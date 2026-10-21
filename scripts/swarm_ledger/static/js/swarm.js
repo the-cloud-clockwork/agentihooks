@@ -9,7 +9,7 @@ import { doc, queue } from "./sync.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
 import { quotaCount, renderHives } from "./hives.js";
-import { agentCellTips } from "./agent_cells.js";
+import { agentCellTips, joinCell } from "./agent_cells.js";
 import { capacityShown, liveAgents, renderRoles } from "./roles.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
@@ -155,13 +155,6 @@ function agentRow(a, remote) {
 
 const transportCell = (c) => c ? h("span", { class: "sw-transport", "data-tip": `${c.push_inbox ? "push" : "no push"} · ${c.native_terminal_attach ? "native terminal" : "no native terminal"}` },
   label(c.push_inbox ? "push" : "no push", c.push_inbox ? "on" : "off"), " ", label(c.native_terminal_attach ? "native terminal" : "no native terminal", c.native_terminal_attach ? "on" : "off")) : "—";
-
-function joinCell(report) {
-  if (!report || !report.grade) return "";
-  const tone = { complete: "live", partial: "waiting", failed: "stalled" }[report.grade];
-  return h("span", { class: "sw-sub" }, label(report.grade, tone), ...Object.entries(report.misses || {}).map(([name, miss]) =>
-    h("span", { class: "sw-sub", "data-tip": `${name.replace(/_/g, " ")} missing (${miss.required ? "required" : "optional"})`, text: name.replace(/_/g, " ") })));
-}
 
 function executionCell(e) {
   return e ? h("span", {}, label(e.shown, e.tone), ` ${e.seen}`, h("span", { class: "sw-sub", text: e.where })) : "—";
