@@ -455,7 +455,7 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
     assert "invalid_order" in clients[-1].hget(f"{stream}:acks", queued[0])
 
 
-def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypatch):
+def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypatch, capsys):
     from redis.exceptions import ConnectionError, TimeoutError
 
     outcomes = iter([ConnectionError] * 6 + [None, None, TimeoutError, None])
@@ -490,6 +490,9 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypat
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connect)
     assert sleeps == [1, 2, 4, 8, 16, 30, 30, 30, 1]
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[0] == "hive Redis connection lost (ConnectionError: refused); reconnecting in 1s"
+    assert lines[2] == "hive Redis connection lost (ConnectionError: lost); reconnecting in 4s"
     assert len(connections) == 10
 
 
@@ -512,8 +515,11 @@ def stalled():
         yield lambda: redis.Redis(host="127.0.0.1", port=server.getsockname()[1], decode_responses=True)
 
 
-def test_clients_set_timeouts_keepalive_health_checks_and_no_retries(stalled, monkeypatch):
-    source = stalled()
+def test_clients_set_timeouts_keepalive_health_checks_and_no_retries(monkeypatch):
+    import redis
+    from redis.backoff import NoBackoff
+
+    source = redis.Redis(host="127.0.0.1", port=1, decode_responses=True)
     monkeypatch.setattr(source, "close", Mock())
     beat, waiter = daemon.clients(source)
     source.close.assert_called_once_with()
@@ -524,9 +530,26 @@ def test_clients_set_timeouts_keepalive_health_checks_and_no_retries(stalled, mo
         assert options["socket_keepalive"] is True
         assert options["health_check_interval"] == daemon.BEAT_SECONDS
         assert options["retry"].get_retries() == 0
+        assert isinstance(options["retry"]._backoff, NoBackoff)
         assert options["decode_responses"] is True
         assert options["port"] == source.connection_pool.connection_kwargs["port"]
     assert (daemon.CONNECT_TIMEOUT_S, daemon.READ_TIMEOUT_S, daemon.WAKE_SLACK_S) == (3, 5, 2)
+
+
+def test_back_off_logs_the_cause_and_sleeps_the_capped_delay(monkeypatch, capsys):
+    from redis.exceptions import TimeoutError
+
+    sleep = Mock()
+    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    daemon._back_off(TimeoutError("lost"), 2)
+    daemon._back_off(TimeoutError("lost"), 99)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        "hive Redis connection lost (TimeoutError: lost); reconnecting in 4s\n"
+        "hive Redis connection lost (TimeoutError: lost); reconnecting in 30s\n"
+    )
+    assert sleep.call_args_list == [((4,),), ((30,),)]
 
 
 def test_clients_keep_the_source_connection_class():
