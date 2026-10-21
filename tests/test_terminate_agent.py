@@ -123,6 +123,78 @@ def test_main_terminates_after_validation(monkeypatch, capsys):
     assert "result=terminated escalation=SIGKILL" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("environ", "recorded"),
+    [
+        (("rig", "engineer@a1b2c3-0001"), [("rig", "engineer@a1b2c3-0001")]),
+        (("", "engineer@a1b2c3-0001"), []),
+        (("rig", ""), []),
+    ],
+)
+def test_main_records_a_deliberate_exit_for_a_terminated_swarm_agent(monkeypatch, capsys, environ, recorded):
+    item = session()
+    seen, order = [], []
+    store = object()
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [item])
+    monkeypatch.setattr(
+        "scripts.terminate_agent.validate", lambda selected, items, force_shared=False: [selected.process]
+    )
+    monkeypatch.setattr("scripts.terminate_agent.herdr_pane", lambda pid: ("", ""))
+
+    def environ_of(pid, keys, proc=Path("/proc")):
+        assert pid == 200
+        if keys == ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"):
+            order.append("environ")
+            return environ
+        return tuple("" for _ in keys)
+
+    def stop(selected, members, timeout):
+        order.append("terminate")
+        return False
+
+    def record(target, slug, name, at):
+        assert target is store
+        assert isinstance(at, int) and at > 0
+        order.append("record")
+        seen.append((slug, name))
+
+    monkeypatch.setattr("scripts.terminate_agent.agent_environ", environ_of)
+    monkeypatch.setattr("scripts.terminate_agent.terminate", stop)
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.deliberate_exit.record", record)
+
+    assert main(["uuid-1", "--type", "claude"]) == 0
+
+    assert seen == recorded
+    out = capsys.readouterr().out
+    if recorded:
+        assert order == ["environ", "terminate", "record"]
+        assert "swarm_exit=recorded" in out.splitlines()
+    else:
+        assert "swarm_exit" not in out
+
+
+def test_main_reports_a_deliberate_exit_the_swarm_store_refused(monkeypatch, capsys):
+    from scripts.swarm.store import Unreachable
+
+    item = session()
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [item])
+    monkeypatch.setattr(
+        "scripts.terminate_agent.validate", lambda selected, items, force_shared=False: [selected.process]
+    )
+    monkeypatch.setattr("scripts.terminate_agent.herdr_pane", lambda pid: ("", ""))
+    monkeypatch.setattr("scripts.terminate_agent.agent_environ", lambda pid, keys, proc=Path("/proc"): ("rig", "e@1"))
+    monkeypatch.setattr("scripts.terminate_agent.terminate", lambda selected, members, timeout: False)
+
+    def refuse():
+        raise Unreachable("down")
+
+    monkeypatch.setattr("scripts.swarm.store.connect", refuse)
+
+    assert main(["uuid-1", "--type", "claude"]) == 0
+    assert "swarm_exit=not-recorded (down)" in capsys.readouterr().out.splitlines()
+
+
 def test_terminate_uses_process_group(monkeypatch):
     from scripts.terminate_agent import terminate
 

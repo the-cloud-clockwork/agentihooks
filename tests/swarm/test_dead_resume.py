@@ -530,3 +530,41 @@ def test_reap_reports_every_lost_engineer_in_the_pass(store):
 
     assert actions == [f"lost {agent.name}, task {agent.task} reopened" for agent in engineers]
     assert len(engineers) == 2
+
+
+def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(store, monkeypatch):
+    from scripts.swarm import deliberate_exit
+
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    tick_module.tick("sw", store, ledger, runtime, 1)
+    agent = next(a for a in store.agents("sw") if a.lane == "eng")
+    store.put_agent("sw", replace(agent, conversation_id="original-conversation", profile="engineer"))
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+    claims = store.claims("sw", "t1")
+    deliberate_exit.record(store, "sw", agent.name, 5)
+    runtime.live.discard(agent.name)
+    rows = {task_id: dict(row) for task_id, row in ledger.rows.items()}
+
+    actions = tick_module._reap("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2)
+
+    assert actions == [f"retired {agent.name} after a deliberate terminate, task t1 reopened"]
+    assert runtime.resumed == []
+    assert agent.name not in {a.name for a in store.agents("sw")}
+    assert ledger.rows["t1"]["state"] == "open"
+    assert ledger.rows["t1"]["claimed_by"] == ""
+    assert store.claims("sw", "t1") == claims - 1
+    assert deliberate_exit.recorded(store, "sw", agent.name) is False
+
+
+def test_a_deliberate_exit_is_kept_per_swarm_and_agent_until_taken(store):
+    from scripts.swarm import deliberate_exit
+
+    deliberate_exit.record(store, "sw", "eng@a-1", 7)
+
+    assert deliberate_exit.recorded(store, "sw", "eng@a-1") is True
+    assert deliberate_exit.recorded(store, "sw", "eng@a-2") is False
+    assert deliberate_exit.recorded(store, "other", "eng@a-1") is False
+    assert store.redis.hget(store.key("sw", "deliberate-exits"), "eng@a-1") == "7"
+    assert deliberate_exit.take(store, "sw", "eng@a-1") is True
+    assert deliberate_exit.take(store, "sw", "eng@a-1") is False
+    assert deliberate_exit.recorded(store, "sw", "eng@a-1") is False
