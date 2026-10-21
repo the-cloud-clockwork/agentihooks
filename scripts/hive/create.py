@@ -1,0 +1,262 @@
+"""agentihooks hive create: one workstation command brings a new Kubernetes hive live in herdr."""
+
+import json
+import subprocess
+import tempfile
+import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from scripts import openbao_kv
+from scripts.hive import auth, create_github, create_render, invite, machine, registry, setup
+from scripts.hive.bundle_origin import SETTINGS_PATH
+
+if TYPE_CHECKING:
+    from redis import Redis
+
+STATE_FILE = "hive-create.json"
+NAME_PREFIX = "swarm-hive-"
+WORKSTATION_RECORD = "k8s/agentihooks-swarm-workstation-hive"
+HOST_KEY = "ssh_host_key"
+HOST_PUBLIC_KEY = "ssh_host_public_key"
+AUTHORIZED_KEYS = "ssh_authorized_keys"
+SSH_USER = "worker"
+POLL_S = 15
+KUBECTL_TIMEOUT_S = 60
+
+
+@dataclass(frozen=True)
+class Options:
+    repo: str = "the-cloud-clockwork/antoncore"
+    base: str = "dev"
+    like: str = WORKSTATION_RECORD
+    node: str = "worker-001"
+    timeout_s: int = 1800
+    dry_run: bool = False
+
+
+@dataclass
+class Tools:
+    redis: "Redis"
+    bao: openbao_kv.OpenBao
+    environ: Mapping[str, str]
+    local_id: str
+    local_redis_url: str
+    ledger_ca: str | None = None
+    run: create_github.Run = subprocess.run
+    clock: Callable[[], float] = time.time
+    sleep: Callable[[float], None] = time.sleep
+    out: Callable[[str], None] = print
+    state: dict = field(default_factory=dict)
+
+
+def create(tools: Tools, options: Options) -> str:
+    tools.state = _start(tools, options)
+    name = tools.state["name"]
+    for title, step in STEPS:
+        tools.out(f"hive create {name}: {title}: {step(tools, options)}")
+        if not options.dry_run:
+            _save(tools)
+    if options.dry_run:
+        return f"dry run of hive create {name}: nothing written"
+    tools.state["finished"] = True
+    _save(tools)
+    return f"hive {name} is live in herdr as {_target(tools.state)}"
+
+
+def _state_path(tools: Tools) -> Path:
+    return registry.home(tools.environ) / STATE_FILE
+
+
+def _start(tools: Tools, options: Options) -> dict:
+    try:
+        saved = json.loads(_state_path(tools).read_text())
+    except (OSError, ValueError):
+        saved = {}
+    if saved.get("name") and not saved.get("finished"):
+        tools.out(f"hive create {saved['name']}: resuming the unfinished create")
+        return saved
+    name = f"{NAME_PREFIX}{int(tools.clock())}"
+    port = create_render.next_port(json.loads(_kubectl(tools, ["get", "service", "-A", "-o", "json"]))["items"])
+    return {"name": name, "record": invite.default_path(name), "ssh_port": port, "node": options.node}
+
+
+def _save(tools: Tools) -> None:
+    path = _state_path(tools)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(tools.state, indent=2) + "\n")
+
+
+def _kubectl(tools: Tools, argv: list[str]) -> str:
+    return machine._run(tools.run, ["kubectl", *argv], None, KUBECTL_TIMEOUT_S)
+
+
+def _record(tools: Tools) -> dict[str, str]:
+    try:
+        return openbao_kv.read(tools.bao, tools.state["record"])[0]
+    except openbao_kv.OpenBaoError as exc:
+        raise auth.HiveError(str(exc)) from None
+
+
+def _member(tools: Tools) -> dict[str, str]:
+    return invite._env(_record(tools).get(invite.CREDENTIAL))
+
+
+def _invite(tools: Tools, options: Options) -> str:
+    member = _member(tools).get(invite.HIVE_ID)
+    if member:
+        return f"kept hive member {member} in OpenBao {openbao_kv.MOUNT}/{tools.state['record']}"
+    if options.dry_run:
+        return f"would mint a hive member into OpenBao {openbao_kv.MOUNT}/{tools.state['record']} like {options.like}"
+    name, record = tools.state["name"], tools.state["record"]
+    request = invite.Request(name, record, options.like, ledger_ca=tools.ledger_ca)
+    return invite.invite(tools.redis, tools.bao, request, tools.local_redis_url)
+
+
+def _ssh_keys(tools: Tools, options: Options) -> str:
+    where = f"OpenBao {openbao_kv.MOUNT}/{tools.state['record']}"
+    if _record(tools).get(HOST_KEY):
+        return f"kept the SSH host key in {where}"
+    keys = sorted((Path(tools.environ.get("HOME") or Path.home()) / ".ssh").glob("*.pub"))
+    if not keys:
+        raise auth.HiveError("no public key under ~/.ssh to authorize on the hive sshd")
+    if options.dry_run:
+        return f"would write a new SSH host key and {len(keys)} authorized keys into {where}"
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "host_key"
+        argv = ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", tools.state["name"], "-f", str(path)]
+        machine._run(tools.run, argv, None, KUBECTL_TIMEOUT_S)
+        entries = {
+            HOST_KEY: path.read_text(),
+            HOST_PUBLIC_KEY: path.with_suffix(".pub").read_text().strip(),
+            AUTHORIZED_KEYS: "".join(key.read_text() for key in keys),
+        }
+    try:
+        total = openbao_kv.merge(tools.bao, tools.state["record"], entries)
+    except openbao_kv.OpenBaoError as exc:
+        raise auth.HiveError(str(exc)) from None
+    return openbao_kv.summary(tools.state["record"], entries, total)
+
+
+def _files(tools: Tools, options: Options) -> dict[str, str]:
+    state = tools.state
+    hive = create_render.Hive(state["name"], state["record"], state["ssh_port"], state["node"])
+    template = create_github.read(tools.run, options.repo, create_render.TEMPLATE_PATH, options.base)
+    homes = create_github.read(tools.run, options.repo, create_render.NFS_HOMES_PATH, options.base)
+    files = create_render.render(template, hive)
+    files[create_render.NFS_HOMES_PATH] = create_render.with_home(homes, state["name"])
+    return files
+
+
+def _manifests(tools: Tools, options: Options) -> str:
+    if tools.state.get("pr"):
+        return f"kept pull request {tools.state['pr']}"
+    files = _files(tools, options)
+    if options.dry_run:
+        for path, text in files.items():
+            tools.out(f"--- {path}\n{text}")
+        return f"would open a pull request into {options.repo} {options.base} with {', '.join(files)}"
+    name = tools.state["name"]
+    message = f"Add worker hive {name}\n\nRendered by agentihooks hive create from {create_render.TEMPLATE_PATH}."
+    tools.state["pr"] = create_github.open_pr(tools.run, options.repo, options.base, name, files, message)
+    return f"opened pull request {tools.state['pr']}"
+
+
+def _merged(tools: Tools, options: Options) -> str:
+    if options.dry_run:
+        return "would merge the pull request once its checks pass"
+    url = tools.state["pr"]
+    if not create_github.merged(tools.run, url):
+        create_github.merge(tools.run, url)
+        _wait(tools, options, f"pull request {url} to merge", lambda: create_github.merged(tools.run, url))
+    return f"merged {url}"
+
+
+def _settings(tools: Tools, options: Options) -> str:
+    return setup.publish(tools.environ, SETTINGS_PATH, options.dry_run)
+
+
+def _live(tools: Tools, options: Options) -> str:
+    if options.dry_run:
+        return "would wait for the hive pod's heartbeat"
+    member = _member(tools)[invite.HIVE_ID]
+
+    def beating() -> bool:
+        record = registry.show(tools.redis, member)
+        return bool(record) and registry.live(record, int(tools.clock() * 1000))
+
+    _wait(tools, options, f"hive {member} to send a heartbeat", beating)
+    return f"hive {member} is live"
+
+
+def _target(state: Mapping) -> str:
+    return f"ssh://{SSH_USER}@{create_render.LAN_IP}:{state['ssh_port']}"
+
+
+def _trust(tools: Tools) -> None:
+    known = Path(tools.environ.get("HOME") or Path.home()) / ".ssh" / "known_hosts"
+    line = f"[{create_render.LAN_IP}]:{tools.state['ssh_port']} {_record(tools)[HOST_PUBLIC_KEY]}"
+    lines = known.read_text().splitlines() if known.is_file() else []
+    if line not in lines:
+        known.parent.mkdir(parents=True, exist_ok=True)
+        known.write_text("".join(f"{entry}\n" for entry in [*lines, line]))
+
+
+def _herdr(tools: Tools, options: Options) -> str:
+    target = _target(tools.state)
+    if tools.state.get("added"):
+        return f"kept {target} in herdr"
+    if options.dry_run:
+        return f"would trust the hive host key and run hive add {target} --label {tools.state['name']}"
+    _trust(tools)
+    member = _member(tools)
+    delivery = machine.Delivery(member[invite.HIVE_URL], member[invite.REDIS_URL], tools.ledger_ca)
+    grant = machine.add(tools.redis, tools.local_id, target, tools.state["name"], delivery, tools.run)
+    tools.state["added"] = grant["id"]
+    return f"added {target} to herdr; its hive member is {grant['id']}"
+
+
+def _engineer(tools: Tools, options: Options) -> str:
+    if options.dry_run:
+        return "would wait for an engineer working on the hive"
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(tools.redis)
+    hives = {_member(tools)[invite.HIVE_ID], tools.state["added"]}
+    found: list[str] = []
+
+    def working() -> bool:
+        found[:] = [
+            f"{agent.name} in {slug}"
+            for slug in store.slugs()
+            for agent in store.agents(slug)
+            if agent.hive in hives and agent.lane != "master" and agent.state == "working"
+        ]
+        return bool(found)
+
+    _wait(tools, options, "an engineer working on the hive", working)
+    return f"{found[0]} works on the hive"
+
+
+def _wait(tools: Tools, options: Options, what: str, check: Callable[[], bool]) -> None:
+    deadline = tools.clock() + options.timeout_s
+    while not check():
+        if tools.clock() >= deadline:
+            raise auth.HiveError(
+                f"timed out after {options.timeout_s}s waiting for {what}; rerun hive create to resume"
+            )
+        tools.sleep(POLL_S)
+
+
+STEPS = (
+    ("invite", _invite),
+    ("ssh keys", _ssh_keys),
+    ("manifests", _manifests),
+    ("merge", _merged),
+    ("settings", _settings),
+    ("live", _live),
+    ("herdr", _herdr),
+    ("engineer", _engineer),
+)

@@ -1,4 +1,4 @@
-"""agentihooks hive add|invite|refresh|revoke|controller|serve|set|show|list|run|install|bundle-origin|setup."""
+"""agentihooks hive add|invite|create|refresh|revoke|controller|serve|set|show|list|run|install|bundle-origin|setup."""
 
 import argparse
 import contextlib
@@ -136,6 +136,21 @@ def _invite(args: argparse.Namespace) -> str:
     return invite.invite(redis_client(), bao, request, redis_url(os.environ))
 
 
+def _create(args: argparse.Namespace) -> str:
+    import hooks.config  # noqa: F401  loads the agentihooks env files into os.environ
+    from scripts import openbao_kv
+    from scripts.hive import create
+    from scripts.swarm.commands import hive_id
+    from scripts.swarm.store import redis_url
+
+    bao = openbao_kv.from_env(os.environ)
+    if bao is None:
+        raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
+    tools = create.Tools(redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served())
+    options = create.Options(args.repo, args.base, args.like, args.node, args.timeout, args.dry_run)
+    return create.create(tools, options)
+
+
 def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
@@ -166,6 +181,13 @@ def _parser() -> argparse.ArgumentParser:
     invited.add_argument("--url", help="this hive's endpoint as the new hive reaches it, for hive refresh")
     invited.add_argument("--redis-url", help="Redis URL the new hive connects to")
     invited.add_argument("--swarm-url", help="ledger address the new hive reaches")
+    created = sub.add_parser("create", help="Create a Kubernetes hive from nothing and add it to herdr")
+    created.add_argument("--repo", default="the-cloud-clockwork/antoncore", help="GitOps repository of the hive")
+    created.add_argument("--base", default="dev", help="branch the hive pull request merges into")
+    created.add_argument("--like", default="k8s/agentihooks-swarm-workstation-hive", help="OpenBao record to copy")
+    created.add_argument("--node", default="worker-001", help="node the hive pod runs on")
+    created.add_argument("--timeout", type=int, default=1800, help="seconds each wait may take")
+    created.add_argument("--dry-run", action="store_true", help="Print every step and file, and write nothing")
     sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its hive endpoint")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
     sub.add_parser(
@@ -278,6 +300,8 @@ def main(argv: list[str]) -> int:
             print(f"added {args.target} to herdr as {args.label}; its hive member is {grant['id']}")
         elif args.command == "invite":
             print(_invite(args))
+        elif args.command == "create":
+            print(_create(args))
         elif args.command == "refresh":
             with refresh_lock(os.environ):
                 member_id = refresh_env(os.environ)
