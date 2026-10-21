@@ -122,8 +122,9 @@ def test_run_beats_immediately_then_waits_a_beat_less_the_wake_slack(monkeypatch
 
     waits = []
 
-    def sleep(seconds, redis):
+    def sleep(seconds, redis, timeout):
         assert redis is connection
+        assert timeout == seconds + 1
         events.append(seconds)
         waits.append(seconds)
         if len(waits) == 2:
@@ -156,7 +157,7 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     waiter = object()
     with pytest.raises(KeyboardInterrupt):
         daemon.run(Mock(return_value=(object(), waiter)))
-    sleep.assert_called_once_with(12, redis=waiter)
+    sleep.assert_called_once_with(12, redis=waiter, timeout=12)
 
 
 def test_install_writes_the_service_and_enables_it(tmp_path):
@@ -421,7 +422,7 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     connection = object()
     with pytest.raises(KeyboardInterrupt):
         daemon.run(_once(connection))
-    sleep.assert_called_once_with(0, redis=connection)
+    sleep.assert_called_once_with(0, redis=connection, timeout=0)
 
 
 def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch):
@@ -442,7 +443,7 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
         if server.connected:
             queued.append(clients[-1].xadd(stream, {"order": "{}"}))
 
-    def wait(seconds, redis):
+    def wait(seconds, redis, timeout):
         assert redis is clients[-1]
         if now[0] == 2000.0:
             raise KeyboardInterrupt
@@ -485,7 +486,7 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypat
         if error:
             raise error("lost")
 
-    def wait(seconds, redis):
+    def wait(seconds, redis, timeout):
         assert redis is connections[-1]
         waits.append(seconds)
         if len(waits) == 1:
@@ -654,6 +655,34 @@ def test_a_stalled_wait_socket_reconnects_and_beats_within_one_beat_interval(mon
     _stall_run(monkeypatch, connect, beat)
     assert beats[1] - beats[0] < daemon.BEAT_SECONDS + 0.25
     assert capsys.readouterr().err.endswith("); reconnecting in 1s\n")
+
+
+@pytest.mark.wall_clock
+def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkeypatch, capsys):
+    import time
+
+    import fakeredis
+
+    from scripts.scheduler import process_timer
+
+    silent = fakeredis.FakeRedis(decode_responses=True)
+    beats = []
+
+    def beat(redis, hive):
+        beats.append(time.monotonic())
+        if len(beats) == 2:
+            raise KeyboardInterrupt
+
+    def scheduler_down():
+        assert time.monotonic() - beats[-1] < daemon.BEAT_SECONDS, "the timer wait outlived its bound"
+
+    monkeypatch.setattr(process_timer, "RECHECK_S", 0.05)
+    monkeypatch.setattr(process_timer.service, "ensure_running", scheduler_down)
+    connects = []
+    _stall_run(monkeypatch, lambda: connects.append(silent) or (silent, silent), beat)
+    assert len(connects) == 1
+    assert beats[1] - beats[0] < daemon.BEAT_SECONDS
+    assert capsys.readouterr().err == ""
 
 
 def test_default_install_location_and_executable_discovery(monkeypatch, tmp_path):

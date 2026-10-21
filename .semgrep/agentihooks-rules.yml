@@ -49,6 +49,7 @@ rules:
                   metavariable: $SLEEP
                   regex: (.*\.)?(sleep|wait)$
           - pattern: $EVENT.wait(..., timeout=$ARG, ...)
+      - pattern-not: scripts.scheduler.process_timer.wait(...)
       - pattern-not-inside: |
           try:
               ...
