@@ -720,7 +720,21 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
 6. Runs `agentihooks hive run`.
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
-origin from the workstation, read from the `origin` remote and current branch of the linked bundle, else of
+whole record from the workstation with one command:
+
+```bash
+agentihooks hive setup --dry-run   # key names it would write and leave out; writes nothing
+agentihooks hive setup             # into secret/k8s/agentihooks-swarm-workstation-hive-settings
+agentihooks hive setup --path <record>
+```
+
+It takes every key the agentihooks env files define (`.env` and each `*.env` in the agentihooks home, except
+`hive.env` and `hive-container.env`), with its value from the agent environment, and prints key names only. It
+leaves out account tokens, which the accounts records carry, `SWARM_SECRET` and `AGENTIHOOKS_LEDGER_AGENT_TOKEN`,
+values that are host paths and values that name localhost, a loopback, unspecified or link local address, naming
+each with its reason. It adds the bundle origin as `hive bundle-origin` does and keeps the record's other keys.
+
+To write only the origin, read from the `origin` remote and current branch of the linked bundle, else of
 `AGENTIHOOKS_BUNDLE_PATH`:
 
 ```bash
