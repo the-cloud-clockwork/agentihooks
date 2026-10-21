@@ -134,7 +134,7 @@ def quiet(page):
         now = page.evaluate(f"() => [window.__inflight, JSON.stringify(({CAPTURE})())]")
         same = same + 1 if now[0] == 0 and now == last else 0
         if same == 3:
-            return
+            return now
         last = now
     raise TimeoutError("the page did not settle")
 
@@ -145,8 +145,14 @@ def settle(page, ms=0):
         page.clock.run_for(min(ms, 1000))
         ms -= 1000
         quiet(page)
-    page.clock.run_for(20)
-    quiet(page)
+    before = None
+    for _ in range(10):
+        page.clock.run_for(20)
+        now = quiet(page)
+        if now == before:
+            return
+        before = now
+    raise TimeoutError("the page kept changing on each clock tick")
 
 
 def steps():
