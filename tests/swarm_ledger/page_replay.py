@@ -285,8 +285,12 @@ def record(root: Path, folder: Path) -> list:
         errors = []
         page.on("pageerror", lambda exc: errors.append(str(exc)))
         page.goto(url)
+        page.set_default_timeout(3000)
         for name, act in steps():
-            act(page)
+            try:
+                act(page)
+            except Exception as exc:
+                DIAG.append(f"DIAG step {name}: {str(exc).splitlines()[0]} | {' '.join(str(exc).splitlines()[1:4])}")
             settle(page)
             requests, dialogs = api.take()
             results.append(
@@ -302,6 +306,9 @@ def record(root: Path, folder: Path) -> list:
     return results
 
 
+DIAG = []
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", type=Path)
@@ -309,6 +316,8 @@ def main() -> None:
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
     args.output.write_text(json.dumps(record(args.root.resolve(), args.folder), indent=1, ensure_ascii=False) + "\n")
+    if DIAG:
+        raise SystemExit("\n".join(DIAG))
 
 
 if __name__ == "__main__":
