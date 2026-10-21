@@ -322,6 +322,30 @@ def test_the_watch_command_runs_without_a_parsed_swarm(monkeypatch):
     assert ran == [("store", {})]
 
 
+@pytest.mark.parametrize(
+    "environ, local",
+    [
+        ({"LEDGER_URL": "https://hub.example"}, False),
+        ({"AGENTIHOOKS_DEPLOYMENT": "compose"}, False),
+        ({}, True),
+        ({"LEDGER_URL": "https://hub.example", "AGENTIHOOKS_DEPLOYMENT": "local"}, True),
+    ],
+)
+def test_the_watch_command_repairs_locally_only_without_a_hub_address_or_under_local_mode(monkeypatch, environ, local):
+    for key in ("LEDGER_URL", "AGENTIHOOKS_DEPLOYMENT"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in environ.items():
+        monkeypatch.setenv(key, value)
+    repairs = []
+    monkeypatch.setattr(tick_watch, "run", lambda store, clock, repair: repairs.append(repair))
+    monkeypatch.setattr(cli, "HerdrRuntime", lambda: "herdr")
+    monkeypatch.setattr(cli, "routed", lambda herdr: herdr)
+
+    cli.cmd_tick_watch("store", None)
+
+    assert [repair is not None for repair in repairs] == [local]
+
+
 def test_a_pass_that_ended_at_the_epoch_is_stale_a_full_limit_later():
     found = tick_heartbeat.Heartbeat(0, {})
 

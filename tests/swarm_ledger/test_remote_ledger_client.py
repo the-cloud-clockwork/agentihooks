@@ -101,6 +101,16 @@ def test_a_hub_address_without_a_deployment_mode_is_a_remote_client_that_never_r
             assert ledger.credentials(SLUG) == {"X-Ledger-Token": "launch-token", "X-Ledger-Agent": WORKER}
 
 
+def test_the_deployment_mode_is_remote_from_a_hub_address_only_without_a_mode():
+    hub = "https://hub.example"
+    assert ledger_link.deployed({"LEDGER_URL": hub}) is True
+    assert ledger_link.deployed({}) is False
+    assert ledger_link.deployed({"LEDGER_URL": hub, "AGENTIHOOKS_DEPLOYMENT": "local"}) is False
+    assert ledger_link.deployed({"AGENTIHOOKS_DEPLOYMENT": "compose"}) is True
+    assert ledger_link.deployed({"AGENTIHOOKS_DEPLOYMENT": ""}) is True
+    assert ledger_link.deployed({"SWARM_URL": "https://swarm.example"}) is False
+
+
 def test_non_local_mode_reaches_the_ledger_at_ledger_url():
     assert ledger_link.base({"AGENTIHOOKS_DEPLOYMENT": "distributed", "LEDGER_URL": "https://hub.example/"}) == (
         "https://hub.example"
