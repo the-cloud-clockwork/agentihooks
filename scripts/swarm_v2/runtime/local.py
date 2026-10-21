@@ -24,6 +24,8 @@ from scripts.swarm_v2.runtime.base import (
     legacy,
 )
 
+ENDED_NAMESPACE = "its process namespace has ended"
+
 
 def _failed(operation: str, exc: SpawnError) -> Outcome:
     status = Status.AMBIGUOUS if isinstance(exc.__cause__, subprocess.TimeoutExpired) else Status(exc.status)
@@ -92,6 +94,8 @@ class LocalHerdrRuntime:
             retired = self.herdr.retire(agent, homes=homes)
         else:
             pid = process.resolve(agent, self.namespace(), self.table())
+            if pid is Unqualified.FOREIGN_NAMESPACE and agent.runtime_target.get("host_id"):
+                return Outcome("terminate", Status.OK, LOCAL, detail=ENDED_NAMESPACE)
             if isinstance(pid, Unqualified):
                 return Outcome("terminate", Status.REFUSED, LOCAL, pid, pid.value)
             retired = self.herdr.retire_process(agent, pid, homes, agent.runtime_target["pid_start"])
