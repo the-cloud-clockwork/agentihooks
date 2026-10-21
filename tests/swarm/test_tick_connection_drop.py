@@ -50,3 +50,20 @@ def test_an_exit_sweep_that_keeps_dropping_logs_and_the_tick_still_spawns(store,
         in capsys.readouterr().err
     )
     assert "skipped scripts.inbox.exits.sweep: its Redis connection dropped twice" in actions
+
+
+def test_a_read_timeout_in_the_exit_sweep_is_retried_once(store, monkeypatch):
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    calls = []
+
+    def sweep(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise RedisTimeoutError("Timeout reading from socket")
+
+    monkeypatch.setattr(exits, "sweep", sweep)
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(("t1", "eng")), runtime, 1)
+    assert len(calls) == 2
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
