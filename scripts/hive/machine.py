@@ -56,7 +56,9 @@ def add(
         )
     grant = auth.mint(redis, label, delivery.redis_url)
     try:
-        run_checked(run, ["ssh", "-o", "BatchMode=yes", target, DELIVER], auth.env_text(delivery.url, grant), SSH_TIMEOUT_S)
+        run_checked(
+            run, ["ssh", "-o", "BatchMode=yes", target, DELIVER], auth.env_text(delivery.url, grant), SSH_TIMEOUT_S
+        )
         if delivery.ledger_ca:
             run_checked(run, ["ssh", "-o", "BatchMode=yes", target, DELIVER_CA], delivery.ledger_ca, SSH_TIMEOUT_S)
     except auth.HiveError:
@@ -97,7 +99,9 @@ def known_host(target: str) -> str:
     return f"[{parts.hostname}]:{parts.port}" if parts.port not in (None, 22) else parts.hostname
 
 
-def run_checked(run: Callable[..., subprocess.CompletedProcess], argv: list[str], stdin: str | None, timeout: int) -> str:
+def run_checked(
+    run: Callable[..., subprocess.CompletedProcess], argv: list[str], stdin: str | None, timeout: int
+) -> str:
     try:
         done = run(argv, input=stdin, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
