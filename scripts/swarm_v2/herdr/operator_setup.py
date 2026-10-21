@@ -325,7 +325,6 @@ def _awaiting_setup(placement: Placement) -> bool:
 
 def sync(event: dict, _delivery_id: str, _redis: "Redis") -> None:
     root, _ = _job(event)
-    # The refused setup already raised its Priorities item; refusing here every pass only floods the journal.
     if _awaiting_setup(Placement(root / FOLDER)):
         return
     _contained("sync", lambda: sync_once(shell_environ(), root))
