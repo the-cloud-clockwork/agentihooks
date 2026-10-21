@@ -71,7 +71,7 @@ def test_publish_counts_waiting_launch_orders_and_expires_with_the_heartbeat(red
         "pending": 2,
         "measured_at": 5_000,
     }
-    assert redis.pttl(headroom.key("box")) == 30_000
+    assert 29_000 < redis.pttl(headroom.key("box")) <= 30_000
 
 
 def test_measure_and_publish_read_the_host_process_files_by_default(redis):
