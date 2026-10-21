@@ -144,6 +144,117 @@ def test_removing_a_swarm_withdraws_its_member_agents_open_mail(redis, agent, ma
     assert member.get(item.id).state == "cancelled"
 
 
+def seat_successor(store, previous, hive):
+    if hive:
+        from scripts.hive import auth
+
+        store.redis.hset(f"{auth.PREFIX}:member:{hive}", mapping={"name": hive, "ledger": "digest"})
+        store.redis.sadd(auth.INDEX, hive)
+    name = store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT, hive=hive), previous.execution_id)
+    store.seats.occupy(SEAT, name, 2)
+    return name
+
+
+@pytest.mark.parametrize("hive", ["", "m2"])
+def test_a_leaving_member_agents_unread_mail_reaches_its_seats_next_occupant_on_another_host(store, agent, mail, hive):
+    member, item = mail
+    neighbour = store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(neighbour, "eng", "t0", seat="eng-0@sw", hive="m1"))
+    store.seats.occupy("eng-0@sw", neighbour, 1)
+    exits.settle(InboxStore(store.redis), agent.name, SEAT, "handed off its seat")
+    store.put_agent("sw", replace(agent, state="finished"))
+    successor = seat_successor(store, agent, hive)
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    target = InboxStore(store.redis, world=hive)
+    assert [i.id for i in target.pending_mail(successor)] == [item.id]
+    assert member.inbox(SEAT) == []
+    moved = target.history(item.id)[-1]
+    where = f"hive {hive}" if hive else "the controller"
+    assert (moved["by"], moved["reason"]) == ("swarm", f"moved to {where}, where {successor} runs {SEAT}")
+
+
+def test_seat_mail_a_leaving_member_agent_took_reaches_its_seats_next_occupant_on_the_workstation(store, agent):
+    item = InboxStore(store.redis).send("sender", SEAT, "contract")
+    member = InboxStore(store.redis, world="m1")
+    member.deliver(item.id, agent.name)
+    exits.settle(InboxStore(store.redis), agent.name, SEAT, "handed off its seat")
+    store.put_agent("sw", replace(agent, state="finished"))
+    successor = seat_successor(store, agent, "")
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert [i.id for i in InboxStore(store.redis, world="").pending_mail(successor)] == [item.id]
+    assert member.inbox(SEAT) == []
+
+
+@pytest.mark.parametrize("hive", ["", "m2"])
+def test_a_redirect_moves_a_member_item_with_its_history_into_the_inbox_its_address_resolves_to(
+    store, agent, mail, hive
+):
+    member, item = mail
+    successor = seat_successor(store, agent, hive)
+    moved = member.redirect(item.id, "swarm", successor, "passed on")
+    target = InboxStore(store.redis, world=hive)
+    assert moved.address == successor
+    assert member.inbox(agent.name) == []
+    assert [i.id for i in target.pending_items(successor)] == [item.id]
+    history = target.history(item.id)
+    assert [e["state"] for e in history] == ["pending", "pending"]
+    assert (history[-1]["by"], history[-1]["reason"]) == ("swarm", "passed on")
+
+
+def test_the_inbox_an_address_resolves_to_keeps_the_persist_hook(store, agent):
+    persist = object()
+    successor = seat_successor(store, agent, "")
+    resolved = InboxStore(store.redis, persist=persist, world="m1").home_store(successor)
+    assert (resolved.world, resolved.persist) == ("", persist)
+
+
+def test_a_relocated_item_leaves_its_old_inbox_and_is_fully_indexed_in_its_new_one(store, agent, mail):
+    _, first = mail
+    redis, persisted = store.redis, []
+    member = InboxStore(redis, persist=persisted.append, world="m1")
+    second, third = (InboxStore(redis).send("sender", agent.name, text) for text in ("second", "third"))
+    member.deliver(second.id, agent.name)
+    member.read(second.id, agent.name)
+    member.deliver(third.id, agent.name)
+    member.about(first.id, "tasks/t1")
+    successor = seat_successor(store, agent, "")
+    controller = InboxStore(redis, world="")
+    earlier = controller.send("sender", successor, "earlier")
+    controller.deliver(earlier.id, successor)
+    assert not redis.sismember(controller.key("waiting"), successor)
+    moved = [member.redirect(item.id, "swarm", successor, "passed on") for item in (first, second, third)]
+    assert not any(redis.exists(member.key(kind, first.id)) for kind in ("item", "history", "entry"))
+    assert [redis.zcard(member.key(kind, agent.name)) for kind in ("address", "open", "pending")] == [0, 0, 0]
+    assert redis.get(member.key("open-size", agent.name)) == "0"
+    assert not redis.sismember(member.key("waiting"), agent.name)
+    assert redis.zscore(member.key("delivered"), third.id) is None
+    relocated = sorted(item.id for item in (first, second, third))
+    assert [sorted(redis.zrange(controller.key(kind, successor), 0, -1)) for kind in ("address", "open")] == [
+        sorted([earlier.id, *relocated])
+    ] * 2
+    assert sorted(redis.zrange(controller.key("pending", successor), 0, -1)) == relocated
+    assert redis.get(controller.key("open-size", successor)) == "4"
+    assert redis.sismember(controller.key("waiting"), successor)
+    assert controller.entry_of(first.id) == "tasks/t1"
+    assert [controller.get(i.id).sequence for i in (first, second, third)] == [2, 3, 4]
+    history = controller.history(second.id)
+    assert [e["state"] for e in history] == ["pending", "delivered", "read", "pending"]
+    assert history[-1]["at"] == moved[1].updated_at
+    assert len(persisted) == 3 and None not in persisted
+
+
+def test_a_relocated_front_door_item_leaves_its_old_master_pool(store, agent):
+    store.seats.occupy("master@sw", agent.name, 1)
+    item = InboxStore(store.redis).send("sender", "master@sw", "front door")
+    member = InboxStore(store.redis, world="m1")
+    store.redis.zadd(member.pool.key("sw"), {item.id: 1})
+    store.seats.occupy("master@sw", store.next_name("sw", "eng"), 2)
+    member.redirect(item.id, "swarm", "master@sw", "moved")
+    assert store.redis.zscore(member.pool.key("sw"), item.id) is None
+    assert InboxStore(store.redis, world="").get(item.id).address == "master@sw"
+
+
 @pytest.fixture
 def moved_seat(store, agent, mail):
     from scripts.hive import auth
