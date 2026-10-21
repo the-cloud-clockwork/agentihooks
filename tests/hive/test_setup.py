@@ -137,8 +137,8 @@ def test_a_name_the_environment_does_not_hold_is_skipped(tmp_path):
     home, environ = workstation(tmp_path)
     del environ["LITELLM_URL"]
     kept, left_out = setup.entries(environ, home)
-    assert "LITELLM_URL" not in kept
-    assert "LITELLM_URL" not in left_out
+    assert sorted(kept) == [name for name in WRITTEN if name != "LITELLM_URL"]
+    assert left_out == REASONS
 
 
 @pytest.mark.parametrize(

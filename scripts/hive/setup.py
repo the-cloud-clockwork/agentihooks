@@ -16,7 +16,7 @@ TICK_ONLY = frozenset({"SWARM_SECRET", "AGENTIHOOKS_LEDGER_AGENT_TOKEN"})
 def names(home: Path) -> list[str]:
     from hooks.context.credential_guard import dotenv_keys
 
-    files = sorted({home / ".env", *home.glob("*.env")}) if home.is_dir() else []
+    files = sorted(home.glob("*.env")) if home.is_dir() else []
     return sorted({name for path in files if path.name not in NOT_SETTINGS for name in dotenv_keys(path)})
 
 

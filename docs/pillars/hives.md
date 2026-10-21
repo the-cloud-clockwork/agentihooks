@@ -729,11 +729,10 @@ agentihooks hive setup --path <record>
 ```
 
 It takes every key the agentihooks env files define (`.env` and each `*.env` in the agentihooks home, except
-`hive.env` and `hive-container.env`), with its value from the agent environment, and prints key names only; a key the environment does not hold is
-skipped. It
-leaves out account tokens, which the accounts records carry, `SWARM_SECRET` and `AGENTIHOOKS_LEDGER_AGENT_TOKEN`,
-values that are host paths and values that name localhost, a loopback, unspecified or link local address, naming
-each with its reason. It adds the bundle origin as `hive bundle-origin` does and keeps the record's other keys.
+`hive.env` and `hive-container.env`), with its value from the agent environment, and prints key names only; a key
+the environment does not hold is skipped. It leaves out account tokens, which the accounts records carry,
+`SWARM_SECRET` and `AGENTIHOOKS_LEDGER_AGENT_TOKEN`, values that are host paths and values that name localhost, a
+loopback, unspecified or link local address, naming each with its reason. It adds the bundle origin as `hive bundle-origin` does and keeps the record's other keys.
 
 To write only the origin, read from the `origin` remote and current branch of the linked bundle, else of
 `AGENTIHOOKS_BUNDLE_PATH`:
