@@ -6,6 +6,7 @@ import subprocess
 import sys
 import zipfile
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from scripts.ci_budget.jobs import read_jobs
@@ -86,25 +87,27 @@ def find_record(repository: str, before: str) -> tuple[dict, dict] | None:
     runs = json.loads(
         _api(f"{actions}/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page={CANDIDATES}")
     )["workflow_runs"]
-    for run in runs:
-        if not _recorded(run, repository) or run["updated_at"] > before:
-            continue
-        artifacts = json.loads(_api(f"{actions}/runs/{run['id']}/artifacts?per_page=100"))["artifacts"]
-        kept = [item for item in artifacts if item["name"] == "dep-manifest" and not item["expired"]]
-        live = {item["name"] for item in artifacts if not item["expired"]}
-        if not kept or any(name not in live for name in COVERAGE):
-            continue
-        jobs = read_jobs(f"{actions}/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", JOB_PAGE)
-        if not UNIT_JOBS <= {job["name"] for job in jobs if job["conclusion"] == "success"}:
-            continue
-        try:
-            manifest = _manifest(_api(f"{actions}/artifacts/{kept[0]['id']}/zip"))
-        except UnusableRecord as error:
-            raise UnusableRecord(f"Dev run {run['id']}: {error}") from error
-        if manifest.get("commit") != run["head_sha"]:
-            print(f"Dev run {run['id']} recorded a manifest for {manifest.get('commit')}, not {run['head_sha']}")
-            continue
-        return run, manifest
+    runs = [run for run in runs if _recorded(run, repository) and run["updated_at"] <= before]
+    with ThreadPoolExecutor(max_workers=CANDIDATES) as pool:
+        listings = pool.map(lambda run: _api(f"{actions}/runs/{run['id']}/artifacts?per_page=100"), runs)
+        for run, listing in zip(runs, listings):
+            artifacts = json.loads(listing)["artifacts"]
+            kept = [item for item in artifacts if item["name"] == "dep-manifest" and not item["expired"]]
+            live = {item["name"] for item in artifacts if not item["expired"]}
+            if not kept or any(name not in live for name in COVERAGE):
+                continue
+            jobs = pool.submit(read_jobs, f"{actions}/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", JOB_PAGE)
+            download = pool.submit(_api, f"{actions}/artifacts/{kept[0]['id']}/zip")
+            if not UNIT_JOBS <= {job["name"] for job in jobs.result() if job["conclusion"] == "success"}:
+                continue
+            try:
+                manifest = _manifest(download.result())
+            except UnusableRecord as error:
+                raise UnusableRecord(f"Dev run {run['id']}: {error}") from error
+            if manifest.get("commit") != run["head_sha"]:
+                print(f"Dev run {run['id']} recorded a manifest for {manifest.get('commit')}, not {run['head_sha']}")
+                continue
+            return run, manifest
     return None
 
 
