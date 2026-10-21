@@ -76,7 +76,7 @@ def test_nonlocal_consumers_use_aggregate_without_credential_probes(redis, monke
     assert account_sessions.codex_sessions_by_account() == {"one": 4}
     rows = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100)
     claude = next(row for row in rows if row.harness == "claude")
-    assert (claude.sessions, claude.five_left, claude.week_left, claude.cap) == (3, 80, 70, 6)
+    assert (claude.sessions, claude.five_left, claude.week_left, claude.cap) == (3, 80, 70, 8)
 
 
 def test_local_backend_counts_other_hives_and_unreported_launches_like_the_reservation(redis, monkeypatch):
@@ -279,7 +279,7 @@ def test_global_capacity_preserves_api_policy_and_future_reset_fields(redis, mon
         ),
     )
     monkeypatch.setattr(reservation, "current", lambda harness, env: None)
-    assert capacity.accounts(environ, 100) == [capacity.Account("claude", "one", "OPEN", 2, 100, 100, 6)]
+    assert capacity.accounts(environ, 100) == [capacity.Account("claude", "one", "OPEN", 2, 100, 100, 12)]
 
 
 @pytest.mark.parametrize("missing", ["stale", "sessions"])

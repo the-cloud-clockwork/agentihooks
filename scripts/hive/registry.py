@@ -99,6 +99,7 @@ SETTINGS = {
     "name": ("name", _name),
     "ui": ("ui", _flag),
     "ephemeral": ("ephemeral", _flag),
+    "draining": ("draining", _flag),
     "excluded": ("excluded", _excluded),
     "prefer": ("prefer", _prefer),
     "max-agents": ("max_agents", _count),
