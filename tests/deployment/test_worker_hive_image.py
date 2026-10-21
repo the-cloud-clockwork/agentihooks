@@ -157,8 +157,12 @@ def test_the_hive_image_carries_the_pyproject_ruff_pin_and_the_kind_proof_runs_i
     assert "r.startswith('ruff==')" in (ROOT / "deploy/worker/Dockerfile").read_text()
 
 
-def test_the_kind_job_publishes_the_proven_image_after_the_chart_proof_without_an_artifact():
-    jobs = yaml.safe_load((ROOT / ".github/workflows/hive-worker.yml").read_text())["jobs"]
+def hive_jobs():
+    return yaml.safe_load((ROOT / ".github/workflows/hive-worker.yml").read_text())["jobs"]
+
+
+def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_proof():
+    jobs = hive_jobs()
     kind = jobs["kind"]
     assert "publish" not in jobs
     assert kind["needs"] == "contracts"
@@ -166,5 +170,10 @@ def test_the_kind_job_publishes_the_proven_image_after_the_chart_proof_without_a
     assert names.index("Publish the proven hive worker image") > names.index(
         "Build the worker image while kind starts, then prove registration and order acknowledgement"
     )
+    dev_push = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+    assert [step.get("if") for step in kind["steps"] if "ghcr.io" in str(step)] == [dev_push, dev_push]
+
+
+def test_the_proven_image_skips_the_artifact_round_trip():
     assert "docker save" not in PROOF.read_text()
-    assert all("image.tar" not in str(step) for step in kind["steps"])
+    assert all("image.tar" not in str(step) for job in hive_jobs().values() for step in job["steps"])
