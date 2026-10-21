@@ -151,3 +151,24 @@ def test_cache_writer_lock_expires_if_the_writer_dies(monkeypatch, cache):
     monkeypatch.setattr(cache, "scan_iter", locked_scan)
     ci_cache.write(cache, key(1), {})
     assert not cache.exists(f"{ci_cache.PREFIX}lock")
+
+
+def test_cache_sweep_batches_shared_store_scans(monkeypatch, cache):
+    from scripts.doctor import ci_cache
+
+    seed = cache.pipeline(transaction=False)
+    for number in range(2000):
+        seed.set(key(number), "{}", ex=60)
+    seed.execute()
+    scans = []
+    execute = cache.execute_command
+
+    def counted(*args, **kwargs):
+        if args[0] == "SCAN":
+            scans.append(args)
+        return execute(*args, **kwargs)
+
+    monkeypatch.setattr(cache, "execute_command", counted)
+    ci_cache.write(cache, key(2001), {})
+    assert 0 < len(scans) <= 3
+    assert cache.exists(key(2001))
