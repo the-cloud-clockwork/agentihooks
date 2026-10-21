@@ -25,10 +25,12 @@ def rename_swarm(store, slug, ledger, runtime, at):
                 raise SwarmError(f"no live pane for {agent.name}; run the swarm tick first")
             reserved = store.redis.get(store.key(slug, "rename-to", agent.name)) or ""
             _check_pane(store.names, agent, pane, reserved)
+            controller.keep_tick(store, slug, held, token, LOCK_MS)
             new = _new_name(store, slug, agent, at)
             if pane.get("name") != herdr_target(new):
                 runtime.herdr(["agent", "rename", agent.pane_id, herdr_target(new)])
                 actions.append(f"renamed {agent.name} to {new}")
+                controller.keep_tick(store, slug, held, token, LOCK_MS)
             if agent.harness == "codex" and not live_binding.managed(agent):
                 _name_session(store, slug, runtime, agent.pane_id, new)
             store.names.alias(agent.name, new)
@@ -41,6 +43,7 @@ def rename_swarm(store, slug, ledger, runtime, at):
             if workspace["workspace_id"] not in workspaces and workspace.get("label") != f"swarm-{slug}":
                 continue
             if workspace.get("label") != label:
+                controller.keep_tick(store, slug, held, token, LOCK_MS)
                 runtime.herdr(["workspace", "rename", workspace["workspace_id"], label])
                 actions.append(f"renamed space {workspace['workspace_id']} to {label}")
         return actions
