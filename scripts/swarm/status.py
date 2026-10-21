@@ -61,6 +61,7 @@ from scripts.swarm_v2.runtime import observe
 DEFAULT_COMPACT_LIMIT = 600
 UNCLASSIFIED = "unclassified"
 PAUSED_WHILE_SLOW = ("idle with claim", "stale claim")
+HISTORY_SHOWN = 100
 
 
 from scripts.swarm_v2.checkpoints import cards as recovery_cards
@@ -275,7 +276,8 @@ def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord
     return [a for a in agents if a.runtime_backend != "local" or reports.host(a) or a.name in names]
 
 
-def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | None = None) -> dict:
+def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | None = None, view=None) -> dict:
+    from scripts.hive import join_report
     from scripts.swarm import capacity, tick_activity
 
     config = store.config(slug)
@@ -286,6 +288,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
     handed = transfers.list_transfers(store, slug)
     active = lift.current(slug, now_ms())
     promotion = tick_master.read(store, slug)
+    worlds = InboxStore(store.redis).worlds()
     return {
         "config": {
             **config.__dict__,
@@ -299,10 +302,12 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
                 "observation": observation(store, slug, a),
                 "capabilities": transport(a),
+                "hive_join": join_report.read(store.redis, a),
                 "gates": active.get(a.name, []),
                 "inbox": [
                     {"text": item.text, "sender": item.sender, "state": item.state}
-                    for item in InboxStore(store.redis).pending_mail(a.name)
+                    for world in worlds
+                    for item in world.pending_mail(a.name)
                 ],
             }
             for a in visible
@@ -311,11 +316,11 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
         "outbox": outbox.status(),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),
         "last_tick_activity": tick_activity.read(store, slug),
-        "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)],
+        "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), -HISTORY_SHOWN, -1)],
         "tasks": task_counts(tasks),
         "task_revisions": lifecycle.revisions(state.get("_meta", {}).get("stamps", {})),
         "spawns": store.spawns(slug),
-        "findings": findings(store, slug, config, tasks, events),
+        "findings": findings(store, slug, config, tasks, events, view),
         "launch_checks": launch_check.reports(store, slug),
         "failed_launch_panes": failed_panes.report(store, slug),
         "auto_snapshot": auto_snapshot(config),

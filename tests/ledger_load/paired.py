@@ -23,7 +23,7 @@ def pair_ratios(pairs: list[tuple[dict, dict]], key: str) -> list[float]:
 
 
 def balanced_ratio(ratios: list[float]) -> float:
-    """The geometric mean of the base first and head first pair medians, so a slower second run cancels out."""
+    """The geometric mean of the base first and head first pair medians, so launch order cancels out."""
     medians = [median(group) for group in (ratios[0::2], ratios[1::2]) if group]
     return prod(medians) ** (1 / len(medians))
 

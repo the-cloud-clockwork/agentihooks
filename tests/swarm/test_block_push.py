@@ -99,6 +99,55 @@ def test_block_records_the_pushed_branch_on_the_task(worktree, monkeypatch):
     assert ("t1", ["branch", "branch_repo", "repository_branches"], AGENT) in writers
 
 
+@pytest.fixture
+def hive_worktree(env, monkeypatch, tmp_path):
+    _, ledger, _ = env
+    origin, primary, top = _repository(tmp_path, "repo")
+    monkeypatch.setattr(publish, "pushed_branches", PUSHED)
+    monkeypatch.chdir(primary)
+    cli.main(["sw", "create", "--repo", str(tmp_path / "workstation" / "repo")])
+    cli.main(["sw", "start"])
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_REPO", str(primary))
+    return ledger, origin, primary, top
+
+
+def test_block_on_a_hive_reads_the_local_checkout_the_launch_named(hive_worktree, monkeypatch):
+    ledger, origin, primary, top = hive_worktree
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    _git(top, "commit", "--allow-empty", "-m", "Task work")
+    _git(top, "push", "-u", "origin", BRANCH)
+    assert block() == 0
+    row = ledger.rows["t1"]
+    assert (row["state"], row["branch"], row["branch_repo"]) == ("blocked", BRANCH, str(origin))
+    assert row["repository_branches"] == {str(primary): BRANCH}
+
+
+@pytest.mark.parametrize("hive", [("sw", True, True), ("other", True, False), ("sw", False, False)])
+@pytest.mark.parametrize(
+    "command",
+    [
+        (["prepare"], publish, "prepare", 2),
+        (["publish", "-m", "Task work", "a.py"], publish, "publish", 2),
+        (["block", "waiting on a token"], publish, "pushed_branches", 0),
+        (["block", "--dev-red", "dev is red"], cli.dev_red, "failing_run", 0),
+    ],
+)
+def test_worker_commands_read_the_launch_checkout_only_for_their_own_swarm(
+    hive_worktree, monkeypatch, tmp_path, hive, command
+):
+    swarm, named, local = hive
+    argv, module, target, position = command
+    primary = hive_worktree[2]
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
+    if not named:
+        monkeypatch.delenv("AGENTIHOOKS_SWARM_REPO")
+    seen = []
+    monkeypatch.setattr(publish, "pushed_branches", lambda repo, task, agent: {})
+    monkeypatch.setattr(module, target, lambda *args, **kwargs: seen.append(args[position]))
+    cli.main(["sw", "--as", AGENT, *argv])
+    assert seen == [str(primary) if local else str(tmp_path / "workstation" / "repo")]
+
+
 @pytest.mark.parametrize("tracking", [True, False])
 @pytest.mark.parametrize("ahead", [True, False])
 def test_block_checks_the_published_continuation_branch(worktree, capsys, tracking, ahead):

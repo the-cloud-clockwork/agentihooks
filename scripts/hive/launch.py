@@ -6,11 +6,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from scripts.hive import orders, placement, placement_waits, registry
-from scripts.hive.orders import Ack, LaunchOrder, Orders
+from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import Placed
+from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
 
 HIVE = "hive"
@@ -32,24 +33,36 @@ class Selection:
 
 
 def loaded_hives(store: RedisStore) -> list[dict]:
-    """Every registered hive with the worker agents it runs or is launching."""
+    """Every registered hive with the worker agents it runs or is launching.
+
+    A hive counts a running agent in its slot's processes even when it lists no execution for it."""
     agents = [agent for slug in store.slugs() for agent in store.agents(slug)]
     hives = registry.hives(store.redis)
     for hive in hives:
         counts = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
-        seen = {execution for executions in counts.get("_executions", {}).values() for execution in executions}
-        reported = sum(
-            count for key, count in counts.items() if key != "_executions" and not key.startswith("interactive:")
-        )
+        executions = counts.get("_executions", {})
+        seen = {execution for ids in executions.values() for execution in ids}
+        reported = {
+            key: count for key, count in counts.items() if key != "_executions" and not key.startswith("interactive:")
+        }
         masters = sum(count for key, count in counts.items() if key.startswith("interactive:"))
-        pending = sum(
-            agent.hive == hive["id"]
-            and agent.lane != "master"
-            and agent.state in ("launching", "working", "suspect")
-            and agent.execution_id not in seen
-            for agent in agents
+        pending: dict[str, int] = {}
+        for agent in agents:
+            if (
+                agent.hive == hive["id"]
+                and agent.lane != "master"
+                and agent.state in ("launching", "working", "suspect")
+                and agent.execution_id not in seen
+            ):
+                slot = f"{agent.harness}:{agent.account}"
+                pending[slot] = pending.get(slot, 0) + 1
+        unclaimed = {
+            slot: max(0, reported.get(slot, 0) - counts.get(f"interactive:{slot}", 0) - len(executions.get(slot, [])))
+            for slot in pending
+        }
+        hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
+            max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
-        hive["agents"] = max(0, reported - masters) + pending
     return hives
 
 
@@ -141,7 +154,8 @@ class HiveLaunch:
         rows = getattr(self.herdr, "_quota_accounts", None)
         rows = capacity.accounts(dict(os.environ), now / 1000, refresh=False) if rows is None else rows
         if lane == "master" and not task.get("route_kind"):
-            selected = self._master_selection(config, decision, hives, now, rows)
+            front = front_door.holds(self.slug, task.get("seat", ""))
+            selected = self._master_selection(config, decision, hives, now, rows, front)
             return self._record_wait(lane, task, selected)
         account = saved.get("account") or self.herdr.planned_account(task["id"], "claude")
         candidates = [
@@ -167,15 +181,17 @@ class HiveLaunch:
         found = replace(found, role=role) if isinstance(found, placement.Wait) else found
         return self._record_wait(lane, task, found)
 
-    def _master_selection(self, config, decision, hives, now, rows):
+    def _master_selection(self, config, decision, hives, now, rows, front):
         accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
         available = [
             {**hive, "slots": [slot for slot in hive["slots"] if _key(slot["account"]) in accounts]} for hive in hives
         ]
-        selected = placement.place_master("claude", "", config.repo, available, now)
+        selected = placement.place_master("claude", "", config.repo, available, now, front)
         if isinstance(selected, placement.Wait):
             return selected if hives else placement.Wait(f"no live hive takes {placement.MASTER}")
-        if selected.route_kind == "interactive":
+        if selected.route_kind == placement.MASTER_LOGIN:
+            account = capacity.Account("claude", selected.account, "room", 0, None, None, kind=placement.MASTER_LOGIN)
+        elif selected.route_kind == "interactive":
             account = capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
         else:
             row = accounts[_key(selected.account)]
@@ -194,6 +210,16 @@ class HiveLaunch:
             agent.name != previous.name for agent in self.store.agents(self.slug)
         )
 
+    def unacknowledged(self, order: LaunchOrder) -> bool:
+        return lease.now_ms(self.store) >= order.expires_at and self.orders.ack(order) is None
+
+    def retire(self, order: LaunchOrder, previous: AgentRecord) -> None:
+        self.reap(order, previous)
+        self.end(previous, "hive launch order expired without an acknowledgement")
+
+    def reap(self, order: LaunchOrder, agent: AgentRecord) -> None:
+        self.orders.command(order.hive, CommandOrder(f"reap:{agent.name}", "reap", name=agent.name))
+
     def spawn(self, request: SpawnRequest) -> Outcome:
         lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
         if order := self.orders_for(request.task["id"]):
@@ -202,6 +228,8 @@ class HiveLaunch:
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif self.abandoned(order, previous):
                 self.end(previous, "hive launch order abandoned")
+            elif self.unacknowledged(order):
+                self.retire(order, previous)
             elif previous.name != request.name or previous.seat != request.task["seat"]:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
             else:
@@ -220,7 +248,7 @@ class HiveLaunch:
             self.opening(named),
         )
         admitted = self.admit(request, selected)
-        if not self.slots.reserve(
+        if selected.route_kind != placement.MASTER_LOGIN and not self.slots.reserve(
             f"claude:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
         ):
             self.end(admitted, "account reservation is full")
@@ -292,6 +320,8 @@ class HiveLaunch:
     def complete(self, order: LaunchOrder, ack: Ack) -> Outcome:
         agent = self.store.execution_registry.get(self.slug, order.execution_id)
         if ack.status != "live":
+            if ack.failure == "expired":
+                self.reap(order, agent)
             if ack.failure != "ambiguous":
                 self.end(agent, ack.failure)
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
@@ -308,7 +338,7 @@ class HiveLaunch:
             or agent.state != "working"
         ):
             raise SwarmError("hive launch acknowledgement does not match the live execution")
-        if not self.slots.acknowledge(agent.execution_id):
+        if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(agent.execution_id):
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch reservation expired")
         placed = Placed(
             agent.pane_id,

@@ -97,6 +97,7 @@ class PullRequest:
     required_pending: bool = False
     running: bool = False
     body: str = ""
+    started: bool = False
 
 
 def iso_ms(text):
@@ -121,13 +122,17 @@ def pull_request(raw):
         (_run_key(check), check.get("name")) for check in rollup if check.get("isRequired") or check.get("name") == GATE
     }
     reported = {(_run_key(check), check.get("name")) for check in checks}
-    running = any(
+    started = any(
         suite.get("workflowRun")
         and suite.get("status") != "COMPLETED"
         and not _superseded(suite, newest)
         and (not raw.get("gated") or not required_runs or _run_key(suite) in required_runs)
         for suite in suites
-    ) or bool(expected - reported or required_runs - {key for key, _ in reported} or workflows - present)
+    )
+    running = started or bool(
+        expected - reported or required_runs - {key for key, _ in reported} or workflows - present
+    )
+    required_pending = any(result in PENDING - {"EXPECTED"} for result in results)
     pushes = [
         iso_ms(suite["workflowRun"]["createdAt"])
         for suite in suites
@@ -172,9 +177,10 @@ def pull_request(raw):
         any((check.get("conclusion") or check.get("state")) == "SUCCESS" for check in everything)
         and all((check.get("conclusion") or check.get("state")) in PASSED | {"NEUTRAL"} for check in everything),
         _stale_red(raw, checks, results),
-        any(result in PENDING - {"EXPECTED"} for result in results),
+        required_pending,
         running or any(result in PENDING for result in results),
         raw.get("body") or "",
+        started,
     )
 
 

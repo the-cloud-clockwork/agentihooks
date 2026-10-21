@@ -9,7 +9,7 @@ from scripts.gates import Call, Gate, Who, entry
 from scripts.gates.one_push import OnePush, actions, destinations, open_refusal, push_refusal, queue_refusal
 from scripts.gates.subagents import SubagentBudget
 from scripts.gates.verdicts import Verdicts
-from scripts.swarm.ledger_events import PullRequest
+from scripts.swarm.ledger_events import PullRequest, pull_request
 
 ME = Who(name="ci@323133-0001", swarm="demo", lane="ci", task="t1")
 URL = "https://github.com/o/r/pull/7"
@@ -55,7 +55,14 @@ class Ledger:
 
 def pull(state="OPEN", red=False, running=True, queued=False):
     return PullRequest(
-        state=state, merged_at=None, pushed_at=None, red=red, resolved=not running, queued=queued, running=running
+        state=state,
+        merged_at=None,
+        pushed_at=None,
+        red=red,
+        resolved=not running,
+        queued=queued,
+        running=running,
+        started=running,
     )
 
 
@@ -346,6 +353,39 @@ def test_a_push_while_the_pull_request_waits_in_the_merge_queue_is_refused(tree,
     decision = gate(pull(running=False, queued=True)).decide(bash("git push", tree), ME, state(tmp_path))
     assert decision.reason == queue_refusal("demo", URL)
     assert gate(pull(running=False, queued=True, red=True)).decide(bash("git push", tree), ME, state(tmp_path)).allowed
+
+
+NEVER_STARTED = {"state": "OPEN", "gated": True, "gate_workflows": ["tests.yml"]}
+LINT_EXPECTED = [{"context": "lint", "state": "EXPECTED"}]
+TESTS_RUNNING = [{"status": "IN_PROGRESS", "workflowRun": {"databaseId": 1}}]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {**NEVER_STARTED, "mergeable": "CONFLICTING"},
+        {**NEVER_STARTED, "mergeable": "CONFLICTING", "statusCheckRollup": LINT_EXPECTED},
+        {**NEVER_STARTED, "mergeable": "MERGEABLE"},
+    ],
+)
+def test_a_required_workflow_that_never_started_lets_the_push_pass(tree, tmp_path, raw):
+    found = pull_request(raw)
+    assert found.running
+    assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {**NEVER_STARTED, "mergeable": "CONFLICTING", "checkSuites": TESTS_RUNNING},
+        {**NEVER_STARTED, "mergeable": "CONFLICTING", "statusCheckRollup": [{"context": "lint", "state": "PENDING"}]},
+        {**NEVER_STARTED, "mergeable": "MERGEABLE", "statusCheckRollup": LINT_EXPECTED},
+    ],
+)
+def test_a_real_running_check_or_a_pending_placeholder_on_a_mergeable_head_still_holds_the_push(tree, tmp_path, raw):
+    decision = gate(pull_request(raw)).decide(bash("git push", tree), ME, state(tmp_path))
+    assert not decision.allowed
+    assert decision.reason == push_refusal("demo", URL)
 
 
 def test_a_reader_counts_when_either_its_name_or_its_type_names_it(tree, tmp_path):

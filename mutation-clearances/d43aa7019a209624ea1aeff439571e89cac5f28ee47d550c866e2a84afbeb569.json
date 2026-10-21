@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/master_launch.py:scripts.swarm.master_launch.x__free_seat__mutmut_15:78acd7a3ea5160050020b2b6643361b6f4a140ced9a5a70b87fa749aab68ccce": {
+    "reader": "standards_reader",
+    "reason": "master_fill.taken_seats returns a set of at most len(taken) distinct seat addresses. master_seats.seat(index) is injective and seat_address is injective in seat, so indices 2 to len(taken)+2 give len(taken)+1 distinct addresses; by pigeonhole a free seat is always found before the mutant's extra candidate at len(taken)+3, so next() returns the identical index."
+  }
+}

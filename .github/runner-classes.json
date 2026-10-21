@@ -16,7 +16,6 @@
   "hierarchy-cpu.yml/load": "batch",
   "hive-worker.yml/contracts": "light",
   "hive-worker.yml/kind": "standard",
-  "hive-worker.yml/publish": "standard",
   "ledger-load.yml/compare": "standard",
   "ledger-load.yml/compare-grade": "light",
   "ledger-load.yml/load": "standard",

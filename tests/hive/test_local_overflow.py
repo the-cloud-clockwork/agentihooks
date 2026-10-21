@@ -199,6 +199,28 @@ def test_no_workstation_herdr_leaves_the_hive_wait(setup, monkeypatch):
     assert fenced.placement_refusal("eng", {"id": "task"}) == FULL
 
 
+@pytest.mark.parametrize("excluded", ["eng", "ci"])
+def test_a_lane_or_role_the_local_hive_excludes_waits_for_a_hive_instead_of_running_locally(
+    setup, monkeypatch, excluded
+):
+    from scripts.swarm.profile_choice import ProfileDecision
+
+    fenced = hybrid(setup, monkeypatch)
+    setup.herdr._profile_decision.return_value = ProfileDecision("cicd", "task", "cicd")
+    fill_anton(setup)
+    write_hive(setup, id="workstation", ui="yes", excluded=[excluded], max_agents=0)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "workstation")
+    assert fenced.placement_refusal("eng", {"id": "task"}) == "no hive for ci has room"
+
+
+def test_a_lane_the_local_hive_keeps_still_runs_locally_when_no_hive_has_room(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    write_hive(setup, id="workstation", ui="yes", excluded=["master"], max_agents=0)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "workstation")
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+
+
 def test_swarm_set_stores_the_local_machine_cap(setup, capsys):
     import argparse
     import json
@@ -209,3 +231,102 @@ def test_swarm_set_stores_the_local_machine_cap(setup, capsys):
     cli.cmd_set(setup.store, argparse.Namespace(slug=setup.config.slug, pairs=["local-max-agents=5"]))
     assert setup.store.config(setup.config.slug).local_max_agents == 5
     assert json.loads(capsys.readouterr().out)["local_max_agents"] == 5
+
+
+def test_two_concurrent_spawns_at_cap_minus_one_yield_one_local_spawn_and_one_wait(setup, monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from scripts.swarm import local_slots
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    local_agents(setup, 7)
+    monkeypatch.setattr(local_slots, "held", lambda *_: 0)
+    read, together, first_reads = local_slots._held, threading.Barrier(2), iter(range(2))
+
+    def read_together(*args):
+        seen = read(*args)
+        if next(first_reads, None) is not None:
+            together.wait(5)
+        return seen
+
+    monkeypatch.setattr(local_slots, "_held", read_together)
+
+    def attempt(task):
+        try:
+            return fenced.spawn(setup.config, "eng", f"eng {task}", {"id": task})
+        except SpawnError as refused:
+            return str(refused)
+
+    with ThreadPoolExecutor(2) as pool:
+        outcomes = sorted(pool.map(attempt, ["first", "second"]))
+    assert outcomes == [CAPPED, "placed on the workstation"]
+    assert setup.herdr.spawn.call_count == 1
+
+
+def test_a_failed_local_spawn_releases_its_slot(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    local_agents(setup, 7)
+    setup.herdr.spawn.side_effect = SpawnError("pane refused", "unavailable")
+    with pytest.raises(SpawnError, match="^pane refused$"):
+        fenced.spawn(setup.config, "eng", "eng first", {"id": "first"})
+    setup.herdr.spawn.side_effect = None
+    assert fenced.spawn(setup.config, "eng", "eng second", {"id": "second"}) == "placed on the workstation"
+
+
+def test_a_slot_counts_once_while_its_agent_runs_and_not_after_it_leaves(setup):
+    from scripts.swarm import local_slots
+    from scripts.swarm.store import AgentRecord
+
+    slug = setup.config.slug
+    setup.store.put_agent(slug, AgentRecord("eng-1", "eng", "first", state="starting"))
+    assert local_slots.held(setup.store, "box", slug, "other") == 0
+    assert local_slots.claim(setup.store, "box", slug, "first", "eng-1", 8) == 0
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
+    assert local_slots.held(setup.store, "box", slug, "first") == 0
+    assert local_slots.held(setup.store, "elsewhere", slug, "other") == 0
+    setup.store.put_agent(slug, AgentRecord("eng-1", "eng", "first"))
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
+    assert local_slots.held(setup.store, "box", slug, "first") == 0
+    assert local_slots.claim(setup.store, "box", slug, "second", "eng-2", 8) == 1
+    assert setup.store.redis.hkeys(local_slots.key("box")) == [f"{slug}/eng-2"]
+    setup.store.put_agent(slug, AgentRecord("eng-1", "eng", "first", state="finished"))
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
+    setup.store.put_agent(slug, AgentRecord("eng-2", "eng", "second", state="finished"))
+    assert local_slots.held(setup.store, "box", slug, "other") == 0
+
+
+def test_a_claim_whose_agent_never_appears_expires(setup):
+    from scripts.swarm import lease, local_slots
+    from scripts.swarm.store import AgentRecord
+
+    slug = setup.config.slug
+    now = lease.now_ms(setup.store)
+    claims = {f"{slug}/old": now - local_slots.PENDING_MS, f"{slug}/new": now}
+    setup.store.redis.hset(local_slots.key("box"), mapping=claims)
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
+    assert local_slots.claim(setup.store, "box", slug, "third", "eng-3", 2) == 1
+    assert local_slots.claim(setup.store, "box", slug, "fourth", "eng-4", 2) == 2
+    assert sorted(setup.store.redis.hkeys(local_slots.key("box"))) == [f"{slug}/eng-3", f"{slug}/new"]
+    local_slots.release(setup.store, "box", slug, "eng-3")
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
+    setup.store.put_agent(slug, AgentRecord("stuck", "eng", "stuck", state="starting"))
+    setup.store.redis.hset(local_slots.key("box"), f"{slug}/stuck", now - local_slots.PENDING_MS)
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
+
+
+def test_the_machine_count_leaves_out_the_task_itself_and_holds_other_swarms_pending_claims(setup, monkeypatch):
+    from scripts.swarm import local_slots
+    from scripts.swarm.store import AgentRecord
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "box")
+    setup.store.update(setup.config.slug, local_max_agents=2)
+    setup.store.put_agent(setup.config.slug, AgentRecord("eng-self", "eng", "task"))
+    assert local_slots.claim(setup.store, "box", "other", "elsewhere", "eng-other", 8) == 1
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+    assert fenced.spawn(setup.config, "eng", "eng name", {"id": "task"}) == "placed on the workstation"
+    assert fenced.placement_refusal("eng", {"id": "next"}) == f"{FULL}, and the local machine runs 3 of its 2 agents"

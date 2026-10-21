@@ -955,33 +955,39 @@ def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(env, mon
     assert calls == [(9_000_000, 60_000, 7_000)]
 
 
-def test_only_scheduled_ticks_sample_langfuse(env, monkeypatch):
-    from scripts.swarm import langfuse
+def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
+    from scripts.swarm import grafana_alerts, langfuse, refresh_job
 
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
-    called = []
-    monkeypatch.setattr(langfuse, "refresh", lambda *args: called.append(args) or [])
+    started, sampled = [], []
+    monkeypatch.setattr(refresh_job, "spawn", started.append)
+    monkeypatch.setattr(langfuse, "refresh", lambda *args: sampled.append("langfuse") or [])
+    monkeypatch.setattr(grafana_alerts, "refresh", lambda *args: sampled.append("grafana") or ["fired ci_queue on sw"])
     monkeypatch.setattr(cli, "now_ms", lambda: 9000000)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert called == []
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
-    assert called == [(store, "sw", 9000000)]
-
-
-def test_only_scheduled_ticks_read_grafana_alerts(env, monkeypatch):
-    from scripts.swarm import grafana_alerts
-
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo")
-    called = []
-    monkeypatch.setattr(grafana_alerts, "refresh", lambda *args: called.append(args) or ["fired ci_queue on sw"])
-    monkeypatch.setattr(cli, "now_ms", lambda: 9000000)
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert called == []
+    assert started == []
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
-    assert called == [(store.redis, "sw", 9000000)]
-    assert "fired ci_queue on sw" in actions
+    assert started == ["sw"]
+    assert sampled == [] and "fired ci_queue on sw" not in actions
+
+
+def test_the_tick_publishes_status_with_the_pull_request_view_it_built(env, monkeypatch):
+    from scripts.swarm import command_runner, ledger_events
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    built, published = [], []
+
+    def tick_view(*args):
+        built.append(lambda url: None)
+        return built[-1]
+
+    monkeypatch.setattr(ledger_events, "tick_view", tick_view)
+    monkeypatch.setattr(command_runner, "publish", lambda *args: published.append(args))
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert len(published) == 1
+    assert published[0][3] is built[-1]
 
 
 def test_timer_units_and_enable(tmp_path):
@@ -1311,7 +1317,7 @@ def test_runtime_retire_reports_a_refused_end_and_closes_no_pane(tmp_path):
     from scripts.swarm.reaper import Outcome
 
     closed = []
-    rt = runtime.HerdrRuntime(home=tmp_path, herdr=lambda args: closed.append(args) or {})
+    rt = runtime.HerdrRuntime(home=tmp_path, herdr=lambda args: args[0] == "pane" and closed.append(args) or {})
     rt.end = lambda name, pid, homes, start=0: Outcome((), 4242, "survived SIGKILL: 4242")
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w3:p1")
     assert rt.retire(agent) is False and closed == []

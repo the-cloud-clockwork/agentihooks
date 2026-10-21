@@ -22,17 +22,17 @@ cluster_pid=$!
 build_started="$SECONDS"
 if bash deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-worker:dev; then
   worker_base=published
-  docker build -f deploy/worker/Dockerfile -t "$image" .
+  docker build -f deploy/worker/Dockerfile --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" -t "$image" .
 else
   worker_base=rebuilt
   docker build -f docker/swarm-node/Dockerfile -t local/worker-base:dev .
-  docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev -t "$image" .
+  docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" -t "$image" .
 fi
 printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
 docker run --rm --tmpfs /home/worker:uid=10001,gid=10001 --entrypoint bash "$image" -c 'agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"' > "$out/init.txt"
 wait "$cluster_pid"
 kind load docker-image "$image" --name "$cluster"
-docker run --rm --entrypoint bash "$image" -c 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && node --version && npm --version && uv --version && gh --version && test "$(npm config get prefix)" = "$HOME/.local" && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] && agentihooks hive --help' > "$out/tools.txt"
+docker run --rm --entrypoint bash "$image" -c 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && node --version && npm --version && uv --version && gh --version && ruff --version && test "$(npm config get prefix)" = "$HOME/.local" && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] && agentihooks hive --help' > "$out/tools.txt"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=hive-join -addext subjectAltName=DNS:hive-join \
   -keyout "$out/key.pem" -out "$out/cert.pem" 2>/dev/null
 kubectl create secret generic hive-tls --from-file=key.pem="$out/key.pem" --from-file=cert.pem="$out/cert.pem" >/dev/null
@@ -175,6 +175,3 @@ replacement_member="$(member_id "$replacement")"
 prove_worker "$replacement_member" | tee "$out/replacement.txt"
 echo 'replacement pod reused the mounted member credential without minting again' | tee -a "$out/replacement.txt"
 echo 'worker hive kind registration and scratch order acknowledgement: passed'
-if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF:-}" == refs/heads/dev ]]; then
-  docker save "$image" -o "$out/image.tar"
-fi

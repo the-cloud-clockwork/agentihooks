@@ -78,6 +78,17 @@ def test_agent_reads_transfer_only_the_latest_visible_attempt(store, agent, monk
     assert json.loads(received[0])["execution_id"] == third.execution_id
 
 
+def test_agent_reads_decode_only_attempts_of_current_agents(store, agent):
+    current = store.start_execution("fixture", agent)
+    key = store.key("fixture", "executions")
+    row = json.loads(store.redis.hget(key, current.execution_id))
+    reordered = {"generation": 2, **{k: v for k, v in row.items() if k != "generation"}, "execution_id": "exe-later"}
+    store.redis.hset(key, "exe-later", json.dumps(reordered))
+    store.redis.hset(key, "exe-retired", '{"name": "retired", "generation": ')
+
+    assert store.agents("fixture") == [replace(current, execution_id="exe-later", generation=2)]
+
+
 @pytest.mark.parametrize("query", ["occupants", "managed"])
 def test_identity_queries_do_not_download_past_attempts(store, agent, monkeypatch, query):
     first = store.start_execution("fixture", agent)

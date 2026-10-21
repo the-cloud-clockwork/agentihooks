@@ -17,7 +17,11 @@ fi
 umask 077
 export AGENTIHOOKS_HOME="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}"
 export HIVE_REPO_ROOT="${HIVE_REPO_ROOT:-$HOME/dev}"
-mkdir -p "$AGENTIHOOKS_HOME" "$HIVE_REPO_ROOT"
+mkdir -p "$AGENTIHOOKS_HOME" "$HIVE_REPO_ROOT" "$HOME/dev/tcc-ecosystem"
+venv="$HOME/dev/tcc-ecosystem/.venv"
+[[ -e "$venv" && ! -L "$venv" ]] || ln -sfn "$(python3 -c 'import sys; print(sys.prefix)')" "$venv"
+git config --global user.name >/dev/null || git config --global user.name "agentihooks hive"
+git config --global user.email >/dev/null || git config --global user.email agentihooks-hive@users.noreply.github.com
 git config --global credential.https://github.com.helper \
   "!$(command -v python3) -m scripts.github_app_cli credential"
 if [[ "${HIVE_GITHUB_AUTH_MODE:-}" == app ]]; then
@@ -117,6 +121,17 @@ elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
     sleep 2
   done
 fi
+if [[ -n "${AGENTIHOOKS_HIVE_URL:-}" ]]; then
+  # hive refresh from an ssh shell has no pod environment, so it reads the endpoint from hive.env.
+  python3 - <<'PY'
+import os
+from pathlib import Path
+
+saved = Path(os.environ['AGENTIHOOKS_HOME']) / 'hive.env'
+kept = [line for line in saved.read_text().splitlines() if not line.startswith('AGENTIHOOKS_HIVE_URL=')]
+saved.write_text('\n'.join([f"AGENTIHOOKS_HIVE_URL={os.environ['AGENTIHOOKS_HIVE_URL']}", *kept]) + '\n')
+PY
+fi
 bundle=()
 [[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
 if (( ${#bundle[@]} )) && ! agentihooks init "${bundle[@]}"; then
@@ -143,6 +158,7 @@ if ledger_ca.place(Path(os.environ['AGENTIHOOKS_HOME']), system.rstrip() + '\n' 
     raise SystemExit('worker-hive: LEDGER_CA_PEM holds no valid certificate')
 PY
 fi
+unset LEDGER_CA_PEM
 agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"

@@ -8,11 +8,12 @@ from scripts.gates import Who
 from scripts.swarm_ledger import ports
 
 CURRENT: ContextVar[tuple[str, str] | None] = ContextVar("ledger_route", default=None)
-DEPLOYMENT, LOCAL = "AGENTIHOOKS_DEPLOYMENT", "local"
 
 
 def configured(store: object, slug: str) -> str:
-    if os.environ.get(DEPLOYMENT, LOCAL) != LOCAL:
+    from scripts.swarm_ledger import ledger_link
+
+    if not ledger_link.local_mode(os.environ):
         return ""
     return store.redis.hget(store.key(slug, "config"), "api_url") or ""
 
@@ -33,9 +34,11 @@ def scoped(slug: str, address: str) -> Iterator[None]:
 
 @contextmanager
 def session(slug: str) -> Iterator[None]:
+    from scripts.swarm_ledger import ledger_link
+
     if (
         os.environ.get("AGENTIHOOKS_SWARM") == slug
-        and os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") == "local"
+        and ledger_link.local_mode(os.environ)
         and not os.environ.get("SWARM_URL")
     ):
         store = ports.swarm().store.connect()

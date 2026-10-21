@@ -118,6 +118,12 @@ def queue_refusal(slug, url):
     )
 
 
+def never_started(pull):
+    return (
+        not pull.started and not pull.required_pending and (pull.mergeable == "CONFLICTING" or not pull.checks_pending)
+    )
+
+
 class OnePush:
     name = "one-push"
     default_mode = "enforce"
@@ -159,7 +165,7 @@ class OnePush:
             return ""
         if pull.queued:
             return queue_refusal(who.swarm, task["pr_url"])
-        return push_refusal(who.swarm, task["pr_url"]) if pull.running else ""
+        return push_refusal(who.swarm, task["pr_url"]) if pull.running and not never_started(pull) else ""
 
     def target(self):
         return self._target or os.environ.get("AGENTIHOOKS_TARGET") or "claude"

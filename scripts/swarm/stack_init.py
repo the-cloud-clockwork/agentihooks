@@ -4,6 +4,7 @@ It never creates or starts a swarm; swarm init creates it after this step and th
 """
 
 import argparse
+import ipaddress
 import json
 import os
 import shlex
@@ -103,6 +104,14 @@ def materialize(home: Path) -> None:
     (home / "deploy" / "compose" / "tls").mkdir(exist_ok=True)
 
 
+def loopback(url: str) -> bool:
+    try:
+        host = urllib.parse.urlsplit(url).hostname
+        return host == "localhost" or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def adopt(env_file: Path, environ: Mapping[str, str]) -> bool:
     from scripts.swarm_ledger.server_compose import ROOT
 
@@ -130,6 +139,8 @@ def adopt(env_file: Path, environ: Mapping[str, str]) -> bool:
             if environ.get(key)
         }
     )
+    if "AGENTIHOOKS_SWARM_REDIS_URL" in values and loopback(values["AGENTIHOOKS_SWARM_REDIS_URL"]):
+        del values["AGENTIHOOKS_SWARM_REDIS_URL"]
     write_private(env_file, "".join(f"{key}={value}\n" for key, value in values.items()))
     return True
 

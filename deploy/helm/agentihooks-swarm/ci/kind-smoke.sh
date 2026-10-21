@@ -23,6 +23,7 @@ fi
 python3 tests/kind_request.py
 python3 tests/chart_github_auth.py "$chart"
 python3 tests/chart_hive_home.py "$chart"
+python3 tests/chart_hive_only.py "$chart"
 
 finish() {
   status=$?
@@ -228,6 +229,15 @@ plant_hive_join 'the hive join Service ports are' --set hive.join.port=8771
 plant_hive_join 'the hive join volumes are' --set hive.join.tlsSecretName=other-tls
 plant_hive_join 'the hive join env is' --set hive.join.redisSecret.name=swarm-redis
 plant_hive_join 'the hive join tolerations are' --set-json 'hive.join.tolerations=[{"operator":"Exists"}]'
+foreign="$chart/ci/kind-hive-join-foreign-ledger.yaml"
+helm template "$release" "$chart" "${hive_join[@]}" -f "$foreign" \
+  | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}" "$foreign"
+planted="$(helm template "$release" "$chart" "${hive_join[@]}" -f "$foreign" --set hive.join.serveLedgerCa=true \
+  | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}" "$foreign" 2>&1 >/dev/null || true)"
+if [[ $planted != *"the hive join env is"* ]]; then
+  printf 'the chart check did not flag a hive join serving its ledger CA with serveLedgerCa off: %s\n' "$planted" >&2
+  exit 1
+fi
 planted="$(helm template "$release" "$chart" | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}" 2>&1 >/dev/null || true)"
 if [[ $planted != *"the chart renders no hive join Deployment"* ]]; then
   printf 'the chart check did not flag a missing hive join service: %s\n' "$planted" >&2

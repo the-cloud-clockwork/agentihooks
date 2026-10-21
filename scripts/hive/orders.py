@@ -3,6 +3,7 @@ import json
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING
 
+from scripts import serena_router_daemon
 from scripts.hive import registry
 from scripts.swarm import launch_check, lease, prompt, reaper
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
@@ -293,7 +294,22 @@ class Consumer:
         if current is None or current.execution_id != agent.execution_id:
             raise SwarmError("launch order names a replaced execution")
 
+    def front_door_refusal(self, order: LaunchOrder, agent: AgentRecord) -> str:
+        from scripts import master_claude_login
+        from scripts.swarm_v2 import front_door
+
+        if order.lane != MASTER or not front_door.holds(order.slug, agent.seat):
+            return ""
+        if (
+            order.route_kind != master_claude_login.ROUTE
+            and self.store.redis.hget(registry.key(self.hive), "ui") == "yes"
+        ):
+            return ""
+        return master_claude_login.unusable()
+
     def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict) -> Ack:
+        if refused := self.front_door_refusal(order, agent):
+            return Ack("failed", {}, refused)
         config = self.store.config(order.slug)
         chosen = {**config.lanes.get(order.lane, {}), "agent": order.harness, "role": order.profile}
         config = replace(config, repo=task.get(ORIGIN) or config.repo, lanes={**config.lanes, order.lane: chosen})
@@ -308,6 +324,8 @@ class Consumer:
         lease.require_epoch(self.store, order.slug, order.epoch)
         if task.get("workspace"):
             task["workspace"] = str(ledger_workspace.materialize(order.slug, order.task, task.get(SEEDS) or {}))
+        if not serena_router_daemon.ensure():
+            return Ack("failed", {}, "serena")
         outcome = self.runtime.spawn(SpawnRequest(config, order.lane, agent.name, task))
         if not outcome.ok:
             return Ack("failed", {}, _failure(outcome))

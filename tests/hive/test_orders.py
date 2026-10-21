@@ -656,3 +656,12 @@ def test_runtime_failure_carries_its_cause(setup, status, detail, failure):
 
     setup.runtime.spawn.return_value = Outcome("spawn", Status[status], "local", detail=detail)
     assert setup.consumer.apply(setup.order) == Ack("failed", {}, failure)
+
+
+def test_a_serena_router_that_does_not_come_up_fails_the_order_before_spawn(setup, monkeypatch):
+    from scripts import serena_router_daemon
+    from scripts.hive.orders import Ack
+
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: False)
+    assert setup.consumer.apply(setup.order) == Ack("failed", {}, "serena")
+    setup.runtime.spawn.assert_not_called()

@@ -1,4 +1,4 @@
-"""agentihooks hive add|refresh|revoke|controller|serve|set|show|list|run|install|bundle-origin."""
+"""agentihooks hive add|invite|refresh|revoke|controller|serve|set|show|list|run|install|bundle-origin|setup."""
 
 import argparse
 import contextlib
@@ -51,6 +51,11 @@ def refresh_env(environ: MutableMapping[str, str]) -> str:
 
 def saved_redis_url(environ: Mapping[str, str]) -> str | None:
     return _saved_env(environ).get("AGENTIHOOKS_HIVE_REDIS_URL") or None
+
+
+def saved_member(environ: Mapping[str, str]) -> dict[str, str]:
+    saved = _saved_env(environ)
+    return {name: saved[name] for name in ("AGENTIHOOKS_HIVE_ID", "AGENTIHOOKS_HIVE_REDIS_URL") if saved.get(name)}
 
 
 def _saved_env(environ: Mapping[str, str]) -> dict[str, str]:
@@ -111,6 +116,26 @@ def _add(args: argparse.Namespace) -> dict:
     )
 
 
+def _invite(args: argparse.Namespace) -> str:
+    from scripts import openbao_kv
+    from scripts.hive import invite
+    from scripts.swarm.store import redis_url
+
+    bao = openbao_kv.from_env(os.environ)
+    if bao is None:
+        raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
+    request = invite.Request(
+        args.label,
+        args.path or invite.default_path(args.label),
+        args.like,
+        args.url,
+        args.redis_url,
+        args.swarm_url,
+        ledger_ca.served(),
+    )
+    return invite.invite(redis_client(), bao, request, redis_url(os.environ))
+
+
 def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
@@ -134,6 +159,13 @@ def _parser() -> argparse.ArgumentParser:
     add.add_argument("--label", required=True, help="herdr sidebar label and hive member name")
     add.add_argument("--url", required=True, help="this hive's endpoint as the machine reaches it, for hive refresh")
     add.add_argument("--redis-url", help="Redis URL the machine connects to; defaults to this host's")
+    invited = sub.add_parser("invite", help="Mint a hive member and write its credential into an OpenBao record")
+    invited.add_argument("label", help="hive member name")
+    invited.add_argument("--path", help="OpenBao record under the secret mount; defaults to k8s/agentihooks-hive-LABEL")
+    invited.add_argument("--like", help="OpenBao record of another hive to copy addresses and the ledger CA from")
+    invited.add_argument("--url", help="this hive's endpoint as the new hive reaches it, for hive refresh")
+    invited.add_argument("--redis-url", help="Redis URL the new hive connects to")
+    invited.add_argument("--swarm-url", help="ledger address the new hive reaches")
     sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its hive endpoint")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
     sub.add_parser(
@@ -158,15 +190,27 @@ def _parser() -> argparse.ArgumentParser:
         "bundle-origin", help="Write the linked bundle's git address and branch into the hive settings record"
     )
     origin.add_argument("--path", default=bundle_origin.SETTINGS_PATH, help="OpenBao record under the secret mount")
+    setup = sub.add_parser(
+        "setup", help="Write the workstation agent settings and the bundle origin into the hive settings record"
+    )
+    setup.add_argument("--path", default=bundle_origin.SETTINGS_PATH, help="OpenBao record under the secret mount")
+    setup.add_argument(
+        "--dry-run", action="store_true", help="Print the key names it would write and leave out, and write nothing"
+    )
     return parser
 
 
 def _list() -> None:
+    from scripts.hive import join_report
+
     now = now_ms()
-    for record in registry.hives(redis_client()):
+    redis = redis_client()
+    for record in registry.hives(redis):
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
         print(f"{record['id']}\t{state}\tui={record['ui']}\tmax-agents={record['max_agents']}\texcluded={excluded}")
+        for report in join_report.listing(redis, record["id"]):
+            print("  " + join_report.summary(report))
 
 
 def _registry(args: argparse.Namespace) -> None:
@@ -184,7 +228,7 @@ def _registry(args: argparse.Namespace) -> None:
 def _daemon(command: str) -> int:
     from scripts.hive import daemon
 
-    actions = {"run": lambda: daemon.run(redis_client), "install": daemon.install}
+    actions = {"run": lambda: daemon.run(lambda: daemon.clients(redis_client())), "install": daemon.install}
     result = actions[command]()
     return 1 if result is False else 0
 
@@ -219,12 +263,21 @@ def _report(hive_id: str, base: dict, other: dict | None) -> bool:
     return bool(lines)
 
 
+def _setup(args: argparse.Namespace) -> str:
+    import hooks.config  # noqa: F401  loads the agentihooks env files into os.environ
+    from scripts.hive import setup
+
+    return setup.publish(os.environ, args.path, args.dry_run)
+
+
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "add":
             grant = _add(args)
             print(f"added {args.target} to herdr as {args.label}; its hive member is {grant['id']}")
+        elif args.command == "invite":
+            print(_invite(args))
         elif args.command == "refresh":
             with refresh_lock(os.environ):
                 member_id = refresh_env(os.environ)
@@ -245,6 +298,8 @@ def main(argv: list[str]) -> int:
             _registry(args)
         elif args.command == "bundle-origin":
             print(bundle_origin.publish(os.environ, args.path))
+        elif args.command == "setup":
+            print(_setup(args))
         else:
             return _serve(args)
     except auth.HiveError as exc:

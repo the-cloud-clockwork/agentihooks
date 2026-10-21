@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from scripts import agent_choice
 from scripts.handoff import transfers
-from scripts.swarm import idle, outage, snapshot
+from scripts.swarm import deliberate_exit, idle, outage, profile_choice, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
 
@@ -297,6 +297,7 @@ def recovery_pending(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
         record.get("state") == "pending"
         and record["attempts"] < RECOVERY_ATTEMPTS
         and record["identity"] == _recovery_identity(store, slug, agent)
+        and not deliberate_exit.recorded(store, slug, agent.name)
     )
 
 
@@ -403,17 +404,23 @@ def _recover_process(store, slug, agent, task, context, text):
 
 
 def _restart_from_handoff(store, slug, agent, task, context):
-    from scripts.swarm.tick import placed_record, primed
+    from scripts.swarm.tick import SpawnError, placed_record, primed
 
     if not _recovery_current(store, slug, agent, context):
         return "task ownership changed"
     handoff = recovery_text(store, slug, agent.task)
-    transfer = transfers.record(store, slug, agent, "outage", handoff, context.at)
-    transfers.attach(store, slug, agent)
-    task = primed(store, slug, agent.seat, {**task, "handoff": handoff, "transfer": transfer["id"]})
+    transfers.record(store, slug, agent, "outage", handoff, context.at)
+    transfer = transfers.attach(store, slug, agent)
+    task = primed(store, slug, agent.seat, {**task, "handoff": handoff, "transfer": transfer})
     if not _recovery_current(store, slug, agent, context):
         return "task ownership changed"
-    placed = context.runtime.spawn(store.config(slug), agent.lane, agent.name, task)
+    config = store.config(slug)
+    try:
+        placed = context.runtime.spawn(config, agent.lane, agent.name, task)
+    except SpawnError as error:
+        if error.status != "unsupported":
+            raise
+        placed = context.runtime.spawn(config, agent.lane, agent.name, {**task, profile_choice.FRESH: True})
     store.put_agent(
         slug,
         replace(

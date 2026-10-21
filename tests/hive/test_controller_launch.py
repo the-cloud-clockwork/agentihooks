@@ -38,6 +38,7 @@ def setup():
     herdr.planned_account.return_value = None
     launcher = launch.HiveLaunch(store, config.slug, held, herdr)
     launcher.opening = lambda request: f"opening for {request.name}"
+    launcher.sleep = Mock(side_effect=AssertionError("a test launch must not wait for a hive"))
     return SimpleNamespace(store=store, config=config, held=held, hive=hive, herdr=herdr, launcher=launcher)
 
 
@@ -314,6 +315,20 @@ def test_expired_order_honors_a_definitive_receipt(setup):
     }
     assert setup.launcher.orders_for("task") is None
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [(json.loads(fields["order"])["action"], json.loads(fields["order"])["name"]) for _, fields in commands] == [
+        ("reap", request.name)
+    ]
+
+
+def test_a_failed_receipt_other_than_expiry_sends_no_reap(setup):
+    from scripts.hive.orders import Ack
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("failed", {}, "prompt"))
+    assert not setup.launcher.wait(order).ok
+    assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
 
 
 def test_expired_unknown_order_remains_ambiguous(setup):
@@ -347,6 +362,10 @@ def test_replay_refuses_another_claimant(setup):
     assert result.operation == "spawn"
     assert result.backend == "hive"
     assert len(setup.store.execution_registry.records("fixture")) == 1
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "working"
+    assert setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id) is None
+    assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
+    assert setup.launcher.orders_for("task") == order
 
 
 def test_expired_order_of_a_retired_claimant_is_ended_and_replaced(setup):
@@ -400,6 +419,68 @@ def test_an_order_is_abandoned_from_its_expiry_instant_only_without_its_claimant
     assert not setup.launcher.abandoned(order, previous)
 
 
+def test_expired_unacknowledged_order_is_retired_and_its_seat_relaunched(setup):
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    other = request_for(setup)
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(other) == "pending"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
+    assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id)) == {
+        "reason": "hive launch order expired without an acknowledgement",
+        "generation": order.generation,
+    }
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [json.loads(fields["order"]) for _, fields in commands] == [
+        {
+            "id": f"reap:{request.name}",
+            "action": "reap",
+            "slug": "",
+            "name": request.name,
+            "execution_id": "",
+            "generation": 0,
+            "text": "",
+        }
+    ]
+    replacement = setup.launcher.orders_for("task")
+    assert replacement.execution_id != order.execution_id
+    launched = setup.store.execution_registry.get("fixture", replacement.execution_id)
+    assert (launched.name, launched.seat) == (other.name, request.task["seat"])
+
+
+def test_unexpired_unacknowledged_order_is_never_retired(setup):
+    from scripts.swarm import lease
+    from scripts.swarm_v2.runtime.base import Status
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    order = replace(order, expires_at=lease.now_ms(setup.store) + 60000)
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    other = replace(request, name=setup.store.next_name("fixture", "eng"))
+    result = setup.launcher.spawn(other)
+    assert result.status is Status.REFUSED
+    assert result.detail == "another claimant owns the hive launch order"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
+    assert setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id) is None
+    assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
+    assert setup.launcher.orders_for("task") == order
+
+
+def test_an_order_is_unacknowledged_from_its_expiry_instant_until_a_receipt_lands(setup, monkeypatch):
+    from scripts.hive import launch
+    from scripts.hive.orders import Ack
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    monkeypatch.setattr(launch.lease, "now_ms", lambda store: order.expires_at - 1)
+    assert not setup.launcher.unacknowledged(order)
+    monkeypatch.setattr(launch.lease, "now_ms", lambda store: order.expires_at)
+    assert setup.launcher.unacknowledged(order)
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("live", {"host_id": "remote"}))
+    assert not setup.launcher.unacknowledged(order)
+
+
 def test_publication_uses_one_redis_transaction(setup):
     from unittest.mock import patch
 
@@ -450,6 +531,7 @@ def test_reservation_contention_ends_the_unlaunched_execution(setup):
     request = request_for(setup)
     from unittest.mock import patch
 
+    setup.launcher.wait = Mock(return_value="pending")
     with patch.object(type(setup.launcher.slots), "reserve", return_value=False):
         result = setup.launcher.spawn(request)
     assert result.status is Status.UNAVAILABLE
@@ -881,6 +963,47 @@ def test_heartbeat_execution_ids_prevent_double_counting_and_masters_are_exempt(
     write_hive(setup, max_agents=2)
     assert setup.launcher.select(setup.config, "eng", {"id": "next"}).hive == "remote"
     assert setup.launcher.hives()[0]["agents"] == 1
+
+
+@pytest.mark.parametrize(
+    ("sessions", "listed", "expected"),
+    [
+        ({"claude:account": 2}, 0, 2),
+        ({"claude:account": 1}, 0, 2),
+        ({"claude:account": 3}, 0, 3),
+        ({"claude:account": 2, "interactive:claude:account": 1}, 0, 2),
+        ({"claude:account": 2}, 1, 2),
+        ({"claude:account": 1}, 1, 2),
+    ],
+)
+def test_reported_processes_absorb_agents_the_hive_lists_no_execution_for(setup, sessions, listed, expected):
+    from scripts.hive import registry
+    from scripts.swarm.store import AgentRecord
+
+    started = [
+        setup.store.start_execution(
+            "fixture",
+            AgentRecord(
+                setup.store.next_name("fixture", "eng"),
+                "eng",
+                "task",
+                seat=f"eng-{index + 1}@fixture",
+                harness="claude",
+                account="account",
+                hive="remote",
+                runtime_target={"host_id": "remote"},
+            ),
+        )
+        for index in range(2)
+    ]
+    executions = {"claude:account": [agent.execution_id for agent in started[:listed]]} if listed else {}
+    setup.store.redis.set(
+        f"{registry.key('remote')}:sessions",
+        json.dumps({**sessions, **({"_executions": executions} if listed else {})}),
+    )
+    write_hive(setup, max_agents=4)
+    assert setup.launcher.hives()[0]["agents"] == expected
+    assert setup.launcher.select(setup.config, "eng", {"id": "next"}).hive == "remote"
 
 
 def test_default_wait_sleep_and_exact_deadline_are_exercised(setup):

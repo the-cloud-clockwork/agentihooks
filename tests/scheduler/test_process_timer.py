@@ -62,6 +62,40 @@ def test_a_wait_with_no_wake_by_its_recheck_starts_the_scheduler_again(monkeypat
     assert ensure.call_args_list == [call(), call()]
 
 
+def test_a_bounded_wait_with_no_wake_returns_at_its_deadline(monkeypatch):
+    ensure = Mock()
+    monkeypatch.setattr(process_timer.service, "ensure_running", ensure)
+    readings = [100, 100, 120, 120, 131]
+    monkeypatch.setattr(process_timer.time, "monotonic", lambda: readings.pop(0) if len(readings) > 1 else readings[0])
+    timer = process_timer.Timer.__new__(process_timer.Timer)
+    timer.key = "wake"
+    timer.redis = Mock()
+    timer.redis.blpop.side_effect = [None, None]
+    assert timer.wait(timeout=31) is None
+    assert timer.redis.blpop.call_args_list == [call("wake", timeout=30), call("wake", timeout=11)]
+    ensure.assert_called_once_with()
+
+
+def test_a_bounded_wait_never_asks_redis_to_block_forever(monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", Mock())
+    readings = [100, 105]
+    monkeypatch.setattr(process_timer.time, "monotonic", lambda: readings.pop(0) if len(readings) > 1 else readings[0])
+    timer = process_timer.Timer.__new__(process_timer.Timer)
+    timer.key = "wake"
+    timer.redis = Mock()
+    timer.redis.blpop.side_effect = [None]
+    timer.wait(timeout=1)
+    assert timer.redis.blpop.call_args_list == [call("wake", timeout=process_timer.MIN_POP_S)]
+
+
+def test_wait_passes_its_bound_to_the_timer(redis, monkeypatch):
+    bounds = []
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.Timer, "wait", lambda timer, timeout=None: bounds.append(timeout))
+    process_timer.wait(2, redis=redis, timeout=3)
+    assert bounds == [3]
+
+
 def test_interruption_cancels_the_timer_and_cleans_the_wake(redis, monkeypatch):
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
     with pytest.raises(KeyboardInterrupt), process_timer.Timer(3, redis=redis) as timer:
@@ -190,7 +224,8 @@ async def test_wait_helpers_consume_and_close_a_fired_timer(redis, monkeypatch, 
     timers = []
     original = process_timer.Timer
 
-    def timer(delay):
+    def timer(delay, **given):
+        assert given.get("redis") is None
         result = original(delay, redis=redis)
         timers.append(result)
         Scheduler(redis).run_due(now=result.entry.record["due"])
@@ -206,6 +241,22 @@ async def test_wait_helpers_consume_and_close_a_fired_timer(redis, monkeypatch, 
     assert timers[0].entry.record["delay"] == 2
     assert timers[0].entry.state == "cancelled"
     assert not redis.exists(timers[0].key)
+
+
+def test_wait_on_a_given_client_neither_builds_nor_closes_one(redis, monkeypatch):
+    original = process_timer.Timer.wait
+
+    def fired(timer, timeout=None):
+        Scheduler(redis).run_due(now=timer.entry.record["due"])
+        original(timer, timeout)
+
+    close = Mock()
+    monkeypatch.setattr(redis, "close", close)
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer, "blocking_client", Mock(side_effect=AssertionError("built its own client")))
+    monkeypatch.setattr(process_timer.Timer, "wait", fired)
+    process_timer.wait(2, redis=redis)
+    close.assert_not_called()
 
 
 def test_controller_namespace_changes_only_in_hosted_mode(redis, monkeypatch):

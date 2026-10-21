@@ -62,7 +62,7 @@ def master_agents(store: "RedisStore | None", harness: str, slug: str) -> int:
         and agent.state != "finished"
         and agent.harness == harness
         and agent.account == slug
-        and agent.route_kind != "interactive"
+        and agent.route_kind not in ("interactive", "master-login")
     )
 
 

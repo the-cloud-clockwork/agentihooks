@@ -564,8 +564,8 @@ waits or stops.
 | Directive | What the agent does | Enforcement |
 |---|---|---|
 | `QUOTA HANDOFF REQUIRED` | Writes a handoff document, runs `agentihooks init-agent --handoff`, reports where the work moved, stops; a swarm session instead writes its Handoff v2, runs `agentihooks swarm <slug> handoff DOC --reason quota` and stops, keeping its seat | Injected on every tool call until done |
-| `QUOTA WAIT` | Creates a one-shot `CronCreate` job for the 5h reset, tells the operator, stops | Every tool except `CronCreate` / `CronList` / `CronDelete` is blocked |
-| `QUOTA STOP` | Tells the operator to add another account or say "keep pushing" | Every tool is blocked |
+| `QUOTA WAIT` | Creates a one-shot `CronCreate` job for the 5h reset, tells the operator, stops | Injected as an alert on every tool call; no tool is blocked |
+| `QUOTA STOP` | Tells the operator to add another account or say "keep pushing" | Injected as an alert on every tool call; no tool is blocked |
 | `QUOTA PUSH` | Continues on this account until 100% | The operator typed "keep pushing" (or "push to 100") this session |
 
 A window whose reset time has passed counts as empty, so a waiting session is

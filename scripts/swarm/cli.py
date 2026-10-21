@@ -10,7 +10,7 @@ agentihooks swarm <id> url                                        print the ledg
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
-agentihooks swarm <id> master up [--last | --new]                 from a terminal: bring back the last master's conversation or start a new one
+agentihooks swarm <id> master up [--last | --new | --replace]     from a terminal: bring back the last master's conversation or start a new one
 agentihooks swarm <id> master move --to HIVE                      order the live master to hand off so its successor starts on that hive
 agentihooks swarm <id> set master-move-grace=SECONDS              how long a quiet master hive may stay quiet before the master moves (default 300)
 agentihooks swarm <id> set hive-placement=on|off                  place this swarm's work on hives while a local machine stays local
@@ -110,6 +110,7 @@ from scripts.swarm import (
     plan_review,
     priming_trace,
     prompt,
+    queue_exit,
     queue_priority,
     queue_record,
     ready,
@@ -135,7 +136,7 @@ from scripts.swarm import (
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
-from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime
 from scripts.swarm.status import (
     auto_snapshot,
     findings,
@@ -220,12 +221,12 @@ def now_ms():
     return int(time.time() * 1000)
 
 
-def _publish_tick_status(store, slug, doc):
+def _publish_tick_status(store, slug, doc, view=None):
     from scripts.swarm import command_runner
 
     failure = sys.exception()
     try:
-        timing.call(command_runner.publish, store, slug, doc)
+        timing.call(command_runner.publish, store, slug, doc, view)
     except Exception:
         if failure is None:
             raise
@@ -279,8 +280,7 @@ def _stopped_tick(store, slug, ledger, runtime, held):
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
     from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
 
-    deployment = os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL)
-    if deployment != controller.LOCAL and not scheduled:
+    if not ledger_link.local_mode(os.environ) and not scheduled:
         return [CONTROLLER_TICKS]
     tick_stop.check()
     ledger = ledger or LedgerClient()
@@ -299,7 +299,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
 
     keeping = timing.BEFORE_STEP.set(before_step)
-    doc = {}
+    doc, view = {}, None
     try:
         timing.keep()
         if store.config(slug).state == "stopped":
@@ -375,7 +375,6 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
             rows = {t["id"]: t for t in doc["tasks"]}
-            actions += skip_refused(queue_priority.refresh, store, slug, doc["tasks"], ledger)
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
             actions += skip_refused(
                 ready.merge_pass, ready.Pass(store, slug, ledger, view, ledger_events.view, now_ms()), rows
@@ -400,12 +399,9 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
             if scheduled:
-                from scripts.swarm import langfuse
+                from scripts.swarm import refresh_job
 
-                actions += skip_refused(langfuse.refresh, store, slug, now_ms())
-                from scripts.swarm import grafana_alerts
-
-                actions += skip_refused(grafana_alerts.refresh, store.redis, slug, now_ms())
+                timing.call(refresh_job.start, store, slug)
             found = timing.call(
                 findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
             )
@@ -430,7 +426,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
     finally:
         try:
-            _publish_tick_status(store, slug, doc)
+            _publish_tick_status(store, slug, doc, view)
         finally:
             timing.BEFORE_STEP.reset(keeping)
             tick_stop.drop(token)
@@ -621,11 +617,12 @@ def cmd_prober(store, args):
 
 
 def cmd_tick_watch(store, args):
-    from scripts.swarm import controller, scheduled_tick, tick_watch
+    from scripts.swarm import scheduled_tick, tick_watch
     from scripts.swarm.tick import respawn_master
+    from scripts.swarm_ledger import ledger_link
 
     repair = None
-    if os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL) == controller.LOCAL:
+    if ledger_link.local_mode(os.environ):
         runtime = routed(herdr=HerdrRuntime())
 
         def respawn(slug):
@@ -1205,6 +1202,9 @@ def cmd_status(store, args):
         print(
             f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}"
         )
+    from scripts.hive import join_report
+
+    sys.stdout.write(join_report.text(store.redis, agents))
     for r in store.restored(args.slug):
         print(f"restored  {r['name']}  {r['outcome']}  {r['reason']}")
     for launch in launch_check.reports(store, args.slug):
@@ -1418,6 +1418,11 @@ def _worker(store, args):
     return agent
 
 
+def _local_repo(store, slug):
+    local = os.environ.get(REPO_VARIABLE)
+    return local if local and os.environ.get("AGENTIHOOKS_SWARM") == slug else store.config(slug).repo
+
+
 def cmd_issue(store, args):
     agent = _worker(store, args)
     LedgerClient().update_task(args.slug, agent.task, {"issue_url": args.url}, by=agent.name)
@@ -1489,7 +1494,7 @@ def origin_repo(run=subprocess.run):
 def cmd_prepare(store, args):
     from scripts.swarm import publish
 
-    fields = publish.prepare(args.slug, _worker(store, args), store.config(args.slug).repo, LedgerClient())
+    fields = publish.prepare(args.slug, _worker(store, args), _local_repo(store, args.slug), LedgerClient())
     print(json.dumps(fields))
 
 
@@ -1497,7 +1502,7 @@ def cmd_publish(store, args):
     from scripts.swarm import publish
 
     fields = publish.publish(
-        args.slug, _worker(store, args), store.config(args.slug).repo, LedgerClient(), args.message, args.files
+        args.slug, _worker(store, args), _local_repo(store, args.slug), LedgerClient(), args.message, args.files
     )
     print(json.dumps(fields))
 
@@ -1596,7 +1601,7 @@ def cmd_merge(store, args):
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: _queue_intent(store, args, agent, head),
+                admit=lambda head: _queue_intent(store, args, agent, head) or queue_exit.require_fresh(args.url, head),
                 journal=queue_record.Journal(args.url),
             )
         else:
@@ -1680,7 +1685,7 @@ def cmd_block(store, args):
             return
     from scripts.swarm import publish
 
-    pushed = publish.pushed_branches(store.config(args.slug).repo, rows[agent.task], agent)
+    pushed = publish.pushed_branches(_local_repo(store, args.slug), rows[agent.task], agent)
     red_run = _dev_red_run(store, args.slug) if args.dev_red else None
     if pushed:
         ledger.update_task(args.slug, agent.task, pushed, by=agent.name)
@@ -1693,7 +1698,7 @@ def cmd_block(store, args):
 
 def _dev_red_run(store, slug):
     try:
-        red_run = dev_red.failing_run(store.config(slug).repo)
+        red_run = dev_red.failing_run(_local_repo(store, slug))
     except dev_red.READ_ERRORS as exc:
         raise SwarmError(f"cannot read the dev Tests runs: {getattr(exc, 'stderr', None) or exc}") from exc
     if red_run is None:
@@ -2095,6 +2100,7 @@ def build_parser():
     pick = master_up.add_mutually_exclusive_group()
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
+    pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
     sub.add_parser("agent-up").add_argument("profile")
     sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")

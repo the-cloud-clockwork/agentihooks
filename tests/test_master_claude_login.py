@@ -71,6 +71,18 @@ def test_the_login_is_on_only_for_a_claude_front_door_master_with_the_setting_on
     assert login.route(False) == []
 
 
+def test_signed_in_names_the_master_login_account_only_with_the_setting_on(ah, monkeypatch):
+    monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
+    assert login.signed_in() == ""
+    login.home().mkdir(parents=True)
+    (login.home() / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
+    assert login.signed_in() == ""
+    (login.home() / login.CREDENTIALS).write_text(json.dumps({login.GRANT: GRANT}))
+    assert login.signed_in() == "masteratexample_com"
+    monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", "True")
+    assert login.signed_in() == ""
+
+
 def test_the_private_home_lives_under_the_agentihooks_home(ah):
     assert login.root() == ah / "master-login"
     assert login.home() == ah / "master-login" / "claude"
@@ -241,20 +253,15 @@ def test_a_login_on_the_declared_master_account_keeps_its_declaration(tmp_path):
     assert master_account.declared(store, environ)["claude"].tier == "max"
 
 
-def test_another_declared_master_account_refuses_naming_both(tmp_path):
+def test_a_login_on_another_account_takes_over_its_slot_declaration(tmp_path):
     target, store = _home(tmp_path), _store(tmp_path)
     environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
     master_account.declare(store, {"claude": ("other", None)}, environ, "operator", 1.0)
-    with pytest.raises(
-        login.LoginRefused,
-        match="^the master login account masteratexample_com is a worker quota token "
-        "and the declared claude master account is other$",
-    ):
-        login.account(target, environ, _given(store, environ))
-    assert master_account.declared(store, environ)["claude"].slug == "other"
+    assert login.account(target, environ, _given(store, environ)) == "masteratexample_com"
+    assert master_account.declared(store, environ)["claude"].slug == "masteratexample_com"
 
 
-def test_a_declaration_another_login_wrote_first_refuses_naming_both(tmp_path):
+def test_a_declaration_another_login_wrote_first_is_taken_over(tmp_path):
     class Raced(FileSettings):
         def _claim(self, key, value, entry):
             self._write(key, "other", {**entry, "value": "other", "actor": "rival"})
@@ -262,13 +269,18 @@ def test_a_declaration_another_login_wrote_first_refuses_naming_both(tmp_path):
 
     target, store = _home(tmp_path), Raced(tmp_path / "routing-settings.json")
     environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
-    with pytest.raises(
-        login.LoginRefused,
-        match="^the master login account masteratexample_com is a worker quota token "
-        "and the declared claude master account is other$",
-    ):
-        login.account(target, environ, _given(store, environ))
-    assert [entry["actor"] for entry in store.history()] == ["rival"]
+    assert login.account(target, environ, _given(store, environ)) == "masteratexample_com"
+    assert master_account.declared(store, environ)["claude"].slug == "masteratexample_com"
+
+
+def test_a_second_slot_login_on_a_worker_account_keeps_the_first_slot_declaration(tmp_path, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "2")
+    target, store = _home(tmp_path), _store(tmp_path)
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
+    master_account.declare(store, {"claude": ("other", None)}, environ, "operator", 1.0)
+    assert login.account(target, environ, _given(store, environ)) == "masteratexample_com"
+    assert master_account.declared(store, environ)["claude"].slug == "other"
+    assert store.all()["master-account-claude-2"] == "masteratexample_com"
 
 
 def test_the_settings_store_follows_the_routing_store(tmp_path, monkeypatch):
@@ -506,7 +518,7 @@ def test_keep_publishes_and_reports_a_failed_write(tmp_path, monkeypatch, capsys
 
 def test_a_checkpoint_publishes_only_from_the_master_login_home(ah, rendered, monkeypatch):
     kept = []
-    monkeypatch.setattr(login, "keep", lambda bao, target, epoch: kept.append((bao, target, epoch)) or True)
+    monkeypatch.setattr(login, "keep", lambda bao, target, epoch, number: kept.append((bao, target, epoch)) or True)
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao" if environ.get("OPENBAO_URL") else None)
     _seed(rendered)
     master = {"OPENBAO_URL": "u", "CLAUDE_CONFIG_DIR": str(login.home())}
@@ -536,9 +548,9 @@ def test_prepare_claims_above_the_stored_epoch_builds_restores_and_keeps(ah, ren
     _seed(rendered)
     calls = []
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao" if environ.get("OPENBAO_URL") else None)
-    monkeypatch.setattr(login, "stored", lambda bao: {"epoch": "5"} if bao == "bao" else {})
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: {"epoch": "5"} if bao == "bao" else {})
     monkeypatch.setattr(login, "restore", lambda copy, target: calls.append(("restore", copy, target)))
-    monkeypatch.setattr(login, "keep", lambda bao, target, epoch: calls.append(("keep", bao, target, epoch)))
+    monkeypatch.setattr(login, "keep", lambda bao, target, epoch, number: calls.append(("keep", bao, target, epoch)))
     monkeypatch.setattr(binding, "rehome", lambda report, home, shared: calls.append(("rehome", report, home, shared)))
     environ = _environ(rendered, OPENBAO_URL="u", AGENTIHOOKS_PROFILE_REPORT="/run/report")
     target, found = login.prepare(environ, tmp_path)
@@ -558,7 +570,7 @@ def test_prepare_claims_above_the_stored_epoch_builds_restores_and_keeps(ah, ren
 def test_prepare_without_a_stored_epoch_takes_epoch_one(ah, rendered, tmp_path, monkeypatch):
     _seed(rendered)
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
-    monkeypatch.setattr(login, "stored", lambda bao: {})
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: {})
     monkeypatch.setattr(login, "keep", lambda *_: True)
     login.prepare(_environ(rendered), tmp_path)
     assert json.loads((login.root() / login.OWNER).read_text())["epoch"] == 1
@@ -686,3 +698,82 @@ def test_a_worker_token_master_launch_holds_its_workers_at_the_one_master_ceilin
     assert source.cap(week(70.0), 0) == 0
     assert source.cap(week(69.9), 0) > 0
     assert source.cap(week(70.0, "workeratexample_com"), 0) > 0
+
+
+def test_slot_one_keeps_the_original_home_and_record(ah, monkeypatch):
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    assert login.slot() == 1
+    assert login.root() == ah / "master-login"
+    assert login.creds() == login.CREDS
+
+
+def test_the_active_slot_file_picks_the_home_and_record(ah, monkeypatch):
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    login.use(4)
+    assert login.root() == ah / "master-login-4"
+    assert login.creds() == f"{login.CREDS}-4"
+
+
+def test_an_unreadable_or_out_of_range_slot_falls_back_to_slot_one(ah, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "nine")
+    assert login.slot() == 1
+    monkeypatch.setenv(login.SLOT_ENV, str(login.MAX_SLOTS + 1))
+    assert login.slot() == 1
+
+
+def test_use_refuses_a_slot_outside_the_cap(ah):
+    with pytest.raises(login.LoginRefused):
+        login.use(0)
+
+
+@pytest.mark.parametrize("number", [0, login.MAX_SLOTS + 1])
+def test_use_names_the_refused_slot_and_the_cap(ah, number):
+    with pytest.raises(login.LoginRefused) as refused:
+        login.use(number)
+    assert str(refused.value) == f"master login slot {number} is outside 1 to {login.MAX_SLOTS}"
+    assert not (ah / login.SLOT_FILE).exists()
+
+
+@pytest.mark.parametrize("number", [1, login.MAX_SLOTS])
+def test_use_and_slot_accept_the_first_and_last_slot(ah, monkeypatch, number):
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    login.use(number)
+    assert (ah / login.SLOT_FILE).read_text() == f"{number}\n"
+    assert login.slot() == number
+    monkeypatch.setenv(login.SLOT_ENV, str(number))
+    assert login.slot() == number
+
+
+def test_slot_zero_falls_back_to_slot_one(ah, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "0")
+    assert login.slot() == 1
+
+
+def test_use_creates_a_nested_missing_home(tmp_path, monkeypatch):
+    nested = tmp_path / "a" / "b" / "ah"
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(nested))
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    login.use(2)
+    assert (nested / login.SLOT_FILE).read_text() == "2\n"
+
+
+def test_a_slot_takeover_records_the_login_time(tmp_path, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "2")
+    monkeypatch.setattr(login, "time", SimpleNamespace(time=lambda: 1234.5))
+    target, store = _home(tmp_path), _store(tmp_path)
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
+    store.set("master-account-claude-2", "other", "operator", 1.0)
+    assert login.account(target, environ, _given(store, environ)) == "masteratexample_com"
+    written = [entry for entry in store.history() if entry["key"] == "master-account-claude-2"]
+    assert (written[-1]["value"], written[-1]["actor"], written[-1]["at"]) == ("masteratexample_com", "m", 1234.5)
+
+
+@pytest.mark.parametrize(
+    ("logins", "expected"), [({1: "operator"}, ""), ({1: ""}, login.NO_LOGIN), ({}, login.NO_LOGIN)]
+)
+def test_unusable_names_why_a_hive_cannot_run_the_master_login(monkeypatch, logins, expected):
+    monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
+    monkeypatch.setattr(login, "logins", lambda: logins)
+    assert login.unusable() == expected
+    monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", "True")
+    assert login.unusable() == login.OFF

@@ -112,6 +112,14 @@ CASES = {
     "login missing on pc": ("master", fleet(pc={"interactive": {}}), "interactive", REPO, "vm"),
     "login present": ("master", fleet(), "interactive", REPO, "pc"),
     "login ignored for subscription": ("master", fleet(pc={"interactive": {}}), "subscription", REPO, "pc"),
+    "master login missing": (
+        "master",
+        fleet(vm={"master_login": {"claude": "other"}}),
+        "master-login",
+        REPO,
+        Wait("no hive for master holds the claude master login for acct"),
+    ),
+    "master login on vm": ("master", fleet(vm={"master_login": {"claude": "acct"}}), "master-login", REPO, "vm"),
 }
 
 
