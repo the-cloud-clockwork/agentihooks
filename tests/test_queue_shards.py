@@ -442,7 +442,7 @@ def test_the_reused_tests_step_deselects_against_the_single_collection(tmp_path)
     uploads = {step.get("with", {}).get("name"): step for step in steps if "upload" in step.get("uses", "")}
     assert uploads["reused-tests-${{ matrix.python-version }}"]["with"]["path"] == "reused-tests.json"
     assert uploads["reused-${{ matrix.python-version }}"]["with"]["path"] == "${{ runner.temp }}/reused.json"
-    early = uploads["early-collected-${{ matrix.python-version }}"]["with"]["path"].split()
+    early = uploads["early-collected-${{ matrix.python-version }}"]["with"]["path"].splitlines()
     assert "${{ runner.temp }}/reused.json" in early
     assert "${{ runner.temp }}/plan-outputs.txt" in early
     for name in ("reused-tests-${{ matrix.python-version }}", "reused-${{ matrix.python-version }}"):
