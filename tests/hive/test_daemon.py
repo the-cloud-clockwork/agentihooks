@@ -157,7 +157,7 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     waiter = object()
     with pytest.raises(KeyboardInterrupt):
         daemon.run(Mock(return_value=(object(), waiter)))
-    sleep.assert_called_once_with(12, redis=waiter, timeout=11)
+    sleep.assert_called_once_with(12, redis=waiter, timeout=12)
 
 
 def test_install_writes_the_service_and_enables_it(tmp_path):

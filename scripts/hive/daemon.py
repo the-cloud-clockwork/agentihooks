@@ -141,7 +141,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                 beat(redis, local_id)
                 elapsed = time.monotonic() - started
                 delay = max(0, BEAT_SECONDS - max(WAKE_SLACK_S, elapsed))
-                scheduled_wait(delay, redis=waiter, timeout=max(0, BEAT_SECONDS - elapsed - WAKE_SLACK_S / 2))
+                scheduled_wait(delay, redis=waiter, timeout=max(delay, BEAT_SECONDS - elapsed - WAKE_SLACK_S / 2))
                 failures = 0
         except lost as exc:
             _back_off(exc, failures)
