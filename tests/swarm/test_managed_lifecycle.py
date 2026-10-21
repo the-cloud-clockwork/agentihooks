@@ -455,7 +455,7 @@ def _launched(monkeypatch, rig, pane, terminal):
     from scripts import herdr_panes
 
     record = SimpleNamespace(pane_id=pane, terminal_id=terminal, kind="init-agent", owner_session=rig.agent.name)
-    monkeypatch.setattr(herdr_panes, "load", lambda environ: [record])
+    monkeypatch.setattr(herdr_panes, "load", lambda environ: [record] if isinstance(environ, dict) else [])
 
 
 def test_managed_retirement_leaves_a_reused_pane_on_another_terminal_open(rig, monkeypatch):
