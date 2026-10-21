@@ -16,7 +16,7 @@ def log(*measures: dict) -> str:
     return "\n".join(["ledger load-gate: 1000 tasks", *(json.dumps(measure) for measure in measures), "done"])
 
 
-def test_one_noisy_pair_cannot_turn_the_median_pair_ratio_red():
+def test_one_noisy_pair_cannot_turn_the_order_balanced_pair_ratio_red():
     pairs = [
         (BASE, {**BASE, "write_p50_s": 1.4, "busiest_cores": 0.7}),
         (BASE, BASE),
@@ -28,14 +28,40 @@ def test_one_noisy_pair_cannot_turn_the_median_pair_ratio_red():
 @pytest.mark.parametrize(
     "change, problem",
     [
-        ({"errors": 1}, "head had 2 failed requests, base 0"),
-        ({"write_p50_s": 2.0}, "head write p50 median pair ratio 2.00 exceeds the 1.5x margin"),
-        ({"busiest_cores": 0.8}, "head busiest CPU window median pair ratio 1.60 exceeds the 1.5x margin"),
+        ({"errors": 1}, "head had 4 failed requests, base 0"),
+        ({"write_p50_s": 2.0}, "head write p50 order balanced pair ratio 2.00 exceeds the 1.5x margin"),
+        ({"busiest_cores": 0.8}, "head busiest CPU window order balanced pair ratio 1.60 exceeds the 1.5x margin"),
     ],
 )
 def test_a_head_regression_in_most_pairs_is_named(change, problem):
     head = {**BASE, **change}
-    assert paired.regressions([(BASE, head), (BASE, head), (BASE, BASE)], 1.5) == [problem]
+    assert paired.regressions([(BASE, head), (BASE, head), (BASE, head), (BASE, head), (BASE, BASE)], 1.5) == [problem]
+
+
+def measures(*rows: tuple[float, float, float, float]) -> list[tuple[dict, dict]]:
+    return [
+        (
+            {"errors": 0, "write_p50_s": base_write, "busiest_cores": base_cpu},
+            {"errors": 0, "write_p50_s": head_write, "busiest_cores": head_cpu},
+        )
+        for base_write, base_cpu, head_write, head_cpu in rows
+    ]
+
+
+def test_a_slower_second_run_cannot_turn_the_three_base_first_pairs_red():
+    pairs = measures(
+        (0.107, 0.146, 0.142, 0.157),
+        (0.158, 0.164, 0.115, 0.169),
+        (0.11, 0.153, 0.151, 0.167),
+        (0.156, 0.162, 0.126, 0.17),
+        (0.121, 0.173, 0.199, 0.173),
+    )
+    assert paired.regressions(pairs, 1.25) == []
+
+
+def test_a_head_slower_whichever_side_runs_first_is_named():
+    pairs = measures(*[(0.1, 0.15, 0.15, 0.15), (0.15, 0.15, 0.2, 0.15)] * 2, (0.1, 0.15, 0.15, 0.15))
+    assert paired.regressions(pairs, 1.25) == ["head write p50 order balanced pair ratio 1.41 exceeds the 1.25x margin"]
 
 
 def test_a_measure_missing_from_any_run_is_named():
@@ -51,6 +77,9 @@ def test_a_pair_missing_its_run_is_named():
     assert paired.regressions([], 1.5) == ["no paired runs were given"]
     assert paired.regressions([({**BASE, "busiest_cores": 0.0}, BASE)], 1.5) == [
         "busiest CPU window was not measured on the base run of pair 1"
+    ]
+    assert paired.regressions([(BASE, BASE), ({**BASE, "write_p50_s": 2.0}, {**BASE, "write_p50_s": 0.0})], 1.5) == [
+        "write p50 was not measured on the head run of pair 2"
     ]
 
 
@@ -81,7 +110,7 @@ def test_compare_mode_passes_one_same_code_pair_two_times_apart_and_fails_a_thre
     assert paired.regressions([(BASE, apart), *[(BASE, BASE)] * (count - 1)], margin) == []
     slower = {**BASE, "write_p50_s": 3.0}
     assert paired.regressions([(BASE, slower)] * count, margin) == [
-        f"head write p50 median pair ratio 3.00 exceeds the {margin}x margin"
+        f"head write p50 order balanced pair ratio 3.00 exceeds the {margin}x margin"
     ]
 
 
@@ -118,7 +147,10 @@ def test_the_command_pairs_runs_in_order_and_refuses_a_margin_below_the_same_cod
         paired.main(["--base", str(base), str(base), str(base), "--head", str(head), str(slow), str(slow), *graded])
         == 1
     )
-    assert "::error::head busiest CPU window median pair ratio 2.00 exceeds the 1.5x margin" in capsys.readouterr().out
+    assert (
+        "::error::head busiest CPU window order balanced pair ratio 1.73 exceeds the 1.5x margin"
+        in capsys.readouterr().out
+    )
     assert (
         paired.main(["--base", str(base), "--head", str(head), "--margin", "1.2", "--same-code", str(same_code)]) == 1
     )
