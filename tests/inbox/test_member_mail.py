@@ -58,11 +58,32 @@ def test_the_wake_pass_escalates_a_member_agents_unread_mail_to_the_controller_m
     assert raised.ref == f"inbox-escalation:{item.id}"
 
 
+def test_the_wake_pass_types_no_wake_into_a_pane_on_another_host(redis, agent, mail):
+    member, item = mail
+    remote = replace(agent, harness="codex", pane_id="p1", runtime_target={"host_id": "m1"})
+    herdr = FakeHerdr({"p1": "idle"})
+    wake.wake_pass(InboxStore(redis), "sw", [remote], herdr, FakeLedger(), item.created_at + 1, 300_000)
+    assert herdr.prompts == []
+    assert wake.WOKEN not in [e.get("event") for e in member.history(item.id)]
+
+
 def test_the_exit_sweep_moves_a_gone_member_agents_mail_to_its_seat(store, agent, mail):
     member, item = mail
     store.put_agent("sw", replace(agent, state="finished"))
     exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
     assert member.get(item.id).address == SEAT
+
+
+def test_the_exit_sweep_withdraws_the_master_escalation_of_a_member_agents_unfillable_seat(store, agent, mail):
+    member, item = mail
+    agents = [agent, AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm")]
+    wake.wake_pass(InboxStore(store.redis), "sw", agents, FakeHerdr({}), FakeLedger(), item.created_at + 10, 1)
+    [raised] = InboxStore(store.redis, world="").pending_items(MASTER_NAME)
+    store.put_agent("sw", replace(agent, state="finished"))
+    store.update("sw", state="stopped")
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert member.get(item.id).state == "cancelled"
+    assert InboxStore(store.redis, world="").get(raised.id).state == "cancelled"
 
 
 class Live:

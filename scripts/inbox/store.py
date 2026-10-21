@@ -143,7 +143,8 @@ class InboxStore:
         return scope.host(self.redis, slug, receiver) if slug else ""
 
     def worlds(self) -> list["InboxStore"]:
-        """This inbox and, for the controller's, each joined hive member's, which holds the mail of the agents it runs."""
+        """This inbox and, for the controller's, each joined hive member's, which holds the mail of the agents that
+        member runs."""
         from scripts.hive import scope
 
         if self.world or scope.member():

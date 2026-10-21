@@ -243,11 +243,16 @@ def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
 
 
 def _withdraw_escalations(inbox: "InboxStore", item_id: str, seat: str) -> None:
+    from scripts.hive import scope
+    from scripts.inbox.store import InboxStore
     from scripts.inbox.wake import raised_id
 
+    worlds = [inbox] if scope.member() else InboxStore(inbox.redis, persist=inbox.persist, world="").worlds()
     for entry in inbox.history(item_id):
         if raised := raised_id(entry):
-            inbox.withdraw(raised, BY, f"cancelled: message {item_id} is closed, {seat} can get no successor")
+            for world in worlds:
+                if world.redis.exists(world.key("item", raised)):
+                    world.withdraw(raised, BY, f"cancelled: message {item_id} is closed, {seat} can get no successor")
 
 
 def no_successor(seat: str, config) -> str:
