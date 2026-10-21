@@ -2,11 +2,9 @@ ARG WORKER_IMAGE=ghcr.io/the-cloud-clockwork/agentihooks-worker:dev
 FROM mirror.gcr.io/library/node:22.20.0-bookworm-slim AS node
 FROM ghcr.io/astral-sh/uv:0.10.9 AS uv
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS wheel
+ARG AGENTIHOOKS_REF=dev
+ADD https://github.com/the-cloud-clockwork/agentihooks.git#${AGENTIHOOKS_REF} /build
 WORKDIR /build
-COPY pyproject.toml README.md ./
-COPY hooks/ hooks/
-COPY scripts/ scripts/
-COPY profiles/ profiles/
 RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip wheel --no-deps --wheel-dir /wheels . \
     && python -c "import tomllib; dev = tomllib.load(open('pyproject.toml', 'rb'))['project']['optional-dependencies']['dev']; print(*[r for r in dev if r.startswith('ruff==')])" > /wheels/tools.txt
 
