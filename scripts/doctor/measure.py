@@ -31,13 +31,17 @@ def _class_hint(finding_id):
     return f"measure the class {finding_id.partition('/')[0]} to read every live target"
 
 
+def _unknown(target, failed):
+    return SwarmError(f"{target} is unknown because {'; '.join(failed)}")
+
+
 def exact(finding_id: str, found: list[Finding], failed: list[str], seen: dict, live: set[str]) -> int:
     """A current finding's number; 0 only for a seen finding that is gone while the agent it names is live."""
     match = next((f for f in found if f.id == finding_id), None)
     if match:
         return match.measure
     if failed:
-        raise SwarmError(f"{finding_id} is unknown while {len(failed)} detector{'s' * (len(failed) != 1)} failed")
+        raise _unknown(finding_id, failed)
     record = seen.get(finding_id)
     if record is None:
         raise SwarmError(f"no finding {finding_id} has been seen; {_class_hint(finding_id)}")
@@ -62,6 +66,8 @@ def _measures(name, found):
 def of_class(name: str, found: list[Finding], failed: list[str], seen_classes: set[str]) -> Read:
     """Every current finding of a class seen before; unknown counts the detectors that failed."""
     measures = _measures(name, found)
+    if not measures and failed:
+        raise _unknown(name, failed)
     if not measures and name not in seen_classes:
         raise SwarmError(f"no finding of the class {name} has been seen")
     return Read(len(measures), len(failed), max(measures, default=0))
