@@ -1,6 +1,5 @@
 from dataclasses import replace
 
-
 from tests.test_hook_manager import quiet_session_start as quiet_session_start
 
 
