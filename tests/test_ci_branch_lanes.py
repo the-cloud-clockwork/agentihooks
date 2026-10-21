@@ -272,6 +272,7 @@ def test_reusable_walk_follows_trusted_calls_and_preserves_the_outer_workflow_na
             "aaa": None,
             "covered": {"uses": "./.github/workflows/branch.yml", "concurrency": LANED},
             "escape": {"uses": "./.github/workflows/middle.yml"},
+            "last": {"uses": "./.github/workflows/branch.yml"},
         },
     }
     middle = _workflow(
@@ -287,7 +288,8 @@ def test_reusable_walk_follows_trusted_calls_and_preserves_the_outer_workflow_na
     assert lanes.refused(sha, base) == (
         {
             f"{lanes.WORKFLOWS}/replay.yml": [
-                "job escape calls .github/workflows/middle.yml: job work calls .github/workflows/branch.yml: job replay has no shared hosted lane concurrency group"
+                "job escape calls .github/workflows/middle.yml: job work calls .github/workflows/branch.yml: job replay has no shared hosted lane concurrency group",
+                "job last calls .github/workflows/branch.yml: job replay has no shared hosted lane concurrency group",
             ]
         }
         if caller_name == "Trusted"
