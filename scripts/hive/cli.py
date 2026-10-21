@@ -142,8 +142,10 @@ def _serve(args: argparse.Namespace) -> int:
     if bool(args.tls_cert) != bool(args.tls_key):
         raise auth.HiveError("--tls-cert and --tls-key go together")
     tls = (args.tls_cert, args.tls_key) if args.tls_cert else None
+    redis = redis_client()
+    auth.regrant(redis)
     httpd = server.make_server(
-        redis_client(), args.redis_url or redis_url(os.environ), args.host, args.port, tls, ledger_ca=ledger_ca.served()
+        redis, args.redis_url or redis_url(os.environ), args.host, args.port, tls, ledger_ca=ledger_ca.served()
     )
     scheme = "https" if tls else "http"
     print(f"hive endpoint on {scheme}://{args.host}:{httpd.server_address[1]}{server.REFRESH_PATH}", flush=True)
