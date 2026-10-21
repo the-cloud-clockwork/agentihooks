@@ -157,7 +157,7 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     waiter = object()
     with pytest.raises(KeyboardInterrupt):
         daemon.run(Mock(return_value=(object(), waiter)))
-    sleep.assert_called_once_with(12, redis=waiter, timeout=13)
+    sleep.assert_called_once_with(12, redis=waiter, timeout=11)
 
 
 def test_install_writes_the_service_and_enables_it(tmp_path):
@@ -422,7 +422,7 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     connection = object()
     with pytest.raises(KeyboardInterrupt):
         daemon.run(_once(connection))
-    sleep.assert_called_once_with(0, redis=connection, timeout=1)
+    sleep.assert_called_once_with(0, redis=connection, timeout=0)
 
 
 def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch):
@@ -674,11 +674,13 @@ def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkey
             raise KeyboardInterrupt
 
     def scheduler_down():
-        assert time.monotonic() - beats[-1] < daemon.BEAT_SECONDS * 2, "the timer wait outlived its bound"
+        assert time.monotonic() - beats[-1] < daemon.BEAT_SECONDS, "the timer wait outlived its bound"
 
     monkeypatch.setattr(process_timer, "RECHECK_S", 0.05)
     monkeypatch.setattr(process_timer.service, "ensure_running", scheduler_down)
-    _stall_run(monkeypatch, lambda: (silent, silent), beat)
+    connects = []
+    _stall_run(monkeypatch, lambda: connects.append(silent) or (silent, silent), beat)
+    assert len(connects) == 1
     assert beats[1] - beats[0] < daemon.BEAT_SECONDS
     assert capsys.readouterr().err == ""
 
