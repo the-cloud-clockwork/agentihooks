@@ -772,6 +772,26 @@ def test_stale_claude_reading_does_not_advertise_capacity(observations):
     assert quota["claude:one"]["observed_at"] == 1
 
 
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        ({"AH_CC_TOKEN_one": "same", "AH_CC_TOKEN_two": "same"}, [("one", 3)]),
+        ({"AH_CC_TOKEN_one": "first", "AH_CC_TOKEN_two": "second"}, [("one", 3), ("two", 0)]),
+    ],
+)
+def test_token_names_holding_one_token_report_one_slot(observations, monkeypatch, environ, expected):
+    monkeypatch.setattr(daemon.balancer.operator_env, "block_tokens", lambda: {})
+    result = observations.ProbeResult(
+        "one", "allowed", "OK", 60, observations.QuotaWindow(65, 1000), observations.QuotaWindow(40, 2000)
+    )
+    observations.cached_observations.return_value = [(120, result)]
+    slots, quota = daemon._subscriptions(environ, {"claude": {}, "codex": {}}, 122)
+    assert slots == [
+        {"harness": "claude", "account": account, "kind": "subscription", "cap": cap} for account, cap in expected
+    ]
+    assert sorted(quota) == [f"claude:{account}" for account, _ in expected]
+
+
 def test_snapshot_missing_windows_bad_records_and_newer_cache(monkeypatch, tmp_path):
     from hooks.context import quota_usage
     from scripts import claude_quota_balancer as balancer

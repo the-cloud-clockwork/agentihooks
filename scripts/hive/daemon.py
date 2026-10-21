@@ -252,11 +252,7 @@ def claude_signed_in() -> bool:
 def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     _claude_snapshots(observed)
-    claude = {
-        name.removeprefix(balancer.TOKEN_PREFIX)
-        for name in environ
-        if name.startswith(balancer.TOKEN_PREFIX) and environ[name]
-    }
+    claude = {credential.account for credential in balancer.discover_credentials(environ)}
     claude.update(counts["claude"])
     claude.discard(account_sessions.API_ACCOUNT)
     if claude_signed_in():
