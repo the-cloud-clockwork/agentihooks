@@ -9,7 +9,7 @@ from scripts.hive import auth
 TEMPLATE_PATH = "k8s/templates/agentihooks-hive.yaml"
 NFS_HOMES_PATH = "k8s/manifests/agentihooks-swarm/hive-home-nfs.yaml"
 FILE_MARK = "#@ file: "
-LAN_IP = "10.10.30.207"
+LAN_IP = "10.10.30.207"  # NOSONAR: the swarm's published MetalLB address, written into manifests, never bound
 LAN_IP_ANNOTATION = "metallb.universe.tf/loadBalancerIPs"
 SSH_PORT_FIRST = 2222
 HIVES_LINE = re.compile(r"(- name: HIVES\n\s+value: )(.*)")
