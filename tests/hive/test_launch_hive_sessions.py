@@ -10,21 +10,27 @@ def _rows():
     ]
 
 
-def test_an_account_the_hives_already_fill_has_no_open_seat(monkeypatch):
+def test_an_account_the_hives_already_fill_has_no_open_seat():
+    hived = {"full-on-hives": 6, "room-left": 5}
+
+    assert [row.name for row in launch._open_claude_rows(_rows(), hived)] == ["room_left"]
+
+
+def test_hive_sessions_are_read_from_every_live_hive(monkeypatch):
     monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
     monkeypatch.setattr(
         "scripts.routing.aggregate.read",
         lambda redis, now: {
             "claude:full_on_hives": {"harness": "claude", "account": "full_on_hives", "sessions": 6},
-            "claude:room_left": {"harness": "claude", "account": "room_left", "sessions": 5},
+            "codex:other": {"harness": "codex", "account": "other", "sessions": 2},
         },
     )
 
-    assert [row.name for row in launch._open_claude_rows(_rows(), None, 0)] == ["room_left"]
+    assert launch._hive_sessions(None, 0) == {"full-on-hives": 6}
 
 
 def test_an_aggregated_router_counts_hive_sessions_once(monkeypatch):
     monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: True)
     monkeypatch.setattr("scripts.routing.aggregate.read", lambda redis, now: (_ for _ in ()).throw(AssertionError))
 
-    assert [row.name for row in launch._open_claude_rows(_rows(), None, 0)] == ["full_on_hives", "room_left"]
+    assert launch._hive_sessions(None, 0) == {}
