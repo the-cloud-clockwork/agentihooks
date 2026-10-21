@@ -210,7 +210,9 @@ def test_an_unreadable_hive_record_holds_its_workers(remote):
         (None, None, None, False),
     ],
 )
-def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat, until, retired):
+@pytest.mark.parametrize("placement", [True, False])
+@pytest.mark.parametrize("state", ["claimed", "blocked"])
+def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat, until, retired, placement, state):
     from scripts.hive import scope
     from scripts.swarm import idle, tick
     from scripts.swarm.tick import SUSPECT
@@ -225,20 +227,24 @@ def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat
         prefix = scope.readings(remote.redis, "fixture", remote.agent.name)
         remote.redis.set(idle.key("fixture", "wait", remote.agent.name, prefix), json.dumps(wait))
     remote.store.claim("fixture", "task", remote.agent.name, 60000)
-    rows = {"task": {"state": "claimed", "claimed_by": remote.agent.name}}
+    rows = {"task": {"state": state, "claimed_by": remote.agent.name}}
     ledger = Mock()
     ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
-    remote.runtime.retire = Mock(side_effect=AssertionError("a lost hive takes no process command"))
+    if not placement:
+        remote.runtime.hive = None
+    remote.runtime.retire = Mock(return_value=False)
 
     actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
 
+    reopened = ", task task reopened" if state == "claimed" else ""
     if retired:
+        remote.runtime.retire.assert_not_called()
         assert remote.store.agents("fixture") == []
         assert remote.store.claimant("fixture", "task") is None
         assert remote.store.execution_registry.occupants("fixture")[remote.agent.seat].state == "ended"
-        assert actions == [f"retired {remote.agent.name}: its hive stopped reporting, task task reopened"]
+        assert actions == [f"retired {remote.agent.name}: its hive stopped reporting{reopened}"]
     else:
-        assert actions == []
+        assert actions == ([] if reopened else [f"could not retire {remote.agent.name}, retrying next tick"])
         assert [(a.name, a.state) for a in remote.store.agents("fixture")] == [(remote.agent.name, SUSPECT)]
         assert remote.store.claimant("fixture", "task") == remote.agent.name
 

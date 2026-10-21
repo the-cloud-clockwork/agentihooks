@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import re
@@ -1344,6 +1345,60 @@ def test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job():
         report["with"]["path"] == "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
     )
     assert names.index(mutate["name"]) < names.index(report["name"])
+
+
+PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "tomlkit": "tomlkit"}
+
+
+def _planner_imports(path: Path) -> set[str]:
+    found, pending = set(), [ast.parse(path.read_text())]
+    while pending:
+        for child in ast.iter_child_nodes(pending.pop()):
+            if isinstance(child, ast.Import):
+                found |= {alias.name for alias in child.names}
+            elif isinstance(child, ast.ImportFrom) and child.level == 0:
+                found |= {child.module} | {f"{child.module}.{alias.name}" for alias in child.names}
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                # A function's own third party import loads only when it runs; its first party ones decide what else the planner reads.
+                found |= {
+                    node.module
+                    for node in ast.walk(child)
+                    if isinstance(node, ast.ImportFrom)
+                    and node.level == 0
+                    and node.module.split(".")[0] in ("scripts", "tests")
+                }
+            else:
+                pending.append(child)
+    return found
+
+
+def _planner_third_party() -> set[str]:
+    seen, third, queue = set(), set(), ["scripts.ci_mutation.plan", "scripts.ci_mutation.__main__"]
+    while queue:
+        name = queue.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        base = _ROOT.joinpath(*name.split("."))
+        path = next((p for p in (base.with_suffix(".py"), base / "__init__.py") if p.is_file()), None)
+        for dep in _planner_imports(path) if path else ():
+            parts = dep.split(".")
+            if parts[0] in ("scripts", "tests"):
+                queue += [".".join(parts[:i]) for i in range(1, len(parts) + 1)]
+            elif parts[0] not in sys.stdlib_module_names:
+                third.add(parts[0])
+    return third
+
+
+def test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pins():
+    plan = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation-plan"]
+    (install,) = [step for step in plan["steps"] if step.get("name") == "Install dependencies"]
+    project = tomllib.loads((_ROOT / "pyproject.toml").read_text())["project"]
+    declared = {re.split(r"[<>=!\[]", spec)[0].lower(): spec for spec in project["optional-dependencies"]["dev"]}
+    declared |= {re.split(r"[<>=!\[]", spec)[0].lower(): spec for spec in project["dependencies"]}
+    specs = [declared[name] for name in sorted(PLANNER_PACKAGES)]
+    assert install["run"] == "uv pip install --system " + " ".join(f'"{spec}"' for spec in specs)
+    assert _planner_third_party() == set(PLANNER_PACKAGES.values())
 
 
 def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_protected_grader():
