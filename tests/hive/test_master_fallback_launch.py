@@ -321,6 +321,21 @@ def test_a_master_login_without_a_hive_slot_reserves_one_launch(setup):
     assert (selected.account.name, selected.route_kind, selected.account.cap) == ("login", "interactive", 1)
 
 
+def test_a_secondary_master_on_a_native_login_reserves_one_launch_beside_a_master_login(setup):
+    task = {**master(setup), "seat": "master-2@fixture"}
+    master_login_hive(setup)
+    write_hive(
+        setup,
+        excluded=[],
+        ui="yes",
+        interactive={"claude": "login"},
+        master_login={"claude": "login"},
+        slots=[{"harness": "claude", "account": "login", "kind": "subscription", "cap": 4}],
+    )
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert (selected.account.name, selected.route_kind, selected.account.cap) == ("login", "interactive", 1)
+
+
 def test_a_front_door_successor_on_a_master_login_hive_starts_on_its_first_order(setup):
     from types import SimpleNamespace
 

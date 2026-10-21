@@ -76,6 +76,8 @@ def test_signed_in_names_the_master_login_account_only_with_the_setting_on(ah, m
     assert login.signed_in() == ""
     login.home().mkdir(parents=True)
     (login.home() / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
+    assert login.signed_in() == ""
+    (login.home() / login.CREDENTIALS).write_text(json.dumps({login.GRANT: GRANT}))
     assert login.signed_in() == "masteratexample_com"
     monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", "True")
     assert login.signed_in() == ""

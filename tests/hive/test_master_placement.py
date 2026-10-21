@@ -157,3 +157,10 @@ def test_a_declared_login_skips_a_hive_whose_master_login_differs():
     assert placement.place_master("claude", "declared", REPO, hives, NOW, front=True) == placement.MasterPlacement(
         "native", "declared", "interactive", False
     )
+
+
+def test_a_declared_login_matching_the_hive_master_login_is_placed_there():
+    hives = [hive("login", master_login={"claude": "operator"})]
+    assert placement.place_master("claude", "operator", REPO, hives, NOW, front=True) == placement.MasterPlacement(
+        "login", "operator", "interactive", False
+    )

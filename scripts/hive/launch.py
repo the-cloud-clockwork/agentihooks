@@ -84,7 +84,6 @@ def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: 
 
 
 def _master_login(hives: list[dict], hive_id: str) -> str:
-    """A master login shares its account's quota, so it reserves against that account's slot cap."""
     return next((hive.get("master_login", {}).get("claude", "") for hive in hives if hive["id"] == hive_id), "")
 
 

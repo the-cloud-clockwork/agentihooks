@@ -93,7 +93,7 @@ def signed_in() -> str:
     if hooks_config.MASTER_CLAUDE_LOGIN is not True:
         return ""
     email = (_read(home() / CONFIG).get(ACCOUNT) or {}).get("emailAddress")
-    return aicode_tokens.slug(email) if email else ""
+    return aicode_tokens.slug(email) if email and _private(home()) else ""
 
 
 def slot() -> int:

@@ -119,7 +119,6 @@ def overflow(role: str, waited: Wait, local_agents: int, local_max: int) -> Choi
 def place_master(
     harness: str, login: str, repo: str, hives: list[dict], now: int, front: bool = False
 ) -> MasterPlacement | Wait:
-    """A hive with a master login launches the front door master as that login, so it is placed on nothing else."""
     candidates = []
     for hive in hives:
         if not live(hive, now) or repo not in hive["repos"] or not hosts(MASTER, hive):
