@@ -71,8 +71,8 @@ def _github(monkeypatch, runs, *, manifests, failed=(), uncovered=()):
 def _manifest(run_id):
     return {
         "commit": f"{run_id:040d}",
-        "units": [],
-        "tests": {"tests/test_a.py::test_a": {"units": [], "files": [], "escapes": False}},
+        "units": ["hooks/a.py::a"],
+        "tests": {"tests/test_a.py::test_a": {"units": [0], "files": [], "escapes": False}},
     }
 
 
@@ -171,6 +171,25 @@ def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
         (json.dumps({**_manifest(1), "tests": []}).encode(), True),
         (json.dumps({**_manifest(1), "units": {}}).encode(), True),
         (json.dumps({**_manifest(1), "tests": {"test": {}}}).encode(), True),
+        (json.dumps({**_manifest(1), "tests": {"test": None}}).encode(), True),
+        (
+            json.dumps({**_manifest(1), "tests": {"test": {"units": [0], "files": None, "escapes": False}}}).encode(),
+            True,
+        ),
+        (json.dumps({**_manifest(1), "tests": {"test": {"units": [0], "files": [], "escapes": None}}}).encode(), True),
+        (
+            json.dumps({**_manifest(1), "tests": {"test": {"units": [-1], "files": [], "escapes": False}}}).encode(),
+            True,
+        ),
+        (json.dumps({**_manifest(1), "tests": {"test": {"units": [1], "files": [], "escapes": False}}}).encode(), True),
+        (
+            json.dumps({**_manifest(1), "tests": {"test": {"units": [True], "files": [], "escapes": False}}}).encode(),
+            True,
+        ),
+        (
+            json.dumps({**_manifest(1), "tests": {"test": {"units": [0.0], "files": [], "escapes": False}}}).encode(),
+            True,
+        ),
     ],
     ids=[
         "empty-download",
@@ -185,6 +204,13 @@ def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
         "wrong-tests",
         "wrong-units",
         "wrong-test",
+        "non-object-test",
+        "wrong-files",
+        "wrong-escapes",
+        "negative-unit",
+        "unit-out-of-range",
+        "boolean-unit",
+        "float-unit",
     ],
 )
 def test_an_unusable_download_runs_every_test_and_names_its_own_fallback(
@@ -215,6 +241,19 @@ def test_an_unusable_download_runs_every_test_and_names_its_own_fallback(
     assert "Dev run 1" in report
     assert "every test runs" in report
     assert "No test record" not in report
+    if not zipped:
+        reason = "File is not a zip file"
+    elif zipped == "corrupt-deflate":
+        reason = "Error -3 while decompressing data: invalid block type"
+    elif content == b"":
+        reason = "Expecting value: line 1 column 1 (char 0)"
+    elif content == b"{":
+        reason = "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+    elif content == bytes([255]):
+        reason = "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
+    else:
+        reason = "dependency manifest schema is invalid or empty"
+    assert report == f"::warning title=Unusable test record::Dev run 1: {reason}; every test runs.\n"
 
 
 @pytest.mark.parametrize("cause", [None, ".github/workflows/test.yml"])
