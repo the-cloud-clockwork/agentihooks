@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from scripts.swarm_ledger import ledger_route
+from scripts.swarm_ledger import hosted_probe, ledger_route
 
 START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
@@ -32,7 +32,7 @@ class Cleartext(SystemExit):
 
 
 def base(environ=os.environ, slug="") -> str:
-    if selected := ledger_route.url(slug):
+    if selected := ledger_route.url(slug) or hosted_probe.hosted(environ):
         return selected
     if remote(environ, slug):
         url = environ.get("SWARM_URL") or environ.get("LEDGER_URL")
@@ -117,6 +117,7 @@ def remote(environ=os.environ, slug="") -> bool:
     mode = environ.get("AGENTIHOOKS_DEPLOYMENT")
     return bool(
         ledger_route.url(slug)
+        or hosted_probe.hosted(environ)
         or (environ.get("SWARM_URL") if not slug or environ.get("AGENTIHOOKS_SWARM", slug) == slug else "")
     ) or (bool(environ.get("LEDGER_URL")) if mode is None else mode != "local")
 

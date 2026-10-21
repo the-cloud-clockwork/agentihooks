@@ -159,17 +159,38 @@ The first rule that matches decides:
 | Order | Environment | Client |
 |---|---|---|
 | 1 | A ledger route is active for this ledger: a ledger cutover, or an `agentihooks ledger` command run by an agent of that swarm with no `SWARM_URL`, routed to the swarm's stored API address | Remote, to the routed address |
-| 2 | `SWARM_URL` set, and `AGENTIHOOKS_SWARM` is unset or names this ledger | Remote, in every mode, `local` included |
-| 3 | `AGENTIHOOKS_DEPLOYMENT` unset and `LEDGER_URL` set | Remote |
-| 4 | `AGENTIHOOKS_DEPLOYMENT` unset and `LEDGER_URL` unset | Local |
-| 5 | `AGENTIHOOKS_DEPLOYMENT=local` | Local; `LEDGER_URL` is ignored |
-| 6 | `AGENTIHOOKS_DEPLOYMENT` set to any other value | Remote |
+| 2 | `AGENTIHOOKS_HOSTED_LEDGER_URL` set, the session holds `AGENTIHOOKS_LEDGER_AGENT_TOKEN` or `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL`, and the address answers `/healthz` | Remote, to the hosted address, in every mode |
+| 3 | `SWARM_URL` set, and `AGENTIHOOKS_SWARM` is unset or names this ledger | Remote, in every mode, `local` included |
+| 4 | `AGENTIHOOKS_DEPLOYMENT` unset and `LEDGER_URL` set | Remote |
+| 5 | `AGENTIHOOKS_DEPLOYMENT` unset and `LEDGER_URL` unset | Local |
+| 6 | `AGENTIHOOKS_DEPLOYMENT=local` | Local; `LEDGER_URL` is ignored |
+| 7 | `AGENTIHOOKS_DEPLOYMENT` set to any other value | Remote |
 
 A hub address with no mode is remote because it is the safe default: a worker handed the hub's `LEDGER_URL` and
 nothing else must not fall back to a local client that reads a local ledger credential. Local mode needs either no
-hub address at all or an explicit `AGENTIHOOKS_DEPLOYMENT=local`.
+hub address at all or an explicit `AGENTIHOOKS_DEPLOYMENT=local`, and rule 2 still sends a session with a hosted
+credential to an answering hosted ledger in local mode.
 
 A remote client sends to `SWARM_URL`, else `LEDGER_URL`, with any trailing slash removed.
+
+### Hosted ledger first
+
+`AGENTIHOOKS_HOSTED_LEDGER_URL` names the hosted ledger every agent tries first. A process checks it once, with a
+2 second `/healthz` request. It answers only with a JSON object; a refused, reset or timed out connection, an error
+status, or a page such as an access login does not. The answer is
+kept for 30 seconds in `hosted-ledger-probe.json` under the agentihooks home, so hooks and commands inside that
+window reuse it instead of waiting on a silent ledger. When it does not answer, the process falls through to rule 3
+onwards: a workstation agent reaches its workstation ledger server, a hive agent its `SWARM_URL` or `LEDGER_URL`.
+A command after the window checks again. A session without a hosted credential never takes rule 2, so it keeps the
+workstation server and its page credential.
+
+The launch settings carry the address and the credential:
+
+- On the workstation, set `AGENTIHOOKS_HOSTED_LEDGER_URL` in the env file the tick loads. The tick then reads the
+  hosted server secret (`SWARM_SECRET`, else OpenBao) and hands each spawned agent its
+  `AGENTIHOOKS_LEDGER_AGENT_TOKEN`; without the secret the tick still runs and its agents keep the workstation server.
+- On a hive, set `AGENTIHOOKS_HOSTED_LEDGER_URL` in the controller's `controller.env`. Every launch hands it to the
+  worker home beside `AGENTIHOOKS_SWARM_API_URL`.
 
 ### Credentials a remote client sends
 

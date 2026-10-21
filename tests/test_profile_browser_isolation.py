@@ -18,6 +18,7 @@ def test_cached_browser_session_is_independent_of_mcp_import_state(tmp_path, ord
     home.mkdir()
     env = os.environ | {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config")}
     env.pop("PYTEST_ADDOPTS", None)
+    env.pop("PYTEST_DISABLE_PLUGIN_AUTOLOAD", None)
     result = subprocess.run(
         [
             sys.executable,
