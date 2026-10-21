@@ -352,6 +352,11 @@ export function timeLeftInputs(calc) {
   return `Larger of a ${calc.chain}m chain and ${calc.work}m of work over ${slots} · ${calc.remaining} tasks left · ${tiers} · ${ci}${held}`;
 }
 
+function admissionList(counts) {
+  const rows = Object.entries(counts || {}).map(([reason, count]) => `${reason} ${count}`);
+  return h("ul", { class: "admission-list" }, ...(rows.length ? rows : [counts ? "none" : "—"]).map((text) => h("li", { text })));
+}
+
 export function renderStats() {
   const phases = inScope(doc.phases), ups = inScope(doc.followups), tasks = inScope(doc.tasks);
   const total = phases.length + closedLeft("phases"), done = phases.filter((p) => p.done).length + closedLeft("phases");
@@ -385,7 +390,7 @@ export function renderStats() {
     row("Inbox pending", figure(swarm && inboxPending(swarm))),
     row("Agents · 2 h", String(activeAgents())),
     row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"),
-    row("Admission refusals", swarm ? Object.entries(swarm.admission || {}).map(([reason, count]) => `${reason} ${count}`).join(" · ") || "none" : "—"),
+    row("Admission refusals", admissionList(swarm && (swarm.admission || {}))),
     bottleneckStat(swarm && swarm.top_bottleneck));
   document.dispatchEvent(new Event("stats"));
 }

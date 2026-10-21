@@ -18,16 +18,19 @@ def stat_text(browser, swarm):
         show(tab, shell_html(), ledger=ledger_state(DOC), swarm=swarm)
         row = tab.locator('#stats [data-stat="admission-refusals"]')
         row.wait_for()
-        return row.locator("dt").text_content().strip(), row.locator("dd").text_content().strip()
+        lines = [item.text_content() for item in row.locator("dd li").all()]
+        box, value = row.bounding_box(), row.locator("dd").bounding_box()
+        assert value["x"] + value["width"] <= box["x"] + box["width"]
+        return row.locator("dt").text_content().strip(), lines
     finally:
         tab.close()
 
 
 def test_stats_show_admission_refusals_counted_by_reason(browser):
     swarm = {**STATUS, "admission": {"cpu": 2, "ram": 1, "missing telemetry": 1}}
-    assert stat_text(browser, swarm) == ("Admission refusals", "cpu 2 · ram 1 · missing telemetry 1")
+    assert stat_text(browser, swarm) == ("Admission refusals", ["cpu 2", "ram 1", "missing telemetry 1"])
 
 
 def test_stats_show_none_when_nothing_is_refused(browser):
-    assert stat_text(browser, {**STATUS, "admission": {}}) == ("Admission refusals", "none")
-    assert stat_text(browser, STATUS) == ("Admission refusals", "none")
+    assert stat_text(browser, {**STATUS, "admission": {}}) == ("Admission refusals", ["none"])
+    assert stat_text(browser, STATUS) == ("Admission refusals", ["none"])

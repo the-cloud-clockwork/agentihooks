@@ -695,10 +695,10 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .stat-grip:focus-visible { box-shadow: inset 0 -1px 0 var(--accent); }
 #stats .stat.dragging { opacity: .6; }
 body.reordering, body.reordering .stat-grip { cursor: grabbing; user-select: none; }
-#stats .top-bottleneck { grid-template-columns: 1fr; gap: 6px; padding-top: 12px; padding-bottom: 12px; }
-#stats .bottleneck-list { margin: 0; padding-left: 16px; list-style: disc; }
-#stats .bottleneck-list li::marker { color: var(--accent); }
-#stats .top-bottleneck dd { text-align: left; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+#stats .top-bottleneck, #stats [data-stat="admission-refusals"] { grid-template-columns: 1fr; gap: 6px; padding-top: 12px; padding-bottom: 12px; }
+#stats .bottleneck-list, #stats .admission-list { margin: 0; padding-left: 16px; list-style: disc; }
+#stats .bottleneck-list li::marker, #stats .admission-list li::marker { color: var(--accent); }
+#stats .top-bottleneck dd, #stats [data-stat="admission-refusals"] dd { text-align: left; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 #stats .bottleneck-stage { font-weight: 600; }
 @media (max-width: 1023px) {
   .workspace { margin-left: 0; overflow-x: auto; }
