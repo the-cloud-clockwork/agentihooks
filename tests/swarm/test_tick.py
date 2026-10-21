@@ -658,13 +658,9 @@ class HiveAcks(FakeRuntime):
 
 
 def test_a_tick_pass_never_waits_on_hive_acknowledgements_and_a_later_pass_records_them(store):
-    import time
-
     store.update("sw", max_eng=3)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), HiveAcks()
-    started = time.monotonic()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert time.monotonic() - started < 5
     names = list(runtime.ordered)
     assert len(names) == 3 and runtime.spawned == []
     assert sorted(row["state"] for row in store.launches("sw")) == ["acknowledging"] * 3
@@ -680,6 +676,18 @@ def test_a_tick_pass_never_waits_on_hive_acknowledgements_and_a_later_pass_recor
     assert sorted(row["state"] for row in store.launches("sw")) == ["started"] * 3
     assert [store.claims("sw", t) for t in ("t1", "t2", "t3")] == [1, 1, 1]
     assert runtime.ordered == names
+
+
+@pytest.mark.wall_clock
+def test_a_tick_pass_with_three_unacknowledged_hive_orders_ends_within_seconds(store):
+    import time
+
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), HiveAcks()
+    started = time.monotonic()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert time.monotonic() - started < 5
+    assert len(runtime.ordered) == 3
 
 
 def test_a_refused_hive_acknowledgement_reopens_its_task(store):
