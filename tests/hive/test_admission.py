@@ -259,3 +259,17 @@ def test_a_tie_names_the_host_line_first():
         admission.CPU,
         "five minute load 4.00 on 10 CPUs, 0.5 CPU per agent, fits 8 more under the 80 percent line",
     )
+
+
+def test_an_overloaded_host_floors_its_cpu_line_before_comparing_with_ram():
+    measured = reading(cpus=1, load5=1.55, available_mb=1000, total_mb=10_000)
+    assert admission.room(measured) == admission.Room(
+        0, admission.CPU, "five minute load 1.55 on 1 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line"
+    )
+
+
+def test_the_swarm_ram_share_counts_whole_agents_under_forty_percent():
+    measured = reading(cpus=64, available_mb=87_500, total_mb=87_500)
+    assert admission.room(measured, 0) == admission.Room(
+        50, admission.RAM, "0 swarm agents at 700 MB each in 87500 MB, fits 50 more under the 40 percent swarm share"
+    )
