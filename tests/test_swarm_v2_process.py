@@ -456,9 +456,7 @@ def test_retire_process_hands_the_reaper_the_verified_start_time_and_legacy_reti
     assert seen == [(NAME, PID, ["/scratch/t1"], STARTED), (NAME, 55, [], 0)]
 
 
-@pytest.mark.parametrize(
-    ("owner", "closed"), [("engineer@a1b2c3-0009", False), (NAME, True), ("", True)]
-)
+@pytest.mark.parametrize(("owner", "closed"), [("engineer@a1b2c3-0009", False), (NAME, True), ("", True)])
 def test_retire_process_closes_the_recorded_pane_only_while_it_belongs_to_the_ended_worker(
     tmp_path, monkeypatch, owner, closed
 ):
