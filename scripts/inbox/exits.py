@@ -18,6 +18,11 @@ LANE_SEAT = re.compile(r"(eng|ci|plan)-(\d+)@.+")
 def settle(inbox, name, seat, exit_text):
     """seat is where the work goes on, '' when nobody takes it up. A master's mail passes to its successor, or waits
     for one while none is spawned yet."""
+    for world in inbox.worlds():
+        _settle_world(world, name, seat, exit_text)
+
+
+def _settle_world(inbox, name, seat, exit_text):
     from scripts.inbox.store import CLOSED
     from scripts.swarm.naming import NameRegistry
 
@@ -93,6 +98,11 @@ def _taker(inbox, item):
 
 
 def close_swarm(inbox: "InboxStore", slug: str) -> None:
+    for world in inbox.worlds():
+        _close_world(world, slug)
+
+
+def _close_world(inbox: "InboxStore", slug: str) -> None:
     from scripts.inbox.seats import of_swarm
     from scripts.inbox.store import CLOSED
 
@@ -131,30 +141,31 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
     tasks = {row.get("claimed_by"): row for row in live_rows().values()}
     gone = [(name, seat) for name, seat in seats if name not in active]
     outcomes = store.seats.exits([name for name, _ in gone])
-    pending = gone
-    for _ in range(len(gone)):
-        quiet = inbox.quiet([name for name, _ in pending])
-        due = [(name, seat) for name, seat in pending if not (outcomes[name] and name in quiet)]
-        if not due:
-            break
-        pending = [entry for entry in pending if entry not in due]
-        for name, seat in due:
-            _settle_gone(inbox, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
-    _settle_seat_notices(inbox, {seat for _, seat in seats if seat}, active)
-    _settle_peer_mail(inbox, slug, store, active)
-    if slug in store.slugs():
-        empty = {seat for _, seat in seats} - {agent.seat for agent in live}
-        _settle_unfillable(inbox, store.config(slug), empty)
+    for world in inbox.worlds():
+        pending = gone
+        for _ in range(len(gone)):
+            quiet = world.quiet([name for name, _ in pending])
+            due = [(name, seat) for name, seat in pending if not (outcomes[name] and name in quiet)]
+            if not due:
+                break
+            pending = [entry for entry in pending if entry not in due]
+            for name, seat in due:
+                _settle_gone(world, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
+        _settle_seat_notices(world, {seat for _, seat in seats if seat}, active)
+        _settle_peer_mail(world, slug, store, active)
+        if slug in store.slugs():
+            empty = {seat for _, seat in seats} - {agent.seat for agent in live}
+            _settle_unfillable(world, store.config(slug), empty)
 
 
 def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:
     if state in ("done", "blocked"):
         exit_text = "finished its task and exited" if state == "done" else "blocked its task and exited"
-        settle(inbox, name, "", exit_text)
+        _settle_world(inbox, name, "", exit_text)
     elif outcome:
-        settle(inbox, name, outcome["seat"], outcome["reason"])
+        _settle_world(inbox, name, outcome["seat"], outcome["reason"])
     else:
-        settle(inbox, name, seat, "exited")
+        _settle_world(inbox, name, seat, "exited")
 
 
 def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:

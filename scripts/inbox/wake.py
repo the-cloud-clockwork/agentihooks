@@ -105,6 +105,14 @@ def _wake_inputs(inbox, slug, items, names, config, marks):
 
 
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
+    return [
+        action
+        for world in inbox.worlds()
+        for action in _wake_world(world, slug, agents, herdr, ledger, now_ms, window, quiet)
+    ]
+
+
+def _wake_world(inbox, slug, agents, herdr, ledger, now_ms, window, quiet):
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
     boss = next((a for a in agents if a.lane == MASTER), None)

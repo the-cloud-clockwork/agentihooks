@@ -65,10 +65,19 @@ def test_the_exit_sweep_moves_a_gone_member_agents_mail_to_its_seat(store, agent
     assert member.get(item.id).address == SEAT
 
 
-def test_swarm_status_lists_a_member_agents_pending_mail(store, agent, mail):
-    from scripts.swarm.status import status_report
+class Live:
+    def __init__(self, *names):
+        self.names = set(names)
 
-    report = status_report(store, "sw", {"tasks": []})
+    def live_names(self):
+        return self.names
+
+
+def test_swarm_status_lists_a_member_agents_pending_mail(store, agent, mail, monkeypatch):
+    from scripts.swarm import status
+
+    monkeypatch.setattr(status, "page_quota", lambda: {})
+    report = status.status_report(store, "sw", {"tasks": []}, Live(agent.name))
     [row] = [a for a in report["agents"] if a["name"] == agent.name]
     assert [m["text"] for m in row["inbox"]] == ["contract"]
 
