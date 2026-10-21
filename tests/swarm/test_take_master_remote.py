@@ -167,6 +167,16 @@ def test_a_workstation_on_a_hosted_ledger_needs_no_hive_id():
     assert take_master.hive_of({"AGENTIHOOKS_DEPLOYMENT": "compose", "AGENTIHOOKS_HIVE_ID": "member-9"}) == "member-9"
 
 
+def test_a_hub_address_with_no_mode_is_a_remote_host():
+    hub = "https://hub.example:8765"
+    assert take_master.hive_of({"LEDGER_URL": hub, "AGENTIHOOKS_HIVE_ID": "member-9"}) == "member-9"
+    assert take_master.hive_of({"LEDGER_URL": hub, "AGENTIHOOKS_DEPLOYMENT": "local", "AGENTIHOOKS_HIVE_ID": "m"}) == ""
+    assert take_master.hive_of({"AGENTIHOOKS_HIVE_ID": "member-9"}) == ""
+    with pytest.raises(SwarmError) as refused:
+        take_master.hive_of({"LEDGER_URL": hub})
+    assert str(refused.value) == "take-master on a remote host needs AGENTIHOOKS_HIVE_ID from agentihooks hive add"
+
+
 def test_a_local_ledger_keeps_the_session_unpinned(taker, monkeypatch):  # noqa: F811
     store, ledger, _, _ = taker
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
