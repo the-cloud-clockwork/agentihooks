@@ -11,25 +11,18 @@ def run(payload: dict, event: str) -> None:
         return
     from scripts.hive import join_checks, join_report
     from scripts.profiles.binding import HOMES
-    from scripts.swarm.store import AgentRecord, connect
+    from scripts.swarm.store import connect
 
     store = connect()
     session = payload.get("session_id", "")
     at = int(time.time() * 1000)
     if event == "end":
         for report in join_report.listing(store.redis, hive):
-            if report["agent"] == name and report["session_id"] == session:
-                agent = AgentRecord(
-                    name,
-                    "",
-                    report["task"],
-                    hive=hive,
-                    execution_id=report["execution_id"],
-                    generation=report["generation"],
-                )
+            if report["session_id"] == session:
                 join_report.end(
                     store.redis,
-                    agent,
+                    hive,
+                    report["execution_id"],
                     session,
                     payload.get("reason", "unknown"),
                     payload.get("exit_status", "ended"),

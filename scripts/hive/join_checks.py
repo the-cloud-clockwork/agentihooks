@@ -38,8 +38,8 @@ def github_ready() -> bool:
 def transcript_ready(folder: str) -> bool:
     if not folder:
         return False
-    with TemporaryFile(dir=folder) as stream:
-        return stream.write(b"hive join") == 9
+    with TemporaryFile(dir=folder):
+        return True
 
 
 def settings_ready(context: dict) -> bool:

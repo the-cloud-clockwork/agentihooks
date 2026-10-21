@@ -23,3 +23,4 @@ def test_hive_list_shows_each_agent_grade_and_every_miss(monkeypatch, capsys):
     assert "brain" in output
     assert "github" in output
     assert "heartbeat=1000" in output
+    assert "  engineer\tfailed\tmisses=github (required), brain (optional)\theartbeat=1000" in output.splitlines()

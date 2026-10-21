@@ -90,19 +90,20 @@ def start(redis: "Redis", slug: str, agent: "AgentRecord", session: str, checks:
     return report
 
 
-def end(redis: "Redis", agent: "AgentRecord", session: str, reason: str, status: str | int, at: int) -> dict:
+def end(redis: "Redis", hive: str, execution: str, session: str, reason: str, status: str | int, at: int) -> dict:
     from redis.exceptions import WatchError
 
     while True:
         with redis.pipeline() as pipe:
             try:
-                pipe.watch(key(host(agent)))
-                report = read(pipe, agent)
+                pipe.watch(key(hive))
+                raw = pipe.hget(key(hive), execution)
+                report = json.loads(raw) if raw else {}
                 if report.get("session_id") != session:
                     return {}
                 report = {**report, "ended_at": at, "exit_reason": reason, "status": status}
                 pipe.multi()
-                pipe.hset(key(host(agent)), agent.execution_id, json.dumps(report))
+                pipe.hset(key(hive), execution, json.dumps(report))
                 pipe.execute()
                 return report
             except WatchError:
