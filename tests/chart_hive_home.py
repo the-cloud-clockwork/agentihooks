@@ -206,6 +206,26 @@ def hives_problems(chart: str) -> list[str]:
     }
     cases = [({"hives": hives}, reason) for reason, hives in refusals.items()]
     cases.append(({"homeVolume": host["homeVolume"], "hives": shared}, "shares its home volume"))
+    typed = [
+        {"name": f"pool-{i}", "credentialSecret": {"name": f"m{i}", "key": "c"}, "homeVolume": {"hostPath": path}}
+        for i, path in enumerate([{"path": "/a", "type": "Directory"}, {"path": "/a"}])
+    ]
+    cases.append(({"hives": typed}, "shares its home volume"))
+    hosted = [
+        {
+            "name": "pool-1",
+            "credentialSecret": {"name": "a", "key": "c"},
+            "homeVolume": {"emptyDir": None, "hostPath": {"path": "/a", "type": "Directory"}},
+        }
+    ]
+    rendered = subprocess.run(
+        ["helm", "template", "fixture", chart, *BASE, "-f", "-"],
+        input=yaml.safe_dump({"workers": {"hives": hosted}}),
+        capture_output=True,
+        text=True,
+    )
+    if rendered.returncode != 0:
+        found.append(f"the chart refused a hive hostPath home beside emptyDir null: {rendered.stderr.strip()!r}")
     for workers, reason in cases:
         refused = subprocess.run(
             ["helm", "template", "fixture", chart, *BASE, "-f", "-"],

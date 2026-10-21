@@ -1,3 +1,12 @@
+{{- define "swarm.homeSource" -}}
+{{- if .hostPath -}}
+hostPath:{{ .hostPath.path }}
+{{- else if .persistentVolumeClaim -}}
+claim:{{ .persistentVolumeClaim.claimName }}
+{{- else -}}
+{{ toJson . }}
+{{- end -}}
+{{- end }}
 {{- define "swarm.workerHive" }}
 {{- $root := .root }}
 {{- $workers := .workers }}
@@ -188,7 +197,7 @@ spec:
 {{- $homes := dict }}
 {{- if gt (int .Values.workers.replicas) 0 }}
 {{- $_ := set $credentials (toString .Values.workers.credentialSecret.name) true }}
-{{- $_ := set $homes (toJson .Values.workers.homeVolume) true }}
+{{- $_ := set $homes (include "swarm.homeSource" .Values.workers.homeVolume) true }}
 {{- end }}
 {{- range .Values.workers.hives }}
 {{- $name := toString .name }}
@@ -212,7 +221,11 @@ spec:
 {{- $_ := set $hive $key $value }}
 {{- end }}
 {{- $_ := set $hive "replicas" 1 }}
-{{- $home := toJson $hive.homeVolume }}
+{{- $_ := set $hive "homeVolume" (deepCopy $hive.homeVolume) }}
+{{- if and (gt (len $hive.homeVolume) 1) (kindIs "invalid" $hive.homeVolume.emptyDir) }}
+{{- $_ := unset $hive.homeVolume "emptyDir" }}
+{{- end }}
+{{- $home := include "swarm.homeSource" $hive.homeVolume }}
 {{- if and (not (hasKey $hive.homeVolume "emptyDir")) (hasKey $homes $home) }}
 {{- fail (printf "workers.hives %s shares its home volume with another hive; give it its own homeVolume" $name) }}
 {{- end }}
