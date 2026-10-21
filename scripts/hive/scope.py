@@ -47,6 +47,8 @@ def members(redis: "Redis") -> list[str]:
     from scripts.hive.auth import PREFIX
 
     hives = sorted(redis.smembers(registry.INDEX))
+    if not hives:
+        return []
     with redis.pipeline(transaction=False) as pipe:
         for hive in hives:
             pipe.exists(f"{PREFIX}:member:{hive}")

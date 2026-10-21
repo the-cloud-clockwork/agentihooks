@@ -153,6 +153,14 @@ def test_members_checks_every_member_record_in_one_round_trip(redis, monkeypatch
     pipeline.assert_called_once_with(transaction=False)
 
 
+def test_members_of_an_empty_index_opens_no_pipeline(redis, monkeypatch):
+    from scripts.hive import scope
+
+    monkeypatch.setattr(redis, "pipeline", lambda **_: pytest.fail("an empty index opened a pipeline"))
+
+    assert scope.members(redis) == []
+
+
 def relaunch(redis, store, name, hive, generation):
     key = store.key("fixture", "executions")
     row = next(json.loads(raw) for raw in redis.hvals(key) if json.loads(raw)["name"] == name)
