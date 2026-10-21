@@ -388,6 +388,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
+        "master_login": {"claude": ""},
         "repos": [],
         "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
         "version": "",

@@ -20,6 +20,7 @@ DEFAULT = {
     "harnesses": [],
     "slots": [],
     "interactive": {"claude": "", "codex": ""},
+    "master_login": {"claude": ""},
     "repos": [],
     "heartbeat_at": 0,
     "version": "",
