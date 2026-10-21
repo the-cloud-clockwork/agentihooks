@@ -5,7 +5,11 @@ from tests.swarm_ledger.ledger_page import chromium, ledger_state, shell_html, s
 DOC = {"title": "Admission", "overview": "o", "phases": []}
 STATUS = {"config": {"state": "running", "max_eng": 3, "max_ci": 1}, "agents": [], "tasks": {}, "findings": []}
 
-browser = pytest.fixture(scope="module")(chromium)
+
+@pytest.fixture(scope="module")
+def browser():
+    with chromium() as launched:
+        yield launched
 
 
 def stat_text(browser, swarm):
