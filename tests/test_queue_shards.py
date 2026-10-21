@@ -31,6 +31,42 @@ def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
     assert int(result.stdout) == minutes * 60
 
 
+_RECORDED_QUEUE_RUNS = [
+    (347.0, 264),
+    (346.9, 268),
+    (346.7, 271),
+    (346.7, 278),
+    (347.0, 288),
+    (346.7, 282),
+    (346.9, 281),
+    (346.8, 315),
+    (346.7, 261),
+    (346.5, 262),
+    (346.7, 274),
+    (346.4, 257),
+    (346.4, 267),
+    (346.5, 280),
+    (342.6, 269),
+    (342.6, 265),
+    (342.7, 264),
+    (342.6, 270),
+    (342.6, 286),
+    (342.6, 346),
+]
+_RECORDED_SLOWDOWN = 1.5
+
+
+def test_the_planned_slowest_queue_shard_is_within_ten_percent_of_the_recorded_real_slowest_shard():
+    from tests.queue_shards import SLOWDOWN, STARTUP_SECONDS
+
+    ratios = sorted(
+        (STARTUP_SECONDS + SLOWDOWN * (planned - STARTUP_SECONDS) / _RECORDED_SLOWDOWN) / real
+        for planned, real in _RECORDED_QUEUE_RUNS
+    )
+
+    assert 0.9 <= ratios[len(ratios) // 2] <= 1.1
+
+
 def test_queue_durations_keep_the_slowest_recent_measurement_and_expire_old_runs(tmp_path, monkeypatch):
     samples = tmp_path / "samples"
     for run, seconds in [("10", 99), ("11", 1), ("12", 9), ("13", 2)]:
@@ -53,7 +89,7 @@ def test_queue_sizing_splits_a_serial_group_until_it_has_half_timeout_margin(tmp
     path = tmp_path / "tests/test_serial.py"
     path.parent.mkdir()
     path.write_text("import pytest\npytestmark = pytest.mark.xdist_group('serial')\n")
-    measured = {f"tests/test_serial.py::test_{i}": 30.0 for i in range(48)}
+    measured = {f"tests/test_serial.py::test_{i}": 40.0 for i in range(48)}
     plan = matrix(tmp_path, {"3.12": measured})
 
     legs = [leg for leg in plan if leg["python-version"] == "3.12"]
@@ -264,21 +300,21 @@ def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_poo
     plan = json.loads("[" + output.read_text().strip().split("=", 1)[1] + "]")
     assert len(plan) == 30
     out = capsys.readouterr().out
-    assert "::warning::The capped queue plan predicts 630.0s, over 420s of the step timeout\n" in out
-    assert "30 queue jobs fit one wave of 30 runners; predicted slowest test step 630.0s" in out
+    assert "::warning::The capped queue plan predicts 490.0s, over 420s of the step timeout\n" in out
+    assert "30 queue jobs fit one wave of 30 runners; predicted slowest test step 490.0s" in out
 
 
 def test_a_capped_plan_at_the_step_timeout_warns(tmp_path, capsys, monkeypatch):
     from tests import queue_shards
 
-    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 630)
-    root, output = _overflowing_plan(tmp_path, 400.0)
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 513)
+    root, output = _overflowing_plan(tmp_path, 420.0)
 
     queue_shards.main(
         ["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")]
     )
 
-    assert "::warning::The capped queue plan predicts 630.0s, over 630s of the step timeout\n" in (
+    assert "::warning::The capped queue plan predicts 513.0s, over 513s of the step timeout\n" in (
         capsys.readouterr().out
     )
 
@@ -322,7 +358,7 @@ def test_queue_prediction_pins_the_first_shard_files_and_ignores_removed_files(t
 
     plan = matrix(tmp_path, {"3.12": durations}, {"3.12": 2})
 
-    assert {leg["predicted_seconds"] for leg in plan} == {331.875}
+    assert {leg["predicted_seconds"] for leg in plan} == {261.4375}
 
 
 def test_queue_capacity_admission_precedes_the_unit_matrix():
