@@ -31,6 +31,7 @@ def setup():
     )
     store.redis.hset(registry.key("remote"), mapping={k: registry._encode(k, v) for k, v in hive.items()})
     store.redis.sadd(registry.INDEX, "remote")
+    publish_room(store, "remote", hive["max_agents"])
     herdr = Mock(spec=HerdrRuntime)
     herdr.choose = Mock()
     herdr._profile_decision.return_value = ProfileDecision("engineer", "task", "engineer")
@@ -570,6 +571,23 @@ def write_hive(setup, **changes):
         registry.key(hive["id"]), mapping={key: registry._encode(key, value) for key, value in hive.items()}
     )
     setup.store.redis.sadd(registry.INDEX, hive["id"])
+    publish_room(setup.store, hive["id"], hive["max_agents"])
+
+
+def publish_room(store, hive_id, room):
+    from scripts.hive import admission, headroom
+    from scripts.swarm import lease
+
+    total = 100_000
+    reading = {
+        "cpus": 1000,
+        "load5": 0.0,
+        "available_mb": total // 5 + admission.AGENT_MB * room,
+        "total_mb": total,
+        "pending": 0,
+        "measured_at": lease.now_ms(store),
+    }
+    store.redis.set(headroom.key(hive_id), json.dumps(reading))
 
 
 def live_order(setup, route="subscription"):

@@ -8,7 +8,7 @@ REPO = "agentihooks"
 
 
 def hive(hive_id: str, **fields) -> dict:
-    return {
+    record = {
         **registry._default(hive_id, "yes"),
         "max_agents": 2,
         "slots": [{"harness": "claude", "account": "acct", "kind": "subscription", "cap": 4}],
@@ -18,6 +18,7 @@ def hive(hive_id: str, **fields) -> dict:
         "agents": 0,
         **fields,
     }
+    return {"room": record["max_agents"] - record["agents"], **record}
 
 
 def fleet(*off: str, **changes: dict) -> list[dict]:
