@@ -554,3 +554,24 @@ def test_a_workstation_keeps_its_swarm_redis_beside_a_saved_hive_member(admin, h
     assert pinged == ["swarm"]
     assert "AGENTIHOOKS_HIVE_REDIS_URL" not in environ
     assert "AGENTIHOOKS_HIVE_ID" not in environ
+
+
+@pytest.mark.parametrize("deployment", [{}, {"AGENTIHOOKS_DEPLOYMENT": "local"}])
+def test_a_workstation_keeps_a_different_member_in_its_env(admin, hive, redis_lib, tmp_path, monkeypatch, deployment):
+    left = auth.mint(admin, "pod-before-restart", PUBLIC)
+    _joined(admin, hive, tmp_path, monkeypatch)
+    admin.acl_setuser("swarm", enabled=True, passwords=["+p"], keys=["*"], commands=["+@all"])
+    pinged = _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {
+        **deployment,
+        "AGENTIHOOKS_HOME": str(tmp_path),
+        "AGENTIHOOKS_SWARM_REDIS_URL": auth._with_user("redis://h:1/0", "swarm", "p"),
+        "AGENTIHOOKS_HIVE_ID": left["id"],
+        "AGENTIHOOKS_HIVE_REDIS_URL": left["redis_url"],
+    }
+
+    store.redis_client(environ)
+
+    assert pinged == ["swarm"]
+    assert environ["AGENTIHOOKS_HIVE_ID"] == left["id"]
+    assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == left["redis_url"]
