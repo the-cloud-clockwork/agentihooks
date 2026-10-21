@@ -142,3 +142,93 @@ def test_removing_a_swarm_withdraws_its_member_agents_open_mail(redis, agent, ma
     member, item = mail
     exits.close_swarm(InboxStore(redis), "sw")
     assert member.get(item.id).state == "cancelled"
+
+
+@pytest.fixture
+def moved_seat(store, agent, mail):
+    from scripts.hive import auth
+
+    store.redis.hset(f"{auth.PREFIX}:member:m2", mapping={"name": "m2", "ledger": "digest"})
+    store.redis.sadd(auth.INDEX, "m2")
+    member, item = mail
+    store.put_agent("sw", replace(agent, state="finished"))
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    name = store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT, hive="m2"))
+    store.seats.occupy(SEAT, name, 2)
+    return member, item, name
+
+
+def test_the_sweep_moves_open_seat_mail_to_the_new_occupants_host(store, moved_seat):
+    member, item, name = moved_seat
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert [i.id for i in InboxStore(store.redis, world="m2").open_mail(name)] == [item.id]
+    assert member.inbox(SEAT) == []
+
+
+def test_a_moved_seat_item_is_pending_with_its_history_and_a_move_entry(store, moved_seat):
+    member, item, name = moved_seat
+    before = member.history(item.id)
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    target = InboxStore(store.redis, world="m2")
+    assert (target.get(item.id).state, target.get(item.id).address) == ("pending", SEAT)
+    assert [i.id for i in target.pending_mail(name)] == [item.id]
+    history = target.history(item.id)
+    assert history[:-1] == before
+    assert {k: history[-1][k] for k in ("state", "by", "reason")} == {
+        "state": "pending",
+        "by": exits.BY,
+        "reason": f"moved to hive m2, where {name} runs {SEAT}",
+    }
+
+
+def test_the_sweep_moves_open_seat_mail_to_a_new_occupant_on_the_controller(store, agent, mail):
+    member, item = mail
+    store.put_agent("sw", replace(agent, state="finished"))
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    name = store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT))
+    store.seats.occupy(SEAT, name, 2)
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert [i.id for i in InboxStore(store.redis, world="").open_mail(name)] == [item.id]
+    assert member.inbox(SEAT) == []
+    assert InboxStore(store.redis, world="").get(item.id).reason == f"moved to the controller, where {name} runs {SEAT}"
+
+
+def test_the_sweep_leaves_seat_mail_in_the_world_its_occupant_runs_on(store, agent, mail):
+    member, item = mail
+    store.put_agent("sw", replace(agent, state="finished"))
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    name = store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT, hive="m1"))
+    store.seats.occupy(SEAT, name, 2)
+    history = member.history(item.id)
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert member.history(item.id) == history
+    assert [i.id for i in member.open_mail(name)] == [item.id]
+
+
+def test_moving_an_item_between_worlds_leaves_a_closed_item_in_place(store, agent, mail):
+    member, item = mail
+    member.close(item.id, agent.name, "done")
+    target = InboxStore(store.redis, world="m2")
+    assert member.move_world(item.id, target, exits.BY, "moved") is None
+    assert member.get(item.id).state == "done"
+    assert target.inbox(agent.name) == []
+
+
+def test_moving_an_item_between_worlds_moves_its_indexes_and_ledger_entry(store, agent, mail):
+    member, item = mail
+    member.about(item.id, "tasks/t1")
+    target = InboxStore(store.redis, world="m2")
+    moved = member.move_world(item.id, target, exits.BY, "moved")
+    assert (moved.state, moved.reason, moved.address) == ("pending", "moved", agent.name)
+    assert not store.redis.exists(member.key("item", item.id))
+    assert not store.redis.exists(member.key("history", item.id))
+    assert member.entry_of(item.id) == ""
+    assert member.inbox(agent.name) == []
+    assert member.pending() == []
+    assert member.open_items(agent.name) == []
+    assert target.entry_of(item.id) == "tasks/t1"
+    assert [i.id for i in target.open_items(agent.name)] == [item.id]
+    assert [i.id for i in target.pending()] == [item.id]
