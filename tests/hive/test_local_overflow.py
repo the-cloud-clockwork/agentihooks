@@ -231,3 +231,72 @@ def test_swarm_set_stores_the_local_machine_cap(setup, capsys):
     cli.cmd_set(setup.store, argparse.Namespace(slug=setup.config.slug, pairs=["local-max-agents=5"]))
     assert setup.store.config(setup.config.slug).local_max_agents == 5
     assert json.loads(capsys.readouterr().out)["local_max_agents"] == 5
+
+
+def test_two_concurrent_spawns_at_cap_minus_one_yield_one_local_spawn_and_one_wait(setup, monkeypatch):
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    local_agents(setup, 7)
+
+    def launch(*_):
+        time.sleep(0.2)
+        return "placed on the workstation"
+
+    setup.herdr.spawn.side_effect = launch
+
+    def attempt(task):
+        try:
+            return fenced.spawn(setup.config, "eng", f"eng {task}", {"id": task})
+        except SpawnError as refused:
+            return str(refused)
+
+    with ThreadPoolExecutor(2) as pool:
+        outcomes = sorted(pool.map(attempt, ["first", "second"]))
+    assert outcomes == [CAPPED, "placed on the workstation"]
+    assert setup.herdr.spawn.call_count == 1
+
+
+def test_a_failed_local_spawn_releases_its_slot(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    local_agents(setup, 7)
+    setup.herdr.spawn.side_effect = SpawnError("pane refused", "unavailable")
+    with pytest.raises(SpawnError, match="^pane refused$"):
+        fenced.spawn(setup.config, "eng", "eng first", {"id": "first"})
+    setup.herdr.spawn.side_effect = None
+    assert fenced.spawn(setup.config, "eng", "eng second", {"id": "second"}) == "placed on the workstation"
+
+
+def test_a_slot_counts_once_while_its_agent_runs_and_not_after_it_leaves(setup):
+    from scripts.swarm import local_slots
+    from scripts.swarm.store import AgentRecord
+
+    slug = setup.config.slug
+    assert local_slots.claim(setup.store, "box", slug, "first", 8) == 0
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
+    assert local_slots.held(setup.store, "box", slug, "first") == 0
+    assert local_slots.held(setup.store, "elsewhere", slug, "other") == 0
+    setup.store.put_agent(slug, AgentRecord("eng-1", "eng", "first"))
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
+    assert local_slots.claim(setup.store, "box", slug, "second", 8) == 1
+    assert setup.store.redis.hkeys(local_slots.key("box")) == [f"{slug}/second"]
+    setup.store.put_agent(slug, AgentRecord("eng-1", "eng", "first", state="finished"))
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
+    local_slots.release(setup.store, "box", slug, "second")
+    assert local_slots.held(setup.store, "box", slug, "other") == 0
+
+
+def test_a_claim_whose_agent_never_appears_expires(setup):
+    from scripts.swarm import lease, local_slots
+
+    slug = setup.config.slug
+    now = lease.now_ms(setup.store)
+    claims = {f"{slug}/old": now - local_slots.PENDING_MS, f"{slug}/new": now}
+    setup.store.redis.hset(local_slots.key("box"), mapping=claims)
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
+    assert local_slots.claim(setup.store, "box", slug, "third", 2) == 1
+    assert local_slots.claim(setup.store, "box", slug, "fourth", 2) == 2
+    assert sorted(setup.store.redis.hkeys(local_slots.key("box"))) == [f"{slug}/new", f"{slug}/third"]
