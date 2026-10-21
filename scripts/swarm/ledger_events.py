@@ -180,7 +180,7 @@ def pull_request(raw):
         required_pending,
         running or any(result in PENDING for result in results),
         raw.get("body") or "",
-        started or required_pending,
+        started,
     )
 
 

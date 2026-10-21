@@ -119,8 +119,11 @@ def queue_refusal(slug, url):
 
 
 def never_started(pull):
-    """True when no run started on the head and GitHub reports a conflict or nothing pending: a push cancels nothing."""
-    return not pull.started and (pull.mergeable == "CONFLICTING" or not pull.checks_pending)
+    return (
+        not pull.started
+        and not pull.required_pending
+        and (pull.mergeable == "CONFLICTING" or not pull.checks_pending)
+    )
 
 
 class OnePush:

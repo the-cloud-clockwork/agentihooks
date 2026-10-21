@@ -1131,8 +1131,8 @@ def test_a_pull_request_reports_whether_checks_still_run(rollup, suites, running
     ("rollup", "suites", "started"),
     [
         ([], [QUEUED_TESTS], True),
-        ([{"name": "lint", "conclusion": None}], [], True),
-        ([{"context": "lint", "state": "PENDING"}], [], True),
+        ([{"name": "lint", "conclusion": None}], [], False),
+        ([{"context": "lint", "state": "PENDING"}], [], False),
         ([{"context": "lint", "state": "EXPECTED"}], [], False),
         ([], [FINISHED_RUN, APP_SUITE], False),
         ([], [], False),
