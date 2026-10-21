@@ -38,6 +38,32 @@ def test_a_head_regression_in_most_pairs_is_named(change, problem):
     assert paired.regressions([(BASE, head), (BASE, head), (BASE, BASE)], 1.5) == [problem]
 
 
+def measures(*rows: tuple[float, float, float, float]) -> list[tuple[dict, dict]]:
+    return [
+        (
+            {"errors": 0, "write_p50_s": base_write, "busiest_cores": base_cpu},
+            {"errors": 0, "write_p50_s": head_write, "busiest_cores": head_cpu},
+        )
+        for base_write, base_cpu, head_write, head_cpu in rows
+    ]
+
+
+def test_a_slower_second_run_cannot_turn_the_three_base_first_pairs_red():
+    pairs = measures(
+        (0.107, 0.146, 0.142, 0.157),
+        (0.158, 0.164, 0.115, 0.169),
+        (0.11, 0.153, 0.151, 0.167),
+        (0.156, 0.162, 0.126, 0.17),
+        (0.121, 0.173, 0.199, 0.173),
+    )
+    assert paired.regressions(pairs, 1.25) == []
+
+
+def test_a_head_slower_whichever_side_runs_first_is_named():
+    pairs = measures(*[(0.1, 0.15, 0.15, 0.15), (0.15, 0.15, 0.2, 0.15)] * 2, (0.1, 0.15, 0.15, 0.15))
+    assert paired.regressions(pairs, 1.25) == ["head write p50 order balanced pair ratio 1.41 exceeds the 1.25x margin"]
+
+
 def test_a_measure_missing_from_any_run_is_named():
     head = {**BASE, "write_p50_s": None}
     assert paired.regressions([(BASE, head), (BASE, BASE)], 1.5) == [
