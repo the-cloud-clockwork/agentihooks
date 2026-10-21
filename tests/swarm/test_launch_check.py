@@ -68,6 +68,29 @@ def test_a_clean_launch_passes(store, launched):
     assert misses(store, agent, facts, doc) == {}
 
 
+def test_a_backend_master_on_the_root_hive_passes_without_a_join_report(store, launched, monkeypatch):
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    agent, facts, doc = launched
+    code = store.ensure_code("sw").code
+    master = replace(
+        agent,
+        name=f"master@{code}-0001",
+        lane=MASTER,
+        seat="master@sw",
+        execution_id="exe-root",
+        hive="workstation",
+        runtime_backend="local",
+        runtime_target={"host_id": "workstation"},
+    )
+    store.put_agent("sw", master)
+    store.seats.occupy(master.seat, master.name, LAUNCH)
+    doc["_meta"]["members"][master.name] = {"joined_at": LAUNCH + 20_000}
+    assert misses(store, master, facts, doc) == {}
+    assert list(misses(store, replace(master, hive="worker"), facts, doc)) == ["hive_join"]
+
+
 def test_not_joined_is_named(store, launched):
     agent, facts, _ = launched
     assert list(misses(store, agent, facts, {"_meta": {"members": {}}})) == ["joined"]
