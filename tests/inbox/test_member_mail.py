@@ -154,6 +154,23 @@ def test_the_exit_sweep_skips_a_world_that_stops_answering_after_ping_and_settle
     ]
 
 
+def test_a_pass_with_every_world_down_records_the_exit_and_the_next_pass_settles_its_mail(
+    store, agent, mail, monkeypatch, silent_redis
+):
+    member, item = mail
+    worlds = InboxStore.worlds
+    with monkeypatch.context() as patch:
+        patch.setattr(InboxStore, "worlds", lambda self: [InboxStore(silent_redis, world="m1")])
+        store.put_agent("sw", replace(agent, state="finished"))
+        lines = exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert [line.split(":")[0] for line in lines] == ["skipped the inbox of hive m1 this pass"]
+    assert store.seats.exits([agent.name])[agent.name]
+    assert member.get(item.id).address == agent.name
+    assert InboxStore.worlds is worlds
+    assert exits.sweep(InboxStore(store.redis), "sw", store, lambda: {}) == []
+    assert member.get(item.id).address == SEAT
+
+
 def test_the_tick_redis_client_every_world_reads_through_carries_a_socket_timeout(monkeypatch):
     import redis as redis_lib
 
