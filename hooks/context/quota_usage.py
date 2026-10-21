@@ -52,8 +52,9 @@ def _snapshots(account: str) -> list[tuple[float, dict]]:
     for path in (AGENTIHOOKS_HOME / "quota_usage").glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
+            updated = float(data["updated_at"])
             if data.get("account") == account and isinstance(data.get("rate_limits"), dict):
-                found.append((float(data["updated_at"]), data["rate_limits"]))
+                found.append((updated, data["rate_limits"]))
         except (OSError, ValueError, TypeError, KeyError):
             continue
     return found

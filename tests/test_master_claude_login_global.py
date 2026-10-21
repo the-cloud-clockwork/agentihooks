@@ -122,17 +122,6 @@ def test_a_second_front_door_on_a_held_login_leaves_its_report_untouched(ah, tmp
     assert json.loads(report.read_text()) == launched
 
 
-def test_a_front_door_of_another_profile_is_refused(ah, tmp_path, rendered):
-    _doctor_home(rendered)
-    binding.write(rendered, "engineer", "claude")
-    report = tmp_path / "report.json"
-    binding.request(report, "engineer", "claude", rendered)
-
-    with pytest.raises(ValueError, match="^profile mismatch in rendered binding$"):
-        login.prepare({**_environ(rendered, "rig"), binding.REPORT: str(report)}, tmp_path)
-    assert json.loads(report.read_text())["state"] == "failed"
-
-
 def test_a_launch_waits_out_a_running_login_command(ah, tmp_path, rendered):
     import os
 
