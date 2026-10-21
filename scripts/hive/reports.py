@@ -46,6 +46,21 @@ class Reports:
         found = report["executions"].get(agent.execution_id, {})
         return found if found.get("generation") == agent.generation else {}
 
+    def gone(self, agent: "AgentRecord") -> bool:
+        report = self.read(host(agent))
+        if report is None:
+            return False
+        if report.get("observed_at", 0) < (agent.launched_at or agent.started_at):
+            return False
+        panes = report.get("pane_ids")
+        if not isinstance(panes, list):
+            return False
+        namespace = report.get("process_namespace")
+        launched = agent.runtime_target.get("process_namespace")
+        if namespace and launched and namespace != launched:
+            return True
+        return bool(agent.pane_id) and agent.pane_id not in panes
+
     def names(self) -> set[str]:
         return {name for report in self.live().values() for name in report["names"]}
 

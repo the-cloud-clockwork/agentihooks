@@ -127,11 +127,42 @@ def grade(text: str, baseline: str | None = None) -> list[str]:
         return ["does not parse as YAML"]
 
 
+def reusable_problems(head: str, root: Path, workflow: object, seen: tuple[str, ...] = ()) -> list[str]:
+    if not isinstance(workflow, dict) or not isinstance(workflow.get("jobs", {}), dict):
+        return []
+    found = []
+    for name, job in (workflow.get("jobs") or {}).items():
+        if not isinstance(job, dict):
+            continue
+        call = job.get("uses")
+        if not isinstance(call, str) or not call.startswith(f"./{WORKFLOWS}/"):
+            continue
+        if lane_problem(job.get("concurrency", workflow.get("concurrency")), workflow.get("name")) is None:
+            continue
+        path = call[2:]
+        if path in seen:
+            continue
+        try:
+            called = yaml.safe_load(git("show", f"{head}:{path}"))
+        except yaml.YAMLError:
+            found.append(f"job {name} calls {path}: does not parse as YAML")
+            continue
+        if isinstance(called, dict):
+            called = {**called, "name": workflow.get("name")}
+        issues = problems(called) if not (root / path).exists() else []
+        issues.extend(reusable_problems(head, root, called, (*seen, path)))
+        found.extend(f"job {name} calls {path}: {issue}" for issue in issues)
+    return found
+
+
 def refused(head: str, root: Path) -> dict[str, list[str]]:
     graded = {
         path: grade(git("show", f"{head}:{path}"), (root / path).read_text() if (root / path).exists() else None)
         for path in branch_only(head, root, include_edits=True)
     }
+    for path, found in graded.items():
+        if "does not parse as YAML" not in found:
+            found.extend(reusable_problems(head, root, yaml.safe_load(git("show", f"{head}:{path}")), (path,)))
     return {path: found for path, found in graded.items() if found}
 
 

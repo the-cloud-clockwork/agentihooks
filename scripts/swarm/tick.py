@@ -513,31 +513,45 @@ def _restore_owner(slug, store, ledger, rows, agent):
     rows[agent.task] = ledger.update_task(slug, agent.task, fields, if_state=(row["state"],), if_match=expected)
 
 
+def _drop_remote(slug, store, ledger, rows, agent):
+    master_retire.forget(store, slug, agent.name)
+    _refund_parked(slug, store, rows, agent.task)
+    return f"retired {agent.name}: its hive pane is gone" + _drop(slug, store, ledger, rows, agent)
+
+
+def _remote_exited(runtime, agent):
+    return bool(reports.host(agent)) and runtime.observe(agent).state == "exited"
+
+
+def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
+    master_retire.forget(store, slug, agent.name)
+    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
+        return [f"could not retire {agent.name}, retrying next tick"]
+    store.release(slug, agent.task, agent.name)
+    store.drop_agent(slug, agent.name)
+    _refund_parked(slug, store, rows, agent.task)
+    row = rows.get(agent.task, {})
+    goes_on = bool(store.handoff(slug, agent.task)) and row.get("state") in ACTIVE and not awaiting_merge(row)
+    if goes_on:
+        _reopen(slug, ledger, rows, agent.task)
+    exits.settle(InboxStore(store.redis), agent.name, agent.seat if goes_on else "", "exited")
+    return [f"retired {agent.name}"]
+
+
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     live, actions = runtime.live_names(), []
     for agent in store.agents(slug):
         if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
             continue
+        if _remote_exited(runtime, agent):
+            actions.append(_drop_remote(slug, store, ledger, rows, agent))
+            continue
         ended = _ended(agent, rows)
         if agent.state == "retiring" and not ended:
             continue
         if ended:
-            master_retire.forget(store, slug, agent.name)
-            if runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
-                store.release(slug, agent.task, agent.name)
-                store.drop_agent(slug, agent.name)
-                _refund_parked(slug, store, rows, agent.task)
-                row = rows.get(agent.task, {})
-                goes_on = (
-                    bool(store.handoff(slug, agent.task)) and row.get("state") in ACTIVE and not awaiting_merge(row)
-                )
-                if goes_on:
-                    _reopen(slug, ledger, rows, agent.task)
-                exits.settle(InboxStore(store.redis), agent.name, agent.seat if goes_on else "", "exited")
-                actions.append(f"retired {agent.name}")
-            else:
-                retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
-                actions.append(f"could not retire {agent.name}, retrying next tick")
+            actions += _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.runtime_backend != "local" or reports.host(agent):
             actions += _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live and agent.lane == MASTER:
