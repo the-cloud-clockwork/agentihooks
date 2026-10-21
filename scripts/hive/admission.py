@@ -108,9 +108,13 @@ def category(reason: str) -> str:
     return PLACEMENT
 
 
-def status_line(waits: dict) -> str:
-    counts = dict.fromkeys(REASONS, 0)
+def counts(waits: dict) -> dict:
+    found = dict.fromkeys(REASONS, 0)
     for row in waits.values():
-        counts[category(row["reason"])] += 1
-    shown = "  ".join(f"{reason} {count}" for reason, count in counts.items() if count)
+        found[category(row["reason"])] += 1
+    return {reason: count for reason, count in found.items() if count}
+
+
+def status_line(waits: dict) -> str:
+    shown = "  ".join(f"{reason} {count}" for reason, count in counts(waits).items())
     return f"admission refusals  {shown}" if shown else ""

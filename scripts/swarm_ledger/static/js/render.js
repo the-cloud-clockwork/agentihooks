@@ -385,6 +385,7 @@ export function renderStats() {
     row("Inbox pending", figure(swarm && inboxPending(swarm))),
     row("Agents · 2 h", String(activeAgents())),
     row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"),
+    row("Admission refusals", swarm ? Object.entries(swarm.admission || {}).map(([reason, count]) => `${reason} ${count}`).join(" · ") || "none" : "—"),
     bottleneckStat(swarm && swarm.top_bottleneck));
   document.dispatchEvent(new Event("stats"));
 }
