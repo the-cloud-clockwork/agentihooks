@@ -98,13 +98,13 @@ def file_seconds(root: Path, files: list[str]) -> dict[str, float]:
     return seconds
 
 
-def part_files(
-    root: Path, files: list[str], part: tuple[int, int], seconds: dict[str, float] | None = None
-) -> list[str]:
+def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
+    return split_parts(files, file_seconds(root, files), part)
+
+
+def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:
     # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
     index, total = part
-    if seconds is None:
-        seconds = file_seconds(root, files)
     parts = [[] for _ in range(total)]
     for path in sorted(files, key=lambda path: (-seconds[path], path)):
         min(parts, key=lambda chosen: sum(seconds[path] for path in chosen)).append(path)

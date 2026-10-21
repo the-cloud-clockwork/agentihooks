@@ -14,7 +14,7 @@ from pathlib import Path
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
-from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
+from scripts.ci_mutation.selection import changed_mutations, file_seconds, split_parts, stats_shards
 from scripts.ci_test_plan import find_record
 from tests.dep_manifest import GLOBAL_FILES, MEASURED, _spans, changed_units, line_units, node
 from tests.dep_manifest import changes as recorded_changes
@@ -223,7 +223,7 @@ def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, 
     buckets = [
         bucket
         for index in range(parts)
-        for bucket in stats_shards(root, part_files(root, tests, (index, parts), seconds), shard_workers(), seconds)
+        for bucket in stats_shards(root, split_parts(tests, seconds, (index, parts)), shard_workers(), seconds)
     ]
     return max(sum(seconds[path] for path in bucket) for bucket in buckets)
 
