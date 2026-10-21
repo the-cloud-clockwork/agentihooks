@@ -44,7 +44,12 @@ def hosts(role: str, hive: dict, aliases: tuple[str, ...] = ()) -> bool:
 
 
 def _room(hive: dict) -> int:
-    return hive["max_agents"] - hive["agents"]
+    return hive["room"]
+
+
+def _refused(reason: str, hives: list[dict]) -> str:
+    held = "; ".join(f"{hive['id']} {hive['refusal']}" for hive in hives if hive.get("refusal"))
+    return f"{reason}: {held}" if held else reason
 
 
 def _checks(
@@ -80,10 +85,11 @@ def _order(role: str) -> Callable[[dict], tuple]:
 def _pick(
     role: str, harness: str, slot: str, route_kind: str, repo: str, candidates: list[dict], kind: str = HIVE
 ) -> Choice | Wait:
-    for check, reason in _checks(role, harness, slot, route_kind, repo, kind):
-        candidates = [hive for hive in candidates if check(hive)]
-        if not candidates:
-            return Wait(reason)
+    for index, (check, reason) in enumerate(_checks(role, harness, slot, route_kind, repo, kind)):
+        kept = [hive for hive in candidates if check(hive)]
+        if not kept:
+            return Wait(_refused(reason, candidates) if index == 0 else reason)
+        candidates = kept
     return Choice(min(candidates, key=_order(role))["id"])
 
 
