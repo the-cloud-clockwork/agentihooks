@@ -155,10 +155,11 @@ def _name(store, slug, agent):
 def misses(
     store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: dict, on_bundle: bool, declared: list[str]
 ) -> dict:
-    from scripts.hive import reports
+    from scripts.hive import reports, scope
     from scripts.swarm.commands import hive_id
 
-    if (agent.hive and agent.hive != hive_id()) or reports.host(agent):
+    root = "" if scope.member() else hive_id()
+    if (agent.hive and agent.hive != root) or reports.host(agent):
         report = join_report.read(store.redis, agent)
         if not report:
             return {"hive_join": {"expected": "session join report", "actual": "missing"}}

@@ -69,9 +69,11 @@ def test_a_clean_launch_passes(store, launched):
 
 
 def test_a_backend_master_on_the_root_hive_passes_without_a_join_report(store, launched, monkeypatch):
+    from scripts.hive import scope
     from scripts.swarm import commands
 
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(scope, "member", lambda: "")
     agent, facts, doc = launched
     code = store.ensure_code("sw").code
     master = replace(
@@ -88,6 +90,8 @@ def test_a_backend_master_on_the_root_hive_passes_without_a_join_report(store, l
     doc["_meta"]["members"][master.name] = {"joined_at": LAUNCH + 20_000}
     assert misses(store, master, facts, doc) == {}
     assert list(misses(store, replace(master, hive="worker"), facts, doc)) == ["hive_join"]
+    monkeypatch.setattr(scope, "member", lambda: "workstation")
+    assert list(misses(store, master, facts, doc)) == ["hive_join"]
 
 
 def test_not_joined_is_named(store, launched):
