@@ -37,8 +37,8 @@ def test_legacy_hit_preserves_flaky_findings_and_trims_other_oversized_keys(monk
     failed = {"job": "unit", "nodeid": "tests/test_x.py::test_x", "outcome": "FAILED"}
     first = {"run_id": 42, "head_sha": "head", "attempt": 1, "tests": [failed, failed]}
     cache.set(key(1), json.dumps(first), ex=604800)
-    cache.set(key(9), "x" * (1024 * 1024 + 1), ex=604800)
-    cache.set("unrelated", "x" * (1024 * 1024 + 1), ex=604800)
+    cache.set(key(9), "x" * (8 * 1024 * 1024 + 1), ex=604800)
+    cache.set("unrelated", "x" * (8 * 1024 * 1024 + 1), ex=604800)
     assert attempt(monkeypatch, cache, []) == first
     assert cache.strlen(key(1)) < len(json.dumps(first))
     assert 3590 <= cache.ttl(key(1)) <= 3600
@@ -52,15 +52,18 @@ def test_legacy_hit_preserves_flaky_findings_and_trims_other_oversized_keys(monk
 
 
 def test_write_bounds_total_storage_and_shortens_only_long_expiries(monkeypatch, cache):
+    from scripts.doctor import ci_cache
+
+    monkeypatch.setattr(ci_cache, "TOTAL_BYTES", 16 * 1024 * 1024)
     for number in range(2, 20):
         cache.set(key(number), "x" * (1024 * 1024), ex=604800)
     cache.set(key(0), "{}", ex=20)
     cache.set(key(99), "{}")
-    cache.set(key(100), "x" * (1024 * 1024 + 1), ex=604800)
+    cache.set(key(100), "x" * (8 * 1024 * 1024 + 1), ex=604800)
     expected = attempt(monkeypatch, cache, [])
     keys = list(cache.scan_iter(match=f"{ci_read.ROOT}:doctor:ci-attempt:*"))
     assert sum(cache.strlen(k) for k in keys) <= 16 * 1024 * 1024
-    assert max(cache.strlen(k) for k in keys) <= 1024 * 1024
+    assert max(cache.strlen(k) for k in keys) <= 8 * 1024 * 1024
     assert cache.get(key(2)) is not None
     assert not cache.exists(key(100))
     assert 0 < cache.ttl(key(0)) <= 20
@@ -74,7 +77,7 @@ def test_encoded_entry_byte_boundary(monkeypatch, cache, delta, retained):
     from scripts.doctor import ci_cache
 
     payload = {"tests": []}
-    encoded = "x" * (1024 * 1024 + delta)
+    encoded = "x" * (8 * 1024 * 1024 + delta)
     monkeypatch.setattr(ci_cache, "encode", lambda value: encoded)
     ci_cache.write(cache, key(1), payload)
     assert bool(cache.exists(key(1))) is retained
@@ -86,7 +89,7 @@ def test_uncacheable_attempt_is_returned_in_full_and_removes_old_copy(monkeypatc
     tests = [{"job": "unit", "nodeid": "tests/test_x.py::test_x", "outcome": "FAILED"}]
     expected = attempt(monkeypatch, None, tests)
     cache.set(key(1), json.dumps(expected), ex=604800)
-    monkeypatch.setattr(ci_cache, "encode", lambda value: "x" * (1024 * 1024 + 1))
+    monkeypatch.setattr(ci_cache, "encode", lambda value: "x" * (8 * 1024 * 1024 + 1))
     assert attempt(monkeypatch, cache, []) == expected
     assert not cache.exists(key(1))
 
@@ -96,3 +99,55 @@ def test_legacy_hit_keeps_its_shorter_expiry(monkeypatch, cache):
     cache.set(key(1), json.dumps(expected), px=1500)
     assert attempt(monkeypatch, cache, []) == expected
     assert 0 < cache.pttl(key(1)) <= 1500
+
+
+def test_total_byte_boundary_keeps_current_and_exact_fit_entries(monkeypatch, cache):
+    from scripts.doctor import ci_cache
+
+    monkeypatch.setattr(ci_cache, "TOTAL_BYTES", 1024)
+    monkeypatch.setattr(ci_cache, "encode", lambda value: "x" * 512)
+    cache.set(key(0), "x" * 512, ex=60)
+    ci_cache.write(cache, key(1), {})
+    assert cache.strlen(key(0)) == 512
+    assert cache.strlen(key(1)) == 512
+    ci_cache.write(cache, key(2), {})
+    assert cache.strlen(key(2)) == 512
+    assert cache.strlen(key(0)) == 512
+    assert not cache.exists(key(1))
+
+
+def test_busy_cache_writer_has_a_bounded_wait(monkeypatch, cache):
+    from types import SimpleNamespace
+
+    from redis import lock
+    from redis.exceptions import LockError
+
+    from scripts.doctor import ci_cache
+
+    elapsed = [0.0]
+
+    def sleep(delay):
+        elapsed[0] += delay
+        if elapsed[0] > 12:
+            raise AssertionError("cache writer waited indefinitely")
+
+    monkeypatch.setattr(lock, "mod_time", SimpleNamespace(monotonic=lambda: elapsed[0], sleep=sleep))
+    cache.set(f"{ci_cache.PREFIX}lock", "another writer", ex=30)
+    with pytest.raises(LockError):
+        ci_cache.write(cache, key(1), {})
+    assert 9 <= elapsed[0] <= 10.1
+    assert not cache.exists(key(1))
+
+
+def test_cache_writer_lock_expires_if_the_writer_dies(monkeypatch, cache):
+    from scripts.doctor import ci_cache
+
+    scan = cache.scan_iter
+
+    def locked_scan(**kwargs):
+        assert 0 < cache.pttl(f"{ci_cache.PREFIX}lock") <= 30000
+        return scan(**kwargs)
+
+    monkeypatch.setattr(cache, "scan_iter", locked_scan)
+    ci_cache.write(cache, key(1), {})
+    assert not cache.exists(f"{ci_cache.PREFIX}lock")

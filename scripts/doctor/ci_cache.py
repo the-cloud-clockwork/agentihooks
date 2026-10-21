@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import base64
-import json
-import zlib
 from typing import TYPE_CHECKING
+
+import lz4.frame
+import orjson
 
 from scripts.swarm.keyspace import ROOT
 
@@ -12,14 +13,13 @@ if TYPE_CHECKING:
 
 PREFIX = f"{ROOT}:doctor:ci-attempt:"
 TTL = 3600
-ENTRY_BYTES = 1024 * 1024
-TOTAL_BYTES = 16 * ENTRY_BYTES
-VERSION = "z1:"
+ENTRY_BYTES = 8 * 1024 * 1024
+TOTAL_BYTES = 512 * 1024 * 1024
+VERSION = "l4:"
 
 
 def encode(attempt: dict) -> str:
-    payload = json.dumps(attempt, separators=(",", ":")).encode()
-    return VERSION + base64.b64encode(zlib.compress(payload, level=1)).decode("ascii")
+    return VERSION + base64.b64encode(lz4.frame.compress(orjson.dumps(attempt))).decode("ascii")
 
 
 def read(cache: Redis, key: str) -> dict | None:
@@ -27,8 +27,8 @@ def read(cache: Redis, key: str) -> dict | None:
     if saved is None:
         return None
     if saved.startswith(VERSION):
-        return json.loads(zlib.decompress(base64.b64decode(saved[len(VERSION) :])))
-    attempt = json.loads(saved)
+        return orjson.loads(lz4.frame.decompress(base64.b64decode(saved[len(VERSION) :])))
+    attempt = orjson.loads(saved)
     write(cache, key, attempt)
     return attempt
 
