@@ -38,6 +38,7 @@ def setup():
     herdr.planned_account.return_value = None
     launcher = launch.HiveLaunch(store, config.slug, held, herdr)
     launcher.opening = lambda request: f"opening for {request.name}"
+    launcher.sleep = Mock(side_effect=AssertionError("a test launch must not wait for a hive"))
     return SimpleNamespace(store=store, config=config, held=held, hive=hive, herdr=herdr, launcher=launcher)
 
 
