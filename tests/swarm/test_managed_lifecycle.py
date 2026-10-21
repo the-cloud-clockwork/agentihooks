@@ -403,3 +403,19 @@ def test_a_headless_retirement_with_its_runtime_home_already_gone_succeeds(rig, 
     assert rig.runner.retire(headless)
     rig.herdr.assert_not_called()
     assert rig.runner.refusal(headless) == {"process": 0, "refusal": "unknown"}
+
+
+@pytest.mark.parametrize(("owner", "closed"), [("engineer@other-0009", False), ("", True)])
+def test_managed_retirement_closes_the_launch_pane_only_while_it_belongs_to_the_worker(rig, owner, closed):
+    from scripts.swarm import reaper
+
+    def herdr(args):
+        if args[:2] == ["agent", "get"]:
+            return {"agent": {"pane_id": "viewer", "name": owner or rig.agent.name, "agent_session": None}}
+        return _close_only(args)
+
+    rig.herdr.side_effect = herdr
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(rig.agent)
+    assert (["pane", "close", "viewer"] in [call.args[0] for call in rig.herdr.call_args_list]) is closed
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == "exited"
