@@ -153,11 +153,15 @@ def test_github_outage_retains_deferred_request(priority, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("error", ["", "could not restore https://github.com/o/r/pull/2: refused"])
-def test_tick_applies_priority_after_blocking_tests_complete(env, monkeypatch, error):
-    from tests.swarm.test_delivery import FakeHerdr
+def test_the_refresh_job_applies_priority_after_blocking_tests_complete(env, monkeypatch, error):
+    from scripts.ci_budget import defects, flakes
+    from scripts.swarm import ci_speed, grafana_alerts, langfuse, lease, refresh_job
 
-    store, ledger, runtime = env
+    store, ledger, _ = env
     assert cli.main(["sw", "create", "--repo", "/repo"]) == 0
+    assert lease.acquire(store, "sw", commands.hive_id()) is not None
+    for module in (ci_speed, defects, flakes, langfuse, grafana_alerts):
+        monkeypatch.setattr(module, "refresh", lambda *args: [])
     store.redis.hset(
         store.key("sw", queue_priority.PENDING),
         URL,
@@ -187,7 +191,7 @@ def test_tick_applies_priority_after_blocking_tests_complete(env, monkeypatch, e
     monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: writes.append((args, kwargs)))
     if error:
         monkeypatch.setattr(merge_queue, "prioritize", lambda *args, **kwargs: {"displaced": [], "errors": [error]})
-    actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    actions = refresh_job.run(store, "sw", ledger, 1_000)
     if error:
         assert alerts == [("sw", f"merge-priority:{URL}", f"Deferred merge priority failed for {URL}: {error}")]
         assert writes == [
