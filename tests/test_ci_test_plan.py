@@ -156,6 +156,62 @@ def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
     assert "every test runs" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("content", "zipped"),
+    [
+        (b"", False),
+        (b"not a zip", False),
+        (b"", True),
+        (b"{", True),
+        (b"\\xff", True),
+        (b"[]", True),
+        (b"{}", True),
+        (json.dumps({**_manifest(1), "tests": {}}).encode(), True),
+        (json.dumps({**_manifest(1), "tests": []}).encode(), True),
+        (json.dumps({**_manifest(1), "units": {}}).encode(), True),
+        (json.dumps({**_manifest(1), "tests": {"test": {}}}).encode(), True),
+    ],
+    ids=[
+        "empty-download",
+        "corrupt-zip",
+        "empty-json",
+        "corrupt-json",
+        "invalid-encoding",
+        "non-object",
+        "missing-fields",
+        "empty-tests",
+        "wrong-tests",
+        "wrong-units",
+        "wrong-test",
+    ],
+)
+def test_an_unusable_download_runs_every_test_and_names_its_own_fallback(
+    monkeypatch, tmp_path, capsys, content, zipped
+):
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    api = ci_test_plan._api
+    buffer = io.BytesIO()
+    if zipped:
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("manifest.json", content)
+    payload = buffer.getvalue() if zipped else content
+    monkeypatch.setattr(ci_test_plan, "_api", lambda endpoint: payload if endpoint.endswith("/zip") else api(endpoint))
+    monkeypatch.setattr(
+        ci_test_plan.dep_manifest, "changes", lambda *args: pytest.fail("Unusable records cannot plan reuse")
+    )
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    out = tmp_path / "reused-tests.json"
+    assert ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)]) == 0
+    assert not out.exists()
+    assert output.read_text() == "reused=0\\nrun=\\ncommit=\\n"
+    report = capsys.readouterr().out
+    assert "Unusable test record" in report
+    assert "Dev run 1" in report
+    assert "every test runs" in report
+    assert "No test record" not in report
+
+
 @pytest.mark.parametrize("cause", [None, ".github/workflows/test.yml"])
 def test_a_record_plans_the_unchanged_tests(monkeypatch, tmp_path, capsys, cause):
     _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
