@@ -11,8 +11,9 @@ pytestmark = pytest.mark.xdist_group("hosted_client_lookup")
 
 @pytest.fixture(scope="module")
 def imported_hosted():
+    original = dict(vars(hosted_ledger))
     yield hosted_ledger
-    importlib.reload(hosted_ledger)
+    vars(hosted_ledger).update(original)
 
 
 def test_01_import_under_a_patched_client(monkeypatch, imported_hosted):
