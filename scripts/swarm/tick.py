@@ -197,7 +197,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
-    timing.call(
+    actions += skip_dropped(
         exits.sweep,
         InboxStore(store.redis),
         slug,
@@ -276,6 +276,19 @@ def skip_refused(function, *args):
         name = f"{function.__module__}.{function.__qualname__}"
         print(f"{name} skipped, the ledger refused its write: {exc}", file=sys.stderr)
         return [f"skipped {name}: the ledger refused its write"]
+
+
+def skip_dropped(function, *args):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    for _ in range(2):
+        try:
+            return timing.call(function, *args) or []
+        except RedisConnectionError as exc:
+            dropped = exc
+    name = f"{function.__module__}.{function.__qualname__}"
+    print(f"{name} skipped, its Redis connection dropped twice: {dropped}", file=sys.stderr)
+    return [f"skipped {name}: its Redis connection dropped twice"]
 
 
 def _codex_hook_order():
