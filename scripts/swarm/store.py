@@ -655,7 +655,7 @@ def _adopt_saved_member(environ):
     saved = cli.saved_member(environ)
     url, current = saved.get("AGENTIHOOKS_HIVE_REDIS_URL"), environ.get("AGENTIHOOKS_HIVE_REDIS_URL")
     # A rejoined hive keeps its old member in the process env, whose Redis user may still answer elsewhere.
-    if url and (not current or urlsplit(url).username != urlsplit(current).username):
+    if url and current and urlsplit(url).username != urlsplit(current).username:
         environ.update(saved)
 
 

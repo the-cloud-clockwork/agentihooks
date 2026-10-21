@@ -499,18 +499,23 @@ def test_a_member_the_process_env_left_behind_yields_to_the_saved_member(admin, 
     assert client.connection_pool.connection_kwargs["username"] == f"hive-{grant['id']}"
 
 
-def test_a_hive_process_without_a_member_in_its_env_reads_the_saved_member(
+def test_a_hive_process_with_a_swarm_redis_and_no_member_keeps_its_swarm_redis(
     admin, hive, redis_lib, tmp_path, monkeypatch
 ):
-    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    _joined(admin, hive, tmp_path, monkeypatch)
+    swarm_url = auth._with_user("redis://h:1/0", "swarm", "p")
+    admin.acl_setuser("swarm", enabled=True, passwords=["+p"], keys=["*"], commands=["+@all"])
     pinged = _fake_ping(admin, redis_lib, monkeypatch)
-    environ = {"AGENTIHOOKS_HOME": str(tmp_path), "AGENTIHOOKS_DEPLOYMENT": "distributed"}
+    environ = {
+        "AGENTIHOOKS_HOME": str(tmp_path),
+        "AGENTIHOOKS_DEPLOYMENT": "distributed",
+        "AGENTIHOOKS_SWARM_REDIS_URL": swarm_url,
+    }
 
     store.redis_client(environ)
 
-    assert pinged == [f"hive-{grant['id']}"]
-    assert environ["AGENTIHOOKS_HIVE_ID"] == grant["id"]
-    assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == grant["redis_url"]
+    assert pinged == ["swarm"]
+    assert "AGENTIHOOKS_HIVE_REDIS_URL" not in environ
 
 
 @pytest.mark.parametrize(
