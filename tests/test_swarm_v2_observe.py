@@ -391,7 +391,9 @@ def test_status_report_rows_keep_their_fields_and_add_the_observation(monkeypatc
         "inbox",
         "observation",
         "capabilities",
+        "hive_join",
     }
+    assert row["hive_join"] == {}
     assert (row["name"], row["observation"]["sources"]["heartbeat"]["observed_at"]) == (agent.name, NOW - 5.0)
 
 
