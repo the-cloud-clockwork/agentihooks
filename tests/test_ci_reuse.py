@@ -267,15 +267,11 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
     assert steps in [
-        finish(
-            ci_reuse.inline_mutation(
-                ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss, lost_rerun=lost_rerun)
-            )
-        )
+        finish(rerun(ci_reuse.inline_mutation(ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss))))
         for form in forms
         for summary in (False, True)
         for watcher_loss in (False, True)
-        for lost_rerun in (False, True)
+        for rerun in (list, ci_reuse.lost_rerun)
         for finish in (list, ci_reuse.pipefail_summary)
     ]
 
@@ -987,7 +983,7 @@ def test_queue_watcher_loss_never_masks_a_graded_failure(job, status):
     assert result.returncode != 0, result.stdout + result.stderr
 
 
-_LOST_RERUN_FORM = {"queue_tier": True, "promotion": True, "consolidated": True, "watcher_loss": True, "lost_rerun": True}
+_LOST_RERUN_FORM = {"queue_tier": True, "promotion": True, "consolidated": True, "watcher_loss": True}
 
 
 @pytest.mark.parametrize(
@@ -1009,13 +1005,13 @@ def test_a_lost_unit_shard_passes_the_queue_only_on_its_green_rerun(unit, lost, 
     needs = {name: {"result": "success"} for name in ("select", "split", "shard-check", "test-count")}
     needs["queue-fail-fast"] = {"result": "success", "outputs": {"failed": ""}}
     needs |= {"unit": {"result": unit}, "unit-lost": {"result": lost}, "unit-rerun": {"result": rerun}}
-    result = _gate(ci_reuse.inline_mutation(ci_reuse.gate_steps(**_LOST_RERUN_FORM)), needs)
+    result = _gate(ci_reuse.lost_rerun(ci_reuse.inline_mutation(ci_reuse.gate_steps(**_LOST_RERUN_FORM))), needs)
     assert (result.returncode == 0) == passes, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("event", ["push", "workflow_dispatch", "pull_request"])
-@pytest.mark.parametrize("rerun", ["skipped", "success"])
-def test_the_rerun_jobs_must_be_skipped_outside_the_queue(event, rerun):
+@pytest.mark.parametrize("rerun", ["skipped", "success", "failure"])
+def test_outside_the_queue_the_rerun_jobs_never_pass_a_failure(event, rerun):
     from scripts import ci_reuse
 
     needs = {name: {"result": "success"} for name in ("select", "split", "unit", "shard-check", "test-count")}
@@ -1024,8 +1020,11 @@ def test_the_rerun_jobs_must_be_skipped_outside_the_queue(event, rerun):
         needs[name] = {"result": "success"}
     needs["reuse"] = {"result": "skipped" if event == "pull_request" else "success", "outputs": {"reused": "false"}}
     needs |= {"unit-lost": {"result": rerun}, "unit-rerun": {"result": rerun}}
-    result = _gate(ci_reuse.inline_mutation(ci_reuse.gate_steps(**_LOST_RERUN_FORM)), needs, event=event)
-    assert (result.returncode == 0) == (rerun == "skipped"), result.stdout + result.stderr
+    result = _gate(
+        ci_reuse.lost_rerun(ci_reuse.inline_mutation(ci_reuse.gate_steps(**_LOST_RERUN_FORM))), needs, event=event
+    )
+    passes = rerun == "skipped" or (rerun == "success" and event != "pull_request")
+    assert (result.returncode == 0) == passes, result.stdout + result.stderr
 
 
 def _mutation_gate(form, event, inline, stats, mutation):

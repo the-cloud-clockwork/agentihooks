@@ -959,8 +959,10 @@ def test_the_promotion_gate_form_is_an_allowed_transition(weakened, promotion, w
     base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps()
     head = copy.deepcopy(base)
     head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(
-        queue_tier=True, promotion=promotion, watcher_loss=watcher_loss, lost_rerun=lost_rerun
+        queue_tier=True, promotion=promotion, watcher_loss=watcher_loss
     )
+    if lost_rerun:
+        head["jobs"]["gate-required"]["steps"] = ci_reuse.lost_rerun(head["jobs"]["gate-required"]["steps"])
     if weakened:
         head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
