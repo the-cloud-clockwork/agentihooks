@@ -83,7 +83,7 @@ def test_no_flake_reports_is_red(tmp_path, capsys):
     out = tmp_path / "out.json"
     argv = ["--history", str(tmp_path / "h.jsonl"), "--reports", str(tmp_path), "--out", str(out)]
     assert flake_budget.main(argv) == 1
-    assert capsys.readouterr().err == f"no flake reports under {tmp_path}\n"
+    assert capsys.readouterr().out == f"::error::No flake reports under {tmp_path}\n"
     assert not out.exists()
 
 
