@@ -5,6 +5,7 @@ from unittest.mock import Mock
 from scripts.swarm import cli
 from scripts.swarm.store import RedisStore, SwarmConfig
 
+
 def test_setting_a_running_swarm_returns_without_running_a_tick(monkeypatch, capsys):
     import fakeredis
 
