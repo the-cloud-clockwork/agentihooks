@@ -4,13 +4,14 @@ mode."""
 
 import json
 import os
+import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from scripts.gates import modes
 from scripts.gates.base import Who
 from scripts.gates.enforcement import NIGHT_WATCH
-from scripts.swarm import capacity, operator_email, tick_master, timing
+from scripts.swarm import capacity, operator_email, redis_budget, tick_master, timing
 from scripts.swarm.health import merge_stall, spawn_stall
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.store import MASTER
@@ -20,6 +21,7 @@ KEY = "night-watch"
 SENDER = "swarm"
 SEAT_MS, SPAWN_MS, GAP_MS = 10 * MINUTE_MS, 30 * MINUTE_MS, 5 * MINUTE_MS
 RESPAWNS, RESPAWN_WINDOW_MS = 3, 60 * MINUTE_MS
+BUDGET_S = 30
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
 SOURCES = (SEAT, SPAWN, MERGE)
 HOST, QUOTA, CAP, SLEEP, UNNAMED = "host room", "quota", "cap", "sleep", "no named hold"
@@ -32,6 +34,7 @@ MERGE_ALERT = "Swarm {slug} dev merges are stuck: {summary}. {evidence}"
 CLEARED = "The night watch saw it clear: {what}"
 GAP = "The night watch starts over after a gap in its passes and raises this again if the fault remains"
 LOGGED = "night watch gate not at deny: would {action}"
+SKIPPED = "skipped the rest of the night watch pass: {why}"
 
 
 @dataclass(frozen=True)
@@ -54,7 +57,24 @@ def read(store, slug: str) -> dict:
 
 
 def run(watch: Watch) -> list[str]:
-    state, actions = read(watch.store, watch.slug), []
+    from redis.exceptions import RedisError
+
+    client = redis_budget.capped(watch.store.redis)
+    budget, actions = redis_budget.Budget(client, BUDGET_S), []
+    try:
+        _run(replace(watch, store=redis_budget.bounded(watch.store, budget)), actions)
+    except (redis_budget.Spent, RedisError) as exc:
+        budget.why = budget.why or f"Redis failed: {exc}"
+    finally:
+        redis_budget.release(client, watch.store.redis)
+    if budget.why:
+        print(f"night watch skipped the rest of its pass, {budget.why}", file=sys.stderr)
+        actions.append(SKIPPED.format(why=budget.why))
+    return actions
+
+
+def _run(watch: Watch, actions: list[str]) -> None:
+    state = read(watch.store, watch.slug)
     try:
         if watch.now_ms - state.get("at", watch.now_ms) > GAP_MS:
             for source in SOURCES:
@@ -64,7 +84,6 @@ def run(watch: Watch) -> list[str]:
             actions += step(watch, state)
     finally:
         watch.store.redis.set(watch.store.key(watch.slug, KEY), json.dumps(state))
-    return actions
 
 
 def _allows(watch, action, reason):
