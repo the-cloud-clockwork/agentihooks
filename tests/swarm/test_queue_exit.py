@@ -89,6 +89,13 @@ def test_every_job_page_of_a_cancelled_run_is_read():
     assert run.calls[-1] == ["gh", "api", jobs_path(5, page=2)]
 
 
+def test_a_cancelled_run_whose_jobs_cannot_all_be_listed_is_a_failure():
+    pages = [["success"] * 100] * queue_exit.PAGES + [["success"]]
+    run = runner([run_of(7, "cancelled", run_id=5)], jobs={5: pages})
+    assert queue_exit.own_failures(URL, SINCE, run) == ["Tests https://github.com/o/r/actions/runs/5"]
+    assert run.calls[-1] == ["gh", "api", jobs_path(5, page=queue_exit.PAGES)]
+
+
 def test_jobs_of_other_pull_requests_runs_are_not_read():
     run = runner([run_of(8, "cancelled", run_id=5)], jobs={5: [["failure"]]})
     assert queue_exit.own_failures(URL, SINCE, run) == []
@@ -175,9 +182,15 @@ def test_an_older_failed_group_does_not_refuse_a_clean_last_group():
     assert queue_exit.require_fresh(URL, "abc", run) is None
 
 
-def test_a_running_group_is_not_the_last_group():
+def test_a_running_last_group_does_not_refuse_for_an_older_failed_group():
     failed = run_of(7, "failure", run_id=1, group="g0", created="2026-10-20T08:30:00Z")
     running = run_of(7, None, run_id=2, group="g1")
+    assert queue_exit.require_fresh(URL, "abc", runner([failed, running])) is None
+
+
+def test_a_failed_run_of_a_partly_running_last_group_refuses():
+    failed = run_of(7, "failure", run_id=1, group="g1", created="2026-10-20T08:30:00Z")
+    running = run_of(7, None, name="Proofs", run_id=2, group="g1")
     with pytest.raises(SwarmError, match=r"\(Tests https://github.com/o/r/actions/runs/1\)"):
         queue_exit.require_fresh(URL, "abc", runner([failed, running]))
 

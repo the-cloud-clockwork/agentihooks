@@ -40,7 +40,7 @@ def _failed(repo: str, item: dict, run) -> bool:
         jobs += body["jobs"]
         if len(jobs) >= body["total_count"] or not body["jobs"]:
             break
-    return any(job["conclusion"] in FAILED_JOB for job in jobs)
+    return len(jobs) < body["total_count"] or any(job["conclusion"] in FAILED_JOB for job in jobs)
 
 
 def own_failures(url: str, since_ms: int, run=subprocess.run) -> list[str] | None:
@@ -62,13 +62,12 @@ def require_fresh(url: str, head: str, run=subprocess.run) -> None:
     listed = _listed(repo, since, run)
     if listed is None:
         raise SwarmError(f"could not list every merge group run since head {head} landed")
-    own = [item for item in listed if _own(item, number) and item["conclusion"] is not None]
+    own = [item for item in listed if _own(item, number)]
     if not own:
         return
     group = max(own, key=lambda item: item["created_at"])["head_sha"]
-    if failed := [
-        f"{item['name']} {item['html_url']}" for item in own if item["head_sha"] == group and _failed(repo, item, run)
-    ]:
+    last = [item for item in own if item["head_sha"] == group and item["conclusion"] is not None]
+    if failed := [f"{item['name']} {item['html_url']}" for item in last if _failed(repo, item, run)]:
         raise SwarmError(
             f"head {head} failed its last merge group run ({', '.join(failed)}); push a new commit before queueing again"
         )
