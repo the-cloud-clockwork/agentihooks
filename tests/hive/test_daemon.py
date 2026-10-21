@@ -122,8 +122,9 @@ def test_run_beats_immediately_then_waits_a_beat_less_the_wake_slack(monkeypatch
 
     waits = []
 
-    def sleep(seconds, redis):
+    def sleep(seconds, redis, timeout):
         assert redis is connection
+        assert timeout == seconds + 1
         events.append(seconds)
         waits.append(seconds)
         if len(waits) == 2:
@@ -156,7 +157,7 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     waiter = object()
     with pytest.raises(KeyboardInterrupt):
         daemon.run(Mock(return_value=(object(), waiter)))
-    sleep.assert_called_once_with(12, redis=waiter)
+    sleep.assert_called_once_with(12, redis=waiter, timeout=13)
 
 
 def test_install_writes_the_service_and_enables_it(tmp_path):
@@ -421,7 +422,7 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     connection = object()
     with pytest.raises(KeyboardInterrupt):
         daemon.run(_once(connection))
-    sleep.assert_called_once_with(0, redis=connection)
+    sleep.assert_called_once_with(0, redis=connection, timeout=1)
 
 
 def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch):
@@ -442,7 +443,7 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
         if server.connected:
             queued.append(clients[-1].xadd(stream, {"order": "{}"}))
 
-    def wait(seconds, redis):
+    def wait(seconds, redis, timeout):
         assert redis is clients[-1]
         if now[0] == 2000.0:
             raise KeyboardInterrupt
@@ -485,7 +486,7 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypat
         if error:
             raise error("lost")
 
-    def wait(seconds, redis):
+    def wait(seconds, redis, timeout):
         assert redis is connections[-1]
         waits.append(seconds)
         if len(waits) == 1:
