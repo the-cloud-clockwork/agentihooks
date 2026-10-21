@@ -120,7 +120,7 @@ def test_the_masters_channel_line_names_the_owner_of_a_cross_write():
 
 
 def cross(world):
-    return {item: (row["owner"], row["seat"], row["by"]) for item, row in world.cross().items()}
+    return {item: [(row["owner"], row["seat"], row["by"]) for row in rows] for item, rows in world.cross().items()}
 
 
 def test_two_masters_racing_on_one_follow_up_are_both_accepted_and_the_owner_kept(world):
@@ -139,7 +139,7 @@ def test_a_live_master_decides_a_follow_up_another_master_owns_and_the_write_is_
     rev = doc["_meta"]["stamps"][f"{FOLLOWUP}/done"]["rev"]
     assert doc["_meta"][master_fence.DECISIONS] == {FOLLOWUP: {"seat": LEAD, "rev": rev}}
     assert doc["_meta"][master_fence.CROSS] == {
-        FOLLOWUP: {"owner": LEAD, "seat": SECOND, "by": SECOND_NAME, "rev": rev}
+        FOLLOWUP: [{"owner": LEAD, "seat": SECOND, "by": SECOND_NAME, "rev": rev}]
     }
     assert world.posts() == [f"{SECOND} set {FOLLOWUP}/done to true for {LEAD}"]
     assert world.refusals() == 0
@@ -151,7 +151,17 @@ def test_a_master_that_writes_after_the_owner_leaves_the_decider_record_with_the
     assert world.decide(SECOND_NAME, value=False) == {"accepted": True, "warnings": []}
     assert world.followup()["done"] is False
     assert world.decisions()[FOLLOWUP]["seat"] == LEAD
-    assert cross(world) == {FOLLOWUP: (LEAD, SECOND, SECOND_NAME)}
+    assert cross(world) == {FOLLOWUP: [(LEAD, SECOND, SECOND_NAME)]}
+
+
+def test_every_cross_write_on_an_item_is_kept_up_to_the_cap(world):
+    for n in range(master_fence.CROSS_KEPT + 1):
+        world.decide(SECOND_NAME, value=n % 2 == 0, n=n)
+
+    rows = world.cross()[FOLLOWUP]
+    assert len(rows) == master_fence.CROSS_KEPT
+    assert [row["rev"] for row in rows] == sorted(row["rev"] for row in rows)
+    assert rows[-1]["rev"] == world.doc()["_meta"]["stamps"][f"{FOLLOWUP}/done"]["rev"]
 
 
 def test_a_master_without_a_live_seat_is_still_refused_naming_the_owner(world):
@@ -184,7 +194,7 @@ def test_a_master_sets_a_task_in_any_phase_and_a_cross_write_names_its_owner(wor
         f"{LEAD} set tasks/t1: description",
     ]
     assert world.decisions() == {}
-    assert cross(world) == {"tasks/t1": (LEAD, SECOND, SECOND_NAME)}
+    assert cross(world) == {"tasks/t1": [(LEAD, SECOND, SECOND_NAME)]}
 
 
 def test_a_task_with_no_phase_belongs_to_the_lead(world):
@@ -193,7 +203,7 @@ def test_a_task_with_no_phase_belongs_to_the_lead(world):
     )
 
     assert world.set_task(SECOND_NAME, "t3")["accepted"] is True
-    assert cross(world) == {"tasks/t3": (LEAD, SECOND, SECOND_NAME)}
+    assert cross(world) == {"tasks/t3": [(LEAD, SECOND, SECOND_NAME)]}
 
 
 def test_a_refused_write_changes_nothing_and_posts_nothing(world):
@@ -245,7 +255,7 @@ def test_a_successor_decides_over_a_record_whose_seat_remains_and_the_record_kee
 
     assert world.decide(cases.SUCCESSOR, value=False) == {"accepted": True, "warnings": []}
     assert world.decisions()[FOLLOWUP]["seat"] == SECOND
-    assert cross(world) == {FOLLOWUP: (SECOND, LEAD, cases.SUCCESSOR)}
+    assert cross(world) == {FOLLOWUP: [(SECOND, LEAD, cases.SUCCESSOR)]}
 
 
 def test_repeating_a_decision_posts_it_once(world):

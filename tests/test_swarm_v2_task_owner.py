@@ -75,6 +75,7 @@ def test_a_backend_master_comments_on_a_task_with_no_phase(world):
     assert comment(world, SECOND_NAME, LOOSE) == {"accepted": True, "warnings": []}
     task = next(t for t in world.doc()["tasks"] if t["id"] == LOOSE)
     assert len(task["comments"]) == 1
+    assert [(r["owner"], r["seat"], r["by"]) for r in world.cross()[f"tasks/{LOOSE}"]] == [(LEAD, SECOND, SECOND_NAME)]
     assert world.refusals() == 0
 
 

@@ -127,7 +127,9 @@ class World:
 def _recorded(world):
     return {
         "deciders": {item: row["seat"] for item, row in world.decisions().items()},
-        "cross": {item: [row["owner"], row["seat"], row["by"]] for item, row in world.cross().items()},
+        "cross": {
+            item: [[row["owner"], row["seat"], row["by"]] for row in rows] for item, rows in world.cross().items()
+        },
     }
 
 
@@ -206,7 +208,7 @@ def _meets_positive(o):
     accepted = all(o["accepted"].values()) and o["refusals"] == 0
     written = o["followup_done"] is True and o["answered"] == 1 and o["t1_description"] == f"Updated by {SECOND_NAME}"
     owners = o["deciders"] == {FOLLOWUP: LEAD, QUESTION: LEAD}
-    by_second = [LEAD, SECOND, SECOND_NAME]
+    by_second = [[LEAD, SECOND, SECOND_NAME]]
     recorded = o["cross"] == {FOLLOWUP: by_second, QUESTION: by_second, "tasks/t1": by_second}
     posted = o["posts"] == [
         f"{SECOND} set {FOLLOWUP}/done to true for {LEAD}",
@@ -230,7 +232,7 @@ def _meets_negative(o):
 
 def _meets_recovery(o):
     accepted = o["acting_lead_accepted"] and o["successor_accepted"] and o["after_restart_accepted"]
-    kept = o["deciders"] == {FOLLOWUP: SECOND} and o["cross"] == {FOLLOWUP: [SECOND, LEAD, SUCCESSOR]}
+    kept = o["deciders"] == {FOLLOWUP: SECOND} and o["cross"] == {FOLLOWUP: [[SECOND, LEAD, SUCCESSOR]] * 2}
     posted = o["posts"] == [
         f"{SECOND} set {FOLLOWUP}/done to true",
         f"{LEAD} set {FOLLOWUP}/done to false for {SECOND}",

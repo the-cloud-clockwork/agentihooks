@@ -10,9 +10,16 @@
       "after_restart_accepted": true,
       "cross": {
         "followups/f1": [
-          "master-2@race-2026-01-01",
-          "master@race-2026-01-01",
-          "master@abcdef-0003"
+          [
+            "master-2@race-2026-01-01",
+            "master@race-2026-01-01",
+            "master@abcdef-0003"
+          ],
+          [
+            "master-2@race-2026-01-01",
+            "master@race-2026-01-01",
+            "master@abcdef-0003"
+          ]
         ]
       },
       "deciders": {

@@ -15,19 +15,25 @@
       "answered": 1,
       "cross": {
         "followups/f1": [
-          "master@race-2026-01-01",
-          "master-2@race-2026-01-01",
-          "master@abcdef-0002"
+          [
+            "master@race-2026-01-01",
+            "master-2@race-2026-01-01",
+            "master@abcdef-0002"
+          ]
         ],
         "questions/q1": [
-          "master@race-2026-01-01",
-          "master-2@race-2026-01-01",
-          "master@abcdef-0002"
+          [
+            "master@race-2026-01-01",
+            "master-2@race-2026-01-01",
+            "master@abcdef-0002"
+          ]
         ],
         "tasks/t1": [
-          "master@race-2026-01-01",
-          "master-2@race-2026-01-01",
-          "master@abcdef-0002"
+          [
+            "master@race-2026-01-01",
+            "master-2@race-2026-01-01",
+            "master@abcdef-0002"
+          ]
         ]
       },
       "deciders": {

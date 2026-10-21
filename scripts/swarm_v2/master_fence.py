@@ -21,6 +21,7 @@ SWITCH = "AGENTIHOOKS_MASTER_FENCE"
 OFF = "off"
 DECISIONS = "master_decisions"
 CROSS = "master_cross_writes"
+CROSS_KEPT = 20
 REFUSALS = "write_refusals"
 DECIDED = ("questions/", "followups/")
 TASKS = "tasks/"
@@ -199,6 +200,9 @@ class Fence:
             return False
         before = _fields(ctx.stamps, item)
         done = self._inner(doc, op, ctx, apply)
+        if done and writer != owner:
+            rows = ctx.meta.setdefault(CROSS, {}).setdefault(item, [])
+            rows[:] = [*rows, {"owner": owner, "seat": writer, "by": by, "rev": ctx.rev}][-CROSS_KEPT:]
         if done and _fields(ctx.stamps, item) != before:
             self._decided(op, item, (owner, writer, by), seats.count, ctx)
         return done
@@ -207,8 +211,6 @@ class Fence:
         owner, writer, by = authors
         if item.startswith(DECIDED):
             ctx.meta.setdefault(DECISIONS, {})[item] = {"seat": owner, "rev": ctx.rev}
-        if writer != owner:
-            ctx.meta.setdefault(CROSS, {})[item] = {"owner": owner, "seat": writer, "by": by, "rev": ctx.rev}
         if count > 1:
             self.decided.append((op["id"], writer, by, announcement(writer, op, owner), ctx.at / 1000))
 
