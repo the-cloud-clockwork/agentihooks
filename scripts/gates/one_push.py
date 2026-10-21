@@ -120,9 +120,7 @@ def queue_refusal(slug, url):
 
 def never_started(pull):
     return (
-        not pull.started
-        and not pull.required_pending
-        and (pull.mergeable == "CONFLICTING" or not pull.checks_pending)
+        not pull.started and not pull.required_pending and (pull.mergeable == "CONFLICTING" or not pull.checks_pending)
     )
 
 
