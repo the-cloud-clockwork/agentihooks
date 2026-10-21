@@ -15,20 +15,43 @@ def master(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_reopening_an_open_window_refreshes_it(master):
+def test_the_window_stays_open_until_the_operator_denies_it(master):
     assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
-    assert master_coding.observe(SID, "allow-master-coding", typed=True, now=2000) == "open"
-    assert master_coding.is_open(SID, now=2000 + master_coding.WINDOW_SEC - 1)
+    assert master_coding.is_open(SID)
+    assert master_coding.observe(SID, "deny-master-coding", typed=False) == ""
+    assert master_coding.is_open(SID)
+    assert master_coding.observe(SID, "deny-master-coding", typed=True) == "closed"
+    assert not master_coding.is_open(SID)
+
+
+class _Stop(Exception):
+    pass
+
+
+def _stop(*args):
+    raise _Stop
+
+
+@pytest.mark.parametrize(("source", "open_after"), [("startup", False), ("resume", False), ("compact", True)])
+def test_a_session_restart_closes_the_window_and_a_compaction_keeps_it(master, monkeypatch, source, open_after):
+    from hooks import hook_manager
+
+    master_coding.observe(SID, "allow-master-coding", typed=True)
+    monkeypatch.setattr(hook_manager, "_inject_refocus", lambda *args: None)
+    monkeypatch.setattr("hooks.lifecycle.guard.session_event", _stop)
+    with pytest.raises(_Stop):
+        hook_manager.on_session_start({"session_id": SID, "source": source})
+    assert master_coding.is_open(SID) is open_after
 
 
 def test_an_open_record_is_ignored_once_the_session_is_no_longer_the_master(master, monkeypatch):
     master_coding.observe(SID, "allow-master-coding", typed=True, now=1000)
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t12")
-    assert not master_coding.is_open(SID, now=1001)
+    assert not master_coding.is_open(SID)
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "master")
-    assert master_coding.is_open(SID, now=1001)
+    assert master_coding.is_open(SID)
     monkeypatch.delenv("AGENTIHOOKS_SWARM")
-    assert not master_coding.is_open(SID, now=1001)
+    assert not master_coding.is_open(SID)
 
 
 def test_a_window_import_failure_denies_edits_through_the_condition_runner(master, monkeypatch):
