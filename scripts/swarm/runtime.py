@@ -1024,6 +1024,12 @@ class HerdrRuntime:
         except Exception as exc:
             self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"pane list: {exc}"}
             return False
+        if agent.pane_id:
+            try:
+                self._close_owned_pane(agent)
+            except Exception as exc:
+                self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"pane {agent.pane_id}: {exc}"}
+                return False
         for pane in viewers:
             try:
                 self.close_pane(pane)
@@ -1050,7 +1056,7 @@ class HerdrRuntime:
         if recorded:
             listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"])["panes"]}
             live = [pane for pane, terminal in recorded.items() if terminal and listed.get(pane) == terminal]
-        return [pane for pane in dict.fromkeys((launch_pane, *live)) if pane]
+        return [pane for pane in live if pane != launch_pane]
 
     def retire_process(self, agent, pid, homes=(), start=0):
         if live_binding.managed(agent):
