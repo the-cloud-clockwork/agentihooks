@@ -208,7 +208,10 @@ def _meets_positive(o):
     owners = o["deciders"] == {FOLLOWUP: LEAD, QUESTION: LEAD}
     by_second = [LEAD, SECOND, SECOND_NAME]
     recorded = o["cross"] == {FOLLOWUP: by_second, QUESTION: by_second, "tasks/t1": by_second}
-    posted = o["posts"][-2:] == [f"{SECOND} set tasks/t1: description for {LEAD}", f"{SECOND} set tasks/t2: description"]
+    posted = o["posts"][-2:] == [
+        f"{SECOND} set tasks/t1: description for {LEAD}",
+        f"{SECOND} set tasks/t2: description",
+    ]
     return accepted and written and owners and recorded and posted
 
 
