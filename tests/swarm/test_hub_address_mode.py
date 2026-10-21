@@ -3,7 +3,7 @@ import io
 import pytest
 
 from scripts.scheduler import core, service
-from scripts.swarm import cli, controller, stack_clients, stack_env, store
+from scripts.swarm import cli, controller, stack_env, store
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_link, ledger_route
@@ -68,6 +68,8 @@ def test_the_controller_counts_a_hub_address_with_no_mode_as_remote(swarm_store,
 
 
 def test_client_preparation_refuses_a_hub_address_with_no_mode(tmp_path):
+    from scripts.swarm import stack_clients
+
     home = tmp_path / "agentihooks"
     home.mkdir()
     name = "SWARM_REDIS_PASSWORD"
