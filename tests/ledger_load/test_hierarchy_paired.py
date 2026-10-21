@@ -80,6 +80,15 @@ def test_the_workflow_runs_an_even_number_of_hierarchy_pairs_against_the_merge_b
     assert "did not halve" not in script
 
 
+def test_redis_installs_from_the_distribution_archive_alone():
+    for name in ("hierarchy", "load"):
+        steps = workflow()["jobs"][name]["steps"]
+        start = next(step["run"] for step in steps if step.get("name") == "Start Redis on this runner")
+        assert "only_archive=(-o Acquire::Retries=5 -o \"Dir::Etc::sourcelist=$archive\" -o Dir::Etc::sourceparts=-)" in start
+        apt = [line for line in start.splitlines() if "apt-get" in line]
+        assert len(apt) == 2 and all('"${only_archive[@]}"' in line for line in apt), name
+
+
 def test_the_command_grades_pair_folders_and_refuses_a_margin_below_the_same_code_bound(tmp_path, capsys):
     folders = []
     for number, (base, head) in enumerate([(0.08, 0.04), (0.04, 0.08)], 1):
