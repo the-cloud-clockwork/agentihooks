@@ -298,10 +298,8 @@ def main(argv: list[str]) -> int:
         if args.command == "add":
             grant = _add(args)
             print(f"added {args.target} to herdr as {args.label}; its hive member is {grant['id']}")
-        elif args.command == "invite":
-            print(_invite(args))
-        elif args.command == "create":
-            print(_create(args))
+        elif args.command in ("invite", "create"):
+            print((_invite if args.command == "invite" else _create)(args))
         elif args.command == "refresh":
             with refresh_lock(os.environ):
                 member_id = refresh_env(os.environ)
