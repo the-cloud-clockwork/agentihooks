@@ -313,7 +313,7 @@ def codex_sessions_by_account(proc: Path = _PROC, *, local: bool = False) -> dic
     counts: dict[str, int] = {}
     for account in [*sessions.values(), *(account for _, account in executions)]:
         counts[account] = counts.get(account, 0) + 1
-    return counts
+    return counts if local else _with_held(counts, hive_held("codex"))
 
 
 def local_processes(proc: Path = _PROC) -> dict[str, dict[int, str]]:
@@ -356,6 +356,32 @@ def fleet_held(environ: Mapping[str, str] | None = None) -> dict[str, int]:
         return {}
 
 
+def hive_held(harness: str) -> dict[str, int]:
+    """Other live hives' sessions and unreported launches per account, as the launch reservation counts them."""
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    if redis is None:
+        return {}
+    import time
+
+    from redis.exceptions import RedisError
+
+    from scripts.routing import aggregate
+    from scripts.swarm.commands import hive_id
+
+    try:
+        return aggregate.elsewhere(redis, harness, time.time(), hive_id())
+    except RedisError:
+        return {}
+
+
+def _with_held(counts: dict[str, int], held: dict[str, int]) -> dict[str, int]:
+    for account, count in held.items():
+        counts[account] = max(0, counts.get(account, 0) + count)
+    return counts
+
+
 def sessions_by_account(
     proc: Path = _PROC, *, local: bool = False, environ: Mapping[str, str] | None = None
 ) -> dict[str, int]:
@@ -376,4 +402,5 @@ def sessions_by_account(
     if not local:
         for account, held in fleet_held().items():
             counts[account] = counts.get(account, 0) + held
+        _with_held(counts, hive_held("claude"))
     return counts
