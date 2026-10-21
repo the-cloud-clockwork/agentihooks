@@ -1080,17 +1080,24 @@ def test_deferred_launches_return_pending_at_once_and_a_replay_records_each_ackn
 
 def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(setup):
     from scripts.swarm import controller
-    from scripts.swarm.tick import ACK_LATER
+    from scripts.swarm.tick import ACK_LATER, SpawnError
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 
     routed = Mock()
-    routed.spawn.return_value = "placed"
+    routed.spawn.side_effect = AssertionError("collect must not route the seat again")
+    routed.hive_launch.spawn.side_effect = [
+        Outcome("spawn", Status.OK, "hive", "placed"),
+        Outcome("spawn", Status.PENDING, "hive", detail="waiting"),
+    ]
     fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
-    fenced._refusal = Mock(side_effect=AssertionError("collect must not place the seat again"))
     task = {"id": "task", "seat": "eng-1@fixture", ACK_LATER: True}
     assert fenced.collect(setup.config, "eng", "engineer", task) == "placed"
-    routed.spawn.assert_called_once_with(
-        setup.config, "eng", "engineer", {**task, "controller_epoch": setup.held.epoch}
+    routed.hive_launch.spawn.assert_called_with(
+        SpawnRequest(setup.config, "eng", "engineer", {**task, "controller_epoch": setup.held.epoch})
     )
+    with pytest.raises(SpawnError) as raised:
+        fenced.collect(setup.config, "eng", "engineer", task)
+    assert (str(raised.value), raised.value.status) == ("waiting", Status.PENDING)
 
 
 def test_old_controller_cannot_admit_after_lease_takeover(setup):

@@ -88,7 +88,6 @@ LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
 ACK_LATER = "hive_ack_later"
 ACKNOWLEDGING = "acknowledging"
-ACKNOWLEDGING_STATUS = "pending"
 EXITED_BEFORE_LIFE = "its agent process exited before its launch check passed"
 SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
@@ -1135,7 +1134,9 @@ def _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms):
 
 
 def _acknowledging_error(exc):
-    return isinstance(exc, SpawnError) and exc.status == ACKNOWLEDGING_STATUS
+    from scripts.swarm_v2.runtime.base import Status
+
+    return isinstance(exc, SpawnError) and exc.status == Status.PENDING
 
 
 def _acknowledging(slug, store, agent):
