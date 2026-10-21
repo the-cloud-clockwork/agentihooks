@@ -177,8 +177,8 @@ def steps():
         ("ledger tab", lambda page: page.click("#tab-ledger")),
         ("sections all", lambda page: page.click("#sections-all")),
         ("comments all", lambda page: page.click("#comments-all")),
-        ("check phase", lambda page: page.click('[data-focus="check:phases/p2"]')),
         ("approve plan", lambda page: page.click("#item-phases-p2 .phase-review button >> nth=0")),
+        ("check phase", lambda page: page.click('[data-focus="check:phases/p2"]')),
         ("add comment", lambda page: page.click("#item-phases-p3 button.add")),
         ("type comment", lambda page: type_line(page, '[data-focus="compose:phases/p3/comments"]', "Looks **good**")),
         ("answer", lambda page: page.click("#item-questions-q2 .thread button.add")),
@@ -285,12 +285,8 @@ def record(root: Path, folder: Path) -> list:
         errors = []
         page.on("pageerror", lambda exc: errors.append(str(exc)))
         page.goto(url)
-        page.set_default_timeout(3000)
         for name, act in steps():
-            try:
-                act(page)
-            except Exception as exc:
-                DIAG.append(f"DIAG step {name}: {str(exc).splitlines()[0]} | {' '.join(str(exc).splitlines()[1:4])}")
+            act(page)
             settle(page)
             requests, dialogs = api.take()
             results.append(
@@ -306,9 +302,6 @@ def record(root: Path, folder: Path) -> list:
     return results
 
 
-DIAG = []
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", type=Path)
@@ -316,8 +309,6 @@ def main() -> None:
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
     args.output.write_text(json.dumps(record(args.root.resolve(), args.folder), indent=1, ensure_ascii=False) + "\n")
-    if DIAG:
-        raise SystemExit("\n".join(DIAG))
 
 
 if __name__ == "__main__":
