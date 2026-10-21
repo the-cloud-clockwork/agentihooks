@@ -314,6 +314,20 @@ def test_expired_order_honors_a_definitive_receipt(setup):
     }
     assert setup.launcher.orders_for("task") is None
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [(json.loads(fields["order"])["action"], json.loads(fields["order"])["name"]) for _, fields in commands] == [
+        ("reap", request.name)
+    ]
+
+
+def test_a_failed_receipt_other_than_expiry_sends_no_reap(setup):
+    from scripts.hive.orders import Ack
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("failed", {}, "prompt"))
+    assert not setup.launcher.wait(order).ok
+    assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
 
 
 def test_expired_unknown_order_remains_ambiguous(setup):
@@ -347,6 +361,10 @@ def test_replay_refuses_another_claimant(setup):
     assert result.operation == "spawn"
     assert result.backend == "hive"
     assert len(setup.store.execution_registry.records("fixture")) == 1
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "working"
+    assert setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id) is None
+    assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
+    assert setup.launcher.orders_for("task") == order
 
 
 def test_expired_order_of_a_retired_claimant_is_ended_and_replaced(setup):

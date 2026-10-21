@@ -217,8 +217,11 @@ class HiveLaunch:
         return lease.now_ms(self.store) >= order.expires_at and self.orders.ack(order) is None
 
     def retire(self, order: LaunchOrder, previous: AgentRecord) -> None:
+        self.reap(order, previous)
         self.end(previous, "hive launch order expired without an acknowledgement")
-        self.orders.command(order.hive, CommandOrder(f"reap:{previous.name}", "reap", name=previous.name))
+
+    def reap(self, order: LaunchOrder, agent: AgentRecord) -> None:
+        self.orders.command(order.hive, CommandOrder(f"reap:{agent.name}", "reap", name=agent.name))
 
     def spawn(self, request: SpawnRequest) -> Outcome:
         lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
@@ -320,6 +323,8 @@ class HiveLaunch:
     def complete(self, order: LaunchOrder, ack: Ack) -> Outcome:
         agent = self.store.execution_registry.get(self.slug, order.execution_id)
         if ack.status != "live":
+            if ack.failure == "expired":
+                self.reap(order, agent)
             if ack.failure != "ambiguous":
                 self.end(agent, ack.failure)
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
