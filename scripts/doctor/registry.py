@@ -58,6 +58,9 @@ def save(path: Path, state: dict) -> None:
     path.write_text(json.dumps(state))
 
 
+def _started_at(agent):
+    return next((agent[key] for key in ("started_at", "launched_at") if (agent.get(key) or 0) > 0), 0)
+
 def bindings(agents: list[dict]) -> list[dict]:
     return [
         {
@@ -67,7 +70,7 @@ def bindings(agents: list[dict]) -> list[dict]:
             "task": agent.get("task") or "",
             "harness": agent.get("harness") or "",
             "profile": agent.get("profile") or "",
-            "started_at": agent.get("started_at") or 0,
+            "started_at": _started_at(agent),
             "session_id": agent.get("conversation_id") or "",
         }
         for agent in agents

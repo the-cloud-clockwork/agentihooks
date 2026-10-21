@@ -376,7 +376,19 @@ def _misattributed(binding):
     )
 
 
+def _start_unknown(binding):
+    return Finding(
+        "telemetry start unknown",
+        binding["agent"],
+        "working agent start is unknown",
+        (*_who(binding), "no positive spawn or launch timestamp; launch grace cannot be established"),
+        "an observed start is required to judge active telemetry",
+        1,
+    )
+
 def _active_binding(binding, record, limits):
+    if (binding.get("started_at") or 0) <= 0:
+        return [_start_unknown(binding)]
     if record["now_ms"] - binding["started_at"] <= limits.active_grace_seconds * SECOND_MS:
         return []
     wrong = _misattributed(binding)
