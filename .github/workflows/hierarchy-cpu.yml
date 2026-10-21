@@ -134,7 +134,7 @@ jobs:
           git -C head fetch --depth=1 origin "$BASE"
         env:
           BASE: ${{ inputs.base || '726353637ab44da81bdbd374ec393db275856e22' }}
-      - name: Run one base and head pair of load gates on this runner, base first on odd pairs
+      - name: Run one base and head pair of load gates side by side on this runner, base started first on odd pairs
         env:
           BASE: ${{ inputs.base || '726353637ab44da81bdbd374ec393db275856e22' }}
           PAIR: ${{ matrix.pair }}
@@ -143,14 +143,19 @@ jobs:
           order=(base head)
           [[ "$PAIR" == [135] ]] || order=(head base)
           database=1
-          failed=""
+          pids=()
           for side in "${order[@]}"; do
             ( cd "$side" && REDIS_URL="redis://127.0.0.1:6379/$database" \
               AGENTIHOOKS_SWARM_REDIS_URL="redis://127.0.0.1:6379/$database" \
               python -m tests.ledger_load.memory \
               --folder "$GITHUB_WORKSPACE/load-evidence/$side" \
-              --base "$BASE" 2>&1 | tee "$GITHUB_WORKSPACE/load-evidence/$side.log" ) || failed="$failed $side"
+              --base "$BASE" 2>&1 | tee "$GITHUB_WORKSPACE/load-evidence/$side.log" ) &
+            pids+=("$!")
             database=$((database + 1))
+          done
+          failed=""
+          for index in "${!order[@]}"; do
+            wait "${pids[$index]}" || failed="$failed ${order[$index]}"
           done
           [[ -z "$failed" ]] || { echo "::error::load gate failed on$failed"; exit 1; }
       - name: Stop Redis
