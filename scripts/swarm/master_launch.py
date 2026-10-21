@@ -24,6 +24,7 @@ from scripts.swarm.snapshot import ledger_source
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import placed_record, primed
+from scripts.swarm_v2 import master_fill
 from scripts.swarm_v2 import masters as master_seats
 
 LAST, NEW, REPLACE = "last", "new", "replace"
@@ -202,7 +203,7 @@ def _front_doors(store, slug, live):
 
 
 def _free_seat(store, slug, live):
-    taken = {a.seat for a in store.agents(slug) if a.state != "finished" or a.name in live}
+    taken = master_fill.taken_seats(store, slug, live)
     return next(index for index in count(2) if seat_address(slug, master_seats.seat(index)) not in taken)
 
 
@@ -218,16 +219,9 @@ def _beside(store, slug, runtime, at, live):
         return _filled(primed(store, slug, record.seat, task), config)
 
     try:
-        record, placed = seat_spawn.place_seat(
-            slug, config, store, runtime, seat_spawn.Seat(MASTER, seat_name), at, prepare
-        )
+        record = master_fill.place(slug, config, store, runtime, seat_name, at, prepare)
     except seat_spawn.SeatFailed as failed:
-        store.drop_agent(slug, failed.record.name)
         raise SwarmError(f"the new master could not start: {failed.error}") from failed.error
-    record = placed_record(store.execution_occupants(slug).get(record.seat, record), placed)
-    store.put_agent(slug, record)
-    launch_check.begin(store, slug, record, at)
-    store.clear_handoff(slug, seat_name)
     return Launched(record.name, record.pane_id, record.seat, NEW)
 
 
@@ -253,7 +247,8 @@ def up(store, slug, runtime, at, choice, ask, say):
         choice = _choose(ask)
     if choice == NEW:
         return _fresh(store, slug, runtime, at, live, replace_live)
-    why = _why(previous, store.config(slug), live)
+    front = _front_doors(store, slug, live)
+    why = _why(previous, store.config(slug), live) or (front and f"the front door master {front[0].name} is live")
     if not why:
         try:
             return _resume(store, slug, runtime, at, previous)

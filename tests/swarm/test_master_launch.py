@@ -306,6 +306,27 @@ def test_flag_last_with_the_last_master_still_running_exits_non_zero(up, monkeyp
     assert rt.resumed == [] and rt.masters == []
 
 
+def test_a_last_master_is_never_resumed_onto_a_live_front_door_and_the_new_one_takes_its_own_seat(
+    up, monkeypatch, capsys
+):
+    store, _, rt = up
+    front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
+    store.put_agent("sw", front)
+    rt.live.add(front.name)
+    gone_master(store, conversation="conv-new")
+    asked = answers(monkeypatch, "1", "y")
+    assert run("sw", "master", "up") == 0
+    out = capsys.readouterr().out
+    assert "The last master cannot be resumed: the front door master master@a1b2c3-0005 is live" in out
+    assert asked[-1] == master_launch.OFFER and rt.resumed == []
+    assert json.loads(out.strip().splitlines()[-1])["seat"] == "master-2@sw"
+
+
+def test_last_and_replace_flags_exclude_each_other(up):
+    with pytest.raises(SystemExit):
+        run("sw", "master", "up", "--last", "--replace")
+
+
 def test_a_dead_master_still_in_the_registry_is_the_last_master(up):
     store, _, _ = up
     gone_master(store)
@@ -374,7 +395,7 @@ def test_a_replacing_master_retires_the_live_front_door_first(up, monkeypatch, c
     store.put_agent("sw", live)
     rt.live.add(live.name)
     answers(monkeypatch)
-    assert run("sw", "master", "up", "--new", "--replace") == 0
+    assert run("sw", "master", "up", "--replace") == 0
     launched = printed(capsys)
     assert rt.killed == [live.name]
     held = [a for a in masters(store) if a.state != "finished" and a.name in rt.live]
@@ -388,7 +409,7 @@ def test_a_front_door_that_will_not_retire_starts_no_replacement(up, monkeypatch
     rt.live.add(live.name)
     rt.stuck.add(live.name)
     answers(monkeypatch)
-    assert run("sw", "master", "up", "--new", "--replace") == 1
+    assert run("sw", "master", "up", "--replace") == 1
     assert "could not retire master@a1b2c3-0005; try again" in capsys.readouterr().err
     assert rt.masters == [] and [a.name for a in masters(store)] == [live.name]
 
