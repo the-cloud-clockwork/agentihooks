@@ -1074,7 +1074,7 @@ def test_deferred_launches_return_pending_at_once_and_a_replay_records_each_ackn
     assert len(store.execution_registry.records(slug)) == 3
 
 
-def test_a_collect_without_a_live_order_refuses_instead_of_ordering_again(setup, monkeypatch):
+def test_a_collect_without_a_live_order_refuses_instead_of_ordering_again(setup):
     from scripts.hive import launch
     from scripts.swarm.store import AgentRecord
     from scripts.swarm.tick import ACK_LATER
@@ -1094,13 +1094,13 @@ def test_a_collect_without_a_live_order_refuses_instead_of_ordering_again(setup,
     assert setup.launcher.collect(request).status is Status.PENDING
     order = setup.launcher.orders_for("task-1")
     setup.launcher.reap = Mock()
-    monkeypatch.setattr(launch.lease, "now_ms", lambda store: order.expires_at)
+    order = replace(order, expires_at=launch.lease.now_ms(store) - 1)
+    store.redis.hset(store.key(slug, launch.ORDERS), "task-1", json.dumps(order.__dict__))
     assert setup.launcher.collect(request) == Outcome("spawn", Status.AMBIGUOUS, "hive", detail=launch.EXPIRED)
     setup.launcher.reap.assert_called_once()
     assert store.execution_registry.get(slug, order.execution_id).state == "ended"
     assert setup.launcher.orders_for("task-1") == order
     assert setup.launcher.collect(request) == gone
-    monkeypatch.undo()
     setup.launcher.spawn(request)
     order = setup.launcher.orders_for("task-1")
     setup.launcher.end(store.execution_registry.get(slug, order.execution_id), "ended before its acknowledgement")
