@@ -84,12 +84,15 @@ def test_redis_installs_from_the_distribution_archive_alone():
     for name in ("hierarchy", "load"):
         steps = workflow()["jobs"][name]["steps"]
         start = next(step["run"] for step in steps if step.get("name") == "Start Redis on this runner")
-        assert (
-            'only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)'
-            in start
-        )
-        apt = [line for line in start.splitlines() if "apt-get" in line]
-        assert len(apt) == 2 and all('"${only_archive[@]}"' in line for line in apt), name
+        apt = [line for line in start.splitlines() if "apt-get" in line or "archive" in line]
+        assert apt == [
+            "archive=/etc/apt/sources.list.d/ubuntu.sources",
+            '[[ -f "$archive" ]] || archive=/etc/apt/sources.list',
+            'only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)',
+            'sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete;'
+            ' installing redis-server from the indexes that loaded"',
+            'sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" redis-server',
+        ], name
 
 
 def test_the_command_grades_pair_folders_and_refuses_a_margin_below_the_same_code_bound(tmp_path, capsys):
