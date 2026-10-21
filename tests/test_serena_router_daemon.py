@@ -56,10 +56,11 @@ def test_ensure_skips_the_router_when_serena_is_off(monkeypatch):
 
 
 @pytest.mark.parametrize("error", [OSError("no serena"), subprocess.TimeoutExpired("systemctl", 10)])
-def test_ensure_reports_a_router_start_that_raises_as_down(monkeypatch, error):
+def test_ensure_reports_a_router_start_that_raises_as_down(monkeypatch, capsys, error):
     def fail():
         raise error
 
     monkeypatch.delenv("AGENTIHOOKS_SERENA", raising=False)
     monkeypatch.setattr(daemon, "start", fail)
     assert daemon.ensure() is False
+    assert capsys.readouterr().err == f"serena router failed to start: {error}\n"
