@@ -105,11 +105,9 @@ def materialize(home: Path) -> None:
 
 
 def loopback(url: str) -> bool:
-    host = urllib.parse.urlsplit(url).hostname or ""
-    if host == "localhost":
-        return True
     try:
-        return ipaddress.ip_address(host).is_loopback
+        host = urllib.parse.urlsplit(url).hostname or ""
+        return host == "localhost" or ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
 

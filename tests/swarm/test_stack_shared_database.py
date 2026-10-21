@@ -88,6 +88,8 @@ def test_adoption_drops_host_loopback_redis_addresses(tmp_path):
         assert "AGENTIHOOKS_SWARM_REDIS_URL" not in saved
         assert saved["AGENTIHOOKS_SWARM_DATABASE_URL"] == database
         assert saved["SWARM_ADOPT_REDIS_URL"] == "redis://127.0.0.1:6379/0"
+    assert not stack_init.loopback("redis://[::1:6379/0")
+    assert not stack_init.loopback("redis://redis:6379/0")
 
 
 def test_compose_controller_and_hive_take_the_stack_redis_service_address():
