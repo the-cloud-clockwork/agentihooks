@@ -87,6 +87,26 @@ def test_the_api_reads_through_gh_and_fails_on_an_error(monkeypatch):
     assert ci_test_plan._api("repos/x") == b"{}"
     assert calls == [((["gh", "api", "repos/x"],), {"capture_output": True, "check": True, "timeout": 60})]
 
+@pytest.mark.parametrize("message", ["HTTP 403: Resource not accessible by integration", "HTTP 404: Not Found", "HTTP 502: Bad Gateway"])
+def test_a_failed_record_download_names_the_github_error_and_stays_red(monkeypatch, tmp_path, capsys, message):
+    download = ci_test_plan._api
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    api = ci_test_plan._api
+
+    def fetch(endpoint):
+        return download(endpoint) if endpoint.endswith("/zip") else api(endpoint)
+
+    def fail(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command, stderr=message.encode())
+
+    monkeypatch.setattr(ci_test_plan, "_api", fetch)
+    monkeypatch.setattr(ci_test_plan.subprocess, "run", fail)
+    out = tmp_path / "reused-tests.json"
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)])
+    assert message in capsys.readouterr().err
+    assert not out.exists()
+
 
 def test_the_newest_dev_run_whose_unit_shards_passed_and_kept_a_manifest_is_the_record(monkeypatch):
     runs = [_run(4, event="merge_group"), _run(3), _run(2), _run(1)]
