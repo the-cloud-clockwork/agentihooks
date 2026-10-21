@@ -172,3 +172,23 @@ def test_cache_sweep_batches_shared_store_scans(monkeypatch, cache):
     ci_cache.write(cache, key(2001), {})
     assert 0 < len(scans) <= 3
     assert cache.exists(key(2001))
+
+
+def test_cache_sweep_does_not_block_other_clients_in_a_bulk_transaction(monkeypatch, cache):
+    from redis.client import Pipeline
+
+    from scripts.doctor import ci_cache
+
+    for number in range(10):
+        cache.set(key(number), "{}", ex=60)
+    batches = []
+    execute = Pipeline._execute_transaction
+
+    def observed(pipeline, connection, commands, raise_on_error):
+        batches.append(len(commands))
+        return execute(pipeline, connection, commands, raise_on_error)
+
+    monkeypatch.setattr(Pipeline, "_execute_transaction", observed)
+    ci_cache.write(cache, key(11), {})
+    assert batches
+    assert max(batches) <= 2
