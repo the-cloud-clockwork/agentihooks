@@ -14,7 +14,7 @@ on:
         type: boolean
         default: false
       compare:
-        description: Run identical load gates on base and head on separate runners
+        description: Run identical load gates concurrently on base and head on one runner
         type: boolean
         default: false
       base:
@@ -132,7 +132,6 @@ jobs:
       fail-fast: false
       matrix:
         pair: [1, 2, 3, 4, 5]
-        side: [base, head]
     services:
       redis:
         image: public.ecr.aws/docker/library/redis:7-alpine
@@ -179,26 +178,41 @@ jobs:
           cp tests/ledger_load/gate.py load-base/tests/ledger_load/gate.py
           mkdir -p "$GITHUB_WORKSPACE/load-evidence"
 
-      - name: Run one side of the load pair on its own runner
+      - name: Run the base and head load windows concurrently on this runner
         env:
-          SIDE: ${{ matrix.side }}
+          PAIR: ${{ matrix.pair }}
         run: |
           set -o pipefail
-          directory="$GITHUB_WORKSPACE"
-          [[ "$SIDE" == head ]] || directory="$GITHUB_WORKSPACE/load-base"
-          cd "$directory"
-          "$HOME/venv/bin/python" -c 'import pathlib, scripts.swarm_ledger.ledger_server as m; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), m.__file__'
-          REDIS_URL=redis://127.0.0.1:6379/1 \
-            AGENTIHOOKS_SWARM_REDIS_URL=redis://127.0.0.1:6379/1 \
-            "$HOME/venv/bin/python" -m tests.ledger_load.gate \
-            --folder "$GITHUB_WORKSPACE/load-evidence/$SIDE" \
-            --base FETCH_HEAD 2>&1 | tee "$GITHUB_WORKSPACE/load-evidence/$SIDE.log"
+          order=(base head)
+          [[ "$PAIR" == [135] ]] || order=(head base)
+          database=1
+          pids=()
+          for side in "${order[@]}"; do
+            directory="$GITHUB_WORKSPACE"
+            [[ "$side" == head ]] || directory="$GITHUB_WORKSPACE/load-base"
+            (
+              cd "$directory"
+              "$HOME/venv/bin/python" -c 'import pathlib, scripts.swarm_ledger.ledger_server as m; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), m.__file__'
+              REDIS_URL="redis://127.0.0.1:6379/$database" \
+                AGENTIHOOKS_SWARM_REDIS_URL="redis://127.0.0.1:6379/$database" \
+                "$HOME/venv/bin/python" -m tests.ledger_load.gate \
+                --folder "$GITHUB_WORKSPACE/load-evidence/$side" \
+                --base FETCH_HEAD 2>&1 | tee "$GITHUB_WORKSPACE/load-evidence/$side.log"
+            ) &
+            pids+=("$!")
+            database=$((database + 1))
+          done
+          failed=""
+          for index in "${!pids[@]}"; do
+            wait "${pids[$index]}" || failed="$failed ${order[$index]}"
+          done
+          [[ -z "$failed" ]] || { echo "::error::load gate failed on$failed"; exit 1; }
 
       - name: Preserve the pair's load measurements and server logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: compare-pair-${{ matrix.pair }}-${{ matrix.side }}
+          name: compare-pair-${{ matrix.pair }}
           path: |
             load-evidence/*.log
             load-evidence/*/server.log
@@ -228,6 +242,6 @@ jobs:
       - name: Fail when the median head over base pair ratio exceeds the margin set from recorded same code pairs
         run: |
           python -m tests.ledger_load.paired \
-            --base load-evidence/compare-pair-{1,2,3,4,5}-base/base.log \
-            --head load-evidence/compare-pair-{1,2,3,4,5}-head/head.log \
+            --base load-evidence/compare-pair-{1,2,3,4,5}/base.log \
+            --head load-evidence/compare-pair-{1,2,3,4,5}/head.log \
             --margin "$SAME_CODE_MARGIN" --same-code tests/ledger_load/compare_same_code_pairs.json
