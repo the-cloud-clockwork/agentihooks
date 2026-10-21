@@ -64,6 +64,16 @@ def test_three_missed_beats_expire_both_keys(redis, monkeypatch):
     assert redis.exists(registry.key("machine"))
 
 
+@pytest.mark.parametrize("account", ["login", ""])
+def test_beat_publishes_the_master_login_account(redis, monkeypatch, account):
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(daemon.master_claude_login, "signed_in", lambda: account)
+    daemon.beat(redis, "machine")
+    assert registry.show(redis, "machine")["master_login"] == {"claude": account}
+
+
 @pytest.mark.parametrize(("member", "indexed", "ttl"), [("machine", set(), 10), ("other", {"machine"}, 45)])
 def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis, monkeypatch, member, indexed, ttl):
     from scripts.routing.reservation import LaunchSlots
@@ -378,6 +388,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
+        "master_login": {"claude": ""},
         "repos": [],
         "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
         "version": "",

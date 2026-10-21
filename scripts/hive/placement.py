@@ -116,12 +116,20 @@ def overflow(role: str, waited: Wait, local_agents: int, local_max: int) -> Choi
     return Choice(LOCAL_MACHINE, waited.reason)
 
 
-def place_master(harness: str, login: str, repo: str, hives: list[dict], now: int) -> MasterPlacement | Wait:
+def place_master(
+    harness: str, login: str, repo: str, hives: list[dict], now: int, front: bool = False
+) -> MasterPlacement | Wait:
     candidates = []
     for hive in hives:
         if not live(hive, now) or repo not in hive["repos"] or not hosts(MASTER, hive):
             continue
         headless = hive["ui"] != YES
+        forced = front and hive["master_login"].get(harness)
+        if forced:
+            if login in ("", forced):
+                placed = MasterPlacement(hive["id"], forced, INTERACTIVE, False)
+                candidates.append((headless, False, _order(MASTER)(hive), forced, placed))
+            continue
         native = hive["interactive"].get(harness)
         if native and login in ("", native):
             candidates.append(
