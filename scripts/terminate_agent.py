@@ -266,14 +266,17 @@ def _close_pane(pane: str, socket: str) -> str:
     return "closed"
 
 
-def _record_exit(swarm: str, agent: str) -> str:
+def _record_exit(swarm: str, agent: str) -> None:
     from scripts.swarm import deliberate_exit, store
 
+    if not swarm or not agent:
+        return
     try:
         deliberate_exit.record(store.connect(), swarm, agent, int(time.time() * 1000))
     except store.SwarmError as exc:
-        return f"not-recorded ({exc})"
-    return "recorded"
+        print(f"swarm_exit=not-recorded ({exc})")
+        return
+    print("swarm_exit=recorded")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -346,8 +349,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"terminate-agent: {exc}", file=sys.stderr)
         return 1
     print(f"result=terminated escalation={'SIGKILL' if escalated else 'none'}")
-    if swarm and agent:
-        print(f"swarm_exit={_record_exit(swarm, agent)}")
+    _record_exit(swarm, agent)
     if pane:
         print(f"pane_id={pane} pane={'kept' if args.keep_pane else _close_pane(pane, socket)}")
     return 0
