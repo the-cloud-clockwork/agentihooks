@@ -199,6 +199,22 @@ def test_no_workstation_herdr_leaves_the_hive_wait(setup, monkeypatch):
     assert fenced.placement_refusal("eng", {"id": "task"}) == FULL
 
 
+def test_a_lane_the_local_hive_excludes_waits_for_a_hive_instead_of_running_locally(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    write_hive(setup, id="workstation", ui="yes", excluded=["eng"], max_agents=4)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "workstation")
+    assert fenced.placement_refusal("eng", {"id": "task"}) == FULL
+
+
+def test_a_lane_the_local_hive_keeps_still_runs_locally_when_no_hive_has_room(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    write_hive(setup, id="workstation", ui="yes", excluded=["master"], max_agents=0)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "workstation")
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+
+
 def test_swarm_set_stores_the_local_machine_cap(setup, capsys):
     import argparse
     import json
