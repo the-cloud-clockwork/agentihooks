@@ -159,12 +159,18 @@ def seat_successor(store, previous, hive):
 @pytest.mark.parametrize("hive", ["", "m2"])
 def test_a_leaving_member_agents_unread_mail_reaches_its_seats_next_occupant_on_another_host(store, agent, mail, hive):
     member, item = mail
+    neighbour = store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(neighbour, "eng", "t0", seat="eng-0@sw", hive="m1"))
+    store.seats.occupy("eng-0@sw", neighbour, 1)
     exits.settle(InboxStore(store.redis), agent.name, SEAT, "handed off its seat")
     store.put_agent("sw", replace(agent, state="finished"))
     successor = seat_successor(store, agent, hive)
     exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
-    assert [i.id for i in InboxStore(store.redis, world=hive).pending_mail(successor)] == [item.id]
+    target = InboxStore(store.redis, world=hive)
+    assert [i.id for i in target.pending_mail(successor)] == [item.id]
     assert member.inbox(SEAT) == []
+    moved = target.history(item.id)[-1]
+    assert (moved["by"], moved["reason"]) == ("swarm", f"moved to the inbox that now holds {SEAT}")
 
 
 def test_seat_mail_a_leaving_member_agent_took_reaches_its_seats_next_occupant_on_the_workstation(store, agent):
@@ -188,3 +194,10 @@ def test_a_redirect_moves_a_member_item_with_its_history_into_the_inbox_its_addr
     assert member.inbox(agent.name) == []
     assert [i.id for i in controller.pending_items(successor)] == [item.id]
     assert [e["state"] for e in controller.history(item.id)] == ["pending", "pending"]
+
+
+def test_the_inbox_an_address_resolves_to_keeps_the_persist_hook(store, agent):
+    persist = object()
+    successor = seat_successor(store, agent, "")
+    resolved = InboxStore(store.redis, persist=persist, world="m1").home_store(successor)
+    assert (resolved.world, resolved.persist) == ("", persist)
