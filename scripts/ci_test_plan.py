@@ -3,6 +3,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -16,7 +17,11 @@ CANDIDATES = 10
 
 
 def _api(endpoint: str) -> bytes:
-    return subprocess.run(["gh", "api", endpoint], capture_output=True, check=True, timeout=60).stdout
+    try:
+        return subprocess.run(["gh", "api", endpoint], capture_output=True, check=True, timeout=60).stdout
+    except subprocess.CalledProcessError as error:
+        print(error.stderr.decode(), file=sys.stderr)
+        raise
 
 
 def _recorded(run: dict, repository: str) -> bool:
