@@ -94,7 +94,7 @@ def _quiet_quota(monkeypatch):
     monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
 
 
-def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
+def test_run_beats_immediately_then_waits_a_beat_less_the_wake_slack(monkeypatch):
     events = []
     connection = object()
     monkeypatch.setattr(daemon, "beat", lambda redis, hive: events.append((redis, hive)))
@@ -127,10 +127,10 @@ def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
         "refresh",
         ("start", environ, None, 50),
         (connection, "local"),
-        15,
+        13,
         ("start", environ, "worker", 51),
         (connection, "local"),
-        15,
+        13,
     ]
 
 
@@ -526,7 +526,7 @@ def test_clients_set_timeouts_keepalive_health_checks_and_no_retries(stalled, mo
         assert options["retry"].get_retries() == 0
         assert options["decode_responses"] is True
         assert options["port"] == source.connection_pool.connection_kwargs["port"]
-    assert (daemon.CONNECT_TIMEOUT_S, daemon.READ_TIMEOUT_S) == (3, 5)
+    assert (daemon.CONNECT_TIMEOUT_S, daemon.READ_TIMEOUT_S, daemon.WAKE_SLACK_S) == (3, 5, 2)
 
 
 def test_clients_keep_the_source_connection_class():
@@ -541,6 +541,7 @@ def _stall_run(monkeypatch, connect, beat):
 
     monkeypatch.setattr(daemon, "BEAT_SECONDS", 0.5)
     monkeypatch.setattr(daemon, "READ_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(daemon, "WAKE_SLACK_S", 0.1)
     _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", beat)

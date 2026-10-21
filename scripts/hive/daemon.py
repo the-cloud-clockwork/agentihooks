@@ -28,6 +28,8 @@ TTL_SECONDS = BEAT_SECONDS * 3
 RETRY_SECONDS = (1, 2, 4, 8, 16, 30)
 CONNECT_TIMEOUT_S = 3
 READ_TIMEOUT_S = 5
+# The wait client times out at BEAT_SECONDS, so a scheduled wake must land before it.
+WAKE_SLACK_S = 2
 UNIT = "agentihooks-hive.service"
 ORIGIN = re.compile(r'\[remote "origin"\][^\[]*?\burl\s*=\s*(\S+)')
 REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
@@ -133,7 +135,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                 worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
                 renewed = github_app_cli.renew(renewed, time.time())
                 beat(redis, local_id)
-                scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)), redis=waiter)
+                scheduled_wait(max(0, BEAT_SECONDS - max(WAKE_SLACK_S, time.monotonic() - started)), redis=waiter)
                 failures = 0
         except lost as exc:
             delay = RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)]
