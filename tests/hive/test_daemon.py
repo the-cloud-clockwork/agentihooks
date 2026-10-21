@@ -565,7 +565,10 @@ def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(mon
     assert beats[1] is healthy
     assert beats[2] - started < daemon.BEAT_SECONDS
     assert healthy.get("beat") == "local"
-    assert "hive Redis connection lost (TimeoutError(" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert err.startswith("hive Redis connection lost (")
+    assert "TimeoutError" in err
+    assert err.endswith("); reconnecting in 1s\n")
     daemon.time.sleep.assert_called_once_with(1)
 
 
