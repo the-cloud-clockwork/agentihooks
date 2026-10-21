@@ -48,6 +48,7 @@ import ledger_media  # noqa: E402
 from scripts.gates import talk  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     composition,
+    ledger_closed,
     ledger_task_duplicates,
     page_policy,
     ports,
@@ -107,7 +108,10 @@ NO_DOCTOR = ("", False)
 def page_view(state, fix_phase, watched):
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
     marks = ports.swarm().freeze.marks(state, hierarchy.project(state)[0], fix_phase, watched)
-    return {**state, "marks": marks, "_meta": {**meta, "limits": PAGE_LIMITS}}
+    rows, closed = ledger_closed.trimmed(state)
+    if closed:
+        meta["closed"] = closed
+    return {**state, **rows, "marks": marks, "_meta": {**meta, "limits": PAGE_LIMITS}}
 
 
 def doctor_holds(slug):

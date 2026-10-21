@@ -1,7 +1,7 @@
 import { OFFLINE, PAGE } from "./config.js";
 import { $, banner, newId, span, status } from "./dom.js";
-import { readMetadata, writeLedger } from "./api.js";
-import { applyChecks, applyOp, itemOf, lsRead, lsWrite, setState, withDefaults } from "./state.js";
+import { readClosed, readMetadata, writeLedger } from "./api.js";
+import { applyChecks, applyOp, hiddenDone, itemOf, lsRead, lsWrite, setState, withDefaults } from "./state.js";
 import { attaching } from "./media.js";
 import { composing, editing } from "./threads.js";
 import { render } from "./render.js";
@@ -97,11 +97,61 @@ export function toggle(key, value, field) {
   flush(false);
 }
 
+const older = {};
+const pulled = {};
+
+export function closedLeft(name) {
+  const closed = (meta.closed || {})[name];
+  return closed ? Math.max(0, closed.hidden - (pulled[name] || 0)) : 0;
+}
+
+export function closedLeftIn(name, key) {
+  const closed = (meta.closed || {})[name];
+  const field = { phases: "plan", tasks: "slice" }[name];
+  if (!closed || !closed.groups || !field) return 0;
+  const plans = new Set(doc.plans.map((p) => `plans/${p.id}`));
+  const group = (i) => (name === "phases" && !plans.has(i.plan) ? "unplanned" : i[field]);
+  return Math.max(0, (closed.groups[key] || 0) - (older[name] || []).filter((i) => group(i) === key).length);
+}
+
+function keepDropped(previous, next) {
+  for (const name of Object.keys(pulled)) {
+    const gone = hiddenDone(next, name);
+    const have = new Set([...next[name], ...(older[name] || [])].map((i) => i.id));
+    const dropped = previous[name].filter((i) => gone.has(i.id) && !have.has(i.id)).reverse();
+    older[name] = [...dropped, ...older[name]].filter((i) => gone.has(i.id));
+    pulled[name] = older[name].length;
+  }
+}
+
+function mergeOlder(d) {
+  for (const [name, rows] of Object.entries(older)) {
+    const known = new Set(d[name].map((i) => i.id));
+    d[name] = [...rows.filter((i) => !known.has(i.id)).reverse(), ...d[name]];
+  }
+}
+
+export async function loadClosed(name) {
+  const closed = (meta.closed || {})[name];
+  if (!closed) return;
+  const resp = await readClosed(name, closed.kept + (pulled[name] || 0));
+  if (!resp.ok) return;
+  const { data } = await resp.json();
+  const have = new Set((older[name] || []).map((i) => i.id));
+  const fresh = withDefaults({ [name]: data })[name].filter((i) => !have.has(i.id));
+  older[name] = [...(older[name] || []), ...fresh];
+  pulled[name] = fresh.length ? older[name].length : closed.hidden;
+  mergeOlder(doc);
+}
+
 function applyServer(server) {
   if ((server._meta || {}).rev < rev) return;
   meta = server._meta || {};
   rev = meta.rev;
+  const previous = doc;
   doc = withDefaults(server);
+  keepDropped(previous, doc);
+  mergeOlder(doc);
   for (const op of ops) applyOp(doc, op);
   applyChecks(doc);
   banner([meta.seed_error]);
