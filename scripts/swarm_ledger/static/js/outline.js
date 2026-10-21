@@ -1,6 +1,6 @@
 import { $, h } from "./dom.js";
 import { itemState } from "./state.js";
-import { closedLeft, doc } from "./sync.js";
+import { closedLeft, doc, pageIn, pagedOut } from "./sync.js";
 import { noticeTarget, showAlerts, showNotifications } from "./notices.js";
 import { showArtifacts } from "./artifacts.js";
 import { renderSwarm, swarm } from "./swarm.js";
@@ -46,10 +46,24 @@ export function revealTarget(id) {
   return el;
 }
 
+export function pageTo(id) {
+  const [kind, list, ...rest] = id.split("-");
+  if (kind !== "item" || document.getElementById(id) || !pagedOut(list, rest.join("-"))) return false;
+  pageIn(list, rest.join("-")).then(() => land(revealTarget(id)));
+  return true;
+}
+
 export function jumpTo(ev, item) {
-  const el = revealTarget(`item-${item.replace("/", "-")}`);
+  const id = `item-${item.replace("/", "-")}`;
+  if (pageTo(id)) return ev.preventDefault();
+  const el = revealTarget(id);
   if (!el) return;
   ev.preventDefault();
+  land(el);
+}
+
+function land(el) {
+  if (!el) return;
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.classList.remove("flash");
   void el.offsetWidth;

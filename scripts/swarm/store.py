@@ -31,6 +31,7 @@ DEFAULT_SWAP_FULL_SHARE = 0.9
 DEFAULT_SWAP_FLOOR_MB = 4096
 DEFAULT_MASTERS_STEP = 12
 DEFAULT_MASTER_MOVE_GRACE = 300
+DEFAULT_LOCAL_MAX_AGENTS = 8
 MAX_LOAD = 10.0
 CODEX_TRANSPORTS = ("legacy", "app_server")
 LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
@@ -81,6 +82,7 @@ class SwarmConfig:
     swap_full_share: float = DEFAULT_SWAP_FULL_SHARE
     swap_floor_mb: int = DEFAULT_SWAP_FLOOR_MB
     hive_placement: bool = False
+    local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
 
 
 def scaling_refusal(config):
@@ -222,6 +224,7 @@ class RedisStore:
             float(raw.get("swap_full_share") or DEFAULT_SWAP_FULL_SHARE),
             int(raw.get("swap_floor_mb") or DEFAULT_SWAP_FLOOR_MB),
             raw.get("hive_placement") == "True",
+            int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
         )
 
     def update(self, slug, **changes):

@@ -137,7 +137,7 @@ class HiveLaunch:
         hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
         harness = saved.get("harness") or chosen.get("agent") or "claude"
         if harness not in ("claude", "auto"):
-            return self._record_wait(lane, task, placement.Wait("Codex hive placement is not enabled"))
+            return self._record_wait(lane, task, placement.Wait("Codex hive placement is not enabled", role))
         rows = getattr(self.herdr, "_quota_accounts", None)
         rows = capacity.accounts(dict(os.environ), now / 1000, refresh=False) if rows is None else rows
         if lane == "master" and not task.get("route_kind"):
@@ -164,6 +164,7 @@ class HiveLaunch:
                 if isinstance(matched, placement.Wait)
                 else Selection(decision, choice.hive, row, route_kind, fallback=fallback, origin=matched)
             )
+        found = replace(found, role=role) if isinstance(found, placement.Wait) else found
         return self._record_wait(lane, task, found)
 
     def _master_selection(self, config, decision, hives, now, rows):

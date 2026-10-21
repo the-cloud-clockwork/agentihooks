@@ -26,6 +26,7 @@ DIRECT = {
     "swarm-smoke.yml": ("Swarm container smoke", "swarm-smoke"),
     "swarm-node-smoke.yml": ("Swarm worker image smoke", "swarm-node-smoke"),
     "brain-smoke.yml": ("brain-smoke", "brain-smoke"),
+    "writer-lock.yml": ("Writer lock", "writer-lock"),
     "worker-resources.yml": ("Worker resources", "worker-resources"),
     "startup-stages.yml": ("Startup stages", "startup-stages"),
 }

@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from scripts.hive.registry import UI_ROLES, live
 
@@ -13,12 +13,15 @@ NO_UI_HIVE = "no UI hive live"
 HIVE = "hive"
 HEADLESS = "headless hive"
 UI_HIVE = "UI hive"
+LOCAL_MACHINE = "local machine"
+LOCAL_FULL = ", and the local machine runs "
 UNRANKED = math.inf
 
 
 @dataclass(frozen=True)
 class Wait:
     reason: str
+    role: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,14 @@ def choose(
 def place(role: str, harness: str, slot: str, route_kind: str, repo: str, hives: list[dict], now: int) -> str | Wait:
     chosen = choose(role, harness, slot, route_kind, repo, hives, now)
     return chosen.hive if isinstance(chosen, Choice) else chosen
+
+
+def overflow(role: str, waited: Wait, local_agents: int, local_max: int) -> Choice | Wait:
+    if role in UI_ROLES:
+        return waited
+    if local_agents >= local_max:
+        return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents")
+    return Choice(LOCAL_MACHINE, waited.reason)
 
 
 def place_master(harness: str, login: str, repo: str, hives: list[dict], now: int) -> MasterPlacement | Wait:
