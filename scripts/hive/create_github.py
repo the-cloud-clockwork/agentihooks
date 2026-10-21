@@ -19,7 +19,7 @@ def gh(run: Run, argv: list[str], body: dict | None = None) -> str:
         raise auth.HiveError(f"gh {argv[0]} failed ({exc})") from exc
     if done.returncode != 0:
         raise auth.HiveError(f"gh {' '.join(argv[:2])} exited {done.returncode}: {done.stderr.strip()}")
-    return done.stdout.strip()
+    return done.stdout.rstrip("\n")
 
 
 def read(run: Run, repo: str, path: str, ref: str) -> str:

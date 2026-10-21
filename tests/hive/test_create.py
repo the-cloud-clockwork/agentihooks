@@ -178,7 +178,7 @@ def test_a_rerun_resumes_the_unfinished_create_and_repeats_no_finished_step(worl
     later = world.run.calls[calls:]
     assert not [argv for argv in later if argv[:3] in (["gh", "pr", "create"], ["herdr", "machine", "add"])]
     assert not [argv for argv in later if argv[0] in ("ssh-keygen", "ssh", "kubectl")]
-    assert world.lines[len(create.STEPS)] == f"hive create {NAME}: resuming the unfinished create"
+    assert world.lines[len(create.STEPS) - 1] == f"hive create {NAME}: resuming the unfinished create"
     assert f"hive create {NAME}: manifests: kept pull request {PR}" in world.lines
     assert (world.home / ".ssh" / "known_hosts").read_text().count("HOSTPUBLIC") == 1
 
