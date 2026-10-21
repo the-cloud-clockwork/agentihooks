@@ -141,7 +141,7 @@ def test_a_record_reads_all_jobs_of_its_run_in_one_request(monkeypatch):
 
 
 def test_the_candidate_runs_list_their_artifacts_at_the_same_time(monkeypatch):
-    runs = [_run(4), _run(3), _run(2), _run(1)]
+    runs = [_run(n) for n in range(ci_test_plan.CANDIDATES, 0, -1)]
     _github(monkeypatch, runs, manifests={1: _manifest(1)})
     api = ci_test_plan._api
     listings = threading.Barrier(len(runs), timeout=10)
@@ -174,7 +174,7 @@ def test_a_record_downloads_while_its_jobs_are_read(monkeypatch):
     assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
 
 
-def test_a_run_whose_unit_shards_failed_never_reads_its_download(monkeypatch):
+def test_a_run_whose_unit_shards_failed_does_not_consume_its_download(monkeypatch):
     _github(
         monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(2), 1: _manifest(1)}, failed={(2, "unit (3.12, 4)")}
     )
