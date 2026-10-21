@@ -33,8 +33,12 @@ jobs:
 
   kind:
     if: ${{ !inputs.contracts_only }}
+    needs: contracts
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,35 +60,14 @@ jobs:
         with:
           name: worker-hive-proof
           path: ~/scratchpad/worker-hive-proof/*.txt
-      - name: Retain the proven image for publication
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-        uses: actions/upload-artifact@v4
-        with:
-          name: worker-hive-image
-          path: ~/scratchpad/worker-hive-proof/image.tar
-          compression-level: 0
-          retention-days: 1
-
-  publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    needs: [contracts, kind]
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: worker-hive-image
-          path: ~/scratchpad/worker-hive-publish
       - uses: docker/login-action@v3
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish the proven hive worker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         run: |
-          docker load -i "$HOME/scratchpad/worker-hive-publish/image.tar"
           docker tag local/agentihooks-hive-worker:dev ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev
           docker push ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev

@@ -35,7 +35,6 @@ MOVED = {
     ("branch-lanes.yml", "grade"): LIGHT,
     ("hive-worker.yml", "contracts"): LIGHT,
     ("hive-worker.yml", "kind"): STANDARD,
-    ("hive-worker.yml", "publish"): STANDARD,
     ("brain-smoke.yml", "smoke"): QUEUED,
     ("codex-cache.yml", "seed"): STANDARD,
     ("coverage-stability.yml", "compare"): BATCH,

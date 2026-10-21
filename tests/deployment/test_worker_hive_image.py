@@ -5,6 +5,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
@@ -154,3 +155,16 @@ def test_base_is_undetermined_with_a_visible_reason_when_the_comparison_fails(tm
 def test_the_hive_image_carries_the_pyproject_ruff_pin_and_the_kind_proof_runs_it():
     assert "&& ruff --version &&" in PROOF.read_text()
     assert "r.startswith('ruff==')" in (ROOT / "deploy/worker/Dockerfile").read_text()
+
+
+def test_the_kind_job_publishes_the_proven_image_after_the_chart_proof_without_an_artifact():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/hive-worker.yml").read_text())["jobs"]
+    kind = jobs["kind"]
+    assert "publish" not in jobs
+    assert kind["needs"] == "contracts"
+    names = [step.get("name", step.get("uses", "")) for step in kind["steps"]]
+    assert names.index("Publish the proven hive worker image") > names.index(
+        "Build the worker image while kind starts, then prove registration and order acknowledgement"
+    )
+    assert "docker save" not in PROOF.read_text()
+    assert all("image.tar" not in str(step) for step in kind["steps"])
