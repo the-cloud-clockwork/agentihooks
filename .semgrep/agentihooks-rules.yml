@@ -1,4 +1,4 @@
-# Excluded paths beside /scripts/scheduler/ hold a timed job awaiting its move onto the scheduler, or a daemon loop paced by its own reconnect or event wait.
+# Excluded paths beside /scripts/scheduler/ hold a timed job awaiting its move onto the scheduler, a daemon loop paced by its own reconnect or event wait, or a bounded retry wrapper around one CI call.
 rules:
   - id: machine-timer-unit
     message: A systemd timer unit schedules work outside the agentihooks scheduler. Register the job with scripts.scheduler instead.
