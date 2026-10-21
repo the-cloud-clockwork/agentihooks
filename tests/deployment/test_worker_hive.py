@@ -46,6 +46,7 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
         '  [[ "$REFUSE" != init ]] || exit 7\n'
         '  [[ "$REFUSE" != bundle-init || "$*" == init ]] || exit 7\nfi\n'
         'if [[ "$*" == "deps ensure" ]]; then [[ "$REFUSE" != deps ]] || exit 4; fi\n'
+        'if [[ "$*" == "hive run" ]]; then printf %s "${LEDGER_CA_PEM:+set}" > "$AGENTIHOOKS_HOME/hive-run-ca-pem"; fi\n'
         'if [[ "$*" == "hive run" && "${GH_TOKEN:-}" == "$GITHUB_PERSONAL_ACCESS_TOKEN" ]]; then\n'
         '  touch "$AGENTIHOOKS_HOME/gh-token-matches"\nfi\n'
     )
@@ -362,3 +363,10 @@ def test_a_configured_git_identity_is_kept(tmp_path):
     result, _, _, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
     assert git_identity(tmp_path) == ["Operator", "operator@example.test"]
+
+
+def test_hive_run_and_the_agents_it_launches_never_inherit_the_inline_ledger_ca(tmp_path, monkeypatch, cert):
+    monkeypatch.setenv("LEDGER_CA_PEM", Path(cert[0]).read_text())
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (home / "hive-run-ca-pem").read_text() == ""
