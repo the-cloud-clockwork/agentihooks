@@ -61,7 +61,7 @@ Dev push run [39064628062](https://github.com/the-cloud-clockwork/agentihooks/ac
 - **A red integration branch keeps merging; promotion does not advance.** A failed promotion run never closes the queue or holds other pull requests. The release branch stays on the last green promoted head until a later run passes.
 - **Promotion owns the slow checks.** Nothing is dropped to make the earlier tiers fast; it runs at promotion instead, and a pull request is never held for a check only promotion runs.
 - **A red promotion must produce one fixer task per failing check.** Each must be a `ci` task naming the job, the run and the commit, raised with a ledger alert and closed by the next green run. The fix is an ordinary pull request.
-- **A lost runner is retried once.** A retry after runner loss is not a pass on a failed check. In the merge queue the [Queue retry workflow](#lost-runner-requeue) does this for unit shards.
+- **A lost runner is retried once.** A retry after runner loss is not a pass on a failed check. In the merge queue a unit shard whose runner was lost is [rerun inside the same merge group run](#lost-unit-shard-rerun).
 
 ## Entering the merge queue
 
@@ -112,6 +112,15 @@ agentihooks swarm <slug> merge queue https://github.com/the-cloud-clockwork/agen
 ```
 
 For agentibrain-kernel, whose `dev` rules require `Gate — Required` reported by GitHub Actions (`gh api repos/the-cloud-clockwork/agentibrain-kernel/rules/branches/dev` lists it with `integration_id` 15368), the command grades that check, not a Tests run, and enqueues into the kernel's `dev` merge queue. A repository with no merge queue on `dev`, such as antoncore, takes the squash merge described above. The checks wait accepts a pull request or an Actions run in another repository the same way: `agentihooks swarm <slug> wait --on checks https://github.com/<owner>/<repo>/actions/runs/<id>` reads only that repository's run and, when it is red, its jobs.
+
+## Lost unit shard rerun
+
+A merge group unit shard that loses its runner is rerun once inside the same Tests run, so the pull request stays in the queue and merges on the rerun's green.
+
+1. `queue-fail-fast` reads the log of each failed `unit (<python>, <shard>)` job once on the App token. Only an error line `Process completed with exit code <1 to 127>` with no runner loss signature proves a real failure and cancels the run at once; a timed out shard also cancels it. A lost runner can leave no log, or only an annotation the App token cannot read, so any other shard failure waits for the classifier. Every other failed job, the classifier and the rerun included, cancels the run at once.
+2. `unit-lost` starts when the `unit` matrix ends in failure or cancelled. On the App token it lists this attempt's jobs and runs `python -m scripts.ci_unit_rerun --jobs <listing> --repo <owner>/<repo> --plan <queue plan>`, which judges each failed shard's log by the watcher's rule. A timed out shard, a shard whose log proves a real failure, or a lost leg missing from the queue shard plan makes `unit-lost` fail and the queue drops the entry.
+3. `unit-rerun` runs the `unit` job's own steps once for each lost leg, from the same queue shard plan, and overwrites that leg's durations, flake and coverage artifacts. `shard-check` waits for it, so completeness is graded on the rerun's results.
+4. `Gate — Required` accepts a merge group only when `unit` passed with both rerun jobs skipped, or `unit` failed or was cancelled and both `unit-lost` and `unit-rerun` passed. A rerun that fails for any reason, a second runner loss included, fails the gate and the queue drops the entry. Queue retry never requeues it: a run whose `unit rerun` job failed is refused with `failed again on its in-run rerun`.
 
 ## Lost runner requeue
 
@@ -186,6 +195,7 @@ gh run view <run id> --log | grep -E '"requeue"|Log only'
 | `"requeue": false` with `failed without a runner loss signature: <shards>` | A shard failed on a test, or its loss left none of the three signatures. | Read the shard log. Fix a real failure; queue again by hand for an unrecognised runner loss. |
 | `"requeue": false` with `head already left the queue 2 times on failed checks` | The same head was already requeued once and failed again. | Treat it as a real failure until the shard logs show otherwise. |
 | `"requeue": false` with `pull request is not open outside the queue` | The pull request was closed or merged, already queued again, or still in the queue after the 30 minute wait. | None, unless it is open and outside the queue; then queue it by hand. |
+| `"requeue": false` with `failed again on its in-run rerun: <jobs>` | A shard lost its runner, was rerun inside the run, and the rerun failed. | Read the rerun log; queue again by hand once the cause is fixed. |
 | `"requeue": false` with `no unit shard failed` | The run failed or was cancelled with no unit shard carrying a failure or a runner loss signature. | Read the failed job; queue again by hand once it is fixed. |
 | `Classify the failed jobs` fails with `gh: HTTP 404` on `actions/jobs/<id>/logs` | GitHub kept no log for a shard, which can happen when its runner was lost. No decision is printed and nothing is requeued. | Queue the pull request by hand. |
 | The `Log only` notice | `QUEUE_RETRY_ENFORCE` is `false`. | Queue the pull request by hand, or delete the variable to turn enforcement on. |

@@ -18,6 +18,9 @@ BUDGETS = {
     "split": 90,
     "select": 60,
     "unit": 300,
+    # Merge queue only, after a lost runner; stage budgets grade push and dispatch runs.
+    "unit-lost": 0,
+    "unit-rerun": 0,
     "unit-selected": 300,
     "shard-check": 90,
     "test-count": 120,

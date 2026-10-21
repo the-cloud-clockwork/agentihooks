@@ -125,6 +125,20 @@ def _acl_keys(member_id: str) -> tuple[str, ...]:
     return (f"%R~{ROOT}:*", f"~{own}", f"~{own}:*", *(f"~{ROOT}:{key}" for key in WORKER_KEYS))
 
 
+def regrant(redis: "Redis") -> None:
+    for member_id in redis.smembers(INDEX):
+        redis.acl_setuser(
+            f"hive-{member_id}",
+            enabled=True,
+            reset_keys=True,
+            reset_channels=True,
+            categories=ACL_CATEGORIES,
+            keys=_acl_keys(member_id),
+            channels=ACL_PATTERNS,
+        )
+    _persist(redis)
+
+
 def _persist(redis: "Redis") -> None:
     from redis.exceptions import ResponseError
 

@@ -180,7 +180,11 @@ def _global(environ: dict, now: float) -> list[Account]:
         week = session_bands.left(quota["seven_day"]["used"], quota["seven_day"]["resets_at"], now) if quota else None
         cap = None
         if quota and session_bands.fresh(quota["observed_at"], now):
-            cap = session_bands.week_cap(week) if row["harness"] == "codex" else session_bands.cap(five, week)
+            cap = (
+                session_bands.week_cap(week)
+                if row["harness"] == "codex"
+                else session_bands.scaled_cap(five, week, session_bands.hive_ceiling(environ))
+            )
         weight = None
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)

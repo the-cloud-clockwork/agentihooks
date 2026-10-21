@@ -2340,6 +2340,30 @@ def test_aggregate_capacity_keeps_missing_or_stale_codex_quota_unknown(monkeypat
     )
 
 
+@pytest.mark.parametrize(
+    ("environ", "high", "near"),
+    [
+        ({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 9, 0),
+        ({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes", "AGENTIHOOKS_HIVE_SESSION_CEILING": "8"}, 5, 0),
+    ],
+)
+def test_hive_workers_are_admitted_more_at_high_quota_and_fewer_near_a_limit(monkeypatch, environ, high, near):
+    from scripts.routing import aggregate
+
+    def record(account, five_used):
+        quota = {
+            "observed_at": 100,
+            "five_hour": {"used": five_used, "resets_at": 500},
+            "seven_day": {"used": 2, "resets_at": 600},
+        }
+        return {"harness": "claude", "account": account, "kind": "pool", "sessions": 2, "quota": quota}
+
+    monkeypatch.setattr(aggregate, "current", lambda now: {"high": record("high", 4), "near": record("near", 92)})
+    rows = capacity.accounts(environ, 100, refresh=False)
+    assert {row.name: capacity.free_seats(row) for row in rows} == {"high": high, "near": near}
+    assert high + 2 > session_bands.TOP_BAND
+
+
 def test_two_names_holding_one_token_offer_one_account(monkeypatch, tmp_path):
     env = {
         "AGENTIHOOKS_HOME": str(tmp_path),

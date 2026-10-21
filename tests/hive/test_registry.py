@@ -164,9 +164,9 @@ def test_a_record_written_by_another_writer_shows_with_defaults(redis):
         ([], "hive set needs at least one setting"),
         (
             ["colour=red"],
-            "unknown setting 'colour=red'; settings are name, ui, ephemeral, excluded, prefer, max-agents",
+            "unknown setting 'colour=red'; settings are name, ui, ephemeral, draining, excluded, prefer, max-agents",
         ),
-        (["ui"], "unknown setting 'ui'; settings are name, ui, ephemeral, excluded, prefer, max-agents"),
+        (["ui"], "unknown setting 'ui'; settings are name, ui, ephemeral, draining, excluded, prefer, max-agents"),
         (["ui=maybe"], "ui must be yes or no, not 'maybe'"),
         (["ephemeral=true"], "ephemeral must be yes or no, not 'true'"),
         (["name="], "name must not be empty"),
@@ -231,7 +231,8 @@ def test_cli_set_show_and_list(redis, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["heartbeat_at"] == 50_000
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "box\tlive\tui=yes\tmax-agents=3\texcluded=qa\npod\tstale\tui=no\tmax-agents=20\texcluded=eng\n"
+        "box\tlive\tui=yes\tmax-agents=3\texcluded=qa\theadroom=missing\n"
+        "pod\tstale\tui=no\tmax-agents=20\texcluded=eng\theadroom=missing\n"
     )
 
 
@@ -262,7 +263,7 @@ def test_cli_list_joins_excluded_with_commas(redis, monkeypatch, capsys):
     monkeypatch.setattr(cli, "now_ms", lambda: 0)
     registry.update(redis, "box", ["excluded=eng,ci"])
     assert cli.main(["list"]) == 0
-    assert capsys.readouterr().out == "box\tstale\tui=no\tmax-agents=20\texcluded=eng,ci\n"
+    assert capsys.readouterr().out == "box\tstale\tui=no\tmax-agents=20\texcluded=eng,ci\theadroom=missing\n"
 
 
 @pytest.fixture

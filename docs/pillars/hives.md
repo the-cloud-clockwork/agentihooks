@@ -63,6 +63,16 @@ agentihooks hive install          # user service that runs agentihooks hive run
   seconds after any exit. `hive run` publishes sessions, quota, slots and repos every fifteen seconds.
 - `agentihooks hive refresh` mints a new Redis credential; `agentihooks hive revoke <id>` deletes a member's
   ledger credential and Redis user.
+- `agentihooks hive remove <id>` takes a hive out of the fleet in one run. It sets `draining=yes`, so placement
+  puts no new agent or master there, and sends every live agent on the hive one inbox order to hand off. Once none
+  is left it revokes the member and its Redis user, removes the herdr machine saved under the hive's label and that
+  machine's host key from `~/.ssh/known_hosts`, deletes the hive record and every key below it, and deletes the
+  OpenBao record (`k8s/agentihooks-hive-<label>`, or `--path`). With `--antoncore <checkout>` it also stages the
+  removal of the hive's Argo application, manifests folder and values overlay there, for a pull request. The label
+  defaults to the member's name (`--label` overrides; a rerun after the member is revoked needs it). After `--wait` seconds (default 3600) with agents still on
+  the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step skips a
+  piece that is already gone, so a rerun finishes an interrupted remove. `OPENBAO_URL` and `OPENBAO_TOKEN` must
+  be set.
 - `agentihooks hive list` prints one line per hive: id, `live` or `stale`, ui, max agents and excluded (`none` when
   empty).
   `agentihooks hive show <id>` prints the full record as JSON.
@@ -385,6 +395,13 @@ Quota belongs to the account, so every hive reports the same cap for it. A subsc
 missing or older takes the cap and reading of the newest one another live hive published for that account. A hive
 that holds a token but never probes it, such as a worker pod, still shows the account's real cap; interactive and
 api slots keep their own.
+
+A hive's subscription cap scales with quota left: the ceiling `AGENTIHOOKS_HIVE_SESSION_CEILING` (default 12) times
+the smaller of the five hour and week percentage left, at least the band in
+[Claude account load balancing](load-balancing.md) and at most the ceiling, which wins when set below the band. An
+account at 96% of both windows left reports 11; one with under 10% of its five hour window left keeps the band's 2;
+under 5% of either window it reports 0. Worker admission under a hive or cluster spawn backend reads every Claude
+row this way, interactive slots included. Launches routed by one machine's own processes keep the band.
 
 ### Master placement
 

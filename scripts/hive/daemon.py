@@ -69,11 +69,12 @@ def beat(redis: "Redis", local_id: str) -> None:
         consumer.poll()
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
-    from scripts.hive import join_report
+    from scripts.hive import headroom, join_report
 
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+    headroom.publish(redis, local_id, int(time.time() * 1000))
     publish_config(redis, local_id, report["repos"])
 
 
@@ -262,7 +263,11 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
     slots, quota = [], {}
     for account in sorted(claude):
         at, result = observed.get(account, (None, None))
-        cap = balancer.account_cap(result, now) if result and session_bands.fresh(at, now) else None
+        cap = (
+            balancer.account_cap(result, now, ceiling=session_bands.hive_ceiling(environ))
+            if result and session_bands.fresh(at, now)
+            else None
+        )
         kind = "interactive" if account == account_sessions.UNROUTED else "subscription"
         slots.append({"harness": "claude", "account": account, "kind": kind, "cap": cap or 0})
         quota[f"claude:{account}"] = (

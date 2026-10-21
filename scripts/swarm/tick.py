@@ -1373,9 +1373,39 @@ def _retire_master(slug, store, runtime, master, now_ms):
 
 
 def respawn_master(slug, store, runtime, now_ms):
+    from scripts.swarm import controller
+
+    def respawn(config, held):
+        fenced = controller.FencedRuntime(store, slug, held, runtime, controller.LOCAL)
+        live, actions = fenced.live_names(), []
+        for agent in store.agents(slug):
+            gone = agent.state not in ("finished", "starting") and agent.name not in live
+            if agent.lane == MASTER and gone and master_seats.is_lead(slug, agent):
+                store.drop_agent(slug, agent.name)
+                actions.append(f"dropped the gone master {agent.name}")
+        return actions + (
+            _recover_master(slug, config, store, fenced, now_ms) or _master(slug, config, store, fenced, now_ms)
+        )
+
+    return _under_tick_lock(slug, store, respawn)
+
+
+def place_master(slug, store, runtime, now_ms):
+    from scripts.swarm import controller
+
+    def place(config, held):
+        fenced = controller.FencedRuntime(store, slug, held, runtime, controller.deployment_for(config, os.environ))
+        return _master(slug, config, store, fenced, now_ms)
+
+    return _under_tick_lock(slug, store, place)
+
+
+def _under_tick_lock(slug, store, act):
     from scripts.swarm import controller, lease
     from scripts.swarm.commands import hive_id
 
+    if store.config(slug).state in ("stopping", "stopped"):
+        return []
     held = lease.acquire(store, slug, hive_id())
     if held is None:
         return []
@@ -1386,16 +1416,7 @@ def respawn_master(slug, store, runtime, now_ms):
         config = store.ensure_code(slug)
         if config.state in ("stopping", "stopped"):
             return []
-        runtime = controller.FencedRuntime(store, slug, held, runtime, controller.LOCAL)
-        live, actions = runtime.live_names(), []
-        for agent in store.agents(slug):
-            gone = agent.state not in ("finished", "starting") and agent.name not in live
-            if agent.lane == MASTER and gone and master_seats.is_lead(slug, agent):
-                store.drop_agent(slug, agent.name)
-                actions.append(f"dropped the gone master {agent.name}")
-        return actions + (
-            _recover_master(slug, config, store, runtime, now_ms) or _master(slug, config, store, runtime, now_ms)
-        )
+        return act(config, held)
     finally:
         controller.release_tick_lock(store, slug, token)
 
