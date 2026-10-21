@@ -147,6 +147,7 @@ if ledger_ca.place(Path(os.environ['AGENTIHOOKS_HOME']), system.rstrip() + '\n' 
     raise SystemExit('worker-hive: LEDGER_CA_PEM holds no valid certificate')
 PY
 fi
+unset LEDGER_CA_PEM
 agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
