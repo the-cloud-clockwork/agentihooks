@@ -228,6 +228,7 @@ def test_an_edited_trusted_workflow_grades_new_reusable_calls(tmp_path, monkeypa
         allowed={"runs-on": "x"},
         escape={"uses": "./.github/workflows/branch.yml"},
     )
+    baseline["name"] = updated["name"] = "Trusted"
     child = _workflow(concurrency=called_block)
     child["on"] = {"workflow_call": None, "workflow_dispatch": None}
     base, head, sha = _repo(tmp_path, {"replay.yml": updated, "branch.yml": child})
