@@ -30,11 +30,12 @@ class AlreadyRunning(RuntimeError):
 def runtime_dir(environ: Mapping[str, str] | None = None) -> Path:
     from scripts.swarm.keyspace import ROOT
     from scripts.swarm.store import redis_url
+    from scripts.swarm_ledger import ledger_link
 
     env = os.environ if environ is None else environ
     url = urlsplit(redis_url(env))
     endpoint = (url.scheme, url.hostname, url.port or 6379, url.path or "/0")
-    member = env.get("AGENTIHOOKS_HIVE_ID") if env.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local" else ""
+    member = "" if ledger_link.local_mode(env) else env.get("AGENTIHOOKS_HIVE_ID")
     directory = Path.home() / ".cache" / "agentihooks" / "scheduler"
     if endpoint == ("redis", "127.0.0.1", 6379, "/0") and not member:
         return directory
