@@ -34,6 +34,7 @@ WORKER_KEYS = (
     "swarm:*:handoff-seat:*",
     "swarm:*:handoff-envelope:*",
     "swarm:*:findings",
+    "swarm:*:checks:*",
     "swarm:*:merge-stall",
     "swarm:*:merge-stall-notice",
     "swarm:*:hive-placement-waits",
