@@ -52,7 +52,7 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
     cli.chmod(0o755)
     home = tmp_path / "state"
     home.mkdir()
-    (tmp_path / "home").mkdir()
+    (tmp_path / "home").mkdir(exist_ok=True)
     member = tmp_path / "member"
     member.write_text(JOINED if credential in SAVED else "fixture member credential\n")
     if credential == "delivered":
@@ -333,3 +333,32 @@ def test_ledger_ca_cases_ignore_inherited_mount_in_either_order(tmp_path, monkey
                 case(root, isolated)
             else:
                 case(root, isolated, cert)
+
+
+def test_the_workspace_venv_of_the_repo_instructions_resolves_to_the_image_python(tmp_path):
+    result, _, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    prefix = subprocess.run(
+        ["python3", "-c", "import sys; print(sys.prefix)"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert (tmp_path / "home/dev/tcc-ecosystem/.venv").resolve() == Path(prefix).resolve()
+
+
+def git_identity(tmp_path):
+    env = {**os.environ, "HOME": str(tmp_path / "home"), "GIT_CONFIG_NOSYSTEM": "1"}
+    read = [["git", "config", "--global", key] for key in ("user.name", "user.email")]
+    return [subprocess.run(argv, env=env, capture_output=True, text=True).stdout.strip() for argv in read]
+
+
+def test_a_hive_without_a_git_identity_commits_as_the_hive(tmp_path):
+    result, _, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert git_identity(tmp_path) == ["agentihooks hive", "agentihooks-hive@users.noreply.github.com"]
+
+
+def test_a_configured_git_identity_is_kept(tmp_path):
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home/.gitconfig").write_text("[user]\n\tname = Operator\n\temail = operator@example.test\n")
+    result, _, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert git_identity(tmp_path) == ["Operator", "operator@example.test"]
