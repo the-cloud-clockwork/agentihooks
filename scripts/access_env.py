@@ -20,7 +20,7 @@ USAGE = "usage: agentihooks access env"
 
 
 def _opener(request, timeout):
-    return urlopen(request, timeout=TIMEOUT_S)
+    return urlopen(request, timeout=min(timeout, TIMEOUT_S))
 
 
 def values(environ: Mapping[str, str], opener: Callable = _opener) -> dict[str, str]:

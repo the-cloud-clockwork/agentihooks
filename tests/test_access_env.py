@@ -1,6 +1,8 @@
 import io
 import json
+import shlex
 import subprocess
+import sys
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -80,12 +82,13 @@ def test_a_missing_record_gives_nothing_quietly(capsys):
     assert capsys.readouterr().err == ""
 
 
-def test_the_default_opener_caps_the_wait(monkeypatch):
+@pytest.mark.parametrize(("asked", "waited"), [(20, 3), (1, 1)])
+def test_the_default_opener_caps_the_wait(monkeypatch, asked, waited):
     seen = []
-    monkeypatch.setattr(access_env, "urlopen", lambda request, timeout: seen.append(timeout) or "opened")
+    monkeypatch.setattr(access_env, "urlopen", lambda request, timeout: seen.append((request, timeout)) or "opened")
 
-    assert access_env._opener("request", timeout=20) == "opened"
-    assert seen == [3]
+    assert access_env._opener("request", timeout=asked) == "opened"
+    assert seen == [("request", waited)]
 
 
 def test_env_prints_one_quoted_export_per_variable(monkeypatch, capsys):
@@ -123,7 +126,7 @@ def test_the_launcher_reads_the_access_token_at_start_and_holds_no_value(tmp_pat
 
     text = _launcher(tmp_path, {PART_NAME: "held-one", PART_FIELD: "held-two"})
 
-    command = init_agent.shlex.join([init_agent.sys.executable, "-m", "scripts.access_env", "env"])
+    command = shlex.join([sys.executable, "-m", "scripts.access_env", "env"])
     line = f'eval "$({command})"\n'
     assert init_agent._access_export() == line
     assert line in text.splitlines(keepends=True)

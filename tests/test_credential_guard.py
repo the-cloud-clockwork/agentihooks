@@ -137,6 +137,33 @@ CASES = [
     ("kubectl secret yaml", {"tool_name": "Bash", "tool_input": {"command": "kubectl get secret db -o yaml"}}, True),
     ("kubectl secret list", {"tool_name": "Bash", "tool_input": {"command": "kubectl get secrets -n prod"}}, False),
     ("kubectl describe secret", {"tool_name": "Bash", "tool_input": {"command": "kubectl describe secret db"}}, False),
+    ("access env printed", {"tool_name": "Bash", "tool_input": {"command": "agentihooks access env"}}, True),
+    (
+        "access env module printed",
+        {"tool_name": "Bash", "tool_input": {"command": "/v/bin/python -m scripts.access_env env | cat"}},
+        True,
+    ),
+    (
+        "access env captured",
+        {"tool_name": "Bash", "tool_input": {"command": 'x="$(agentihooks access env)"; echo "$x"'}},
+        True,
+    ),
+    (
+        "access env evaluated",
+        {"tool_name": "Bash", "tool_input": {"command": 'eval "$(agentihooks access env)" && test -n "$A"'}},
+        False,
+    ),
+    (
+        "access env module evaluated",
+        {"tool_name": "Bash", "tool_input": {"command": 'eval "$(/v/bin/python -m scripts.access_env env)"'}},
+        False,
+    ),
+    (
+        "access env evaluated then printed",
+        {"tool_name": "Bash", "tool_input": {"command": 'eval "$(agentihooks access env)"; agentihooks access env'}},
+        True,
+    ),
+    ("access help", {"tool_name": "Bash", "tool_input": {"command": "agentihooks access envelope"}}, False),
     (
         "python opens dotenv",
         {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('.env').read())\""}},
