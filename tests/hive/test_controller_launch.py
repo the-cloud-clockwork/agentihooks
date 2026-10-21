@@ -891,6 +891,7 @@ def test_heartbeat_execution_ids_prevent_double_counting_and_masters_are_exempt(
         ({"claude:account": 3}, 0, 3),
         ({"claude:account": 2, "interactive:claude:account": 1}, 0, 2),
         ({"claude:account": 2}, 1, 2),
+        ({"claude:account": 1}, 1, 2),
     ],
 )
 def test_reported_processes_absorb_agents_the_hive_lists_no_execution_for(setup, sessions, listed, expected):
