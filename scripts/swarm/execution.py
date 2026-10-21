@@ -92,7 +92,7 @@ class ExecutionRegistry:
         from scripts.swarm.store import AgentRecord
 
         rows = (reader if reader is not None else self.redis).eval(
-            _LATEST, 2, self.store.key(slug, "executions"), self.store.key(slug, "agents"), "seat"
+            _LATEST, 1, self.store.key(slug, "executions"), "seat"
         )
         agents = sorted((AgentRecord(**json.loads(row)) for row in rows), key=lambda a: a.seat)
         return {agent.seat: agent for agent in agents}
