@@ -1,6 +1,7 @@
 import json
 import os
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -121,8 +122,8 @@ def test_the_master_flag_routes_main_to_master_mode(monkeypatch, capsys):
     monkeypatch.setattr(claude_login, "master", lambda *args: seen.append(args) or 0)
     console = _console()
     assert claude_login.main(["--master", "--openbao"], {"A": "1"}, console=console, opener="op") == 0
-    openbao, environ, deps = seen[0]
-    assert (openbao, environ, deps.console, deps.opener) == (True, {"A": "1"}, console, "op")
+    openbao, environ, deps, slot = seen[0]
+    assert (openbao, environ, deps.console, deps.opener, slot) == (True, {"A": "1"}, console, "op", None)
     with pytest.raises(SystemExit):
         claude_login.main(["--master", "rig"], {}, console=console)
     assert len(seen) == 1
@@ -149,11 +150,12 @@ def test_a_slot_login_builds_its_own_home_and_becomes_the_active_master_login(ah
     monkeypatch.setenv(login.SLOT_ENV, "1")
     runs = []
     assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, runs), 2) == 0
-    home = str(ah / "master-login-2" / "claude")
+    base = Path(login.hooks_config.AGENTIHOOKS_HOME)
+    home = str(base / "master-login-2" / "claude")
     assert runs[0][1]["CLAUDE_CONFIG_DIR"] == home
     monkeypatch.delenv(login.SLOT_ENV)
     assert login.slot() == 2
-    assert login.home() == ah / "master-login-2" / "claude"
+    assert login.home() == base / "master-login-2" / "claude"
     assert login.creds() == "agentihooks/master-claude-login-2"
 
 
@@ -162,7 +164,7 @@ def test_a_failed_slot_login_keeps_the_active_master_login(ah, monkeypatch):
     assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, [], code=1), 3) == 1
     monkeypatch.delenv(login.SLOT_ENV)
     assert login.slot() == 1
-    assert login.home() == ah / "master-login" / "claude"
+    assert login.home() == Path(login.hooks_config.AGENTIHOOKS_HOME) / "master-login" / "claude"
 
 
 def test_a_slot_outside_the_cap_is_refused_before_any_login(ah, monkeypatch, capsys):

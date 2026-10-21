@@ -1,5 +1,9 @@
 import json
+import os
 import shlex
+import signal
+import subprocess
+import sys
 from pathlib import Path
 from string import Template
 
@@ -80,7 +84,8 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
     reuse = steps[names.index("Reuse a green report when this head only adds tests to it")]
     assert reuse["id"] == "reuse"
     assert reuse["if"] == "steps.open.outputs.open == 'false'"
-    assert reuse["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    reuse["env"]["UNRELATED_SETTING"] = "ignored"
+    assert reuse["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert reuse["run"] == "python3 -m scripts.ci_mutation." + 'reuse "$GITHUB_REF_NAME" "$GITHUB_RUN_ID"'
     upload_at = names.index("Upload the reused mutation evidence")
     upload = steps[upload_at]
@@ -168,7 +173,9 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     assert steps[names.index(None)]["with"] == {"fetch-depth": 0, "persist-credentials": False}
     sized = steps[names.index("Size mutation shards from stored timings")]
     assert sized["id"] == "plan"
-    assert sized["env"] == {"GH_TOKEN": "${{ github.token }}", "MUTATION_SHARD_CPU_QUOTA": "3"}
+    sized["env"]["UNRELATED_SETTING"] = "ignored"
+    assert sized["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert sized["env"]["MUTATION_SHARD_CPU_QUOTA"] == "3"
     from scripts.ci_mutation import plan as planner
     from tests.test_ci_mutation_plan import _project
 
@@ -268,7 +275,9 @@ def test_a_single_stats_part_refines_inside_the_statistics_worker():
     measured = steps[names.index("Refine mutation shards from measured statistics")]
     assert measured["if"] == single
     assert measured["id"] == "refine"
-    assert measured["env"] == {"BASES": "${{ needs.plan.outputs.bases }}", "MUTATION_SHARD_CPU_QUOTA": "3"}
+    measured["env"]["UNRELATED_SETTING"] = "ignored"
+    assert measured["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
+    assert measured["env"]["MUTATION_SHARD_CPU_QUOTA"] == "3"
     assert measured["run"] == refine_steps[refine_names.index(measured["name"])]["run"]
     upload = steps[names.index("Upload the measured mutation plan")]
     assert upload["if"] == single
@@ -371,10 +380,11 @@ def test_preflight_merges_every_shard_into_the_one_report_its_readers_take():
     scope = steps[names.index("Record the revisions the report grades")]
     assert '"$(git merge-base "$BASE" HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json' in scope["run"]
     merge = steps[names.index("Merge the shard reports")]
-    assert merge["env"] == {
-        "SHARDS": "${{ needs.plan.outputs.changed != '0'"
+    merge["env"]["UNRELATED_SETTING"] = "ignored"
+    assert merge["env"]["SHARDS"] == (
+        "${{ needs.plan.outputs.changed != '0'"
         " && (needs.refine.outputs.shards || needs.stats.outputs.shards) || '[]' }}"
-    }
+    )
     assert merge["run"] == (
         "python -m scripts.ci_mutation."
         'merge .mutation-shards --shards "$(jq length <<< "$SHARDS")" --output .mutation-gate'
@@ -415,7 +425,7 @@ def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
     assert run["if"] == "steps.touched.outputs.files != ''"
     assert run["env"]["FILES"] == "${{ steps.touched.outputs.files }}"
     assert run["run"] == (
-        'read -ra files <<< "$FILES"\npython -m pytest "${files[@]}" -n auto --tb=short -p no:cacheprovider\n'
+        'read -ra files <<< "$FILES"\npython -m pytest "${files[@]}" -n auto --dist loadgroup --tb=short -p no:cacheprovider\n'
     )
     assert not any(step.get("continue-on-error") for step in steps)
 
@@ -428,3 +438,48 @@ def test_touched_test_selection_supplies_the_automatic_worker_limit():
     assert "workers={workers}" in select["run"]
     run = steps[names.index("Run the tests the branch touches")]
     assert run["env"]["PYTEST_XDIST_AUTO_NUM_WORKERS"] == "${{ steps.touched.outputs.workers }}"
+
+
+_GROUPED = """
+import os, pytest
+
+@pytest.mark.xdist_group("client")
+@pytest.mark.parametrize("n", range(4))
+def test_grouped(n):
+    with open(os.path.join(os.environ["GROUP_OUT"], str(n)), "w") as stream:
+        stream.write(os.environ["PYTEST_XDIST_WORKER"])
+"""
+
+
+def test_touched_tests_keep_one_xdist_group_on_one_worker(tmp_path):
+    steps, names = _steps(_workflow()["jobs"]["touched-tests"])
+    run = steps[names.index("Run the tests the branch touches")]["run"]
+    line = next(line for line in run.splitlines() if line.startswith("python -m pytest "))
+    command = shlex.split(line.replace('"${files[@]}"', "test_cases.py"))
+    assert command[:3] == ["python", "-m", "pytest"]
+    command[0] = sys.executable
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "test_cases.py").write_text(_GROUPED)
+    out = tmp_path / "out"
+    out.mkdir()
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE_", "COVERAGE_", "PYTEST_"))}
+    env |= {"PYTEST_XDIST_AUTO_NUM_WORKERS": "2", "GROUP_OUT": str(out)}
+    process = subprocess.Popen(
+        command,
+        cwd=project,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        output = process.communicate(timeout=120)[0]
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        output = "timed out\n" + process.communicate()[0]
+    assert process.returncode == 0, output
+    workers = [path.read_text() for path in sorted(out.iterdir())]
+    assert len(workers) == 4, output
+    assert len(set(workers)) == 1, (workers, output)

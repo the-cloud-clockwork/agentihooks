@@ -58,9 +58,6 @@ DROPPED = (
 )
 PRIVATE_DIR, PRIVATE_FILE = 0o700, 0o600
 NO_LOGIN = "no master claude ai login: run agentihooks claude login --master"
-OTHER_MASTER = (
-    "the master login account {account} is a worker quota token and the declared claude master account is {master}"
-)
 NO_QUOTA = "the master claude ai login needs workers on quota tokens; none is set"
 HELD = "the master login is held by {owner}, still running"
 API_HELPER = "{path} sets apiKeyHelper"
@@ -232,9 +229,11 @@ def routing_store(environ: Mapping[str, str]) -> SettingsStore:
 
 
 def _master(found: str, environ: Mapping[str, str], store: SettingsStore) -> None:
-    declared = master_account.claim(store, "claude", found, environ, environ["AGENTIHOOKS_AGENT_NAME"], time.time())
-    if declared != found:
-        raise LoginRefused(OTHER_MASTER.format(account=found, master=declared))
+    number = slot()
+    harness = "claude" if number == 1 else f"claude-{number}"
+    actor, now = environ["AGENTIHOOKS_AGENT_NAME"], time.time()
+    if master_account.claim(store, harness, found, environ, actor, now) != found:
+        store.set(f"master-account-{harness}", found, actor, now)
 
 
 def account(
