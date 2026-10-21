@@ -71,7 +71,13 @@ def test_publish_counts_waiting_launch_orders_and_expires_with_the_heartbeat(red
         "pending": 2,
         "measured_at": 5_000,
     }
-    assert redis.ttl(headroom.key("box")) == daemon.TTL_SECONDS
+    assert redis.pttl(headroom.key("box")) == 30_000
+
+
+def test_measure_and_publish_read_the_host_process_files_by_default(redis):
+    assert headroom.measure(0, 1)["measured_at"] == 1
+    headroom.publish(redis, "box", 2)
+    assert json.loads(redis.get(headroom.key("box")))["measured_at"] == 2
 
 
 def test_publish_writes_nothing_without_a_measurement(redis, proc):
@@ -81,7 +87,7 @@ def test_publish_writes_nothing_without_a_measurement(redis, proc):
 
 
 def test_read_takes_numbers_up_to_two_heartbeats_old(redis):
-    assert headroom.STALE_MS == 30_000
+    assert headroom.STALE_MS == 2 * daemon.BEAT_SECONDS * 1000 == 30_000
     record = {"cpus": 2, "load5": 0.5, "available_mb": 100, "pending": 0, "measured_at": 10_000}
     redis.set(headroom.key("box"), json.dumps(record))
     assert headroom.read(redis, "box", 40_000) == record
@@ -95,15 +101,15 @@ def test_summary_names_each_number_or_missing_telemetry():
     assert headroom.summary(None) == "headroom=missing"
 
 
-def test_beat_publishes_headroom_after_taking_orders(redis, monkeypatch):
+def test_beat_publishes_headroom_at_the_beat_time_in_whole_milliseconds(redis, monkeypatch):
     calls = []
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
-    monkeypatch.setattr(daemon.time, "time", lambda: 12.5)
+    monkeypatch.setattr(daemon.time, "time", lambda: 12.3456)
     monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: calls.append((client, hive, now_ms)))
     daemon.beat(redis, "machine")
-    assert calls == [(redis, "machine", 12_500)]
+    assert calls == [(redis, "machine", 12_345)]
 
 
 def test_hive_list_shows_live_headroom_beside_each_hive(redis, monkeypatch, capsys):

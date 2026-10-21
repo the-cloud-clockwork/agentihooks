@@ -7,14 +7,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.hive import registry
-from scripts.hive.daemon import BEAT_SECONDS, TTL_SECONDS
-from scripts.hive.orders import Orders
 from scripts.swarm import host_budget
 
 if TYPE_CHECKING:
     from redis import Redis
 
-STALE_MS = 2 * BEAT_SECONDS * 1000
+# Two heartbeats of the hive daemon; kept here so readers skip the daemon's imports.
+STALE_MS = 30_000
 MISSING = "headroom=missing"
 
 
@@ -38,9 +37,11 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc")) -> dict | Non
 
 
 def publish(redis: "Redis", hive: str, now_ms: int, proc: Path = Path("/proc")) -> None:
+    from scripts.hive.orders import Orders
+
     measured = measure(redis.xlen(Orders(redis).stream(hive)), now_ms, proc)
     if measured is not None:
-        redis.set(key(hive), json.dumps(measured), ex=TTL_SECONDS)
+        redis.set(key(hive), json.dumps(measured), px=STALE_MS)
 
 
 def read(redis: "Redis", hive: str, now_ms: int) -> dict | None:
