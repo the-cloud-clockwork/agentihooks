@@ -77,28 +77,52 @@ def test_a_rerun_classifier_or_judge_failure_is_named_even_when_lost(name):
     [
         ("##[error]The runner has received a shutdown signal.", True),
         ("##[error]Process completed with exit code 1.", False),
-        ("E   AssertionError: lost communication with the server", False),
-        (None, True),
+        ("##[error]Process completed with exit code 128.\n##[error]The runner has received a shutdown signal.", True),
+        ("", True),
+        ("E   AssertionError: Process completed with exit code 1", True),
     ],
 )
-def test_the_shard_log_decides_a_loss_and_a_missing_log_waits_for_the_classifier(monkeypatch, log, lost):
+def test_only_a_nonzero_step_exit_without_a_loss_signature_is_a_real_failure(monkeypatch, log, lost):
     def api(*args):
         assert args[0] == "repos/o/r/actions/jobs/41/logs"
-        if log is None:
-            raise subprocess.CalledProcessError(1, ["gh", "api", *args])
         return log
 
     monkeypatch.setattr(fail_fast_retry, "_api", api)
-    assert fail_fast.logged_loss("o/r", {"id": 41}) is lost
+    seen = {}
+    assert fail_fast.logged_loss("o/r", {"id": 41}, seen) is lost
+    assert seen == {"41": lost}
 
 
-def test_main_with_a_repository_reads_the_failed_unit_shard_log(tmp_path, monkeypatch, capsys):
-    asked = []
-    monkeypatch.setattr(fail_fast, "logged_loss", lambda repo, job: asked.append((repo, job["id"])) or True)
+def test_a_missing_log_waits_and_is_read_again_next_poll(monkeypatch):
+    def api(*args):
+        raise subprocess.CalledProcessError(1, ["gh", "api", *args])
+
+    monkeypatch.setattr(fail_fast_retry, "_api", api)
+    seen = {}
+    assert fail_fast.logged_loss("o/r", {"id": 41}, seen) is True
+    assert seen == {}
+
+
+def test_a_judged_shard_log_is_not_read_again(monkeypatch):
+    monkeypatch.setattr(fail_fast_retry, "_api", lambda *args: pytest.fail("read again"))
+    assert fail_fast.logged_loss("o/r", {"id": 41}, {"41": False}) is False
+
+
+def test_main_with_a_repository_keeps_each_shard_verdict_between_polls(tmp_path, monkeypatch, capsys):
+    reads = []
+
+    def errors(repo, job_id):
+        reads.append((repo, job_id))
+        return ["##[error]The runner has received a shutdown signal."]
+
+    monkeypatch.setattr(fail_fast, "log_errors", errors)
     listing = _listing(tmp_path, {**_job("unit (3.12, 4)", "failure"), "id": 41}, _job("lint", "success"))
-    assert fail_fast.main([str(listing), "--repo", "o/r"]) == 0
-    assert capsys.readouterr().out == "wait\n"
-    assert asked == [("o/r", 41)]
+    seen = tmp_path / "seen.json"
+    for _ in range(2):
+        assert fail_fast.main([str(listing), "--repo", "o/r", "--seen", str(seen)]) == 0
+    assert capsys.readouterr().out == "wait\nwait\n"
+    assert reads == [("o/r", 41)]
+    assert json.loads(seen.read_text()) == {"41": True}
 
 
 def test_passing_skipped_and_running_jobs_and_the_watcher_itself_name_nothing():
