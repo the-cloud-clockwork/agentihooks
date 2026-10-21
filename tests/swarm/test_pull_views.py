@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm.ledger_events import GATE, SENT_TTL_S, views
+from scripts.swarm.ledger_events import GATE, ROLLUP_FALLBACK, SENT_TTL_S, PullRequest, views
 from scripts.swarm.ledger_events import view as single_view
 from scripts.swarm.store import PREFIX
 
@@ -501,3 +501,46 @@ def test_an_unreadable_workflow_tree_does_not_hide_the_readable_tree_after_it():
     found = views(urls, run)
     assert found[urls[0]] is None
     assert found[urls[1]].head == "h1"
+
+
+ROLLUP_PATH = ["resource", "commits", "nodes", 0, "commit", "statusCheckRollup"]
+
+
+def _refused(state, errors):
+    raw = resource(state=state)
+    raw["mergedAt"] = "2026-10-21T10:00:00Z" if state == "MERGED" else None
+    stdout = json.dumps({"data": {"resource": raw}, "errors": errors})
+    return lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout=stdout, stderr="")
+
+
+@pytest.mark.parametrize("field", ["statusCheckRollup", "checkSuites"])
+def test_a_merged_pull_request_with_unreadable_checks_reads_merged_unresolved_and_names_the_fallback(field):
+    message = "Resource not accessible by integration"
+    forbidden = [
+        {"type": "FORBIDDEN", "path": [*ROLLUP_PATH[:-1], field], "message": message},
+        {"type": "FORBIDDEN", "path": [*ROLLUP_PATH, "contexts", "nodes", 0, "checkSuite"], "message": message},
+    ]
+    pull = single_view("https://github.com/o/r/pull/9", _refused("MERGED", forbidden))
+    assert pull == PullRequest("MERGED", 1_792_576_800_000, None, False, head="h1", fallback=ROLLUP_FALLBACK)
+    assert ROLLUP_FALLBACK == "merged state alone, because GitHub refused the check rollup"
+
+
+@pytest.mark.parametrize(
+    ("state", "errors"),
+    [
+        ("OPEN", [{"type": "FORBIDDEN", "path": ROLLUP_PATH}]),
+        ("MERGED", [{"type": "INTERNAL", "path": ROLLUP_PATH}]),
+        ("MERGED", [{"type": "FORBIDDEN", "path": ["resource", "body"]}]),
+        ("MERGED", [{"type": "FORBIDDEN", "path": [*ROLLUP_PATH[:-1], "file"]}]),
+        ("MERGED", [{"type": "FORBIDDEN", "path": ROLLUP_PATH}, {"type": "INTERNAL", "path": ROLLUP_PATH}]),
+        ("MERGED", [{"type": "FORBIDDEN"}]),
+        ("MERGED", []),
+    ],
+)
+def test_any_other_refused_read_stays_unknown(state, errors):
+    assert single_view("https://github.com/o/r/pull/9", _refused(state, errors)) is None
+
+
+def test_a_refused_read_with_unparsable_output_stays_unknown():
+    run = lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="gh: forbidden", stderr="")  # noqa: E731
+    assert single_view("https://github.com/o/r/pull/9", run) is None
