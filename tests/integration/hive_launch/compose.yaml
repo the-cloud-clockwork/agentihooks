@@ -16,6 +16,7 @@ services:
     environment:
       AGENTIHOOKS_SWARM_REDIS_URL: redis://redis:6379/0
       AGENTIHOOKS_DEPLOYMENT: local
+      AGENTIHOOKS_SERENA: "false"
     depends_on:
       redis:
         condition: service_healthy
