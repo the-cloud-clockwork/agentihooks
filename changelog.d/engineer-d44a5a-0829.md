@@ -1,3 +1,3 @@
 ### Fixed
 
-- Priorities raised by a master for the operator now require an operator answer or verified relay before agent comments can clear them.
+- Agent comments no longer clear priorities raised by a master for the operator; only operator answers and verified relays qualify as resolution evidence.
