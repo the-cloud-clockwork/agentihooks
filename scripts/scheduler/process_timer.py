@@ -69,8 +69,8 @@ class Timer:
         self.close()
 
 
-def wait(delay: float) -> None:
-    with Timer(delay) as timer:
+def wait(delay: float, redis: "Redis | None" = None) -> None:
+    with Timer(delay, redis=redis) as timer:
         timer.wait()
 
 

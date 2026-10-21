@@ -1,0 +1,6 @@
+{
+  "scripts/master_claude_login.py:scripts.master_claude_login.x_slot__mutmut_12:a3f4628ce19de70184d5d053b7bebe449d7bdd80820d641782c760c2b882aee9": {
+    "reader": "standards_reader",
+    "reason": "Making the lower bound strict only changes the result for number 1, which then takes the else branch and still returns 1. Every other integer keeps its result, so slot() returns the same value for every input."
+  }
+}

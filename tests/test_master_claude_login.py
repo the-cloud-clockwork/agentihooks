@@ -241,20 +241,15 @@ def test_a_login_on_the_declared_master_account_keeps_its_declaration(tmp_path):
     assert master_account.declared(store, environ)["claude"].tier == "max"
 
 
-def test_another_declared_master_account_refuses_naming_both(tmp_path):
+def test_a_login_on_another_account_takes_over_its_slot_declaration(tmp_path):
     target, store = _home(tmp_path), _store(tmp_path)
     environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
     master_account.declare(store, {"claude": ("other", None)}, environ, "operator", 1.0)
-    with pytest.raises(
-        login.LoginRefused,
-        match="^the master login account masteratexample_com is a worker quota token "
-        "and the declared claude master account is other$",
-    ):
-        login.account(target, environ, _given(store, environ))
-    assert master_account.declared(store, environ)["claude"].slug == "other"
+    assert login.account(target, environ, _given(store, environ)) == "masteratexample_com"
+    assert master_account.declared(store, environ)["claude"].slug == "masteratexample_com"
 
 
-def test_a_declaration_another_login_wrote_first_refuses_naming_both(tmp_path):
+def test_a_declaration_another_login_wrote_first_is_taken_over(tmp_path):
     class Raced(FileSettings):
         def _claim(self, key, value, entry):
             self._write(key, "other", {**entry, "value": "other", "actor": "rival"})
@@ -262,13 +257,18 @@ def test_a_declaration_another_login_wrote_first_refuses_naming_both(tmp_path):
 
     target, store = _home(tmp_path), Raced(tmp_path / "routing-settings.json")
     environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
-    with pytest.raises(
-        login.LoginRefused,
-        match="^the master login account masteratexample_com is a worker quota token "
-        "and the declared claude master account is other$",
-    ):
-        login.account(target, environ, _given(store, environ))
-    assert [entry["actor"] for entry in store.history()] == ["rival"]
+    assert login.account(target, environ, _given(store, environ)) == "masteratexample_com"
+    assert master_account.declared(store, environ)["claude"].slug == "masteratexample_com"
+
+
+def test_a_second_slot_login_on_a_worker_account_keeps_the_first_slot_declaration(tmp_path, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "2")
+    target, store = _home(tmp_path), _store(tmp_path)
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
+    master_account.declare(store, {"claude": ("other", None)}, environ, "operator", 1.0)
+    assert login.account(target, environ, _given(store, environ)) == "masteratexample_com"
+    assert master_account.declared(store, environ)["claude"].slug == "other"
+    assert store.all()["master-account-claude-2"] == "masteratexample_com"
 
 
 def test_the_settings_store_follows_the_routing_store(tmp_path, monkeypatch):
@@ -686,3 +686,71 @@ def test_a_worker_token_master_launch_holds_its_workers_at_the_one_master_ceilin
     assert source.cap(week(70.0), 0) == 0
     assert source.cap(week(69.9), 0) > 0
     assert source.cap(week(70.0, "workeratexample_com"), 0) > 0
+
+
+def test_slot_one_keeps_the_original_home_and_record(ah, monkeypatch):
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    assert login.slot() == 1
+    assert login.root() == ah / "master-login"
+    assert login.creds() == login.CREDS
+
+
+def test_the_active_slot_file_picks_the_home_and_record(ah, monkeypatch):
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    login.use(4)
+    assert login.root() == ah / "master-login-4"
+    assert login.creds() == f"{login.CREDS}-4"
+
+
+def test_an_unreadable_or_out_of_range_slot_falls_back_to_slot_one(ah, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "nine")
+    assert login.slot() == 1
+    monkeypatch.setenv(login.SLOT_ENV, str(login.MAX_SLOTS + 1))
+    assert login.slot() == 1
+
+
+def test_use_refuses_a_slot_outside_the_cap(ah):
+    with pytest.raises(login.LoginRefused):
+        login.use(0)
+
+
+@pytest.mark.parametrize("number", [0, login.MAX_SLOTS + 1])
+def test_use_names_the_refused_slot_and_the_cap(ah, number):
+    with pytest.raises(login.LoginRefused) as refused:
+        login.use(number)
+    assert str(refused.value) == f"master login slot {number} is outside 1 to {login.MAX_SLOTS}"
+    assert not (ah / login.SLOT_FILE).exists()
+
+
+@pytest.mark.parametrize("number", [1, login.MAX_SLOTS])
+def test_use_and_slot_accept_the_first_and_last_slot(ah, monkeypatch, number):
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    login.use(number)
+    assert (ah / login.SLOT_FILE).read_text() == f"{number}\n"
+    assert login.slot() == number
+    monkeypatch.setenv(login.SLOT_ENV, str(number))
+    assert login.slot() == number
+
+
+def test_slot_zero_falls_back_to_slot_one(ah, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "0")
+    assert login.slot() == 1
+
+
+def test_use_creates_a_nested_missing_home(tmp_path, monkeypatch):
+    nested = tmp_path / "a" / "b" / "ah"
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(nested))
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    login.use(2)
+    assert (nested / login.SLOT_FILE).read_text() == "2\n"
+
+
+def test_a_slot_takeover_records_the_login_time(tmp_path, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "2")
+    monkeypatch.setattr(login, "time", SimpleNamespace(time=lambda: 1234.5))
+    target, store = _home(tmp_path), _store(tmp_path)
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
+    store.set("master-account-claude-2", "other", "operator", 1.0)
+    assert login.account(target, environ, _given(store, environ)) == "masteratexample_com"
+    written = [entry for entry in store.history() if entry["key"] == "master-account-claude-2"]
+    assert (written[-1]["value"], written[-1]["actor"], written[-1]["at"]) == ("masteratexample_com", "m", 1234.5)

@@ -189,11 +189,16 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _list() -> None:
+    from scripts.hive import join_report
+
     now = now_ms()
-    for record in registry.hives(redis_client()):
+    redis = redis_client()
+    for record in registry.hives(redis):
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
         print(f"{record['id']}\t{state}\tui={record['ui']}\tmax-agents={record['max_agents']}\texcluded={excluded}")
+        for report in join_report.listing(redis, record["id"]):
+            print("  " + join_report.summary(report))
 
 
 def _registry(args: argparse.Namespace) -> None:
@@ -211,7 +216,7 @@ def _registry(args: argparse.Namespace) -> None:
 def _daemon(command: str) -> int:
     from scripts.hive import daemon
 
-    actions = {"run": lambda: daemon.run(redis_client), "install": daemon.install}
+    actions = {"run": lambda: daemon.run(lambda: daemon.clients(redis_client())), "install": daemon.install}
     result = actions[command]()
     return 1 if result is False else 0
 

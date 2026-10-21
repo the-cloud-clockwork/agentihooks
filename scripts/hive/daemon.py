@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -25,6 +26,10 @@ if TYPE_CHECKING:
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
 RETRY_SECONDS = (1, 2, 4, 8, 16, 30)
+CONNECT_TIMEOUT_S = 3
+READ_TIMEOUT_S = 5
+# The wait client times out at BEAT_SECONDS, so a scheduled wake must land before it.
+WAKE_SLACK_S = 2
 UNIT = "agentihooks-hive.service"
 ORIGIN = re.compile(r'\[remote "origin"\][^\[]*?\burl\s*=\s*(\S+)')
 REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
@@ -63,6 +68,9 @@ def beat(redis: "Redis", local_id: str) -> None:
         consumer.poll()
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
+    from scripts.hive import join_report
+
+    join_report.heartbeat(redis, local_id, int(time.time() * 1000))
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
     publish_config(redis, local_id, report["repos"])
@@ -113,7 +121,7 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
     return redis.hlen(key) > 0
 
 
-def run(connect: Callable[[], "Redis"]) -> None:
+def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     lost = (ConnectionError, TimeoutError)
@@ -124,17 +132,47 @@ def run(connect: Callable[[], "Redis"]) -> None:
     failures = 0
     while True:
         try:
-            redis = connect()
+            redis, waiter = connect()
             while True:
                 started = time.monotonic()
                 worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
                 renewed = github_app_cli.renew(renewed, time.time())
                 beat(redis, local_id)
-                scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
+                scheduled_wait(max(0, BEAT_SECONDS - max(WAKE_SLACK_S, time.monotonic() - started)), redis=waiter)
                 failures = 0
-        except lost:
-            time.sleep(RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)])
+        except lost as exc:
+            _back_off(exc, failures)
             failures += 1
+
+
+def _back_off(exc: Exception, failures: int) -> None:
+    delay = RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)]
+    print(f"hive Redis connection lost ({type(exc).__name__}: {exc}); reconnecting in {delay}s", file=sys.stderr)
+    time.sleep(delay)
+
+
+def clients(source: "Redis") -> tuple["Redis", "Redis"]:
+    from redis import ConnectionPool, Redis
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
+
+    pool = source.connection_pool
+    options = {
+        **pool.connection_kwargs,
+        "socket_connect_timeout": CONNECT_TIMEOUT_S,
+        "socket_keepalive": True,
+        "health_check_interval": BEAT_SECONDS,
+        "retry": Retry(NoBackoff(), 0),
+    }
+    source.close()
+    return tuple(
+        Redis(
+            connection_pool=ConnectionPool(
+                connection_class=pool.connection_class, **options | {"socket_timeout": timeout}
+            )
+        )
+        for timeout in (READ_TIMEOUT_S, BEAT_SECONDS)
+    )
 
 
 def unit(binary: str) -> str:

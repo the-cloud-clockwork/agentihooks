@@ -41,7 +41,8 @@ SUMMARY = "{name} written to {rc} ({length} chars). run: source {rc}"
 STEP_MASTER = "Sign in to the master claude ai account in the browser; the login stays in {home}"
 MASTER_FAILED = "claude auth login exited {code}; the master login is unchanged"
 STEP_RECOVERY = "Storing the master login recovery copy in OpenBao"
-MASTER_SLUG = "--master takes no slug: the master login is one home for every swarm"
+MASTER_SLUG = "--master takes no slug: the master login is one home per slot for every swarm"
+SLOT_NEEDS_MASTER = "--slot picks a master login slot and needs --master"
 _write = os.write
 
 
@@ -153,6 +154,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=PROG)
     parser.add_argument("slug", nargs="?")
     parser.add_argument("--master", action="store_true")
+    parser.add_argument("--slot", type=int)
     store = parser.add_mutually_exclusive_group()
     store.add_argument("--openbao", action="store_true", default=None)
     store.add_argument("--no-openbao", dest="openbao", action="store_false")
@@ -200,9 +202,14 @@ def _rendered(profile: str) -> Path:
     return render.profile_dir(profile) / "claude"
 
 
-def master(openbao: bool | None, environ: Mapping[str, str], deps: Deps) -> int:
+def master(openbao: bool | None, environ: Mapping[str, str], deps: Deps, slot: int | None = None) -> int:
     from scripts import master_claude_login as login
 
+    if slot is not None:
+        if not 1 <= slot <= login.MAX_SLOTS:
+            _fail(login.SLOT_RANGE.format(number=slot, cap=login.MAX_SLOTS))
+            return 2
+        os.environ[login.SLOT_ENV] = str(slot)
     try:
         epoch = login.claim(PROG, os.getpid(), alone=True)
     except login.LoginRefused as exc:
@@ -231,6 +238,8 @@ def master(openbao: bool | None, environ: Mapping[str, str], deps: Deps) -> int:
         except openbao_kv.OpenBaoError as exc:
             _fail(str(exc))
             return 1
+    if slot is not None:
+        login.use(slot)
     return 0
 
 
@@ -247,8 +256,10 @@ def main(
     options = parser.parse_args(args)
     if options.master and options.slug:
         parser.error(MASTER_SLUG)
+    if options.slot is not None and not options.master:
+        parser.error(SLOT_NEEDS_MASTER)
     if options.master:
-        return master(options.openbao, environ, Deps(console=console, opener=opener))
+        return master(options.openbao, environ, Deps(console=console, opener=opener), options.slot)
     raw = _raw_slug(options.slug, console, parser)
     if raw is None:
         return 2

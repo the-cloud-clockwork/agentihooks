@@ -3,6 +3,7 @@ import json
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING
 
+from scripts import serena_router_daemon
 from scripts.hive import registry
 from scripts.swarm import launch_check, lease, prompt, reaper
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
@@ -308,6 +309,8 @@ class Consumer:
         lease.require_epoch(self.store, order.slug, order.epoch)
         if task.get("workspace"):
             task["workspace"] = str(ledger_workspace.materialize(order.slug, order.task, task.get(SEEDS) or {}))
+        if not serena_router_daemon.ensure():
+            return Ack("failed", {}, "serena")
         outcome = self.runtime.spawn(SpawnRequest(config, order.lane, agent.name, task))
         if not outcome.ok:
             return Ack("failed", {}, _failure(outcome))

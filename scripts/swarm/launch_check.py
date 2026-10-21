@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hooks.context import profile_chain
+from scripts.hive import join_report
 from scripts.swarm import live_binding, naming
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord, RedisStore
@@ -27,11 +28,12 @@ WORDS = {
     "overlay": "every overlay its profile declares",
     "name": "its name",
 }
-REPORT_ONLY = frozenset({"late"})
+REPORT_ONLY = frozenset({"late", *(f"hive_{name}" for name in join_report.OPTIONAL)})
 OUTCOMES = {
     "relaunch": "It is being retired and relaunched once.",
     "spent": "Its one automatic relaunch is spent; operator action is required.",
     "report": "This is reported only; the master keeps running.",
+    "retired": "The failed hive agent was retired.",
 }
 
 
@@ -153,6 +155,16 @@ def _name(store, slug, agent):
 def misses(
     store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: dict, on_bundle: bool, declared: list[str]
 ) -> dict:
+    from scripts.hive import reports
+
+    if agent.hive or reports.host(agent):
+        report = join_report.read(store.redis, agent)
+        if not report:
+            return {"hive_join": {"expected": "session join report", "actual": "missing"}}
+        return {
+            f"hive_{name}": {"expected": "available", "actual": "missing"}
+            for name in join_report.graded(report)["misses"]
+        }
     found = _joined(store, agent, doc, session_started_at(agent))
     if not facts or facts.get("process", True) is not True:
         found["observation"] = {"expected": "available process observation", "actual": "unavailable"}
@@ -204,7 +216,7 @@ def clear_relaunched(store: RedisStore, slug: str, task: str) -> None:
 
 
 def told(found: dict, outcome: str) -> str:
-    fields = ", ".join(WORDS[field] for field in found)
+    fields = ", ".join(WORDS.get(field, field.removeprefix("hive_").replace("_", " ")) for field in found)
     return f"The master failed its launch check within a minute on {fields}. {OUTCOMES[outcome]}"
 
 

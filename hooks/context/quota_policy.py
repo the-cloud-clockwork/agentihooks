@@ -39,7 +39,6 @@ if TYPE_CHECKING:
 
 MIN_ROUTING_LEFT = 5.0
 PUSH_SIGNALS = ["keep pushing", "push to 100", "push until 100", "burn it to 100"]
-WAIT_TOOLS = frozenset({"CronCreate", "CronList", "CronDelete"})
 RESET_TOLERANCE_S = 600
 
 
@@ -433,14 +432,14 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
             f'1. CronCreate a one-shot job, cron "{cron}" (local time {at.strftime("%a %H:%M")}), recurring '
             f'false, prompt: "The 5-hour quota window has reset. Continue the task from where you stopped."\n'
             f"2. Tell the operator this session waits until the reset at {reset_when(d.five_reset)}, then stop. "
-            f"Every other tool is blocked until the window resets."
+            f"Tools are not blocked."
         )
     reset = d.week_reset if d.trigger == "week" else d.five_reset
     prefix = "AH_CX_TOKEN_" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "AH_CC_TOKEN_"
     return (
         f"QUOTA STOP — {head} Resets {reset_when(reset)}. No other account has room: {_others_text(d)}.\n"
         f"Stop working and tell the operator to add another {prefix}<slug> account, or to say "
-        f'"keep pushing" to continue on this account until 100%. Every tool is blocked.'
+        f'"keep pushing" to continue on this account until 100%. Tools are not blocked.'
     )
 
 
@@ -467,10 +466,7 @@ def pretool(session_id: str, tool_name: str, cwd: str) -> tuple[str | None, str 
     d = evaluate(session_id)
     if d is None or d.action == "push":
         return None, None
-    text = render(d, session_id, cwd)
-    if d.action == "stop" or (d.action == "wait" and tool_name not in WAIT_TOOLS):
-        return f"BLOCKED: {text}", None
-    return None, text
+    return None, render(d, session_id, cwd)
 
 
 def prompt_context(session_id: str, cwd: str) -> str | None:

@@ -276,6 +276,7 @@ def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord
 
 
 def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | None = None) -> dict:
+    from scripts.hive import join_report
     from scripts.swarm import capacity, tick_activity
 
     config = store.config(slug)
@@ -299,6 +300,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
                 "observation": observation(store, slug, a),
                 "capabilities": transport(a),
+                "hive_join": join_report.read(store.redis, a),
                 "gates": active.get(a.name, []),
                 "inbox": [
                     {"text": item.text, "sender": item.sender, "state": item.state}

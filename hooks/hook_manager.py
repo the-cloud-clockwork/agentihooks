@@ -347,6 +347,7 @@ def on_session_start(payload: dict) -> None:
 
     codex_refresh_kick()
     _swarm_ledger(payload)
+    _hive_join(payload, "start")
     otel.emit_event(
         "agentihooks.session.started",
         {
@@ -575,6 +576,7 @@ def on_session_end(payload: dict) -> None:
     """Handle SessionEnd event."""
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
+    _hive_join(payload, "end")
     from hooks.lifecycle.guard import session_event
 
     session_event()
@@ -1161,6 +1163,15 @@ def _master_login_checkpoint() -> None:
         master_claude_login.checkpoint(os.environ)
     except Exception as e:
         log("master login checkpoint failed", {"error": str(e)})
+
+
+def _hive_join(payload: dict, event: str) -> None:
+    try:
+        from hooks.context.hive_join import run
+
+        run(payload, event)
+    except Exception as exc:
+        log("hive join report failed", {"error": type(exc).__name__})
 
 
 def _swarm_ledger(payload: dict) -> None:

@@ -110,6 +110,7 @@ from scripts.swarm import (
     plan_review,
     priming_trace,
     prompt,
+    queue_exit,
     queue_priority,
     queue_record,
     ready,
@@ -1205,6 +1206,9 @@ def cmd_status(store, args):
         print(
             f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}"
         )
+    from scripts.hive import join_report
+
+    sys.stdout.write(join_report.text(store.redis, agents))
     for r in store.restored(args.slug):
         print(f"restored  {r['name']}  {r['outcome']}  {r['reason']}")
     for launch in launch_check.reports(store, args.slug):
@@ -1596,7 +1600,7 @@ def cmd_merge(store, args):
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: _queue_intent(store, args, agent, head),
+                admit=lambda head: _queue_intent(store, args, agent, head) or queue_exit.require_fresh(args.url, head),
                 journal=queue_record.Journal(args.url),
             )
         else:

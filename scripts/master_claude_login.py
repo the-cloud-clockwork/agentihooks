@@ -29,6 +29,10 @@ MANIFESTS = ("claude.sources.json", "claude.mounts.json")
 OWNER = "owner.json"
 LOCK = "owner.lock"
 CREDS = "agentihooks/master-claude-login"
+SLOT_ENV = "AGENTIHOOKS_MASTER_LOGIN_SLOT"
+SLOT_FILE = "master-login.slot"
+MAX_SLOTS = int(os.environ.get("AGENTIHOOKS_MASTER_LOGIN_SLOTS", "5"))
+SLOT_RANGE = "master login slot {number} is outside 1 to {cap}"
 MANAGED = Path("/etc/claude-code/managed-settings.json")
 SELECTORS = ("CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR")
 REINTRODUCED = (
@@ -54,9 +58,6 @@ DROPPED = (
 )
 PRIVATE_DIR, PRIVATE_FILE = 0o700, 0o600
 NO_LOGIN = "no master claude ai login: run agentihooks claude login --master"
-OTHER_MASTER = (
-    "the master login account {account} is a worker quota token and the declared claude master account is {master}"
-)
 NO_QUOTA = "the master claude ai login needs workers on quota tokens; none is set"
 HELD = "the master login is held by {owner}, still running"
 API_HELPER = "{path} sets apiKeyHelper"
@@ -88,8 +89,38 @@ def route(login: bool) -> list[str]:
     return ["--route", ROUTE] if login else []
 
 
+def slot() -> int:
+    raw = os.environ.get(SLOT_ENV)
+    if not raw and _slot_file().is_file():
+        raw = _slot_file().read_text().strip()
+    try:
+        number = int(raw or 1)
+    except ValueError:
+        return 1
+    return number if 1 <= number <= MAX_SLOTS else 1
+
+
+def _slot_file() -> Path:
+    return Path(hooks_config.AGENTIHOOKS_HOME) / SLOT_FILE
+
+
+def use(number: int) -> None:
+    if not 1 <= number <= MAX_SLOTS:
+        raise LoginRefused(SLOT_RANGE.format(number=number, cap=MAX_SLOTS))
+    path = _slot_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{number}\n")
+
+
+def creds() -> str:
+    number = slot()
+    return CREDS if number == 1 else f"{CREDS}-{number}"
+
+
 def root() -> Path:
-    return Path(hooks_config.AGENTIHOOKS_HOME) / "master-login"
+    base = Path(hooks_config.AGENTIHOOKS_HOME)
+    number = slot()
+    return base / ("master-login" if number == 1 else f"master-login-{number}")
 
 
 def home() -> Path:
@@ -198,9 +229,11 @@ def routing_store(environ: Mapping[str, str]) -> SettingsStore:
 
 
 def _master(found: str, environ: Mapping[str, str], store: SettingsStore) -> None:
-    declared = master_account.claim(store, "claude", found, environ, environ["AGENTIHOOKS_AGENT_NAME"], time.time())
-    if declared != found:
-        raise LoginRefused(OTHER_MASTER.format(account=found, master=declared))
+    number = slot()
+    harness = "claude" if number == 1 else f"claude-{number}"
+    actor, now = environ["AGENTIHOOKS_AGENT_NAME"], time.time()
+    if master_account.claim(store, harness, found, environ, actor, now) != found:
+        store.set(f"master-account-{harness}", found, actor, now)
 
 
 def account(
@@ -253,7 +286,7 @@ def publish(bao: openbao_kv.OpenBao, target: Path, epoch: int) -> bool:
     if not grant.get("refreshToken"):
         return False
     generation = int(grant.get("expiresAt", 0))
-    stored, _ = openbao_kv.read(bao, CREDS)
+    stored, _ = openbao_kv.read(bao, creds())
     if (int(stored.get("epoch", 0)), int(stored.get("generation", 0))) >= (epoch, generation):
         return False
     entries = {
@@ -262,7 +295,7 @@ def publish(bao: openbao_kv.OpenBao, target: Path, epoch: int) -> bool:
         "epoch": str(epoch),
         "generation": str(generation),
     }
-    openbao_kv.merge(bao, CREDS, entries)
+    openbao_kv.merge(bao, creds(), entries)
     return True
 
 
@@ -278,7 +311,7 @@ def stored(bao: openbao_kv.OpenBao | None) -> dict[str, str]:
     if bao is None:
         return {}
     try:
-        return openbao_kv.read(bao, CREDS)[0]
+        return openbao_kv.read(bao, creds())[0]
     except openbao_kv.OpenBaoError as exc:
         print(RECOVERY_FAILED.format(error=exc), file=sys.stderr)
         return {}

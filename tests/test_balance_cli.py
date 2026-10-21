@@ -40,6 +40,10 @@ def test_balance_set_writes_through_the_store_and_prints_before_and_after(monkey
         "master-account-codex=unset",
         "master-tier-claude=unset",
         "master-tier-codex=unset",
+        "master-account-claude-2=unset",
+        "master-account-claude-3=unset",
+        "master-account-claude-4=unset",
+        "master-account-claude-5=unset",
     ]
 
 
