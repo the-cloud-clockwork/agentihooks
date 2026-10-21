@@ -110,6 +110,7 @@ from scripts.swarm import (
     plan_review,
     priming_trace,
     prompt,
+    queue_exit,
     queue_priority,
     queue_record,
     ready,
@@ -1596,7 +1597,7 @@ def cmd_merge(store, args):
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: _queue_intent(store, args, agent, head),
+                admit=lambda head: queue_exit.require_fresh(args.url, head) or _queue_intent(store, args, agent, head),
                 journal=queue_record.Journal(args.url),
             )
         else:
