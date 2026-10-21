@@ -206,6 +206,13 @@ def test_an_agent_in_any_state_but_finished_holds_the_drain(store, tmp_path, sta
         remove.remove(store, bao, plan, _host(Clock(store, member, 99), Run(), tmp_path))
 
 
+def test_an_ended_agent_on_the_hive_does_not_hold_the_drain(store):
+    member = _member(store)
+    _agent(store, member)
+    store.put_agent(SLUG, replace(store.agents(SLUG)[0], state="ended"))
+    assert remove.hosted(store, member) == []
+
+
 @pytest.mark.parametrize(
     ("target", "host"),
     [(TARGET, "[10.10.30.207]:2222"), ("ssh://worker@box:22", "box"), ("worker@box", "box")],

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from scripts.swarm.store import AgentRecord, RedisStore
 
-FINISHED = "finished"
+ENDED = ("finished", "ended")
 POLL_S = 15
 SENDER = "operator"
 ORDER = (
@@ -63,7 +63,7 @@ def hosted(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
         (slug, agent)
         for slug in store.slugs()
         for agent in store.agents(slug)
-        if agent.hive == hive and agent.state != FINISHED
+        if agent.hive == hive and agent.state not in ENDED
     ]
 
 
