@@ -73,3 +73,40 @@ def test_native_initialization_propagates_shared_settings_without_adoption(tmp_p
     assert {key: stack_env.read_env(folder / ".env")[key] for key in chosen} == chosen
     assert {key: stack_env.read_env(folder / "client.env")[key] for key in chosen} == chosen
     assert all(value not in out.getvalue() for value in chosen.values())
+
+
+def test_adoption_drops_host_loopback_redis_addresses(tmp_path):
+    (tmp_path / stack_init.PREPARED_CLIENT).write_text("AGENTIHOOKS_SWARM_REDIS_URL=redis://127.0.0.1:6379/0\n")
+    (tmp_path / "stack").mkdir()
+    env_file = tmp_path / "stack" / ".env"
+    env_file.write_text("AGENTIHOOKS_SWARM_REDIS_URL=redis://localhost:6379/0\n")
+    database = "postgresql://ledger@database.internal/ledger"
+    for host in ("127.0.0.1", "127.0.1.1", "localhost", "[::1]"):
+        environ = {"AGENTIHOOKS_SWARM_DATABASE_URL": database, "AGENTIHOOKS_SWARM_REDIS_URL": f"redis://{host}:6379/0"}
+        assert stack_init.adopt(env_file, environ) is True
+        saved = stack_env.read_env(env_file)
+        assert "AGENTIHOOKS_SWARM_REDIS_URL" not in saved
+        assert saved["AGENTIHOOKS_SWARM_DATABASE_URL"] == database
+        assert saved["SWARM_ADOPT_REDIS_URL"] == "redis://127.0.0.1:6379/0"
+    assert not stack_init.loopback("redis://[::1:6379/0")
+    assert not stack_init.loopback("redis://redis:6379/0")
+    assert not stack_init.loopback("unix:///run/redis.sock")
+    env_file.write_text("")
+    assert stack_init.adopt(env_file, {}) is True
+    assert "AGENTIHOOKS_SWARM_REDIS_URL" not in stack_env.read_env(env_file)
+
+
+def test_compose_controller_and_hive_take_the_stack_redis_service_address():
+    from pathlib import Path
+
+    import yaml
+
+    stack = (
+        "${SWARM_REDIS_SCHEME:-redis}://swarm:"
+        "${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}@redis:6379/0"
+    )
+    root = Path(__file__).parents[2]
+    for compose in (root / "compose.yaml", root / "scripts/swarm/stack/compose.yaml"):
+        services = yaml.safe_load(compose.read_text())["services"]
+        for service in ("controller", "hive"):
+            assert services[service]["environment"]["AGENTIHOOKS_SWARM_REDIS_URL"] == stack
