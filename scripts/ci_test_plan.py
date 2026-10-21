@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import zipfile
+import zlib
 from pathlib import Path
 
 from scripts.ci_budget.jobs import read_jobs
@@ -62,7 +63,7 @@ def _manifest(data: bytes) -> dict:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             manifest = json.loads(archive.read("manifest.json"))
-    except (zipfile.BadZipFile, KeyError, ValueError) as error:
+    except (zipfile.BadZipFile, zlib.error, KeyError, ValueError) as error:
         raise UnusableRecord(str(error)) from error
     if not _valid_manifest(manifest):
         raise UnusableRecord("dependency manifest schema is invalid or empty")
