@@ -56,10 +56,20 @@ def test_kind_proof_layers_only_the_hive_on_a_current_base():
     published, rebuilt_base, rebuilt_hive = builds()
     assert "--pull" not in published
     assert "-f deploy/worker/Dockerfile" in published
-    assert "--build-arg" not in published
+    assert "--build-arg WORKER_IMAGE" not in published
     assert f"ARG WORKER_IMAGE={BASE}\n" in (ROOT / "deploy/worker/Dockerfile").read_text()
     assert "-f docker/swarm-node/Dockerfile" in rebuilt_base
     assert "--build-arg WORKER_IMAGE=local/worker-base:dev" in rebuilt_hive
+    for hive in (published, rebuilt_hive):
+        assert '--build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}"' in hive
+
+
+def test_hive_image_installs_agentihooks_cloned_from_the_chosen_branch():
+    dockerfile = (ROOT / "deploy/worker/Dockerfile").read_text()
+    wheel = dockerfile[dockerfile.index("AS wheel\n") : dockerfile.index("\nFROM ${WORKER_IMAGE}")]
+    assert "ARG AGENTIHOOKS_REF=dev\n" in wheel
+    assert "ADD https://github.com/the-cloud-clockwork/agentihooks.git#${AGENTIHOOKS_REF} /build\n" in wheel
+    assert "COPY" not in wheel
 
 
 def test_kind_proof_rebuilds_the_base_only_when_it_is_not_current():
