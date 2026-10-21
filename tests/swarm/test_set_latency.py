@@ -21,5 +21,7 @@ def test_setting_a_running_swarm_returns_without_running_a_tick(monkeypatch, cap
     cli.cmd_set(store, Namespace(slug="fixture", pairs=["max-eng-agents=8"]))
 
     assert store.config("fixture").max_eng == 8
-    assert json.loads(capsys.readouterr().out)["max_eng"] == 8
+    reply = json.loads(capsys.readouterr().out)
+    assert reply["max_eng"] == 8
+    assert reply["applies"] == "next tick"
     tick.assert_not_called()
