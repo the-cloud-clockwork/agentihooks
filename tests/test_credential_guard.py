@@ -192,17 +192,17 @@ CASES = [
     ),
     (
         "python calls env helper",
-        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"auth.env_text(record)\""}},
+        {"tool_name": "Bash", "tool_input": {"command": 'python3 -c "auth.env_text(record)"'}},
         False,
     ),
     (
         "python references env attribute",
-        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(auth.env_name)\""}},
+        {"tool_name": "Bash", "tool_input": {"command": 'python3 -c "print(auth.env_name)"'}},
         False,
     ),
     (
         "python references credential attribute",
-        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(auth.netrc_path)\""}},
+        {"tool_name": "Bash", "tool_input": {"command": 'python3 -c "print(auth.netrc_path)"'}},
         False,
     ),
     (
@@ -217,7 +217,10 @@ CASES = [
     ),
     (
         "python reads named dotenv variant",
-        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('/app/.env.production-local').read())\""}},
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "python3 -c \"print(open('/app/.env.production-local').read())\""},
+        },
         True,
     ),
     (
