@@ -1003,12 +1003,12 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
     order, actions = _spawn_order(slug, config, store, agents, rows, doc, runtime)
-    begun, launched = time.monotonic(), 0
+    begun, attempts = time.monotonic(), 0
     for lane, task in order:
         expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
         if held:
             return actions + held
-        if stop := _spawn_stop(slug, config, store, runtime, now_ms) or _budget_spent(task, begun, launched):
+        if stop := _spawn_stop(slug, config, store, runtime, now_ms) or _budget_spent(task, begun, attempts):
             return actions + [stop]
         blocked = (
             _lives_spent(slug, store, ledger, rows, task)
@@ -1067,6 +1067,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.record_launch(slug, record, "pending")
             store.seats.occupy(seat, name, now_ms)
             task["transfer"] = transfers.attach(store, slug, record)
+            attempts += 1
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
             from scripts.swarm_v2.runtime import codex
 
@@ -1078,7 +1079,6 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             if isinstance(exc, ProfileUnresolved):
                 actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
             continue
-        launched += 1
         store.count_claim(slug, task["id"])
         after = store.take_restart(slug, task["id"]) or _master_set(doc, task["id"])
         head = (ledger_events.head(task["pr_url"]) or None) if task.get("pr_url") else ""

@@ -708,11 +708,12 @@ def test_launches_inside_the_budget_keep_filling_the_lanes(store, monkeypatch):
     assert not any("launch budget" in action for action in actions)
 
 
-def test_a_failed_launch_spends_no_budget(store, monkeypatch):
+def test_a_slow_failed_launch_spends_the_budget_too(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FailingFor("t1")
     _slow_launches(monkeypatch, runtime, 30)
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert runtime.tried == ["t1", "t2"]
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.tried == ["t1"]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
 
 
 def test_a_spawn_claims_its_task_for_one_lease_and_records_its_seat_at_launch_time(store):
