@@ -419,7 +419,7 @@ def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
     assert run["if"] == "steps.touched.outputs.files != ''"
     assert run["env"]["FILES"] == "${{ steps.touched.outputs.files }}"
     assert run["run"] == (
-        'read -ra files <<< "$FILES"\npython -m pytest "${files[@]}" -n auto --tb=short -p no:cacheprovider\n'
+        'read -ra files <<< "$FILES"\npython -m pytest "${files[@]}" -n auto --dist loadgroup --tb=short -p no:cacheprovider\n'
     )
     assert not any(step.get("continue-on-error") for step in steps)
 
