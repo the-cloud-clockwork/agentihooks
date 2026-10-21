@@ -4,7 +4,6 @@ import json
 import os
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timezone
-from itertools import count
 
 from scripts import agent_choice
 from scripts.handoff import transfers
@@ -204,7 +203,9 @@ def _front_doors(store, slug, live):
 
 def _free_seat(store, slug, live):
     taken = master_fill.taken_seats(store, slug, live)
-    return next(index for index in count(2) if seat_address(slug, master_seats.seat(index)) not in taken)
+    return next(
+        index for index in range(2, len(taken) + 3) if seat_address(slug, master_seats.seat(index)) not in taken
+    )
 
 
 def _beside(store, slug, runtime, at, live):
@@ -225,7 +226,7 @@ def _beside(store, slug, runtime, at, live):
     return Launched(record.name, record.pane_id, record.seat, NEW)
 
 
-def _fresh(store, slug, runtime, at, live, replace_live):
+def _fresh(store, slug, runtime, at, live, replace_live=False):
     front = _front_doors(store, slug, live)
     if front and not replace_live:
         return _beside(store, slug, runtime, at, live)
@@ -259,4 +260,4 @@ def up(store, slug, runtime, at, choice, ask, say):
     say(f"The last master cannot be resumed: {why}")
     if _answer(ask, OFFER) not in ("y", "yes"):
         raise SwarmError("no master started")
-    return _fresh(store, slug, runtime, at, live, False)
+    return _fresh(store, slug, runtime, at, live)
