@@ -1,0 +1,83 @@
+import pytest
+
+from scripts.hive import auth, create_render
+
+pytestmark = pytest.mark.unit
+
+HIVE = create_render.Hive("swarm-hive-1800000000", "k8s/agentihooks-hive-swarm-hive-1800000000", 2225, "worker-002")
+TEMPLATE = """# header lines before the first file are dropped
+#@ file: k8s/argocd/apps/${name}.yaml
+name: ${name}
+values: $$values/k8s/values-overlays/${name}/values.yaml
+#@ file: k8s/manifests/${name}/hive.yaml
+key: ${record}
+port: ${ssh_port}
+node: ${node}
+"""
+NFS = """      - name: homes
+        env:
+        - name: HIVES
+          value: agentihooks-hive agentihooks-hive-anton-2
+        command:
+"""
+
+
+def test_render_splits_the_template_into_its_named_files_with_every_placeholder_filled():
+    assert create_render.render(TEMPLATE, HIVE) == {
+        "k8s/argocd/apps/swarm-hive-1800000000.yaml": (
+            "name: swarm-hive-1800000000\nvalues: $values/k8s/values-overlays/swarm-hive-1800000000/values.yaml\n"
+        ),
+        "k8s/manifests/swarm-hive-1800000000/hive.yaml": (
+            "key: k8s/agentihooks-hive-swarm-hive-1800000000\nport: 2225\nnode: worker-002\n"
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    ("template", "reason"),
+    [
+        ("#@ file: a.yaml\nx: ${unknown}\n", "unknown placeholder 'unknown'"),
+        ("#@ file: a.yaml\nx: $\n", "malformed placeholder"),
+        ("x: ${name}\n", "names no file with a #@ file: line"),
+    ],
+)
+def test_render_refuses_a_template_it_cannot_fill_or_split(template, reason):
+    with pytest.raises(auth.HiveError, match=reason):
+        create_render.render(template, HIVE)
+
+
+def test_with_home_appends_the_hive_to_the_nfs_home_list():
+    assert create_render.with_home(NFS, HIVE.name) == NFS.replace(
+        "agentihooks-hive-anton-2\n", "agentihooks-hive-anton-2 swarm-hive-1800000000\n"
+    )
+
+
+def test_with_home_keeps_a_list_that_already_holds_the_hive():
+    once = create_render.with_home(NFS, HIVE.name)
+    assert create_render.with_home(once, HIVE.name) == once
+
+
+def test_with_home_refuses_a_manifest_without_the_list():
+    with pytest.raises(auth.HiveError, match="has no HIVES list"):
+        create_render.with_home("kind: Deployment\n", HIVE.name)
+
+
+def _service(ip, *ports):
+    annotations = {create_render.LAN_IP_ANNOTATION: ip} if ip else {}
+    return {"metadata": {"annotations": annotations}, "spec": {"ports": [{"port": port} for port in ports]}}
+
+
+def test_next_port_is_the_first_port_from_2222_free_on_the_lan_address():
+    services = [
+        _service("10.10.30.207", 2222),
+        _service("10.10.30.207", 2223, 8765),
+        _service("10.10.30.207", 2224),
+        _service("10.10.30.208", 2225),
+        _service(None, 2225),
+        {"metadata": {}},
+    ]
+    assert create_render.next_port(services) == 2225
+
+
+def test_next_port_fills_a_gap():
+    assert create_render.next_port([_service("10.10.30.207", 2222, 2224)]) == 2223
