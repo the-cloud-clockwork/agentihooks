@@ -157,3 +157,55 @@ def test_exit_rechecks_session_identity_after_a_concurrent_write(monkeypatch, re
         assert current["exit_reason"] == "logout"
         assert current["status"] == 0
         assert current["ended_at"] == 2000
+
+
+def test_report_summary_retains_grade_misses_heartbeat_and_exit():
+    from fakeredis import FakeRedis
+
+    from scripts.hive import join_report
+    from scripts.swarm.store import AgentRecord
+
+    redis = FakeRedis(decode_responses=True)
+    agent = AgentRecord("engineer", "eng", "task", execution_id="execution", hive="worker")
+    checks = passing()
+    checks["brain"] = False
+    join_report.start(redis, "sw", agent, "session", checks, {}, 1000)
+    join_report.end(redis, agent, "session", "logout", 0, 2000)
+    local = AgentRecord("local", "eng", "other")
+    assert (
+        join_report.text(redis, [local, agent])
+        == "hive join  engineer\tpartial\tmisses=brain (optional)\theartbeat=1000\texit=logout\tstatus=0\n"
+    )
+    assert join_report.listing(redis, "worker") == [join_report.read(redis, agent)]
+
+
+def test_real_cheap_heartbeat_preserves_expensive_start_evidence(tmp_path):
+    from fakeredis import FakeRedis
+
+    from scripts.hive import join_report
+    from scripts.swarm.store import AgentRecord
+
+    redis = FakeRedis(decode_responses=True)
+    agent = AgentRecord("engineer", "eng", "task", execution_id="execution", hive="worker")
+    context = {
+        "home": str(tmp_path / "missing"),
+        "profile": "engineer",
+        "harness": "claude",
+        "pane": "",
+        "transcript_dir": "",
+    }
+    join_report.start(redis, "sw", agent, "session", passing(), context, 1000)
+    join_report.heartbeat(redis, "worker", 181000)
+    report = join_report.read(redis, agent)
+    assert report["grade"] == "failed"
+    assert report["heartbeat_at"] == 181000
+    assert report["checks"]["github"] is True
+    assert report["checks"]["ledger_join"] is True
+    assert report["checks"]["ledger_write"] is True
+    assert report["misses"] == {
+        "transcript": {"required": True},
+        "profile": {"required": True},
+        "settings": {"required": True},
+        "pane": {"required": True},
+        "brain": {"required": False},
+    }

@@ -14,7 +14,7 @@ def test_startup_observes_ledger_join_and_write_independently(monkeypatch, faile
     calls = []
 
     def request(slug, ops, **kwargs):
-        calls.append((slug, ops))
+        calls.append((slug, [{key: value for key, value in op.items() if key != "id"} for op in ops]))
         return (
             {"rejected": True, "_meta": {"warnings": ["refused"]}} if ops[0]["op"] == failed else {"_meta": {"rev": 1}}
         )
