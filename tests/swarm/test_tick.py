@@ -700,15 +700,21 @@ def test_a_tick_pass_with_three_unacknowledged_hive_orders_ends_within_seconds(s
     assert len(runtime.ordered) == 3
 
 
-def test_a_refused_hive_acknowledgement_reopens_its_task(store):
+def test_a_refused_hive_acknowledgement_reopens_its_task(store, monkeypatch):
     from scripts.swarm import failed_panes
+    from scripts.swarm import tick as tick_module
 
     store.update("sw", max_eng=2)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     names = list(runtime.ordered)
     runtime.failing.update(names)
+    released, release = [], tick_module._release_admission
+    monkeypatch.setattr(
+        tick_module, "_release_admission", lambda *args: released.append((args[1], args[2]["id"])) or release(*args)
+    )
     actions = tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert sorted(released) == [(runtime, "t1"), (runtime, "t2")]
     assert sum(action.startswith("spawn failed for ") for action in actions) == 2
     launches = {row["agent"]: row for row in store.launches("sw")}
     for name in names:
