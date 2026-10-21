@@ -83,7 +83,9 @@ def test_local_backend_counts_other_hives_and_unreported_launches_like_the_reser
     import time
 
     from hooks.context import account_sessions
+    from scripts import claude_quota_balancer as balancer
     from scripts.routing.reservation import LaunchSlots
+    from scripts.swarm import capacity
 
     now = int(time.time() * 1000)
     for hive, counts, heartbeat in (
@@ -110,6 +112,15 @@ def test_local_backend_counts_other_hives_and_unreported_launches_like_the_reser
     assert account_sessions.sessions_by_account(local=True) == {"one": 1}
     assert account_sessions.codex_sessions_by_account() == {"one": 2}
     assert not slots.reserve("claude:one", "next", 7, 1000)
+    assert not slots.reserve("codex:one", "codex-next", 2, 1000)
+    assert slots.reserve("codex:one", "codex-next", 3, 1000)
+
+    window = balancer.QuotaWindow(used=10)
+    result = balancer.ProbeResult("one", "allowed", "NORMAL", 90, window, window)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(time.time(), result)])
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([], "cached"))
+    (row,) = capacity._claude({"AH_CC_TOKEN_one": "fake"}, time.time())
+    assert row.sessions == 7
     assert slots.reserve("claude:one", "next", 8, 1000)
 
 

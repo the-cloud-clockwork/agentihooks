@@ -402,5 +402,5 @@ def sessions_by_account(
     if not local:
         for account, held in fleet_held().items():
             counts[account] = counts.get(account, 0) + held
-        _with_held(counts, hive_held("claude"))
+        counts = _with_held(counts, hive_held("claude"))
     return counts
