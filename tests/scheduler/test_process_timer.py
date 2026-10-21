@@ -70,7 +70,7 @@ def test_a_bounded_wait_with_no_wake_returns_at_its_deadline(monkeypatch):
     timer = process_timer.Timer.__new__(process_timer.Timer)
     timer.key = "wake"
     timer.redis = Mock()
-    timer.redis.blpop.return_value = None
+    timer.redis.blpop.side_effect = [None, None]
     assert timer.wait(timeout=31) is None
     assert timer.redis.blpop.call_args_list == [call("wake", timeout=30), call("wake", timeout=11)]
     ensure.assert_called_once_with()
@@ -83,7 +83,7 @@ def test_a_bounded_wait_never_asks_redis_to_block_forever(monkeypatch):
     timer = process_timer.Timer.__new__(process_timer.Timer)
     timer.key = "wake"
     timer.redis = Mock()
-    timer.redis.blpop.return_value = None
+    timer.redis.blpop.side_effect = [None]
     timer.wait(timeout=1)
     assert timer.redis.blpop.call_args_list == [call("wake", timeout=process_timer.MIN_POP_S)]
 
