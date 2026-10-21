@@ -32,24 +32,36 @@ class Selection:
 
 
 def loaded_hives(store: RedisStore) -> list[dict]:
-    """Every registered hive with the worker agents it runs or is launching."""
+    """Every registered hive with the worker agents it runs or is launching.
+
+    A hive counts a running agent in its slot's processes even when it lists no execution for it."""
     agents = [agent for slug in store.slugs() for agent in store.agents(slug)]
     hives = registry.hives(store.redis)
     for hive in hives:
         counts = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
-        seen = {execution for executions in counts.get("_executions", {}).values() for execution in executions}
-        reported = sum(
-            count for key, count in counts.items() if key != "_executions" and not key.startswith("interactive:")
-        )
+        executions = counts.get("_executions", {})
+        seen = {execution for ids in executions.values() for execution in ids}
+        reported = {
+            key: count for key, count in counts.items() if key != "_executions" and not key.startswith("interactive:")
+        }
         masters = sum(count for key, count in counts.items() if key.startswith("interactive:"))
-        pending = sum(
-            agent.hive == hive["id"]
-            and agent.lane != "master"
-            and agent.state in ("launching", "working", "suspect")
-            and agent.execution_id not in seen
-            for agent in agents
+        pending: dict[str, int] = {}
+        for agent in agents:
+            if (
+                agent.hive == hive["id"]
+                and agent.lane != "master"
+                and agent.state in ("launching", "working", "suspect")
+                and agent.execution_id not in seen
+            ):
+                slot = f"{agent.harness}:{agent.account}"
+                pending[slot] = pending.get(slot, 0) + 1
+        unclaimed = {
+            slot: max(0, reported.get(slot, 0) - counts.get(f"interactive:{slot}", 0) - len(executions.get(slot, [])))
+            for slot in pending
+        }
+        hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
+            max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
-        hive["agents"] = max(0, reported - masters) + pending
     return hives
 
 
