@@ -7,7 +7,8 @@ COPY pyproject.toml README.md ./
 COPY hooks/ hooks/
 COPY scripts/ scripts/
 COPY profiles/ profiles/
-RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip wheel --no-deps --wheel-dir /wheels .
+RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip wheel --no-deps --wheel-dir /wheels . \
+    && python -c "import tomllib; dev = tomllib.load(open('pyproject.toml', 'rb'))['project']['optional-dependencies']['dev']; print(*[r for r in dev if r.startswith('ruff==')])" > /wheels/tools.txt
 
 FROM ${WORKER_IMAGE}
 USER root
@@ -21,6 +22,7 @@ RUN apt-get update \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 COPY --from=wheel /wheels /wheels
 RUN pip install --no-cache-dir --no-deps --force-reinstall /wheels/*.whl \
+    && pip install --no-cache-dir -r /wheels/tools.txt \
     && rm -r /wheels \
     && python -c 'import profiles; from pathlib import Path; import os; helper = Path(profiles.__file__).parent / "package/skills/worktree/scripts/wt.sh"; helper.chmod(0o755); os.symlink(helper, "/usr/local/bin/wt.sh")' \
     && usermod -s /bin/bash worker

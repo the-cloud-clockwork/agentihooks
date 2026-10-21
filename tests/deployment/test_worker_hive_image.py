@@ -149,3 +149,8 @@ def test_base_is_undetermined_with_a_visible_reason_when_the_comparison_fails(tm
     assert status == 2
     assert output.startswith("::warning title=Worker hive base::")
     assert reason in output
+
+
+def test_the_hive_image_carries_the_pyproject_ruff_pin_and_the_kind_proof_runs_it():
+    assert "&& ruff --version &&" in PROOF.read_text()
+    assert "r.startswith('ruff==')" in (ROOT / "deploy/worker/Dockerfile").read_text()
