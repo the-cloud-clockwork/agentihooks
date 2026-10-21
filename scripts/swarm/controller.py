@@ -157,7 +157,7 @@ class FencedRuntime:
         ):
             return f"{waited.reason}{LOCAL_FULL}{taken} of its {local_max} agents{refused}"
         if claim:
-            admission.reserve(self.store.redis, machine, f"{self.slug}/{claim}", local_max)
+            admission.record(self.store.redis, machine, f"{self.slug}/{claim}")
         self.store.redis.hdel(self.store.key(self.slug, placement_waits.WAITS), task["id"])
         return OVERFLOW.format(lane=lane)
 

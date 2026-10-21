@@ -230,3 +230,10 @@ def test_a_reservation_holds_for_three_five_minute_load_windows(redis):
     expiry = redis.zscore(admission.key("anton"), "s/one") - (int(seconds) * 1000 + int(micros) // 1000)
     assert 899_000 <= expiry <= 901_000
     assert 899_000 <= redis.pttl(admission.key("anton")) <= 900_000
+
+
+def test_a_recorded_launch_counts_even_past_the_room(redis):
+    assert admission.reserve(redis, "box", "s/one", 1) == (True, 0)
+    admission.record(redis, "box", "s/two")
+    assert admission.pending(redis, "box") == 2
+    assert 899_000 <= redis.pttl(admission.key("box")) <= 900_000

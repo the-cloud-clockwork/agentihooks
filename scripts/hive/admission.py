@@ -93,6 +93,12 @@ def reserve(redis: "Redis", machine: str, member: str, limit: int, ttl_ms: int =
     return bool(admitted), int(held)
 
 
+def record(redis: "Redis", machine: str, member: str) -> None:
+    seconds, micros = redis.time()
+    redis.zadd(key(machine), {member: int(seconds) * 1000 + int(micros) // 1000 + PENDING_MS})
+    redis.pexpire(key(machine), PENDING_MS)
+
+
 def pending(redis: "Redis", machine: str) -> int:
     seconds, micros = redis.time()
     return redis.zcount(key(machine), f"({int(seconds) * 1000 + int(micros) // 1000}", "+inf")
