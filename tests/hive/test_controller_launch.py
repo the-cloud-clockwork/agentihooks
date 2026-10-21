@@ -1078,6 +1078,30 @@ def test_deferred_launches_return_pending_at_once_and_a_replay_records_each_ackn
     assert len(store.execution_registry.records(slug)) == 3
 
 
+def test_a_collect_without_a_live_order_refuses_instead_of_ordering_again(setup):
+    from scripts.hive import launch
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import ACK_LATER
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    name = store.next_name(slug, "eng")
+    record = AgentRecord(name, "eng", "task-1", seat=f"eng-1@{slug}", state="starting")
+    store.put_agent(slug, record)
+    store.seats.occupy(record.seat, name, 0)
+    task = {"id": "task-1", "seat": record.seat, "controller_epoch": setup.held.epoch, ACK_LATER: True}
+    request = SpawnRequest(setup.config, "eng", name, task)
+    gone = Outcome("spawn", Status.REFUSED, "hive", detail=launch.GONE)
+    assert setup.launcher.collect(request) == gone
+    assert setup.launcher.orders_for("task-1") is None
+    assert setup.launcher.spawn(request).status is Status.PENDING
+    assert setup.launcher.collect(request).status is Status.PENDING
+    order = setup.launcher.orders_for("task-1")
+    setup.launcher.end(store.execution_registry.get(slug, order.execution_id), "ended before its acknowledgement")
+    assert setup.launcher.collect(request) == gone
+    assert setup.launcher.orders_for("task-1") == order
+
+
 def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(setup):
     from scripts.swarm import controller
     from scripts.swarm.tick import ACK_LATER, SpawnError
@@ -1085,14 +1109,14 @@ def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(s
 
     routed = Mock()
     routed.spawn.side_effect = AssertionError("collect must not route the seat again")
-    routed.hive_launch.spawn.side_effect = [
+    routed.hive_launch.collect.side_effect = [
         Outcome("spawn", Status.OK, "hive", "placed"),
         Outcome("spawn", Status.PENDING, "hive", detail="waiting"),
     ]
     fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
     task = {"id": "task", "seat": "eng-1@fixture", ACK_LATER: True}
     assert fenced.collect(setup.config, "eng", "engineer", task) == "placed"
-    routed.hive_launch.spawn.assert_called_with(
+    routed.hive_launch.collect.assert_called_with(
         SpawnRequest(setup.config, "eng", "engineer", {**task, "controller_epoch": setup.held.epoch})
     )
     with pytest.raises(SpawnError) as raised:

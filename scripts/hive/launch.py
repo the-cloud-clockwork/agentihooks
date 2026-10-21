@@ -20,6 +20,7 @@ TTL_MS = 300000
 ORDERS = "controller-launch-orders"
 ENDINGS = "launch-endings"
 PENDING = "hive launch ordered, waiting for its acknowledgement"
+GONE = "the hive launch order ended before its acknowledgement"
 
 
 @dataclass(frozen=True)
@@ -279,6 +280,15 @@ class HiveLaunch:
             Orders(pipe).send(selected.hive, order)
             pipe.execute()
         return self.answer(request, order)
+
+    def collect(self, request: SpawnRequest) -> Outcome:
+        order = self.orders_for(request.task["id"])
+        if order is None or self.store.execution_registry.get(self.slug, order.execution_id).state in (
+            "ended",
+            "finished",
+        ):
+            return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
+        return self.spawn(request)
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
         agent = AgentRecord(

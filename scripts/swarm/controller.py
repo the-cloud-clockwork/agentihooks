@@ -181,7 +181,7 @@ class FencedRuntime:
         lease.renew(self.store, self.slug, self.held)
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
         with lease.kept(self.store, self.slug, self.held):
-            outcome = self.runtime.hive_launch.spawn(request)
+            outcome = self.runtime.hive_launch.collect(request)
         if not outcome.ok:
             raise SpawnError(outcome.detail, outcome.status)
         return outcome.value
