@@ -219,6 +219,27 @@ def test_an_edited_workflow_cannot_add_an_uncapped_job(tmp_path, monkeypatch):
     }
 
 
+@pytest.mark.parametrize("called_block, unsafe", [(CALLED, True), (LANED, False)])
+def test_an_edited_trusted_workflow_grades_new_reusable_calls(tmp_path, monkeypatch, called_block, unsafe):
+    trusted = {"group": "trusted-${{ github.run_id }}", "cancel-in-progress": False}
+    baseline = _workflow(concurrency=trusted, allowed={"runs-on": "x"})
+    updated = _workflow(
+        concurrency=trusted,
+        allowed={"runs-on": "x"},
+        escape={"uses": "./.github/workflows/branch.yml"},
+    )
+    child = _workflow(concurrency=called_block)
+    child["on"] = {"workflow_call": None, "workflow_dispatch": None}
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated, "branch.yml": child})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == (
+        {f"{lanes.WORKFLOWS}/replay.yml": ["job escape calls .github/workflows/branch.yml: job replay has no shared hosted lane concurrency group"]}
+        if unsafe
+        else {}
+    )
+
+
 def test_proof_branch_pushes_are_graded():
     workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "branch-lanes.yml").read_text())
     assert "diffcheck/**" not in workflow[True]["push"]["branches-ignore"]
