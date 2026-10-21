@@ -24,7 +24,7 @@ HOST_PUBLIC_KEY = "ssh_host_public_key"
 AUTHORIZED_KEYS = "ssh_authorized_keys"
 SSH_USER = "worker"
 POLL_S = 15
-KUBECTL_TIMEOUT_S = 60
+COMMAND_TIMEOUT_S = 60
 
 
 @dataclass(frozen=True)
@@ -53,8 +53,11 @@ class Tools:
 
 
 def create(tools: Tools, options: Options) -> str:
+    _placing(tools)
     tools.state = _start(tools, options)
     name = tools.state["name"]
+    if not options.dry_run:
+        _save(tools)
     for title, step in STEPS:
         tools.out(f"hive create {name}: {title}: {step(tools, options)}")
         if not options.dry_run:
@@ -64,6 +67,17 @@ def create(tools: Tools, options: Options) -> str:
     tools.state["finished"] = True
     _save(tools)
     return f"hive {name} is live in herdr as {_target(tools.state)}"
+
+
+def _placing(tools: Tools) -> None:
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(tools.redis)
+    if not any(store.config(slug).hive_placement for slug in store.slugs()):
+        raise auth.HiveError(
+            "no swarm places engineers on hives, so the new hive would wait for one forever: "
+            "run agentihooks swarm <slug> set hive-placement=on"
+        )
 
 
 def _state_path(tools: Tools) -> Path:
@@ -90,7 +104,7 @@ def _save(tools: Tools) -> None:
 
 
 def _kubectl(tools: Tools, argv: list[str]) -> str:
-    return machine._run(tools.run, ["kubectl", *argv], None, KUBECTL_TIMEOUT_S)
+    return machine._run(tools.run, ["kubectl", *argv], None, COMMAND_TIMEOUT_S)
 
 
 def _record(tools: Tools) -> dict[str, str]:
@@ -127,7 +141,7 @@ def _ssh_keys(tools: Tools, options: Options) -> str:
     with tempfile.TemporaryDirectory() as folder:
         path = Path(folder) / "host_key"
         argv = ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", tools.state["name"], "-f", str(path)]
-        machine._run(tools.run, argv, None, KUBECTL_TIMEOUT_S)
+        machine._run(tools.run, argv, None, COMMAND_TIMEOUT_S)
         entries = {
             HOST_KEY: path.read_text(),
             HOST_PUBLIC_KEY: path.with_suffix(".pub").read_text().strip(),
@@ -168,9 +182,16 @@ def _merged(tools: Tools, options: Options) -> str:
     if options.dry_run:
         return "would merge the pull request once its checks pass"
     url = tools.state["pr"]
-    if not create_github.merged(tools.run, url):
+    found = create_github.pr_state(tools.run, url)
+    if found == "CLOSED":
+        del tools.state["pr"]
+        _save(tools)
+        raise auth.HiveError(f"pull request {url} was closed without merging; rerun hive create to open a new one")
+    if found != "MERGED":
         create_github.merge(tools.run, url)
-        _wait(tools, options, f"pull request {url} to merge", lambda: create_github.merged(tools.run, url))
+        _wait(
+            tools, options, f"pull request {url} to merge", lambda: create_github.pr_state(tools.run, url) == "MERGED"
+        )
     return f"merged {url}"
 
 

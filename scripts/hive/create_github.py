@@ -27,7 +27,10 @@ def read(run: Run, repo: str, path: str, ref: str) -> str:
 
 
 def open_pr(run: Run, repo: str, base: str, branch: str, files: Mapping[str, str], message: str) -> str:
-    found = gh(run, ["pr", "list", "-R", repo, "--head", branch, "--state", "all", "--json", "url", "--jq", ".[0].url"])
+    pending = '[.[] | select(.state != "CLOSED")][0].url // ""'
+    found = gh(
+        run, ["pr", "list", "-R", repo, "--head", branch, "--state", "all", "--json", "url,state", "--jq", pending]
+    )
     if found:
         return found
     head = gh(run, ["api", f"repos/{repo}/git/ref/heads/{base}", "--jq", ".object.sha"])
@@ -35,17 +38,31 @@ def open_pr(run: Run, repo: str, base: str, branch: str, files: Mapping[str, str
     entries = [{"path": path, "mode": "100644", "type": "blob", "content": text} for path, text in files.items()]
     tree = _post(run, f"repos/{repo}/git/trees", {"base_tree": tree, "tree": entries})
     commit = _post(run, f"repos/{repo}/git/commits", {"message": message, "tree": tree, "parents": [head]})
-    _post(run, f"repos/{repo}/git/refs", {"ref": f"refs/heads/{branch}", "sha": commit})
+    _branch(run, repo, branch, commit)
     title = message.splitlines()[0]
     return gh(run, ["pr", "create", "-R", repo, "--base", base, "--head", branch, "--title", title, "--body", message])
+
+
+def _branch(run: Run, repo: str, branch: str, commit: str) -> None:
+    try:
+        _post(run, f"repos/{repo}/git/refs", {"ref": f"refs/heads/{branch}", "sha": commit})
+    except auth.HiveError as exc:
+        if "Reference already exists" not in str(exc):
+            raise
+        body = {"sha": commit, "force": True}
+        gh(
+            run,
+            ["api", "-X", "PATCH", f"repos/{repo}/git/refs/heads/{branch}", "--input", "-", "--jq", ".object.sha"],
+            body,
+        )
 
 
 def _post(run: Run, path: str, body: dict) -> str:
     return gh(run, ["api", "-X", "POST", path, "--input", "-", "--jq", ".sha"], body)
 
 
-def merged(run: Run, url: str) -> bool:
-    return gh(run, ["pr", "view", url, "--json", "state", "--jq", ".state"]) == "MERGED"
+def pr_state(run: Run, url: str) -> str:
+    return gh(run, ["pr", "view", url, "--json", "state", "--jq", ".state"])
 
 
 def merge(run: Run, url: str) -> None:

@@ -13,6 +13,7 @@ values: $$values/k8s/values-overlays/${name}/values.yaml
 key: ${record}
 port: ${ssh_port}
 node: ${node}
+ip: ${lan_ip}
 """
 NFS = """      - name: homes
         env:
@@ -28,7 +29,7 @@ def test_render_splits_the_template_into_its_named_files_with_every_placeholder_
             "name: swarm-hive-1800000000\nvalues: $values/k8s/values-overlays/swarm-hive-1800000000/values.yaml\n"
         ),
         "k8s/manifests/swarm-hive-1800000000/hive.yaml": (
-            "key: k8s/agentihooks-hive-swarm-hive-1800000000\nport: 2225\nnode: worker-002\n"
+            "key: k8s/agentihooks-hive-swarm-hive-1800000000\nport: 2225\nnode: worker-002\nip: 10.10.30.207\n"
         ),
     }
 

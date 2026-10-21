@@ -49,7 +49,9 @@ agentihooks hive create
 | herdr | trusts the host key in `~/.ssh/known_hosts`, then `hive add ssh://worker@<LAN address>:<port> --label <name>` | the saved create holds the added member |
 | engineer | waits for a non master agent working on the hive | never |
 
-Each wait is bounded by `--timeout` (1800 seconds). A refusal prints `hive create refused: <reason>` and exits 1; a
+It needs antoncore `k8s/templates/agentihooks-hive.yaml` on `dev` and at least one swarm with `hive-placement=on`,
+because the engineer comes from that swarm's placement; without placement it refuses before naming a hive. Each wait
+is bounded by `--timeout` (1800 seconds). A refusal prints `hive create refused: <reason>` and exits 1; a
 rerun resumes the saved create from its first unfinished step. A finished create makes the next run start a new hive.
 `--node`, `--repo`, `--base` and `--like` override the node, the GitOps repository, its branch and the record copied.
 

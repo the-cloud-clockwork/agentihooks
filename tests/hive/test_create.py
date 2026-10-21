@@ -78,12 +78,16 @@ class Run:
 
 class Store:
     working = True
+    placing = True
 
     def __init__(self, redis):
         self.redis = redis
 
     def slugs(self):
         return ["demo"]
+
+    def config(self, slug):
+        return SimpleNamespace(hive_placement=Store.placing)
 
     def agents(self, slug):
         hives = [
@@ -107,7 +111,7 @@ def world(tmp_path, monkeypatch):
     published = []
     monkeypatch.setattr(create.setup, "publish", lambda env, path, dry: published.append(dry) or f"settings {dry}")
     monkeypatch.setattr(swarm_store, "RedisStore", Store)
-    Store.working = True
+    Store.working = Store.placing = True
 
     def beat():
         member = invite._env(bao.records[RECORD]["credential"])[invite.HIVE_ID]
@@ -228,7 +232,7 @@ def test_a_failing_gh_names_its_command():
         return subprocess.CompletedProcess(argv, 1, "", "HTTP 404")
 
     with pytest.raises(auth.HiveError, match="gh pr view exited 1: HTTP 404"):
-        create_github.merged(run, PR)
+        create_github.pr_state(run, PR)
 
 
 def test_cli_create_needs_openbao(monkeypatch, capsys):
@@ -249,3 +253,84 @@ def test_cli_create_passes_its_options(monkeypatch, capsys):
     assert cli.main([*argv, "--base", "main"]) == 0
     assert capsys.readouterr().out == "created\n"
     assert seen["options"] == create.Options("o/r", "main", "k8s/x", "worker-002", 9, True)
+
+
+def test_a_crash_in_the_first_step_resumes_the_same_hive(world, monkeypatch):
+    real = invite.invite
+
+    def crash(*args):
+        real(*args)
+        raise auth.HiveError("killed")
+
+    monkeypatch.setattr(invite, "invite", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    monkeypatch.setattr(invite, "invite", real)
+    first = world.bao.records[RECORD]["credential"]
+    world.tools.clock = lambda: NOW + 7
+    Store.working = False
+
+    with pytest.raises(auth.HiveError, match="waiting for an engineer"):
+        create.create(world.tools, create.Options(timeout_s=0))
+    assert _state(world)["name"] == NAME
+    assert world.bao.records[RECORD]["credential"] == first
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_no_swarm_placing_on_hives_is_a_refusal_before_anything_is_named(world, dry_run):
+    Store.placing = False
+    with pytest.raises(auth.HiveError, match="set hive-placement=on"):
+        create.create(world.tools, create.Options(dry_run=dry_run))
+    assert world.run.calls == []
+    assert not (world.home / "agentihooks" / create.STATE_FILE).exists()
+
+
+def test_a_closed_pull_request_is_not_reused():
+    run = Run()
+    create_github.open_pr(run, REPO, "dev", NAME, {"a": "b"}, "Add worker hive")
+    listed = run.named("gh", "pr", "list")[0]
+    assert listed[listed.index("--jq") + 1] == '[.[] | select(.state != "CLOSED")][0].url // ""'
+
+
+def test_a_branch_left_by_an_earlier_run_is_moved_to_the_new_commit():
+    run = Run()
+
+    def answer(argv, **kwargs):
+        if argv[:5] == ["gh", "api", "-X", "POST", f"repos/{REPO}/git/refs"]:
+            return subprocess.CompletedProcess(argv, 1, "", "gh: Reference already exists (HTTP 422)")
+        return run(argv, **kwargs)
+
+    assert create_github.open_pr(answer, REPO, "dev", NAME, {"a": "b"}, "Add worker hive") == PR
+    patched = run.named("gh", "api", "-X", "PATCH")
+    assert patched == [
+        ["gh", "api", "-X", "PATCH", f"repos/{REPO}/git/refs/heads/{NAME}", "--input", "-", "--jq", ".object.sha"]
+    ]
+
+
+def test_another_branch_error_is_a_refusal():
+    def answer(argv, **kwargs):
+        if argv[:4] == ["gh", "api", "-X", "POST"] and argv[4].endswith("/git/refs"):
+            return subprocess.CompletedProcess(argv, 1, "", "HTTP 403")
+        return Run()(argv, **kwargs)
+
+    with pytest.raises(auth.HiveError, match="HTTP 403"):
+        create_github.open_pr(answer, REPO, "dev", NAME, {"a": "b"}, "Add worker hive")
+
+
+def test_a_saved_pull_request_closed_without_merging_is_dropped_for_a_new_one(world):
+    world.run.state = "CLOSED"
+    world.run.prs = [PR]
+    world.tools.state = {}
+    (world.home / "agentihooks").mkdir()
+    saved = {"name": NAME, "record": RECORD, "ssh_port": 2225, "node": "worker-001", "pr": PR}
+    (world.home / "agentihooks" / create.STATE_FILE).write_text(json.dumps(saved))
+
+    with pytest.raises(auth.HiveError, match="was closed without merging; rerun hive create to open a new one"):
+        create.create(world.tools, create.Options(timeout_s=0))
+    assert "pr" not in _state(world)
+    assert not world.run.named("gh", "pr", "merge")
+
+
+def test_cli_create_defaults_are_the_options_defaults():
+    args = cli._parser().parse_args(["create"])
+    assert create.Options(args.repo, args.base, args.like, args.node, args.timeout, args.dry_run) == create.Options()

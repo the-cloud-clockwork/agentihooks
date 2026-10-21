@@ -26,7 +26,7 @@ class Hive:
 def render(template: str, hive: Hive) -> dict[str, str]:
     try:
         text = Template(template).substitute(
-            name=hive.name, record=hive.record, ssh_port=str(hive.ssh_port), node=hive.node
+            name=hive.name, record=hive.record, ssh_port=str(hive.ssh_port), node=hive.node, lan_ip=LAN_IP
         )
     except KeyError as exc:
         raise auth.HiveError(f"the hive template names an unknown placeholder {exc}") from None
