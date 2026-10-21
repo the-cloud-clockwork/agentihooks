@@ -72,6 +72,7 @@ PAGES = {
     "checkSuites": (PAGE_PREFIX + "checkSuites(first:100,after:$after){" + SUITE_NODES + "}}}}", ("checkSuites",)),
 }
 MAX_PAGES = 20
+ROLLUP_FALLBACK = "merged state alone, because GitHub refused the check rollup"
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ class PullRequest:
     running: bool = False
     body: str = ""
     started: bool = False
+    fallback: str = ""
 
 
 def iso_ms(text):
@@ -323,12 +325,29 @@ def view(url, run=subprocess.run, required_checks=None):
             timeout=20,
         )
         if done.returncode != 0:
-            return None
+            return _merged_without_rollup(json.loads(done.stdout))
         return _view_resource(
             json.loads(done.stdout)["data"]["resource"], number, run=run, required_checks=required_checks
         )
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
+
+
+def _merged_without_rollup(result):
+    errors, raw = result.get("errors"), result["data"]["resource"]
+    if not errors or raw["state"] != "MERGED":
+        return None
+    if not all(error.get("type") == "FORBIDDEN" and "commits" in error["path"] for error in errors):
+        return None
+    return PullRequest(
+        "MERGED",
+        iso_ms(raw["mergedAt"]),
+        None,
+        False,
+        resolved=True,
+        head=raw["headRefOid"],
+        fallback=ROLLUP_FALLBACK,
+    )
 
 
 def head(url, run=subprocess.run):
