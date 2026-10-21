@@ -60,6 +60,36 @@ def test_a_lost_communication_annotation_is_retried():
     assert ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
 
 
+def test_a_shard_lost_again_on_its_in_run_rerun_is_not_requeued():
+    failed = [*lost_run(), job("unit rerun (3.11, 2)", SHUTDOWN), job("unit rerun (3.11, 5)", LOST)]
+    retry, reason = ci_queue_retry.decide(RUN, failed, WORKFLOW)
+    assert not retry
+    assert reason == "failed again on its in-run rerun: unit rerun (3.11, 2), unit rerun (3.11, 5)"
+
+
+def test_a_timed_out_rerun_is_listed_so_it_refuses_the_requeue(monkeypatch):
+    jobs = {
+        "total_count": 2,
+        "jobs": [
+            {"id": 1, "name": "unit (3.12, 2)", "conclusion": "failure"},
+            {"id": 2, "name": "unit rerun (3.12, 2)", "conclusion": "timed_out"},
+        ],
+    }
+
+    def api(*args):
+        if args[0].endswith("jobs?filter=latest&per_page=100"):
+            return json.dumps(jobs)
+        return "##[error]" + SHUTDOWN if args[0].endswith("/logs") else "[]"
+
+    monkeypatch.setattr(ci_queue_retry, "_api", api)
+    failed = ci_queue_retry.failed_jobs("o/r", 7)
+    assert [entry["name"] for entry in failed] == ["unit (3.12, 2)", "unit rerun (3.12, 2)"]
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (
+        False,
+        "failed again on its in-run rerun: unit rerun (3.12, 2)",
+    )
+
+
 def test_a_real_test_failure_is_not_retried():
     failed = [job("unit (3.11, 2)", RED), job("Gate — Required", "")]
     retry, reason = ci_queue_retry.decide(RUN, failed, WORKFLOW)

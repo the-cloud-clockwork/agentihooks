@@ -119,7 +119,9 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
 
 def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     record = {}
-    for repository in dict.fromkeys(repository_root(Path(value)) for value in task.get("repositories") or [repo]):
+    present = [value for value in task.get("repositories") or [] if Path(value).is_dir()]
+    candidates = [value for value in present or [repo] if Path(value).is_dir()]
+    for repository in dict.fromkeys(repository_root(Path(value)) for value in candidates):
         scoped = repository_task(repository, task)
         root = existing(repository, scoped, agent)
         if root and stack.pushed(root, scoped["branch"]):

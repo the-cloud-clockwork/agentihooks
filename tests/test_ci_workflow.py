@@ -245,7 +245,7 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
         assert "count-record" not in jobs
         jobs["count-record"] = recorder
         callers["count-record"] = recorder["steps"]
-    assert sorted(callers) == ["count-record", "split", "test-count", "unit", "unit-selected"]
+    assert sorted(callers) == ["count-record", "split", "test-count", "unit", "unit-rerun", "unit-selected"]
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
         assert restore["uses"] == "actions/cache/restore@v4"
@@ -472,6 +472,19 @@ def test_equivalence_runs_storage_then_page_replays_each_group_at_once():
         assert 'cat "$RUNNER_TEMP/$name.log"' in run and "return 1" in run
     assert steps.index(store) < steps.index(_browser_install(steps)) < steps.index(pages)
     assert all("Path('head/" not in step.get("run", "") for step in steps)
+
+
+def test_equivalence_plants_each_fault_in_a_file_that_exists():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
+        "steps"
+    ]
+    [plant] = [step for step in steps if step.get("name", "").startswith("Plant ")]
+    script = plant["run"].split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
+    loop = next(node for node in ast.walk(ast.parse(script)) if isinstance(node, ast.For))
+    planted = [(ast.literal_eval(entry.elts[0].args[0]), ast.literal_eval(entry.elts[1])) for entry in loop.iter.elts]
+    assert [path.split("/", 1)[0] for path, _ in planted] == ["fault-store", "fault-chat"]
+    for path, needle in planted:
+        assert (_ROOT / path.split("/", 1)[1]).read_text().count(needle) == 1
 
 
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])

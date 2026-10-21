@@ -69,11 +69,12 @@ def beat(redis: "Redis", local_id: str) -> None:
         consumer.poll()
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
-    from scripts.hive import join_report
+    from scripts.hive import headroom, join_report
 
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+    headroom.publish(redis, local_id, int(time.time() * 1000))
     publish_config(redis, local_id, report["repos"])
 
 

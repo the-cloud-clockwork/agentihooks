@@ -1314,10 +1314,12 @@ def follow_shared(interval=FOLLOW_S):
 def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     ledger_writer = ports.swarm().ledger_writer
-    try:
-        writer = ledger_writer.WriterLease(core.LEDGER_DIR).acquire(ledger_writer.owner())
-    except ledger_writer.WriterConflict as conflict:
-        sys.exit(str(conflict))
+    writer = ledger_writer.WriterLease(core.LEDGER_DIR)
+    if not storage.shared():
+        try:
+            writer.acquire(ledger_writer.owner())
+        except ledger_writer.WriterConflict as conflict:
+            sys.exit(str(conflict))
     legacy.adopt(stored)
     adopt_unrelayed()
     metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
