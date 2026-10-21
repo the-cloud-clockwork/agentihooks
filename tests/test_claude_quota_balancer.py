@@ -723,6 +723,11 @@ def test_a_ceiling_scales_the_cap_with_the_tighter_window():
     full = balancer.ProbeResult("a", "allowed", "NORMAL", 96.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(2.0))
     assert balancer.account_cap(full, 1000) == 6
     assert balancer.account_cap(full, 1000, ceiling=12) == 11
+    assert balancer.account_cap(full, 1000, ceiling=0) == 0
+    spent = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 0.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(100.0, 2000)
+    )
+    assert balancer.account_cap(spent, 1000, ceiling=12) == 0
     fable = balancer.ProbeResult(
         "a", "allowed", "NORMAL", 96.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(2.0), balancer.QuotaWindow(50.0)
     )

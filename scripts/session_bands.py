@@ -48,7 +48,7 @@ def scaled_cap(five_left: float | None, week_left: float | None, ceiling: int) -
 
 def hive_ceiling(environ: Mapping[str, str]) -> int:
     try:
-        return int(environ.get(HIVE_CEILING_ENV) or HIVE_CEILING)
+        return max(0, int(environ.get(HIVE_CEILING_ENV) or HIVE_CEILING))
     except ValueError:
         return HIVE_CEILING
 

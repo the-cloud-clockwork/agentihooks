@@ -151,6 +151,7 @@ def test_a_hive_cap_without_a_reading_is_unknown():
         ({"AGENTIHOOKS_HIVE_SESSION_CEILING": ""}, 12),
         ({"AGENTIHOOKS_HIVE_SESSION_CEILING": "20"}, 20),
         ({"AGENTIHOOKS_HIVE_SESSION_CEILING": "many"}, 12),
+        ({"AGENTIHOOKS_HIVE_SESSION_CEILING": "-3"}, 0),
     ],
 )
 def test_the_hive_ceiling_comes_from_the_environment(environ, ceiling):
