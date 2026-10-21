@@ -8,7 +8,15 @@ import json
 
 import pytest
 
-from hooks.context.credential_guard import ENV_NAMES_SAFE, GREP_EXCLUDES, RG_EXCLUDES, decide, evaluate
+from hooks.context.credential_guard import (
+    ENV_NAMES_SAFE,
+    GREP_EXCLUDES,
+    KIND_ENVIRONMENT,
+    RG_EXCLUDES,
+    block,
+    decide,
+    evaluate,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -277,6 +285,19 @@ def test_guard_never_raises_on_garbage():
     for payload in ({}, {"tool_name": None}, {"tool_input": "notadict"}, {"tool_name": "Bash", "tool_input": None}):
         decide(payload)
         evaluate(payload, allow_rewrite=True)
+
+
+def test_access_env_block_names_the_token_and_the_eval_form():
+    reason = decide({"tool_name": "Bash", "tool_input": {"command": "agentihooks access env"}})
+
+    assert reason == (
+        block("printing the Cloudflare Access service token (agentihooks access env)", KIND_ENVIRONMENT)
+        + '\nEvaluate it instead:  eval "$(agentihooks access env)", then test each variable by name.'
+    )
+    assert reason.startswith("BLOCKED: printing the Cloudflare Access service token (agentihooks access env).\n")
+    assert reason != block("printing the Cloudflare Access service token (agentihooks access env)", None) + (
+        '\nEvaluate it instead:  eval "$(agentihooks access env)", then test each variable by name.'
+    )
 
 
 def _bash(command, cwd=""):

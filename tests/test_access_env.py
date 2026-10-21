@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -92,7 +93,9 @@ def test_the_default_opener_caps_the_wait(monkeypatch, asked, waited):
 
 
 def test_env_prints_one_quoted_export_per_variable(monkeypatch, capsys):
-    monkeypatch.setattr(access_env, "values", lambda environ: {PART_NAME: "s 'q'", ID_NAME: "i"})
+    monkeypatch.setattr(
+        access_env, "values", lambda environ: {PART_NAME: "s 'q'", ID_NAME: "i"} if environ is os.environ else {}
+    )
 
     assert delegated_cli(["access"]) is access_env.main
     assert access_env.main(["env"]) == 0

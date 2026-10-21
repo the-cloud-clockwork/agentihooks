@@ -32,7 +32,7 @@ def values(environ: Mapping[str, str], opener: Callable = _opener) -> dict[str, 
     except openbao_kv.OpenBaoError as exc:
         print(f"agentihooks access: {exc}", file=sys.stderr)
         return {}
-    found = {name: record.get(name.replace("SWARM_", "CF_", 1)) for name in NAMES}
+    found = {name: record.get(name.replace("SWARM_", "CF_")) for name in NAMES}
     return found if all(isinstance(value, str) and value for value in found.values()) else {}
 
 
