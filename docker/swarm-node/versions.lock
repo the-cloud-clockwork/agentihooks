@@ -18,7 +18,7 @@
     "jq": "1.6-2.1+deb12u1",
     "tini": "0.19.0-1+b3"
   },
-  "requirements_sha256": "546054a9833fe708000f4247cb597ad8200ef2b13478652815fc4fc712bce472",
+  "requirements_sha256": "3f0efa6a589fc171889cfb5f225b519c8fa3cb86ee2abcad3f49622c15db5b5e",
   "tools": {
     "herdr": {
       "version": "0.9.1",
