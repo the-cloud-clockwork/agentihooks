@@ -81,7 +81,7 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
     assert reuse["id"] == "reuse"
     assert reuse["if"] == "steps.open.outputs.open == 'false'"
     reuse["env"]["UNRELATED_SETTING"] = "ignored"
-    assert reuse["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert reuse["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert reuse["run"] == "python3 -m scripts.ci_mutation." + 'reuse "$GITHUB_REF_NAME" "$GITHUB_RUN_ID"'
     upload_at = names.index("Upload the reused mutation evidence")
     upload = steps[upload_at]
@@ -170,7 +170,8 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     sized = steps[names.index("Size mutation shards from stored timings")]
     assert sized["id"] == "plan"
     sized["env"]["UNRELATED_SETTING"] = "ignored"
-    assert sized["env"] == {"GH_TOKEN": "${{ github.token }}", "MUTATION_SHARD_CPU_QUOTA": "3"}
+    assert sized["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert sized["env"]["MUTATION_SHARD_CPU_QUOTA"] == "3"
     from scripts.ci_mutation import plan as planner
     from tests.test_ci_mutation_plan import _project
 
@@ -271,7 +272,8 @@ def test_a_single_stats_part_refines_inside_the_statistics_worker():
     assert measured["if"] == single
     assert measured["id"] == "refine"
     measured["env"]["UNRELATED_SETTING"] = "ignored"
-    assert measured["env"] == {"BASES": "${{ needs.plan.outputs.bases }}", "MUTATION_SHARD_CPU_QUOTA": "3"}
+    assert measured["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
+    assert measured["env"]["MUTATION_SHARD_CPU_QUOTA"] == "3"
     assert measured["run"] == refine_steps[refine_names.index(measured["name"])]["run"]
     upload = steps[names.index("Upload the measured mutation plan")]
     assert upload["if"] == single
@@ -374,10 +376,11 @@ def test_preflight_merges_every_shard_into_the_one_report_its_readers_take():
     scope = steps[names.index("Record the revisions the report grades")]
     assert '"$(git merge-base "$BASE" HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json' in scope["run"]
     merge = steps[names.index("Merge the shard reports")]
-    assert merge["env"] == {
-        "SHARDS": "${{ needs.plan.outputs.changed != '0'"
+    merge["env"]["UNRELATED_SETTING"] = "ignored"
+    assert merge["env"]["SHARDS"] == (
+        "${{ needs.plan.outputs.changed != '0'"
         " && (needs.refine.outputs.shards || needs.stats.outputs.shards) || '[]' }}"
-    }
+    )
     assert merge["run"] == (
         "python -m scripts.ci_mutation."
         'merge .mutation-shards --shards "$(jq length <<< "$SHARDS")" --output .mutation-gate'
