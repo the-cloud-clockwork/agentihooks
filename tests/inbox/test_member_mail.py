@@ -86,17 +86,10 @@ def test_the_exit_sweep_moves_a_gone_member_agents_mail_to_its_seat(store, agent
     assert member.get(item.id).address == SEAT
 
 
-class HungRedis:
-    """A hive Redis whose socket timeout fires on every call; pings answer when answers_ping is set."""
-
-    def __init__(self, answers_ping):
-        self.answers_ping = answers_ping
+class AnsweringPingThenHung:
+    """A hive Redis that answers ping, then times out on every later call."""
 
     def ping(self):
-        from redis.exceptions import TimeoutError as RedisTimeoutError
-
-        if not self.answers_ping:
-            raise RedisTimeoutError("Timeout reading from socket")
         return True
 
     def __getattr__(self, name):
@@ -108,21 +101,74 @@ class HungRedis:
         return hung
 
 
-@pytest.mark.parametrize("answers_ping", [False, True])
-def test_the_exit_sweep_skips_a_world_that_never_answers_and_still_settles_the_others(
-    store, agent, mail, monkeypatch, answers_ping
+@pytest.fixture
+def silent_redis():
+    """A real Redis client on a socket the kernel accepts and nobody ever answers, with a short socket timeout."""
+    import socket
+
+    import redis as redis_lib
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    host, port = listener.getsockname()
+    client = redis_lib.Redis(host=host, port=port, socket_timeout=0.2, socket_connect_timeout=0.2)
+    yield client
+    client.close()
+    listener.close()
+
+
+def _with_world(monkeypatch, world):
+    worlds = InboxStore.worlds
+    monkeypatch.setattr(InboxStore, "worlds", lambda self: [*worlds(self), world])
+
+
+def test_the_exit_sweep_finishes_past_a_world_that_never_answers_and_settles_the_others(
+    store, agent, mail, monkeypatch, silent_redis, capsys
+):
+    import time
+
+    member, item = mail
+    _with_world(monkeypatch, InboxStore(silent_redis, world="m2"))
+    store.put_agent("sw", replace(agent, state="finished"))
+    started = time.monotonic()
+    lines = exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert time.monotonic() - started < 5
+    assert member.get(item.id).address == SEAT
+    assert lines == [
+        "skipped the inbox of hive m2 this pass: its Redis timed out or dropped: Timeout reading from socket"
+    ]
+    assert capsys.readouterr().err == f"{lines[0]}\n"
+
+
+def test_the_exit_sweep_skips_a_world_that_stops_answering_after_ping_and_settles_the_others(
+    store, agent, mail, monkeypatch
 ):
     member, item = mail
-    worlds = InboxStore.worlds
-    monkeypatch.setattr(
-        InboxStore, "worlds", lambda self: [*worlds(self), InboxStore(HungRedis(answers_ping), world="m2")]
-    )
+    _with_world(monkeypatch, InboxStore(AnsweringPingThenHung(), world="m2"))
     store.put_agent("sw", replace(agent, state="finished"))
     lines = exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
     assert member.get(item.id).address == SEAT
     assert lines == [
         "skipped the inbox of hive m2 this pass: its Redis timed out or dropped: Timeout reading from socket"
     ]
+
+
+def test_the_tick_redis_client_every_world_reads_through_carries_a_socket_timeout(monkeypatch):
+    import redis as redis_lib
+
+    from scripts.swarm import store as swarm_store
+
+    seen = {}
+
+    class Client:
+        def ping(self):
+            return True
+
+    monkeypatch.setattr(redis_lib.Redis, "from_url", lambda url, **kwargs: seen.update(kwargs) or Client())
+    swarm_store._pinged(redis_lib, "redis://hive:6379")
+    assert seen["socket_timeout"] == 10
+    assert seen["socket_connect_timeout"] == 3
 
 
 def test_the_exit_sweep_withdraws_the_master_escalation_of_a_member_agents_unfillable_seat(store, agent, mail):

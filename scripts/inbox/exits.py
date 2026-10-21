@@ -2,6 +2,7 @@
 sender told."""
 
 import re
+import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -218,6 +219,7 @@ class _WorldPass:
             self.up.remove(world)
             where = f"hive {world.world}" if world.world else "the controller"
             self.skipped.append(f"skipped the inbox of {where} this pass: its Redis timed out or dropped: {exc}")
+            print(self.skipped[-1], file=sys.stderr)
             return None
 
 
