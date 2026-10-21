@@ -758,6 +758,20 @@ def test_the_refresh_slot_runs_setup_with_the_recorded_address(tmp_path, monkeyp
     assert {environ["AGENTIHOOKS_HOME"] for _, environ in seen} == {str(tmp_path / "agentihooks")}
 
 
+@pytest.mark.parametrize("slot, command", [(operator_setup.refresh, "setup"), (operator_setup.sync, "sync")])
+def test_an_unreadable_operator_shell_env_is_reported_and_never_raised(tmp_path, monkeypatch, slot, command):
+    def fail(environ):
+        raise OSError("no bash")
+
+    monkeypatch.setattr(operator_setup.operator_env, "values", fail)
+    err = Journal()
+
+    with redirect_stderr(err):
+        slot(event(tmp_path / "home"), "delivery", None)
+
+    assert err.getvalue() == f"operator terminal {command} failed: OSError: no bash\n"
+
+
 def test_the_operator_shell_env_is_the_env_file_set_over_the_runner_env(tmp_path, monkeypatch):
     home = tmp_path / "operator"
     state = home / ".agentihooks"
