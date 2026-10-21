@@ -513,14 +513,25 @@ def _restore_owner(slug, store, ledger, rows, agent):
     rows[agent.task] = ledger.update_task(slug, agent.task, fields, if_state=(row["state"],), if_match=expected)
 
 
-def _drop_remote(slug, store, ledger, rows, agent):
+def _drop_remote(slug, store, ledger, rows, agent, reason):
     master_retire.forget(store, slug, agent.name)
     _refund_parked(slug, store, rows, agent.task)
-    return f"retired {agent.name}: its hive pane is gone" + _drop(slug, store, ledger, rows, agent)
+    return f"retired {agent.name}: {reason}" + _drop(slug, store, ledger, rows, agent)
 
 
-def _remote_exited(runtime, agent):
-    return bool(reports.host(agent)) and runtime.observe(agent).state == "exited"
+def _remote_exited(slug, store, runtime, agent, now_ms):
+    if not reports.host(agent):
+        return ""
+    if runtime.observe(agent).state == "exited":
+        return "its hive pane is gone"
+    return "its hive stopped reporting" if _hive_lost(slug, store, runtime, agent, now_ms) else ""
+
+
+def _hive_lost(slug, store, runtime, agent, now_ms):
+    if runtime.hive is None or not runtime.hive.lost(agent, now_ms):
+        return False
+    beat = idle_state.heartbeat(store.redis, slug, agent.name)
+    return beat is None or now_ms - beat["at"] > reports.LOST_MS
 
 
 def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
@@ -544,8 +555,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
     for agent in store.agents(slug):
         if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
             continue
-        if _remote_exited(runtime, agent):
-            actions.append(_drop_remote(slug, store, ledger, rows, agent))
+        if reason := _remote_exited(slug, store, runtime, agent, now_ms):
+            actions.append(_drop_remote(slug, store, ledger, rows, agent, reason))
             continue
         ended = _ended(agent, rows)
         if agent.state == "retiring" and not ended:

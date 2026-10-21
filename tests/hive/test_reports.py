@@ -175,6 +175,7 @@ def _beat_hive(remote, age):
     ("age", "reporting", "lost"),
     [
         (LOST + 1, False, True),
+        (NOW - 1, False, True),
         (LOST, False, False),
         (LOST + 1, True, False),
         ("never", False, False),

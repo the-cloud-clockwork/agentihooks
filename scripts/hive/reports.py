@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 
     from scripts.swarm.store import AgentRecord
 
+LOST_MS = 10 * 60_000
+
 
 def key(hive: str) -> str:
     return f"{registry.key(hive)}:executions"
@@ -60,6 +62,13 @@ class Reports:
         if namespace and launched and namespace != launched:
             return True
         return bool(agent.pane_id) and agent.pane_id not in panes
+
+    def lost(self, agent: "AgentRecord", now_ms: int) -> bool:
+        hive = host(agent)
+        if not hive or self.read(hive) is not None:
+            return False
+        record = registry.show(self.redis, hive)
+        return record is not None and 0 < record["heartbeat_at"] < now_ms - LOST_MS
 
     def names(self) -> set[str]:
         return {name for report in self.live().values() for name in report["names"]}
