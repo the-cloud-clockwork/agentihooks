@@ -123,6 +123,79 @@ jobs:
           MUTATION_SHARD_CPU_QUOTA: "3"
         run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
+      - name: Probe record lookup phases
+        if: steps.open.outputs.open != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rec"
+          python - <<'PY'
+          import os, time
+          from datetime import UTC, datetime
+          from pathlib import Path
+          import scripts.ci_test_plan as p
+          orig_api, orig_manifest, orig_jobs = p._api, p._manifest, p.read_jobs
+          for i in range(3):
+              t = {"api": 0.0, "zip": 0.0, "parse": 0.0, "jobs": 0.0}
+              def api(e):
+                  s = time.perf_counter(); r = orig_api(e); d = time.perf_counter() - s
+                  t["zip" if e.endswith("/zip") else "api"] += d
+                  if e.endswith("/zip"):
+                      Path(os.environ["RUNNER_TEMP"], "rec", "record.zip").write_bytes(r)
+                  return r
+              def man(b):
+                  s = time.perf_counter(); r = orig_manifest(b); t["parse"] += time.perf_counter() - s; return r
+              def jobs(*a):
+                  s = time.perf_counter(); r = orig_jobs(*a); t["jobs"] += time.perf_counter() - s; return r
+              p._api, p._manifest, p.read_jobs = api, man, jobs
+              s = time.perf_counter()
+              found = p.find_record(os.environ["GITHUB_REPOSITORY"], datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+              t["total"] = time.perf_counter() - s
+              print("PROBE", found and found[0]["id"], {k: round(v, 2) for k, v in t.items()}, flush=True)
+          PY
+
+      - name: Probe save
+        if: steps.open.outputs.open != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/rec
+          key: probe-record-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Probe clear 1
+        if: steps.open.outputs.open != 'true'
+        run: rm -rf "$RUNNER_TEMP/rec"
+
+      - name: Probe restore 1
+        if: steps.open.outputs.open != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/rec
+          key: probe-record-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Probe clear 2
+        if: steps.open.outputs.open != 'true'
+        run: ls -la "$RUNNER_TEMP/rec" && rm -rf "$RUNNER_TEMP/rec"
+
+      - name: Probe restore 2
+        if: steps.open.outputs.open != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/rec
+          key: probe-record-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Probe parse restored
+        if: steps.open.outputs.open != 'true'
+        run: |
+          python - <<'PY'
+          import hashlib, os, time
+          from pathlib import Path
+          import scripts.ci_test_plan as p
+          for i in range(3):
+              s = time.perf_counter(); b = Path(os.environ["RUNNER_TEMP"], "rec", "record.zip").read_bytes(); a = time.perf_counter()
+              h = hashlib.sha256(b).hexdigest(); c = time.perf_counter(); p._manifest(b); d = time.perf_counter()
+              print("PROBE read", round(a - s, 2), "sha", round(c - a, 3), "parse", round(d - c, 2), h, flush=True)
+          PY
+
       - name: Upload planned mutation test selection
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
         uses: actions/upload-artifact@v4
