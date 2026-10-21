@@ -4,16 +4,27 @@ import json
 import os
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timezone
+from itertools import count
 
 from scripts import agent_choice
 from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
-from scripts.swarm import affinity, capacity, effort_range, launch_check, master_start, model_pick
+from scripts.swarm import (
+    affinity,
+    capacity,
+    effort_range,
+    launch_check,
+    master_start,
+    model_pick,
+    seat_spawn,
+    take_master,
+)
 from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_source
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import placed_record, primed
+from scripts.swarm_v2 import masters as master_seats
 
 LAST, NEW = "last", "new"
 ANSWERS = {"1": LAST, LAST: LAST, "2": NEW, NEW: NEW}
@@ -186,8 +197,51 @@ def _new(store, slug, runtime, at):
     return Launched(name, record.pane_id, record.seat, NEW)
 
 
-def up(store, slug, runtime, at, choice, ask, say):
-    """Launch the chosen master; ask last or new when no choice is given. Never refuses because a master is live."""
+def _front_doors(store, slug, live):
+    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.state != "finished" and a.name in live]
+
+
+def _free_seat(store, slug, live):
+    taken = {a.seat for a in store.agents(slug) if a.state != "finished" or a.name in live}
+    return next(index for index in count(2) if seat_address(slug, master_seats.seat(index)) not in taken)
+
+
+def _beside(store, slug, runtime, at, live):
+    """A new master next to a live front door takes the lowest free master seat, so its seat and title are its own."""
+    config = store.ensure_code(slug)
+    index = _free_seat(store, slug, live)
+    seat_name = master_seats.seat(index)
+    seats = max(master_seats.MasterSeats(store.redis).count(slug), index)
+
+    def prepare(record):
+        task = {"id": seat_name, "handoff": store.handoff(slug, seat_name), "owns": [], "masters": seats}
+        return _filled(primed(store, slug, record.seat, task), config)
+
+    try:
+        record, placed = seat_spawn.place_seat(
+            slug, config, store, runtime, seat_spawn.Seat(MASTER, seat_name), at, prepare
+        )
+    except seat_spawn.SeatFailed as failed:
+        store.drop_agent(slug, failed.record.name)
+        raise SwarmError(f"the new master could not start: {failed.error}") from failed.error
+    record = placed_record(store.execution_occupants(slug).get(record.seat, record), placed)
+    store.put_agent(slug, record)
+    launch_check.begin(store, slug, record, at)
+    store.clear_handoff(slug, seat_name)
+    return Launched(record.name, record.pane_id, record.seat, NEW)
+
+
+def _fresh(store, slug, runtime, at, live, replace_live):
+    front = _front_doors(store, slug, live)
+    if front and not replace_live:
+        return _beside(store, slug, runtime, at, live)
+    take_master.retired(store, slug, runtime, front)
+    return _new(store, slug, runtime, at)
+
+
+def up(store, slug, runtime, at, choice, ask, say, replace_live=False):
+    """Launch the chosen master; ask last or new when no choice is given. Never refuses because a master is live:
+    a new master takes its own seat beside a live front door, or retires it first when replace_live is set."""
     live = runtime.live_names()
     previous = _previous(store, slug)
     asked = not choice
@@ -196,7 +250,7 @@ def up(store, slug, runtime, at, choice, ask, say):
         say(QUESTION)
         choice = _choose(ask)
     if choice == NEW:
-        return _new(store, slug, runtime, at)
+        return _fresh(store, slug, runtime, at, live, replace_live)
     why = _why(previous, store.config(slug), live)
     if not why:
         try:
@@ -208,4 +262,4 @@ def up(store, slug, runtime, at, choice, ask, say):
     say(f"The last master cannot be resumed: {why}")
     if _answer(ask, OFFER) not in ("y", "yes"):
         raise SwarmError("no master started")
-    return _new(store, slug, runtime, at)
+    return _fresh(store, slug, runtime, at, live, replace_live)
