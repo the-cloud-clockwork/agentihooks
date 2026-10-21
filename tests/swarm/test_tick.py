@@ -635,7 +635,7 @@ def test_a_launch_is_pending_while_the_runtime_spawns_it(store):
 class HiveAcks(FakeRuntime):
     def __init__(self, fail=()):
         super().__init__()
-        self.ordered, self.collected, self.acked, self.failing = [], [], set(), set(fail)
+        self.ordered, self.collected, self.acked, self.failing, self.broken = [], [], set(), set(fail), set()
 
     def spawn(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER
@@ -648,6 +648,8 @@ class HiveAcks(FakeRuntime):
 
     def collect(self, config, lane, name, task):
         self.collected.append(name)
+        if name in self.broken:
+            raise ConnectionError("redis went away")
         if name in self.failing:
             raise SpawnError("hive launch failed: prompt", "refused")
         if name not in self.acked:
@@ -688,6 +690,38 @@ def test_a_refused_hive_acknowledgement_reopens_its_task(store):
     tick("sw", store, ledger, runtime, now_ms=2_000)
     launches = {row["agent"]: row for row in store.launches("sw")}
     assert (launches[first]["state"], launches[first]["error"]) == ("failed", "hive launch failed: prompt")
+    assert first not in {agent.name for agent in store.agents("sw")}
+    assert ledger.rows["t1"]["claimed_by"] != first
+
+
+def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(store):
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    runtime.broken.add(first)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
+    assert ledger.rows["t1"]["claimed_by"] == first and store.claimant("sw", "t1") == first
+    runtime.broken.clear()
+    runtime.acked.add(first)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert [row["state"] for row in store.launches("sw")] == ["started"]
+    assert runtime.ordered == [first]
+
+
+def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(store):
+    from scripts.swarm.tick import ACK_EXPIRED, LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS - 1)
+    assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
+    collected = len(runtime.collected)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    assert (launches[first]["state"], launches[first]["error"]) == ("failed", ACK_EXPIRED)
+    assert len(runtime.collected) == collected
     assert first not in {agent.name for agent in store.agents("sw")}
     assert ledger.rows["t1"]["claimed_by"] != first
 
