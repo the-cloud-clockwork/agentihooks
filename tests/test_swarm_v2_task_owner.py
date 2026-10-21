@@ -88,8 +88,9 @@ def test_a_phase_owner_comments_on_its_own_phase_and_on_another(world):
 
 
 def test_a_backend_master_relays_onto_a_task_with_no_phase(world):
-    assert relay(world, SECOND_NAME, LOOSE) == {"accepted": True, "warnings": []}
+    assert relay(world, SECOND_NAME, LOOSE)["warnings"] == []
     assert relay(world, LEAD_NAME, LOOSE)["warnings"] == []
+    assert world.refusals() == 0
 
 
 def test_a_master_without_a_live_seat_cannot_comment_or_relay_naming_the_owner(world):

@@ -17,8 +17,9 @@
   "evidence_class": "fakeredis swarm store, seats and masters channel and a temporary ledger folder written through the ledger write path with the master fence, two masters racing from two threads; no live swarm or ledger server. Live G10 qualification is separate.",
   "interfaces": [
     "ledger_server.write_gate(slug): every op write on the page path and the API path runs through master_fence.Fence wrapping the talk budget, inside the locked ledger write",
-    "master_fence.Fence.apply: a master's answer on questions/<id>, set on followups/<id>/<field> or questions/<id>/out_of_scope, or task_update on tasks/<id> is accepted only from the owning master seat; any other master, or a master name with no live seat, is refused with '<item> belongs to <owner>, so <writer> cannot <verb> it'",
-    "Decider record: an accepted master decision that changed a question or follow up writes {seat, rev} under _meta.master_decisions; while its own stamp stands and only masters wrote the item since, another master is refused with '<item> was decided by <seat> at revision <rev>, so <writer> cannot <verb> it'",
+    "master_fence.Fence.apply: a master's answer on questions/<id>, set on followups/<id>/<field> or questions/<id>/out_of_scope, task_update, comment or relay on tasks/<id> is accepted from any live master seat of the swarm; a master name with no live seat that does not own the item is refused with '<item> belongs to <owner>, so <writer> cannot <verb> it'",
+    "Decider record: an accepted master decision that changed a question or follow up writes {seat, rev} under _meta.master_decisions with the owning seat, so a write by another live master keeps the owner; while its own stamp stands and only masters wrote the item since, a master with no live seat is refused with '<item> was decided by <seat> at revision <rev>, so <writer> cannot <verb> it'",
+    "Cross write record: an accepted write by a seat other than the owner writes {owner, seat, by, rev} under _meta.master_cross_writes, and its masters channel post ends with 'for <owner>'",
     "Fence.publish(rejected): after the ledger write commits, each kept decision is posted on the masters channel as its seat with MastersChannel.decision, only when the swarm has more than one master seat",
     "master_fence.measurements(redis, slug): master_write_refusals_total from the swarm masters hash",
     "AGENTIHOOKS_MASTER_FENCE=off in the ledger server environment turns the fence off: every master write passes as before"
@@ -65,8 +66,8 @@
   },
   "decisions": [
     "The fence runs inside the locked ledger write, so the owner check and the write never interleave with another master's; a client side check could race",
-    "Routing decides the owner, so the master an item was sent to is the one that may act on it",
-    "A question or follow up keeps its deciding seat until someone other than a master changes it, so a returning lead cannot overturn the acting lead's decision; tasks follow their phase owner because they change all their life",
+    "Routing decides the owner, so the master an item was sent to keeps it; every live master seat holds the same authority, so any of them may act on it and the write is recorded with its writer",
+    "A question or follow up keeps its deciding seat until someone other than a master changes it, and a cross write never moves it; tasks follow their phase owner because they change all their life",
     "The record holds only while its own stamp stands, so a write rolled back after the fence leaves no false owner",
     "Decisions are posted after the commit and only for kept writes, so the channel never reports a decision the ledger dropped"
   ],
@@ -79,17 +80,19 @@
       ]
     },
     "output_contract": {
-      "met_by": "Two masters racing on one follow up leave one decision by its owner, posted once",
+      "met_by": "Any live master seat writes an item another master owns; the owner is kept and the cross write is recorded with its writer",
       "tests": [
-        "tests/test_swarm_v2_master_fence.py::test_two_masters_racing_on_one_follow_up_leave_one_decision_by_its_owner",
-        "tests/test_swarm_v2_master_fence.py::test_a_master_sets_a_task_only_in_the_phase_it_owns"
+        "tests/test_swarm_v2_master_fence.py::test_two_masters_racing_on_one_follow_up_are_both_accepted_and_the_owner_kept",
+        "tests/test_swarm_v2_master_fence.py::test_a_live_master_decides_a_follow_up_another_master_owns_and_the_write_is_recorded",
+        "tests/test_swarm_v2_master_fence.py::test_a_master_sets_a_task_in_any_phase_and_a_cross_write_names_its_owner"
       ]
     },
     "rejection_contract": {
-      "met_by": "A refused write names the owning master and changes nothing",
+      "met_by": "A master without a live seat is refused naming the owning master, and the refused write changes nothing",
       "tests": [
         "tests/test_swarm_v2_master_fence.py::test_a_refused_write_changes_nothing_and_posts_nothing",
-        "tests/test_swarm_v2_master_fence.py::test_the_refusals_name_the_owning_master_in_full"
+        "tests/test_swarm_v2_master_fence.py::test_the_refusals_name_the_owning_master_in_full",
+        "tests/test_swarm_v2_master_fence.py::test_a_master_without_a_live_seat_is_still_refused_naming_the_owner"
       ]
     },
     "recovery_contract": {

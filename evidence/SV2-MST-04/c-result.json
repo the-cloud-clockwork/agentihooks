@@ -7,31 +7,29 @@
     "input_sha256": "a11c82985cdf497aa9f0644d8381ed5e34b2cf4f3c2145206aa6e262ba70ad96",
     "observed": {
       "acting_lead_accepted": true,
-      "after_reopen_accepted": true,
-      "decisions": {
-        "followups/f1": {
-          "rev": 6,
-          "seat": "master@race-2026-01-01"
-        }
+      "after_restart_accepted": true,
+      "cross": {
+        "followups/f1": [
+          "master-2@race-2026-01-01",
+          "master@race-2026-01-01",
+          "master@abcdef-0003"
+        ]
+      },
+      "deciders": {
+        "followups/f1": "master-2@race-2026-01-01"
       },
       "followup_done": true,
+      "gone_second": [
+        false,
+        true
+      ],
       "posts": [
         "master-2@race-2026-01-01 set followups/f1/done to true",
-        "master@race-2026-01-01 set followups/f1/done to true"
+        "master@race-2026-01-01 set followups/f1/done to false for master-2@race-2026-01-01",
+        "master@race-2026-01-01 set followups/f1/done to true for master-2@race-2026-01-01"
       ],
-      "refusals": 2,
-      "second_after_restart": [
-        false,
-        [
-          "followups/f1 was decided by master@race-2026-01-01 at revision 6, so master-2@race-2026-01-01 cannot decide it"
-        ]
-      ],
-      "stale_successor": [
-        false,
-        [
-          "followups/f1 was decided by master-2@race-2026-01-01 at revision 3, so master@race-2026-01-01 cannot decide it"
-        ]
-      ]
+      "refusals": 1,
+      "successor_accepted": true
     },
     "state": "passed"
   }
