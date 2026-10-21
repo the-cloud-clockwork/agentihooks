@@ -20,7 +20,15 @@ UI_ROLES = ("master", "qa", "frontend")
 LIVE_MS = 90_000
 HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 EXCLUDED_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-JSON_FIELDS = {"excluded": list, "prefer": dict, "harnesses": list, "slots": list, "interactive": dict, "repos": list}
+JSON_FIELDS = {
+    "excluded": list,
+    "prefer": dict,
+    "harnesses": list,
+    "slots": list,
+    "interactive": dict,
+    "master_login": dict,
+    "repos": list,
+}
 INT_FIELDS = ("max_agents", "heartbeat_at")
 LEGACY = "roles"
 LEGACY_FIELDS = (LEGACY, "max_agents")
@@ -44,6 +52,7 @@ def _default(hive_id: str, ui: str = "no") -> dict:
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
+        "master_login": {"claude": ""},
         "repos": [],
         "heartbeat_at": 0,
         "version": "",

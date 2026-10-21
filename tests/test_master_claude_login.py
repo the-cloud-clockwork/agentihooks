@@ -71,6 +71,18 @@ def test_the_login_is_on_only_for_a_claude_front_door_master_with_the_setting_on
     assert login.route(False) == []
 
 
+def test_signed_in_names_the_master_login_account_only_with_the_setting_on(ah, monkeypatch):
+    monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
+    assert login.signed_in() == ""
+    login.home().mkdir(parents=True)
+    (login.home() / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
+    assert login.signed_in() == ""
+    (login.home() / login.CREDENTIALS).write_text(json.dumps({login.GRANT: GRANT}))
+    assert login.signed_in() == "masteratexample_com"
+    monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", "True")
+    assert login.signed_in() == ""
+
+
 def test_the_private_home_lives_under_the_agentihooks_home(ah):
     assert login.root() == ah / "master-login"
     assert login.home() == ah / "master-login" / "claude"
