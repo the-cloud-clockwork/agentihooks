@@ -122,7 +122,10 @@ def start(python: str = sys.executable) -> int:
 
 
 def ensure() -> bool:
-    return os.environ.get("AGENTIHOOKS_SERENA") == "false" or start() == 0
+    try:
+        return os.environ.get("AGENTIHOOKS_SERENA") == "false" or start() == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def stop() -> int:

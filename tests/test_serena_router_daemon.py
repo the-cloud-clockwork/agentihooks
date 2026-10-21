@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import subprocess
+
+import pytest
+
 from scripts import serena_router_daemon as daemon
 
 
@@ -49,3 +53,13 @@ def test_ensure_skips_the_router_when_serena_is_off(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_SERENA", "false")
     monkeypatch.setattr(daemon, "start", refuse)
     assert daemon.ensure() is True
+
+
+@pytest.mark.parametrize("error", [OSError("no serena"), subprocess.TimeoutExpired("systemctl", 10)])
+def test_ensure_reports_a_router_start_that_raises_as_down(monkeypatch, error):
+    def fail():
+        raise error
+
+    monkeypatch.delenv("AGENTIHOOKS_SERENA", raising=False)
+    monkeypatch.setattr(daemon, "start", fail)
+    assert daemon.ensure() is False

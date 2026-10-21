@@ -18,7 +18,8 @@ umask 077
 export AGENTIHOOKS_HOME="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}"
 export HIVE_REPO_ROOT="${HIVE_REPO_ROOT:-$HOME/dev}"
 mkdir -p "$AGENTIHOOKS_HOME" "$HIVE_REPO_ROOT" "$HOME/dev/tcc-ecosystem"
-ln -sfn "$(python3 -c 'import sys; print(sys.prefix)')" "$HOME/dev/tcc-ecosystem/.venv"
+venv="$HOME/dev/tcc-ecosystem/.venv"
+[[ -e "$venv" && ! -L "$venv" ]] || ln -sfn "$(python3 -c 'import sys; print(sys.prefix)')" "$venv"
 git config --global user.name >/dev/null || git config --global user.name "agentihooks hive"
 git config --global user.email >/dev/null || git config --global user.email agentihooks-hive@users.noreply.github.com
 git config --global credential.https://github.com.helper \

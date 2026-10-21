@@ -5,4 +5,4 @@ import pytest
 def _serena_router_up(monkeypatch):
     from scripts import serena_router_daemon
 
-    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True, raising=False)
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
