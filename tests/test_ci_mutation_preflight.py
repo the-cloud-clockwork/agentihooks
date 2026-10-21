@@ -448,7 +448,8 @@ def test_grouped(n):
 def test_touched_tests_keep_one_xdist_group_on_one_worker(tmp_path):
     steps, names = _steps(_workflow()["jobs"]["touched-tests"])
     run = steps[names.index("Run the tests the branch touches")]["run"]
-    command = shlex.split(run.splitlines()[1].replace('"${files[@]}"', "test_cases.py"))
+    line = next(line for line in run.splitlines() if line.startswith("python -m pytest "))
+    command = shlex.split(line.replace('"${files[@]}"', "test_cases.py"))
     assert command[:3] == ["python", "-m", "pytest"]
     command[0] = sys.executable
     project = tmp_path / "project"
