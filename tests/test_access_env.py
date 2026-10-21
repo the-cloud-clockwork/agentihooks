@@ -42,7 +42,7 @@ def test_values_read_the_default_record_and_name_the_swarm_variables():
     found = access_env.values(BAO, _opener(seen, RECORD))
 
     assert found == {ID_NAME: "i1.access", PART_NAME: "p 'x'"}
-    assert seen == [("https://bao.example/v1/secret/data/cloudflare-access-service-token", "b0", 3)]
+    assert seen == [("https://bao.example/v1/secret/data/cloudflare-access-service-token", "b0", 20)]
 
 
 def test_the_record_path_setting_moves_the_read():
