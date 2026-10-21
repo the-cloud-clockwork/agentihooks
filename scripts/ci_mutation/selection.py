@@ -99,17 +99,21 @@ def file_seconds(root: Path, files: list[str]) -> dict[str, float]:
 
 
 def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
+    return split_parts(files, file_seconds(root, files), part)
+
+
+def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:
     # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
     index, total = part
-    seconds = file_seconds(root, files)
     parts = [[] for _ in range(total)]
     for path in sorted(files, key=lambda path: (-seconds[path], path)):
         min(parts, key=lambda chosen: sum(seconds[path] for path in chosen)).append(path)
     return sorted(parts[index])
 
 
-def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
-    seconds = file_seconds(root, files)
+def stats_shards(root: Path, files: list[str], count: int, seconds: dict[str, float] | None = None) -> list[list[str]]:
+    if seconds is None:
+        seconds = file_seconds(root, files)
     # Files that share an xdist group never run concurrently in CI, so they share a shard here.
     units = []
     for path in files:

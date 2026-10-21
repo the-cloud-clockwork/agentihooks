@@ -67,7 +67,9 @@ agentihooks hive install          # user service that runs agentihooks hive run
   `agentihooks hive show <id>` prints the full record as JSON.
 
 A Kubernetes worker pod joins the same way, waiting for `hive add` to deliver its credential; see
-[Worker hives in Kubernetes](#worker-hives-in-kubernetes).
+[Worker hives in Kubernetes](#worker-hives-in-kubernetes). A pod can instead mount a credential that
+`agentihooks hive invite <label>` writes into OpenBao, which brings a new hive up from an empty namespace; see
+[Reproducible hive](../reference/reproducible-hive.md).
 
 ## Repos and checkouts
 
@@ -738,8 +740,13 @@ global installs and uv tools land in `~/.local` under the worker home.
 `workers.credentialSecret` is required; it carries the member credential and, with `workers.ssh.enabled`, also the
 sshd `authorized_keys` and host key the pod installs for `agentihooks hive add` to reach it. Credentials come from
 ExternalSecrets by name. Replicas that mount the same credential would report the same hive id and agent limit, so
-the chart refuses `workers.replicas` above 1. Scale by installing one release per hive credential and adding each
-pod with `agentihooks hive add` from the UI hive; the pod name is used only when no credential is installed.
+the chart refuses `workers.replicas` above 1. Scale with `workers.hives`: each entry, `name` plus its own
+`credentialSecret`, renders one more hive pod, `<release>-worker-hive-<name>` with component `worker-hive-<name>` and
+its own worktrees ConfigMap. Every other key the entry sets replaces that `workers` key whole, so an entry that sets
+`homeVolume` gives the complete source. The chart refuses an entry without a credential of its own, an entry
+that sets `replicas`, an entry whose hostPath or claim home is the same path or claim as another hive's, a
+repeated name, or a name that is not a lowercase DNS label of at most 20 characters. Add a pod with no installed
+credential with `agentihooks hive add` from the UI hive; the pod name is used only then.
 
 The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (default 700) and `.limit` (default
 2048), in MiB, are multiplied by `workers.maxAgents` into the container's memory request and limit, so the scheduler

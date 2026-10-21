@@ -14,7 +14,7 @@ from pathlib import Path
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
-from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
+from scripts.ci_mutation.selection import changed_mutations, file_seconds, split_parts, stats_shards
 from scripts.ci_test_plan import find_record
 from tests.dep_manifest import GLOBAL_FILES, MEASURED, _spans, changed_units, line_units, node
 from tests.dep_manifest import changes as recorded_changes
@@ -217,18 +217,20 @@ def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
     return max(1, min(limit, mutants, math.ceil(seconds / (shard_workers() * target))))
 
 
-def slowest_bucket(root: Path, tests: list[str], parts: int) -> float:
-    seconds = file_seconds(root, tests)
+def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, float] | None = None) -> float:
+    if seconds is None:
+        seconds = file_seconds(root, tests)
     buckets = [
         bucket
         for index in range(parts)
-        for bucket in stats_shards(root, part_files(root, tests, (index, parts)), shard_workers())
+        for bucket in stats_shards(root, split_parts(tests, seconds, (index, parts)), shard_workers(), seconds)
     ]
     return max(sum(seconds[path] for path in bucket) for bucket in buckets)
 
 
 def stats_part_count(root: Path, tests: list[str], target: float, limit: int) -> tuple[int, float]:
-    walls = [slowest_bucket(root, tests, parts) for parts in range(1, limit + 1)]
+    seconds = file_seconds(root, tests)
+    walls = [slowest_bucket(root, tests, parts, seconds) for parts in range(1, limit + 1)]
     # One file never splits, so past the floor another part only adds a job.
     reachable = max(target, min(walls))
     parts = next(parts for parts, wall in enumerate(walls, 1) if wall <= reachable)

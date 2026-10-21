@@ -1,3 +1,4 @@
+{{- if not .Values.hiveOnly }}
 {{- $api := .Values.controller.api }}
 {{- $workers := .Values.controller.workers }}
 {{- $ca := .Values.controller.terminalCa | default dict }}
@@ -345,3 +346,4 @@ spec:
               - key: {{ $ca.key }}
                 path: {{ $ca.key }}
         {{- end }}
+{{- end }}
