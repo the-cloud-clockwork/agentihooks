@@ -1,7 +1,8 @@
-"""Grade head load gate runs against base runs paired on one runner, by the median head over base ratio of the pairs."""
+"""Grade head load gate runs against base runs paired on one runner, odd pairs base first, by the order balanced head over base ratio."""
 
 import argparse
 import json
+from math import prod
 from pathlib import Path
 from statistics import median
 
@@ -19,6 +20,12 @@ def graded_measure(log: str) -> dict | None:
 
 def pair_ratios(pairs: list[tuple[dict, dict]], key: str) -> list[float]:
     return [head[key] / base[key] for base, head in pairs if base[key] and head[key] is not None]
+
+
+def balanced_ratio(ratios: list[float]) -> float:
+    """The geometric mean of the base first and head first pair medians, so a slower second run cancels out."""
+    medians = [median(group) for group in (ratios[0::2], ratios[1::2]) if group]
+    return prod(medians) ** (1 / len(medians))
 
 
 def same_code_bound(runs: list[list[tuple[dict, dict]]]) -> float:
@@ -52,8 +59,8 @@ def regressions(pairs: list[tuple[dict | None, dict | None]], margin: float) -> 
         ]
         if unmeasured:
             problems += unmeasured
-        elif (ratio := median(pair_ratios(pairs, key))) > margin:
-            problems.append(f"head {label} median pair ratio {ratio:.2f} exceeds the {margin}x margin")
+        elif (ratio := balanced_ratio(pair_ratios(pairs, key))) > margin:
+            problems.append(f"head {label} order balanced pair ratio {ratio:.2f} exceeds the {margin}x margin")
     return problems
 
 

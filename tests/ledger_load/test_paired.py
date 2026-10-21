@@ -29,13 +29,13 @@ def test_one_noisy_pair_cannot_turn_the_median_pair_ratio_red():
     "change, problem",
     [
         ({"errors": 1}, "head had 2 failed requests, base 0"),
-        ({"write_p50_s": 2.0}, "head write p50 median pair ratio 2.00 exceeds the 1.5x margin"),
-        ({"busiest_cores": 0.8}, "head busiest CPU window median pair ratio 1.60 exceeds the 1.5x margin"),
+        ({"write_p50_s": 2.0}, "head write p50 order balanced pair ratio 2.00 exceeds the 1.5x margin"),
+        ({"busiest_cores": 0.8}, "head busiest CPU window order balanced pair ratio 1.60 exceeds the 1.5x margin"),
     ],
 )
 def test_a_head_regression_in_most_pairs_is_named(change, problem):
     head = {**BASE, **change}
-    assert paired.regressions([(BASE, head), (BASE, head), (BASE, BASE)], 1.5) == [problem]
+    assert paired.regressions([(BASE, head), (BASE, head), (BASE, head), (BASE, head), (BASE, BASE)], 1.5) == [problem]
 
 
 def measures(*rows: tuple[float, float, float, float]) -> list[tuple[dict, dict]]:
@@ -107,7 +107,7 @@ def test_compare_mode_passes_one_same_code_pair_two_times_apart_and_fails_a_thre
     assert paired.regressions([(BASE, apart), *[(BASE, BASE)] * (count - 1)], margin) == []
     slower = {**BASE, "write_p50_s": 3.0}
     assert paired.regressions([(BASE, slower)] * count, margin) == [
-        f"head write p50 median pair ratio 3.00 exceeds the {margin}x margin"
+        f"head write p50 order balanced pair ratio 3.00 exceeds the {margin}x margin"
     ]
 
 
@@ -144,7 +144,10 @@ def test_the_command_pairs_runs_in_order_and_refuses_a_margin_below_the_same_cod
         paired.main(["--base", str(base), str(base), str(base), "--head", str(head), str(slow), str(slow), *graded])
         == 1
     )
-    assert "::error::head busiest CPU window median pair ratio 2.00 exceeds the 1.5x margin" in capsys.readouterr().out
+    assert (
+        "::error::head busiest CPU window order balanced pair ratio 1.73 exceeds the 1.5x margin"
+        in capsys.readouterr().out
+    )
     assert (
         paired.main(["--base", str(base), "--head", str(head), "--margin", "1.2", "--same-code", str(same_code)]) == 1
     )
