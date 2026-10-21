@@ -632,18 +632,19 @@ def test_the_hive_retires_the_recorded_process_identity(remote, monkeypatch):
     assert runtime.retire(agent) is True
 
 
-def test_the_hive_refuses_a_retire_outside_the_recorded_namespace(remote, monkeypatch):
-    from scripts.hive.orders import Consumer
+def test_a_hive_restarted_since_launch_retires_without_signalling(remote, monkeypatch):
+    from scripts.hive.orders import Ack, Consumer, Orders
 
     _publish(remote)
     runtime, agent = remote.runtime, remote.agent
-    runtime.retire(agent)
+    assert runtime.retire(agent) is False
     hive, ended = _hive_side(monkeypatch, "another", {12: SimpleNamespace(pid=12, start_time=34)})
     Consumer(remote.redis, HIVE, hive).poll_commands()
     assert ended == []
     monkeypatch.setenv("SWARM_HIVE_ID", "controller")
-    assert runtime.retire(agent) is False
-    assert "another PID namespace" in runtime.refusal(agent)["refusal"]
+    assert Orders(remote.redis).command(HIVE, _retire_order(agent)) == Ack("done", agent.runtime_target)
+    assert runtime.retire(agent) is True
+    assert agent.name not in runtime.refusals
 
 
 def test_a_runtime_without_hive_reports_never_acts_on_a_remote_worker_locally(remote):

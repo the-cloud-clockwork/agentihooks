@@ -228,6 +228,30 @@ def test_a_foreign_namespace_terminate_signals_nothing_and_counts_one_rejection(
     assert router.rejected == {(LOCAL, Unqualified.FOREIGN_NAMESPACE): 1}
 
 
+def test_a_record_this_host_launched_before_its_namespace_restarted_retires_without_signalling(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = record(namespace=WORKER)
+    agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": "hive-a"})
+    router = RuntimeRouter([local])
+    assert router.terminate(agent, ("/scratch/t1",)) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process namespace has ended"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {}
+
+
+def test_a_record_of_this_host_is_still_refused_when_the_local_namespace_is_unreadable(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()}, namespace="")
+    agent = record(namespace=WORKER)
+    agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": "hive-a"})
+    assert RuntimeRouter([local]).terminate(agent) == Outcome(
+        "terminate", Status.REFUSED, LOCAL, Unqualified.NO_NAMESPACE, "local process namespace is unreadable"
+    )
+    assert (ended, calls) == ([], [])
+
+
 def test_a_legacy_local_record_keeps_the_recorded_launch_pid_path(tmp_path, monkeypatch):
     local, calls, ended = adapter(tmp_path, monkeypatch, {})
     agent = AgentRecord(NAME, "eng", "t1", pane_id="w1:p1", profile_decision={"validation": {"pid": 55}})
