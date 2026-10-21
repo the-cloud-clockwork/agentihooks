@@ -335,11 +335,11 @@ def _master_down(slug, config, store, ledger, runtime, now_ms):
     return [f"master down, told the operator about {len(told)} waiting lines"]
 
 
-def _drop(slug, store, ledger, rows, agent, refund=False, keep_merge=False):
+def _drop(slug, store, ledger, rows, agent, refund=False):
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
     held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
-    held = held and not (keep_merge and awaiting_merge(rows[agent.task]))
+    held = held and not awaiting_merge(rows[agent.task])
     if refund and held and store.claims(slug, agent.task) > 0:
         store.refund_claim(slug, agent.task)
     expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}
@@ -537,7 +537,7 @@ def _restore_owner(slug, store, ledger, rows, agent):
 def _drop_remote(slug, store, ledger, rows, agent, reason):
     master_retire.forget(store, slug, agent.name)
     _refund_parked(slug, store, rows, agent.task)
-    return f"retired {agent.name}: {reason}" + _drop(slug, store, ledger, rows, agent, keep_merge=True)
+    return f"retired {agent.name}: {reason}" + _drop(slug, store, ledger, rows, agent)
 
 
 def _remote_gone_reason(slug, store, runtime, agent, now_ms):
