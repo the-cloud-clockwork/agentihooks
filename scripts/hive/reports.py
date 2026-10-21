@@ -5,6 +5,7 @@ import json
 from typing import TYPE_CHECKING
 
 from scripts.hive import registry
+from scripts.hive.auth import HiveError
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -67,7 +68,10 @@ class Reports:
         hive = host(agent)
         if not hive or self.read(hive) is not None:
             return False
-        record = registry.show(self.redis, hive)
+        try:
+            record = registry.show(self.redis, hive)
+        except HiveError:
+            return False
         return record is not None and 0 < record["heartbeat_at"] < now_ms - LOST_MS
 
     def names(self) -> set[str]:

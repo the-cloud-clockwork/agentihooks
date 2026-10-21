@@ -191,17 +191,27 @@ def test_a_hive_is_lost_only_after_its_heartbeat_outlives_the_grace_window(remot
     assert remote.runtime.hive.lost(here, NOW) is False
 
 
+def test_an_unreadable_hive_record_holds_its_workers(remote):
+    from scripts.hive import registry
+
+    remote.redis.hset(registry.key(HIVE), "heartbeat_at", "garbled")
+    assert remote.runtime.hive.lost(remote.agent, NOW) is False
+
+
 @pytest.mark.parametrize(
-    ("age", "beat", "retired"),
+    ("age", "beat", "until", "retired"),
     [
-        (LOST + 1, None, True),
-        (LOST + 1, LOST + 1, True),
-        (LOST + 1, LOST, False),
-        (LOST, None, False),
-        (None, None, False),
+        (LOST + 1, None, None, True),
+        (LOST + 1, LOST + 1, None, True),
+        (LOST + 1, LOST, None, False),
+        (LOST + 1, None, NOW, True),
+        (LOST + 1, None, NOW + 1, False),
+        (LOST, None, None, False),
+        (None, None, None, False),
     ],
 )
-def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat, retired):
+def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat, until, retired):
+    from scripts.hive import scope
     from scripts.swarm import idle, tick
     from scripts.swarm.tick import SUSPECT
 
@@ -210,6 +220,10 @@ def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat
     _beat_hive(remote, age)
     if beat is not None:
         idle.beat(remote.redis, "fixture", remote.agent.name, idle.WORKING, NOW - beat)
+    if until is not None:
+        wait = {"until": until, "reason": "checks", "at": NOW - LOST}
+        prefix = scope.readings(remote.redis, "fixture", remote.agent.name)
+        remote.redis.set(idle.key("fixture", "wait", remote.agent.name, prefix), json.dumps(wait))
     remote.store.claim("fixture", "task", remote.agent.name, 60000)
     rows = {"task": {"state": "claimed", "claimed_by": remote.agent.name}}
     ledger = Mock()

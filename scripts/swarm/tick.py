@@ -528,10 +528,13 @@ def _remote_exited(slug, store, runtime, agent, now_ms):
 
 
 def _hive_lost(slug, store, runtime, agent, now_ms):
-    if runtime.hive is None or not runtime.hive.lost(agent, now_ms):
+    hive = getattr(runtime, "hive", None)
+    if hive is None or not hive.lost(agent, now_ms):
         return False
     beat = idle_state.heartbeat(store.redis, slug, agent.name)
-    return beat is None or now_ms - beat["at"] > reports.LOST_MS
+    wait = idle_state.wait(store.redis, slug, agent.name)
+    fresh = beat is not None and now_ms - beat["at"] <= reports.LOST_MS
+    return not fresh and (wait is None or wait["until"] <= now_ms)
 
 
 def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
