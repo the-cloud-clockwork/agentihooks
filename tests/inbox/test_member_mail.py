@@ -123,6 +123,7 @@ def _with_world(monkeypatch, world):
     monkeypatch.setattr(InboxStore, "worlds", lambda self: [*worlds(self), world])
 
 
+@pytest.mark.wall_clock
 def test_the_exit_sweep_finishes_past_a_world_that_never_answers_and_settles_the_others(
     store, agent, mail, monkeypatch, silent_redis, capsys
 ):
