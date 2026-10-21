@@ -1311,7 +1311,7 @@ def test_runtime_retire_reports_a_refused_end_and_closes_no_pane(tmp_path):
     from scripts.swarm.reaper import Outcome
 
     closed = []
-    rt = runtime.HerdrRuntime(home=tmp_path, herdr=lambda args: closed.append(args) or {})
+    rt = runtime.HerdrRuntime(home=tmp_path, herdr=lambda args: args[0] == "pane" and closed.append(args) or {})
     rt.end = lambda name, pid, homes, start=0: Outcome((), 4242, "survived SIGKILL: 4242")
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w3:p1")
     assert rt.retire(agent) is False and closed == []

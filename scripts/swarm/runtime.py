@@ -1058,18 +1058,16 @@ class HerdrRuntime:
         if agent.runtime_backend != "local":
             self.refusals[agent.name] = {"process": 0, "refusal": REMOTE_PANE}
             return False
-        found = self._get(agent.pane_id) if agent.pane_id else None
         outcome = self.end(agent.name, pid, list(homes), start)
         if outcome.refusal:
             self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
             return False
-        if agent.pane_id and (found is None or _owns(found, agent)):
+        if agent.pane_id:
             try:
-                self.herdr(["pane", "close", agent.pane_id])
+                self._close_owned_pane(agent)
             except Exception as exc:
-                if "not found" not in str(exc):
-                    self.refusals[agent.name] = {"process": pid or 0, "refusal": f"pane {agent.pane_id}: {exc}"}
-                    return False
+                self.refusals[agent.name] = {"process": pid or 0, "refusal": f"pane {agent.pane_id}: {exc}"}
+                return False
         self.refusals.pop(agent.name, None)
         return True
 
@@ -1104,6 +1102,17 @@ class HerdrRuntime:
         except Exception as exc:
             if "not found" not in str(exc):
                 raise
+
+    def _close_owned_pane(self, agent):
+        """herdr reuses a closed pane's id, so a pane it lists under another owner is left open."""
+        try:
+            found = self.herdr(["agent", "get", agent.pane_id])
+        except Exception as exc:
+            if "not found" not in str(exc):
+                raise
+            found = None
+        if found is None or _owns(found.get("agent", found), agent):
+            self.close_pane(agent.pane_id)
 
     def close_space(self, config: SwarmConfig) -> bool:
         try:

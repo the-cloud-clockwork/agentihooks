@@ -467,6 +467,23 @@ def test_retire_process_closes_the_recorded_pane_only_while_it_belongs_to_the_en
     assert herdr.refusal(AgentRecord(NAME, "eng", "t1")) == {"process": 0, "refusal": "unknown"}
 
 
+def test_retire_process_refuses_and_closes_nothing_when_herdr_cannot_name_the_pane_owner(tmp_path, monkeypatch):
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch)
+    answer = herdr.herdr
+
+    def unavailable(args):
+        if args[:2] == ["agent", "get"]:
+            calls.append(args)
+            raise RuntimeError("herdr agent get: server unavailable")
+        return answer(args)
+
+    herdr.herdr = unavailable
+    agent = AgentRecord(NAME, "eng", "t1", pane_id="w1:p1")
+    assert herdr.retire_process(agent, PID, (), STARTED) is False
+    assert calls == [["agent", "get", "w1:p1"]]
+    assert herdr.refusal(agent) == {"process": PID, "refusal": "pane w1:p1: herdr agent get: server unavailable"}
+
+
 def test_each_unqualified_terminate_is_counted():
     router = RuntimeRouter([local_fake()])
     router.terminate(record(execution=""))
