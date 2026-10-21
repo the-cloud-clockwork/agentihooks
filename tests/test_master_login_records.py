@@ -245,6 +245,20 @@ def test_room_reads_the_cache_when_it_is_newer(monkeypatch):
     assert master_logins.left("two", 299.0) == 79.5
 
 
+def test_room_reads_a_snapshot_week_and_drops_its_five_hours_that_reset(monkeypatch):
+    _readings(
+        monkeypatch, [(100.0, _probe("two", (10.5, 900), (20.5, 900)))], (200.0, _limits((30.5, 250), (40.5, 900)))
+    )
+    assert master_logins.usage("two", 300.0) == (0.0, 40.5, 200.0)
+
+
+def test_a_cache_reading_and_snapshot_seen_at_once_compare_only_their_time(monkeypatch):
+    _readings(
+        monkeypatch, [(200.0, _probe("two", (None, 900), (20.5, 900)))], (200.0, _limits((30.5, 900), (40.5, 900)))
+    )
+    assert master_logins.usage("two", 300.0) == (0.0, 20.5, 200.0)
+
+
 def test_a_login_never_seen_or_without_numbers_reads_as_unused(monkeypatch):
     _readings(monkeypatch, [(300.0, _probe("two", (None, None), (None, 900)))], None)
     assert master_logins.usage("two", 1.0) == (0.0, 0.0, 300.0)
