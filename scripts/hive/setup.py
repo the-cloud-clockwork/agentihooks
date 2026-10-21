@@ -9,7 +9,6 @@ from scripts import openbao_kv
 from scripts.hive import auth, bundle_origin, registry
 from scripts.hive.config import TOKEN_PREFIXES
 
-SETTINGS_PATH = bundle_origin.SETTINGS_PATH
 NOT_SETTINGS = (auth.ENV_FILE, "hive-container.env")
 TICK_ONLY = frozenset({"SWARM_SECRET", "AGENTIHOOKS_LEDGER_AGENT_TOKEN"})
 
@@ -64,16 +63,9 @@ def entries(environ: Mapping[str, str], home: Path) -> tuple[dict[str, str], dic
 def publish(environ: Mapping[str, str], path: str, dry_run: bool, opener: Callable | None = None) -> str:
     kept, left_out = entries(environ, registry.home(environ))
     skipped = ", ".join(f"{name} ({reason})" for name, reason in sorted(left_out.items())) or "nothing"
-    url, ref = kept[bundle_origin.URL_KEY], kept[bundle_origin.REF_KEY]
-    linked = f"bundle {url} at {ref}" if url else "no bundle is linked"
+    linked = "a bundle is linked" if kept[bundle_origin.URL_KEY] else "no bundle is linked"
     if dry_run:
         written = f"would write {', '.join(sorted(kept))}"
         return f"dry run, nothing written to OpenBao {openbao_kv.MOUNT}/{path}: {written}; left out {skipped}; {linked}"
-    bao = openbao_kv.from_env(environ, opener)
-    if bao is None:
-        raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
-    try:
-        total = openbao_kv.merge(bao, path, kept)
-    except openbao_kv.OpenBaoError as exc:
-        raise auth.HiveError(str(exc)) from None
+    total = bundle_origin.write(environ, path, kept, opener)
     return f"{openbao_kv.summary(path, kept, total)}; left out {skipped}; {linked}"

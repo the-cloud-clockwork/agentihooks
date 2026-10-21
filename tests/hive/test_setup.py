@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 import scripts.hive.setup as setup
-from scripts.hive import auth, cli
+from scripts.hive import auth, bundle_origin, cli
 from tests.codex_fakes import BAO_TOKEN, BAO_URL, FakeBao
 
 pytestmark = pytest.mark.unit
@@ -163,11 +163,12 @@ def test_each_local_address_form_is_left_out(tmp_path, host):
 def test_publish_merges_the_full_record_and_prints_only_key_names(tmp_path):
     home, environ = workstation(tmp_path)
     fake = FakeBao({"KEPT_BY_HAND": "fixture-kept"}, version=2, path=RECORD)
-    report = setup.publish(environ, setup.SETTINGS_PATH, False, fake)
+    report = setup.publish(environ, bundle_origin.SETTINGS_PATH, False, fake)
     assert report == (
         f"OpenBao secret/k8s/agentihooks-swarm-workstation-hive-settings: wrote {', '.join(WRITTEN)} "
-        f"({len(WRITTEN) + 1} keys total); left out {left_out_text()}; bundle {BUNDLE_URL} at dev"
+        f"({len(WRITTEN) + 1} keys total); left out {left_out_text()}; a bundle is linked"
     )
+    assert BUNDLE_URL not in report
     assert fake.data == {"KEPT_BY_HAND": "fixture-kept"} | {name: live_value(name) for name in LIVE_KEYS} | {
         "OPENBAO_URL": BAO_URL,
         "OPENBAO_TOKEN": BAO_TOKEN,
@@ -181,7 +182,7 @@ def test_publish_merges_the_full_record_and_prints_only_key_names(tmp_path):
 def test_a_dry_run_prints_only_key_names_and_writes_nothing(tmp_path):
     home, environ = workstation(tmp_path, linked=False)
     fake = FakeBao({"KEPT_BY_HAND": "fixture-kept"}, version=2, path=RECORD)
-    report = setup.publish(environ, setup.SETTINGS_PATH, True, fake)
+    report = setup.publish(environ, bundle_origin.SETTINGS_PATH, True, fake)
     assert report == (
         "dry run, nothing written to OpenBao secret/k8s/agentihooks-swarm-workstation-hive-settings: would write "
         f"{', '.join(WRITTEN)}; left out {left_out_text()}; no bundle is linked"
@@ -222,7 +223,7 @@ def test_a_failed_write_is_refused_with_the_openbao_status(tmp_path):
     home, environ = workstation(tmp_path)
     fake = FakeBao({}, path=RECORD, fail_writes=True)
     with pytest.raises(auth.HiveError) as refused:
-        setup.publish(environ, setup.SETTINGS_PATH, False, fake)
+        setup.publish(environ, bundle_origin.SETTINGS_PATH, False, fake)
     assert str(refused.value) == "OpenBao HTTP 503: sealed"
 
 
