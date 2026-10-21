@@ -279,7 +279,7 @@ def test_global_capacity_preserves_api_policy_and_future_reset_fields(redis, mon
         ),
     )
     monkeypatch.setattr(reservation, "current", lambda harness, env: None)
-    assert capacity.accounts(environ, 100) == [capacity.Account("claude", "one", "OPEN", 2, 100, 100, 6)]
+    assert capacity.accounts(environ, 100) == [capacity.Account("claude", "one", "OPEN", 2, 100, 100, 12)]
 
 
 @pytest.mark.parametrize("missing", ["stale", "sessions"])
