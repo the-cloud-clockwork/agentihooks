@@ -26,7 +26,7 @@ from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import placed_record, primed
 from scripts.swarm_v2 import masters as master_seats
 
-LAST, NEW = "last", "new"
+LAST, NEW, REPLACE = "last", "new", "replace"
 ANSWERS = {"1": LAST, LAST: LAST, "2": NEW, NEW: NEW}
 QUESTION = (
     "  1) bring back the last master with its own conversation\n"
@@ -239,9 +239,11 @@ def _fresh(store, slug, runtime, at, live, replace_live):
     return _new(store, slug, runtime, at)
 
 
-def up(store, slug, runtime, at, choice, ask, say, replace_live=False):
+def up(store, slug, runtime, at, choice, ask, say):
     """Launch the chosen master; ask last or new when no choice is given. Never refuses because a master is live:
-    a new master takes its own seat beside a live front door, or retires it first when replace_live is set."""
+    a new master takes its own seat beside a live front door, and a replacing one retires the front door first."""
+    replace_live = choice == REPLACE
+    choice = NEW if replace_live else choice
     live = runtime.live_names()
     previous = _previous(store, slug)
     asked = not choice

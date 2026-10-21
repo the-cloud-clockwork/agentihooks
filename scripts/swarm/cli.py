@@ -854,7 +854,8 @@ def cmd_master(store, args):
     runtime = routed(herdr=HerdrRuntime())
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
-    launched = master_launch.up(store, args.slug, runtime, now_ms(), args.choice, input, print, args.replace)
+    choice = master_launch.REPLACE if args.replace else args.choice
+    launched = master_launch.up(store, args.slug, runtime, now_ms(), choice, input, print)
     ledger = LedgerClient(service=True)
     if ledger.closed(args.slug):
         ledger.reopen(args.slug, launched.master)
