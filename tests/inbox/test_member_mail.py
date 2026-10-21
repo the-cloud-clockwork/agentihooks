@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox import exits, wake
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from tests.inbox.test_wake import FakeHerdr, FakeLedger
 
@@ -217,30 +217,79 @@ def test_moving_an_item_between_worlds_leaves_a_closed_item_in_place(store, agen
     assert target.inbox(agent.name) == []
 
 
-def test_moving_an_item_between_worlds_moves_its_indexes_and_ledger_entry(store, agent, mail):
+def test_moving_an_item_between_worlds_moves_its_indexes_and_ledger_entry(store, agent, mail, monkeypatch):
+    from scripts.inbox import store as inbox_store
+
     member, item = mail
     member.about(item.id, "tasks/t1")
     target = InboxStore(store.redis, world="m2")
+    monkeypatch.setattr(inbox_store, "now_ms", lambda: item.created_at + 7)
     moved = member.move_world(item.id, target, exits.BY, "moved")
-    assert (moved.state, moved.reason, moved.address) == ("pending", "moved", agent.name)
-    assert not store.redis.exists(member.key("item", item.id))
-    assert not store.redis.exists(member.key("history", item.id))
-    assert member.entry_of(item.id) == ""
-    assert member.inbox(agent.name) == []
-    assert member.pending() == []
-    assert member.open_items(agent.name) == []
-    assert target.entry_of(item.id) == "tasks/t1"
-    assert [i.id for i in target.open_items(agent.name)] == [item.id]
-    assert [i.id for i in target.pending()] == [item.id]
-    assert store.redis.smembers(member.key("waiting")) == set()
-    assert store.redis.smembers(target.key("waiting")) == {agent.name}
-    assert (
-        member.redis.get(member.key("open-size", agent.name)),
-        target.redis.get(target.key("open-size", agent.name)),
-    ) == (
-        "0",
-        "1",
+    redis, name = store.redis, agent.name
+    assert [
+        (
+            redis.zscore(world.key(index, name), item.id),
+            redis.get(world.key("open-size", name)),
+            redis.smembers(world.key("waiting")),
+        )
+        for world in (member, target)
+        for index in ("address", "open", "pending")
+    ] == [(None, "0", set())] * 3 + [(item.created_at, "1", {name})] * 3
+    assert moved == replace(item, state="pending", reason="moved", updated_at=item.created_at + 7)
+    assert target.get(item.id) == moved
+    assert target.history(item.id)[-1]["at"] == item.created_at + 7
+    assert not redis.exists(member.key("item", item.id))
+    assert not redis.exists(member.key("history", item.id))
+    assert (member.entry_of(item.id), target.entry_of(item.id)) == ("", "tasks/t1")
+
+
+def test_moving_a_read_item_between_worlds_keeps_its_whole_history(store, agent, mail):
+    member, item = mail
+    member.deliver(item.id, agent.name)
+    member.read(item.id, agent.name)
+    before = member.history(item.id)
+    target = InboxStore(store.redis, world="m2")
+    member.move_world(item.id, target, exits.BY, "moved")
+    assert [e["state"] for e in target.history(item.id)] == ["pending", "delivered", "read", "pending"]
+    assert target.history(item.id)[:3] == before
+
+
+def test_moving_a_missing_item_between_worlds_names_it(store):
+    with pytest.raises(InboxError, match="no message nope"):
+        InboxStore(store.redis, world="m1").move_world("nope", InboxStore(store.redis, world="m2"), exits.BY, "x")
+
+
+@pytest.mark.parametrize("touched", ["item", "history", "entry"])
+def test_moving_an_item_between_worlds_retries_after_a_concurrent_write(store, agent, mail, touched):
+    member, item = mail
+    member.about(item.id, "tasks/t1")
+    writes = {
+        "item": lambda: store.redis.hset(member.key("item", item.id), "reason", "changed"),
+        "history": lambda: store.redis.rpush(member.key("history", item.id), '{"event": "woken"}'),
+        "entry": lambda: store.redis.set(member.key("entry", item.id), "tasks/t9"),
+    }
+    calls = []
+
+    def persist(pipe):
+        if not calls:
+            writes[touched]()
+        calls.append(1)
+
+    target = InboxStore(store.redis, world="m2", persist=persist)
+    member.move_world(item.id, target, exits.BY, "moved")
+    assert len(calls) == 2
+    assert target.entry_of(item.id) == ("tasks/t9" if touched == "entry" else "tasks/t1")
+    assert ("woken" in [e.get("event") for e in target.history(item.id)]) == (touched == "history")
+
+
+def test_moving_an_item_between_worlds_gives_up_after_writes_on_every_attempt(store, agent, mail):
+    member, item = mail
+    target = InboxStore(
+        store.redis, world="m2", persist=lambda pipe: store.redis.hset(member.key("item", item.id), "reason", "x")
     )
+    with pytest.raises(InboxError, match=f"message {item.id} changed meanwhile; run the command again"):
+        member.move_world(item.id, target, exits.BY, "moved")
+    assert member.get(item.id).state == "pending"
 
 
 def test_moving_a_delivered_item_between_worlds_returns_it_to_pending(store, agent, mail):

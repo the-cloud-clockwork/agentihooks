@@ -164,12 +164,14 @@ def _move_seat_mail(inbox: "InboxStore", worlds: list["InboxStore"], live: list)
     """A lane seat's open mail follows its live occupant into the world of the host it runs on; a master seat's
     mail stays with the master pool of its world."""
     by_world = {world.world: world for world in worlds}
-    for agent in live:
-        if not (LANE_SEAT.fullmatch(agent.seat) and inbox.seats.occupant(agent.seat).occupant == agent.name):
-            continue
-        home = by_world.get(inbox.home(agent.seat))
-        if home is None:
-            continue
+    moves = [
+        (agent, by_world[home])
+        for agent in live
+        if LANE_SEAT.fullmatch(agent.seat)
+        and inbox.seats.occupant(agent.seat).occupant == agent.name
+        and (home := inbox.home(agent.seat)) in by_world
+    ]
+    for agent, home in moves:
         where = f"hive {home.world}" if home.world else "the controller"
         for world in worlds:
             if world is not home:
