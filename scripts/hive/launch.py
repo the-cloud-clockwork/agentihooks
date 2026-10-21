@@ -184,7 +184,7 @@ class HiveLaunch:
         hived = _hive_sessions(self.store.redis, now)
         open_rows = _open_claude_rows(rows, hived)
         candidates = [row for row in open_rows if not account or row.name == account]
-        if not candidates and not saved.get("account"):
+        if not candidates:
             candidates = open_rows
         if not candidates:
             seats = ", ".join(
