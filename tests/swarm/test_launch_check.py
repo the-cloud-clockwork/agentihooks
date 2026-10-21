@@ -84,7 +84,6 @@ def test_a_backend_master_on_the_root_hive_passes_without_a_join_report(store, l
         runtime_backend="local",
         runtime_target={"host_id": "workstation"},
     )
-    store.put_agent("sw", master)
     store.seats.occupy(master.seat, master.name, LAUNCH)
     doc["_meta"]["members"][master.name] = {"joined_at": LAUNCH + 20_000}
     assert misses(store, master, facts, doc) == {}
