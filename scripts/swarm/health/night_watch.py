@@ -60,17 +60,33 @@ def run(watch: Watch) -> list[str]:
     from redis.exceptions import RedisError
 
     client = redis_budget.capped(watch.store.redis)
-    budget, actions = redis_budget.Budget(client, BUDGET_S), []
+    budget, actions, state = redis_budget.Budget(client, BUDGET_S), [], None
     try:
-        _run(replace(watch, store=redis_budget.bounded(watch.store, budget)), actions)
+        bound = replace(watch, store=redis_budget.bounded(watch.store, budget))
+        state = read(bound.store, watch.slug)
+        _run(bound, state, actions)
     except (redis_budget.Spent, RedisError) as exc:
         budget.why = budget.why or f"Redis failed: {exc}"
     finally:
+        try:
+            if state is not None:
+                client.set(watch.store.key(watch.slug, KEY), json.dumps(state))
+        except RedisError as exc:
+            budget.why = budget.why or f"Redis failed: {exc}"
         redis_budget.release(client, watch.store.redis)
     if budget.why:
         print(f"night watch skipped the rest of its pass, {budget.why}", file=sys.stderr)
         actions.append(SKIPPED.format(why=budget.why))
     return actions
+
+
+def _run(watch: Watch, state: dict, actions: list[str]) -> None:
+    if watch.now_ms - state.get("at", watch.now_ms) > GAP_MS:
+        for source in SOURCES:
+            actions += _clear(watch, state, source, GAP)
+    state["at"] = watch.now_ms
+    for step in (_seat, _spawn, _merge):
+        actions += step(watch, state)
 
 
 def _run(watch: Watch, actions: list[str]) -> None:

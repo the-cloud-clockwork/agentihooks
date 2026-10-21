@@ -677,7 +677,9 @@ def test_the_spawn_finding_and_alert_carry_their_exact_words(store, monkeypatch)
     calls = ready(monkeypatch, 2)
     decide(store, host={"room": 0, "granted_at": NOW, "limit": 4, "reason": "load is high"})
     until(store, rig, NOW, NOW + 30 * MINUTE)
-    assert calls[0] == (SLUG, store, {"tasks": []})
+    (slug, budgeted, doc), *_ = calls
+    assert (slug, doc, type(budgeted)) == (SLUG, {"tasks": []}, type(store))
+    assert budgeted.redis._client is store.redis
     why = "host 4 room 0, 0 spawned since it was granted: load is high"
     assert rig.ledger.alerts == [
         ("spawn", f"Swarm sw has had 2 ready tasks and no agent launch for 30 minutes, held by host room: {why}")

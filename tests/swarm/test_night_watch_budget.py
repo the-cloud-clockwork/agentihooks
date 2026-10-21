@@ -52,8 +52,10 @@ def test_a_stalled_redis_ends_the_pass_within_its_budget_and_records_a_skip(monk
     started = time.monotonic()
     actions = night_watch.run(watch(store))
 
-    assert time.monotonic() - started < 0.2 + 2 * STALL_S + 0.5
+    assert time.monotonic() - started < 0.2 + 2 * STALL_S + 1
+    assert store.redis.calls <= 0.2 / STALL_S + 2
     assert actions == ["skipped the rest of the night watch pass: its 0.2 second Redis budget is spent"]
+    assert night_watch.read(RedisStore(store.redis.client), SLUG)["at"] == 1_000
 
 
 def test_a_pass_inside_its_budget_saves_its_state_and_records_no_skip(monkeypatch):
@@ -139,5 +141,7 @@ def test_bounded_routes_the_store_and_every_part_holding_its_client_through_the_
     assert bound.redis is budget
     assert (bound.seats.redis, bound.memory.redis, bound.culture.redis, bound.names.redis) == (budget,) * 4
     assert bound.execution_registry.redis is budget
+    assert bound.execution_registry.store is bound
+    assert store.execution_registry.store is store
     assert store.redis is not budget and store.seats.redis is store.redis
     assert bound.names.mint is store.names.mint

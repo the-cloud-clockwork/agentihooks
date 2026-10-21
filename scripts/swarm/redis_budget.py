@@ -56,5 +56,7 @@ def bounded(store, budget: Budget):
         elif getattr(value, "redis", None) is source:
             part = copy.copy(value)
             part.redis = budget
+            if getattr(value, "store", None) is store:
+                part.store = bound
             setattr(bound, name, part)
     return bound
