@@ -48,7 +48,7 @@ def add(
     if local is None or local["ui"] != YES:
         raise auth.HiveError(f"hive {local_id} is headless; only a UI hive adds machines")
     if not _saved(run, target):
-        call(
+        run_checked(
             run,
             ["herdr", "machine", "add", "--label", label, "--remote-session", REMOTE_SESSION, target],
             None,
@@ -56,9 +56,9 @@ def add(
         )
     grant = auth.mint(redis, label, delivery.redis_url)
     try:
-        call(run, ["ssh", "-o", "BatchMode=yes", target, DELIVER], auth.env_text(delivery.url, grant), SSH_TIMEOUT_S)
+        run_checked(run, ["ssh", "-o", "BatchMode=yes", target, DELIVER], auth.env_text(delivery.url, grant), SSH_TIMEOUT_S)
         if delivery.ledger_ca:
-            call(run, ["ssh", "-o", "BatchMode=yes", target, DELIVER_CA], delivery.ledger_ca, SSH_TIMEOUT_S)
+            run_checked(run, ["ssh", "-o", "BatchMode=yes", target, DELIVER_CA], delivery.ledger_ca, SSH_TIMEOUT_S)
     except auth.HiveError:
         auth.revoke(redis, grant["id"])
         raise
@@ -70,7 +70,7 @@ def _saved(run: Callable[..., subprocess.CompletedProcess], target: str) -> bool
 
 
 def _listed(run: Callable[..., subprocess.CompletedProcess]) -> list[dict]:
-    listed = call(run, list(LIST), None, HERDR_TIMEOUT_S)
+    listed = run_checked(run, list(LIST), None, HERDR_TIMEOUT_S)
     try:
         return json.loads(listed)
     except ValueError as exc:
@@ -83,11 +83,11 @@ def forget(label: str, known_hosts: Path, run: Callable[..., subprocess.Complete
         return [f"herdr holds no machine {label}"]
     done = []
     for machine in found:
-        call(run, ["herdr", "machine", "remove", machine["id"]], None, HERDR_TIMEOUT_S)
+        run_checked(run, ["herdr", "machine", "remove", machine["id"]], None, HERDR_TIMEOUT_S)
         done.append(f"removed herdr machine {label}")
         host = known_host(machine["target"])
         if known_hosts.is_file():
-            call(run, ["ssh-keygen", "-R", host, "-f", str(known_hosts)], None, SSH_TIMEOUT_S)
+            run_checked(run, ["ssh-keygen", "-R", host, "-f", str(known_hosts)], None, SSH_TIMEOUT_S)
             done.append(f"removed the host key of {host}")
     return done
 
@@ -97,7 +97,7 @@ def known_host(target: str) -> str:
     return f"[{parts.hostname}]:{parts.port}" if parts.port not in (None, 22) else parts.hostname
 
 
-def call(run: Callable[..., subprocess.CompletedProcess], argv: list[str], stdin: str | None, timeout: int) -> str:
+def run_checked(run: Callable[..., subprocess.CompletedProcess], argv: list[str], stdin: str | None, timeout: int) -> str:
     try:
         done = run(argv, input=stdin, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:

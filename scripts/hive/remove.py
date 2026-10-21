@@ -3,7 +3,7 @@
 import subprocess
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from scripts.swarm.store import AgentRecord, RedisStore
 
-LIVE = ("launching", "working", "suspect")
+FINISHED = "finished"
 POLL_S = 15
 SENDER = "operator"
 ORDER = (
@@ -44,12 +44,14 @@ class Host:
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
-    known_hosts: Path = Path.home() / ".ssh" / "known_hosts"
+    known_hosts: Path = field(default_factory=lambda: Path.home() / ".ssh" / "known_hosts")
 
 
 def label(redis: "Redis", hive: str) -> str:
-    record = registry.show(redis, hive)
-    return redis.hget(member_key(hive), "name") or (record["name"] if record else hive)
+    name = redis.hget(member_key(hive), "name")
+    if not name:
+        raise auth.HiveError(f"hive {hive} holds no member record to name it; pass --label")
+    return name
 
 
 def member_key(hive: str) -> str:
@@ -61,7 +63,7 @@ def hosted(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
         (slug, agent)
         for slug in store.slugs()
         for agent in store.agents(slug)
-        if agent.hive == hive and agent.state in LIVE
+        if agent.hive == hive and agent.state != FINISHED
     ]
 
 
@@ -115,7 +117,7 @@ def unmanifest(checkout: Path | None, name: str, run: Callable[..., subprocess.C
         return ["left the antoncore manifests: pass --antoncore with a checkout to remove them"]
     paths = [pattern.format(label=name) for pattern in MANIFESTS]
     argv = ["git", "-C", str(checkout), "rm", "-r", "-q", "--ignore-unmatch", "--", *paths]
-    machine.call(run, argv, None, machine.SSH_TIMEOUT_S)
+    machine.run_checked(run, argv, None, machine.SSH_TIMEOUT_S)
     return [f"staged the removal of {', '.join(paths)} in {checkout}; commit it and open a pull request"]
 
 

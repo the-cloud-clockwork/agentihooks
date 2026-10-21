@@ -46,7 +46,7 @@ class Run:
         self.calls.append(argv)
         if argv == list(machine.LIST):
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.machines), "")
-        if argv[:3] == ["git", "-C", argv[2]] and argv[3] == "rm":
+        if argv[:2] == ["git", "-C"] and argv[3] == "rm":
             return subprocess.run(argv, capture_output=True, text=True, check=False)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
@@ -185,10 +185,25 @@ def test_a_rerun_after_a_completed_remove_finds_nothing_left_and_succeeds(store,
     assert again[-1].startswith("left the antoncore manifests")
 
 
-def test_the_label_comes_from_the_member_name(store):
+def test_the_label_comes_from_the_member_name_and_is_required_once_it_is_gone(store):
     member = _member(store, "anton-7")
     assert remove.label(store.redis, member) == "anton-7"
-    assert remove.label(store.redis, "unknown") == "unknown"
+    auth.revoke(store.redis, member)
+    with pytest.raises(auth.HiveError, match="pass --label"):
+        remove.label(store.redis, member)
+
+
+@pytest.mark.parametrize("state", ["starting", "retiring", "launching", "suspect"])
+def test_an_agent_in_any_state_but_finished_holds_the_drain(store, tmp_path, state):
+    member = _member(store)
+    _agent(store, member)
+    agent = store.agents(SLUG)[0]
+    store.put_agent(SLUG, replace(agent, state=state))
+    plan = remove.Plan(member, "anton-9", "k8s/agentihooks-hive-anton-9", None, wait_s=15)
+    bao = openbao_kv.OpenBao("https://bao.example", "t", opener=Bao())
+
+    with pytest.raises(auth.HiveError, match="did not hand off"):
+        remove.remove(store, bao, plan, _host(Clock(store, member, 99), Run(), tmp_path))
 
 
 @pytest.mark.parametrize(

@@ -68,7 +68,7 @@ agentihooks hive install          # user service that runs agentihooks hive run
   machine's host key from `~/.ssh/known_hosts`, deletes the hive record and every key below it, and deletes the
   OpenBao record (`k8s/agentihooks-hive-<label>`, or `--path`). With `--antoncore <checkout>` it also stages the
   removal of the hive's Argo application, manifests folder and values overlay there, for a pull request. The label
-  defaults to the member's name (`--label` overrides). After `--wait` seconds (default 3600) with agents still on
+  defaults to the member's name (`--label` overrides; a rerun after the member is revoked needs it). After `--wait` seconds (default 3600) with agents still on
   the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step skips a
   piece that is already gone, so a rerun finishes an interrupted remove. `OPENBAO_URL` and `OPENBAO_TOKEN` must
   be set.
