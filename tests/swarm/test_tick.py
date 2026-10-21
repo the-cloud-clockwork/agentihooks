@@ -673,6 +673,7 @@ def test_a_tick_pass_never_waits_on_hive_acknowledgements_and_a_later_pass_recor
     runtime.acked.update(names)
     tick("sw", store, ledger, runtime, now_ms=STARTUP_GRACE_MS + 3_000)
     assert sorted(name for _, name, _ in runtime.spawned) == sorted(names)
+    assert {lane for lane, _, _ in runtime.spawned} == {"eng"}
     assert sorted(row["state"] for row in store.launches("sw")) == ["started"] * 3
     assert [store.claims("sw", t) for t in ("t1", "t2", "t3")] == [1, 1, 1]
     assert runtime.ordered == names

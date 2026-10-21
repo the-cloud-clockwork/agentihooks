@@ -1108,7 +1108,9 @@ def test_a_collect_without_a_live_order_refuses_instead_of_ordering_again(setup)
     assert setup.launcher.orders_for("task-1") == order
 
 
-def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(setup):
+def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(setup, monkeypatch):
+    from contextlib import contextmanager
+
     from scripts.swarm import controller
     from scripts.swarm.tick import ACK_LATER, SpawnError
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
@@ -1119,6 +1121,14 @@ def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(s
         Outcome("spawn", Status.OK, "hive", "placed"),
         Outcome("spawn", Status.PENDING, "hive", detail="waiting"),
     ]
+    kept = []
+
+    @contextmanager
+    def keep(store, slug, held):
+        kept.append((store, slug, held))
+        yield
+
+    monkeypatch.setattr(controller.lease, "kept", keep)
     fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
     task = {"id": "task", "seat": "eng-1@fixture", ACK_LATER: True}
     assert fenced.collect(setup.config, "eng", "engineer", task) == "placed"
@@ -1128,6 +1138,7 @@ def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(s
     with pytest.raises(SpawnError) as raised:
         fenced.collect(setup.config, "eng", "engineer", task)
     assert (str(raised.value), raised.value.status) == ("waiting", Status.PENDING)
+    assert kept == [(setup.store, setup.config.slug, setup.held)] * 2
 
 
 def test_old_controller_cannot_admit_after_lease_takeover(setup):
