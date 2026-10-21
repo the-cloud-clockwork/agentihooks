@@ -175,6 +175,3 @@ replacement_member="$(member_id "$replacement")"
 prove_worker "$replacement_member" | tee "$out/replacement.txt"
 echo 'replacement pod reused the mounted member credential without minting again' | tee -a "$out/replacement.txt"
 echo 'worker hive kind registration and scratch order acknowledgement: passed'
-if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF:-}" == refs/heads/dev ]]; then
-  docker save "$image" -o "$out/image.tar"
-fi
