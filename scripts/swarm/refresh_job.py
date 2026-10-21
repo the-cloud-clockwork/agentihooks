@@ -45,7 +45,7 @@ def start(store, slug):
 
 def refreshes(store, slug, ledger, now_ms):
     from scripts.ci_budget import defects, flakes
-    from scripts.swarm import ci_speed, grafana_alerts, langfuse
+    from scripts.swarm import ci_speed, grafana_alerts, langfuse, queue_priority
 
     config = store.config(slug)
     return [
@@ -54,21 +54,25 @@ def refreshes(store, slug, ledger, now_ms):
         lambda: flakes.refresh(slug, config, store, ledger, now_ms),
         lambda: langfuse.refresh(store, slug, now_ms),
         lambda: grafana_alerts.refresh(store.redis, slug, now_ms),
+        lambda: queue_priority.refresh(store, slug, ledger.state(slug)["tasks"], ledger),
     ]
 
 
 def run(store, slug, ledger, now_ms):
-    """Every due refresh under the swarm's refresh lock; returns their actions, or None when another job holds it."""
+    """Every due refresh under the swarm's refresh lock; returns their actions, or None when this hive lost the
+    swarm's lease or another job holds the lock."""
+    from scripts.swarm import commands, lease
+
+    held = lease.current(store, slug)
+    if held is None or held.owner != commands.hive_id():
+        return None
     key, token = lock_key(store, slug), uuid.uuid4().hex
     if not store.redis.set(key, token, nx=True, px=LOCK_MS):
         return None
     actions = []
     try:
         for refresh in refreshes(store, slug, ledger, now_ms):
-            try:
-                actions += refresh()
-            except Exception as exc:
-                actions.append(f"refresh failed: {type(exc).__name__}: {exc}")
+            actions += refresh()
         return actions
     finally:
         snapshot_job._release(store, key, token)

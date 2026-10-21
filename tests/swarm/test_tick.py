@@ -701,17 +701,23 @@ def test_a_launch_that_spends_the_budget_leaves_the_next_task_for_the_next_pass(
     assert not store.redis.exists(store.key("sw", "claim", "t2"))
 
 
-def test_a_pass_with_no_launch_yet_never_spends_the_budget(store, monkeypatch):
+def test_time_spent_before_the_first_launch_never_holds_it_back(store, monkeypatch):
     from types import SimpleNamespace
 
     from scripts.swarm import tick as tick_module
 
-    clock = iter(range(0, 10_000, 25))
-    monkeypatch.setattr(tick_module, "time", SimpleNamespace(monotonic=lambda: next(clock)))
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    clock = [0.0]
+    monkeypatch.setattr(tick_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    stop = tick_module._spawn_stop
+
+    def slow_stop(*args):
+        clock[0] += 30.0
+        return stop(*args)
+
+    monkeypatch.setattr(tick_module, "_spawn_stop", slow_stop)
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [task for _, _, task in runtime.spawned] == ["t1"]
-    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
 
 
 def test_launches_inside_the_budget_keep_filling_the_lanes(store, monkeypatch):
