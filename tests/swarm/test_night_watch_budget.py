@@ -144,6 +144,25 @@ def test_a_real_client_gets_its_own_pool_with_a_bounded_timeout_and_no_retries()
     assert client.connection_pool.connection_kwargs["socket_timeout"] == 10
 
 
+def test_the_capped_pool_keeps_the_connection_class_and_never_backs_off():
+    import redis
+    from redis.backoff import NoBackoff
+
+    client = redis.Redis.from_url("unix:///run/redis-budget-test.sock")
+    pool = redis_budget.capped(client).connection_pool
+
+    assert pool.connection_class is redis.UnixDomainSocketConnection
+    assert type(pool.connection_kwargs["retry"]._backoff) is NoBackoff
+
+
+def test_a_budget_refuses_at_its_exact_deadline(monkeypatch):
+    monkeypatch.setattr(redis_budget.time, "monotonic", lambda: 100.0)
+    budget = redis_budget.Budget(SimpleNamespace(get=lambda key: pytest.fail("reached Redis at the deadline")), 0)
+
+    with pytest.raises(redis_budget.Spent):
+        budget.get("key")
+
+
 def test_a_client_that_is_not_a_plain_redis_stays_as_it_is():
     import fakeredis
 
