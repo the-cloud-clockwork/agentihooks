@@ -442,6 +442,36 @@ def test_master_move_refuses_a_hive_that_cannot_take_the_master(store, to, reaso
     assert master_move.pending(store, "sw") is None
 
 
+@pytest.mark.parametrize(
+    ("listed", "refusal"),
+    [
+        ("github.com/the-cloud-clockwork/agentihooks", None),
+        ("github.com/o/other", "no hive for master lists the repo {repo}"),
+    ],
+)
+def test_master_move_matches_a_local_checkout_by_the_origin_the_hive_lists(store, tmp_path, listed, refusal):  # noqa: F811
+    from scripts.hive import registry
+    from scripts.swarm import master_move
+
+    checkout = tmp_path / "agentihooks"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / ".git" / "config").write_text(
+        '[remote "origin"]\n\turl = https://github.com/the-cloud-clockwork/agentihooks.git\n'
+    )
+    store.redis.hset(store.key("sw", "config"), "repo", str(checkout))
+    _hive(store, "home", NOW)
+    _hive(store, "spare", NOW)
+    store.redis.hset(registry.key("spare"), "repos", json.dumps([listed]))
+    _hive_master(store, "home")
+
+    if refusal is None:
+        assert master_move.order(store, "sw", "spare", NOW)["to"] == "spare"
+        return
+    with pytest.raises(SwarmError) as refused:
+        master_move.order(store, "sw", "spare", NOW)
+    assert str(refused.value) == f"the master cannot move to hive spare: {refusal.format(repo=checkout)}"
+
+
 def test_an_ordered_move_never_pins_a_master_that_left_without_handing_off(store):  # noqa: F811
     from scripts.swarm import master_move
 
