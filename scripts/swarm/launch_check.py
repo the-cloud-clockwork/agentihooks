@@ -158,8 +158,7 @@ def misses(
     from scripts.hive import reports, scope
     from scripts.swarm.commands import hive_id
 
-    root = "" if scope.member() else hive_id()
-    if (agent.hive and agent.hive != root) or reports.host(agent):
+    if (agent.hive and (scope.member() or agent.hive != hive_id())) or reports.host(agent):
         report = join_report.read(store.redis, agent)
         if not report:
             return {"hive_join": {"expected": "session join report", "actual": "missing"}}
