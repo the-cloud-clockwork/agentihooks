@@ -1184,6 +1184,9 @@ def cmd_status(store, args):
     quota = quota_view.lines(capacity.read(store, args.slug), now_ms())
     held = spawn_holds(store, args.slug) + failed_panes.status_lines(store, args.slug)
     held += incidents.status_lines(store, args.slug)
+    from scripts.hive import admission, placement_waits
+
+    held += [line] if (line := admission.status_line(placement_waits.read(store, args.slug))) else []
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))

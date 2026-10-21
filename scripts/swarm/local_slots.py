@@ -14,6 +14,15 @@ def held(store: RedisStore, machine: str, slug: str, task: str) -> int:
     return len(_held(store, store.redis.hgetall(key(machine)), f"{slug}/{task}", lease.now_ms(store))[0])
 
 
+def running(store: RedisStore, slug: str, task: str) -> int:
+    own = f"{slug}/{task}"
+    return sum(
+        f"{swarm}/{agent.task}" != own and _local_worker(agent)
+        for swarm in store.slugs()
+        for agent in store.agents(swarm)
+    )
+
+
 def claim(store: RedisStore, machine: str, slug: str, task: str, name: str, local_max: int) -> int:
     from redis.exceptions import WatchError
 
