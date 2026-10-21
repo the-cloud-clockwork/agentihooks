@@ -78,7 +78,7 @@ def main(argv):
     from scripts.swarm.ledger_client import LedgerClient
 
     for action in run(connect(), argv[0], LedgerClient(), now_ms()) or []:
-        print(f"{argv[0]}: {action}", flush=True)
+        print(f"{argv[0]}: {action}")
     return 0
 
 
