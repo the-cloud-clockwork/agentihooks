@@ -512,9 +512,11 @@ def stalled():
         yield lambda: redis.Redis(host="127.0.0.1", port=server.getsockname()[1], decode_responses=True)
 
 
-def test_clients_bound_connects_reads_and_check_health_without_retries(stalled):
+def test_clients_set_timeouts_keepalive_health_checks_and_no_retries(stalled, monkeypatch):
     source = stalled()
+    monkeypatch.setattr(source, "close", Mock())
     beat, waiter = daemon.clients(source)
+    source.close.assert_called_once_with()
     for client, read_timeout in ((beat, daemon.READ_TIMEOUT_S), (waiter, daemon.BEAT_SECONDS)):
         options = client.connection_pool.connection_kwargs
         assert options["socket_timeout"] == read_timeout
@@ -555,22 +557,22 @@ def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(mon
     import fakeredis
 
     healthy = fakeredis.FakeRedis(decode_responses=True)
-    beats = []
+    clients, beaten_at = [], []
 
     def connect():
-        return (healthy, healthy) if beats else daemon.clients(stalled())
+        return (healthy, healthy) if clients else daemon.clients(stalled())
 
     def beat(redis, hive):
-        if not beats:
+        if not clients:
             assert redis.connection_pool.connection_kwargs["socket_timeout"] == 0.1
-        beats.append(redis)
+        clients.append(redis)
         redis.set("beat", hive)
-        beats.append(time.monotonic())
+        beaten_at.append(time.monotonic())
 
     monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=KeyboardInterrupt))
     started = _stall_run(monkeypatch, connect, beat)
-    assert beats[1] is healthy
-    assert beats[2] - started < daemon.BEAT_SECONDS
+    assert clients[1] is healthy
+    assert beaten_at[0] - started < daemon.BEAT_SECONDS
     assert healthy.get("beat") == "local"
     err = capsys.readouterr().err
     assert err.startswith("hive Redis connection lost (")
