@@ -261,6 +261,7 @@ def test_lost_hive_worker_leaves_a_task_awaiting_merge_in_pull_request(remote):
     row = {"state": "pr", "claimed_by": remote.agent.name, "pr_url": pr_url, "awaiting": ready.AWAITING}
     rows = {"task": dict(row)}
     ledger = Mock()
+    ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
     remote.runtime.retire = Mock(return_value=False)
 
     actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
