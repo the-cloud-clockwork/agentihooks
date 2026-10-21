@@ -48,5 +48,7 @@ def consume(store: RedisStore, slug: str) -> list[str]:
     return commands.consume(store, slug, commands.hive_id(), lambda row: execute(store, slug, row))
 
 
-def publish(store: RedisStore, slug: str, ledger: dict) -> None:
-    commands.publish(store, slug, status_report(store, slug, ledger), ledger_workspace.published(store, slug, ledger))
+def publish(store: RedisStore, slug: str, ledger: dict, view=None) -> None:
+    commands.publish(
+        store, slug, status_report(store, slug, ledger, view=view), ledger_workspace.published(store, slug, ledger)
+    )

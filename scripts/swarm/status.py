@@ -276,7 +276,7 @@ def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord
     return [a for a in agents if a.runtime_backend != "local" or reports.host(a) or a.name in names]
 
 
-def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | None = None) -> dict:
+def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | None = None, view=None) -> dict:
     from scripts.hive import join_report
     from scripts.swarm import capacity, tick_activity
 
@@ -320,7 +320,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
         "tasks": task_counts(tasks),
         "task_revisions": lifecycle.revisions(state.get("_meta", {}).get("stamps", {})),
         "spawns": store.spawns(slug),
-        "findings": findings(store, slug, config, tasks, events),
+        "findings": findings(store, slug, config, tasks, events, view),
         "launch_checks": launch_check.reports(store, slug),
         "failed_launch_panes": failed_panes.report(store, slug),
         "auto_snapshot": auto_snapshot(config),

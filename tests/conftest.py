@@ -486,6 +486,13 @@ def _swarm_snapshot_job_runs_inline(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _swarm_refresh_job_never_spawns(monkeypatch):
+    from scripts.swarm import refresh_job
+
+    monkeypatch.setattr(refresh_job, "spawn", lambda slug: None)
+
+
+@pytest.fixture(autouse=True)
 def _ci_speed_offline(request, monkeypatch):
     from scripts.swarm import ci_speed
 

@@ -671,6 +671,50 @@ def test_the_spawn_pass_says_when_it_stops_at_the_session_cap(store):
     assert "every agent is at its session cap, waiting" in actions
 
 
+def _slow_launches(monkeypatch, runtime, seconds):
+    from types import SimpleNamespace
+
+    from scripts.swarm import tick as tick_module
+
+    clock = [0.0]
+    monkeypatch.setattr(tick_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    spawn = runtime.spawn
+
+    def slow(config, lane, name, task):
+        clock[0] += seconds
+        return spawn(config, lane, name, task)
+
+    runtime.spawn = slow
+
+
+def test_a_launch_that_spends_the_budget_leaves_the_next_task_for_the_next_pass(store, monkeypatch):
+    from scripts.swarm.tick import SPAWN_BUDGET_S
+
+    assert SPAWN_BUDGET_S == 20
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 20)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1")]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
+    assert "claimed_by" not in ledger.rows["t2"]
+    assert not store.redis.exists(store.key("sw", "claim", "t2"))
+
+
+def test_launches_inside_the_budget_keep_filling_the_lanes(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 19.9)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+    assert not any("launch budget" in action for action in actions)
+
+
+def test_a_failed_launch_spends_no_budget(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FailingFor("t1")
+    _slow_launches(monkeypatch, runtime, 30)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.tried == ["t1", "t2"]
+
+
 def test_a_spawn_claims_its_task_for_one_lease_and_records_its_seat_at_launch_time(store):
     from scripts.swarm.tick import LEASE_MS
 
@@ -1475,13 +1519,17 @@ def test_account_reads_and_spawns_hold_the_placement_lock_and_the_rest_does_not(
     assert not tick_module.PLACING.locked()
 
 
-def test_the_tick_hands_the_ci_budget_pass_its_store_and_clock(store, monkeypatch):
-    from scripts.ci_budget import defects
+def test_the_tick_leaves_the_ci_budget_and_flake_passes_to_the_refresh_job(store, monkeypatch):
+    from scripts.ci_budget import defects, flakes
+    from scripts.swarm import ci_speed
 
     seen = []
-    monkeypatch.setattr(defects, "refresh", lambda *args: seen.append(args) or ["updated"])
-    assert "updated" in tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
-    assert [(args[0], args[2], args[3]) for args in seen] == [("sw", store, 1)]
+    monkeypatch.setattr(defects, "refresh", lambda *args: seen.append("defects") or ["updated"])
+    monkeypatch.setattr(flakes, "refresh", lambda *args: seen.append("flakes") or ["filed"])
+    monkeypatch.setattr(ci_speed, "refresh", lambda *args: seen.append("speed") or [])
+    actions = tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
+    assert seen == []
+    assert "updated" not in actions and "filed" not in actions
 
 
 def test_tick_captures_panes_before_any_retirement(store, monkeypatch):
@@ -1495,16 +1543,6 @@ def test_tick_captures_panes_before_any_retirement(store, monkeypatch):
     assert tick("sw", store, tasks(("t1", "eng")), rt, 123)[:2] == ["captured", "recovered"]
     assert seen[0] == ("capture", ("sw", store, rt, 123))
     assert seen[1][0] == "recover"
-
-
-def test_the_tick_hands_the_flake_budget_pass_its_ledger(store, monkeypatch):
-    from scripts.ci_budget import flakes
-
-    seen = []
-    monkeypatch.setattr(flakes, "refresh", lambda *args: seen.append(args) or ["filed"])
-    ledger = tasks(("t1", "eng"))
-    assert "filed" in tick("sw", store, ledger, FakeRuntime(), 1)
-    assert [(args[0], args[3], args[4]) for args in seen] == [("sw", ledger, 1)]
 
 
 def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers(store):
