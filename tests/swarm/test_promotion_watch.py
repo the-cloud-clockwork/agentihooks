@@ -921,6 +921,7 @@ def test_a_shard_output_consumer_files_its_own_fixer_when_no_unit_shard_lost_its
             ["No shard durations at shard-durations/1/durations.json, so those shards cannot be graded."],
         ),
         ("sonar (3.12)", ["Missing coverage for shard 1"]),
+        ("flake-budget", ["No flake reports under /home/runner/flake-reports"]),
     ],
 )
 def test_each_shard_output_consumer_joins_the_outage_of_a_lost_unit_shard(store, consumer, messages):
@@ -949,6 +950,11 @@ def test_each_shard_output_consumer_joins_the_outage_of_a_lost_unit_shard(store,
             ["Shards split on different stored durations, so their test sets overlap or leave gaps: a: x, b: y"],
         ),
         ("stage-budget", [{"name": "Grade", "conclusion": "failure"}], []),
+        (
+            "stage-budget",
+            [{"name": "Grade", "conclusion": "failure"}],
+            ["No shard durations at shard-durations/1/durations.json, so those shards cannot be graded."],
+        ),
     ],
 )
 def test_a_consumer_failing_on_its_own_error_beside_a_lost_unit_shard_files_its_own_fixer(
