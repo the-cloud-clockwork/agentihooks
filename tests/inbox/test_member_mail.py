@@ -186,15 +186,20 @@ def test_seat_mail_a_leaving_member_agent_took_reaches_its_seats_next_occupant_o
     assert member.inbox(SEAT) == []
 
 
-def test_a_redirect_moves_a_member_item_with_its_history_into_the_inbox_its_address_resolves_to(store, agent, mail):
+@pytest.mark.parametrize("hive", ["", "m2"])
+def test_a_redirect_moves_a_member_item_with_its_history_into_the_inbox_its_address_resolves_to(
+    store, agent, mail, hive
+):
     member, item = mail
-    successor = seat_successor(store, agent, "")
+    successor = seat_successor(store, agent, hive)
     moved = member.redirect(item.id, "swarm", successor, "passed on")
-    controller = InboxStore(store.redis, world="")
+    target = InboxStore(store.redis, world=hive)
     assert moved.address == successor
     assert member.inbox(agent.name) == []
-    assert [i.id for i in controller.pending_items(successor)] == [item.id]
-    assert [e["state"] for e in controller.history(item.id)] == ["pending", "pending"]
+    assert [i.id for i in target.pending_items(successor)] == [item.id]
+    history = target.history(item.id)
+    assert [e["state"] for e in history] == ["pending", "pending"]
+    assert (history[-1]["by"], history[-1]["reason"]) == ("swarm", "passed on")
 
 
 def test_the_inbox_an_address_resolves_to_keeps_the_persist_hook(store, agent):
