@@ -275,6 +275,27 @@ def sweep(
     return found + (_close_emptied(closed, herdr) if act and closed else [])
 
 
+def close_dead_tabs(environ: dict[str, str], now_ms: int, herdr: Herdr, live: set[str]) -> list[str]:
+    alive = {herdr_host.agent_name(name) for name in live}
+    panes = herdr.list_panes()
+    fresh = {
+        record.tab_id
+        for record in herdr_panes.load(environ)
+        if now_ms - record.launched_at < grace_ms(environ)
+        and panes.get(record.pane_id, {}).get("terminal_id") == record.terminal_id
+    }
+    closed = []
+    for tab in herdr.tabs():
+        label, tab_id = tab["label"], tab["tab_id"]
+        if not naming.PATTERNS["pane"].fullmatch(label) or label in alive or tab_id in fresh:
+            continue
+        held = [pane_id for pane_id, pane in panes.items() if pane["tab_id"] == tab_id]
+        if held and all(bare_shell(herdr.process_info(pane_id)) for pane_id in held):
+            herdr.close_tab(tab_id)
+            closed.append(tab_id)
+    return closed
+
+
 def lines(findings: list, act: bool) -> list[str]:
     out = []
     for found in findings:
