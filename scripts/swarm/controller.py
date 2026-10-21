@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import lease
+from scripts.swarm import lease, local_slots
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
 from scripts.swarm_v2.runtime.base import HIVE_LANES
@@ -99,7 +99,7 @@ class FencedRuntime:
         refused = self._refusal(lane, task)
         return "" if _to_workstation(lane, refused) else refused
 
-    def _refusal(self, lane: str, task: dict) -> str:
+    def _refusal(self, lane: str, task: dict, claim: bool = False) -> str:
         task = _master_task(lane, task)
         if refused := self._mode_refusal():
             return refused
@@ -124,24 +124,28 @@ class FencedRuntime:
                 return ""
             if lane == "master":
                 return f"{WORKSTATION.format(lane=lane)}: {selected.reason}"
-            return self._overflow(lane, task, selected)
+            return self._overflow(lane, task, selected, claim)
         wanted = router.placed_backend(lane, task)
         if wanted == WORKSTATION_BACKEND:
             return WORKSTATION.format(lane=lane)
         return DISABLED.format(backend=wanted) if router.enabled_backend(wanted) != wanted else ""
 
-    def _overflow(self, lane: str, task: dict, waited: "Wait") -> str:
+    def _overflow(self, lane: str, task: dict, waited: "Wait", claim: bool) -> str:
         if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
             return waited.reason
         from scripts.hive import placement_waits, registry
         from scripts.hive.placement import Choice, hosts, overflow
         from scripts.swarm.commands import hive_id
 
-        local = registry.show(self.store.redis, hive_id())
+        machine = hive_id()
+        local = registry.show(self.store.redis, machine)
         if local is not None and not hosts(waited.role, local, (lane,)):
             return waited.reason
         local_max = self.store.config(self.slug).local_max_agents
-        chosen = overflow(waited.role, waited, _local_agents(self.store, task["id"]), local_max)
+        chosen = overflow(waited.role, waited, local_slots.held(self.store, machine, self.slug, task["id"]), local_max)
+        if claim and isinstance(chosen, Choice):
+            taken = local_slots.claim(self.store, machine, self.slug, task["id"], local_max)
+            chosen = overflow(waited.role, waited, taken, local_max)
         if not isinstance(chosen, Choice):
             return chosen.reason
         self.store.redis.hdel(self.store.key(self.slug, placement_waits.WAITS), task["id"])
@@ -156,7 +160,7 @@ class FencedRuntime:
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)
         task = _master_task(lane, task)
-        refused = self._refusal(lane, task)
+        refused = self._refusal(lane, task, claim=True)
         workstation = _to_workstation(lane, refused)
         from scripts.hive.placement import LOCAL_FULL
 
@@ -166,13 +170,20 @@ class FencedRuntime:
             raise SpawnError(refused, "unavailable")
         if refused and not workstation:
             raise SwarmError(refused)
-        with lease.kept(self.store, self.slug, self.held):
-            runtime = self.runtime
-            if workstation:
-                runtime = runtime.herdr_runtime
-            elif not _hive_lane(lane, task) and getattr(runtime, "hive_launch", None) is not None:
-                runtime = runtime.original_runtime
-            return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+        try:
+            with lease.kept(self.store, self.slug, self.held):
+                runtime = self.runtime
+                if workstation:
+                    runtime = runtime.herdr_runtime
+                elif not _hive_lane(lane, task) and getattr(runtime, "hive_launch", None) is not None:
+                    runtime = runtime.original_runtime
+                return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+        except BaseException:
+            if refused == OVERFLOW.format(lane=lane):
+                from scripts.swarm.commands import hive_id
+
+                local_slots.release(self.store, hive_id(), self.slug, task["id"])
+            raise
 
 
 def _hive_lane(lane: str, task: dict) -> bool:
@@ -183,18 +194,6 @@ def _master_seats(store: RedisStore, slug: str) -> frozenset[str]:
     from scripts.swarm_v2 import masters
 
     return frozenset(masters.seat(index) for index in range(1, masters.MasterSeats(store.redis).count(slug) + 1))
-
-
-def _local_agents(store: RedisStore, task: str) -> int:
-    return sum(
-        agent.runtime_backend == WORKSTATION_BACKEND
-        and not agent.hive
-        and agent.lane != "master"
-        and agent.task != task
-        and agent.state != "finished"
-        for slug in store.slugs()
-        for agent in store.agents(slug)
-    )
 
 
 def _to_workstation(lane: str, refused: str) -> bool:
