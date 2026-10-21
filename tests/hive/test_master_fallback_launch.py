@@ -308,6 +308,8 @@ def test_the_front_door_master_is_ordered_on_the_hive_master_login_account(setup
 
 
 def test_a_master_login_without_a_hive_slot_holds_no_account_cap(setup):
+    from scripts.swarm.capacity import Account
+
     task = {**master(setup), "seat": "master@fixture"}
     master_login_hive(setup)
     write_hive(
@@ -319,6 +321,7 @@ def test_a_master_login_without_a_hive_slot_holds_no_account_cap(setup):
     )
     selected = setup.launcher.select(setup.config, "master", task)
     assert (selected.account.name, selected.route_kind, selected.account.cap) == ("login", "master-login", None)
+    assert selected.account == Account("claude", "login", "room", 0, None, None, kind="master-login")
 
 
 def test_a_secondary_master_on_a_native_login_reserves_one_launch_beside_a_master_login(setup):
@@ -477,3 +480,19 @@ def test_a_ui_hive_checks_the_master_login_only_for_a_master_login_order(setup, 
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
     assert ack.failure == failure
     assert runtime.spawn.called is (failure != "refused")
+
+
+def test_a_headless_hive_takes_a_secondary_master_without_the_master_login_check(setup, monkeypatch):
+    from dataclasses import replace
+
+    from scripts import master_claude_login
+    from scripts.hive import orders
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    monkeypatch.setattr(master_claude_login, "unusable", lambda: "refused")
+    order, admitted, task = headless_front_door_order(setup, "subscription")
+    runtime = Mock()
+    runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="spawned")
+    secondary = replace(admitted, seat="master-2@fixture")
+    ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, secondary, task)
+    assert ack.failure == "unavailable: spawned"
