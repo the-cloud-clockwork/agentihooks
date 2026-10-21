@@ -622,11 +622,12 @@ def cmd_prober(store, args):
 
 
 def cmd_tick_watch(store, args):
-    from scripts.swarm import controller, scheduled_tick, tick_watch
+    from scripts.swarm import scheduled_tick, tick_watch
     from scripts.swarm.tick import respawn_master
+    from scripts.swarm_ledger import ledger_link
 
     repair = None
-    if os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL) == controller.LOCAL:
+    if ledger_link.local_mode(os.environ):
         runtime = routed(herdr=HerdrRuntime())
 
         def respawn(slug):
