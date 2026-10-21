@@ -301,6 +301,49 @@ def test_resolve_many_reads_every_alias_in_one_round_trip(store, redis, monkeypa
     assert reads == [keys]
 
 
+def test_names_batches_alias_and_record_reads_without_changing_rows(store, redis, monkeypatch):
+    from unittest.mock import Mock
+
+    names = [store.next_name("sw", lane, at=at) for lane, at in (("eng", 17), ("ci", 23))]
+    store.names.note(names[1], session_id="session")
+    store.names.retire(names[1], 31)
+    code = store.names.code_of("sw")
+    redis.rpush(store.names.key("names", code), "old-agent", "missing", names[0])
+    store.names.alias("old-agent", names[1])
+    expected = [store.names.entry(name) for name in [*names, "old-agent", "missing", names[0]]]
+    direct = Mock(wraps=redis.hgetall)
+    aliases = Mock(wraps=redis.mget)
+    pipeline = Mock(wraps=redis.pipeline)
+    monkeypatch.setattr(redis, "hgetall", direct)
+    monkeypatch.setattr(redis, "mget", aliases)
+    monkeypatch.setattr(redis, "pipeline", pipeline)
+
+    assert store.names.names("sw") == expected
+    direct.assert_not_called()
+    aliases.assert_called_once_with(
+        [store.names.key("alias", name) for name in [*names, "old-agent", "missing", names[0]]]
+    )
+    pipeline.assert_called_once_with(transaction=False)
+
+
+def test_names_without_a_code_reads_no_records(store, redis, monkeypatch):
+    from unittest.mock import Mock
+
+    pipeline = Mock(wraps=redis.pipeline)
+    monkeypatch.setattr(redis, "pipeline", pipeline)
+    assert store.names.names("missing") == []
+    pipeline.assert_not_called()
+
+
+def test_names_with_an_empty_list_reads_no_records(store, redis, monkeypatch):
+    from unittest.mock import Mock
+
+    pipeline = Mock(wraps=redis.pipeline)
+    monkeypatch.setattr(redis, "pipeline", pipeline)
+    assert store.names.names("sw") == []
+    pipeline.assert_not_called()
+
+
 def test_resolve_many_keeps_every_name_when_redis_fails(redis, monkeypatch, caplog):
     from redis.exceptions import RedisError
 

@@ -42,6 +42,35 @@ return 'committed'
 """
 
 
+_LATEST = """
+local latest = {}
+for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
+    local row = cjson.decode(raw)
+    local key = row[ARGV[1]]
+    local previous = latest[key]
+    if not previous or row.generation > previous.row.generation
+        or (ARGV[1] == 'seat' and row.generation == previous.row.generation) then
+        latest[key] = {row = row, raw = raw}
+    end
+end
+local result = {}
+for _, entry in pairs(latest) do
+    if ARGV[1] == 'seat' or redis.call('HEXISTS', KEYS[2], entry.row.name) == 1 then
+        result[#result + 1] = entry.raw
+    end
+end
+return result
+"""
+_MANAGED = """
+for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
+    if cjson.decode(raw).name == ARGV[1] then
+        return 1
+    end
+end
+return 0
+"""
+
+
 class ExecutionRegistry:
     def __init__(self, store: RedisStore) -> None:
         self.store = store
@@ -60,17 +89,25 @@ class ExecutionRegistry:
         return sorted((AgentRecord(**json.loads(row)) for row in rows), key=lambda a: (a.seat, a.generation))
 
     def occupants(self, slug: str, reader: Redis | Pipeline | None = None) -> dict[str, AgentRecord]:
-        return {agent.seat: agent for agent in self.records(slug, reader)}
+        from scripts.swarm.store import AgentRecord
+
+        rows = (reader if reader is not None else self.redis).eval(
+            _LATEST, 1, self.store.key(slug, "executions"), "seat"
+        )
+        agents = sorted((AgentRecord(**json.loads(row)) for row in rows), key=lambda a: a.seat)
+        return {agent.seat: agent for agent in agents}
 
     def managed(self, slug: str, name: str, reader: Redis | Pipeline | None = None) -> bool:
-        return any(agent.name == name for agent in self.records(slug, reader))
+        return bool(
+            (reader if reader is not None else self.redis).eval(_MANAGED, 1, self.store.key(slug, "executions"), name)
+        )
 
     def agents(self, slug: str) -> list[AgentRecord]:
         from scripts.swarm.store import AgentRecord
 
         with self.redis.pipeline() as pipe:
             pipe.hgetall(self.store.key(slug, "agents"))
-            pipe.hvals(self.store.key(slug, "executions"))
+            pipe.eval(_LATEST, 2, self.store.key(slug, "executions"), self.store.key(slug, "agents"), "name")
             pipe.hgetall(self.store.key(slug, "desired-routes"))
             projections, attempts, desired = pipe.execute()
         latest = {}
