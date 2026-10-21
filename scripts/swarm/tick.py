@@ -519,7 +519,7 @@ def _drop_remote(slug, store, ledger, rows, agent, reason):
     return f"retired {agent.name}: {reason}" + _drop(slug, store, ledger, rows, agent)
 
 
-def _remote_exited(slug, store, runtime, agent, now_ms):
+def _remote_gone_reason(slug, store, runtime, agent, now_ms):
     if not reports.host(agent):
         return ""
     if runtime.observe(agent).state == "exited":
@@ -558,7 +558,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
     for agent in store.agents(slug):
         if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
             continue
-        if reason := _remote_exited(slug, store, runtime, agent, now_ms):
+        if reason := _remote_gone_reason(slug, store, runtime, agent, now_ms):
             actions.append(_drop_remote(slug, store, ledger, rows, agent, reason))
             continue
         ended = _ended(agent, rows)
