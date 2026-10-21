@@ -50,15 +50,15 @@ def called(monkeypatch):
 
 def test_the_job_runs_every_refresh_with_its_own_arguments(store, called):
     ledger = Ledger()
-    assert refresh_job.run(store, "sw", ledger, 5) == ["updated", "filed", "fired", "applied"]
+    assert refresh_job.run(store, "sw", ledger, 5) == ["applied", "updated", "filed", "fired"]
     config = store.config("sw")
     assert called == [
+        ("queue", (store, "sw", [{"id": "sw-t1"}], ledger)),
         ("speed", ("sw", config, store, 5)),
         ("defects", ("sw", config, store, 5)),
         ("flakes", ("sw", config, store, ledger, 5)),
         ("langfuse", (store, "sw", 5)),
         ("grafana", (store.redis, "sw", 5)),
-        ("queue", (store, "sw", [{"id": "sw-t1"}], ledger)),
     ]
     assert not store.redis.exists(refresh_job.lock_key(store, "sw"))
 
@@ -70,7 +70,7 @@ def test_a_failing_refresh_ends_the_job_and_frees_its_lock(store, called, monkey
     monkeypatch.setattr(defects, "refresh", broken)
     with pytest.raises(RuntimeError, match="^gh is gone$"):
         refresh_job.run(store, "sw", Ledger(), 5)
-    assert [name for name, _ in called] == ["speed"]
+    assert [name for name, _ in called] == ["queue", "speed"]
     assert not store.redis.exists(refresh_job.lock_key(store, "sw"))
 
 

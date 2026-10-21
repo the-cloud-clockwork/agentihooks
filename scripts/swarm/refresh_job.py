@@ -49,12 +49,12 @@ def refreshes(store, slug, ledger, now_ms):
 
     config = store.config(slug)
     return [
+        lambda: queue_priority.refresh(store, slug, ledger.state(slug)["tasks"], ledger),
         lambda: ci_speed.refresh(slug, config, store, now_ms),
         lambda: defects.refresh(slug, config, store, now_ms),
         lambda: flakes.refresh(slug, config, store, ledger, now_ms),
         lambda: langfuse.refresh(store, slug, now_ms),
         lambda: grafana_alerts.refresh(store.redis, slug, now_ms),
-        lambda: queue_priority.refresh(store, slug, ledger.state(slug)["tasks"], ledger),
     ]
 
 
