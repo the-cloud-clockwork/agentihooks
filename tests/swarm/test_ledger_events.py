@@ -1125,3 +1125,25 @@ def test_dead_gate_resolution_is_red_but_reminders_still_require_actual_failure(
 def test_a_pull_request_reports_whether_checks_still_run(rollup, suites, running):
     raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": suites}
     assert ledger_events.pull_request(raw).running is running
+
+
+@pytest.mark.parametrize(
+    ("rollup", "suites", "started"),
+    [
+        ([], [QUEUED_TESTS], True),
+        ([{"name": "lint", "conclusion": None}], [], True),
+        ([{"context": "lint", "state": "PENDING"}], [], True),
+        ([{"context": "lint", "state": "EXPECTED"}], [], False),
+        ([], [FINISHED_RUN, APP_SUITE], False),
+        ([], [], False),
+    ],
+)
+def test_a_pull_request_reports_whether_a_run_actually_started(rollup, suites, started):
+    raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": suites}
+    assert ledger_events.pull_request(raw).started is started
+
+
+def test_a_required_workflow_that_never_started_runs_but_has_not_started():
+    raw = {"state": "OPEN", "gated": True, "gate_workflows": ["tests.yml"], "mergeable": "CONFLICTING"}
+    pull = ledger_events.pull_request(raw)
+    assert (pull.running, pull.started, pull.mergeable) == (True, False, "CONFLICTING")
