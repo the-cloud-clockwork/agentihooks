@@ -116,29 +116,41 @@ def test_many_pending_items_share_batched_wake_reads_without_changing_seen_or_fy
     assert herdr.prompts == []
 
 
-def test_bulk_seen_marks_keep_alias_pairs_and_empty_results(inbox):
-    from scripts.inbox.seen import SeenMarks
+def test_bulk_seen_marks_keep_alias_pairs_and_empty_results(inbox, monkeypatch):
+    from unittest.mock import Mock
+
+    from scripts.inbox import seen
 
     inbox.names.mint_code("sw", "sw", "/repo")
     canonical = inbox.names.next("sw", "eng")
     inbox.names.alias("earlier-agent", canonical)
-    marks = SeenMarks(inbox.redis)
+    marks = seen.SeenMarks(inbox.redis)
     assert marks.mark(canonical, "written")
+    pipeline = Mock(wraps=inbox.redis.pipeline)
+    monkeypatch.setattr(inbox.redis, "pipeline", pipeline)
     assert marks.seen_many([("earlier-agent", "written"), (canonical, "written"), (canonical, "other")]) == {
         ("earlier-agent", "written"),
         (canonical, "written"),
     }
+    pipeline.assert_called_once_with(transaction=False)
     assert marks.seen_many([]) == set()
+    pipeline.assert_called_once_with(transaction=False)
 
 
-def test_bulk_message_histories_preserve_entries_and_empty_results(inbox):
+def test_bulk_message_histories_preserve_entries_and_empty_results(inbox, monkeypatch):
+    from unittest.mock import Mock
+
     first = inbox.send(MASTER_NAME, "sw-eng-1", "first")
     second = inbox.send(MASTER_NAME, "sw-eng-1", "second")
+    pipeline = Mock(wraps=inbox.redis.pipeline)
+    monkeypatch.setattr(inbox.redis, "pipeline", pipeline)
     assert inbox.histories([first.id, second.id]) == {
         first.id: inbox.history(first.id),
         second.id: inbox.history(second.id),
     }
+    pipeline.assert_called_once_with(transaction=False)
     assert inbox.histories([]) == {}
+    pipeline.assert_called_once_with(transaction=False)
 
 
 def test_batched_wake_resolves_an_old_address_to_the_current_pane(inbox):
@@ -153,6 +165,49 @@ def test_batched_wake_resolves_an_old_address_to_the_current_pane(inbox):
     run(inbox, herdr, FakeLedger(), sent_at(item) + 1, agents)
     assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
     assert events(inbox, item.id) == ["woken"]
+
+
+def test_wake_inputs_resolve_senders_and_skip_seen_reads_without_a_ref_or_receiver(inbox):
+    from unittest.mock import Mock
+
+    inbox.names.mint_code("sw", "sw", "/repo")
+    canonical = inbox.names.next("sw", "eng")
+    first = inbox.send("earlier-agent", "outside", "from an old sender", ref="written")
+    second = inbox.send("unknown", "sw-eng-1", "without a reference")
+    third = inbox.send("unknown", "eng-2@sw", "waiting for an occupant", ref="waiting")
+    fourth = inbox.send("unknown", "outside", "another swarm")
+    inbox.names.alias("earlier-agent", canonical)
+    marks = Mock()
+    marks.seen_many.return_value = set()
+
+    reads = wake._wake_inputs(inbox, "sw", [first, second, third, fourth], {canonical, "sw-eng-1"}, None, marks)
+
+    assert [item.id for item in reads.items] == [first.id, second.id, third.id]
+    assert reads.items[0].sender == canonical
+    assert reads.receivers[third.address][0] == ""
+    assert reads.seen == set()
+    marks.seen_many.assert_called_once_with([("outside", "written")])
+
+
+def test_unresolved_sweep_keeps_processing_after_repeated_live_addresses(inbox, monkeypatch):
+    from unittest.mock import Mock
+
+    from scripts.inbox import addresses
+
+    first = inbox.send(MASTER_NAME, "sw-eng-1", "live recipient")
+    second = inbox.send(MASTER_NAME, "sw-eng-1", "same live recipient")
+    third = inbox.send(MASTER_NAME, "missing", "unresolved recipient")
+    monkeypatch.setattr(addresses, "get_active_sessions", lambda **kwargs: {})
+    resolves = Mock(wraps=addresses.resolves)
+    monkeypatch.setattr(addresses, "resolves", resolves)
+
+    actions = addresses.settle_unresolved(inbox, {"sw-eng-1"}, [first, second, third], sent_at(third) + W + 1, W)
+
+    assert actions == [f"closed message {third.id}: recipient no longer resolves"]
+    assert inbox.get(first.id).state == "pending"
+    assert inbox.get(second.id).state == "pending"
+    assert inbox.get(third.id).state == "cancelled"
+    assert [call.args[1] for call in resolves.call_args_list] == ["sw-eng-1", "missing"]
 
 
 @pytest.mark.parametrize("state", ["blocked", "working", "unknown"])

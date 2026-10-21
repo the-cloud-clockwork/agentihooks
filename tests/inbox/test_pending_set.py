@@ -299,9 +299,12 @@ def test_the_wake_pass_reads_only_the_waiting_set_with_many_idle_addresses(redis
 def test_pending_reads_batch_item_hashes_and_address_indexes(store, monkeypatch, read):
     from unittest.mock import Mock
 
+    times = iter(range(100, 104))
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: next(times))
     first = store.send("alice", "bob", "first")
     second = store.send("alice", "bob", "second")
     third = store.send("alice", "carol", "third")
+    fourth = store.send("alice", "bob", "fourth")
     store.pending()
     hashes = Mock(wraps=store.redis.hgetall)
     indexed = Mock(wraps=store.redis.sismember)
@@ -311,17 +314,19 @@ def test_pending_reads_batch_item_hashes_and_address_indexes(store, monkeypatch,
     monkeypatch.setattr(store.redis, "pipeline", pipeline)
 
     if read == "pending":
-        assert store.pending() == [first, second, third]
+        assert store.pending() == [first, second, third, fourth]
         indexed.assert_not_called()
         assert pipeline.call_count == 2
     else:
-        assert store.pending_items("bob") == [first, second]
+        assert store.pending_items("bob") == [first, second, fourth]
         assert pipeline.call_count == 1
     hashes.assert_not_called()
     assert all(call.kwargs == {"transaction": False} for call in pipeline.call_args_list)
 
 
-def test_pending_batch_keeps_duplicate_pointers_and_legacy_rebuild_behavior(store):
+def test_pending_batch_keeps_duplicate_pointers_and_legacy_rebuild_behavior(store, monkeypatch):
+    times = iter(range(100, 102))
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: next(times))
     first = store.send("alice", "bob", "first")
     second = store.send("alice", "carol", "second")
     store.redis.zadd(store.key("pending", "carol"), {first.id: first.sequence})
