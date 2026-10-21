@@ -622,7 +622,9 @@ def _dump(redis, keys):
 
 
 def redis_url(environ):
-    if environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local" and environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
+    from scripts.swarm_ledger import ledger_link
+
+    if not ledger_link.local_mode(environ) and environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
         return environ["AGENTIHOOKS_HIVE_REDIS_URL"]
     return environ.get("AGENTIHOOKS_SWARM_REDIS_URL") or DEFAULT_URL
 
@@ -635,6 +637,7 @@ def redis_client(environ=None):
     import hooks.config  # noqa: F401  loads ~/.agentihooks/*.env, where REDIS_URL lives
 
     environ = os.environ if environ is None else environ
+    _adopt_saved_member(environ)
     url = redis_url(environ)
     try:
         return _pinged(redis, url)
@@ -642,6 +645,21 @@ def redis_client(environ=None):
         if url != environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
             raise
     return _hive_recovered(redis, environ, url)
+
+
+def _adopt_saved_member(environ):
+    from urllib.parse import urlsplit
+
+    from scripts.hive import cli
+    from scripts.swarm_ledger import ledger_link
+
+    if ledger_link.local_mode(environ):
+        return
+    saved = cli.saved_member(environ)
+    url, current = saved.get("AGENTIHOOKS_HIVE_REDIS_URL"), environ.get("AGENTIHOOKS_HIVE_REDIS_URL")
+    # A rejoined hive keeps its old member in the process env, whose Redis user may still answer elsewhere.
+    if url and current and urlsplit(url).username != urlsplit(current).username:
+        environ.update(saved)
 
 
 def _hive_recovered(redis, environ, refused):

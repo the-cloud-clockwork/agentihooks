@@ -137,7 +137,7 @@ def test_duplicate_account_labels_keep_the_first_route_without_comparing_placeme
 def test_the_front_door_master_takes_a_hive_master_login_and_never_its_slots():
     hives = [hive("login", master_login={"claude": "operator"}, prefer={"master": 1}), hive("other")]
     assert placement.place_master("claude", "", REPO, hives, NOW, front=True) == placement.MasterPlacement(
-        "login", "operator", "interactive", False
+        "login", "operator", "master-login", False
     )
     hives[0]["master_login"] = {"claude": ""}
     assert placement.place_master("claude", "", REPO, hives, NOW, front=True) == placement.MasterPlacement(
@@ -162,7 +162,7 @@ def test_a_declared_login_skips_a_hive_whose_master_login_differs():
 def test_a_declared_login_matching_the_hive_master_login_is_placed_there():
     hives = [hive("login", master_login={"claude": "operator"})]
     assert placement.place_master("claude", "operator", REPO, hives, NOW, front=True) == placement.MasterPlacement(
-        "login", "operator", "interactive", False
+        "login", "operator", "master-login", False
     )
 
 
@@ -177,5 +177,5 @@ def test_a_master_login_outranks_a_preferred_hive_slot_and_follows_master_prefer
         hive("b", master_login={"claude": "second"}, prefer={"master": 1}),
     ]
     assert placement.place_master("claude", "", REPO, hives, NOW, front=True) == placement.MasterPlacement(
-        "b", "second", "interactive", False
+        "b", "second", "master-login", False
     )

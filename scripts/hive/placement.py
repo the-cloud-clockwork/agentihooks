@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from scripts.hive.registry import UI_ROLES, live
+from scripts.master_claude_login import ROUTE as MASTER_LOGIN
 
 MASTER = "master"
 INTERACTIVE = "interactive"
@@ -59,6 +60,10 @@ def _checks(
         (
             lambda hive: route_kind != INTERACTIVE or hive["interactive"].get(harness) == slot,
             f"no {kind} for {role} holds the {harness} login for {slot}",
+        ),
+        (
+            lambda hive: route_kind != MASTER_LOGIN or hive["master_login"].get(harness) == slot,
+            f"no {kind} for {role} holds the {harness} master login for {slot}",
         ),
     ]
 
@@ -127,7 +132,7 @@ def place_master(
         forced = front and hive["master_login"].get(harness)
         if forced:
             if login in ("", forced):
-                placed = MasterPlacement(hive["id"], forced, INTERACTIVE, False)
+                placed = MasterPlacement(hive["id"], forced, MASTER_LOGIN, False)
                 candidates.append((headless, False, _order(MASTER)(hive), forced, placed))
             continue
         native = hive["interactive"].get(harness)

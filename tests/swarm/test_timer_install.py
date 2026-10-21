@@ -189,6 +189,8 @@ def test_the_stale_tick_watcher_is_its_own_restarting_user_service():
         "ExecStart": '"/installed/bin/agentihooks" swarm tick-watch',
         "Restart": "always",
         "RestartSec": "5",
+        "NotifyAccess": "main",
+        "WatchdogSec": "600",
     }
     assert dict(parsed["Install"]) == {"WantedBy": "default.target"}
 

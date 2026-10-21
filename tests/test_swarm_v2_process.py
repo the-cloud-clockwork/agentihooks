@@ -228,6 +228,30 @@ def test_a_foreign_namespace_terminate_signals_nothing_and_counts_one_rejection(
     assert router.rejected == {(LOCAL, Unqualified.FOREIGN_NAMESPACE): 1}
 
 
+def test_a_record_this_host_launched_before_its_namespace_restarted_retires_without_signalling(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = record(namespace=WORKER)
+    agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": "hive-a"})
+    router = RuntimeRouter([local])
+    assert router.terminate(agent, ("/scratch/t1",)) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process namespace has ended"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {}
+
+
+def test_a_record_of_this_host_is_still_refused_when_the_local_namespace_is_unreadable(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()}, namespace="")
+    agent = record(namespace=WORKER)
+    agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": "hive-a"})
+    assert RuntimeRouter([local]).terminate(agent) == Outcome(
+        "terminate", Status.REFUSED, LOCAL, Unqualified.NO_NAMESPACE, "local process namespace is unreadable"
+    )
+    assert (ended, calls) == ([], [])
+
+
 def test_a_legacy_local_record_keeps_the_recorded_launch_pid_path(tmp_path, monkeypatch):
     local, calls, ended = adapter(tmp_path, monkeypatch, {})
     agent = AgentRecord(NAME, "eng", "t1", pane_id="w1:p1", profile_decision={"validation": {"pid": 55}})
@@ -454,6 +478,34 @@ def test_retire_process_hands_the_reaper_the_verified_start_time_and_legacy_reti
     assert herdr.retire_process(AgentRecord(NAME, "eng", "t1"), PID, ("/scratch/t1",), STARTED)
     assert herdr.retire(AgentRecord(NAME, "eng", "t1", profile_decision={"validation": {"pid": 55}}))
     assert seen == [(NAME, PID, ["/scratch/t1"], STARTED), (NAME, 55, [], 0)]
+
+
+@pytest.mark.parametrize(("owner", "closed"), [("engineer@a1b2c3-0009", False), (NAME, True), ("", True)])
+def test_retire_process_closes_the_recorded_pane_only_while_it_belongs_to_the_ended_worker(
+    tmp_path, monkeypatch, owner, closed
+):
+    pane = {"pane_id": "w1:p1", "name": owner, "agent_session": None}
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
+    assert herdr.retire_process(AgentRecord(NAME, "eng", "t1", pane_id="w1:p1"), PID, (), STARTED) is True
+    assert (["pane", "close", "w1:p1"] in calls) is closed
+    assert herdr.refusal(AgentRecord(NAME, "eng", "t1")) == {"process": 0, "refusal": "unknown"}
+
+
+def test_retire_process_refuses_and_closes_nothing_when_herdr_cannot_name_the_pane_owner(tmp_path, monkeypatch):
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch)
+    answer = herdr.herdr
+
+    def unavailable(args):
+        if args[:2] == ["agent", "get"]:
+            calls.append(args)
+            raise RuntimeError("herdr agent get: server unavailable")
+        return answer(args)
+
+    herdr.herdr = unavailable
+    agent = AgentRecord(NAME, "eng", "t1", pane_id="w1:p1")
+    assert herdr.retire_process(agent, PID, (), STARTED) is False
+    assert calls == [["agent", "get", "w1:p1"]]
+    assert herdr.refusal(agent) == {"process": PID, "refusal": "pane w1:p1: herdr agent get: server unavailable"}
 
 
 def test_each_unqualified_terminate_is_counted():

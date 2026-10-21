@@ -142,6 +142,15 @@ class InboxStore:
         slug = self.names.slug_of(receiver)
         return scope.host(self.redis, slug, receiver) if slug else ""
 
+    def worlds(self) -> list["InboxStore"]:
+        """This inbox and, for the controller's, each joined hive member's, which holds the mail of the agents that
+        member runs."""
+        from scripts.hive import scope
+
+        if self.world or scope.member():
+            return [self]
+        return [self, *(InboxStore(self.redis, persist=self.persist, world=m) for m in scope.members(self.redis))]
+
     @functools.cached_property
     def pool(self):
         from scripts.inbox.pool import MasterPool
@@ -171,9 +180,11 @@ class InboxStore:
         work, so a bare close names no outcome; a given item_id refuses a second write of that item."""
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
+        from scripts.hive import scope
+
         sender, address = self.names.resolve(sender), self.names.resolve(address)
         home = self.home(address)
-        if home != self.world and not self.world:
+        if home != self.world and not scope.member():
             routed = InboxStore(self.redis, persist=self.persist, world=home)
             return routed.send(sender, address, text, ref, fyi, task, item_id)
         at = now_ms()

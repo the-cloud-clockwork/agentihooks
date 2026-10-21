@@ -1,0 +1,6 @@
+ledger:
+  tls:
+    secretName: swarm-ledger-tls
+hive:
+  join:
+    serveLedgerCa: false

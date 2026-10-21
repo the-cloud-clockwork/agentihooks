@@ -197,7 +197,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
-    timing.call(
+    actions += skip_dropped(
         exits.sweep,
         InboxStore(store.redis),
         slug,
@@ -278,6 +278,19 @@ def skip_refused(function, *args):
         return [f"skipped {name}: the ledger refused its write"]
 
 
+def skip_dropped(function, *args):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    for _ in range(2):
+        try:
+            return timing.call(function, *args) or []
+        except RedisConnectionError as exc:
+            dropped = exc
+    name = f"{function.__module__}.{function.__qualname__}"
+    print(f"{name} skipped, its Redis connection dropped twice: {dropped}", file=sys.stderr)
+    return [f"skipped {name}: its Redis connection dropped twice"]
+
+
 def _codex_hook_order():
     from scripts.targets.codex_target import codex_home, restore_hook_order
 
@@ -339,6 +352,7 @@ def _drop(slug, store, ledger, rows, agent, refund=False):
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
     held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
+    held = held and not awaiting_merge(rows[agent.task])
     if refund and held and store.claims(slug, agent.task) > 0:
         store.refund_claim(slug, agent.task)
     expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}

@@ -37,14 +37,18 @@ def _linked(home: Path) -> str:
         return ""
 
 
-def publish(environ: Mapping[str, str], path: str, opener: Callable | None = None) -> str:
+def write(environ: Mapping[str, str], path: str, entries: Mapping[str, str], opener: Callable | None = None) -> int:
     bao = openbao_kv.from_env(environ, opener)
     if bao is None:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
-    entries = origin(registry.home(environ), environ)
     try:
-        total = openbao_kv.merge(bao, path, entries)
+        return openbao_kv.merge(bao, path, entries)
     except openbao_kv.OpenBaoError as exc:
         raise auth.HiveError(str(exc)) from None
+
+
+def publish(environ: Mapping[str, str], path: str, opener: Callable | None = None) -> str:
+    entries = origin(registry.home(environ), environ)
+    total = write(environ, path, entries, opener)
     linked = f"bundle {entries[URL_KEY]} at {entries[REF_KEY]}" if entries[URL_KEY] else "no bundle is linked"
     return f"{openbao_kv.summary(path, entries, total)}; {linked}"

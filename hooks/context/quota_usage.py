@@ -47,17 +47,26 @@ def record_rate_limits(session_id: str, rate_limits: dict, environ: Mapping[str,
     os.replace(temporary, path)
 
 
-def account_snapshot(account: str, now: float) -> tuple[float, dict] | None:
+def _snapshots(account: str) -> list[tuple[float, dict]]:
     found = []
     for path in (AGENTIHOOKS_HOME / "quota_usage").glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            fresh = now - float(data["updated_at"]) <= QUOTA_USAGE_STALE_SEC
-            if data.get("account") == account and fresh and isinstance(data.get("rate_limits"), dict):
-                found.append((float(data["updated_at"]), data["rate_limits"]))
+            updated = float(data["updated_at"])
+            if data.get("account") == account and isinstance(data.get("rate_limits"), dict):
+                found.append((updated, data["rate_limits"]))
         except (OSError, ValueError, TypeError, KeyError):
             continue
-    return max(found, key=lambda entry: entry[0], default=None)
+    return found
+
+
+def account_snapshot(account: str, now: float) -> tuple[float, dict] | None:
+    fresh = [entry for entry in _snapshots(account) if now - entry[0] <= QUOTA_USAGE_STALE_SEC]
+    return max(fresh, key=lambda entry: entry[0], default=None)
+
+
+def latest_snapshot(account: str) -> tuple[float, dict] | None:
+    return max(_snapshots(account), key=lambda entry: entry[0], default=None)
 
 
 def clear_session_state(session_id: str) -> None:

@@ -22,7 +22,7 @@ SEAT_MS, SPAWN_MS, GAP_MS = 10 * MINUTE_MS, 30 * MINUTE_MS, 5 * MINUTE_MS
 RESPAWNS, RESPAWN_WINDOW_MS = 3, 60 * MINUTE_MS
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
 SOURCES = (SEAT, SPAWN, MERGE)
-HOST, QUOTA, CAP, SLEEP, UNNAMED = "host room", "quota", "cap", "sleep", "no named hold"
+HOST, QUOTA, CAP, SLEEP, TICK, UNNAMED = "host room", "quota", "cap", "sleep", "tick", "no named hold"
 SLEEPING = "the master retired with no new tasks, so the tick spawns nothing until a task is added"
 SEAT_ALERT = "The front door master seat of swarm {slug} has been empty for {minutes} minutes: {why}"
 SPAWN_ALERT = (
@@ -156,8 +156,9 @@ def held(watch, ready) -> tuple[str, str]:
         return CAP, ", ".join(f"{lane} {busy[lane]} of {configured.get(lane, 0)} seats busy" for lane in waiting)
     if decision and not any((decision.get("placements") or {}).get(lane) for lane in waiting):
         return QUOTA, decision.get("reason") or "no lane has a quota placement"
-    held_by = spawn_holds(watch.store, watch.slug)
-    return UNNAMED, held_by[0] if held_by else decision.get("reason", "no quota decision")
+    if held_by := spawn_holds(watch.store, watch.slug):
+        return TICK, held_by[0]
+    return UNNAMED, decision.get("reason", "no quota decision")
 
 
 def _spawn(watch, state):

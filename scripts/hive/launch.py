@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from scripts.hive import orders, placement, placement_waits, registry
-from scripts.hive.orders import Ack, LaunchOrder, Orders
+from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -81,10 +81,6 @@ def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: 
         if slot["account"] == selected.account and "cap" in slot
     ]
     return caps[0] if caps else fallback
-
-
-def _master_login(hives: list[dict], hive_id: str) -> bool:
-    return any(hive["id"] == hive_id and hive["master_login"].get("claude") for hive in hives)
 
 
 def _by_origin(hives: list[dict], repo: str) -> list[dict]:
@@ -193,9 +189,10 @@ class HiveLaunch:
         selected = placement.place_master("claude", "", config.repo, available, now, front)
         if isinstance(selected, placement.Wait):
             return selected if hives else placement.Wait(f"no live hive takes {placement.MASTER}")
-        if selected.route_kind == "interactive":
-            cap = _slot_cap(hives, selected, 1) if front and _master_login(hives, selected.hive) else 1
-            account = capacity.Account("claude", selected.account, "room", 0, None, None, cap, kind="interactive")
+        if selected.route_kind == placement.MASTER_LOGIN:
+            account = capacity.Account("claude", selected.account, "room", 0, None, None, kind=placement.MASTER_LOGIN)
+        elif selected.route_kind == "interactive":
+            account = capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
         else:
             row = accounts[_key(selected.account)]
             account = replace(row, name=selected.account, cap=_slot_cap(available, selected, row.cap))
@@ -213,6 +210,16 @@ class HiveLaunch:
             agent.name != previous.name for agent in self.store.agents(self.slug)
         )
 
+    def unacknowledged(self, order: LaunchOrder) -> bool:
+        return lease.now_ms(self.store) >= order.expires_at and self.orders.ack(order) is None
+
+    def retire(self, order: LaunchOrder, previous: AgentRecord) -> None:
+        self.reap(order, previous)
+        self.end(previous, "hive launch order expired without an acknowledgement")
+
+    def reap(self, order: LaunchOrder, agent: AgentRecord) -> None:
+        self.orders.command(order.hive, CommandOrder(f"reap:{agent.name}", "reap", name=agent.name))
+
     def spawn(self, request: SpawnRequest) -> Outcome:
         lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
         if order := self.orders_for(request.task["id"]):
@@ -221,6 +228,8 @@ class HiveLaunch:
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif self.abandoned(order, previous):
                 self.end(previous, "hive launch order abandoned")
+            elif self.unacknowledged(order):
+                self.retire(order, previous)
             elif previous.name != request.name or previous.seat != request.task["seat"]:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
             else:
@@ -239,7 +248,7 @@ class HiveLaunch:
             self.opening(named),
         )
         admitted = self.admit(request, selected)
-        if not self.slots.reserve(
+        if selected.route_kind != placement.MASTER_LOGIN and not self.slots.reserve(
             f"claude:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
         ):
             self.end(admitted, "account reservation is full")
@@ -311,6 +320,8 @@ class HiveLaunch:
     def complete(self, order: LaunchOrder, ack: Ack) -> Outcome:
         agent = self.store.execution_registry.get(self.slug, order.execution_id)
         if ack.status != "live":
+            if ack.failure == "expired":
+                self.reap(order, agent)
             if ack.failure != "ambiguous":
                 self.end(agent, ack.failure)
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
@@ -327,7 +338,7 @@ class HiveLaunch:
             or agent.state != "working"
         ):
             raise SwarmError("hive launch acknowledgement does not match the live execution")
-        if not self.slots.acknowledge(agent.execution_id):
+        if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(agent.execution_id):
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch reservation expired")
         placed = Placed(
             agent.pane_id,

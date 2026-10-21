@@ -91,12 +91,14 @@ def render(chart: str, values: str | None) -> dict:
 HIVES = {
     "workers": {
         "replicas": 1,
+        "hiveUrl": "https://join.example:8770",
         "homeVolume": HOST["workers"]["homeVolume"],
         "nodeSelector": HOST["workers"]["nodeSelector"],
         "maxAgents": 1,
         "hives": [
             {
                 "name": "pool-1",
+                "hiveUrl": "https://pool.example:8770",
                 "maxAgents": 3,
                 "credentialSecret": {"name": "member-pool-1", "key": "credential"},
                 "homeVolume": {"emptyDir": {}},
@@ -135,6 +137,8 @@ def hive_problems(name: str, deployment: dict, expected: dict) -> list[str]:
         found.append(f"hive{name} selects component {component}")
     if join != expected["credential"]:
         found.append(f"hive{name} mounts credential {join}, expected {expected['credential']}")
+    if env.get("AGENTIHOOKS_HIVE_URL") != expected["hiveUrl"]:
+        found.append(f"hive{name} refreshes at {env.get('AGENTIHOOKS_HIVE_URL')}, expected {expected['hiveUrl']}")
     if env["HIVE_MAX_AGENTS"] != expected["agents"]:
         found.append(f"hive{name} runs {env['HIVE_MAX_AGENTS']} agents, expected {expected['agents']}")
     if container["resources"]["requests"]["memory"] != expected["memory"]:
@@ -161,6 +165,7 @@ def hives_problems(chart: str) -> list[str]:
     expected = {
         "": {
             "credential": "member",
+            "hiveUrl": "https://join.example:8770",
             "agents": "1",
             "memory": "700Mi",
             "home": {"hostPath": host["homeVolume"]["hostPath"]},
@@ -168,6 +173,7 @@ def hives_problems(chart: str) -> list[str]:
         },
         "-pool-1": {
             "credential": "member-pool-1",
+            "hiveUrl": "https://pool.example:8770",
             "agents": "3",
             "memory": "2100Mi",
             "home": {"emptyDir": {}},
@@ -175,6 +181,7 @@ def hives_problems(chart: str) -> list[str]:
         },
         "-pool-2": {
             "credential": "member-pool-2",
+            "hiveUrl": "https://join.example:8770",
             "agents": "1",
             "memory": "700Mi",
             "home": {"emptyDir": {}},
@@ -226,6 +233,36 @@ def hives_problems(chart: str) -> list[str]:
     )
     if rendered.returncode != 0:
         found.append(f"the chart refused a hive hostPath home beside emptyDir null: {rendered.stderr.strip()!r}")
+    claimed = [
+        {
+            "name": f"pool-{i}",
+            "credentialSecret": {"name": f"m{i}", "key": "c"},
+            "homeVolume": {"emptyDir": None, "persistentVolumeClaim": {"claimName": f"home-{i}"}},
+        }
+        for i in (1, 2)
+    ]
+    rendered = subprocess.run(
+        ["helm", "template", "fixture", chart, *BASE, "-f", "-"],
+        input=yaml.safe_dump({"workers": {"hives": claimed}}),
+        capture_output=True,
+        text=True,
+    )
+    if rendered.returncode != 0:
+        found.append(f"the chart refused hive claim homes beside emptyDir null: {rendered.stderr.strip()!r}")
+    else:
+        for i in (1, 2):
+            pod = hive_pods(rendered.stdout)[f"-pool-{i}"]
+            home = next(v for v in pod["spec"]["template"]["spec"]["volumes"] if v["name"] == "home")
+            if home != {"name": "home", "persistentVolumeClaim": {"claimName": f"home-{i}"}}:
+                found.append(f"hive-pool-{i} home is {home}, expected its claim")
+            if pod["spec"].get("strategy", {}).get("type") != "Recreate":
+                found.append(f"hive-pool-{i} with a claim home does not roll out by Recreate")
+    cases.append(
+        (
+            {"hives": [{**h, "homeVolume": {"persistentVolumeClaim": {"claimName": "home"}}} for h in claimed]},
+            "shares its home volume",
+        )
+    )
     for workers, reason in cases:
         refused = subprocess.run(
             ["helm", "template", "fixture", chart, *BASE, "-f", "-"],
