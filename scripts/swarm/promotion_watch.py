@@ -56,6 +56,8 @@ MISSING_SHARD_SIGNS = (
     "Missing coverage for shard ",
     "No shard durations at ",
     "collected tests did not run in exactly one of ",
+    "head shard coverage missing: ",
+    "baseline shard coverage missing: ",
 )
 REFRESH_JOB = "refresh-durations"
 LOST_SAMPLES_SIGN = "kept no samples from durations-"

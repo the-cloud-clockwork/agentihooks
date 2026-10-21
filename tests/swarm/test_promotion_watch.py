@@ -903,16 +903,26 @@ def test_a_shard_output_consumer_files_its_own_fixer_when_no_unit_shard_lost_its
     ]
 
 
-UNREAD = ["No shard durations at shard-durations/*/durations.json, so those shards cannot be graded."]
-
-
 @pytest.mark.parametrize(
-    "consumer",
-    ["coverage-ratchet", "coverage-baseline", "flake-budget", "stage-budget", "sonar (3.12)"],
+    ("consumer", "messages"),
+    [
+        (
+            "coverage-ratchet",
+            [
+                "The coverage ratchet cannot grade: head shard coverage missing: .coverage-shards/coverage-3.12-1/.coverage"
+            ],
+        ),
+        (
+            "coverage-baseline",
+            ["Cannot record the coverage baseline: baseline shard coverage missing: coverage-3.12-1/.coverage"],
+        ),
+        ("stage-budget", ["No shard durations at shard-durations/1/durations.json, so those shards cannot be graded."]),
+        ("sonar (3.12)", ["Missing coverage for shard 1"]),
+    ],
 )
-def test_each_shard_output_consumer_joins_the_outage_of_a_lost_unit_shard(store, consumer):
+def test_each_shard_output_consumer_joins_the_outage_of_a_lost_unit_shard(store, consumer, messages):
     ledger = Ledger()
-    found = [("unit (3.12, 1)", RAN, DOWNLOAD), (consumer, [{"name": "Grade", "conclusion": "failure"}], UNREAD)]
+    found = [("unit (3.12, 1)", RAN, DOWNLOAD), (consumer, [{"name": "Grade", "conclusion": "failure"}], messages)]
     refresh(store, ledger, outage_run(found))
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
     assert ledger.added[0][1]["description"].endswith(
