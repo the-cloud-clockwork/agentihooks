@@ -16,10 +16,14 @@ def test_a_current_finding_reads_its_measure_even_while_another_detector_failed(
     assert measure.exact(finding.id, [finding], ["the ci detector failed"], {}, set()) == 42
 
 
-@pytest.mark.parametrize("failed,word", [(["a"], "detector"), (["a", "b"], "detectors")])
-def test_an_absent_finding_is_unknown_while_detectors_failed(failed, word):
-    with pytest.raises(SwarmError, match=f"^turn-gap/s1 is unknown while {len(failed)} {word} failed$"):
+def test_an_absent_finding_is_unknown_naming_every_failed_detector():
+    failed = ["the ci detector failed: TimeoutError: ", "the trace detector failed: TimeoutError: "]
+    with pytest.raises(SwarmError) as refused:
         measure.exact("turn-gap/s1", [], failed, {"turn-gap/s1": {"evidence": []}}, set())
+    assert str(refused.value) == (
+        "turn-gap/s1 is unknown because the ci detector failed: TimeoutError: ; "
+        "the trace detector failed: TimeoutError: "
+    )
 
 
 def test_an_unseen_finding_is_refused_with_its_class():
@@ -54,6 +58,13 @@ def test_a_class_reads_its_current_findings_and_counts_failed_detectors_as_unkno
 
 def test_a_seen_class_with_no_current_finding_reads_zero():
     assert measure.of_class("stale-claim", [found("turn gap", "c", 9)], [], {"stale-claim"}) == measure.Read(0, 0, 0)
+
+
+def test_a_class_with_no_current_finding_is_unknown_while_a_detector_failed():
+    with pytest.raises(SwarmError, match="^stale-claim is unknown because the trace detector failed: x; y$"):
+        measure.of_class(
+            "stale-claim", [found("turn gap", "c", 9)], ["the trace detector failed: x", "y"], {"stale-claim"}
+        )
 
 
 def test_an_unseen_class_is_refused():

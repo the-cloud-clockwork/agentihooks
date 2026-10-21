@@ -93,7 +93,33 @@ def test_an_absent_finding_is_unknown_while_a_detector_failed(started, monkeypat
     assert (code, out) == (1, "")
     assert err.splitlines() == [
         "the inbox detector failed: ZeroDivisionError: division by zero",
-        f"doctor: {STALE.id} is unknown while 1 detector failed",
+        f"doctor: {STALE.id} is unknown because the inbox detector failed: ZeroDivisionError: division by zero",
+    ]
+
+
+def test_a_reader_finding_is_refused_while_its_reader_timed_out(started, monkeypatch, capsys):
+    def timed_out():
+        raise TimeoutError
+
+    monkeypatch.setattr(doctor.detect, "readers", lambda *args: {"ci": timed_out, "trace": timed_out})
+    code, out, err = measured(capsys, f"trace-reader-unavailable/{WATCHED}.1")
+    assert (code, out) == (1, "")
+    assert err.splitlines() == [
+        "the ci detector failed: TimeoutError: ",
+        "the trace detector failed: TimeoutError: ",
+        f"doctor: trace-reader-unavailable/{WATCHED}.1 is unknown because the ci detector failed: TimeoutError: ; "
+        "the trace detector failed: TimeoutError: ",
+    ]
+
+
+def test_a_class_with_no_current_finding_is_refused_while_a_detector_failed(started, monkeypatch, capsys):
+    loop.record(started, DOCTOR, [STALE], NOW - 60_000, 0)
+    detecting(monkeypatch, failing=True)
+    code, out, err = measured(capsys, "stale-claim")
+    assert (code, out) == (1, "")
+    assert err.splitlines() == [
+        "the inbox detector failed: ZeroDivisionError: division by zero",
+        "doctor: stale-claim is unknown because the inbox detector failed: ZeroDivisionError: division by zero",
     ]
 
 
