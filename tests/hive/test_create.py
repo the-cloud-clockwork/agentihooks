@@ -16,7 +16,9 @@ NAME = f"swarm-hive-{NOW}"
 RECORD = f"k8s/agentihooks-hive-{NAME}"
 REPO = "the-cloud-clockwork/antoncore"
 PR = "https://github.com/the-cloud-clockwork/antoncore/pull/2000"
-TEMPLATE = "#@ file: k8s/manifests/${name}/ssh-lan.yaml\nport: ${ssh_port}\nnode: ${node}\nkey: ${record}\n"
+TEMPLATE = (
+    "#@ file: k8s/manifests/${name}/ssh-lan.yaml\nport: ${ssh_port}\nnode: ${node}\nkey: ${record}\nip: ${lan_ip}\n"
+)
 NFS = "        - name: HIVES\n          value: agentihooks-hive\n"
 SERVICES = {
     "items": [
@@ -155,7 +157,7 @@ def test_create_brings_a_named_hive_from_nothing_to_an_engineer_in_herdr(world):
     assert record[create.AUTHORIZED_KEYS] == "ssh-ed25519 OPERATOR operator\n"
     tree = dict(world.run.posted)[f"repos/{REPO}/git/trees"]["tree"]
     assert {entry["path"]: entry["content"] for entry in tree} == {
-        f"k8s/manifests/{NAME}/ssh-lan.yaml": f"port: 2225\nnode: worker-001\nkey: {RECORD}\n",
+        f"k8s/manifests/{NAME}/ssh-lan.yaml": f"port: 2225\nnode: worker-001\nkey: {RECORD}\nip: 10.10.30.207\n",
         create_render.NFS_HOMES_PATH: f"        - name: HIVES\n          value: agentihooks-hive {NAME}\n",
     }
     assert dict(world.run.posted)[f"repos/{REPO}/git/refs"]["ref"] == f"refs/heads/{NAME}"
@@ -212,7 +214,10 @@ def test_the_dry_run_prints_every_step_and_file_and_writes_nothing(world):
     assert not world.run.named("gh", "pr", "create")
     assert not [argv for argv in world.run.calls if argv[0] in ("ssh-keygen", "herdr", "ssh")]
     assert world.published == [True]
-    assert f"--- k8s/manifests/{NAME}/ssh-lan.yaml\nport: 2225\nnode: worker-001\nkey: {RECORD}\n" in world.lines
+    assert (
+        f"--- k8s/manifests/{NAME}/ssh-lan.yaml\nport: 2225\nnode: worker-001\nkey: {RECORD}\nip: 10.10.30.207\n"
+        in world.lines
+    )
     assert f"--- {create_render.NFS_HOMES_PATH}\n        - name: HIVES\n          value: agentihooks-hive {NAME}\n" in (
         world.lines
     )
