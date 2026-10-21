@@ -157,6 +157,23 @@ def test_a_handoff_releases_the_old_slot_only_after_the_successor_occupies(world
     }
 
 
+def test_stored_accounts_scans_the_keyspace_in_pages_of_ten_thousand(monkeypatch):
+    from unittest.mock import Mock
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.set(accounts.account_key("b"), 1)
+    store.redis.set(accounts.account_key("a"), 1)
+    scan = Mock(wraps=store.redis.scan_iter)
+    monkeypatch.setattr(store.redis, "scan_iter", scan)
+
+    assert accounts.stored_accounts(store) == ["a", "b"]
+    scan.assert_called_once_with(match=accounts.account_key("*"), count=10000)
+
+
 def test_a_successor_that_never_confirms_leaves_the_old_slot_counted(world):
     world.scene()
     world.clock[0] += TTL
