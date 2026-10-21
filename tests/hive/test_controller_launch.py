@@ -1030,6 +1030,69 @@ def test_default_wait_sleep_and_exact_deadline_are_exercised(setup):
         )
 
 
+def test_deferred_launches_return_pending_at_once_and_a_replay_records_each_acknowledgement(setup, monkeypatch):
+    import time
+
+    from scripts.hive import launch
+    from scripts.hive.orders import Consumer
+    from scripts.swarm import launch_check
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import ACK_LATER, Placed
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    setup.launcher.sleep = Mock(side_effect=AssertionError("a deferred launch must not wait"))
+    requests = []
+    for index in (1, 2, 3):
+        name = store.next_name(slug, "eng")
+        record = AgentRecord(name, "eng", f"task-{index}", seat=f"eng-{index}@{slug}", state="starting")
+        store.put_agent(slug, record)
+        store.seats.occupy(record.seat, name, 0)
+        task = {"id": record.task, "seat": record.seat, "controller_epoch": setup.held.epoch, ACK_LATER: True}
+        requests.append(SpawnRequest(setup.config, "eng", name, task))
+    started = time.monotonic()
+    pending = [setup.launcher.spawn(request) for request in requests]
+    assert time.monotonic() - started < 5
+    assert pending == [Outcome("spawn", Status.PENDING, "hive", detail=launch.PENDING)] * 3
+    assert all(setup.launcher.orders_for(request.task["id"]) for request in requests)
+    assert setup.launcher.spawn(requests[0]) == pending[0]
+    runtime = Mock()
+    runtime.spawn.side_effect = [
+        Outcome(
+            "spawn",
+            Status.OK,
+            "local",
+            Placed(f"pane-{i}", "claude", "account", profile="engineer", profile_decision={"validation": {"pid": i}}),
+        )
+        for i in (1, 2, 3)
+    ]
+    runtime.namespace.return_value = "namespace"
+    runtime.table.return_value = {i: SimpleNamespace(start_time=30 + i) for i in (1, 2, 3)}
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): [])
+    consumer = Consumer(store.redis, "remote", runtime)
+    assert sum(consumer.poll() for _ in range(3)) == 3
+    replayed = [setup.launcher.spawn(request) for request in requests]
+    assert all(outcome.ok for outcome in replayed)
+    assert [outcome.value.execution.state for outcome in replayed] == ["working"] * 3
+    assert {outcome.value.pane_id for outcome in replayed} == {"pane-1", "pane-2", "pane-3"}
+    assert len(store.execution_registry.records(slug)) == 3
+
+
+def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(setup):
+    from scripts.swarm import controller
+    from scripts.swarm.tick import ACK_LATER
+
+    routed = Mock()
+    routed.spawn.return_value = "placed"
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+    fenced._refusal = Mock(side_effect=AssertionError("collect must not place the seat again"))
+    task = {"id": "task", "seat": "eng-1@fixture", ACK_LATER: True}
+    assert fenced.collect(setup.config, "eng", "engineer", task) == "placed"
+    routed.spawn.assert_called_once_with(
+        setup.config, "eng", "engineer", {**task, "controller_epoch": setup.held.epoch}
+    )
+
+
 def test_old_controller_cannot_admit_after_lease_takeover(setup):
     from scripts.swarm import lease
     from scripts.swarm.store import SwarmError
