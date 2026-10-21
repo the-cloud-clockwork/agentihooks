@@ -185,26 +185,6 @@ def test_a_run_whose_unit_shards_failed_does_not_consume_its_download(monkeypatc
     assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
 
 
-def test_a_record_returns_without_waiting_for_older_listings(monkeypatch):
-    _github(monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(2)})
-    api = ci_test_plan._api
-    release, finished = threading.Event(), threading.Event()
-
-    def slow(endpoint):
-        if endpoint == f"{ACTIONS}/runs/1/artifacts?per_page=100":
-            release.wait(10)
-            finished.set()
-            raise subprocess.CalledProcessError(1, ["gh"])
-        return api(endpoint)
-
-    monkeypatch.setattr(ci_test_plan, "_api", slow)
-    try:
-        assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 2
-        assert not finished.is_set()
-    finally:
-        release.set()
-
-
 def test_a_skipped_run_whose_download_fails_does_not_stop_the_lookup(monkeypatch):
     _github(
         monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(2), 1: _manifest(1)}, failed={(2, "unit (3.12, 4)")}

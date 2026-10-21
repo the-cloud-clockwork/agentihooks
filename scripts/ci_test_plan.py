@@ -88,8 +88,7 @@ def find_record(repository: str, before: str) -> tuple[dict, dict] | None:
         _api(f"{actions}/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page={CANDIDATES}")
     )["workflow_runs"]
     runs = [run for run in runs if _recorded(run, repository) and run["updated_at"] <= before]
-    pool = ThreadPoolExecutor(max_workers=CANDIDATES)
-    try:
+    with ThreadPoolExecutor(max_workers=CANDIDATES) as pool:
         listings = [pool.submit(_api, f"{actions}/runs/{run['id']}/artifacts?per_page=100") for run in runs]
         for run, listing in zip(runs, listings):
             artifacts = json.loads(listing.result())["artifacts"]
@@ -109,8 +108,6 @@ def find_record(repository: str, before: str) -> tuple[dict, dict] | None:
                 print(f"Dev run {run['id']} recorded a manifest for {manifest.get('commit')}, not {run['head_sha']}")
                 continue
             return run, manifest
-    finally:
-        pool.shutdown(wait=False)
     return None
 
 
