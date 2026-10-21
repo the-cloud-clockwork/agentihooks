@@ -155,6 +155,20 @@ def test_the_candidate_runs_list_their_artifacts_at_the_same_time(monkeypatch):
     assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
 
 
+def test_the_lookup_pool_holds_one_worker_per_candidate_run(monkeypatch):
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    sizes = []
+    pool = ci_test_plan.ThreadPoolExecutor
+
+    def sized(max_workers=None):
+        sizes.append(max_workers)
+        return pool(max_workers=max_workers)
+
+    monkeypatch.setattr(ci_test_plan, "ThreadPoolExecutor", sized)
+    assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
+    assert sizes == [ci_test_plan.CANDIDATES]
+
+
 def test_a_record_downloads_while_its_jobs_are_read(monkeypatch):
     _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
     api, jobs = ci_test_plan._api, ci_test_plan.read_jobs
