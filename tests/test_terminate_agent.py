@@ -236,6 +236,20 @@ def test_a_failed_terminate_withdraws_no_exit_when_none_was_recorded(monkeypatch
     _withdraw_exit("rig", "")
 
 
+def test_a_withdrawal_the_swarm_store_refuses_is_reported(monkeypatch, capsys):
+    from scripts.swarm.store import Unreachable
+    from scripts.terminate_agent import _withdraw_exit
+
+    def refuse():
+        raise Unreachable("down")
+
+    monkeypatch.setattr("scripts.swarm.store.connect", refuse)
+
+    _withdraw_exit("rig", "e@1")
+
+    assert capsys.readouterr().out.splitlines() == ["swarm_exit=not-withdrawn (down)"]
+
+
 def test_terminate_uses_process_group(monkeypatch):
     from scripts.terminate_agent import terminate
 

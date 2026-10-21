@@ -1,5 +1,4 @@
 import argparse
-import contextlib
 import json
 import os
 import signal
@@ -267,7 +266,7 @@ def _close_pane(pane: str, socket: str) -> str:
     return "closed"
 
 
-def _record_exit(pid: int) -> tuple[str, str]:
+def _mark_exit(pid: int) -> tuple[str, str]:
     import redis
 
     from scripts.swarm import deliberate_exit, store
@@ -289,9 +288,12 @@ def _withdraw_exit(swarm: str, agent: str) -> None:
 
     from scripts.swarm import deliberate_exit, store
 
-    if swarm and agent:
-        with contextlib.suppress(store.SwarmError, redis.RedisError):
-            deliberate_exit.take(store.connect(), swarm, agent)
+    if not swarm or not agent:
+        return
+    try:
+        deliberate_exit.take(store.connect(), swarm, agent)
+    except (store.SwarmError, redis.RedisError) as exc:
+        print(f"swarm_exit=not-withdrawn ({exc})")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -357,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("result=validated signal=none")
         return 0
-    marked = _record_exit(selected.process.pid)
+    marked = _mark_exit(selected.process.pid)
     try:
         escalated = terminate(selected, members, args.term_timeout)
     except (OSError, RuntimeError) as exc:
