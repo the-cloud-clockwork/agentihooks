@@ -68,7 +68,10 @@ LEGACY_HELD = "the legacy master login {path} is held by {owner}, still running"
 LEGACY = "master-claude"
 PUBLISH_FAILED = "master login recovery copy not stored: {error}"
 RECOVERY_FAILED = "master login recovery copy not read: {error}"
-ALL_HELD = "every stored master claude ai login is held by a live master ({held}): add one with agentihooks claude login --master"
+ALL_HELD = (
+    "every stored master claude ai login is held by a live master ({held}): "
+    "add one with agentihooks claude login --master"
+)
 FULL = "all {cap} master login slots hold a login: remove one with agentihooks claude login --remove SLOT"
 EMPTY = "master login slot {number} holds no login"
 RECORD_KEYS = ("grant", "account", "epoch", "generation")
@@ -171,9 +174,9 @@ def remove(number: int, bao: openbao_kv.OpenBao | None) -> str:
         held = holders(folder)
         if held:
             raise LoginRefused(HELD.format(owner=", ".join(sorted(held))))
+        if bao is not None:
+            openbao_kv.merge(bao, creds(number), {}, RECORD_KEYS)
         shutil.rmtree(folder / "claude")
-    if bao is not None:
-        openbao_kv.merge(bao, creds(number), {}, RECORD_KEYS)
     return found
 
 

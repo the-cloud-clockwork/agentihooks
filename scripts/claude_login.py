@@ -43,9 +43,10 @@ MASTER_FAILED = "claude auth login exited {code}; the master login is unchanged"
 STEP_RECOVERY = "Storing the master login recovery copy in OpenBao"
 MASTER_SLUG = "--master takes no slug: the master login is one home per slot for every swarm"
 SLOT_NEEDS_MASTER = "--slot picks a master login slot and needs --master"
-LISTED = "slot {number}: {account}, {state}"
+LISTED = "slot {number}: {account}, {state}, 5h {five:.0f}% used, 7d {week:.0f}% used"
 NONE_STORED = "no master claude ai login is stored: run agentihooks claude login --master"
 REMOVED = "master login slot {number} ({account}) removed"
+KEPT = "the OpenBao record {record} would restore this login at the next master launch: rerun with --openbao"
 _write = os.write
 
 
@@ -248,14 +249,18 @@ def master(openbao: bool | None, environ: Mapping[str, str], deps: Deps, slot: i
 
 
 def listing() -> int:
+    import time
+
     from scripts import master_claude_login as login
+    from scripts import master_logins
 
     found = login.logins()
     if not found:
         print(NONE_STORED)
     for number, account in found.items():
         held = ", ".join(sorted(login.holders(login.root(number)))) or "free"
-        print(LISTED.format(number=number, account=account or "unknown", state=held))
+        five, week, _ = master_logins.usage(account, time.time())
+        print(LISTED.format(number=number, account=account or "unknown", state=held, five=five, week=week))
     return 0
 
 
@@ -264,6 +269,8 @@ def removal(number: int, openbao: bool | None, environ: Mapping[str, str], deps:
 
     try:
         bao = openbao_step.target(openbao, environ, deps.console, deps.opener)
+        if bao is None and openbao_kv.from_env(environ):
+            raise login.LoginRefused(KEPT.format(record=login.creds(number)))
         account = login.remove(number, bao)
     except (StoreRefused, login.LoginRefused, openbao_kv.OpenBaoError) as exc:
         _fail(str(exc))

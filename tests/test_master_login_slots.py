@@ -118,6 +118,31 @@ def test_a_master_at_98_percent_of_its_week_moves_to_the_stored_login_with_most_
     assert (target, found) == (login.home(3), "threeatexample_com")
 
 
+def test_a_master_at_99_percent_of_five_hours_moves_to_the_stored_login_with_most_room(monkeypatch, rendered):
+    from hooks.context import quota_policy
+    from hooks.context.quota_policy import Candidate
+
+    _stored(1, "one@example.com")
+    _stored(2, "two@example.com")
+    _stored(3, "three@example.com")
+    used = {"oneatexample_com": (99.0, 50.0), "twoatexample_com": (60.0, 20.0), "threeatexample_com": (10.0, 30.0)}
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (*used[account], now))
+    environ = _environ(rendered, "master@rig-1")
+    token = Candidate("workeratexample_com", 0.0, 0.0, 0, 0.0, 6)
+    others = quota_policy.master_targets([token, *quota_policy._login_accounts(environ)], environ)
+    decision = quota_policy.decide(
+        account="oneatexample_com",
+        five_used=99.0,
+        week_used=50.0,
+        five_reset=None,
+        week_reset=None,
+        others=others,
+        push=False,
+    )
+    assert (decision.action, decision.trigger) == ("handoff", "five_hour")
+    assert (decision.target.account, decision.target.login) == ("threeatexample_com", True)
+
+
 def test_a_master_with_no_free_stored_login_gets_no_token_target(monkeypatch, rendered):
     from hooks.context import quota_policy
     from hooks.context.quota_policy import Candidate
@@ -162,8 +187,13 @@ def test_listing_names_each_login_and_its_holder(monkeypatch, rendered, capsys):
     _stored(3, "three@example.com")
     _room(monkeypatch, oneatexample_com=50.0, threeatexample_com=40.0)
     _launch_elsewhere(monkeypatch, rendered, "master@rig-1")
+    used = {"oneatexample_com": (12.4, 98.0), "threeatexample_com": (0.0, 3.6)}
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (*used[account], 0 * now))
     assert claude_login.main(["--list"], {}) == 0
-    assert capsys.readouterr().out == "slot 1: oneatexample_com, master@rig-1\nslot 3: threeatexample_com, free\n"
+    assert capsys.readouterr().out == (
+        "slot 1: oneatexample_com, master@rig-1, 5h 12% used, 7d 98% used\n"
+        "slot 3: threeatexample_com, free, 5h 0% used, 7d 4% used\n"
+    )
 
 
 def _console():

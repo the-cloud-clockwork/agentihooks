@@ -167,12 +167,39 @@ def test_removal_refusals_name_the_slot_and_every_holder():
     assert str(held.value) == "the master login is held by master@a-1, master@b-1, still running"
 
 
-def test_listing_and_removal_name_an_unknown_account_and_each_holder(capsys):
+def test_removal_without_the_store_refuses_while_a_record_would_restore_it(monkeypatch, capsys):
+    _stored(2, TWO)
+    environ = {"OPENBAO_URL": "https://bao.example", "OPENBAO_TOKEN": "t"}
+    assert claude_login.removal(2, False, environ, claude_login.Deps(console=None)) == 1
+    assert (
+        "the OpenBao record agentihooks/master-claude-login-2 would restore this login at the next master launch: "
+        "rerun with --openbao"
+    ) in capsys.readouterr().err
+    assert login.home(2).exists()
+
+
+def test_a_failed_record_clear_keeps_the_login(monkeypatch):
+    _stored(2, TWO)
+
+    def sealed(*_):
+        raise openbao_kv.OpenBaoError(503, "sealed")
+
+    monkeypatch.setattr(openbao_kv, "merge", sealed)
+    with pytest.raises(openbao_kv.OpenBaoError):
+        login.remove(2, "bao")
+    assert login.home(2).exists()
+
+
+def test_listing_and_removal_name_an_unknown_account_and_each_holder(monkeypatch, capsys):
     _stored(2)
     _stored(3, TWO)
     _held(3, "master@a-1", "master@b-1")
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (1.0, 2.0, now))
     assert claude_login.listing() == 0
-    assert capsys.readouterr().out == "slot 2: unknown, free\nslot 3: twoatexample_com, master@a-1, master@b-1\n"
+    assert capsys.readouterr().out == (
+        "slot 2: unknown, free, 5h 1% used, 7d 2% used\n"
+        "slot 3: twoatexample_com, master@a-1, master@b-1, 5h 1% used, 7d 2% used\n"
+    )
     assert claude_login.removal(2, False, {}, claude_login.Deps(console=None)) == 0
     assert capsys.readouterr().out == "master login slot 2 (unknown) removed\n"
 

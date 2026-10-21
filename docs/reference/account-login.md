@@ -88,7 +88,7 @@ in the first empty slot; `--slot N` logs slot N in again. Up to
 `$AGENTIHOOKS_HOME/master-login-N/claude`, each with its own OpenBao record,
 `secret/agentihooks/master-claude-login` and
 `secret/agentihooks/master-claude-login-N`. `--list` prints each stored login,
-its account and the live master holding it; `--remove N` deletes a free login
+its account, the live master holding it and its five hour and week usage; `--remove N` deletes a free login
 and clears its record. A login command refuses while a master or another login
 command holds that slot. Native Claude is the only refresher of the login.
 
