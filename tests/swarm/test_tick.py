@@ -651,7 +651,7 @@ class HiveAcks(FakeRuntime):
         if name in self.broken:
             raise ConnectionError("redis went away")
         if name in self.failing:
-            raise SpawnError("hive launch failed: prompt", "refused")
+            raise SpawnError("hive launch failed: prompt", "refused", pane_id=f"pane-{name}")
         if name not in self.acked:
             raise SpawnError("hive launch ordered, waiting for its acknowledgement", "pending")
         return super().spawn(config, lane, name, task)
@@ -694,15 +694,21 @@ def test_a_tick_pass_with_three_unacknowledged_hive_orders_ends_within_seconds(s
 
 
 def test_a_refused_hive_acknowledgement_reopens_its_task(store):
-    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    from scripts.swarm import failed_panes
+
+    store.update("sw", max_eng=2)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    first = runtime.ordered[0]
-    runtime.failing.add(first)
-    tick("sw", store, ledger, runtime, now_ms=2_000)
+    names = list(runtime.ordered)
+    runtime.failing.update(names)
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert sum(action.startswith("spawn failed for ") for action in actions) == 2
     launches = {row["agent"]: row for row in store.launches("sw")}
-    assert (launches[first]["state"], launches[first]["error"]) == ("failed", "hive launch failed: prompt")
-    assert first not in {agent.name for agent in store.agents("sw")}
-    assert ledger.rows["t1"]["claimed_by"] != first
+    for name in names:
+        assert (launches[name]["state"], launches[name]["error"]) == ("failed", "hive launch failed: prompt")
+        assert failed_panes.held(store, "sw")[f"pane-{name}"]["failed_at"] == 2_000
+    assert not set(names) & {agent.name for agent in store.agents("sw")}
+    assert ledger.rows["t1"]["claimed_by"] not in names and ledger.rows["t2"]["claimed_by"] not in names
 
 
 def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(store, monkeypatch):

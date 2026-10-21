@@ -1106,6 +1106,13 @@ def test_a_collect_without_a_live_order_refuses_instead_of_ordering_again(setup)
     setup.launcher.end(store.execution_registry.get(slug, order.execution_id), "ended before its acknowledgement")
     assert setup.launcher.collect(request) == gone
     assert setup.launcher.orders_for("task-1") == order
+    setup.launcher.spawn(request)
+    order = setup.launcher.orders_for("task-1")
+    store.execution_registry.update(
+        slug, replace(store.execution_registry.get(slug, order.execution_id), state="finished")
+    )
+    assert setup.launcher.collect(request) == gone
+    assert setup.launcher.orders_for("task-1") == order
 
 
 def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(setup, monkeypatch):
