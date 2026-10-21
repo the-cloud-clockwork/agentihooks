@@ -3,6 +3,7 @@ import threading
 import pytest
 
 from scripts.hive import admission
+from tests.swarm.test_cli import env as env
 
 pytestmark = pytest.mark.unit
 
@@ -190,3 +191,18 @@ def test_status_counts_refusals_by_reason_in_a_fixed_order():
     assert admission.status_line(waits) == "admission refusals  cpu 2  ram 1  quota 1"
     assert admission.status_line({}) == ""
     assert admission.REASONS == ("cpu", "ram", "quota", "placement", "node cap", "missing telemetry")
+
+
+def test_status_report_carries_refusal_counts_for_the_ledger_page(env):
+    from scripts.hive import placement_waits
+    from scripts.swarm import cli, status
+
+    store, _, _ = env
+    cli.main(["sw", "create", "--repo", "/repo"])
+    assert status.status_report(store, "sw", {"tasks": []})["admission"] == {}
+    placement_waits.observe(store, "sw", "eng", "t1", "no hive for eng has room: anton cpu: busy", 1)
+    placement_waits.observe(store, "sw", "ci", "t2", "no hive for ci has room: vm missing telemetry: none", 1)
+    assert status.status_report(store, "sw", {"tasks": [{"id": "t1"}, {"id": "t2"}]})["admission"] == {
+        "cpu": 1,
+        "missing telemetry": 1,
+    }
