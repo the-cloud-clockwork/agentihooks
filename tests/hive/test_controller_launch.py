@@ -574,6 +574,9 @@ def write_hive(setup, **changes):
     publish_room(setup.store, hive["id"], hive["max_agents"])
 
 
+NO_RAM = "ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more under the 80 percent line"
+
+
 def publish_room(store, hive_id, room):
     from scripts.hive import admission, headroom
     from scripts.swarm import lease
@@ -921,27 +924,18 @@ def test_interactive_placement_keeps_the_native_login_requirement(setup):
     )
 
 
-@pytest.mark.parametrize("state", ["launching", "working", "suspect"])
-def test_unreported_executions_count_against_hive_room(setup, state):
+@pytest.mark.parametrize("reserved", [3, 4])
+def test_pending_admission_reservations_count_against_hive_room(setup, reserved):
+    from scripts.hive import admission
     from scripts.hive.placement import Wait
-    from scripts.swarm.store import AgentRecord
 
-    names = [setup.store.next_name("fixture", "eng") for _ in range(3)]
-    agents = [
-        AgentRecord(
-            name,
-            "eng",
-            "task",
-            seat=f"eng-{i + 1}@fixture",
-            state=state,
-            hive="remote",
-            runtime_target={"host_id": "remote"},
-        )
-        for i, name in enumerate(names)
-    ]
-    for agent in agents:
-        setup.store.start_execution("fixture", agent)
-    assert setup.launcher.select(setup.config, "eng", {"id": "next"}) == Wait("no hive for eng has room")
+    for index in range(reserved):
+        admission.reserve(setup.store.redis, "remote", f"fixture/eng-{index}", 3)
+    assert setup.launcher.select(setup.config, "eng", {"id": "next"}) == Wait(
+        "no hive for eng has room: remote "
+        "ram: 22100 of 100000 MB available, 700 MB per agent, fits 3 more under the 80 percent line"
+    )
+    assert setup.launcher.hives()[0]["room"] == 0
 
 
 def test_foreign_ended_and_master_executions_do_not_use_worker_room(setup):
@@ -1205,12 +1199,37 @@ def test_spawn_honors_the_ci_lane_harness_before_admission(setup):
     assert setup.store.execution_registry.records("fixture") == []
 
 
-def test_reported_worker_sessions_fill_hive_room_without_execution_records(setup):
-    from scripts.hive import registry
+def test_a_hive_without_a_fresh_headroom_reading_refuses_on_missing_telemetry(setup):
+    from scripts.hive import headroom
     from scripts.hive.placement import Wait
 
+    setup.store.redis.delete(headroom.key("remote"))
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        "no hive for eng has room: remote missing telemetry: no fresh headroom reading"
+    )
+
+
+def test_reported_worker_sessions_no_longer_fill_hive_room(setup):
+    from scripts.hive import registry
+
     setup.store.redis.set(f"{registry.key('remote')}:sessions", json.dumps({"claude:account": 3}))
-    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait("no hive for eng has room")
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
+
+
+def test_a_launch_that_loses_the_last_room_to_a_concurrent_reservation_waits_on_the_reason(setup):
+    from scripts.hive import admission
+
+    publish_room(setup.store, "remote", 1)
+    request = request_for(setup)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    assert admission.reserve(setup.store.redis, "remote", "fixture/other", 1) == (True, 0)
+    assert setup.launcher.reserve_room(request, selected) == (
+        "no hive for eng has room: remote "
+        "ram: 20700 of 100000 MB available, 700 MB per agent, fits 1 more under the 80 percent line"
+    )
+    admission.release(setup.store.redis, "remote", "fixture/other")
+    assert setup.launcher.reserve_room(request, selected) == ""
+    assert admission.pending(setup.store.redis, "remote") == 1
 
 
 def test_terminal_order_is_cleared_even_when_replacement_has_no_account_room(setup):

@@ -4,8 +4,8 @@ import pytest
 
 from scripts.hive import launch, placement, registry
 from scripts.hive.placement import Choice, choose
+from tests.hive.test_controller_launch import NO_RAM, publish_room, write_hive
 from tests.hive.test_controller_launch import setup as setup
-from tests.hive.test_controller_launch import write_hive
 from tests.hive.test_placement import NOW, hive
 
 ORIGIN = "github.com/the-cloud-clockwork/agentihooks"
@@ -159,10 +159,10 @@ def test_a_master_placed_by_origin_names_the_origin_to_launch_in(live):
 
 
 def test_a_full_anton_hive_sends_the_engineer_to_the_workstation_with_the_reason(live):
-    live.store.redis.set(f"{registry.key(ANTON)}:sessions", '{"eng": 1}')
+    publish_room(live.store, ANTON, 0)
     selected = live.launcher.select(live.config, "eng", {"id": "task"})
     assert (selected.hive, selected.account.name) == ("root", ROOT_ACCOUNTS[0])
-    assert selected.fallback == "no headless hive for eng has room"
+    assert selected.fallback == f"no headless hive for eng has room: {ANTON} {NO_RAM}"
 
 
 def test_a_hive_listing_another_origin_does_not_take_the_checkout(live):
@@ -189,8 +189,8 @@ def test_a_tick_logs_the_wait_when_both_live_hives_are_full(live):
     from scripts.swarm.tick import tick
     from tests.swarm.test_tick import FakeRuntime, tasks
 
-    live.store.redis.set(f"{registry.key(ANTON)}:sessions", '{"eng": 1}')
-    live.store.redis.set(f"{registry.key('root')}:sessions", '{"eng": 16}')
+    publish_room(live.store, ANTON, 0)
+    publish_room(live.store, "root", 0)
 
     class LiveHives(FakeRuntime):
         def placement_refusal(self, lane, task):
@@ -200,7 +200,7 @@ def test_a_tick_logs_the_wait_when_both_live_hives_are_full(live):
     runtime = LiveHives()
     live.store.create(replace(live.config, slug="sw"))
     actions = tick("sw", live.store, tasks(("t1", "eng")), runtime, now_ms=1_000)
-    assert "task t1 waits: no headless hive for eng has room" in actions
+    assert f"task t1 waits: no headless hive for eng has room: {ANTON} {NO_RAM}" in actions
     assert runtime.spawned == []
 
 
