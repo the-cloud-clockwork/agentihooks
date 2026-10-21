@@ -1058,11 +1058,12 @@ class HerdrRuntime:
         if agent.runtime_backend != "local":
             self.refusals[agent.name] = {"process": 0, "refusal": REMOTE_PANE}
             return False
+        found = self._get(agent.pane_id) if agent.pane_id else None
         outcome = self.end(agent.name, pid, list(homes), start)
         if outcome.refusal:
             self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
             return False
-        if agent.pane_id:
+        if agent.pane_id and (found is None or _owns(found, agent)):
             try:
                 self.herdr(["pane", "close", agent.pane_id])
             except Exception as exc:
