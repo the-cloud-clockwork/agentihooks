@@ -80,7 +80,7 @@ def runner_lost(repo: str, job_id: int) -> bool:
     try:
         text = job_text(repo, job_id, True)
     except subprocess.CalledProcessError:
-        text = "\n".join(annotations(repo, job_id))
+        return any(RUNNER_LOSS.search(note) for note in annotations(repo, job_id))
     return bool(RUNNER_LOSS.search(text))
 
 

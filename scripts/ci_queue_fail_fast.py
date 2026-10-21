@@ -36,10 +36,11 @@ def logged_loss(repo: str, job: dict, seen: dict[str, bool]) -> bool:
     key = str(job["id"])
     if key not in seen:
         try:
-            errors = "\n".join(log_errors(repo, job["id"]))
+            errors = log_errors(repo, job["id"])
         except subprocess.CalledProcessError:
             return True
-        seen[key] = bool(RUNNER_LOSS.search(errors)) or not EXITED.search(errors)
+        lost = any(RUNNER_LOSS.search(line) for line in errors)
+        seen[key] = lost or not any(EXITED.search(line) for line in errors)
     return seen[key]
 
 

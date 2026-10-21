@@ -82,6 +82,7 @@ def test_a_rerun_classifier_or_judge_failure_is_named_even_when_lost(name):
         ("##[error]The runner has received a shutdown signal.", True),
         ("##[error]Process completed with exit code 1.", False),
         ("##[error]Process completed with exit code 128.\n##[error]The runner has received a shutdown signal.", True),
+        ("##[error]Process completed with exit code 1.\n##[error]The runner has received a shutdown signal.", True),
         ("", True),
         ("##[error]Process completed with exit code 127.", False),
         ("##[error]Process completed with exit code 137.", True),

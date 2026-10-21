@@ -21,7 +21,12 @@ def _jobs():
 
 
 def test_each_lost_shard_is_rerun_once_with_its_queue_plan_leg():
-    jobs = [_job("unit (3.12, 3)", "failure"), _job("unit (3.12, 14)", "cancelled"), _job("unit (3.12, 4)", "success")]
+    jobs = [
+        _job("lint", "success"),
+        _job("unit (3.12, 3)", "failure"),
+        _job("unit (3.12, 4)", "success"),
+        _job("unit (3.12, 14)", "cancelled"),
+    ]
     matrix, reason = ci_unit_rerun.decide(jobs, PLAN, lambda job: True)
     assert matrix == [PLAN[2], PLAN[13]]
     assert reason == "rerunning 2 lost unit shards once"
