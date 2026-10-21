@@ -144,14 +144,14 @@ def test_removing_a_swarm_withdraws_its_member_agents_open_mail(redis, agent, ma
     assert member.get(item.id).state == "cancelled"
 
 
-def seat_successor(store, hive):
+def seat_successor(store, previous, hive):
     if hive:
         from scripts.hive import auth
 
         store.redis.hset(f"{auth.PREFIX}:member:{hive}", mapping={"name": hive, "ledger": "digest"})
         store.redis.sadd(auth.INDEX, hive)
     name = store.next_name("sw", "eng")
-    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT, hive=hive))
+    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT, hive=hive), previous.execution_id)
     store.seats.occupy(SEAT, name, 2)
     return name
 
@@ -161,7 +161,7 @@ def test_a_leaving_member_agents_unread_mail_reaches_its_seats_next_occupant_on_
     member, item = mail
     exits.settle(InboxStore(store.redis), agent.name, SEAT, "handed off its seat")
     store.put_agent("sw", replace(agent, state="finished"))
-    successor = seat_successor(store, hive)
+    successor = seat_successor(store, agent, hive)
     exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
     assert [i.id for i in InboxStore(store.redis, world=hive).pending_mail(successor)] == [item.id]
     assert member.inbox(SEAT) == []
@@ -169,7 +169,7 @@ def test_a_leaving_member_agents_unread_mail_reaches_its_seats_next_occupant_on_
 
 def test_a_redirect_moves_a_member_item_with_its_history_into_the_inbox_its_address_resolves_to(store, agent, mail):
     member, item = mail
-    successor = seat_successor(store, "")
+    successor = seat_successor(store, agent, "")
     moved = member.redirect(item.id, "swarm", successor, "passed on")
     controller = InboxStore(store.redis, world="")
     assert moved.address == successor
