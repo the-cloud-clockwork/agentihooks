@@ -524,12 +524,11 @@ def _remote_gone_reason(slug, store, runtime, agent, now_ms):
         return ""
     if runtime.observe(agent).state == "exited":
         return "its hive pane is gone"
-    return "its hive stopped reporting" if _hive_lost(slug, store, runtime, agent, now_ms) else ""
+    return "its hive stopped reporting" if _hive_lost(slug, store, agent, now_ms) else ""
 
 
-def _hive_lost(slug, store, runtime, agent, now_ms):
-    hive = getattr(runtime, "hive", None)
-    if hive is None or not hive.lost(agent, now_ms):
+def _hive_lost(slug, store, agent, now_ms):
+    if not reports.Reports(store.redis).lost(agent, now_ms):
         return False
     beat = idle_state.heartbeat(store.redis, slug, agent.name)
     wait = idle_state.wait(store.redis, slug, agent.name)
