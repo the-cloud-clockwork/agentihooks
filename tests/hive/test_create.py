@@ -79,6 +79,7 @@ class Run:
 class Store:
     working = True
     placing = True
+    swarm_state = "running"
 
     def __init__(self, redis):
         self.redis = redis
@@ -87,7 +88,7 @@ class Store:
         return ["demo"]
 
     def config(self, slug):
-        return SimpleNamespace(hive_placement=Store.placing)
+        return SimpleNamespace(hive_placement=Store.placing, state=Store.swarm_state)
 
     def agents(self, slug):
         hives = [
@@ -112,6 +113,7 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(create.setup, "publish", lambda env, path, dry: published.append(dry) or f"settings {dry}")
     monkeypatch.setattr(swarm_store, "RedisStore", Store)
     Store.working = Store.placing = True
+    Store.swarm_state = "running"
 
     def beat():
         member = invite._env(bao.records[RECORD]["credential"])[invite.HIVE_ID]

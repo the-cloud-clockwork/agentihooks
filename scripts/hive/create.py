@@ -73,10 +73,11 @@ def _placing(tools: Tools) -> None:
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(tools.redis)
-    if not any(store.config(slug).hive_placement for slug in store.slugs()):
+    configs = [store.config(slug) for slug in store.slugs()]
+    if not any(config.hive_placement and config.state == "running" for config in configs):
         raise auth.HiveError(
-            "no swarm places engineers on hives, so the new hive would wait for one forever: "
-            "run agentihooks swarm <slug> set hive-placement=on"
+            "no running swarm places engineers on hives, so the new hive would wait for one forever: "
+            "run agentihooks swarm <slug> set hive-placement=on on a running swarm"
         )
 
 

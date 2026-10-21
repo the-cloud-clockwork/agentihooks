@@ -254,9 +254,17 @@ def test_the_placement_refusal_reads_in_full(world):
     with pytest.raises(auth.HiveError) as refused:
         create.create(world.tools, create.Options())
     assert str(refused.value) == (
-        "no swarm places engineers on hives, so the new hive would wait for one forever: "
-        "run agentihooks swarm <slug> set hive-placement=on"
+        "no running swarm places engineers on hives, so the new hive would wait for one forever: "
+        "run agentihooks swarm <slug> set hive-placement=on on a running swarm"
     )
+
+
+@pytest.mark.parametrize("state", ["paused", "stopped"])
+def test_a_swarm_that_is_not_running_does_not_count_as_placing(world, state):
+    Store.swarm_state = state
+    with pytest.raises(auth.HiveError, match="no running swarm places engineers on hives"):
+        create.create(world.tools, create.Options())
+    assert world.run.calls == []
 
 
 def test_the_missing_key_refusal_reads_in_full(world):
