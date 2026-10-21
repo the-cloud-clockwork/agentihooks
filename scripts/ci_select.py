@@ -37,7 +37,7 @@ CONFTEST = "conftest.py"
 SUITE_SPEED = "tests/test_suite_speed.py"
 FAKEREDIS = "fakeredis"
 # Only the queue ran these whole tree checks, so a pull request adding, removing or moving a file passed its own tier.
-TREE_CHECKS = ("tests/test_codeowners.py", "tests/test_ci_pull_request_api.py")
+TREE_CHECKS = (f"{TESTS}/test_codeowners.py", f"{TESTS}/test_ci_pull_request_api.py")
 # Stored test seconds one leg runs inside the unit step timeout; a full shard holds about 157 and runs in 217.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
