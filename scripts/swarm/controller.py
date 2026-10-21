@@ -174,6 +174,11 @@ class FencedRuntime:
                 runtime = runtime.original_runtime
             return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
+    def collect(self, config, lane, name, task):
+        lease.renew(self.store, self.slug, self.held)
+        with lease.kept(self.store, self.slug, self.held):
+            return self.runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+
 
 def _hive_lane(lane: str, task: dict) -> bool:
     return lane in HIVE_LANES or lane == "master" or bool(task.get("hive"))

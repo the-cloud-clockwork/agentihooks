@@ -180,7 +180,7 @@ def test_an_outcome_is_ok_only_for_the_ok_status():
 
 
 def test_the_enum_values_are_the_wire_names():
-    assert [str(status) for status in Status] == ["ok", "ambiguous", "unavailable", "unsupported", "refused"]
+    assert [str(status) for status in Status] == ["ok", "ambiguous", "unavailable", "unsupported", "refused", "pending"]
     assert [str(mode) for mode in Recovery] == ["reattach", "resume"]
     assert [str(capability) for capability in Capability] == [
         "spawn",
