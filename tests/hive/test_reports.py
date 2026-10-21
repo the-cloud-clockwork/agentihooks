@@ -244,6 +244,40 @@ def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat
 
 
 @pytest.mark.parametrize(
+    ("age", "state", "retired"),
+    [
+        (LOST + 1, "claimed", True),
+        (LOST + 1, "blocked", True),
+        (LOST, "claimed", False),
+    ],
+)
+def test_tick_retires_workers_of_a_lost_hive_while_hive_placement_is_off(remote, age, state, retired):
+    from scripts.swarm import tick
+    from scripts.swarm.tick import SUSPECT
+
+    remote.agent = replace(remote.agent, state=SUSPECT)
+    remote.store.put_agent("fixture", remote.agent)
+    _beat_hive(remote, age)
+    remote.store.claim("fixture", "task", remote.agent.name, 60000)
+    rows = {"task": {"state": state, "claimed_by": remote.agent.name}}
+    ledger = Mock()
+    ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
+    remote.runtime.hive = None
+    remote.runtime.retire = Mock(side_effect=AssertionError("a lost hive takes no process command"))
+
+    actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
+
+    reopened = ", task task reopened" if state == "claimed" else ""
+    if retired:
+        assert remote.store.agents("fixture") == []
+        assert remote.store.claimant("fixture", "task") is None
+        assert actions == [f"retired {remote.agent.name}: its hive stopped reporting{reopened}"]
+    else:
+        assert actions == []
+        assert [(a.name, a.state) for a in remote.store.agents("fixture")] == [(remote.agent.name, SUSPECT)]
+
+
+@pytest.mark.parametrize(
     ("panes", "namespace", "retired"),
     [
         (["w9:p9"], "theirs", True),
