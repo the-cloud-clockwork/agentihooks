@@ -154,7 +154,7 @@ def moved_seat(store, agent, mail):
     store.put_agent("sw", replace(agent, state="finished"))
     exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
     name = store.next_name("sw", "eng")
-    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT, hive="m2"))
+    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT, hive="m2"), agent.execution_id)
     store.seats.occupy(SEAT, name, 2)
     return member, item, name
 
@@ -187,7 +187,7 @@ def test_the_sweep_moves_open_seat_mail_to_a_new_occupant_on_the_controller(stor
     store.put_agent("sw", replace(agent, state="finished"))
     exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
     name = store.next_name("sw", "eng")
-    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT))
+    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT), agent.execution_id)
     store.seats.occupy(SEAT, name, 2)
     exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
     assert [i.id for i in InboxStore(store.redis, world="").open_mail(name)] == [item.id]
@@ -200,7 +200,7 @@ def test_the_sweep_leaves_seat_mail_in_the_world_its_occupant_runs_on(store, age
     store.put_agent("sw", replace(agent, state="finished"))
     exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
     name = store.next_name("sw", "eng")
-    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT, hive="m1"))
+    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT, hive="m1"), agent.execution_id)
     store.seats.occupy(SEAT, name, 2)
     history = member.history(item.id)
     exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
@@ -210,10 +210,10 @@ def test_the_sweep_leaves_seat_mail_in_the_world_its_occupant_runs_on(store, age
 
 def test_moving_an_item_between_worlds_leaves_a_closed_item_in_place(store, agent, mail):
     member, item = mail
-    member.close(item.id, agent.name, "done")
+    member.close(item.id, agent.name, "cancel")
     target = InboxStore(store.redis, world="m2")
     assert member.move_world(item.id, target, exits.BY, "moved") is None
-    assert member.get(item.id).state == "done"
+    assert member.get(item.id).state == "cancelled"
     assert target.inbox(agent.name) == []
 
 
