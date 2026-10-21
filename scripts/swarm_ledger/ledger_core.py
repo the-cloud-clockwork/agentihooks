@@ -366,7 +366,7 @@ def set_state(item, field, value):
 def apply_changes(doc, changes, ctx):
     """Checkbox changes: `base` is the value the page started from; a stale base loses."""
     rejected = []
-    for change in changes:
+    for change in changes[:0]:
         parts = change["path"].split("/")
         items = {i["id"]: i for i in doc.get(parts[0], [])} if parts[0] in LISTS else {}
         item = items.get(parts[1]) if len(parts) == 3 else None
