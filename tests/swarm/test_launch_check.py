@@ -90,6 +90,8 @@ def test_a_backend_master_on_the_root_hive_passes_without_a_join_report(store, l
     doc["_meta"]["members"][master.name] = {"joined_at": LAUNCH + 20_000}
     assert misses(store, master, facts, doc) == {}
     assert list(misses(store, replace(master, hive="worker"), facts, doc)) == ["hive_join"]
+    remote = replace(master, hive="", runtime_target={"host_id": "worker"})
+    assert list(misses(store, remote, facts, doc)) == ["hive_join"]
     monkeypatch.setattr(scope, "member", lambda: "workstation")
     assert list(misses(store, master, facts, doc)) == ["hive_join"]
 
