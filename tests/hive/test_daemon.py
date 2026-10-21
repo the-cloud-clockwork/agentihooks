@@ -656,6 +656,32 @@ def test_a_stalled_wait_socket_reconnects_and_beats_within_one_beat_interval(mon
     assert capsys.readouterr().err.endswith("); reconnecting in 1s\n")
 
 
+@pytest.mark.wall_clock
+def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkeypatch, capsys):
+    import time
+
+    import fakeredis
+
+    from scripts.scheduler import process_timer
+
+    silent = fakeredis.FakeRedis(decode_responses=True)
+    beats = []
+
+    def beat(redis, hive):
+        beats.append(time.monotonic())
+        if len(beats) == 2:
+            raise KeyboardInterrupt
+
+    def scheduler_down():
+        assert time.monotonic() - beats[-1] < daemon.BEAT_SECONDS * 2, "the timer wait outlived its bound"
+
+    monkeypatch.setattr(process_timer, "RECHECK_S", 0.05)
+    monkeypatch.setattr(process_timer.service, "ensure_running", scheduler_down)
+    _stall_run(monkeypatch, lambda: (silent, silent), beat)
+    assert beats[1] - beats[0] < daemon.BEAT_SECONDS
+    assert capsys.readouterr().err == ""
+
+
 def test_default_install_location_and_executable_discovery(monkeypatch, tmp_path):
     monkeypatch.setattr(daemon.shutil, "which", lambda binary: "/bin/agentihooks" if binary == "agentihooks" else None)
     monkeypatch.setattr(daemon.Path, "home", lambda: tmp_path)
