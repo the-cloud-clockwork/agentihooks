@@ -515,7 +515,7 @@ def stalled():
 def test_clients_bound_connects_reads_and_check_health_without_retries(stalled):
     source = stalled()
     beat, waiter = daemon.clients(source)
-    for client, read_timeout in ((beat, daemon.READ_TIMEOUT_S), (waiter, daemon.BEAT_SECONDS + daemon.READ_TIMEOUT_S)):
+    for client, read_timeout in ((beat, daemon.READ_TIMEOUT_S), (waiter, daemon.BEAT_SECONDS)):
         options = client.connection_pool.connection_kwargs
         assert options["socket_timeout"] == read_timeout
         assert options["socket_connect_timeout"] == daemon.CONNECT_TIMEOUT_S
@@ -587,7 +587,7 @@ def test_a_stalled_wait_socket_reconnects_and_beats_within_one_beat_interval(mon
         return healthy, waiters[0]
 
     def beat(redis, hive):
-        assert waiters[0].connection_pool.connection_kwargs["socket_timeout"] == 0.6
+        assert waiters[0].connection_pool.connection_kwargs["socket_timeout"] == 0.5
         beats.append(time.monotonic())
         if len(beats) == 2:
             raise KeyboardInterrupt
@@ -595,9 +595,9 @@ def test_a_stalled_wait_socket_reconnects_and_beats_within_one_beat_interval(mon
     from scripts.scheduler import process_timer
 
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    started = _stall_run(monkeypatch, connect, beat)
-    assert beats[1] - started < 2 * daemon.BEAT_SECONDS
-    assert "reconnecting in 1s" in capsys.readouterr().err
+    _stall_run(monkeypatch, connect, beat)
+    assert beats[1] - beats[0] < daemon.BEAT_SECONDS + 0.25
+    assert capsys.readouterr().err.endswith("); reconnecting in 1s\n")
 
 
 def test_default_install_location_and_executable_discovery(monkeypatch, tmp_path):

@@ -162,7 +162,7 @@ def clients(source: "Redis") -> tuple["Redis", "Redis"]:
                 connection_class=pool.connection_class, **options | {"socket_timeout": timeout}
             )
         )
-        for timeout in (READ_TIMEOUT_S, BEAT_SECONDS + READ_TIMEOUT_S)
+        for timeout in (READ_TIMEOUT_S, BEAT_SECONDS)
     )
 
 
