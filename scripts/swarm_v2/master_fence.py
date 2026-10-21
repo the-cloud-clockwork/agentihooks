@@ -202,7 +202,8 @@ class Fence:
         done = self._inner(doc, op, ctx, apply)
         if done and writer != owner:
             rows = ctx.meta.setdefault(CROSS, {}).setdefault(item, [])
-            rows[:] = [*rows, {"owner": owner, "seat": writer, "by": by, "rev": ctx.rev}][-CROSS_KEPT:]
+            rows.append({"owner": owner, "seat": writer, "by": by, "rev": ctx.rev})
+            del rows[:-CROSS_KEPT]
         if done and _fields(ctx.stamps, item) != before:
             self._decided(op, item, (owner, writer, by), seats.count, ctx)
         return done
