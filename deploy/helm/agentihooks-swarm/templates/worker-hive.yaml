@@ -185,10 +185,13 @@ spec:
 {{- end }}
 {{- $names := dict }}
 {{- $credentials := dict }}
+{{- $homes := dict }}
 {{- if gt (int .Values.workers.replicas) 0 }}
 {{- $_ := set $credentials (toString .Values.workers.credentialSecret.name) true }}
+{{- $_ := set $homes (toJson .Values.workers.homeVolume) true }}
 {{- end }}
 {{- range .Values.workers.hives }}
+{{- $name := toString .name }}
 {{- $credential := toString (dig "credentialSecret" "name" "" .) }}
 {{- if or (not $credential) (hasKey $credentials $credential) }}
 {{- fail (printf "workers.hives %s needs its own credentialSecret: one credential is one hive" (toString .name)) }}
@@ -200,16 +203,21 @@ spec:
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,18}[a-z0-9])?$" (toString .name)) }}
 {{- fail (printf "workers.hives name %q must be a lowercase DNS label of at most 20 characters" (toString .name)) }}
 {{- end }}
-{{- if hasKey $names .name }}
-{{- fail (printf "workers.hives name %s appears twice" .name) }}
+{{- if hasKey $names $name }}
+{{- fail (printf "workers.hives name %s appears twice" $name) }}
 {{- end }}
-{{- $_ := set $names .name true }}
+{{- $_ := set $names $name true }}
 {{- $hive := deepCopy (omit $.Values.workers "hives") }}
 {{- range $key, $value := omit . "name" }}
 {{- $_ := set $hive $key $value }}
 {{- end }}
 {{- $_ := set $hive "replicas" 1 }}
-{{- $hives = append $hives (dict "suffix" (printf "-%s" .name) "workers" $hive) }}
+{{- $home := toJson $hive.homeVolume }}
+{{- if and (not (hasKey $hive.homeVolume "emptyDir")) (hasKey $homes $home) }}
+{{- fail (printf "workers.hives %s shares its home volume with another hive; give it its own homeVolume" $name) }}
+{{- end }}
+{{- $_ := set $homes $home true }}
+{{- $hives = append $hives (dict "suffix" (printf "-%s" $name) "workers" $hive) }}
 {{- end }}
 {{- range $hives }}
 ---

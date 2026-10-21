@@ -103,7 +103,11 @@ HIVES = {
                 "nodeSelector": {"pool": "swarm"},
                 "tolerations": [{"key": "pool", "operator": "Equal", "value": "swarm", "effect": "NoSchedule"}],
             },
-            {"name": "pool-2", "credentialSecret": {"name": "member-pool-2", "key": "credential"}},
+            {
+                "name": "pool-2",
+                "credentialSecret": {"name": "member-pool-2", "key": "credential"},
+                "homeVolume": {"emptyDir": {}},
+            },
         ],
     }
 }
@@ -173,7 +177,7 @@ def hives_problems(chart: str) -> list[str]:
             "credential": "member-pool-2",
             "agents": "1",
             "memory": "700Mi",
-            "home": {"hostPath": host["homeVolume"]["hostPath"]},
+            "home": {"emptyDir": {}},
             "nodeSelector": host["nodeSelector"],
         },
     }
@@ -184,6 +188,13 @@ def hives_problems(chart: str) -> list[str]:
     planted["spec"]["template"]["spec"]["volumes"][0]["secret"]["secretName"] = "member"
     if not hive_problems("-pool-1", planted, expected["-pool-1"]):
         found.append("the check passed a hive that mounts the base credential")
+    planted = yaml.safe_load(yaml.safe_dump(pods["-pool-2"]))
+    home = next(v for v in planted["spec"]["template"]["spec"]["volumes"] if v["name"] == "home")
+    home.pop("emptyDir")
+    home["hostPath"] = host["homeVolume"]["hostPath"]
+    if not hive_problems("-pool-2", planted, expected["-pool-2"]):
+        found.append("the check passed a hive that shares the base home")
+    shared = [{"name": "pool-1", "credentialSecret": {"name": "a", "key": "c"}}]
     refusals = {
         "needs its own credentialSecret": [{"name": "pool-1", "credentialSecret": {"name": "member", "key": "c"}}],
         "appears twice": [
@@ -193,10 +204,12 @@ def hives_problems(chart: str) -> list[str]:
         "lowercase DNS label": [{"name": "Pool_1", "credentialSecret": {"name": "a", "key": "c"}}],
         "sets replicas": [{"name": "pool-1", "replicas": 0, "credentialSecret": {"name": "a", "key": "c"}}],
     }
-    for reason, hives in refusals.items():
+    cases = [({"hives": hives}, reason) for reason, hives in refusals.items()]
+    cases.append(({"homeVolume": host["homeVolume"], "hives": shared}, "shares its home volume"))
+    for workers, reason in cases:
         refused = subprocess.run(
             ["helm", "template", "fixture", chart, *BASE, "-f", "-"],
-            input=yaml.safe_dump({"workers": {"hives": hives}}),
+            input=yaml.safe_dump({"workers": workers}),
             capture_output=True,
             text=True,
         )
