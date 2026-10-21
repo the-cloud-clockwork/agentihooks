@@ -59,6 +59,7 @@ def test_report_is_execution_scoped_and_exit_is_preserved(monkeypatch):
     assert report["started_at"] == report["heartbeat_at"] == 1000
     assert report["session_id"] == "session"
     assert report["generation"] == 3
+    assert report["task"] == "task"
     assert report["status"] == "running"
     assert join_report.read(redis, agent) == report
     assert join_report.read(redis, replace(agent, execution_id="next")) == {}
