@@ -352,6 +352,7 @@ def _drop(slug, store, ledger, rows, agent, refund=False):
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
     held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
+    held = held and not awaiting_merge(rows[agent.task])
     if refund and held and store.claims(slug, agent.task) > 0:
         store.refund_claim(slug, agent.task)
     expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}

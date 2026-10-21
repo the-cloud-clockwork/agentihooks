@@ -249,6 +249,30 @@ def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat
         assert remote.store.claimant("fixture", "task") == remote.agent.name
 
 
+def test_lost_hive_worker_leaves_a_task_awaiting_merge_in_pull_request(remote):
+    from scripts.swarm import ready, tick
+    from scripts.swarm.tick import SUSPECT
+
+    remote.agent = replace(remote.agent, state=SUSPECT)
+    remote.store.put_agent("fixture", remote.agent)
+    _beat_hive(remote, LOST + 1)
+    remote.store.claim("fixture", "task", remote.agent.name, 60000)
+    pr_url = "https://github.com/o/r/pull/1"
+    row = {"state": "pr", "claimed_by": remote.agent.name, "pr_url": pr_url, "awaiting": ready.AWAITING}
+    rows = {"task": dict(row)}
+    ledger = Mock()
+    ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
+    remote.runtime.retire = Mock(return_value=False)
+
+    actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
+
+    assert actions == [f"retired {remote.agent.name}: its hive stopped reporting"]
+    remote.runtime.retire.assert_not_called()
+    ledger.update_task.assert_not_called()
+    assert rows["task"] == row
+    assert remote.store.agents("fixture") == []
+
+
 @pytest.mark.parametrize(
     ("panes", "namespace", "retired"),
     [
