@@ -21,6 +21,7 @@ ORDERS = "controller-launch-orders"
 ENDINGS = "launch-endings"
 PENDING = "hive launch ordered, waiting for its acknowledgement"
 GONE = "the hive launch order ended before its acknowledgement"
+EXPIRED = "hive launch acknowledgement expired"
 
 
 @dataclass(frozen=True)
@@ -283,11 +284,12 @@ class HiveLaunch:
 
     def collect(self, request: SpawnRequest) -> Outcome:
         order = self.orders_for(request.task["id"])
-        if order is None or self.store.execution_registry.get(self.slug, order.execution_id).state in (
-            "ended",
-            "finished",
-        ):
+        previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
+        if not previous or previous.state in ("ended", "finished"):
             return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
+        if self.unacknowledged(order):
+            self.retire(order, previous)
+            return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
         return self.spawn(request)
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
@@ -335,7 +337,7 @@ class HiveLaunch:
         if ack := self.orders.ack(order):
             return self.complete(order, ack)
         if lease.now_ms(self.store) >= order.expires_at:
-            return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch acknowledgement expired")
+            return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
         return Outcome("spawn", Status.PENDING, HIVE, detail=PENDING)
 
     def complete(self, order: LaunchOrder, ack: Ack) -> Outcome:
