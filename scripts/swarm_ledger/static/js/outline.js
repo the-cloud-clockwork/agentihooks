@@ -45,8 +45,9 @@ export function revealTarget(id) {
 
 export function pageTo(id) {
   const [kind, list, ...rest] = id.split("-");
-  if (kind !== "item" || document.getElementById(id) || !pagedOut(list, rest.join("-"))) return null;
-  return pageIn(list, rest.join("-")).then(() => land(revealTarget(id)));
+  if (kind !== "item" || document.getElementById(id) || !pagedOut(list, rest.join("-"))) return false;
+  pageIn(list, rest.join("-")).then(() => land(revealTarget(id)));
+  return true;
 }
 
 export function jumpTo(ev, item) {
