@@ -451,3 +451,15 @@ def test_a_joined_member_beats_under_its_member_id_only_when_it_uses_the_member_
     monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", member_url)
 
     assert commands.hive_id() == expected
+
+
+def test_publish_hands_the_tick_view_to_the_status_report(store, monkeypatch):
+    seen = []
+    monkeypatch.setattr(command_runner, "status_report", lambda *args: seen.append(args) or {})
+
+    def view(url):
+        return None
+
+    command_runner.publish(store, "sw", {"tasks": []}, view)
+    command_runner.publish(store, "sw", {"tasks": []})
+    assert seen == [(store, "sw", {"tasks": []}, None, view), (store, "sw", {"tasks": []}, None, None)]

@@ -1,8 +1,14 @@
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from scripts.ci_budget import defects, flakes
-from scripts.swarm import ci_speed, grafana_alerts, langfuse, refresh_job
+from scripts.swarm import ci_speed, grafana_alerts, langfuse, ledger_client, refresh_job
 from scripts.swarm.store import RedisStore, SwarmConfig
+
+REFRESH_SPAWN = True
 
 
 @pytest.fixture
@@ -81,3 +87,50 @@ def test_start_spawns_only_while_no_job_holds_the_lock(store, monkeypatch):
 
 def test_the_lock_key_sits_under_the_swarm(store):
     assert refresh_job.lock_key(store, "sw") == store.key("sw", "refresh-lock")
+
+
+def test_the_job_log_sits_in_the_swarm_folder():
+    assert refresh_job.log_path("sw") == Path.home() / ".agentihooks" / "swarm" / "sw" / "refresh-job.log"
+
+
+def test_spawn_detaches_the_job_with_its_output_in_the_log(monkeypatch):
+    launched = []
+
+    def popen(argv, **kwargs):
+        launched.append((argv, kwargs))
+        assert kwargs["stdout"] is kwargs["stderr"] and kwargs["stderr"].name == str(refresh_job.log_path("sw"))
+        assert kwargs["stderr"].mode == "ab"
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    refresh_job.spawn("sw")
+    refresh_job.spawn("sw")
+    [(argv, kwargs), again] = launched
+    assert again[0] == argv
+    assert argv == [sys.executable, "-m", "scripts.swarm.refresh_job", "sw"]
+    assert kwargs["stdin"] is subprocess.DEVNULL and kwargs["start_new_session"] is True
+    assert set(kwargs) == {"stdin", "stdout", "stderr", "start_new_session"}
+    assert refresh_job.log_path("sw").parent.is_dir()
+
+
+def test_now_ms_is_the_wall_clock_in_milliseconds(monkeypatch):
+    monkeypatch.setattr(refresh_job.time, "time", lambda: 12.3456)
+    assert refresh_job.now_ms() == 12345
+
+
+def test_main_runs_the_job_for_its_swarm_and_prints_each_action(store, monkeypatch, capsys):
+    ledger, seen = object(), []
+    monkeypatch.setattr(refresh_job, "connect", lambda: store)
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(refresh_job, "now_ms", lambda: 7)
+    monkeypatch.setattr(refresh_job, "run", lambda *args: seen.append(args) or ["one", "two"])
+    assert refresh_job.main(["sw"]) == 0
+    assert seen == [(store, "sw", ledger, 7)]
+    assert capsys.readouterr().out == "sw: one\nsw: two\n"
+
+
+def test_main_prints_nothing_when_another_job_holds_the_lock(store, monkeypatch, capsys):
+    monkeypatch.setattr(refresh_job, "connect", lambda: store)
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: object())
+    monkeypatch.setattr(refresh_job, "run", lambda *args: None)
+    assert refresh_job.main(["sw"]) == 0
+    assert capsys.readouterr().out == ""

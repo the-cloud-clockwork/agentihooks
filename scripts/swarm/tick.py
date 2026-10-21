@@ -970,8 +970,8 @@ def _spawn_stop(slug, config, store, runtime, now_ms):
     return ""
 
 
-def _budget_spent(task, begun, launched):
-    if launched and time.monotonic() - begun >= SPAWN_BUDGET_S:
+def _budget_spent(task, begun, tried):
+    if tried and time.monotonic() - begun >= SPAWN_BUDGET_S:
         return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
     return None
 
@@ -1003,12 +1003,12 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
     order, actions = _spawn_order(slug, config, store, agents, rows, doc, runtime)
-    begun, attempts = time.monotonic(), 0
+    begun, tried = time.monotonic(), False
     for lane, task in order:
         expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
         if held:
             return actions + held
-        if stop := _spawn_stop(slug, config, store, runtime, now_ms) or _budget_spent(task, begun, attempts):
+        if stop := _spawn_stop(slug, config, store, runtime, now_ms) or _budget_spent(task, begun, tried):
             return actions + [stop]
         blocked = (
             _lives_spent(slug, store, ledger, rows, task)
@@ -1067,7 +1067,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.record_launch(slug, record, "pending")
             store.seats.occupy(seat, name, now_ms)
             task["transfer"] = transfers.attach(store, slug, record)
-            attempts += 1
+            tried = True
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
             from scripts.swarm_v2.runtime import codex
 
