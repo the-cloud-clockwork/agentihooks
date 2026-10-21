@@ -67,7 +67,7 @@ def test_a_pass_inside_its_budget_saves_its_state_and_records_no_skip(monkeypatc
     assert night_watch.read(store, SLUG) == {"at": 1_000, night_watch.SEAT: {"since": 1_000}}
 
 
-def test_a_redis_failure_records_a_skip_instead_of_failing_the_tick():
+def test_a_redis_failure_records_a_skip_instead_of_failing_the_tick(capsys):
     from redis.exceptions import TimeoutError as RedisTimeout
 
     def timed_out(*args):
@@ -78,6 +78,38 @@ def test_a_redis_failure_records_a_skip_instead_of_failing_the_tick():
     assert night_watch.run(watch(store)) == [
         "skipped the rest of the night watch pass: Redis failed: Timeout reading from socket"
     ]
+    assert capsys.readouterr().err == (
+        "night watch skipped the rest of its pass, Redis failed: Timeout reading from socket\n"
+    )
+
+
+class SetRefused(Stalled):
+    def __getattr__(self, name):
+        if name != "set":
+            return getattr(self.client, name)
+
+        def refused(*args, **kwargs):
+            from redis.exceptions import ConnectionError as RedisConnectionError
+
+            raise RedisConnectionError("Connection reset by peer")
+
+        return refused
+
+
+def test_a_failed_state_save_records_a_skip(monkeypatch, capsys):
+    import fakeredis
+
+    monkeypatch.setattr(merge_stall, "findings", lambda *args: [])
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    RedisStore(fake).create(SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, max_plan=0, scaling=MANUAL_SCALING))
+    RedisStore(fake).update(SLUG, state="running")
+
+    assert night_watch.run(watch(RedisStore(SetRefused(fake)))) == [
+        "skipped the rest of the night watch pass: Redis failed: Connection reset by peer"
+    ]
+    assert (
+        capsys.readouterr().err == "night watch skipped the rest of its pass, Redis failed: Connection reset by peer\n"
+    )
 
 
 def test_a_spent_budget_refuses_the_next_call_without_reaching_redis():
