@@ -2,13 +2,8 @@ import json
 from argparse import Namespace
 from unittest.mock import Mock
 
-import pytest
-
 from scripts.swarm import cli
 from scripts.swarm.store import RedisStore, SwarmConfig
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def test_setting_a_running_swarm_returns_without_running_a_tick(monkeypatch, capsys):
     import fakeredis
