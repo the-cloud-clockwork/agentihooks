@@ -1,5 +1,6 @@
 import { $, h, headCount, newId, noticeTime } from "./dom.js";
 import { doc, queue } from "./sync.js";
+import { hiddenDone } from "./state.js";
 import { verdictButton } from "./render.js";
 import { jumpTo } from "./outline.js";
 import { foldSaved } from "./folds.js";
@@ -22,7 +23,8 @@ function prioritySubject(item) {
   const [field, noun] = PRIORITY_KINDS[list];
   const found = doc[list].find((i) => i.id === id && !i.deleted);
   const label = field === "title" ? id : noun;
-  return found ? { label, title: found[field] } : { label, title: `This ${noun} was removed`, gone: true };
+  if (found) return { label, title: found[field] };
+  return hiddenDone(doc, list).has(id) ? { label, title: `This ${noun} is done` } : { label, title: `This ${noun} was removed`, gone: true };
 }
 
 export function renderPriorities() {

@@ -296,6 +296,8 @@ details.fold > summary > span.end { display: flex; gap: 14px; }
 .row > .item-actions { margin-left: auto; }
 .item-actions { flex: none; display: inline-flex; align-items: center; gap: 14px; }
 .link:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
+.page-more .link { text-align: left; }
+.page-more .link:disabled { opacity: .35; cursor: not-allowed; }
 .add { margin-top: 6px; background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; transition: color .15s; }
 .add:hover, .add:focus-visible { color: var(--accent); outline: none; }
 .add:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }

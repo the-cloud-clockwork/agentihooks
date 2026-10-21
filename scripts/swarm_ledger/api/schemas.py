@@ -57,6 +57,8 @@ PAGINATION = {
     "properties": {
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
         "cursor": {"type": "string", "pattern": "^[a-f0-9]{64}:[0-9]{1,12}$"},
+        "state": {"enum": ["done"]},
+        "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
     },
 }
 

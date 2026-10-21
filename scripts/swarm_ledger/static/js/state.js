@@ -28,7 +28,7 @@ export function withDefaults(d) {
     alerts: (Array.isArray(d.alerts) ? d.alerts : []).filter((a) => a && typeof a.id === "string" && typeof a.text === "string"),
     artifacts: (Array.isArray(d.artifacts) ? d.artifacts : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
     artifact_trash: (Array.isArray(d.artifact_trash) ? d.artifact_trash : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
-    plans: entries(d.plans), slices: entries(d.slices),
+    plans: entries(d.plans), slices: entries(d.slices), closed: (d._meta && d._meta.closed) || d.closed || {},
     freezes: entries(d.freezes).filter((r) => ["freeze", "focus"].includes(r.verb) && typeof r.target === "string"),
     marks: Object.fromEntries(["frozen", "held"].map((k) => [k, (Array.isArray((d.marks || {})[k]) ? d.marks[k] : []).filter((key) => typeof key === "string")])),
     phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"]),
@@ -163,13 +163,18 @@ export function lsWrite() {
 export function phaseLifecycle(phase, doc) {
   if (phase.out_of_scope) return "out_of_scope";
   if (phase.done) return "done";
-  const done = new Set(doc.phases.filter((p) => p.done).map((p) => p.id));
+  const done = new Set([...doc.phases.filter((p) => p.done).map((p) => p.id), ...(((doc.closed || {}).phases || {}).ids || [])]);
   if ((phase.depends_on || []).some((id) => !done.has(id))) return "waiting";
   if (phase.planning !== "auto") return "building";
   const plan = doc.tasks.find((t) => t.phase === phase.id && t.kind === "plan");
-  if (!plan) return "to_plan";
-  if (plan.state !== "done") return "planning";
+  const planned = plan ? plan.state === "done" : (((doc.closed || {}).tasks || {}).plan_phases || []).includes(phase.id);
+  if (!plan && !planned) return "to_plan";
+  if (!planned) return "planning";
   return (phase.review || {}).state === "approved" ? "building" : "in_review";
+}
+
+export function hiddenDone(doc, list) {
+  return new Set(((doc.closed || {})[list] || {}).ids || []);
 }
 
 export function taskRanks() {
@@ -187,4 +192,18 @@ export function itemState(list, i) {
   if (i.out_of_scope) return "out";
   const done = list === "questions" ? (i.answers || []).some((a) => !a.deleted) : !!i.done;
   return done ? "done" : "open";
+}
+
+export function taskBlockers(task, tasks) {
+  if ((task.state || "open") !== "open") return "";
+  const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
+  const title = (id) => (byId[id] ? byId[id].title : `task ${id}`);
+  const unfinished = (ids) => (ids || []).filter((id) => (byId[id] || {}).state !== "done");
+  const done = (ids) => ids.map((id) => `${title(id)} is done`).join(", and ");
+  const parked = unfinished(task.parked_on);
+  if (parked.length) return `Parked on ${task.branch ? `branch ${task.branch}` : "its branch"} until ${done(parked)}`;
+  const open = unfinished(task.depends_on);
+  const held = open.filter((id) => !(["claimed", "pr"].includes((byId[id] || {}).state) && byId[id].branch));
+  if (held.length) return `Waiting until ${done(held)}`;
+  return open.length ? `Ready to start on ${open.map((id) => `branch ${byId[id].branch} of ${title(id)}`).join(", and ")}` : "";
 }

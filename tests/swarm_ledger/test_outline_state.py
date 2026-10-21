@@ -25,7 +25,10 @@ def function_source(name):
 
 def run_js(names, expr, prelude=""):
     script = (
-        prelude + "".join(function_source(n) + "\n" for n in names) + f"process.stdout.write(JSON.stringify({expr}));"
+        "function closedLeft() { return 0; }\nfunction closedMore() { return null; }\n"
+        + prelude
+        + "".join(function_source(n) + "\n" for n in names)
+        + f"process.stdout.write(JSON.stringify({expr}));"
     )
     return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 

@@ -1,4 +1,5 @@
 import { h } from "./dom.js";
+import { closedLeft, loadClosed } from "./sync.js";
 
 export const PAGE_SIZE = 50;
 export const FULL_PAGE = { first: PAGE_SIZE, more: PAGE_SIZE };
@@ -52,4 +53,15 @@ export function lazy(box, fill) {
   box.addEventListener("toggle", load);
   load();
   return box;
+}
+
+export function closedMore(name, label, again) {
+  const left = closedLeft(name);
+  if (!left) return null;
+  const button = h("button", { class: "link", type: "button", "data-closed": name, text: `Show ${Math.min(left, 10)} more ${label} · ${left} left` });
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    loadClosed(name).catch(() => null).finally(() => { button.disabled = false; again(); });
+  });
+  return h("li", { class: "page-more" }, button);
 }

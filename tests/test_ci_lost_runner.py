@@ -189,7 +189,7 @@ def test_a_second_loss_is_cancelled_only():
 def test_stop_returns_once_a_cancel_ends_the_run(monkeypatch, no_sleep):
     api = Api({RUNS: [json.dumps(RUN), json.dumps({**RUN, "status": "completed"})]})
     monkeypatch.setattr(ci_lost_runner, "_api", api)
-    assert ci_lost_runner.stop("o/r", 7)["status"] == "completed"
+    assert ci_lost_runner.stop("o/r", 7, {})["status"] == "completed"
     assert api.posts() == [post(f"{RUNS}/cancel")]
     assert no_sleep == [ci_lost_runner.POLL_SECONDS] * 2
 
@@ -199,7 +199,7 @@ def test_stop_force_cancels_when_a_cancel_does_not_end_the_run(monkeypatch, no_s
     states = [json.dumps(RUN)] * 3 + [json.dumps({**RUN, "status": "completed"})]
     api = Api({RUNS: states})
     monkeypatch.setattr(ci_lost_runner, "_api", api)
-    assert ci_lost_runner.stop("o/r", 7)["status"] == "completed"
+    assert ci_lost_runner.stop("o/r", 7, {})["status"] == "completed"
     assert api.posts() == [post(f"{RUNS}/cancel"), post(f"{RUNS}/force-cancel")]
     assert len(no_sleep) == 4
 
@@ -208,7 +208,7 @@ def test_stop_returns_the_last_state_when_nothing_ends_the_run(monkeypatch, no_s
     monkeypatch.setattr(ci_lost_runner, "CANCEL_POLLS", 1)
     api = Api({RUNS: [json.dumps(RUN), json.dumps({**RUN, "status": "in_progress"})]})
     monkeypatch.setattr(ci_lost_runner, "_api", api)
-    assert ci_lost_runner.stop("o/r", 7)["status"] == "in_progress"
+    assert ci_lost_runner.stop("o/r", 7, {})["status"] == "in_progress"
     assert api.posts() == [post(f"{RUNS}/cancel"), post(f"{RUNS}/force-cancel")]
 
 
@@ -244,9 +244,34 @@ def watched(monkeypatch, run, jobs, states):
     return api, ci_lost_runner.watch("o/r", run, WORKFLOW, GRACE)
 
 
+@pytest.mark.parametrize("force,completed", [(False, True), (True, True), (True, False)])
+def test_recovery_records_each_cancel_and_observed_completion(monkeypatch, no_sleep, force, completed):
+    monkeypatch.setattr(ci_lost_runner, "CANCEL_POLLS", 1)
+    moments = iter(NOW + timedelta(seconds=i) for i in range(5))
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz):
+            assert tz is UTC
+            return next(moments)
+
+    monkeypatch.setattr(ci_lost_runner, "datetime", Clock)
+    states = [RUN]
+    if force:
+        states.append(RUN)
+    states.append({**RUN, "status": "completed"} if completed else RUN)
+    api, record = watched(monkeypatch, RUN, [lost(started=stamp(NOW - timedelta(hours=1)))], states)
+    assert record["detected_at"] == "2026-10-19T16:00:01+00:00"
+    assert record["cancel_requested_at"] == "2026-10-19T16:00:02+00:00"
+    assert record["force_cancel_requested_at"] == ("2026-10-19T16:00:03+00:00" if force else None)
+    assert record["completed_observed_at"] == (f"2026-10-19T16:00:0{4 if force else 3}+00:00" if completed else None)
+    assert record["action"] == ("rerun" if completed else "cancel")
+    assert api.posts()[0] == post(f"{RUNS}/cancel")
+
+
 def test_a_stalled_first_attempt_is_cancelled_then_rerun_once(monkeypatch, no_sleep):
     api, report = watched(monkeypatch, RUN, stalled_run(), [RUN, {**RUN, "status": "completed"}])
-    assert report == {
+    assert {key: report[key] for key in ("run", "attempt", "action", "reason")} == {
         "run": 7,
         "attempt": 1,
         "action": "rerun",
@@ -259,7 +284,7 @@ def test_a_stalled_first_attempt_is_cancelled_then_rerun_once(monkeypatch, no_sl
 def test_a_second_loss_is_cancelled_and_files_nothing(monkeypatch, no_sleep):
     second = {**RUN, "run_attempt": 2}
     api, report = watched(monkeypatch, second, stalled_run(), [second, {**second, "status": "completed"}])
-    assert report == {
+    assert {key: report[key] for key in ("run", "attempt", "action", "reason")} == {
         "run": 7,
         "attempt": 2,
         "action": "cancel",
@@ -271,7 +296,7 @@ def test_a_second_loss_is_cancelled_and_files_nothing(monkeypatch, no_sleep):
 def test_a_stalled_run_with_a_real_test_failure_is_cancelled_and_never_rerun(monkeypatch, no_sleep):
     jobs = [*stalled_run(), job("unit (3.12, 4)", conclusion="failure")]
     api, report = watched(monkeypatch, RUN, jobs, [RUN, {**RUN, "status": "completed"}])
-    assert report == {
+    assert {key: report[key] for key in ("run", "attempt", "action", "reason")} == {
         "run": 7,
         "attempt": 1,
         "action": "cancel",
@@ -283,7 +308,7 @@ def test_a_stalled_run_with_a_real_test_failure_is_cancelled_and_never_rerun(mon
 def test_a_run_that_will_not_end_is_reported_and_not_rerun(monkeypatch, no_sleep):
     monkeypatch.setattr(ci_lost_runner, "CANCEL_POLLS", 1)
     api, report = watched(monkeypatch, RUN, stalled_run(), [RUN, RUN, RUN])
-    assert report == {
+    assert {key: report[key] for key in ("run", "attempt", "action", "reason")} == {
         "run": 7,
         "attempt": 1,
         "action": "cancel",
@@ -320,13 +345,78 @@ def test_a_cancel_whose_answer_was_lost_still_reruns_the_cancelled_run(monkeypat
 def test_a_cancel_refused_because_the_run_completed_is_left_alone(monkeypatch, no_sleep):
     refused_cancel(monkeypatch, {**RUN, "status": "completed"})
     report = ci_lost_runner.watch("o/r", RUN, WORKFLOW, GRACE)
-    assert report == {"run": 7, "attempt": 1, "action": "none", "reason": "the run completed meanwhile"}
+    assert {key: report[key] for key in ("run", "attempt", "action", "reason")} == {
+        "run": 7,
+        "attempt": 1,
+        "action": "none",
+        "reason": "the run completed meanwhile",
+    }
 
 
-def test_a_cancel_refused_on_an_open_run_is_raised(monkeypatch, no_sleep):
+@pytest.mark.parametrize("conclusion,action", [("cancelled", "rerun"), ("success", "none")])
+def test_a_cancel_error_records_completion_seen_on_the_followup_read(monkeypatch, no_sleep, conclusion, action):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz):
+            assert tz is UTC
+            return datetime.now(tz)
+
+    monkeypatch.setattr(ci_lost_runner, "datetime", Clock)
+    refused_cancel(monkeypatch, {**RUN, "status": "completed", "conclusion": conclusion})
+    record = ci_lost_runner.guarded(ci_lost_runner.watch, "o/r", RUN, WORKFLOW, GRACE)
+    assert record["action"] == action
+    assert set(record) == {
+        "run",
+        "attempt",
+        "action",
+        "reason",
+        "detected_at",
+        "cancel_requested_at",
+        "force_cancel_requested_at",
+        "completed_observed_at",
+    }
+    assert record["force_cancel_requested_at"] is None
+    completed = datetime.fromisoformat(record["completed_observed_at"])
+    assert completed.utcoffset() == timedelta(0)
+    assert datetime.fromisoformat(record["cancel_requested_at"]) <= completed
+
+
+def test_a_cancel_refused_on_an_open_run_keeps_its_timestamps(monkeypatch, no_sleep):
     refused_cancel(monkeypatch, RUN)
-    with pytest.raises(subprocess.CalledProcessError):
-        ci_lost_runner.watch("o/r", RUN, WORKFLOW, GRACE)
+    record = ci_lost_runner.guarded(ci_lost_runner.watch, "o/r", RUN, WORKFLOW, GRACE)
+    assert record["action"] == "error"
+    assert record["run"] == 7
+    assert record["attempt"] == 1
+    assert "cancel" in record["reason"]
+    assert datetime.fromisoformat(record["detected_at"]) <= datetime.fromisoformat(record["cancel_requested_at"])
+    assert record["force_cancel_requested_at"] is None
+    assert record["completed_observed_at"] is None
+
+
+@pytest.mark.parametrize("failed_action", ["force-cancel", "rerun-failed-jobs", "read"])
+def test_recovery_errors_keep_the_collected_timestamps(monkeypatch, no_sleep, failed_action):
+    monkeypatch.setattr(ci_lost_runner, "CANCEL_POLLS", 1)
+    states = [json.dumps(RUN), json.dumps(RUN), json.dumps(RUN)]
+    if failed_action == "rerun-failed-jobs":
+        states[1] = json.dumps({**RUN, "status": "completed"})
+    api = Api({JOBS: lines(*stalled_run()), RUNS: states, RUNNER_LIST: ""})
+
+    def failing(*args):
+        if args == ("-X", "POST", f"{RUNS}/{failed_action}") or (
+            failed_action == "read" and args == (RUNS,) and api.posts()
+        ):
+            raise subprocess.CalledProcessError(1, ["gh", "api", *args])
+        return api(*args)
+
+    monkeypatch.setattr(ci_lost_runner, "_api", failing)
+    record = ci_lost_runner.guarded(ci_lost_runner.watch, "o/r", RUN, WORKFLOW, GRACE)
+    assert record["action"] == "error"
+    assert record["run"] == 7
+    assert record["attempt"] == 1
+    assert (failed_action if failed_action != "read" else RUNS) in record["reason"]
+    assert datetime.fromisoformat(record["detected_at"]) <= datetime.fromisoformat(record["cancel_requested_at"])
+    assert (record["force_cancel_requested_at"] is not None) == (failed_action == "force-cancel")
+    assert (record["completed_observed_at"] is not None) == (failed_action == "rerun-failed-jobs")
 
 
 def test_a_run_still_working_is_left_alone(monkeypatch, no_sleep):
