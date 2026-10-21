@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -125,3 +127,52 @@ def test_the_command_pairs_runs_in_order_and_refuses_a_margin_below_the_same_cod
     assert "::error::the base run of pair 1 printed no load measure" in capsys.readouterr().out
     with pytest.raises(SystemExit):
         paired.main(["--base", str(base), "--head", str(head), str(head)])
+
+
+@pytest.mark.parametrize("failed_side", ["", "base", "head"])
+def test_compare_runs_both_windows_together_and_fails_when_either_side_fails(tmp_path, failed_side):
+    jobs = yaml.safe_load((ROOT / ".github/workflows/ledger-load.yml").read_text())["jobs"]
+    compare = jobs["compare"]
+    assert compare["strategy"]["matrix"] == {"pair": [1, 2, 3, 4, 5]}
+    assert compare["strategy"]["fail-fast"] is False
+    command = next(step["run"] for step in compare["steps"] if "tests.ledger_load.gate" in step.get("run", ""))
+    workspace = tmp_path / "head"
+    (workspace / "load-base").mkdir(parents=True)
+    (workspace / "load-evidence").mkdir()
+    binary = tmp_path / "venv/bin"
+    binary.mkdir(parents=True)
+    python = binary / "python"
+    python.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        '[[ "$1" != -c ]] || exit 0\n'
+        'side=head\n[[ "${PWD##*/}" != load-base ]] || side=base\n'
+        'touch "$GITHUB_WORKSPACE/load-evidence/$side.started"\n'
+        "for attempt in {1..100}; do\n"
+        '  [[ ! -f "$GITHUB_WORKSPACE/load-evidence/base.started" || ! -f "$GITHUB_WORKSPACE/load-evidence/head.started" ]] || break\n'
+        "  sleep 0.01\n"
+        "done\n"
+        '[[ -f "$GITHUB_WORKSPACE/load-evidence/base.started" && -f "$GITHUB_WORKSPACE/load-evidence/head.started" ]] || exit 21\n'
+        'echo "$side window ran"\n'
+        '[[ "$FAIL_SIDE" != "$side" ]]\n'
+    )
+    python.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-e", "-c", command],
+        cwd=workspace,
+        env={
+            **os.environ,
+            "HOME": str(tmp_path),
+            "GITHUB_WORKSPACE": str(workspace),
+            "FAIL_SIDE": failed_side,
+            "PAIR": "1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert (result.returncode == 0) is (not failed_side), result.stdout + result.stderr
+    for side in ("base", "head"):
+        assert (workspace / f"load-evidence/{side}.log").read_text() == f"{side} window ran\n"
+    upload = next(step for step in compare["steps"] if step.get("uses") == "actions/upload-artifact@v4")
+    assert upload["with"]["name"] == "compare-pair-${{ matrix.pair }}"
+    assert upload["if"] == "always()"
