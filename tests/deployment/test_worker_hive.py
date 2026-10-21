@@ -16,18 +16,13 @@ START = ROOT / "deploy/worker/start.sh"
 TOKEN = "fixture-github-token-value"
 
 
-def startup(
-    tmp_path,
-    *,
-    credential="mounted",
-    refuse="",
-    ssh=False,
-    sshd_dies=False,
-    bundle=False,
-    bundle_url="",
-    member_text="fixture member credential\n",
-    saved="",
-):
+JOINED = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://joined\n"
+REFRESHED = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://refreshed\n"
+OTHER = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-old-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://old\n"
+SAVED = {"refreshed": REFRESHED, "rejoined": OTHER}
+
+
+def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=False, bundle=False, bundle_url=""):
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
@@ -59,11 +54,12 @@ def startup(
     home.mkdir()
     (tmp_path / "home").mkdir()
     member = tmp_path / "member"
-    member.write_text(member_text)
+    member.write_text(JOINED if credential in SAVED else "fixture member credential\n")
     if credential == "delivered":
         (home / "hive.env").write_text("fixture delivered hive env\n")
-    if saved:
-        (home / "hive.env").write_text(saved)
+    if credential in SAVED:
+        (home / "hive.env").write_text(SAVED[credential])
+        credential = "mounted"
     repo = tmp_path / "source"
     subprocess.run(["git", "init", "--initial-branch=dev", str(repo)], check=True, capture_output=True)
     subprocess.run(
@@ -159,22 +155,15 @@ def test_a_delivered_hive_env_runs_without_waiting(tmp_path):
     assert (home / "hive.env").read_text() == "fixture delivered hive env\n"
 
 
-JOINED = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://joined\n"
-
-
 def test_a_restart_keeps_the_refreshed_credential_of_the_same_member(tmp_path):
-    refreshed = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://refreshed\n"
-
-    result, _, home, _ = startup(tmp_path, member_text=JOINED, saved=refreshed)
+    result, _, home, _ = startup(tmp_path, credential="refreshed")
 
     assert result.returncode == 0, result.stderr
-    assert (home / "hive.env").read_text() == refreshed
+    assert (home / "hive.env").read_text() == REFRESHED
 
 
 def test_a_new_join_replaces_the_saved_credential_of_another_member(tmp_path):
-    other = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-old-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://old\n"
-
-    result, _, home, _ = startup(tmp_path, member_text=JOINED, saved=other)
+    result, _, home, _ = startup(tmp_path, credential="rejoined")
 
     assert result.returncode == 0, result.stderr
     assert (home / "hive.env").read_text() == JOINED
