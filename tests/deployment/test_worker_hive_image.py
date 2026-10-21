@@ -167,7 +167,8 @@ def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_p
     assert "publish" not in jobs
     assert kind["needs"] == "contracts"
     names = [step.get("name", step.get("uses", "")) for step in kind["steps"]]
-    assert names.index("Publish the proven hive worker image") > names.index(
+    assert names.index("Publish the proven hive worker image") > names.index("docker/login-action@v3")
+    assert names.index("docker/login-action@v3") > names.index(
         "Build the worker image while kind starts, then prove registration and order acknowledgement"
     )
     dev_push = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
