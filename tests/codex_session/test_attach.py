@@ -405,7 +405,9 @@ def test_a_reopen_closes_the_earlier_launch_pane_only_on_its_recorded_terminal(m
     def cli(args, environ):
         calls.append(args)
         if args == ["pane", "list"]:
-            return {"panes": [{"pane_id": "w1:p0", "terminal_id": listed}, {"pane_id": "w1:p1", "terminal_id": "term-1"}]}
+            return {
+                "panes": [{"pane_id": "w1:p0", "terminal_id": listed}, {"pane_id": "w1:p1", "terminal_id": "term-1"}]
+            }
         return {}
 
     monkeypatch.setattr(herdr_host, "_cli", cli)
