@@ -56,7 +56,7 @@ def _github(monkeypatch, runs, *, manifests, failed=(), uncovered=()):
         assert endpoint.endswith("/zip")
         return _zip(manifests[int(endpoint.split("/artifacts/")[1].split("/")[0])])
 
-    def jobs(endpoint):
+    def jobs(endpoint, size=None):
         assert endpoint.startswith(f"{ACTIONS}/runs/") and endpoint.endswith("/attempts/1/jobs")
         run_id = int(endpoint.split("/runs/")[1].split("/")[0])
         return [
@@ -117,6 +117,26 @@ def test_the_newest_dev_run_whose_unit_shards_passed_and_kept_a_manifest_is_the_
     run, manifest = ci_test_plan.find_record(REPOSITORY, LATER)
     assert run["id"] == 1
     assert manifest["commit"] == f"{1:040d}"
+
+
+def test_a_record_reads_all_jobs_of_its_run_in_one_request(monkeypatch):
+    from scripts.ci_budget import jobs as listing
+
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    monkeypatch.setattr(ci_test_plan, "read_jobs", listing.read_jobs)
+    rows = [{"name": name, "conclusion": "success"} for name in sorted(ci_test_plan.UNIT_JOBS)]
+    rows += [{"name": f"gate {index}", "conclusion": "success"} for index in range(60)]
+    requests = []
+
+    def run(command, **kwargs):
+        query = dict(item.split("=") for item in command[-1].partition("?")[2].split("&"))
+        size, page = int(query["per_page"]), int(query["page"])
+        requests.append(command[-1])
+        return subprocess.CompletedProcess(command, 0, json.dumps({"jobs": rows[(page - 1) * size : page * size]}), "")
+
+    monkeypatch.setattr(listing.subprocess, "run", run)
+    assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
+    assert len(requests) == 1
 
 
 def test_every_interpreter_leg_ignores_dev_runs_that_finished_after_its_run_started(monkeypatch):

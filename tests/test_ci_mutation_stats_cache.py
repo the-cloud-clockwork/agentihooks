@@ -50,6 +50,29 @@ def test_unchanged_test_stats_are_reused_and_only_the_changed_file_is_collected(
     assert calls == [files, ["tests/test_b.py"]]
 
 
+def test_selectors_of_one_test_file_trace_its_dependencies_once(tmp_path, monkeypatch):
+    from scripts.ci_mutation import stats_cache
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "tests/test_a.py").write_text("def test_one():\n    pass\n\n\ndef test_two():\n    pass\n")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "add", "tests/test_a.py"], cwd=root, check=True)
+    files = ["tests/test_a.py::test_one", "tests/test_a.py::test_two"]
+    traced = []
+    trace = stats_cache.test_inputs
+    monkeypatch.setattr(
+        stats_cache, "test_inputs", lambda root, path, *rest: traced.append(path) or trace(root, path, *rest)
+    )
+
+    def collect(chosen):
+        return [{"status": 0, "tests": {}, "durations": {path: 1 for path in chosen}, "cpu": 1}]
+
+    results = stats_cache.collect_cached_stats(root, tmp_path / "cache", {}, files, ["-q"], collect)
+    assert traced == ["tests/test_a.py"]
+    assert {test for result in results for test in result["durations"]} == set(files)
+
+
 def test_failed_collection_never_populates_reusable_stats(tmp_path):
     from scripts.ci_mutation.stats_cache import collect_cached_stats
 

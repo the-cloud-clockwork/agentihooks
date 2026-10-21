@@ -712,3 +712,45 @@ def test_an_unreadable_or_out_of_range_slot_falls_back_to_slot_one(ah, monkeypat
 def test_use_refuses_a_slot_outside_the_cap(ah):
     with pytest.raises(login.LoginRefused):
         login.use(0)
+
+
+@pytest.mark.parametrize("number", [0, login.MAX_SLOTS + 1])
+def test_use_names_the_refused_slot_and_the_cap(ah, number):
+    with pytest.raises(login.LoginRefused) as refused:
+        login.use(number)
+    assert str(refused.value) == f"master login slot {number} is outside 1 to {login.MAX_SLOTS}"
+    assert not (ah / login.SLOT_FILE).exists()
+
+
+@pytest.mark.parametrize("number", [1, login.MAX_SLOTS])
+def test_use_and_slot_accept_the_first_and_last_slot(ah, monkeypatch, number):
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    login.use(number)
+    assert (ah / login.SLOT_FILE).read_text() == f"{number}\n"
+    assert login.slot() == number
+    monkeypatch.setenv(login.SLOT_ENV, str(number))
+    assert login.slot() == number
+
+
+def test_slot_zero_falls_back_to_slot_one(ah, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "0")
+    assert login.slot() == 1
+
+
+def test_use_creates_a_nested_missing_home(tmp_path, monkeypatch):
+    nested = tmp_path / "a" / "b" / "ah"
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(nested))
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    login.use(2)
+    assert (nested / login.SLOT_FILE).read_text() == "2\n"
+
+
+def test_a_slot_takeover_records_the_login_time(tmp_path, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "2")
+    monkeypatch.setattr(login, "time", SimpleNamespace(time=lambda: 1234.5))
+    target, store = _home(tmp_path), _store(tmp_path)
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
+    store.set("master-account-claude-2", "other", "operator", 1.0)
+    assert login.account(target, environ, _given(store, environ)) == "masteratexample_com"
+    written = [entry for entry in store.history() if entry["key"] == "master-account-claude-2"]
+    assert (written[-1]["value"], written[-1]["actor"], written[-1]["at"]) == ("masteratexample_com", "m", 1234.5)

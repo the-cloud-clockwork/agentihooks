@@ -433,15 +433,14 @@ def test_handoff_ignores_cached_accounts_without_credentials(tmp_path, monkeypat
     assert (decision.target.account if decision.target else None) == ("beta" if available else None)
 
 
-def test_pre_tool_use_raises_the_stop_block():
+def test_pre_tool_use_lets_the_tool_run_under_the_stop_alert():
     from hooks import hook_manager
 
     d = _decide(10, 98.5, [])
     with patch.object(qp, "evaluate", return_value=d), patch.object(qp, "handed_off_block", return_value=None):
-        with pytest.raises(hook_manager.BlockAction, match="QUOTA STOP"):
-            hook_manager.on_pre_tool_use(
-                {"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}, "session_id": "sess-stop", "cwd": "/tmp"}
-            )
+        hook_manager.on_pre_tool_use(
+            {"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}, "session_id": "sess-stop", "cwd": "/tmp"}
+        )
 
 
 def test_reserve_account_is_the_last_handoff_target():

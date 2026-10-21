@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from scripts.swarm import cli, ledger_events, merge_queue, waits
+from scripts.swarm import cli, ledger_events, merge_queue, queue_exit, waits
 from scripts.swarm.store import SwarmError
 
 URL = "https://github.com/o/r/pull/7"
@@ -771,6 +771,31 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
     assert capsys.readouterr().out == '{"queued": true}\n'
 
 
+@pytest.mark.parametrize("failed", [False, True])
+def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(monkeypatch, capsys, failed):
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    seen = []
+
+    def fresh(url, head):
+        seen.append(("fresh", url, head))
+        if failed:
+            raise SwarmError(f"head {head} failed its last merge group run (Tests run)")
+
+    monkeypatch.setattr(queue_exit, "require_fresh", fresh)
+    monkeypatch.setattr(cli, "_queue_intent", lambda store, args, agent, head: seen.append(("intent", head)))
+    queued = []
+    monkeypatch.setattr(
+        merge_queue, "operate", lambda verb, url, **kwargs: kwargs["admit"]("abc") or queued.append(url) or {}
+    )
+
+    assert cli.main(["sw", "merge", "queue", URL]) == (1 if failed else 0)
+    assert seen == [("intent", "abc"), ("fresh", URL, "abc")]
+    assert queued == ([] if failed else [URL])
+    if failed:
+        assert "head abc failed its last merge group run (Tests run)" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("action", ["queue", "dequeue"])
 def test_cli_accepts_the_earlier_pull_the_task_lists(monkeypatch, action):
     from types import SimpleNamespace
@@ -890,6 +915,7 @@ def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys,
     Verdicts("sw", "intent", tmp_path).write("t1", "fail", "missing required behavior", head="abc", url=URL)
     monkeypatch.setattr(intent, "Verdicts", lambda slug, gate, home=None: Verdicts(slug, gate, tmp_path))
     monkeypatch.setattr(intent, "pr_head", lambda url: pytest.fail("use the observed head"))
+    monkeypatch.setattr(queue_exit, "require_fresh", lambda url, head: None)
     queued, events = [], []
     monkeypatch.setattr(intent.log, "append", lambda slug, row, home=None: events.append((slug, row, home)))
 

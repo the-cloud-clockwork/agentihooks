@@ -178,3 +178,35 @@ def test_a_slot_outside_the_cap_is_refused_before_any_login(ah, monkeypatch, cap
 def test_slot_needs_the_master_flag():
     with pytest.raises(SystemExit):
         claude_login.main(["--slot", "2"])
+
+
+def test_slot_without_master_names_the_refusal(capsys):
+    with pytest.raises(SystemExit):
+        claude_login.main(["--slot", "2"])
+    assert "error: --slot picks a master login slot and needs --master" in capsys.readouterr().err
+
+
+def test_the_slot_flag_reaches_master_mode_as_an_integer(monkeypatch):
+    seen = []
+    monkeypatch.setattr(claude_login, "master", lambda *args: seen.append(args) or 0)
+    assert claude_login.main(["--master", "--slot", "3"], {}, console=_console()) == 0
+    assert seen[0][3] == 3
+
+
+@pytest.mark.parametrize("number", [0, login.MAX_SLOTS + 1])
+def test_a_slot_outside_one_to_the_cap_is_refused_with_its_number(ah, monkeypatch, capsys, number):
+    monkeypatch.setenv(login.SLOT_ENV, "1")
+    runs = []
+    assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, runs), number) == 2
+    assert runs == []
+    assert f"master login slot {number} is outside 1 to {login.MAX_SLOTS}" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("number", [1, login.MAX_SLOTS])
+def test_the_first_and_last_slot_log_in_and_become_active(ah, monkeypatch, number):
+    monkeypatch.setenv(login.SLOT_ENV, "1")
+    runs = []
+    assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, runs), number) == 0
+    assert len(runs) == 1
+    monkeypatch.delenv(login.SLOT_ENV)
+    assert login.slot() == number

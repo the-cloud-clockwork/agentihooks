@@ -610,6 +610,21 @@ def test_stats_parts_split_a_shared_group_across_parts_but_never_inside_one(tmp_
     assert plan.stats_part_count(tmp_path, [], 20, 10) == (1, 0)
 
 
+def test_stats_parts_read_the_stored_durations_once(tmp_path, monkeypatch):
+    tests = _timed_tests(tmp_path, {name: 20 for name in "abcdefgh"})
+    reads = []
+    read_text = Path.read_text
+
+    def counted(self, *args, **kwargs):
+        if self.name == ".test_durations":
+            reads.append(self)
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counted)
+    assert plan.stats_part_count(tmp_path, tests, 21, 10) == (2, pytest.approx(20, abs=0.1))
+    assert len(reads) == 1
+
+
 def _project(tmp_path, durations):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
