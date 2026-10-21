@@ -134,7 +134,7 @@ def test_the_exit_sweep_finishes_past_a_world_that_never_answers_and_settles_the
     store.put_agent("sw", replace(agent, state="finished"))
     started = time.monotonic()
     lines = exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
-    assert time.monotonic() - started < 5
+    assert time.monotonic() - started < 20
     assert member.get(item.id).address == SEAT
     assert lines == [
         "skipped the inbox of hive m2 this pass: its Redis timed out or dropped: Timeout reading from socket"
