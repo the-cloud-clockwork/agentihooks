@@ -51,6 +51,16 @@ class SeenMarks:
     def seen(self, name, ref):
         return bool(self.redis.sismember(self.key(NameRegistry(self.redis).resolve(name)), ref))
 
+    def seen_many(self, pairs: list[tuple[str, str]]) -> set[tuple[str, str]]:
+        if not pairs:
+            return set()
+        resolved = NameRegistry(self.redis).resolve_many(list(dict.fromkeys(name for name, _ in pairs)))
+        with self.redis.pipeline(transaction=False) as pipe:
+            for name, ref in pairs:
+                pipe.sismember(self.key(resolved[name]), ref)
+            rows = pipe.execute()
+        return {pair for pair, shown in zip(pairs, rows) if shown}
+
 
 def marks_for(slug, environ=None):
     """The marks store for a session working this swarm ledger, None for any other session or without Redis."""

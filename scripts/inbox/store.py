@@ -345,6 +345,15 @@ class InboxStore:
     def history(self, item_id):
         return [json.loads(entry) for entry in self.redis.lrange(self.key("history", item_id), 0, -1)]
 
+    def histories(self, item_ids: list[str]) -> dict[str, list[dict]]:
+        if not item_ids:
+            return {}
+        with self.redis.pipeline(transaction=False) as pipe:
+            for item_id in item_ids:
+                pipe.lrange(self.key("history", item_id), 0, -1)
+            rows = pipe.execute()
+        return {item_id: [json.loads(entry) for entry in row] for item_id, row in zip(item_ids, rows)}
+
     def keys_for(self, belongs):
         """The keys of every address belongs() accepts, its items and their histories, and those
         addresses' memberships in the shared waiting and indexed sets."""

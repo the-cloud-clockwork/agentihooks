@@ -78,7 +78,11 @@ def test_an_idle_pane_with_a_pending_item_gets_exactly_one_prompt(inbox):
     assert events(inbox, item.id) == ["woken"] and events(inbox, second.id) == ["woken"]
 
 
-def test_many_pending_items_share_batched_wake_reads_without_changing_seen_or_fyi_behavior(inbox, monkeypatch):
+@pytest.mark.parametrize("age", [1, W + 1])
+@pytest.mark.parametrize("seated", [False, True])
+def test_many_pending_items_share_batched_wake_reads_without_changing_seen_or_fyi_behavior(
+    inbox, monkeypatch, age, seated
+):
     from dataclasses import replace
 
     from scripts.inbox import seen
@@ -86,9 +90,13 @@ def test_many_pending_items_share_batched_wake_reads_without_changing_seen_or_fy
 
     inbox.names.mint_code("sw", "sw", "/repo")
     canonical = inbox.names.next("sw", "eng")
+    address = "eng-1@sw" if seated else "earlier-agent"
+    if seated:
+        inbox.seats.occupy(address, canonical, at=1)
     agents = [replace(agent, name=canonical) if agent.name == "sw-eng-1" else agent for agent in AGENTS]
-    items = [inbox.send(MASTER_NAME, "earlier-agent", f"notice {n}", ref=f"written:{n}", fyi=True) for n in range(40)]
-    inbox.names.alias("earlier-agent", canonical)
+    items = [inbox.send(MASTER_NAME, address, f"notice {n}", ref=f"written:{n}", fyi=True) for n in range(40)]
+    if not seated:
+        inbox.names.alias(address, canonical)
     assert seen.SeenMarks(inbox.redis).mark(canonical, items[0].ref)
     inbox.pending()
     reads = []
@@ -101,11 +109,50 @@ def test_many_pending_items_share_batched_wake_reads_without_changing_seen_or_fy
 
     monkeypatch.setattr(inbox.redis, "execute_command", traced_execute)
     herdr = FakeHerdr({"p1": "idle"})
-    run(inbox, herdr, FakeLedger(), sent_at(items[-1]) + 1, agents)
+    run(inbox, herdr, FakeLedger(), sent_at(items[-1]) + age, agents)
     assert len(reads) <= 30
     assert inbox.get(items[0].id).state in CLOSED
     assert all(inbox.get(item.id).state == "pending" for item in items[1:])
     assert herdr.prompts == []
+
+
+def test_bulk_seen_marks_keep_alias_pairs_and_empty_results(inbox):
+    from scripts.inbox.seen import SeenMarks
+
+    inbox.names.mint_code("sw", "sw", "/repo")
+    canonical = inbox.names.next("sw", "eng")
+    inbox.names.alias("earlier-agent", canonical)
+    marks = SeenMarks(inbox.redis)
+    assert marks.mark(canonical, "written")
+    assert marks.seen_many([("earlier-agent", "written"), (canonical, "written"), (canonical, "other")]) == {
+        ("earlier-agent", "written"),
+        (canonical, "written"),
+    }
+    assert marks.seen_many([]) == set()
+
+
+def test_bulk_message_histories_preserve_entries_and_empty_results(inbox):
+    first = inbox.send(MASTER_NAME, "sw-eng-1", "first")
+    second = inbox.send(MASTER_NAME, "sw-eng-1", "second")
+    assert inbox.histories([first.id, second.id]) == {
+        first.id: inbox.history(first.id),
+        second.id: inbox.history(second.id),
+    }
+    assert inbox.histories([]) == {}
+
+
+def test_batched_wake_resolves_an_old_address_to_the_current_pane(inbox):
+    from dataclasses import replace
+
+    inbox.names.mint_code("sw", "sw", "/repo")
+    canonical = inbox.names.next("sw", "eng")
+    agents = [replace(agent, name=canonical) if agent.name == "sw-eng-1" else agent for agent in AGENTS]
+    item = inbox.send(MASTER_NAME, "earlier-agent", "work")
+    inbox.names.alias("earlier-agent", canonical)
+    herdr = FakeHerdr({"p1": "idle"})
+    run(inbox, herdr, FakeLedger(), sent_at(item) + 1, agents)
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
+    assert events(inbox, item.id) == ["woken"]
 
 
 @pytest.mark.parametrize("state", ["blocked", "working", "unknown"])
