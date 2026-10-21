@@ -275,17 +275,19 @@ def test_a_slot_counts_once_while_its_agent_runs_and_not_after_it_leaves(setup):
     from scripts.swarm.store import AgentRecord
 
     slug = setup.config.slug
-    assert local_slots.claim(setup.store, "box", slug, "first", 8) == 0
+    setup.store.put_agent(slug, AgentRecord("eng-1", "eng", "first", state="starting"))
+    assert local_slots.held(setup.store, "box", slug, "other") == 0
+    assert local_slots.claim(setup.store, "box", slug, "first", "eng-1", 8) == 0
     assert local_slots.held(setup.store, "box", slug, "other") == 1
-    assert local_slots.held(setup.store, "box", slug, "first") == 0
     assert local_slots.held(setup.store, "elsewhere", slug, "other") == 0
     setup.store.put_agent(slug, AgentRecord("eng-1", "eng", "first"))
     assert local_slots.held(setup.store, "box", slug, "other") == 1
-    assert local_slots.claim(setup.store, "box", slug, "second", 8) == 1
-    assert setup.store.redis.hkeys(local_slots.key("box")) == [f"{slug}/second"]
+    assert local_slots.held(setup.store, "box", slug, "first") == 0
+    assert local_slots.claim(setup.store, "box", slug, "second", "eng-2", 8) == 1
+    assert setup.store.redis.hkeys(local_slots.key("box")) == [f"{slug}/eng-2"]
     setup.store.put_agent(slug, AgentRecord("eng-1", "eng", "first", state="finished"))
     assert local_slots.held(setup.store, "box", slug, "other") == 1
-    local_slots.release(setup.store, "box", slug, "second")
+    setup.store.put_agent(slug, AgentRecord("eng-2", "eng", "second", state="finished"))
     assert local_slots.held(setup.store, "box", slug, "other") == 0
 
 
@@ -297,6 +299,8 @@ def test_a_claim_whose_agent_never_appears_expires(setup):
     claims = {f"{slug}/old": now - local_slots.PENDING_MS, f"{slug}/new": now}
     setup.store.redis.hset(local_slots.key("box"), mapping=claims)
     assert local_slots.held(setup.store, "box", slug, "other") == 1
-    assert local_slots.claim(setup.store, "box", slug, "third", 2) == 1
-    assert local_slots.claim(setup.store, "box", slug, "fourth", 2) == 2
-    assert sorted(setup.store.redis.hkeys(local_slots.key("box"))) == [f"{slug}/new", f"{slug}/third"]
+    assert local_slots.claim(setup.store, "box", slug, "third", "eng-3", 2) == 1
+    assert local_slots.claim(setup.store, "box", slug, "fourth", "eng-4", 2) == 2
+    assert sorted(setup.store.redis.hkeys(local_slots.key("box"))) == [f"{slug}/eng-3", f"{slug}/new"]
+    local_slots.release(setup.store, "box", slug, "eng-3")
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
