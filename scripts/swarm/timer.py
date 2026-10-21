@@ -63,7 +63,7 @@ def units(binary):
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         f'ExecStart="{binary}" swarm tick-watch\n'
-        "Restart=always\nRestartSec=5\n\n"
+        "Restart=always\nRestartSec=5\nNotifyAccess=main\nWatchdogSec=300\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
     return {

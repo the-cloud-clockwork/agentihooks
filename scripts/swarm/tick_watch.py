@@ -7,13 +7,14 @@ from collections.abc import Callable
 
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import tick_heartbeat, timing
+from scripts.swarm import sd_notify, tick_heartbeat, timing
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import front_door
 
 KEY = "tick-watch"
 SENDER = "swarm"
 PASS_S = 60
+WATCHDOG = "WATCHDOG=1"
 ALERT = (
     "The tick of swarm {slug} is stale: {evidence}. Until it recovers no swarm alert, nudge, merge or spawn happens; "
     "keep working your own task and do not wait on the tick. The watchdog restarts the tick, and a resolved notice "
@@ -97,14 +98,23 @@ def _save(store, slug, episode) -> None:
     store.redis.set(store.key(slug, KEY), json.dumps(episode))
 
 
-def run(store: RedisStore, now: Callable[[], int], repair=None, wait=None, passes: int | None = None) -> None:
+def run(
+    store: RedisStore, now: Callable[[], int], repair=None, wait=None, passes: int | None = None, beat=None
+) -> None:
+    beat = beat or _watchdog
     since, done = now(), 0
     while passes is None or done < passes:
+        beat()
         for slug in store.slugs():
             try:
                 for action in watch_pass(store, slug, now(), since, repair):
                     timing.emit(sys.stdout, f"{slug}: {action}")
             except Exception as exc:
                 timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
+            beat()
         done += 1
         (wait or scheduled_wait)(PASS_S)
+
+
+def _watchdog() -> None:
+    sd_notify.notify(WATCHDOG)
