@@ -113,7 +113,9 @@ def _writes(doc, rows, events):
 
 
 def _counts(doc, row, write):
-    return write.by == OPERATOR or not operator_only(doc, row)
+    found = naming.parse(row.get("by"))
+    master = found is not None and found.kind == "master"
+    return write.by == OPERATOR or not (master or operator_only(doc, row))
 
 
 def operator_only(doc, row):
@@ -122,7 +124,7 @@ def operator_only(doc, row):
 
 def handed(row):
     found = naming.parse(row.get("by"))
-    return found is not None and found.kind in ("master", DISPATCHER)
+    return found is not None and found.kind == DISPATCHER
 
 
 def _operator_decides(path, item):
