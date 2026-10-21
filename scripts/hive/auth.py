@@ -126,7 +126,6 @@ def _acl_keys(member_id: str) -> tuple[str, ...]:
 
 
 def regrant(redis: "Redis") -> None:
-    """Apply the current key, channel and category rules to every member login, keeping its password."""
     for member_id in redis.smembers(INDEX):
         redis.acl_setuser(
             f"hive-{member_id}",
