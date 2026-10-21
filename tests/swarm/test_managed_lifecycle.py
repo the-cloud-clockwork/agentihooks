@@ -469,6 +469,16 @@ def test_managed_retirement_leaves_a_reused_pane_on_another_terminal_open(rig, m
     assert rig.bindings.get(SLUG, rig.agent.execution_id).state == "exited"
 
 
+def test_managed_retirement_leaves_a_pane_with_no_recorded_terminal_open(rig):
+    from scripts.swarm import reaper
+
+    rig.herdr.side_effect = _panes({"viewer": "operator-shell"})
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(rig.agent)
+    rig.herdr.assert_not_called()
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == "exited"
+
+
 def test_managed_retirement_after_a_reopen_closes_the_earlier_launch_pane(rig, monkeypatch):
     from scripts.swarm import reaper
 

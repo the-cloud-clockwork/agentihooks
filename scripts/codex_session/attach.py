@@ -112,17 +112,20 @@ def reopenable(store: "RedisStore", slug: str, execution_id: str) -> "AgentRecor
     return agent
 
 
-def recorded_terminals(name: str, viewers: dict[str, str], environ: dict[str, str]) -> dict[str, str]:
-    """herdr reuses a closed pane's id, so a pane is the agent's only on the terminal recorded at its launch or as its
-    viewer."""
+def launch_records(name: str, environ: dict[str, str]) -> list:
     from scripts import herdr_panes
     from scripts.swarm import naming
 
-    launched = {
-        r.pane_id: r.terminal_id
+    return [
+        r
         for r in herdr_panes.load(environ)
         if r.kind == "init-agent" and naming.plain(r.owner_session) == naming.plain(name)
-    }
+    ]
+
+
+def recorded_terminals(name: str, viewers: dict[str, str], environ: dict[str, str]) -> dict[str, str]:
+    """herdr reuses pane ids, so a pane is the agent's only on its recorded terminal."""
+    launched = {r.pane_id: r.terminal_id for r in launch_records(name, environ)}
     return {pane: terminal for pane, terminal in {**launched, **viewers}.items() if terminal}
 
 

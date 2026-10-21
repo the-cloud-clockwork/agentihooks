@@ -159,13 +159,9 @@ def _titled(slug, lane, seat):
 
 
 def _launch_records(name):
-    from scripts import herdr_panes
+    from scripts.codex_session.attach import launch_records
 
-    return [
-        r
-        for r in herdr_panes.load(dict(os.environ))
-        if r.kind == "init-agent" and naming.plain(r.owner_session) == naming.plain(name)
-    ]
+    return launch_records(name, dict(os.environ))
 
 
 def _opened_pane(name, since_ms):
@@ -1025,13 +1021,15 @@ class HerdrRuntime:
             self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"pane list: {exc}"}
             return False
         for pane in owned:
+            launch = pane == agent.pane_id
             try:
-                if pane == agent.pane_id:
+                if launch:
                     self._close_owned_pane(agent)
                 else:
                     self.close_pane(pane)
             except Exception as exc:
-                self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"pane {pane}: {exc}"}
+                refusal = f"pane {pane}: {exc}" if launch else f"viewer pane {pane}: {exc}"
+                self.refusals[agent.name] = {"process": record.server_pid, "refusal": refusal}
                 return False
         directory = execution_directory(record)
         if directory is not None and directory.exists():
