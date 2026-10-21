@@ -39,6 +39,12 @@ ORDER = (
 )
 
 
+ACCOUNT_MOVED = (
+    "The master now runs on {harness} account {account}; it moved from account {previous}. "
+    "Open that account on claude.ai to reach it."
+)
+
+
 def fenced(hive: str) -> str:
     return f"{registry.key(hive)}:fenced"
 
@@ -129,3 +135,15 @@ def placed(store, slug):
     if item and item.state not in CLOSED:
         inbox.close(item.id, item.address, "done", "the master moved to its hive")
     store.redis.delete(_key(store, slug))
+
+
+def account_moved(slug, task, record, client=None):
+    """Tell the operator in ledger chat when a master successor runs on another account than its predecessor."""
+    from scripts.swarm.ledger_client import LedgerClient
+
+    previous = ((task.get("handoff_envelope") or {}).get("launch") or {}).get("account") or ""
+    if not (previous and record.account) or previous == record.account:
+        return []
+    text = ACCOUNT_MOVED.format(harness=record.harness, account=record.account, previous=previous)
+    (client or LedgerClient()).say(slug, text)
+    return [f"master {record.name} moved from account {previous} to {record.account}"]

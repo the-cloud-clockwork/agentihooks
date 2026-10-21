@@ -31,8 +31,12 @@ def hook(tmp_path):
     gh = tmp_path / "gh"
     gh.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
-        "[[ \"$*\" == 'pr view 12 --json baseRefName --jq .baseRefName' ]] || exit 1\n"
-        "printf 'dev\\n'\n"
+        "if [[ \"$1 $2\" == 'api graphql' ]]; then\n"
+        '  printf \'{"data": {"resource": {"repository": {"mergeQueue": null}}}}\'\n'
+        "  exit 0\n"
+        "fi\n"
+        '[[ "$*" == \'pr view 12 --json baseRefName,url --jq .baseRefName + " " + .url\' ]] || exit 1\n'
+        "printf 'dev https://github.com/o/r/pull/12\\n'\n"
     )
     gh.chmod(0o755)
     (home / "state.json").write_text(json.dumps({"bundle": {"path": str(bundle)}}))

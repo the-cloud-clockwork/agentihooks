@@ -774,6 +774,16 @@ def test_the_hook_start_is_read_when_the_gate_is_built():
     assert PushStop(clock=lambda: 7.0).started == 7.0
 
 
+def test_the_pull_request_reader_is_the_injected_reader_or_the_ledger_events_view():
+    from scripts.swarm.ledger_events import view
+
+    def reader(url):
+        return None
+
+    assert PushStop(github=reader).github() is reader
+    assert PushStop().github() is view
+
+
 @pytest.mark.wall_clock
 def test_a_passing_gate_followed_by_a_slow_push_and_ledger_write_ends_inside_the_stop_condition(monkeypatch, rig):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
@@ -1002,4 +1012,40 @@ def test_a_wait_during_a_ledger_outage_still_refuses_the_stop(rig):
     rig.gate._ledger = lambda: DownLedger({})
     (rig.tree / "new").write_text("new\n")
     wait_on(rig, {"kind": "task", "target": "t2"})
+    assert rig.stop().reason == TEMPLATE
+
+
+@pytest.mark.parametrize("target", ["https://github.com/o/r/pull/7", "https://github.com/o/r/pull/8"])
+def test_a_live_merge_wait_on_an_open_pull_request_lets_a_refused_push_stop(rig, target):
+    from scripts.swarm.ledger_events import PullRequest
+
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    theirs = refuse_the_push(rig)
+    with_task(rig, "claimed")
+    seen = []
+    rig.gate._github = lambda url: seen.append(url) or PullRequest("OPEN", None, 1, False, True, queued=True)
+    wait_on(rig, {"kind": "merge", "target": target})
+    assert rig.stop().allowed
+    assert seen == [target]
+    assert rig.remote_head() == theirs
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED", None])
+def test_a_merge_wait_on_a_pull_request_no_longer_open_still_refuses_the_stop(rig, state):
+    from scripts.swarm.ledger_events import PullRequest
+
+    refuse_the_push(rig)
+    with_task(rig, "claimed")
+    rig.gate._github = lambda url: PullRequest(state, None, 1, False, True) if state else None
+    wait_on(rig, {"kind": "merge", "target": "https://github.com/o/r/pull/8"})
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_a_merge_wait_never_holds_uncommitted_changes(rig):
+    from scripts.swarm.ledger_events import PullRequest
+
+    with_task(rig, "claimed")
+    (rig.tree / "new").write_text("new\n")
+    rig.gate._github = lambda url: PullRequest("OPEN", None, 1, False, True, queued=True)
+    wait_on(rig, {"kind": "merge", "target": "https://github.com/o/r/pull/8"})
     assert rig.stop().reason == TEMPLATE

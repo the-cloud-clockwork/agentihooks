@@ -67,6 +67,9 @@ data:
 {{- if not $api.swarm }}
 {{- fail "controller.api.swarm must name the swarm the control API serves" }}
 {{- end }}
+{{- if has $api.swarm (.Values.controller.hostSwarms | default list) }}
+{{- fail "controller.api.swarm must not be in controller.hostSwarms: the control API holds the tick lease of the swarm it serves" }}
+{{- end }}
 {{- if not (and $api.signingKey.keyId $api.signingKey.secretName) }}
 {{- fail "controller.api.signingKey needs keyId and secretName: workers verify launch grants with that key" }}
 {{- end }}
@@ -233,8 +236,10 @@ spec:
                 - python
                 - -c
                 - >-
-                  from scripts.swarm import lease; from scripts.swarm.store import connect;
-                  store = connect(); stale = [slug for slug in store.slugs() if not lease.current(store, slug)];
+                  import os; from scripts.swarm import lease; from scripts.swarm.store import connect;
+                  from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked; store = connect();
+                  held = ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, ""));
+                  stale = [slug for slug in held if not lease.current(store, slug)];
                   assert not stale, f"no live controller lease for {stale}"
               {{- end }}
             {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
@@ -242,6 +247,10 @@ spec:
             {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
             - name: AGENTIHOOKS_HOME
               value: /run/agentihooks
+            {{- with .Values.controller.hostSwarms }}
+            - name: AGENTIHOOKS_CONTROL_HOST_SWARMS
+              value: {{ join "," . | quote }}
+            {{- end }}
             {{- if $api.enabled }}
             - name: AGENTIHOOKS_CONTROL_API_PORT
               value: {{ $api.port | quote }}

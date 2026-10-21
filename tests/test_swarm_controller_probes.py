@@ -92,6 +92,47 @@ def test_live_fails_when_a_swarm_has_no_live_controller_lease(store, capsys):
     assert capsys.readouterr().out == "controller: no live controller lease for ['fixture']\n"
 
 
+def test_live_leaves_a_host_ticked_swarm_without_a_lease_to_its_host(store, capsys):
+    from scripts.swarm.store import SwarmConfig
+
+    held(store)
+    store.create(SwarmConfig("workstation", "agentihooks", 2, 0))
+    environ = {**ENV, "AGENTIHOOKS_CONTROL_HOST_SWARMS": "other,workstation"}
+
+    assert controller_probes.live(environ, store, Fetch(), "hive-fixture") == 0
+    assert capsys.readouterr().out == "controller: live\n"
+
+
+def test_live_still_fails_on_a_swarm_left_off_the_host_ticked_list(store, capsys):
+    from scripts.swarm.store import SwarmConfig
+
+    held(store)
+    store.create(SwarmConfig("workstation", "agentihooks", 2, 0))
+    environ = {**ENV, "AGENTIHOOKS_CONTROL_HOST_SWARMS": "other"}
+
+    assert controller_probes.live(environ, store, Fetch(), "hive-fixture") == 1
+    assert capsys.readouterr().out == "controller: no live controller lease for ['workstation']\n"
+
+
+def test_live_requires_every_lease_while_no_host_ticked_list_is_set(store, monkeypatch, capsys):
+    from scripts.swarm.store import SwarmConfig
+
+    monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
+    held(store)
+    store.create(SwarmConfig("XXXX", "agentihooks", 2, 0))
+
+    assert controller_probes.live(ENV, store, Fetch(), "hive-fixture") == 1
+    assert capsys.readouterr().out == "controller: no live controller lease for ['XXXX']\n"
+
+
+@pytest.mark.parametrize(
+    ("host_swarms", "expected"),
+    [("", ["a", "b", "c"]), ("b", ["a", "c"]), ("c,a", ["b"]), ("a,b,c", []), (" a , c", ["b"])],
+)
+def test_ticked_drops_exactly_the_host_ticked_swarms_in_order(host_swarms, expected):
+    assert controller_probes.ticked(["a", "b", "c"], host_swarms) == expected
+
+
 def test_ready_passes_on_the_deep_report_while_the_api_and_redis_answer(store, capsys):
     fetch = Fetch()
 

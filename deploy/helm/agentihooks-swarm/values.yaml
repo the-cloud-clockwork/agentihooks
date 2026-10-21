@@ -107,6 +107,8 @@ controller:
   tolerations: []
   # Required with workers: the Kubernetes runtime creates worker Pods with this account's token.
   serviceAccountName: ""
+  # Swarms in this Redis that their own host ticks; the controller never ticks them or probes their lease.
+  hostSwarms: []
   # Worker registration and heartbeat API, served by the controller process for one swarm.
   api:
     enabled: false
@@ -227,8 +229,12 @@ workers:
   # than emptyDir (a hostPath or persistentVolumeClaim) rolls out by Recreate so two hives never share it.
   homeVolume:
     emptyDir: {}
-  # Free GB wt.sh new requires on the home volume, passed to agents as WT_MIN_FREE_GB.
+  # Worktree limits, passed to agents through the worktrees ConfigMap. wt.sh new evicts the oldest safe
+  # worktrees to keep WT_MIN_FREE_GB free on the home volume and at most WT_MAX_PER_REPO worktrees per repo;
+  # agentihooks gc removes a worktree untouched for WT_STALE_DAYS days unless its owner lives.
   worktreeMinFreeGb: 50
+  worktreeMaxPerRepo: 60
+  worktreeStaleDays: 7
   nodeSelector: {}
   affinity: {}
   tolerations: []

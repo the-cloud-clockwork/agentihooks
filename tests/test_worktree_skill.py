@@ -1,7 +1,9 @@
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -18,6 +20,20 @@ def _isolated_bin(dest):
         assert real, f"required tool not found: {name}"
         os.symlink(real, dest / name)
     return dest
+
+
+def _age(worktree, seconds):
+    stamp = int(time.time() - seconds)
+    admin = Path((worktree / ".git").read_text().split(":", 1)[1].strip())
+    log = admin / "logs" / "HEAD"
+    lines = []
+    for line in log.read_text().splitlines():
+        header, _, message = line.partition("\t")
+        identity, _, zone = header.rsplit(" ", 2)
+        lines.append(f"{identity} {stamp} {zone}\t{message}\n")
+    log.write_text("".join(lines))
+    for item in (admin / "index", admin / "HEAD", log):
+        os.utime(item, (stamp, stamp))
 
 
 def _git(repo, *args, env=None):
@@ -517,6 +533,39 @@ class Limits(WtBase):
             result = self.run_wt(*args, "--repo", str(self.primary))
             self.assertNotEqual(result.returncode, 0, args)
             self.assertIn("already has 1 worktrees (cap 1", result.stderr)
+
+
+class Eviction(WtBase):
+    def setUp(self):
+        super().setUp()
+        shim = self.bin / "agentihooks"
+        shim.write_text(f'#!/bin/sh\nPYTHONPATH="{WT.parents[5]}" exec "{sys.executable}" -m scripts.gc_cli "$@"\n')
+        shim.chmod(0o755)
+        self.env["WT_MAX_PER_REPO"] = "1"
+        self.first = self.worktree_root / "primary" / "first"
+        created = self.run_wt("new", "first", "--repo", str(self.primary))
+        self.assertEqual(created.returncode, 0, created.stderr)
+        _age(self.first, 3600)
+
+    def test_new_evicts_the_oldest_safe_worktree_at_the_cap(self):
+        result = self.run_wt("new", "second", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"wt: evicted {self.first}: removed", result.stderr)
+        self.assertFalse(self.first.exists())
+        self.assertTrue((self.worktree_root / "primary" / "second").is_dir())
+
+    def test_new_refuses_when_no_safe_worktree_is_left(self):
+        holder = subprocess.Popen(["sleep", "120"], cwd=self.first)
+        self.addCleanup(holder.wait)
+        self.addCleanup(holder.kill)
+        result = self.run_wt("new", "second", "--repo", str(self.primary))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "REFUSED — primary already has 1 worktrees (cap 1, WT_MAX_PER_REPO) and no safe worktree is left to evict",
+            result.stderr,
+        )
+        self.assertTrue(self.first.is_dir())
+        self.assertFalse((self.worktree_root / "primary" / "second").exists())
 
 
 class Tmp(WtBase):

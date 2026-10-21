@@ -108,6 +108,9 @@ controller:
 - `controller.api.swarm` becomes `AGENTIHOOKS_CONTROL_SWARM`. The controller serves the control API for that swarm
   only; until the swarm exists in the shared Redis it logs
   `controller: serves the control API for <swarm>, which does not exist yet; waits for it`.
+- `controller.hostSwarms` becomes `AGENTIHOOKS_CONTROL_HOST_SWARMS`: swarms in the shared Redis that their own host
+  ticks. The controller never ticks them and its liveness probe does not require their lease, so a sleeping
+  workstation never hands its swarm to the controller. The chart refuses a `controller.api.swarm` on that list.
 - When the ledger is remote (`SWARM_URL`, an `AGENTIHOOKS_DEPLOYMENT` other than `local`, or `LEDGER_URL` with no
   mode set; see [Client mode resolution](#client-mode-resolution)), the controller needs
   `AGENTIHOOKS_CONTROLLER_CREDENTIAL` and refuses to start without it.

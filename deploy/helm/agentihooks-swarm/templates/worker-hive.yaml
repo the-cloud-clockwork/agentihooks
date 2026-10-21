@@ -28,6 +28,17 @@
 {{- fail "workers.homeVolume needs exactly one volume source; set emptyDir: null beside a hostPath or persistentVolumeClaim" }}
 {{- end }}
 {{- $memory := dict "requests" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.request))) "limits" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.limit))) }}
+{{- $worktrees := dict "WT_MIN_FREE_GB" ($workers.worktreeMinFreeGb | toString) "WT_MAX_PER_REPO" ($workers.worktreeMaxPerRepo | toString) "WT_STALE_DAYS" ($workers.worktreeStaleDays | toString) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "swarm.fullname" . }}-worktrees
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker-hive
+data:
+  {{- toYaml $worktrees | nindent 2 }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,6 +60,8 @@ spec:
       labels:
         {{- include "swarm.labels" . | nindent 8 }}
         app.kubernetes.io/component: worker-hive
+      annotations:
+        checksum/worktrees: {{ toJson $worktrees | sha256sum }}
     spec:
       {{- include "swarm.podSecurity" . | nindent 6 }}
       {{- with $workers.nodeSelector }}
@@ -94,8 +107,6 @@ spec:
               value: {{ join "," $workers.excluded | quote }}
             - name: HIVE_MAX_AGENTS
               value: {{ $workers.maxAgents | quote }}
-            - name: WT_MIN_FREE_GB
-              value: {{ $workers.worktreeMinFreeGb | quote }}
             - name: HIVE_REPOSITORIES
               value: {{ $workers.repositories | toJson | quote }}
             - name: HIVE_CREDENTIAL_FILE
@@ -117,13 +128,13 @@ spec:
             - name: ssh
               containerPort: {{ $workers.ssh.port }}
           {{- end }}
-          {{- with $workers.envFromSecrets }}
           envFrom:
-            {{- range . }}
+            - configMapRef:
+                name: {{ include "swarm.fullname" . }}-worktrees
+            {{- range $workers.envFromSecrets }}
             - secretRef:
                 name: {{ . }}
             {{- end }}
-          {{- end }}
           volumeMounts:
             - name: join
               mountPath: /run/hive-join

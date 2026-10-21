@@ -747,8 +747,10 @@ defaults to an emptyDir on the node root disk; a `hostPath` of type `Directory` 
 `persistentVolumeClaim` (set `emptyDir: null` beside it; the chart refuses more or fewer than one source) keeps them on
 a larger disk. A hostPath of type `Directory` starts the pod only where the path exists, so create it only on the
 mounted data disk. Any source other than an emptyDir rolls the pod out by
-Recreate so two hives never share it. `workers.worktreeMinFreeGb` (default 50) reaches agents as `WT_MIN_FREE_GB`,
-the free space `wt.sh new` requires.
+Recreate so two hives never share it. `workers.worktreeMinFreeGb` (default 50), `workers.worktreeMaxPerRepo` (default 60)
+and `workers.worktreeStaleDays` (default 7) reach agents as `WT_MIN_FREE_GB`, `WT_MAX_PER_REPO` and `WT_STALE_DAYS`
+through the release's worktrees ConfigMap: `wt.sh new` evicts the oldest safe worktrees to keep that floor and cap, and
+`agentihooks gc` removes worktrees untouched that many days.
 
 A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see

@@ -5,7 +5,14 @@ import pytest
 def merge_base(monkeypatch):
     import subprocess
 
-    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "dev\n", ""))
+    def run(argv, **kwargs):
+        if argv[1:3] == ["api", "graphql"]:
+            return subprocess.CompletedProcess(
+                argv, 0, '{"data": {"resource": {"repository": {"mergeQueue": null}}}}', ""
+            )
+        return subprocess.CompletedProcess(argv, 0, "dev https://github.com/owner/repo/pull/123\n", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
 
 
 def _check(command):

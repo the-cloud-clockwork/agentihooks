@@ -7,10 +7,11 @@ from pathlib import Path
 
 from hooks.lifecycle.act import ActionError
 from hooks.lifecycle.config import load_roots
+from hooks.lifecycle.evict import make_room
 from hooks.lifecycle.lease import add_holder, admin_dir
 from hooks.lifecycle.liveness import owner_holder, take_snapshot
-from hooks.lifecycle.model import ACTIONABLE
-from hooks.lifecycle.run import sweep
+from hooks.lifecycle.model import ACTIONABLE, Root
+from hooks.lifecycle.run import state_home, sweep
 from hooks.lifecycle.scratch_rm import remove_scratch
 from hooks.lifecycle.timer import install_timer, remove_timer
 from scripts import herdr_gc
@@ -29,6 +30,12 @@ def _parser() -> argparse.ArgumentParser:
     gc.add_argument("--json", action="store_true", help="Print the full report as JSON")
     gc.add_argument("--path", default="", help="Only report findings under this path")
     gc.add_argument("--enforce", action="store_true", help="Act on findings that are due: remove, snapshot, archive")
+    gc.add_argument(
+        "--make-room", default="", metavar="REPO", help="Evict the oldest safe worktrees until wt.sh new may create"
+    )
+    gc.add_argument("--root", default=str(Path.home() / "dev" / "worktrees"), help="Worktree root for --make-room")
+    gc.add_argument("--min-free-gb", type=int, default=50, help="Free space floor for --make-room")
+    gc.add_argument("--max-per-repo", type=int, default=60, help="Per repository worktree cap for --make-room")
     gc.add_argument(
         "--install-timer", action="store_true", help="Schedule the hourly sweep on the agentihooks scheduler"
     )
@@ -147,6 +154,14 @@ def main(argv: list[str]) -> int:
     if args.install_timer or args.remove_timer:
         root = str(Path(__file__).resolve().parents[1])
         print(install_timer(sys.executable, root) if args.install_timer else remove_timer())
+        return 0
+    if args.make_room:
+        root = Root("worktrees", str(Path(args.root).expanduser()), "worktrees")
+        home = state_home()
+        home.mkdir(parents=True, exist_ok=True)
+        lines = make_room(Path(args.make_room), root, args.min_free_gb, args.max_per_repo, home, take_snapshot())
+        for line in lines:
+            print(f"wt: {line}")
         return 0
     herdr = herdr_gc.run(dict(os.environ), int(time.time() * 1000), args.enforce)
     if not args.json:
