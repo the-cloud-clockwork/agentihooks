@@ -373,6 +373,7 @@ def test_the_master_writes_a_freeze_or_focus_without_the_operators_words(monkeyp
     state, rejected = freeze("plans/b", verb=verb, by=MASTER)
     assert rejected == []
     assert [(row["target"], row["by"]) for row in state["freezes"]] == [("plans/a", "operator"), ("plans/b", MASTER)]
+    assert "quote" not in state["freezes"][1]
 
 
 @pytest.mark.parametrize("name", [ENGINEER, CI, PLANNER])
