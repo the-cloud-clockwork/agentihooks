@@ -276,7 +276,7 @@ def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int)
             pipe.watch(key, store.key(slug, "control-owner"))
             lease.require(store, slug, held)
             raw = pipe.get(key)
-            if raw and (not raw.startswith("{") or json.loads(raw)["epoch"] == held.epoch) and not _dead(raw):
+            if raw and not _dead(raw):
                 return None
             pipe.multi()
             pipe.set(key, token, px=ttl_ms)
