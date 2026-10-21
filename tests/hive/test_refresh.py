@@ -499,6 +499,44 @@ def test_a_member_the_process_env_left_behind_yields_to_the_saved_member(admin, 
     assert client.connection_pool.connection_kwargs["username"] == f"hive-{grant['id']}"
 
 
+def test_a_hive_process_without_a_member_in_its_env_reads_the_saved_member(
+    admin, hive, redis_lib, tmp_path, monkeypatch
+):
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    pinged = _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {"AGENTIHOOKS_HOME": str(tmp_path), "AGENTIHOOKS_DEPLOYMENT": "distributed"}
+
+    store.redis_client(environ)
+
+    assert pinged == [f"hive-{grant['id']}"]
+    assert environ["AGENTIHOOKS_HIVE_ID"] == grant["id"]
+    assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == grant["redis_url"]
+
+
+@pytest.mark.parametrize(
+    ("lines", "member"),
+    [
+        (None, set()),
+        (["AGENTIHOOKS_HIVE_ID=", "AGENTIHOOKS_HIVE_REDIS_URL="], set()),
+        (["AGENTIHOOKS_HIVE_ID=a", "OTHER=b"], {"AGENTIHOOKS_HIVE_ID"}),
+        (
+            ["AGENTIHOOKS_HIVE_ID=a", "AGENTIHOOKS_HIVE_REDIS_URL={url}"],
+            {"AGENTIHOOKS_HIVE_ID", "AGENTIHOOKS_HIVE_REDIS_URL"},
+        ),
+    ],
+)
+def test_the_saved_member_holds_only_its_set_id_and_redis_url(tmp_path, lines, member):
+    url = auth._with_user("rediss://hive.example:6380/0?x=y", "hive-a", "p")
+    if lines is not None:
+        (tmp_path / "hive.env").write_text("".join(line.format(url=url) + "\n" for line in lines))
+
+    saved = cli.saved_member({"AGENTIHOOKS_HOME": str(tmp_path)})
+
+    assert set(saved) == member
+    assert saved.get("AGENTIHOOKS_HIVE_ID", "a") == "a"
+    assert saved.get("AGENTIHOOKS_HIVE_REDIS_URL", url) == url
+
+
 def test_a_workstation_keeps_its_swarm_redis_beside_a_saved_hive_member(admin, hive, redis_lib, tmp_path, monkeypatch):
     _joined(admin, hive, tmp_path, monkeypatch)
     swarm_url = auth._with_user("redis://h:1/0", "swarm", "p")

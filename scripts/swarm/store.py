@@ -635,6 +635,7 @@ def redis_client(environ=None):
     import hooks.config  # noqa: F401  loads ~/.agentihooks/*.env, where REDIS_URL lives
 
     environ = os.environ if environ is None else environ
+    _adopt_saved_member(environ)
     url = redis_url(environ)
     try:
         return _pinged(redis, url)
@@ -642,6 +643,20 @@ def redis_client(environ=None):
         if url != environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
             raise
     return _hive_recovered(redis, environ, url)
+
+
+def _adopt_saved_member(environ):
+    from urllib.parse import urlsplit
+
+    from scripts.hive import cli
+
+    if environ.get("AGENTIHOOKS_DEPLOYMENT", "local") == "local":
+        return
+    saved = cli.saved_member(environ)
+    url, current = saved.get("AGENTIHOOKS_HIVE_REDIS_URL"), environ.get("AGENTIHOOKS_HIVE_REDIS_URL")
+    # A rejoined hive keeps its old member in the process env, whose Redis user may still answer elsewhere.
+    if url and (not current or urlsplit(url).username != urlsplit(current).username):
+        environ.update(saved)
 
 
 def _hive_recovered(redis, environ, refused):
