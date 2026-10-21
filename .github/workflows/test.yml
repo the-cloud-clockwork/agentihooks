@@ -676,7 +676,7 @@ jobs:
 
       - name: Mint the token that reads the dev count record
         id: app-token
-        if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -685,7 +685,7 @@ jobs:
           permission-actions: read
 
       - name: Fetch the base suite count recorded on dev
-        if: steps.app-token.outcome == 'success'
+        if: steps.app-token.outcome == 'success' && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RECORD: count-record-${{ matrix.python-version }}
@@ -700,6 +700,37 @@ jobs:
           echo "Reading the suite count artifact $id recorded on dev for $base."
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/count-record.zip" || exit 0
           python -c 'import sys, zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read("record.json"))' "$RUNNER_TEMP/count-record.zip" > "$RUNNER_TEMP/base-record.json" || rm -f "$RUNNER_TEMP/base-record.json"
+
+      # The protected grader plans, so a queued change cannot widen what it reuses.
+      - name: Plan the tests whose inputs did not change
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GRADER: ${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/planner" "$GRADER"
+          export GITHUB_OUTPUT="$RUNNER_TEMP/plan-outputs.txt"
+          : > "$GITHUB_OUTPUT"
+          plan() {
+            if [[ ! -f "$RUNNER_TEMP/planner/scripts/ci_test_plan.py" ]]; then
+              echo "The grader has no test planner; every test runs."
+              echo "reused=0" >> "$GITHUB_OUTPUT"
+              return 0
+            fi
+            if [[ "$GITHUB_EVENT_NAME" != merge_group && ! -f "$RUNNER_TEMP/planner/tests/reused_coverage.py" ]]; then
+              echo "The grader cannot carry reused tests' coverage into Sonar; every test runs."
+              echo "reused=0" >> "$GITHUB_OUTPUT"
+              return 0
+            fi
+            "$PYTHON_PATH" -m pip install --quiet PyYAML==6.0.3
+            before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+            cd "$RUNNER_TEMP/planner"
+            "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
+              --repo "$GITHUB_WORKSPACE" --before "$before" --out "$GITHUB_WORKSPACE/reused-tests.json"
+          }
+          ( (set -e; plan); echo "$?" > "$RUNNER_TEMP/plan.status" ) > "$RUNNER_TEMP/plan.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/plan.pid"
 
       # The base revision's copy grades, so a pull request cannot loosen its own floor.
       - name: Hold the base revision's test count
@@ -720,11 +751,59 @@ jobs:
             python -c 'import json, os; from pathlib import Path; from tests.duration_coverage import collected_tests; Path(os.environ["TEST_COUNT_HEAD_COLLECTION"]).write_text(json.dumps(collected_tests(Path.cwd())))'
           fi
 
+      - name: Wait for the test plan
+        id: plan
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
+        run: |
+          while [[ ! -f "$RUNNER_TEMP/plan.status" ]] && kill -0 "$(cat "$RUNNER_TEMP/plan.pid")" 2>/dev/null; do
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/plan.log"
+          if [[ ! -f "$RUNNER_TEMP/plan.status" ]]; then
+            echo "::error::The test planner exited without reporting a status."
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/plan-outputs.txt" >> "$GITHUB_OUTPUT"
+          exit "$(cat "$RUNNER_TEMP/plan.status")"
+
+      - name: Upload the test plan
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reused-tests-${{ matrix.python-version }}
+          path: reused-tests.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      # The grader's manifest code picks what is skipped; the head supplies only the plan and its collection.
+      - name: Deselect the reused tests
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          cd "$RUNNER_TEMP/planner"
+          "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
+            --collected "$RUNNER_TEMP/collected.json" --out "$RUNNER_TEMP/reused.json"
+
+      - name: Upload the deselected tests
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reused-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/reused.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
       - name: Upload the early collection
         uses: actions/upload-artifact@v4
         with:
           name: early-collected-${{ matrix.python-version }}
-          path: ${{ runner.temp }}/collected.json
+          path: |
+            ${{ runner.temp }}/collected.json
+            ${{ runner.temp }}/reused.json
+            ${{ runner.temp }}/plan-outputs.txt
           if-no-files-found: error
           retention-days: 7
           overwrite: true
@@ -739,9 +818,9 @@ jobs:
   # Every shard of a version splits on the one map this job chooses, so the whole suite is collected once per version, not once per shard.
   split:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
-    needs: [test-count, select, reuse, admission]
+    needs: [select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 7
+    timeout-minutes: 20
     permissions:
       contents: read
     strategy:
@@ -802,12 +881,35 @@ jobs:
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
 
+      - name: Mint the token that reads the collection job
+        id: app-token
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
       - name: Require successful early collection
         if: github.event_name != 'push' && needs.select.outputs.source == ''
         env:
-          COLLECTION_RESULT: ${{ needs.test-count.result }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          COLLECTION_JOB: test-count (${{ matrix.python-version }})
         run: |
-          [[ "$COLLECTION_RESULT" == success ]] || { echo '::error::The early collection did not succeed.'; exit 1; }
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "A fork pull request mints no App token; Gate Required still holds the count."
+            exit 0
+          fi
+          while :; do
+            state="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
+              --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion)\"")" || state=""
+            case "$state" in
+              "completed success") exit 0 ;;
+              completed*) echo '::error::The early collection did not succeed.'; exit 1 ;;
+            esac
+            sleep 3
+          done
 
       - name: Download the early collection
         if: github.event_name != 'push' && needs.select.outputs.source == ''
@@ -841,61 +943,11 @@ jobs:
           fi
           python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 "${collection[@]}" --collected collected.json
 
-      - name: Mint the token that reads the dev test record
-        id: app-token
-        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
-        uses: actions/create-github-app-token@v3.2.0
-        with:
-          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
-          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: read
-
-      # The protected grader plans, so a queued change cannot widen what it reuses.
-      - name: Plan the tests whose inputs did not change
+      - name: Adopt the test plan
         id: plan
-        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          GRADER: ${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}
-          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        if: github.event_name != 'push' && needs.select.outputs.source == ''
         run: |
-          git worktree add --detach "$RUNNER_TEMP/planner" "$GRADER"
-          if [[ ! -f "$RUNNER_TEMP/planner/scripts/ci_test_plan.py" ]]; then
-            echo "The grader has no test planner; every test runs."
-            echo "reused=0" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [[ "$GITHUB_EVENT_NAME" != merge_group && ! -f "$RUNNER_TEMP/planner/tests/reused_coverage.py" ]]; then
-            echo "The grader cannot carry reused tests' coverage into Sonar; every test runs."
-            echo "reused=0" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          "$PYTHON_PATH" -m pip install --quiet PyYAML==6.0.3
-          before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
-          cd "$RUNNER_TEMP/planner"
-          "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
-            --repo "$GITHUB_WORKSPACE" --before "$before" --out "$GITHUB_WORKSPACE/reused-tests.json"
-
-      - name: Upload the test plan
-        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        uses: actions/upload-artifact@v4
-        with:
-          name: reused-tests-${{ matrix.python-version }}
-          path: reused-tests.json
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
-
-      # The grader's manifest code picks what is skipped; the head supplies only the plan and its collection.
-      - name: Deselect the reused tests
-        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        env:
-          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
-        run: |
-          cd "$RUNNER_TEMP/planner"
-          "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
-            --collected "$GITHUB_WORKSPACE/collected.json" --out "$GITHUB_WORKSPACE/reused.json"
+          [[ ! -f plan-outputs.txt ]] || cat plan-outputs.txt >> "$GITHUB_OUTPUT"
 
       - name: Size queue shards from conservative durations
         id: queue-size
@@ -915,16 +967,6 @@ jobs:
           cp .test_durations durations.sha256 "$destination/"
           python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
           cat queue-plan.txt >> "$GITHUB_OUTPUT"
-
-      - name: Upload the deselected tests
-        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        uses: actions/upload-artifact@v4
-        with:
-          name: reused-${{ matrix.python-version }}
-          path: reused.json
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
 
       - name: Mint the token that restores queue unit artifacts
         id: unit-token

@@ -46,7 +46,7 @@ def _step(job, name):
     return next(step for step in _job(job)["steps"] if step.get("name") == name)
 
 
-def _deselect_in_split(tmp_path, head_manifest):
+def _deselect_in_test_count(tmp_path, head_manifest):
     collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_b.py::new"]
     reused = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"]
     runner = tmp_path / "runner"
@@ -59,11 +59,11 @@ def _deselect_in_split(tmp_path, head_manifest):
         (checkout / "tests" / "__init__.py").write_text("")
         (checkout / "tests" / "dep_manifest.py").write_text(manifest)
     (workspace / "reused-tests.json").write_text(json.dumps({"tests": reused}))
-    (workspace / "collected.json").write_text(json.dumps(collected))
+    (runner / "collected.json").write_text(json.dumps(collected))
     env = {**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_WORKSPACE": str(workspace), "PYTHON_PATH": sys.executable}
-    run = _step("split", "Deselect the reused tests")["run"]
+    run = _step("test-count", "Deselect the reused tests")["run"]
     subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=workspace, env=env, check=True)
-    return json.loads((workspace / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
+    return json.loads((runner / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
 
 
 def test_lines_map_to_the_innermost_function_and_definitions_to_their_scope():
@@ -449,14 +449,16 @@ def test_deselection_keeps_new_tests_and_skips_only_wholly_reused_files(tmp_path
 
 
 def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
-    plan = _step("split", "Plan the tests whose inputs did not change")
+    plan = _step("test-count", "Plan the tests whose inputs did not change")
     assert plan["env"]["GRADER"] == (
         "${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}"
     )
     assert 'cd "$RUNNER_TEMP/planner"' in plan["run"]
     assert _job("split")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"
     assert _job("unit")["outputs"]["reused"] == "${{ needs.split.outputs.reused }}"
-    deselected = _step("split", "Deselect the reused tests")
+    assert _step("test-count", "Wait for the test plan")["id"] == "plan"
+    assert _step("split", "Adopt the test plan")["id"] == "plan"
+    deselected = _step("test-count", "Deselect the reused tests")
     assert deselected["run"].startswith('cd "$RUNNER_TEMP/planner"\n"$PYTHON_PATH" -m tests.dep_manifest deselect')
     assert deselected["env"]["PYTHON_PATH"] == plan["env"]["PYTHON_PATH"]
     assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
@@ -519,8 +521,8 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
                         step["name"],
                     )
     assert calls == {
-        ("split", "Plan the tests whose inputs did not change"),
-        ("split", "Deselect the reused tests"),
+        ("test-count", "Plan the tests whose inputs did not change"),
+        ("test-count", "Deselect the reused tests"),
         ("sonar", "Build the test dependency manifest"),
     }
 
@@ -537,12 +539,12 @@ def test_the_split_deselects_with_the_grader_manifest_code_not_the_heads(tmp_pat
             1,
         )
     )
-    chosen, expected = _deselect_in_split(tmp_path, planted)
+    chosen, expected = _deselect_in_test_count(tmp_path, planted)
     assert chosen == expected
 
 
 def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_code(tmp_path):
-    chosen, expected = _deselect_in_split(tmp_path, (ROOT / "tests" / "dep_manifest.py").read_text())
+    chosen, expected = _deselect_in_test_count(tmp_path, (ROOT / "tests" / "dep_manifest.py").read_text())
     assert (
         chosen
         == expected
