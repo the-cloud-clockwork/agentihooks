@@ -1,6 +1,0 @@
-{
-  "scripts/doctor/ci_cache.py:scripts.doctor.ci_cache.x_encode__mutmut_7:da5a451bb7665a2e512e9cfd1298e21a5ffd2999e64be6db05fd8e06ece2212f": {
-    "reader": "Standards",
-    "reason": "Python codec names are case insensitive: ascii and ASCII resolve to the same decoder. Base64 emits ASCII bytes, so both decode calls return identical strings and exhibit identical error behavior for every possible input to this expression."
-  }
-}

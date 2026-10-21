@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 from typing import TYPE_CHECKING
 
-import lz4.frame
 import orjson
 
 from scripts.swarm.keyspace import ROOT
@@ -19,10 +18,14 @@ VERSION = "l4:"
 
 
 def encode(attempt: dict) -> str:
-    return VERSION + base64.b64encode(lz4.frame.compress(orjson.dumps(attempt))).decode("ascii")
+    import lz4.frame
+
+    return VERSION + base64.b64encode(lz4.frame.compress(orjson.dumps(attempt))).decode()
 
 
 def read(cache: Redis, key: str) -> dict | None:
+    import lz4.frame
+
     saved = cache.get(key)
     if saved is None:
         return None
