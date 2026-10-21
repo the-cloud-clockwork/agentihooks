@@ -94,6 +94,7 @@ class LocalHerdrRuntime:
             retired = self.herdr.retire(agent, homes=homes)
         else:
             pid = process.resolve(agent, self.namespace(), self.table())
+            # A host_id reaching here names this host, and its pane belonged to the herdr that ended with it.
             if pid is Unqualified.FOREIGN_NAMESPACE and agent.runtime_target.get("host_id"):
                 return Outcome("terminate", Status.OK, LOCAL, detail=ENDED_NAMESPACE)
             if isinstance(pid, Unqualified):
