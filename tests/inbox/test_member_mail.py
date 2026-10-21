@@ -88,6 +88,16 @@ def test_a_handoff_moves_a_member_agents_mail_to_its_seat(redis, agent, mail):
     assert member.get(item.id).address == SEAT
 
 
+def test_a_handoff_closes_a_member_agents_wait_ended_notice(redis, agent):
+    from scripts.swarm import waits
+
+    notice = InboxStore(redis).send(waits.SENDER, SEAT, f"Your wait on checks has ended.{waits._pick_up('t1')} go on")
+    member = InboxStore(redis, world="m1")
+    assert member.get(notice.id).state == "pending"
+    waits.settle_notices(InboxStore(redis), agent, "a handoff")
+    assert member.get(notice.id).state == "done"
+
+
 def test_removing_a_swarm_withdraws_its_member_agents_open_mail(redis, agent, mail):
     member, item = mail
     exits.close_swarm(InboxStore(redis), "sw")

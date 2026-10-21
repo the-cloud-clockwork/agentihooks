@@ -141,16 +141,17 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
     tasks = {row.get("claimed_by"): row for row in live_rows().values()}
     gone = [(name, seat) for name, seat in seats if name not in active]
     outcomes = store.seats.exits([name for name, _ in gone])
-    for world in inbox.worlds():
-        pending = gone
-        for _ in range(len(gone)):
-            quiet = world.quiet([name for name, _ in pending])
-            due = [(name, seat) for name, seat in pending if not (outcomes[name] and name in quiet)]
-            if not due:
-                break
-            pending = [entry for entry in pending if entry not in due]
-            for name, seat in due:
-                _settle_gone(world, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
+    worlds = inbox.worlds()
+    pending = gone
+    for _ in range(len(gone)):
+        quiet = set.intersection(*(world.quiet([name for name, _ in pending]) for world in worlds))
+        due = [(name, seat) for name, seat in pending if not (outcomes[name] and name in quiet)]
+        if not due:
+            break
+        pending = [entry for entry in pending if entry not in due]
+        for name, seat in due:
+            _settle_gone(inbox, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
+    for world in worlds:
         _settle_seat_notices(world, {seat for _, seat in seats if seat}, active)
         _settle_peer_mail(world, slug, store, active)
         if slug in store.slugs():
@@ -161,11 +162,11 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
 def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:
     if state in ("done", "blocked"):
         exit_text = "finished its task and exited" if state == "done" else "blocked its task and exited"
-        _settle_world(inbox, name, "", exit_text)
+        settle(inbox, name, "", exit_text)
     elif outcome:
-        _settle_world(inbox, name, outcome["seat"], outcome["reason"])
+        settle(inbox, name, outcome["seat"], outcome["reason"])
     else:
-        _settle_world(inbox, name, seat, "exited")
+        settle(inbox, name, seat, "exited")
 
 
 def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
