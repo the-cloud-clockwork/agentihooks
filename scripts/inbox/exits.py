@@ -18,6 +18,7 @@ LANE_SEAT = re.compile(r"(eng|ci|plan)-(\d+)@.+")
 def settle(inbox, name, seat, exit_text):
     """seat is where the work goes on, '' when nobody takes it up. A master's mail passes to its successor, or waits
     for one while none is spawned yet."""
+    inbox.seats.record_exit(name, seat, exit_text)
     for world in inbox.worlds():
         _settle_world(world, name, seat, exit_text)
 
@@ -26,7 +27,6 @@ def _settle_world(inbox, name, seat, exit_text):
     from scripts.inbox.store import CLOSED
     from scripts.swarm.naming import NameRegistry
 
-    inbox.seats.record_exit(name, seat, exit_text)
     names = NameRegistry(inbox.redis)
     successor = names.successor(name) if names.entry(name).get("type") == "master" else ""
     if names.entry(name).get("type") == "master":
