@@ -170,7 +170,7 @@ def test_a_partial_clone_fetches_every_changed_file_old_text_in_one_batch(tmp_pa
 
 
 def test_pull_requests_into_dev_plan_reuse_from_the_protected_dev_grader():
-    plan = _steps("split")["Plan the tests whose inputs did not change"]
+    plan = _steps("test-count")["Plan the tests whose inputs did not change"]
     assert "github.event.pull_request.head.repo.full_name == github.repository" in plan["if"]
     assert "'origin/dev'" in plan["env"]["GRADER"]
     outputs = yaml.safe_load(WORKFLOW.read_text())["jobs"]["split"]["outputs"]

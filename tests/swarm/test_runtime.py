@@ -267,10 +267,9 @@ def _spawn_env(tmp_path, monkeypatch, task=None, **config):
     runtime.spawn(
         SimpleNamespace(
             slug="sw",
-            repo=str(tmp_path),
             code="a1b2c3",
             lanes={},
-            **{"autonomy": "delegate", **config},
+            **{"repo": str(tmp_path), "autonomy": "delegate", **config},
         ),
         "eng",
         "engineer@a1b2c3-0001",
@@ -285,6 +284,14 @@ def test_spawn_hands_init_agent_the_swarm_compact_limit(tmp_path, monkeypatch):
 
 def test_spawn_without_a_swarm_compact_limit_leaves_the_default(tmp_path, monkeypatch):
     assert "AGENTIHOOKS_COMPACT_LIMIT" not in _spawn_env(tmp_path, monkeypatch, compact_limit=0)
+
+
+def test_spawn_hands_agents_the_local_checkout_of_the_swarm_repo(tmp_path, monkeypatch):
+    from scripts.hive import daemon
+
+    monkeypatch.setattr(daemon, "local_checkout", lambda repo: f"/hive/dev/{repo.rsplit('/', 1)[-1]}")
+    spawned = _spawn_env(tmp_path, monkeypatch, compact_limit=0, repo="github.com/the-cloud-clockwork/agentihooks")
+    assert spawned["AGENTIHOOKS_SWARM_REPO"] == "/hive/dev/agentihooks"
 
 
 def test_spawn_marks_the_launch_as_the_tick_s_own(tmp_path, monkeypatch):
