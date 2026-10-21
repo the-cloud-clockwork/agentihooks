@@ -147,7 +147,8 @@ def _create(args: argparse.Namespace) -> str:
     if bao is None:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
     tools = create.Tools(redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served())
-    options = create.Options(args.repo, args.base, args.like, args.node, args.timeout, args.dry_run)
+    given = {"repo": args.repo, "base": args.base, "like": args.like, "node": args.node, "timeout_s": args.timeout}
+    options = create.Options(**{key: value for key, value in given.items() if value is not None}, dry_run=args.dry_run)
     return create.create(tools, options)
 
 
@@ -181,15 +182,12 @@ def _parser() -> argparse.ArgumentParser:
     invited.add_argument("--url", help="this hive's endpoint as the new hive reaches it, for hive refresh")
     invited.add_argument("--redis-url", help="Redis URL the new hive connects to")
     invited.add_argument("--swarm-url", help="ledger address the new hive reaches")
-    from scripts.hive.create import Options
-
-    defaults = Options()
     created = sub.add_parser("create", help="Create a Kubernetes hive from nothing and add it to herdr")
-    created.add_argument("--repo", default=defaults.repo, help="GitOps repository of the hive")
-    created.add_argument("--base", default=defaults.base, help="branch the hive pull request merges into")
-    created.add_argument("--like", default=defaults.like, help="OpenBao record to copy")
-    created.add_argument("--node", default=defaults.node, help="node the hive pod runs on")
-    created.add_argument("--timeout", type=int, default=defaults.timeout_s, help="seconds each wait may take")
+    created.add_argument("--repo", help="GitOps repository of the hive; defaults to antoncore")
+    created.add_argument("--base", help="branch the hive pull request merges into; defaults to dev")
+    created.add_argument("--like", help="OpenBao record to copy; defaults to the workstation hive's")
+    created.add_argument("--node", help="node the hive pod runs on; defaults to worker-001")
+    created.add_argument("--timeout", type=int, help="seconds each wait may take; defaults to 1800")
     created.add_argument("--dry-run", action="store_true", help="Print every step and file, and write nothing")
     sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its hive endpoint")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")

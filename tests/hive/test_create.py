@@ -331,6 +331,12 @@ def test_a_saved_pull_request_closed_without_merging_is_dropped_for_a_new_one(wo
     assert not world.run.named("gh", "pr", "merge")
 
 
-def test_cli_create_defaults_are_the_options_defaults():
-    args = cli._parser().parse_args(["create"])
-    assert create.Options(args.repo, args.base, args.like, args.node, args.timeout, args.dry_run) == create.Options()
+def test_cli_create_defaults_are_the_options_defaults(monkeypatch, capsys):
+    seen = {}
+    monkeypatch.setenv("OPENBAO_URL", "https://bao.test")
+    monkeypatch.setenv("OPENBAO_TOKEN", "token")
+    monkeypatch.setattr(cli, "redis_client", lambda: None)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
+    monkeypatch.setattr(create, "create", lambda tools, options: seen.update(options=options) or "created")
+    assert cli.main(["create"]) == 0
+    assert seen["options"] == create.Options()
