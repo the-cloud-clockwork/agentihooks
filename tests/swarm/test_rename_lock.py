@@ -204,6 +204,7 @@ def test_a_codex_rename_that_lost_its_lease_types_no_session_name(store):
 
 
 def test_a_rename_that_lost_its_lease_moves_no_further_ledger_name(store):
+    store.names.alias("sw-eng-1", store.next_name("sw", "eng"))
     store.names.alias("sw-eng-0", "sw-eng-1")
     moved = []
 
