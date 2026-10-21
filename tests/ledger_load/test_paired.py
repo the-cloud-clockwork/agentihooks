@@ -16,7 +16,7 @@ def log(*measures: dict) -> str:
     return "\n".join(["ledger load-gate: 1000 tasks", *(json.dumps(measure) for measure in measures), "done"])
 
 
-def test_one_noisy_pair_cannot_turn_the_median_pair_ratio_red():
+def test_one_noisy_pair_cannot_turn_the_order_balanced_pair_ratio_red():
     pairs = [
         (BASE, {**BASE, "write_p50_s": 1.4, "busiest_cores": 0.7}),
         (BASE, BASE),
@@ -77,6 +77,9 @@ def test_a_pair_missing_its_run_is_named():
     assert paired.regressions([], 1.5) == ["no paired runs were given"]
     assert paired.regressions([({**BASE, "busiest_cores": 0.0}, BASE)], 1.5) == [
         "busiest CPU window was not measured on the base run of pair 1"
+    ]
+    assert paired.regressions([(BASE, BASE), ({**BASE, "write_p50_s": 2.0}, {**BASE, "write_p50_s": 0.0})], 1.5) == [
+        "write p50 was not measured on the head run of pair 2"
     ]
 
 

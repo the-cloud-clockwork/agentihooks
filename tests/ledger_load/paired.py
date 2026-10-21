@@ -55,7 +55,7 @@ def regressions(pairs: list[tuple[dict | None, dict | None]], margin: float) -> 
             f"{label} was not measured on the {side} run of pair {number}"
             for number, pair in enumerate(pairs, 1)
             for side, run in zip(SIDES, pair)
-            if run[key] is None or side == "base" and not run[key]
+            if not run[key]
         ]
         if unmeasured:
             problems += unmeasured
