@@ -1204,3 +1204,12 @@ def test_publish_config_hands_the_hive_id_and_repos_to_the_config_snapshot(redis
     monkeypatch.setattr(config, "publish", lambda *args: calls.append(args))
     daemon.publish_config(redis, "pod", ["h/o/a"])
     assert calls == [(redis, "pod", ["h/o/a"])]
+
+
+def test_existing_beat_refreshes_agent_join_heartbeats(redis, monkeypatch):
+    from scripts.hive import join_report
+
+    seen = []
+    monkeypatch.setattr(join_report, "heartbeat", lambda *args: seen.append(args))
+    _publish(redis, monkeypatch, "pod", [], {}, 1000)
+    assert seen == [(redis, "pod", 1_000_000)]

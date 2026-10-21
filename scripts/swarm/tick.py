@@ -442,7 +442,7 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
             miss = launch_check.Miss(agent, found, waiting[agent.name]["relaunch"])
             actions.append(_failed_launch(slug, store, ledger, runtime, rows, miss, now_ms))
             continue
-        elapsed = launch_check.joined_at(agent, doc) - launch_check.session_started_at(agent)
+        elapsed = (launch_check.joined_at(agent, doc) or now_ms) - launch_check.session_started_at(agent)
         launch_check.record(store, slug, agent, found, now_ms, elapsed)
         launch_check.forget(store, slug, agent.name)
         launch_check.clear_relaunched(store, slug, agent.task)
@@ -451,9 +451,29 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
     return actions
 
 
+def _failed_hive_launch(slug, store, ledger, runtime, rows, miss, now_ms):
+    agent, found = miss.agent, miss.found
+    if not _retire_launch(slug, store, runtime, agent, now_ms):
+        return f"could not retire {agent.name} after its hive join failed, retrying next tick"
+    launch_check.record(store, slug, agent, found, now_ms, now_ms - launch_check.session_started_at(agent))
+    launch_check.forget(store, slug, agent.name)
+    if agent.lane == MASTER:
+        ledger.notify(slug, launch_check.told(found, "retired"))
+    return f"retired {agent.name} after its hive join failed" + _drop(slug, store, ledger, rows, agent)
+
+
 def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
     agent, found = miss.agent, miss.found
     fields, elapsed = ", ".join(found), now_ms - launch_check.session_started_at(agent)
+    hive = bool(agent.hive or reports.host(agent))
+    if (
+        hive
+        and not set(found) <= launch_check.REPORT_ONLY
+        and (not miss.relaunch or launch_check.relaunched(store, slug, agent.task))
+    ):
+        return _failed_hive_launch(slug, store, ledger, runtime, rows, miss, now_ms)
+    if hive and set(found) <= launch_check.REPORT_ONLY:
+        _settle_admission(slug, runtime, agent)
     if not miss.relaunch or set(found) <= launch_check.REPORT_ONLY:
         outcome, said = "report", f"{agent.name} failed its launch check on {fields}; reported only"
     elif launch_check.relaunched(store, slug, agent.task):
