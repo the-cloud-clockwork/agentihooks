@@ -34,6 +34,8 @@ jobs:
           version: '0.12.23'
           enable-cache: false
       - name: Install dependencies
+        env:
+          UV_CONSTRAINT: head/.github/test-constraints.txt
         run: uv pip install --system --excludes head/.github/test-excludes.txt -e './head[dev,all]'
       - name: Plant a dropped checkbox update and a dropped chat recipient in copies of head
         run: |
