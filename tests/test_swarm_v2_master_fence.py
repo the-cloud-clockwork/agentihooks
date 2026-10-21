@@ -110,13 +110,26 @@ def test_a_decision_is_posted_as_the_master_seat_that_made_it(world):
     assert MastersChannel(world.redis).read(SLUG, LEAD_NAME) == [post]
 
 
-def test_the_masters_channel_line_names_the_owner_of_a_cross_write():
-    op = {"op": "set", "path": "followups/f1/done", "value": True}
-
-    assert master_fence.announcement("master-2@sw", op, "master@sw") == (
-        "master-2@sw set followups/f1/done to true for master@sw"
-    )
-    assert master_fence.announcement("master@sw", op, "master@sw") == "master@sw set followups/f1/done to true"
+@pytest.mark.parametrize(
+    ("op", "text"),
+    [
+        (
+            {"op": "set", "path": "followups/f1/done", "value": True},
+            "master-2@sw set followups/f1/done to true for master@sw",
+        ),
+        (
+            {"op": "answer", "item": "questions/q1", "text": " Use the spare port "},
+            "master-2@sw answered questions/q1 for master@sw: Use the spare port",
+        ),
+        (
+            {"op": "task_update", "item": "tasks/t1", "fields": {"state": "blocked"}},
+            "master-2@sw set tasks/t1: state for master@sw",
+        ),
+    ],
+)
+def test_the_masters_channel_line_names_the_owner_of_a_cross_write(op, text):
+    assert master_fence.announcement("master-2@sw", op, "master@sw") == text
+    assert master_fence.announcement("master@sw", op, "master@sw") == master_fence.announcement("master@sw", op)
 
 
 def cross_rows(world):
