@@ -636,6 +636,7 @@ class HiveAcks(FakeRuntime):
     def __init__(self, fail=()):
         super().__init__()
         self.ordered, self.collected, self.acked, self.failing, self.broken = [], [], set(), set(fail), set()
+        self.refused = set()
 
     def spawn(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER
@@ -643,6 +644,8 @@ class HiveAcks(FakeRuntime):
         if lane == MASTER:
             return super().spawn(config, lane, name, task)
         assert task[ACK_LATER] is True
+        if task["id"] in self.refused:
+            raise SpawnError("hive refused the order", "refused")
         self.ordered.append(name)
         raise SpawnError("hive launch ordered, waiting for its acknowledgement", "pending")
 
@@ -709,6 +712,18 @@ def test_a_refused_hive_acknowledgement_reopens_its_task(store):
         assert failed_panes.held(store, "sw")[f"pane-{name}"]["failed_at"] == 2_000
     assert not set(names) & {agent.name for agent in store.agents("sw")}
     assert ledger.rows["t1"]["claimed_by"] not in names and ledger.rows["t2"]["claimed_by"] not in names
+
+
+def test_every_refused_hive_order_in_one_pass_reports_its_failure(store):
+    store.update("sw", max_eng=2)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
+    runtime.refused.update({"t1", "t2"})
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    failures = sorted(action for action in actions if action.startswith("spawn failed for "))
+    assert len(failures) == 2
+    assert [failure.startswith(f"spawn failed for {t}") for failure, t in zip(failures, ("t1", "t2"))] == [True, True]
+    assert all(failure.endswith(": hive refused the order") for failure in failures)
+    assert runtime.ordered == []
 
 
 def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(store, monkeypatch):
