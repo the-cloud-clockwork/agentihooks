@@ -552,6 +552,7 @@ def _stall_run(monkeypatch, connect, beat):
     return started
 
 
+@pytest.mark.wall_clock
 def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(monkeypatch, capsys, stalled):
     import time
 
@@ -582,6 +583,7 @@ def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(mon
     daemon.time.sleep.assert_called_once_with(1)
 
 
+@pytest.mark.wall_clock
 def test_a_stalled_wait_socket_reconnects_and_beats_within_one_beat_interval(monkeypatch, capsys, stalled):
     import time
 
