@@ -1,10 +1,16 @@
 import json
 from unittest.mock import Mock
 
-import fakeredis
 import pytest
 
 from scripts.doctor import ci, ci_read
+
+
+@pytest.fixture
+def cache():
+    import fakeredis
+
+    return fakeredis.FakeRedis(decode_responses=True)
 
 
 def attempt(monkeypatch, cache, tests, number=1):
@@ -17,8 +23,7 @@ def key(number):
     return f"{ci_read.ROOT}:doctor:ci-attempt:o/r:42:{number}"
 
 
-def test_write_compresses_all_observations_without_changing_results(monkeypatch):
-    cache = fakeredis.FakeRedis(decode_responses=True)
+def test_write_compresses_all_observations_without_changing_results(monkeypatch, cache):
     tests = [{"job": "unit", "nodeid": f"tests/test_x.py::test_{n}", "outcome": "PASSED"} for n in range(2000)]
     expected = attempt(monkeypatch, None, tests)
     assert attempt(monkeypatch, cache, tests) == expected
@@ -28,8 +33,7 @@ def test_write_compresses_all_observations_without_changing_results(monkeypatch)
     assert ci_read._attempt("o/r", {"id": 42, "head_sha": "head"}, 1, Mock(), cache) == expected
 
 
-def test_legacy_hit_preserves_flaky_findings_and_trims_other_oversized_keys(monkeypatch):
-    cache = fakeredis.FakeRedis(decode_responses=True)
+def test_legacy_hit_preserves_flaky_findings_and_trims_other_oversized_keys(monkeypatch, cache):
     failed = {"job": "unit", "nodeid": "tests/test_x.py::test_x", "outcome": "FAILED"}
     first = {"run_id": 42, "head_sha": "head", "attempt": 1, "tests": [failed, failed]}
     cache.set(key(1), json.dumps(first), ex=604800)
@@ -47,8 +51,7 @@ def test_legacy_hit_preserves_flaky_findings_and_trims_other_oversized_keys(monk
     assert ci.flaky_tests({**record, "attempts": [attempt(monkeypatch, cache, []), second]}) == ci.flaky_tests(record)
 
 
-def test_write_bounds_total_storage_and_shortens_only_long_expiries(monkeypatch):
-    cache = fakeredis.FakeRedis(decode_responses=True)
+def test_write_bounds_total_storage_and_shortens_only_long_expiries(monkeypatch, cache):
     for number in range(2, 20):
         cache.set(key(number), "x" * (1024 * 1024), ex=604800)
     cache.set(key(0), "{}", ex=20)
@@ -67,10 +70,9 @@ def test_write_bounds_total_storage_and_shortens_only_long_expiries(monkeypatch)
 
 
 @pytest.mark.parametrize("delta,retained", [(0, True), (1, False)])
-def test_encoded_entry_byte_boundary(monkeypatch, delta, retained):
+def test_encoded_entry_byte_boundary(monkeypatch, cache, delta, retained):
     from scripts.doctor import ci_cache
 
-    cache = fakeredis.FakeRedis(decode_responses=True)
     payload = {"tests": []}
     encoded = "x" * (1024 * 1024 + delta)
     monkeypatch.setattr(ci_cache, "encode", lambda value: encoded)
@@ -78,13 +80,19 @@ def test_encoded_entry_byte_boundary(monkeypatch, delta, retained):
     assert bool(cache.exists(key(1))) is retained
 
 
-def test_uncacheable_attempt_is_returned_in_full_and_removes_old_copy(monkeypatch):
+def test_uncacheable_attempt_is_returned_in_full_and_removes_old_copy(monkeypatch, cache):
     from scripts.doctor import ci_cache
 
-    cache = fakeredis.FakeRedis(decode_responses=True)
     tests = [{"job": "unit", "nodeid": "tests/test_x.py::test_x", "outcome": "FAILED"}]
     expected = attempt(monkeypatch, None, tests)
     cache.set(key(1), json.dumps(expected), ex=604800)
     monkeypatch.setattr(ci_cache, "encode", lambda value: "x" * (1024 * 1024 + 1))
     assert attempt(monkeypatch, cache, []) == expected
     assert not cache.exists(key(1))
+
+
+def test_legacy_hit_keeps_its_shorter_expiry(monkeypatch, cache):
+    expected = {"run_id": 42, "head_sha": "head", "attempt": 1, "tests": []}
+    cache.set(key(1), json.dumps(expected), px=1500)
+    assert attempt(monkeypatch, cache, []) == expected
+    assert 0 < cache.pttl(key(1)) <= 1500
