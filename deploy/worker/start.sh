@@ -17,7 +17,10 @@ fi
 umask 077
 export AGENTIHOOKS_HOME="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}"
 export HIVE_REPO_ROOT="${HIVE_REPO_ROOT:-$HOME/dev}"
-mkdir -p "$AGENTIHOOKS_HOME" "$HIVE_REPO_ROOT"
+mkdir -p "$AGENTIHOOKS_HOME" "$HIVE_REPO_ROOT" "$HOME/dev/tcc-ecosystem"
+ln -sfn "$(python3 -c 'import sys; print(sys.prefix)')" "$HOME/dev/tcc-ecosystem/.venv"
+git config --global user.name >/dev/null || git config --global user.name "agentihooks hive"
+git config --global user.email >/dev/null || git config --global user.email agentihooks-hive@users.noreply.github.com
 git config --global credential.https://github.com.helper \
   "!$(command -v python3) -m scripts.github_app_cli credential"
 if [[ "${HIVE_GITHUB_AUTH_MODE:-}" == app ]]; then

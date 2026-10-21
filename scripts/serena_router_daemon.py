@@ -121,6 +121,10 @@ def start(python: str = sys.executable) -> int:
     return 1
 
 
+def ensure() -> bool:
+    return os.environ.get("AGENTIHOOKS_SERENA") == "false" or start() == 0
+
+
 def stop() -> int:
     if _unit_path().exists() and mcp_daemon._systemctl_usable():
         _systemctl("stop", UNIT_NAME)
