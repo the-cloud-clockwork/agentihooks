@@ -89,7 +89,7 @@ def test_queue_sizing_splits_a_serial_group_until_it_has_half_timeout_margin(tmp
     path = tmp_path / "tests/test_serial.py"
     path.parent.mkdir()
     path.write_text("import pytest\npytestmark = pytest.mark.xdist_group('serial')\n")
-    measured = {f"tests/test_serial.py::test_{i}": 30.0 for i in range(48)}
+    measured = {f"tests/test_serial.py::test_{i}": 40.0 for i in range(48)}
     plan = matrix(tmp_path, {"3.12": measured})
 
     legs = [leg for leg in plan if leg["python-version"] == "3.12"]
@@ -300,21 +300,21 @@ def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_poo
     plan = json.loads("[" + output.read_text().strip().split("=", 1)[1] + "]")
     assert len(plan) == 30
     out = capsys.readouterr().out
-    assert "::warning::The capped queue plan predicts 630.0s, over 420s of the step timeout\n" in out
-    assert "30 queue jobs fit one wave of 30 runners; predicted slowest test step 630.0s" in out
+    assert "::warning::The capped queue plan predicts 490.0s, over 420s of the step timeout\n" in out
+    assert "30 queue jobs fit one wave of 30 runners; predicted slowest test step 490.0s" in out
 
 
 def test_a_capped_plan_at_the_step_timeout_warns(tmp_path, capsys, monkeypatch):
     from tests import queue_shards
 
-    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 630)
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 489)
     root, output = _overflowing_plan(tmp_path, 400.0)
 
     queue_shards.main(
         ["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")]
     )
 
-    assert "::warning::The capped queue plan predicts 630.0s, over 630s of the step timeout\n" in (
+    assert "::warning::The capped queue plan predicts 490.0s, over 489s of the step timeout\n" in (
         capsys.readouterr().out
     )
 
@@ -358,7 +358,7 @@ def test_queue_prediction_pins_the_first_shard_files_and_ignores_removed_files(t
 
     plan = matrix(tmp_path, {"3.12": durations}, {"3.12": 2})
 
-    assert {leg["predicted_seconds"] for leg in plan} == {331.875}
+    assert {leg["predicted_seconds"] for leg in plan} == {261.4375}
 
 
 def test_queue_capacity_admission_precedes_the_unit_matrix():
