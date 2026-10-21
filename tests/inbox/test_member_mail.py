@@ -86,6 +86,45 @@ def test_the_exit_sweep_moves_a_gone_member_agents_mail_to_its_seat(store, agent
     assert member.get(item.id).address == SEAT
 
 
+class HungRedis:
+    """A hive Redis whose socket timeout fires on every call; pings answer when answers_ping is set."""
+
+    def __init__(self, answers_ping):
+        self.answers_ping = answers_ping
+
+    def ping(self):
+        from redis.exceptions import TimeoutError as RedisTimeoutError
+
+        if not self.answers_ping:
+            raise RedisTimeoutError("Timeout reading from socket")
+        return True
+
+    def __getattr__(self, name):
+        from redis.exceptions import TimeoutError as RedisTimeoutError
+
+        def hung(*args, **kwargs):
+            raise RedisTimeoutError("Timeout reading from socket")
+
+        return hung
+
+
+@pytest.mark.parametrize("answers_ping", [False, True])
+def test_the_exit_sweep_skips_a_world_that_never_answers_and_still_settles_the_others(
+    store, agent, mail, monkeypatch, answers_ping
+):
+    member, item = mail
+    worlds = InboxStore.worlds
+    monkeypatch.setattr(
+        InboxStore, "worlds", lambda self: [*worlds(self), InboxStore(HungRedis(answers_ping), world="m2")]
+    )
+    store.put_agent("sw", replace(agent, state="finished"))
+    lines = exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert member.get(item.id).address == SEAT
+    assert lines == [
+        "skipped the inbox of hive m2 this pass: its Redis timed out or dropped: Timeout reading from socket"
+    ]
+
+
 def test_the_exit_sweep_withdraws_the_master_escalation_of_a_member_agents_unfillable_seat(store, agent, mail):
     member, item = mail
     agents = [agent, AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm")]
