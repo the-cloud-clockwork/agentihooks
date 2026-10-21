@@ -883,11 +883,18 @@ def test_heartbeat_execution_ids_prevent_double_counting_and_masters_are_exempt(
     assert setup.launcher.hives()[0]["agents"] == 1
 
 
-def test_a_hive_reporting_no_execution_ids_counts_each_running_agent_once(setup):
+@pytest.mark.parametrize(
+    ("sessions", "listed", "expected"),
+    [
+        ({"claude:account": 3, "interactive:claude:account": 1}, 0, 3),
+        ({"claude:account": 2}, 1, 3),
+    ],
+)
+def test_a_hive_reporting_no_execution_ids_counts_each_running_agent_once(setup, sessions, listed, expected):
     from scripts.hive import registry
     from scripts.swarm.store import AgentRecord
 
-    for index, state in enumerate(["working", "working", "launching"]):
+    started = [
         setup.store.start_execution(
             "fixture",
             AgentRecord(
@@ -900,12 +907,13 @@ def test_a_hive_reporting_no_execution_ids_counts_each_running_agent_once(setup)
                 runtime_target={"host_id": "remote"},
             ),
         )
-    setup.store.redis.set(
-        f"{registry.key('remote')}:sessions",
-        json.dumps({"claude:account": 2, "interactive:claude:account": 1}),
-    )
-    write_hive(setup, max_agents=4)
-    assert setup.launcher.hives()[0]["agents"] == 3
+        for index, state in enumerate(["working", "launching"] if not listed else ["working", "working"])
+    ]
+    if listed:
+        sessions = {**sessions, "_executions": {"claude:account": [started[0].execution_id]}}
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", json.dumps(sessions))
+    write_hive(setup, max_agents=expected + 1)
+    assert setup.launcher.hives()[0]["agents"] == expected
     assert setup.launcher.select(setup.config, "eng", {"id": "next"}).hive == "remote"
 
 
