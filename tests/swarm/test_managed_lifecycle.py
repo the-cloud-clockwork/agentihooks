@@ -69,6 +69,7 @@ def rig(monkeypatch):
     monkeypatch.setattr(protocol, "connect", connector)
     monkeypatch.setattr(supervisor, "start_time", lambda pid: 456 if pid == 123 else None)
     monkeypatch.setattr(runtime, "connect", lambda: store)
+    monkeypatch.setattr("scripts.herdr_panes.load", lambda environ: [])
     monkeypatch.setattr(live_binding, "read", Mock(return_value={"process": True}))
     from scripts import terminate_agent
 
@@ -243,9 +244,11 @@ def test_managed_conversation_discovery_uses_the_recorded_thread(rig):
     assert rig.runner.conversations() == {"viewer": "thread"}
 
 
-def test_managed_retirement_uses_the_server_start_identity(rig, tmp_path):
+def test_managed_retirement_uses_the_server_start_identity(rig, tmp_path, monkeypatch):
     from scripts.swarm import reaper
 
+    _launched(monkeypatch, rig, "viewer", "tv")
+    rig.herdr.side_effect = _panes({"viewer": "tv"})
     rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
     assert rig.runner.retire(rig.agent, homes=(tmp_path,))
     rig.runner.end.assert_called_once_with(rig.agent.name, 123, [], 456)
@@ -253,6 +256,7 @@ def test_managed_retirement_uses_the_server_start_identity(rig, tmp_path):
     assert rig.bindings.get(SLUG, rig.agent.execution_id).active_turn_id == ""
     assert not rig.store.redis.hgetall(rig.store.key(SLUG, "codex-endpoints"))
     assert [call.args[0] for call in rig.herdr.call_args_list] == [
+        ["pane", "list"],
         ["agent", "get", "viewer"],
         ["pane", "close", "viewer"],
     ]
@@ -350,14 +354,37 @@ def test_managed_retirement_keeps_a_folder_outside_the_endpoint_layout(rig, tmp_
     assert foreign.exists()
 
 
-def test_a_viewer_pane_that_will_not_close_refuses_the_retirement(rig):
+def test_a_viewer_pane_that_will_not_close_refuses_the_retirement(rig, monkeypatch):
     from scripts.swarm import reaper
 
-    rig.herdr.side_effect = RuntimeError("herdr is down")
+    def herdr(args):
+        if args == ["pane", "list"]:
+            return {"panes": [{"pane_id": "viewer", "terminal_id": "tv"}]}
+        raise RuntimeError("herdr is down")
+
+    _launched(monkeypatch, rig, "viewer", "tv")
+    rig.herdr.side_effect = herdr
     rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
     assert not rig.runner.retire(rig.agent)
     assert rig.runner.refusal(rig.agent) == {"process": 123, "refusal": "pane viewer: herdr is down"}
     assert rig.bindings.get(SLUG, rig.agent.execution_id).state == CONNECTED
+
+
+def test_a_recorded_viewer_pane_that_will_not_close_refuses_the_retirement(rig):
+    from scripts.swarm import reaper
+
+    def herdr(args):
+        if args == ["pane", "list"]:
+            return {"panes": [{"pane_id": "w2:p5", "terminal_id": "t5"}]}
+        raise RuntimeError("herdr is down")
+
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "w2:p5", "t5")
+    rig.herdr.side_effect = herdr
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert not rig.runner.retire(rig.agent)
+    assert rig.runner.refusal(rig.agent) == {"process": 123, "refusal": "viewer pane w2:p5: herdr is down"}
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == CONNECTED
+    assert rig.bindings.viewers(SLUG, rig.agent.execution_id) == {"w2:p5": "t5"}
 
 
 def test_a_pane_list_that_fails_refuses_the_retirement(rig):
@@ -428,3 +455,55 @@ def test_managed_retirement_closes_the_launch_pane_only_while_it_belongs_to_the_
     assert rig.runner.retire(rig.agent)
     assert (["pane", "close", "viewer"] in [call.args[0] for call in rig.herdr.call_args_list]) is closed
     assert rig.bindings.get(SLUG, rig.agent.execution_id).state == "exited"
+
+
+def _panes(listed):
+    def herdr(args):
+        if args == ["pane", "list"]:
+            return {"panes": [{"pane_id": pane, "terminal_id": terminal} for pane, terminal in listed.items()]}
+        if args[:2] == ["agent", "get"]:
+            raise RuntimeError("agent not found")
+        return _close_only(args)
+
+    return herdr
+
+
+def _launched(monkeypatch, rig, pane, terminal):
+    from scripts import herdr_panes
+
+    record = SimpleNamespace(pane_id=pane, terminal_id=terminal, kind="init-agent", owner_session=rig.agent.name)
+    monkeypatch.setattr(herdr_panes, "load", lambda environ: [record] if isinstance(environ, dict) else [])
+
+
+def test_managed_retirement_leaves_a_reused_pane_on_another_terminal_open(rig, monkeypatch):
+    from scripts.swarm import reaper
+
+    _launched(monkeypatch, rig, "viewer", "launch")
+    rig.herdr.side_effect = _panes({"viewer": "operator-shell"})
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(rig.agent)
+    assert ["pane", "close", "viewer"] not in [call.args[0] for call in rig.herdr.call_args_list]
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == "exited"
+
+
+def test_managed_retirement_leaves_a_pane_with_no_recorded_terminal_open(rig):
+    from scripts.swarm import reaper
+
+    rig.herdr.side_effect = _panes({"viewer": "operator-shell"})
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(rig.agent)
+    rig.herdr.assert_not_called()
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == "exited"
+
+
+def test_managed_retirement_after_a_reopen_closes_the_earlier_launch_pane(rig, monkeypatch):
+    from scripts.swarm import reaper
+
+    _launched(monkeypatch, rig, "viewer", "launch")
+    reopened = replace(rig.agent, pane_id="w2:p7")
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "w2:p7", "reopened")
+    rig.herdr.side_effect = _panes({"viewer": "launch", "w2:p7": "reopened"})
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(reopened)
+    closed = [call.args[0][2] for call in rig.herdr.call_args_list if call.args[0][:2] == ["pane", "close"]]
+    assert sorted(closed) == ["viewer", "w2:p7"]

@@ -38,7 +38,9 @@ WORKER_KEYS = (
     "swarm:*:merge-stall",
     "swarm:*:merge-stall-notice",
     "swarm:*:hive-placement-waits",
+    "swarm:*:dev-red",
     "seat:*:recaps",
+    "seat:*:learned",
     "seat-of:*:exit",
 )
 INDEX = f"{ROOT}:hives"

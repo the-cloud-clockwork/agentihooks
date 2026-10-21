@@ -280,8 +280,7 @@ def _stopped_tick(store, slug, ledger, runtime, held):
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
     from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
 
-    deployment = os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL)
-    if deployment != controller.LOCAL and not scheduled:
+    if not ledger_link.local_mode(os.environ) and not scheduled:
         return [CONTROLLER_TICKS]
     tick_stop.check()
     ledger = ledger or LedgerClient()

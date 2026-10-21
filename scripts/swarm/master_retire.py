@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 
 from scripts.inbox import exits
-from scripts.inbox.store import CLOSED, InboxError, InboxStore
+from scripts.inbox.store import CLOSED, Contended, InboxError, InboxStore
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 MINUTES = "AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES"
 REF = "master-retire-handoff"
+CLOSE_ATTEMPTS = 3
 ASK = (
     "The swarm is retiring you: {reason}. Write your Handoff v2 now with the handoff skill and submit it with "
     "agentihooks swarm {slug} handoff <doc>, then stop; your successor starts from it. "
@@ -52,10 +52,16 @@ def forget(store: RedisStore, slug: str, name: str) -> bool:
     store.redis.hdel(_key(store, slug), name)
     request = json.loads(raw)
     inbox = InboxStore(store.redis, world=request.get("world"))
-    with contextlib.suppress(InboxError):
-        item = inbox.get(request["item"])
-        if item.state not in CLOSED:
-            inbox.close(item.id, exits.BY, "done", "the master handed off or was retired")
+    for _ in range(CLOSE_ATTEMPTS):
+        try:
+            item = inbox.get(request["item"])
+            if item.state not in CLOSED:
+                inbox.close(item.id, exits.BY, "done", "the master handed off or was retired")
+        except Contended:
+            continue
+        except InboxError:
+            pass
+        break
     return True
 
 

@@ -622,7 +622,9 @@ def _dump(redis, keys):
 
 
 def redis_url(environ):
-    if environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local" and environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
+    from scripts.swarm_ledger import ledger_link
+
+    if not ledger_link.local_mode(environ) and environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
         return environ["AGENTIHOOKS_HIVE_REDIS_URL"]
     return environ.get("AGENTIHOOKS_SWARM_REDIS_URL") or DEFAULT_URL
 
@@ -649,8 +651,9 @@ def _adopt_saved_member(environ):
     from urllib.parse import urlsplit
 
     from scripts.hive import cli
+    from scripts.swarm_ledger import ledger_link
 
-    if environ.get("AGENTIHOOKS_DEPLOYMENT", "local") == "local":
+    if ledger_link.local_mode(environ):
         return
     saved = cli.saved_member(environ)
     url, current = saved.get("AGENTIHOOKS_HIVE_REDIS_URL"), environ.get("AGENTIHOOKS_HIVE_REDIS_URL")

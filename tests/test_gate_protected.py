@@ -950,7 +950,8 @@ def test_the_separate_summary_keeps_the_protected_declaration_expiry():
 @pytest.mark.parametrize("promotion", [False, True])
 @pytest.mark.parametrize("weakened", [False, True])
 @pytest.mark.parametrize("watcher_loss", [False, True])
-def test_the_promotion_gate_form_is_an_allowed_transition(weakened, promotion, watcher_loss):
+@pytest.mark.parametrize("lost_rerun", [False, True])
+def test_the_promotion_gate_form_is_an_allowed_transition(weakened, promotion, watcher_loss, lost_rerun):
     from scripts import ci_reuse
 
     base = _workflow()
@@ -960,6 +961,8 @@ def test_the_promotion_gate_form_is_an_allowed_transition(weakened, promotion, w
     head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(
         queue_tier=True, promotion=promotion, watcher_loss=watcher_loss
     )
+    if lost_rerun:
+        head["jobs"]["gate-required"]["steps"] = ci_reuse.lost_rerun(head["jobs"]["gate-required"]["steps"])
     if weakened:
         head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)

@@ -113,7 +113,9 @@ class Scheduler:
         self.machine = machine or socket.gethostname()
 
     def key(self, suffix: str) -> str:
-        if os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local":
+        from scripts.swarm_ledger import ledger_link
+
+        if not ledger_link.local_mode(os.environ):
             from scripts.swarm.keyspace import ROOT
 
             if member := os.environ.get("AGENTIHOOKS_HIVE_ID"):
