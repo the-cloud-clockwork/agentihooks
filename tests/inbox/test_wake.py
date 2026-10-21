@@ -79,12 +79,17 @@ def test_an_idle_pane_with_a_pending_item_gets_exactly_one_prompt(inbox):
 
 
 def test_many_pending_items_share_batched_wake_reads_without_changing_seen_or_fyi_behavior(inbox, monkeypatch):
+    from dataclasses import replace
+
     from scripts.inbox import seen
     from scripts.inbox.store import CLOSED
 
+    inbox.names.mint_code("sw", "sw", "/repo")
+    canonical = inbox.names.next("sw", "eng")
+    agents = [replace(agent, name=canonical) if agent.name == "sw-eng-1" else agent for agent in AGENTS]
     items = [inbox.send(MASTER_NAME, "earlier-agent", f"notice {n}", ref=f"written:{n}", fyi=True) for n in range(40)]
-    inbox.names.alias("earlier-agent", "sw-eng-1")
-    assert seen.SeenMarks(inbox.redis).mark("sw-eng-1", items[0].ref)
+    inbox.names.alias("earlier-agent", canonical)
+    assert seen.SeenMarks(inbox.redis).mark(canonical, items[0].ref)
     inbox.pending()
     reads = []
     execute = inbox.redis.execute_command
@@ -96,7 +101,7 @@ def test_many_pending_items_share_batched_wake_reads_without_changing_seen_or_fy
 
     monkeypatch.setattr(inbox.redis, "execute_command", traced_execute)
     herdr = FakeHerdr({"p1": "idle"})
-    run(inbox, herdr, FakeLedger(), sent_at(items[-1]) + 1)
+    run(inbox, herdr, FakeLedger(), sent_at(items[-1]) + 1, agents)
     assert len(reads) <= 30
     assert inbox.get(items[0].id).state in CLOSED
     assert all(inbox.get(item.id).state == "pending" for item in items[1:])
