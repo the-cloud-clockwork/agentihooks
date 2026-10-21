@@ -735,3 +735,4 @@ def test_place_master_leaves_a_stopping_or_stopped_swarm(store, monkeypatch, sta
 
     assert tick.place_master("sw", store, runtime, START) == []
     assert runtime.masters == []
+    assert lease.current(store, "sw") is None

@@ -2254,7 +2254,7 @@ never runs a tick pass, checks every running, paused, stopping or drained swarm 
 - **Master respawn.** On a workstation the watcher also restarts an empty front door master while the tick is
   stale: under this hive's controller lease and the tick lock it drops lead master records whose session is gone
   and spawns the master as the tick would. A swarm that another hive ticks is left alone.
-- **Master placement.** In a cluster (`AGENTIHOOKS_DEPLOYMENT` set to anything but `local`, or a hub ledger) the
+- **Master placement.** In a cluster (`AGENTIHOOKS_DEPLOYMENT` set to anything but `local`, or unset with `LEDGER_URL` set) the
   watcher places a front door master while the tick is stale, when that seat is empty and no master start is
   pending: under this hive's controller lease and the tick lock, through the cluster deployment, as the tick would.
   It drops no master record and restarts no scheduler.

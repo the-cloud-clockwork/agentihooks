@@ -1391,6 +1391,8 @@ def _under_tick_lock(slug, store, act):
     from scripts.swarm import controller, lease
     from scripts.swarm.commands import hive_id
 
+    if store.config(slug).state in ("stopping", "stopped"):
+        return []
     held = lease.acquire(store, slug, hive_id())
     if held is None:
         return []
