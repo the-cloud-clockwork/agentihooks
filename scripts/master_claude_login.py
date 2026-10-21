@@ -141,8 +141,8 @@ def login_account(number: int, copy: Mapping[str, str] | None = None) -> str:
     return aicode_tokens.slug(email) if email else ""
 
 
-def holders(number: int) -> dict[str, int]:
-    held = (_read(root(number) / OWNER).get("holders") or {}).items()
+def holders(folder: Path) -> dict[str, int]:
+    held = (_read(folder / OWNER).get("holders") or {}).items()
     return {owner: pid for owner, pid in held if _alive(pid)}
 
 
@@ -151,7 +151,7 @@ def logins() -> dict[int, str]:
 
 
 def free(name: str) -> list[str]:
-    return [found for number, found in logins().items() if found and set(holders(number)) <= {name}]
+    return [found for number, found in logins().items() if found and set(holders(root(number))) <= {name}]
 
 
 def empty() -> int:
@@ -164,22 +164,21 @@ def empty() -> int:
 def remove(number: int, bao: openbao_kv.OpenBao | None) -> str:
     if not 1 <= number <= MAX_SLOTS:
         raise LoginRefused(SLOT_RANGE.format(number=number, cap=MAX_SLOTS))
-    found = login_account(number)
-    if not _private(home(number)):
+    folder, found = root(number), login_account(number)
+    if not _private(folder / "claude"):
         raise LoginRefused(EMPTY.format(number=number))
-    with _locked(root(number)):
-        held = holders(number)
+    with _locked(folder):
+        held = holders(folder)
         if held:
             raise LoginRefused(HELD.format(owner=", ".join(sorted(held))))
-        shutil.rmtree(home(number))
+        shutil.rmtree(folder / "claude")
     if bao is not None:
         openbao_kv.merge(bao, creds(number), {}, RECORD_KEYS)
     return found
 
 
 @contextmanager
-def _locked(folder: Path | None = None) -> Iterator[Path]:
-    folder = folder or root()
+def _locked(folder: Path) -> Iterator[Path]:
     folder.mkdir(mode=PRIVATE_DIR, parents=True, exist_ok=True)
     with (folder / LOCK).open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -205,7 +204,7 @@ def _private(target: Path) -> Path | None:
 
 
 def build(rendered: Path, report: str | None = None) -> Path:
-    with _locked() as folder:
+    with _locked(root()) as folder:
         target = _rebuild(folder, rendered)
     if report:
         binding.rehome(Path(report), target)
@@ -314,7 +313,7 @@ def _alive(pid: object) -> bool:
 
 
 def claim(name: str, pid: int, alive: Callable[[object], bool] = _alive, floor: int = 0, alone: bool = False) -> int:
-    with _locked() as folder:
+    with _locked(root()) as folder:
         return _claim(folder, name, pid, alive, floor, alone)[0]
 
 
@@ -395,22 +394,24 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
     from scripts import master_logins
 
     offered = _offered(bao)
-    if not (offered or holders(slot())):
-        with _locked():
-            _adopt()
+    if not offered:
+        with _locked(root()) as folder:
+            if not holders(folder):
+                _adopt()
         offered = {slot(): {}} if _private(home()) else {}
     if not offered:
         raise LoginRefused(NO_LOGIN)
     named = {number: login_account(number, copy) for number, copy in offered.items()}
-    several = len(offered) > 1
-    left = {number: master_logins.left(found, time.time()) if several else 0.0 for number, found in named.items()}
-    held = []
-    for number in sorted(offered, key=lambda number: (-left[number], number != slot(), number)):
+    now, held = time.time(), []
+    order = list(offered)
+    if len(offered) > 1:
+        order.sort(key=lambda number: (-master_logins.left(named[number], now), number != slot(), number))
+    for number in order:
         with _locked(root(number)) as folder:
             try:
                 epoch = _claim(folder, name, os.getpid(), _alive, int(offered[number].get("epoch", 0)), True)[0]
             except LoginRefused:
-                held.append(f"{named[number] or number} by {', '.join(sorted(holders(number)))}")
+                held.append(f"{named[number] or number} by {', '.join(sorted(holders(folder)))}")
                 continue
         return number, epoch, offered[number]
     raise LoginRefused(ALL_HELD.format(held="; ".join(held)))

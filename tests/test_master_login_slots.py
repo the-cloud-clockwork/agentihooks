@@ -47,7 +47,7 @@ def _launch_elsewhere(monkeypatch, rendered, name):
 
 
 def _room(monkeypatch, **left):
-    monkeypatch.setattr(master_logins, "left", lambda account, now: left[account])
+    monkeypatch.setattr(master_logins, "left", lambda account, now: left[account] + 0 * now)
 
 
 def test_two_live_masters_never_share_a_stored_login(monkeypatch, rendered):
@@ -58,8 +58,8 @@ def test_two_live_masters_never_share_a_stored_login(monkeypatch, rendered):
     second, second_account = login.prepare(_environ(rendered, "master@doctor-1"), rendered.parent)
     assert (first, first_account) == (login.home(1), "oneatexample_com")
     assert (second, second_account) == (login.home(2), "twoatexample_com")
-    assert login.holders(1) == {"master@rig-1": os.getppid()}
-    assert login.holders(2) == {"master@doctor-1": os.getpid()}
+    assert login.holders(login.root(1)) == {"master@rig-1": os.getppid()}
+    assert login.holders(login.root(2)) == {"master@doctor-1": os.getpid()}
 
 
 def test_a_master_launches_on_the_stored_login_with_the_most_room(monkeypatch, rendered):

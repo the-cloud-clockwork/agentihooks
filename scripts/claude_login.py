@@ -254,7 +254,7 @@ def listing() -> int:
     if not found:
         print(NONE_STORED)
     for number, account in found.items():
-        held = ", ".join(sorted(login.holders(number))) or "free"
+        held = ", ".join(sorted(login.holders(login.root(number)))) or "free"
         print(LISTED.format(number=number, account=account or "unknown", state=held))
     return 0
 

@@ -1,7 +1,5 @@
 """Room left on each stored claude ai master login, from its own sessions' quota snapshots and the router cache."""
 
-from collections.abc import Iterable
-
 from hooks.context import quota_usage
 
 
@@ -47,7 +45,3 @@ def usage(account: str, now: float) -> tuple[float, float, float]:
 def left(account: str, now: float) -> float:
     five, week, _ = usage(account, now)
     return 100.0 - max(five, week)
-
-
-def ranked(accounts: Iterable[str], now: float) -> list[str]:
-    return sorted(accounts, key=lambda account: (-left(account, now), account))
