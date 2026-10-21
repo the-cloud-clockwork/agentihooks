@@ -28,7 +28,7 @@ def test_one_noisy_pair_cannot_turn_the_median_pair_ratio_red():
 @pytest.mark.parametrize(
     "change, problem",
     [
-        ({"errors": 1}, "head had 2 failed requests, base 0"),
+        ({"errors": 1}, "head had 4 failed requests, base 0"),
         ({"write_p50_s": 2.0}, "head write p50 order balanced pair ratio 2.00 exceeds the 1.5x margin"),
         ({"busiest_cores": 0.8}, "head busiest CPU window order balanced pair ratio 1.60 exceeds the 1.5x margin"),
     ],
