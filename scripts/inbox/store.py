@@ -426,6 +426,7 @@ class InboxStore:
 
     def _try_redirect(self, item_id, by, address, reason, expected_address, expected_receiver):
         key = self.key("item", item_id)
+        dest = self.home_store(address)
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
             item = _item(pipe.hgetall(key), item_id)
@@ -451,6 +452,8 @@ class InboxStore:
                 updated_at=now_ms(),
                 reason=reason,
             )
+            if dest is not self:
+                return self._relocate(pipe, item, moved, dest, by, (last, pooled))
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
             if moved.address != item.address:
@@ -468,6 +471,47 @@ class InboxStore:
             pipe.rpush(self.key("history", item_id), _entry(moved.state, by, reason, moved.updated_at))
             pipe.execute()
             return moved
+
+    def home_store(self, address: str) -> "InboxStore":
+        """The inbox a send to address writes: this one, or on the controller the hive member's that holds it."""
+        from scripts.hive import scope
+
+        if not address or scope.member():
+            return self
+        home = self.home(address)
+        return self if home == self.world else InboxStore(self.redis, persist=self.persist, world=home)
+
+    def _relocate(self, pipe, item, moved, dest, by, flags):
+        """Move item out of this inbox into dest's, pending at moved.address with its history; flags is (last pending
+        at its address, held in a master pool)."""
+        last, pooled = flags
+        history, entry = self.key("history", item.id), self.key("entry", item.id)
+        pipe.watch(history, entry)
+        entries, about = pipe.lrange(history, 0, -1), pipe.get(entry)
+        pipe.multi()
+        if pooled:
+            self.pool.stage_remove(pipe, item)
+        pipe.delete(self.key("item", item.id), history, entry)
+        for index in ("address", "open", "pending"):
+            pipe.zrem(self.key(index, item.address), item.id)
+        pipe.zrem(self.key("delivered"), item.id)
+        pipe.decr(self.key("open-size", item.address))
+        if last:
+            pipe.srem(self.key("waiting"), item.address)
+        pipe.hset(dest.key("item", item.id), mapping=_fields(moved))
+        pipe.rpush(dest.key("history", item.id), *entries, _entry(moved.state, by, moved.reason, moved.updated_at))
+        if about:
+            pipe.set(dest.key("entry", item.id), about)
+        pipe.zadd(dest.key("address", moved.address), {item.id: item.created_at})
+        pipe.zadd(dest.key("open", moved.address), {item.id: item.created_at})
+        pipe.incr(dest.key("open-size", moved.address))
+        pipe.zadd(dest.key("pending", moved.address), {item.id: item.created_at})
+        pipe.sadd(dest.key("waiting"), moved.address)
+        if dest.persist is not None:
+            dest.persist(pipe)
+        pipe.publish(NOTIFY, moved.address)
+        pipe.execute()
+        return moved
 
     def _move_address(self, pipe, item, address):
         """pipe is in MULTI: move item's address and open entries, and the open counts, to address."""

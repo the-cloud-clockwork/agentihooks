@@ -152,11 +152,22 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
         for name, seat in due:
             _settle_gone(inbox, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
     for world in worlds:
+        _rehome_seat_mail(world, {seat for _, seat in seats if seat})
         _settle_seat_notices(world, {seat for _, seat in seats if seat}, active)
         _settle_peer_mail(world, slug, store, active)
         if slug in store.slugs():
             empty = {seat for _, seat in seats} - {agent.seat for agent in live}
             _settle_unfillable(world, store.config(slug), empty)
+
+
+def _rehome_seat_mail(inbox: "InboxStore", seats: set) -> None:
+    """Pending seat mail held in an inbox the seat's occupant does not read: moved to the one it reads."""
+    for seat in sorted(seats):
+        if inbox.home_store(seat) is inbox:
+            continue
+        for item in inbox.open_items(seat):
+            if item.state == "pending":
+                inbox.redirect(item.id, BY, seat, f"moved to the inbox {seat}'s occupant reads", seat)
 
 
 def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:
