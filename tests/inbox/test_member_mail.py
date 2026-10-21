@@ -232,3 +232,57 @@ def test_moving_an_item_between_worlds_moves_its_indexes_and_ledger_entry(store,
     assert target.entry_of(item.id) == "tasks/t1"
     assert [i.id for i in target.open_items(agent.name)] == [item.id]
     assert [i.id for i in target.pending()] == [item.id]
+    assert store.redis.smembers(member.key("waiting")) == set()
+    assert store.redis.smembers(target.key("waiting")) == {agent.name}
+    assert (
+        member.redis.get(member.key("open-size", agent.name)),
+        target.redis.get(target.key("open-size", agent.name)),
+    ) == (
+        "0",
+        "1",
+    )
+
+
+def test_moving_a_delivered_item_between_worlds_returns_it_to_pending(store, agent, mail):
+    member, item = mail
+    member.deliver(item.id, agent.name)
+    assert store.redis.zscore(member.key("delivered"), item.id) is not None
+    moved = member.move_world(item.id, InboxStore(store.redis, world="m2"), exits.BY, "moved")
+    assert moved.state == "pending"
+    assert store.redis.zscore(member.key("delivered"), item.id) is None
+
+
+def test_moving_an_item_between_worlds_runs_the_target_persist_hook(store, agent, mail):
+    member, item = mail
+    target = InboxStore(store.redis, world="m2", persist=lambda pipe: pipe.set("persisted", item.id))
+    member.move_world(item.id, target, exits.BY, "moved")
+    assert store.redis.get("persisted") == item.id
+
+
+def test_the_sweep_leaves_seat_mail_whose_seat_names_another_occupant(store, moved_seat):
+    member, item, _ = moved_seat
+    store.seats.occupy(SEAT, "ghost", 3)
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert [i.id for i in member.inbox(SEAT)] == [item.id]
+
+
+def test_a_member_world_sweep_leaves_seat_mail_for_an_occupant_on_another_host(store, moved_seat):
+    member, item, _ = moved_seat
+    exits.sweep(InboxStore(store.redis, world="m1"), "sw", store, lambda: {})
+    assert [i.id for i in member.inbox(SEAT)] == [item.id]
+
+
+def test_the_sweep_leaves_master_seat_mail_in_its_world(store, moved_seat):
+    member, _, _ = moved_seat
+    seat = "master@sw"
+    first = store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(first, "eng", "t2", seat=seat, hive="m1"))
+    store.seats.occupy(seat, first, 1)
+    item = InboxStore(store.redis).send("sender", seat, "for the master")
+    assert [i.id for i in member.inbox(seat)] == [item.id]
+    [previous] = [a for a in store.agents("sw") if a.name == first]
+    second = store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(second, "eng", "t2", seat=seat, hive="m2"), previous.execution_id)
+    store.seats.occupy(seat, second, 2)
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert [i.id for i in member.inbox(seat)] == [item.id]

@@ -161,23 +161,20 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
 
 
 def _move_seat_mail(inbox: "InboxStore", worlds: list["InboxStore"], live: list) -> None:
-    """A lane seat's open mail follows its live occupant into the world of the host it runs on."""
-    if len(worlds) < 2:
-        return
+    """A lane seat's open mail follows its live occupant into the world of the host it runs on; a master seat's
+    mail stays with the master pool of its world."""
     by_world = {world.world: world for world in worlds}
-    homes = {
-        agent.seat: (agent.name, by_world.get(inbox.home(agent.seat)))
-        for agent in live
-        if agent.seat and LANE_SEAT.fullmatch(agent.seat) and inbox.seats.occupant(agent.seat).occupant == agent.name
-    }
-    for world in worlds:
-        quiet = world.quiet(list(homes))
-        for seat, (name, home) in homes.items():
-            if home is None or world is home or seat in quiet:
-                continue
-            where = f"hive {home.world}" if home.world else "the controller"
-            for item in world.open_items(seat):
-                world.move_world(item.id, home, BY, f"moved to {where}, where {name} runs {seat}")
+    for agent in live:
+        if not (LANE_SEAT.fullmatch(agent.seat) and inbox.seats.occupant(agent.seat).occupant == agent.name):
+            continue
+        home = by_world.get(inbox.home(agent.seat))
+        if home is None:
+            continue
+        where = f"hive {home.world}" if home.world else "the controller"
+        for world in worlds:
+            if world is not home:
+                for item in world.open_items(agent.seat):
+                    world.move_world(item.id, home, BY, f"moved to {where}, where {agent.name} runs {agent.seat}")
 
 
 def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:
