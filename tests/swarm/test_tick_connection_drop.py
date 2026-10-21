@@ -45,5 +45,8 @@ def test_an_exit_sweep_that_keeps_dropping_logs_and_the_tick_still_spawns(store,
     actions = tick("sw", store, tasks(("t1", "eng")), runtime, 1)
     assert len(calls) == 2
     assert [task for _, _, task in runtime.spawned] == ["t1"]
-    assert "scripts.inbox.exits.sweep skipped, its Redis connection dropped twice" in capsys.readouterr().err
+    assert (
+        "scripts.inbox.exits.sweep skipped, its Redis connection dropped twice: Connection closed by server."
+        in capsys.readouterr().err
+    )
     assert "skipped scripts.inbox.exits.sweep: its Redis connection dropped twice" in actions
