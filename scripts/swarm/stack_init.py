@@ -106,7 +106,7 @@ def materialize(home: Path) -> None:
 
 def loopback(url: str) -> bool:
     try:
-        host = urllib.parse.urlsplit(url).hostname or ""
+        host = urllib.parse.urlsplit(url).hostname
         return host == "localhost" or ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
@@ -139,7 +139,7 @@ def adopt(env_file: Path, environ: Mapping[str, str]) -> bool:
             if environ.get(key)
         }
     )
-    if loopback(values.get("AGENTIHOOKS_SWARM_REDIS_URL", "")):
+    if "AGENTIHOOKS_SWARM_REDIS_URL" in values and loopback(values["AGENTIHOOKS_SWARM_REDIS_URL"]):
         del values["AGENTIHOOKS_SWARM_REDIS_URL"]
     write_private(env_file, "".join(f"{key}={value}\n" for key, value in values.items()))
     return True
