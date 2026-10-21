@@ -1,6 +1,5 @@
 import io
 
-import fakeredis
 import pytest
 
 from scripts.scheduler import core, service
@@ -39,6 +38,8 @@ def test_the_mode_rule_reads_a_hub_address_with_no_mode_as_remote(environ, local
 
 @pytest.fixture
 def swarm_store():
+    import fakeredis
+
     swarms = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     swarms.create(SwarmConfig("sw", ".", 1, 0, state="running"))
     return swarms
