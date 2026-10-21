@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from hooks.context import account_sessions, broadcast
 from scripts import claude_quota_balancer as balancer
-from scripts import codex_router, github_app_cli, session_bands
+from scripts import codex_router, github_app_cli, master_claude_login, session_bands
 from scripts.hive import quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
@@ -55,6 +55,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     with redis.pipeline() as pipe:
         registry.seed(pipe, local_id)
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
+        fields["master_login"] = json.dumps({"claude": master_claude_login.signed_in()})
         fields["heartbeat_at"] = str(int(time.time() * 1000))
         pipe.hset(key, mapping=fields)
         if not member:

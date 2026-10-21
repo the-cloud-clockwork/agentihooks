@@ -89,6 +89,13 @@ def route(login: bool) -> list[str]:
     return ["--route", ROUTE] if login else []
 
 
+def signed_in() -> str:
+    if hooks_config.MASTER_CLAUDE_LOGIN is not True:
+        return ""
+    email = (_read(home() / CONFIG).get(ACCOUNT) or {}).get("emailAddress")
+    return aicode_tokens.slug(email) if email else ""
+
+
 def slot() -> int:
     raw = os.environ.get(SLOT_ENV)
     if not raw and _slot_file().is_file():

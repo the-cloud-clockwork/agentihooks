@@ -11,6 +11,7 @@ from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import Placed
+from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
 
 HIVE = "hive"
@@ -80,6 +81,11 @@ def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: 
         if slot["account"] == selected.account and "cap" in slot
     ]
     return caps[0] if caps else fallback
+
+
+def _master_login(hives: list[dict], hive_id: str) -> str:
+    """A master login shares its account's quota, so it reserves against that account's slot cap."""
+    return next((hive.get("master_login", {}).get("claude", "") for hive in hives if hive["id"] == hive_id), "")
 
 
 def _by_origin(hives: list[dict], repo: str) -> list[dict]:
@@ -153,7 +159,8 @@ class HiveLaunch:
         rows = getattr(self.herdr, "_quota_accounts", None)
         rows = capacity.accounts(dict(os.environ), now / 1000, refresh=False) if rows is None else rows
         if lane == "master" and not task.get("route_kind"):
-            selected = self._master_selection(config, decision, hives, now, rows)
+            front = front_door.holds(self.slug, task.get("seat", ""))
+            selected = self._master_selection(config, decision, hives, now, rows, front)
             return self._record_wait(lane, task, selected)
         account = saved.get("account") or self.herdr.planned_account(task["id"], "claude")
         candidates = [
@@ -179,16 +186,17 @@ class HiveLaunch:
         found = replace(found, role=role) if isinstance(found, placement.Wait) else found
         return self._record_wait(lane, task, found)
 
-    def _master_selection(self, config, decision, hives, now, rows):
+    def _master_selection(self, config, decision, hives, now, rows, front=False):
         accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
         available = [
             {**hive, "slots": [slot for slot in hive["slots"] if _key(slot["account"]) in accounts]} for hive in hives
         ]
-        selected = placement.place_master("claude", "", config.repo, available, now)
+        selected = placement.place_master("claude", "", config.repo, available, now, front)
         if isinstance(selected, placement.Wait):
             return selected if hives else placement.Wait(f"no live hive takes {placement.MASTER}")
         if selected.route_kind == "interactive":
-            account = capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
+            cap = _slot_cap(hives, selected, 1) if front and _master_login(hives, selected.hive) else 1
+            account = capacity.Account("claude", selected.account, "room", 0, None, None, cap, kind="interactive")
         else:
             row = accounts[_key(selected.account)]
             account = replace(row, name=selected.account, cap=_slot_cap(available, selected, row.cap))
