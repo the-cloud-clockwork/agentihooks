@@ -74,7 +74,7 @@ def world(tmp_path, monkeypatch):
         redis.hset(registry.key(member), "heartbeat_at", at)
 
     run.on_merge = beat
-    sleeps = []
+    sleeps, now = [], [NOW]
     tools = create.Tools(
         redis,
         _bao(bao),
@@ -83,8 +83,8 @@ def world(tmp_path, monkeypatch):
         LOCAL,
         "LOCAL CA\n",
         run=run,
-        clock=lambda: NOW,
-        sleep=sleeps.append,
+        clock=lambda: now[0],
+        sleep=lambda seconds: sleeps.append(seconds) or now.__setitem__(0, now[0] + seconds),
         out=lines.append,
     )
     return SimpleNamespace(
@@ -197,6 +197,8 @@ def test_the_dry_run_names_the_pull_request_files(world):
     create.create(world.tools, create.Options(dry_run=True))
     files = f"k8s/manifests/{NAME}/ssh-lan.yaml, {create_render.NFS_HOMES_PATH}"
     assert f"hive create {NAME}: manifests: would open a pull request into {REPO} dev with {files}" in world.lines
+    keys = f"hive create {NAME}: ssh keys: would write a new SSH host key and 2 authorized keys into OpenBao secret/{RECORD}"
+    assert keys in world.lines
     assert world.published == [(world.tools.environ, SETTINGS_PATH, True)]
 
 
@@ -227,6 +229,12 @@ def test_a_wait_sleeps_between_checks_until_its_deadline(world):
     with pytest.raises(auth.HiveError, match="timed out after 60s waiting for it"):
         create._wait(world.tools, create.Options(timeout_s=60), "it", lambda: next(checks))
     assert world.sleeps == [create.POLL_S, create.POLL_S]
+
+
+def test_a_wait_with_no_time_left_checks_once_and_never_sleeps(world):
+    with pytest.raises(auth.HiveError, match="timed out after 0s waiting for it"):
+        create._wait(world.tools, create.Options(timeout_s=0), "it", lambda: False)
+    assert world.sleeps == []
 
 
 def test_a_master_is_not_the_engineer(world, monkeypatch):
@@ -287,9 +295,9 @@ def test_an_openbao_failure_is_a_refusal_naming_it(world, sealed):
 def test_gh_keeps_leading_space_and_trims_only_trailing_newlines():
     def run(argv, **kwargs):
         assert kwargs == {"input": '{"a": 1}', **GH}
-        return subprocess.CompletedProcess(argv, 0, "  text \n\n", "")
+        return subprocess.CompletedProcess(argv, 0, "  text X\n\n", "")
 
-    assert create_github.gh(run, ["api", "x"], {"a": 1}) == "  text "
+    assert create_github.gh(run, ["api", "x"], {"a": 1}) == "  text X"
 
 
 def test_gh_that_cannot_run_names_its_subcommand():
@@ -348,7 +356,7 @@ def test_cli_create_help_names_every_option(capsys):
         "seconds each wait may take; defaults to 1800",
         "Print every step and file, and write nothing",
     ):
-        assert line in text
+        assert f" {line} " in f" {text} "
     with pytest.raises(SystemExit):
         cli.main(["--help"])
     assert "Create a Kubernetes hive from nothing and add it to herdr" in " ".join(capsys.readouterr().out.split())

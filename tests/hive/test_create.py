@@ -118,6 +118,7 @@ def world(tmp_path, monkeypatch):
         redis.hset(registry.key(member), "heartbeat_at", NOW * 1000)
 
     run.on_merge = beat
+    now = [NOW]
     tools = create.Tools(
         redis,
         _bao(bao),
@@ -125,8 +126,8 @@ def world(tmp_path, monkeypatch):
         "root",
         "redis://127.0.0.1:6379/0",
         run=run,
-        clock=lambda: NOW,
-        sleep=lambda _seconds: None,
+        clock=lambda: now[0],
+        sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
         out=lines.append,
     )
     return SimpleNamespace(tools=tools, bao=bao, run=run, lines=lines, home=tmp_path, published=published)
