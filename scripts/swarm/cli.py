@@ -622,17 +622,20 @@ def cmd_prober(store, args):
 
 def cmd_tick_watch(store, args):
     from scripts.swarm import scheduled_tick, tick_watch
-    from scripts.swarm.tick import respawn_master
+    from scripts.swarm.tick import place_master, respawn_master
     from scripts.swarm_ledger import ledger_link
 
-    repair = None
+    runtime = routed(herdr=HerdrRuntime())
     if ledger_link.local_mode(os.environ):
-        runtime = routed(herdr=HerdrRuntime())
 
         def respawn(slug):
             return respawn_master(slug, store, runtime, now_ms())
 
         repair = tick_watch.Repair(scheduled_tick.restart, respawn)
+    else:
+
+        def repair(slug, now):
+            return place_master(slug, store, runtime, now)
 
     tick_watch.run(store, now_ms, repair)
 
