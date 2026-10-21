@@ -555,8 +555,18 @@ def test_back_off_logs_the_cause_and_sleeps_the_capped_delay(monkeypatch, capsys
 def test_clients_keep_the_source_connection_class():
     import redis
 
-    for client in daemon.clients(redis.Redis.from_url("rediss://127.0.0.1:1")):
+    source = redis.Redis.from_url("rediss://127.0.0.1:1")
+    keys = set(source.connection_pool.connection_kwargs)
+    for client in daemon.clients(source):
         assert client.connection_pool.connection_class is redis.SSLConnection
+        assert client.connection_pool.connection_kwargs["socket_keepalive"] is True
+        assert set(client.connection_pool.connection_kwargs) == keys | {
+            "socket_timeout",
+            "socket_connect_timeout",
+            "socket_keepalive",
+            "health_check_interval",
+            "retry",
+        }
 
 
 def _stall_run(monkeypatch, connect, beat):
