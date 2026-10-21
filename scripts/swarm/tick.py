@@ -1155,7 +1155,7 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
         task = rows.get(agent.task) or {"id": agent.task}
         try:
             if now_ms - agent.started_at >= LEASE_MS:
-                raise SpawnError(ACK_EXPIRED, "ambiguous")
+                raise SpawnError(ACK_EXPIRED)
             placed = runtime.collect(
                 config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True}
             )
