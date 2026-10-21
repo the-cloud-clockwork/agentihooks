@@ -71,8 +71,8 @@ def _github(monkeypatch, runs, *, manifests, failed=(), uncovered=()):
 def _manifest(run_id):
     return {
         "commit": f"{run_id:040d}",
-        "units": [],
-        "tests": {"tests/test_a.py::test_a": {"units": [], "files": [], "escapes": False}},
+        "units": ["hooks/a.py::a"],
+        "tests": {"tests/test_a.py::test_a": {"units": [0], "files": [], "escapes": False}},
     }
 
 
@@ -86,6 +86,29 @@ def test_the_api_reads_through_gh_and_fails_on_an_error(monkeypatch):
     monkeypatch.setattr(ci_test_plan.subprocess, "run", run)
     assert ci_test_plan._api("repos/x") == b"{}"
     assert calls == [((["gh", "api", "repos/x"],), {"capture_output": True, "check": True, "timeout": 60})]
+
+
+@pytest.mark.parametrize(
+    "message", ["HTTP 403: Resource not accessible by integration", "HTTP 404: Not Found", "HTTP 502: Bad Gateway"]
+)
+def test_a_failed_record_download_names_the_github_error_and_stays_red(monkeypatch, tmp_path, capsys, message):
+    download = ci_test_plan._api
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    api = ci_test_plan._api
+
+    def fetch(endpoint):
+        return download(endpoint) if endpoint.endswith("/zip") else api(endpoint)
+
+    def fail(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command, stderr=message.encode())
+
+    monkeypatch.setattr(ci_test_plan, "_api", fetch)
+    monkeypatch.setattr(ci_test_plan.subprocess, "run", fail)
+    out = tmp_path / "reused-tests.json"
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)])
+    assert message in capsys.readouterr().err
+    assert not out.exists()
 
 
 def test_the_newest_dev_run_whose_unit_shards_passed_and_kept_a_manifest_is_the_record(monkeypatch):
@@ -131,6 +154,106 @@ def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
     assert not out.exists()
     assert output.read_text() == "reused=0\nrun=\ncommit=\n"
     assert "every test runs" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("content", "zipped"),
+    [
+        (b"", False),
+        (b"not a zip", False),
+        (b"{}", "corrupt-deflate"),
+        (b"", True),
+        (b"{", True),
+        (bytes([255]), True),
+        (b"[]", True),
+        (b"{}", True),
+        (json.dumps({**_manifest(1), "tests": {}}).encode(), True),
+        (json.dumps({**_manifest(1), "tests": []}).encode(), True),
+        (json.dumps({**_manifest(1), "units": {}}).encode(), True),
+        (json.dumps({**_manifest(1), "tests": {"test": {}}}).encode(), True),
+        (json.dumps({**_manifest(1), "tests": {"test": None}}).encode(), True),
+        (
+            json.dumps({**_manifest(1), "tests": {"test": {"units": [0], "files": None, "escapes": False}}}).encode(),
+            True,
+        ),
+        (json.dumps({**_manifest(1), "tests": {"test": {"units": [0], "files": [], "escapes": None}}}).encode(), True),
+        (
+            json.dumps({**_manifest(1), "tests": {"test": {"units": [-1], "files": [], "escapes": False}}}).encode(),
+            True,
+        ),
+        (json.dumps({**_manifest(1), "tests": {"test": {"units": [1], "files": [], "escapes": False}}}).encode(), True),
+        (
+            json.dumps({**_manifest(1), "tests": {"test": {"units": [True], "files": [], "escapes": False}}}).encode(),
+            True,
+        ),
+        (
+            json.dumps({**_manifest(1), "tests": {"test": {"units": [0.0], "files": [], "escapes": False}}}).encode(),
+            True,
+        ),
+    ],
+    ids=[
+        "empty-download",
+        "corrupt-zip",
+        "corrupt-deflate",
+        "empty-json",
+        "corrupt-json",
+        "invalid-encoding",
+        "non-object",
+        "missing-fields",
+        "empty-tests",
+        "wrong-tests",
+        "wrong-units",
+        "wrong-test",
+        "non-object-test",
+        "wrong-files",
+        "wrong-escapes",
+        "negative-unit",
+        "unit-out-of-range",
+        "boolean-unit",
+        "float-unit",
+    ],
+)
+def test_an_unusable_download_runs_every_test_and_names_its_own_fallback(
+    monkeypatch, tmp_path, capsys, content, zipped
+):
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    api = ci_test_plan._api
+    buffer = io.BytesIO()
+    if zipped:
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("manifest.json", content)
+    payload = buffer.getvalue() if zipped else content
+    if zipped == "corrupt-deflate":
+        offset = 30 + len("manifest.json")
+        payload = payload[:offset] + bytes([7]) + payload[offset + 1 :]
+    monkeypatch.setattr(ci_test_plan, "_api", lambda endpoint: payload if endpoint.endswith("/zip") else api(endpoint))
+    monkeypatch.setattr(
+        ci_test_plan.dep_manifest, "changes", lambda *args: pytest.fail("Unusable records cannot plan reuse")
+    )
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    out = tmp_path / "reused-tests.json"
+    assert ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)]) == 0
+    assert not out.exists()
+    assert output.read_text() == "reused=0\nrun=\ncommit=\n"
+    report = capsys.readouterr().out
+    assert "Unusable test record" in report
+    assert "Dev run 1" in report
+    assert "every test runs" in report
+    assert "No test record" not in report
+    if not zipped:
+        reason = "File is not a zip file"
+    elif zipped == "corrupt-deflate":
+        reason = "Error -3 while decompressing data: invalid block type"
+    elif content == b"":
+        reason = "Expecting value: line 1 column 1 (char 0)"
+    elif content == b"{":
+        reason = "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+    elif content == bytes([255]):
+        reason = "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
+    else:
+        reason = "dependency manifest schema is invalid or empty"
+    assert report == f"::warning title=Unusable test record::Dev run 1: {reason}; every test runs.\n"
 
 
 @pytest.mark.parametrize("cause", [None, ".github/workflows/test.yml"])
