@@ -442,10 +442,20 @@ def test_the_watcher_reports_a_failing_swarm_and_goes_on(store, monkeypatch, cap
     assert f"sw: told {FRONT_DOOR} the tick is stale" in out.out
 
 
-@pytest.mark.parametrize(("deployment", "respawns"), [(None, True), ("local", True), ("distributed", False)])
-def test_the_watch_command_respawns_only_on_a_workstation(monkeypatch, deployment, respawns):
+@pytest.mark.parametrize(
+    ("deployment", "hub", "respawns"),
+    [
+        (None, "", True),
+        ("local", "", True),
+        ("distributed", "", False),
+        (None, "https://hub.example:8765", False),
+        ("local", "https://hub.example:8765", True),
+    ],
+)
+def test_the_watch_command_respawns_only_on_a_workstation(monkeypatch, deployment, hub, respawns):
     from scripts.swarm import tick
 
+    monkeypatch.setenv("LEDGER_URL", hub)
     if deployment is None:
         monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
     else:

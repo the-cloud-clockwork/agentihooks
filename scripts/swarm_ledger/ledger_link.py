@@ -114,12 +114,16 @@ def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ)
 
 
 def remote(environ=os.environ, slug="") -> bool:
-    mode = environ.get("AGENTIHOOKS_DEPLOYMENT")
     return bool(
         ledger_route.url(slug)
         or hosted_probe.hosted(environ)
         or (environ.get("SWARM_URL") if not slug or environ.get("AGENTIHOOKS_SWARM", slug) == slug else "")
-    ) or (bool(environ.get("LEDGER_URL")) if mode is None else mode != "local")
+    ) or not local_mode(environ)
+
+
+def local_mode(environ=os.environ) -> bool:
+    mode = environ.get("AGENTIHOOKS_DEPLOYMENT")
+    return not environ.get("LEDGER_URL") if mode is None else mode == "local"
 
 
 def access_headers(environ=os.environ) -> dict:
