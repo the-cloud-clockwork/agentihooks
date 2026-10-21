@@ -151,6 +151,13 @@ def _remove(args: argparse.Namespace) -> list[str]:
     return remove.remove(store, bao, plan)
 
 
+def _retire(args: argparse.Namespace) -> str:
+    if args.command == "revoke":
+        auth.revoke(redis_client(), args.id)
+        return f"revoked {args.id}"
+    return "\n".join(_remove(args))
+
+
 def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
@@ -307,11 +314,8 @@ def main(argv: list[str]) -> int:
             print(
                 f"refreshed the Redis credential of hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}"
             )
-        elif args.command == "revoke":
-            auth.revoke(redis_client(), args.id)
-            print(f"revoked {args.id}")
-        elif args.command == "remove":
-            print("\n".join(_remove(args)))
+        elif args.command in ("revoke", "remove"):
+            print(_retire(args))
         elif args.command in ("run", "install"):
             return _daemon(args.command)
         elif args.command == "compare":
