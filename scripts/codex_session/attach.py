@@ -12,6 +12,7 @@ from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, BindingStor
 
 if TYPE_CHECKING:
     from scripts.herdr_host import Placement
+    from scripts.herdr_panes import PaneRecord
     from scripts.swarm.store import AgentRecord, RedisStore
 
 READY_TIMEOUT_S = 120.0
@@ -112,7 +113,7 @@ def reopenable(store: "RedisStore", slug: str, execution_id: str) -> "AgentRecor
     return agent
 
 
-def launch_records(name: str, environ: dict[str, str]) -> list:
+def launch_records(name: str, environ: dict[str, str]) -> list["PaneRecord"]:
     from scripts import herdr_panes
     from scripts.swarm import naming
 
