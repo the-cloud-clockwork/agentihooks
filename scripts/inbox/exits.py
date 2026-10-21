@@ -151,32 +151,12 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
         pending = [entry for entry in pending if entry not in due]
         for name, seat in due:
             _settle_gone(inbox, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
-    _move_seat_mail(inbox, worlds, live)
     for world in worlds:
         _settle_seat_notices(world, {seat for _, seat in seats if seat}, active)
         _settle_peer_mail(world, slug, store, active)
         if slug in store.slugs():
             empty = {seat for _, seat in seats} - {agent.seat for agent in live}
             _settle_unfillable(world, store.config(slug), empty)
-
-
-def _move_seat_mail(inbox: "InboxStore", worlds: list["InboxStore"], live: list) -> None:
-    """A lane seat's open mail follows its live occupant into the world of the host it runs on; a master seat's
-    mail stays with the master pool of its world."""
-    by_world = {world.world: world for world in worlds}
-    moves = [
-        (agent, by_world[home])
-        for agent in live
-        if LANE_SEAT.fullmatch(agent.seat)
-        and inbox.seats.occupant(agent.seat).occupant == agent.name
-        and (home := inbox.home(agent.seat)) in by_world
-    ]
-    for agent, home in moves:
-        where = f"hive {home.world}" if home.world else "the controller"
-        for world in worlds:
-            if world is not home:
-                for item in world.open_items(agent.seat):
-                    world.move_world(item.id, home, BY, f"moved to {where}, where {agent.name} runs {agent.seat}")
 
 
 def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:
