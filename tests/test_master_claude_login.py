@@ -766,3 +766,14 @@ def test_a_slot_takeover_records_the_login_time(tmp_path, monkeypatch):
     assert login.account(target, environ, _given(store, environ)) == "masteratexample_com"
     written = [entry for entry in store.history() if entry["key"] == "master-account-claude-2"]
     assert (written[-1]["value"], written[-1]["actor"], written[-1]["at"]) == ("masteratexample_com", "m", 1234.5)
+
+
+@pytest.mark.parametrize(
+    ("logins", "expected"), [({1: "operator"}, ""), ({1: ""}, login.NO_LOGIN), ({}, login.NO_LOGIN)]
+)
+def test_unusable_names_why_a_hive_cannot_run_the_master_login(monkeypatch, logins, expected):
+    monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
+    monkeypatch.setattr(login, "logins", lambda: logins)
+    assert login.unusable() == expected
+    monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", "True")
+    assert login.unusable() == login.OFF
