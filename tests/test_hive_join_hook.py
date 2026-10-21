@@ -1,6 +1,9 @@
 from dataclasses import replace
 
 
+from tests.test_hook_manager import quiet_session_start as quiet_session_start
+
+
 def test_hive_hook_starts_and_ends_the_same_execution(monkeypatch, tmp_path):
     from fakeredis import FakeRedis
 
@@ -55,3 +58,31 @@ def test_workstation_hook_does_not_connect(monkeypatch):
 
     monkeypatch.setattr(store, "connect", unexpected)
     assert hive_join.run({"session_id": "session"}, "start") is None
+
+
+def test_hive_reports_are_dispatched_at_start_and_end(quiet_session_start, monkeypatch, tmp_path):
+    from hooks import hook_manager
+    from hooks.context import hive_join
+
+    called = []
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.setattr(hive_join, "run", lambda *args: called.append(args))
+    monkeypatch.setattr(hook_manager, "_request_trace_flush", lambda *args: None)
+    payload = {"session_id": "session", "cwd": str(tmp_path)}
+    hook_manager.EVENT_HANDLERS["SessionStart"](payload)
+    hook_manager.EVENT_HANDLERS["SessionEnd"](payload)
+    assert called == [(payload, "start"), (payload, "end")]
+
+
+def test_hive_report_failure_does_not_abort_the_session_or_log_details(monkeypatch):
+    from hooks import hook_manager
+    from hooks.context import hive_join
+
+    def refused(*args):
+        raise ValueError("private detail")
+
+    logged = []
+    monkeypatch.setattr(hive_join, "run", refused)
+    monkeypatch.setattr(hook_manager, "log", lambda *args: logged.append(args))
+    hook_manager._hive_join({"session_id": "session"}, "start")
+    assert logged == [("hive join report failed", {"error": "ValueError"})]
