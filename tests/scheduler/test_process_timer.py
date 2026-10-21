@@ -246,9 +246,9 @@ async def test_wait_helpers_consume_and_close_a_fired_timer(redis, monkeypatch, 
 def test_wait_on_a_given_client_neither_builds_nor_closes_one(redis, monkeypatch):
     original = process_timer.Timer.wait
 
-    def fired(timer):
+    def fired(timer, timeout=None):
         Scheduler(redis).run_due(now=timer.entry.record["due"])
-        original(timer)
+        original(timer, timeout)
 
     close = Mock()
     monkeypatch.setattr(redis, "close", close)
