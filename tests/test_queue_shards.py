@@ -307,14 +307,14 @@ def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_poo
 def test_a_capped_plan_at_the_step_timeout_warns(tmp_path, capsys, monkeypatch):
     from tests import queue_shards
 
-    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 489)
-    root, output = _overflowing_plan(tmp_path, 400.0)
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 513)
+    root, output = _overflowing_plan(tmp_path, 420.0)
 
     queue_shards.main(
         ["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")]
     )
 
-    assert "::warning::The capped queue plan predicts 490.0s, over 489s of the step timeout\n" in (
+    assert "::warning::The capped queue plan predicts 513.0s, over 513s of the step timeout\n" in (
         capsys.readouterr().out
     )
 
