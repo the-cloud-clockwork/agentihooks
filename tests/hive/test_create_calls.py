@@ -68,6 +68,7 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(create.setup, "publish", lambda *args: published.append(args) or "settings written")
     monkeypatch.setattr(swarm_store, "RedisStore", OneStore)
     Store.working = Store.placing = True
+    Store.swarm_state = "running"
 
     def beat(at=NOW * 1000):
         member = invite._env(bao.records[RECORD]["credential"])[invite.HIVE_ID]
