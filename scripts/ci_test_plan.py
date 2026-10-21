@@ -88,10 +88,11 @@ def find_record(repository: str, before: str) -> tuple[dict, dict] | None:
         _api(f"{actions}/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page={CANDIDATES}")
     )["workflow_runs"]
     runs = [run for run in runs if _recorded(run, repository) and run["updated_at"] <= before]
-    with ThreadPoolExecutor(max_workers=CANDIDATES) as pool:
-        listings = pool.map(lambda run: _api(f"{actions}/runs/{run['id']}/artifacts?per_page=100"), runs)
+    pool = ThreadPoolExecutor(max_workers=CANDIDATES)
+    try:
+        listings = [pool.submit(_api, f"{actions}/runs/{run['id']}/artifacts?per_page=100") for run in runs]
         for run, listing in zip(runs, listings):
-            artifacts = json.loads(listing)["artifacts"]
+            artifacts = json.loads(listing.result())["artifacts"]
             kept = [item for item in artifacts if item["name"] == "dep-manifest" and not item["expired"]]
             live = {item["name"] for item in artifacts if not item["expired"]}
             if not kept or any(name not in live for name in COVERAGE):
@@ -108,6 +109,8 @@ def find_record(repository: str, before: str) -> tuple[dict, dict] | None:
                 print(f"Dev run {run['id']} recorded a manifest for {manifest.get('commit')}, not {run['head_sha']}")
                 continue
             return run, manifest
+    finally:
+        pool.shutdown(wait=False)
     return None
 
 
