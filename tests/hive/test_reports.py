@@ -211,10 +211,8 @@ def test_an_unreadable_hive_record_holds_its_workers(remote):
     ],
 )
 @pytest.mark.parametrize("placement", [True, False])
-@pytest.mark.parametrize(("state", "reopened"), [("claimed", ", task task reopened"), ("blocked", "")])
-def test_tick_retires_workers_of_a_hive_that_stopped_reporting(
-    remote, age, beat, until, retired, placement, state, reopened
-):
+@pytest.mark.parametrize("state", ["claimed", "blocked"])
+def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat, until, retired, placement, state):
     from scripts.hive import scope
     from scripts.swarm import idle, tick
     from scripts.swarm.tick import SUSPECT
@@ -238,6 +236,7 @@ def test_tick_retires_workers_of_a_hive_that_stopped_reporting(
 
     actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
 
+    reopened = ", task task reopened" if state == "claimed" else ""
     if retired:
         remote.runtime.retire.assert_not_called()
         assert remote.store.agents("fixture") == []
