@@ -677,7 +677,6 @@ jobs:
           permission-actions: read
 
       # The protected grader plans, so a queued change cannot widen what it reuses.
-      # It runs in the background beside the count collection; Wait for the test plan reports it.
       - name: Plan the tests whose inputs did not change
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
         env:
@@ -893,7 +892,6 @@ jobs:
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
 
-      # The split starts beside the count collection and waits here only for its result.
       - name: Require successful early collection
         if: github.event_name != 'push' && needs.select.outputs.source == ''
         env:
@@ -901,7 +899,7 @@ jobs:
           COLLECTION_JOB: test-count (${{ matrix.python-version }})
         run: |
           while :; do
-            state="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
+            state="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
               --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion)\"")" || state=""
             case "$state" in
               "completed success") exit 0 ;;

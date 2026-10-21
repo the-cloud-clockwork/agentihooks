@@ -46,7 +46,7 @@ def _step(job, name):
     return next(step for step in _job(job)["steps"] if step.get("name") == name)
 
 
-def _deselect_in_split(tmp_path, head_manifest):
+def _deselect_in_test_count(tmp_path, head_manifest):
     collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_b.py::new"]
     reused = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"]
     runner = tmp_path / "runner"
@@ -539,12 +539,12 @@ def test_the_split_deselects_with_the_grader_manifest_code_not_the_heads(tmp_pat
             1,
         )
     )
-    chosen, expected = _deselect_in_split(tmp_path, planted)
+    chosen, expected = _deselect_in_test_count(tmp_path, planted)
     assert chosen == expected
 
 
 def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_code(tmp_path):
-    chosen, expected = _deselect_in_split(tmp_path, (ROOT / "tests" / "dep_manifest.py").read_text())
+    chosen, expected = _deselect_in_test_count(tmp_path, (ROOT / "tests" / "dep_manifest.py").read_text())
     assert (
         chosen
         == expected
