@@ -78,6 +78,31 @@ def test_an_idle_pane_with_a_pending_item_gets_exactly_one_prompt(inbox):
     assert events(inbox, item.id) == ["woken"] and events(inbox, second.id) == ["woken"]
 
 
+def test_many_pending_items_share_batched_wake_reads_without_changing_seen_or_fyi_behavior(inbox, monkeypatch):
+    from scripts.inbox import seen
+    from scripts.inbox.store import CLOSED
+
+    items = [inbox.send(MASTER_NAME, "earlier-agent", f"notice {n}", ref=f"written:{n}", fyi=True) for n in range(40)]
+    inbox.names.alias("earlier-agent", "sw-eng-1")
+    assert seen.SeenMarks(inbox.redis).mark("sw-eng-1", items[0].ref)
+    inbox.pending()
+    reads = []
+    execute = inbox.redis.execute_command
+
+    def traced_execute(*args, **kwargs):
+        if str(args[0]).upper() in {"GET", "HGETALL", "LRANGE", "SISMEMBER", "SMEMBERS"}:
+            reads.append(args[0])
+        return execute(*args, **kwargs)
+
+    monkeypatch.setattr(inbox.redis, "execute_command", traced_execute)
+    herdr = FakeHerdr({"p1": "idle"})
+    run(inbox, herdr, FakeLedger(), sent_at(items[-1]) + 1)
+    assert len(reads) <= 30
+    assert inbox.get(items[0].id).state in CLOSED
+    assert all(inbox.get(item.id).state == "pending" for item in items[1:])
+    assert herdr.prompts == []
+
+
 @pytest.mark.parametrize("state", ["blocked", "working", "unknown"])
 def test_a_pane_that_is_not_idle_is_never_typed_into_and_escalates_after_one_window(inbox, state):
     item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")

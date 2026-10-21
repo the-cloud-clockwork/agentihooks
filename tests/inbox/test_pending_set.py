@@ -83,7 +83,7 @@ def test_delivery_reads_only_the_pending_set_with_a_thousand_closed_items(redis,
     assert len(store.inbox("bob")) == 1001
 
 
-def test_the_wake_pass_listing_reads_only_pending_sets(redis):
+def test_the_wake_pass_listing_reads_only_pending_sets(redis, monkeypatch):
     seed = InboxStore(redis)
     for n in range(1000):
         seed.close(seed.send("alice", "bob", f"old {n}").id, "bob", "done", "handled the request")
@@ -92,7 +92,20 @@ def test_the_wake_pass_listing_reads_only_pending_sets(redis):
     store = InboxStore(counting)
     store.pending()
     counting.calls.clear()
+    pipeline = redis.pipeline
 
+    def traced_pipeline(*args, **kwargs):
+        pipe = pipeline(*args, **kwargs)
+        execute = pipe.execute
+
+        def traced_execute(*args, **kwargs):
+            counting.calls.extend(str(command[0][0]).lower() for command in pipe.command_stack)
+            return execute(*args, **kwargs)
+
+        monkeypatch.setattr(pipe, "execute", traced_execute)
+        return pipe
+
+    monkeypatch.setattr(redis, "pipeline", traced_pipeline)
     assert [i.id for i in store.pending()] == [item.id]
     assert counting.calls.count("hgetall") == 1, counting.calls
 
