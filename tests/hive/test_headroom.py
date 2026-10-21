@@ -7,7 +7,9 @@ from scripts.hive.orders import Orders
 
 pytestmark = pytest.mark.unit
 
-MEMINFO = "MemTotal:       16000000 kB\nMemAvailable:    8192000 kB\nSwapTotal:       2048000 kB\nSwapFree:  1024000 kB\n"
+MEMINFO = (
+    "MemTotal:       16000000 kB\nMemAvailable:    8192000 kB\nSwapTotal:       2048000 kB\nSwapFree:  1024000 kB\n"
+)
 
 
 @pytest.fixture
