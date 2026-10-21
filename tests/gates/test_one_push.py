@@ -55,7 +55,14 @@ class Ledger:
 
 def pull(state="OPEN", red=False, running=True, queued=False):
     return PullRequest(
-        state=state, merged_at=None, pushed_at=None, red=red, resolved=not running, queued=queued, running=running
+        state=state,
+        merged_at=None,
+        pushed_at=None,
+        red=red,
+        resolved=not running,
+        queued=queued,
+        running=running,
+        started=running,
     )
 
 
