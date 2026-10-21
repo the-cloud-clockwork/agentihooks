@@ -221,7 +221,7 @@ def _trust(tools: Tools) -> None:
     line = f"[{create_render.LAN_IP}]:{tools.state['ssh_port']} {_record(tools)[HOST_PUBLIC_KEY]}"
     lines = known.read_text().splitlines() if known.is_file() else []
     if line not in lines:
-        known.parent.mkdir(parents=True, exist_ok=True)
+        known.parent.mkdir(exist_ok=True)
         known.write_text("".join(f"{entry}\n" for entry in [*lines, line]))
 
 

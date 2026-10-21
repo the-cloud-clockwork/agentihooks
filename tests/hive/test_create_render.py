@@ -72,7 +72,8 @@ def test_next_port_is_the_first_port_from_2222_free_on_the_lan_address():
     services = [
         _service("10.10.30.207", 2222),
         _service("10.10.30.207", 2223, 8765),
-        _service("10.10.30.207", 2224),
+        _service("10.10.30.208,10.10.30.207", 2224),
+        _service("10.10.30.2070", 2225),
         _service("10.10.30.208", 2225),
         _service(None, 2225),
         {"metadata": {}},

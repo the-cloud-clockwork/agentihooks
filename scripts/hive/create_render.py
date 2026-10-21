@@ -58,7 +58,7 @@ def next_port(services: list[dict]) -> int:
     taken = {
         port.get("port")
         for service in services
-        if LAN_IP in ((service.get("metadata") or {}).get("annotations") or {}).get(LAN_IP_ANNOTATION, "")
+        if LAN_IP in str(((service.get("metadata") or {}).get("annotations") or {}).get(LAN_IP_ANNOTATION)).split(",")
         for port in (service.get("spec") or {}).get("ports") or []
     }
     port = SSH_PORT_FIRST
