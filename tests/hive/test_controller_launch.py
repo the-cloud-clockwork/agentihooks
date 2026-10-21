@@ -883,6 +883,32 @@ def test_heartbeat_execution_ids_prevent_double_counting_and_masters_are_exempt(
     assert setup.launcher.hives()[0]["agents"] == 1
 
 
+def test_a_hive_reporting_no_execution_ids_counts_each_running_agent_once(setup):
+    from scripts.hive import registry
+    from scripts.swarm.store import AgentRecord
+
+    for index, state in enumerate(["working", "working", "launching"]):
+        setup.store.start_execution(
+            "fixture",
+            AgentRecord(
+                setup.store.next_name("fixture", "eng"),
+                "eng",
+                "task",
+                seat=f"eng-{index + 1}@fixture",
+                state=state,
+                hive="remote",
+                runtime_target={"host_id": "remote"},
+            ),
+        )
+    setup.store.redis.set(
+        f"{registry.key('remote')}:sessions",
+        json.dumps({"claude:account": 2, "interactive:claude:account": 1}),
+    )
+    write_hive(setup, max_agents=4)
+    assert setup.launcher.hives()[0]["agents"] == 3
+    assert setup.launcher.select(setup.config, "eng", {"id": "next"}).hive == "remote"
+
+
 def test_default_wait_sleep_and_exact_deadline_are_exercised(setup):
     from unittest.mock import patch
 

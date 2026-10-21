@@ -42,14 +42,21 @@ def loaded_hives(store: RedisStore) -> list[dict]:
             count for key, count in counts.items() if key != "_executions" and not key.startswith("interactive:")
         )
         masters = sum(count for key, count in counts.items() if key.startswith("interactive:"))
-        pending = sum(
-            agent.hive == hive["id"]
+        unseen = [
+            agent.state
+            for agent in agents
+            if agent.hive == hive["id"]
             and agent.lane != "master"
             and agent.state in ("launching", "working", "suspect")
             and agent.execution_id not in seen
-            for agent in agents
-        )
-        hive["agents"] = max(0, reported - masters) + pending
+        ]
+        running = max(0, reported - masters)
+        if seen:
+            hive["agents"] = running + len(unseen)
+        else:
+            # A hive that reports no execution ids already counts its running agents among its processes.
+            launching = unseen.count("launching")
+            hive["agents"] = max(running, len(unseen) - launching) + launching
     return hives
 
 
