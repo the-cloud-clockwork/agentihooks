@@ -135,6 +135,56 @@ def test_the_controller_ends_a_member_agents_wait_below_its_member(redis, swarm,
     assert not redis.keys(f"{ROOT}:swarm:fixture:*:{name}")
 
 
+def test_members_checks_every_member_record_in_one_round_trip(redis, monkeypatch):
+    from unittest.mock import Mock
+
+    from scripts.hive import auth, scope
+
+    join(redis, "m2")
+    join(redis, "m1")
+    redis.sadd(auth.INDEX, "gone")
+    direct = Mock(wraps=redis.exists)
+    pipeline = Mock(wraps=redis.pipeline)
+    monkeypatch.setattr(redis, "exists", direct)
+    monkeypatch.setattr(redis, "pipeline", pipeline)
+
+    assert scope.members(redis) == ["m1", "m2"]
+    direct.assert_not_called()
+    pipeline.assert_called_once_with(transaction=False)
+
+
+def test_members_of_an_empty_index_opens_no_pipeline(redis, monkeypatch):
+    from scripts.hive import scope
+
+    monkeypatch.setattr(redis, "pipeline", lambda **_: pytest.fail("an empty index opened a pipeline"))
+
+    assert scope.members(redis) == []
+
+
+def relaunch(redis, store, name, hive, generation):
+    key = store.key("fixture", "executions")
+    row = next(json.loads(raw) for raw in redis.hvals(key) if json.loads(raw)["name"] == name)
+    row.update(execution_id=f"exe-{hive}-{generation}", generation=generation, hive=hive)
+    redis.hset(key, row["execution_id"], json.dumps(row))
+
+
+def test_host_reads_one_agents_latest_placement_without_the_agent_list(redis, swarm, monkeypatch):
+    from scripts.hive import scope
+    from scripts.swarm.store import RedisStore
+
+    join(redis, "m1")
+    join(redis, "m2")
+    first, second = place(swarm, "m1"), place(swarm, "m2", seat="eng-2@fixture")
+    relaunch(redis, swarm, first, "m2", 7)
+    relaunch(redis, swarm, second, "m1", 0)
+    redis.hdel(swarm.key("fixture", "agents"), second)
+    monkeypatch.setattr(RedisStore, "agents", lambda *_: pytest.fail("host read every agent of the swarm"))
+
+    assert scope.host(redis, "fixture", first) == "m2"
+    assert scope.host(redis, "fixture", second) == ""
+    assert scope.host(redis, "fixture", "nobody") == ""
+
+
 def test_no_agent_has_a_member_host_while_no_member_has_joined(redis, swarm):
     from scripts.hive import scope
 
