@@ -518,7 +518,7 @@ def test_keep_publishes_and_reports_a_failed_write(tmp_path, monkeypatch, capsys
 
 def test_a_checkpoint_publishes_only_from_the_master_login_home(ah, rendered, monkeypatch):
     kept = []
-    monkeypatch.setattr(login, "keep", lambda bao, target, epoch: kept.append((bao, target, epoch)) or True)
+    monkeypatch.setattr(login, "keep", lambda bao, target, epoch, number: kept.append((bao, target, epoch)) or True)
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao" if environ.get("OPENBAO_URL") else None)
     _seed(rendered)
     master = {"OPENBAO_URL": "u", "CLAUDE_CONFIG_DIR": str(login.home())}
@@ -548,9 +548,9 @@ def test_prepare_claims_above_the_stored_epoch_builds_restores_and_keeps(ah, ren
     _seed(rendered)
     calls = []
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao" if environ.get("OPENBAO_URL") else None)
-    monkeypatch.setattr(login, "stored", lambda bao: {"epoch": "5"} if bao == "bao" else {})
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: {"epoch": "5"} if bao == "bao" else {})
     monkeypatch.setattr(login, "restore", lambda copy, target: calls.append(("restore", copy, target)))
-    monkeypatch.setattr(login, "keep", lambda bao, target, epoch: calls.append(("keep", bao, target, epoch)))
+    monkeypatch.setattr(login, "keep", lambda bao, target, epoch, number: calls.append(("keep", bao, target, epoch)))
     monkeypatch.setattr(binding, "rehome", lambda report, home, shared: calls.append(("rehome", report, home, shared)))
     environ = _environ(rendered, OPENBAO_URL="u", AGENTIHOOKS_PROFILE_REPORT="/run/report")
     target, found = login.prepare(environ, tmp_path)
@@ -570,7 +570,7 @@ def test_prepare_claims_above_the_stored_epoch_builds_restores_and_keeps(ah, ren
 def test_prepare_without_a_stored_epoch_takes_epoch_one(ah, rendered, tmp_path, monkeypatch):
     _seed(rendered)
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
-    monkeypatch.setattr(login, "stored", lambda bao: {})
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: {})
     monkeypatch.setattr(login, "keep", lambda *_: True)
     login.prepare(_environ(rendered), tmp_path)
     assert json.loads((login.root() / login.OWNER).read_text())["epoch"] == 1

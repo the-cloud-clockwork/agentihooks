@@ -271,17 +271,37 @@ def evaluate(session_id: str) -> Decision | None:
         week_used=week_used,
         five_reset=five_reset,
         week_reset=week_reset,
-        others=master_targets(reserved(subscriptions, held) + _api_accounts(sessions), os.environ),
+        others=master_targets(
+            reserved(subscriptions, held) + _api_accounts(sessions) + _login_accounts(os.environ), os.environ
+        ),
         push=push_active(session_id),
     )
 
 
-def master_targets(candidates: list[Candidate], environ) -> list[Candidate]:
+def _master(environ) -> bool:
     from scripts.routing import reservation
 
-    if not str(environ.get(reservation.AGENT_NAME)).startswith(reservation.MASTER_NAME):
+    return str(environ.get(reservation.AGENT_NAME)).startswith(reservation.MASTER_NAME)
+
+
+def master_targets(candidates: list[Candidate], environ) -> list[Candidate]:
+    if not _master(environ):
         return candidates
     return [c for c in candidates if c.login]
+
+
+def _login_accounts(environ) -> list[Candidate]:
+    from scripts import master_claude_login, master_logins
+    from scripts.routing import reservation
+
+    if not _master(environ):
+        return []
+    now = time.time()
+    found = []
+    for account in master_claude_login.free(environ[reservation.AGENT_NAME]):
+        five, week, observed = master_logins.usage(account, now)
+        found.append(Candidate(account, five, week, 0, observed, 1, login=True))
+    return found
 
 
 def decide_reserved(ceiling: float | None, *, week_used: float, **inputs) -> Decision | None:

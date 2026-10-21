@@ -43,6 +43,10 @@ MASTER_FAILED = "claude auth login exited {code}; the master login is unchanged"
 STEP_RECOVERY = "Storing the master login recovery copy in OpenBao"
 MASTER_SLUG = "--master takes no slug: the master login is one home per slot for every swarm"
 SLOT_NEEDS_MASTER = "--slot picks a master login slot and needs --master"
+LISTED = "slot {number}: {account}, {state}, 5h {five:.0f}% used, 7d {week:.0f}% used"
+NONE_STORED = "no master claude ai login is stored: run agentihooks claude login --master"
+REMOVED = "master login slot {number} ({account}) removed"
+KEPT = "the OpenBao record {record} would restore this login at the next master launch: rerun with --openbao"
 _write = os.write
 
 
@@ -155,6 +159,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("slug", nargs="?")
     parser.add_argument("--master", action="store_true")
     parser.add_argument("--slot", type=int)
+    parser.add_argument("--list", action="store_true")
+    parser.add_argument("--remove", type=int, metavar="SLOT")
     store = parser.add_mutually_exclusive_group()
     store.add_argument("--openbao", action="store_true", default=None)
     store.add_argument("--no-openbao", dest="openbao", action="store_false")
@@ -205,12 +211,11 @@ def _rendered(profile: str) -> Path:
 def master(openbao: bool | None, environ: Mapping[str, str], deps: Deps, slot: int | None = None) -> int:
     from scripts import master_claude_login as login
 
-    if slot is not None:
-        if not 1 <= slot <= login.MAX_SLOTS:
-            _fail(login.SLOT_RANGE.format(number=slot, cap=login.MAX_SLOTS))
-            return 2
-        os.environ[login.SLOT_ENV] = str(slot)
+    if slot is not None and not 1 <= slot <= login.MAX_SLOTS:
+        _fail(login.SLOT_RANGE.format(number=slot, cap=login.MAX_SLOTS))
+        return 2
     try:
+        os.environ[login.SLOT_ENV] = str(login.empty() if slot is None else slot)
         epoch = login.claim(PROG, os.getpid(), alone=True)
     except login.LoginRefused as exc:
         _fail(str(exc))
@@ -243,6 +248,37 @@ def master(openbao: bool | None, environ: Mapping[str, str], deps: Deps, slot: i
     return 0
 
 
+def listing() -> int:
+    import time
+
+    from scripts import master_claude_login as login
+    from scripts import master_logins
+
+    found = login.logins()
+    if not found:
+        print(NONE_STORED)
+    for number, account in found.items():
+        held = ", ".join(sorted(login.holders(login.root(number)))) or "free"
+        five, week, _ = master_logins.usage(account, time.time())
+        print(LISTED.format(number=number, account=account or "unknown", state=held, five=five, week=week))
+    return 0
+
+
+def removal(number: int, openbao: bool | None, environ: Mapping[str, str], deps: Deps) -> int:
+    from scripts import master_claude_login as login
+
+    try:
+        bao = openbao_step.target(openbao, environ, deps.console, deps.opener)
+        if bao is None and openbao_kv.from_env(environ):
+            raise login.LoginRefused(KEPT.format(record=login.creds(number)))
+        account = login.remove(number, bao)
+    except (StoreRefused, login.LoginRefused, openbao_kv.OpenBaoError) as exc:
+        _fail(str(exc))
+        return 1
+    print(REMOVED.format(number=number, account=account or "unknown"))
+    return 0
+
+
 def main(
     args: list[str],
     environ: Mapping[str, str] | None = None,
@@ -258,6 +294,10 @@ def main(
         parser.error(MASTER_SLUG)
     if options.slot is not None and not options.master:
         parser.error(SLOT_NEEDS_MASTER)
+    if options.list:
+        return listing()
+    if options.remove is not None:
+        return removal(options.remove, options.openbao, environ, Deps(console=console, opener=opener))
     if options.master:
         return master(options.openbao, environ, Deps(console=console, opener=opener), options.slot)
     raw = _raw_slug(options.slug, console, parser)
