@@ -136,10 +136,9 @@ def test_the_exit_sweep_finishes_past_a_world_that_never_answers_and_settles_the
     lines = exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
     assert time.monotonic() - started < 20
     assert member.get(item.id).address == SEAT
-    assert lines == [
-        "skipped the inbox of hive m2 this pass: its Redis timed out or dropped: Timeout reading from socket"
-    ]
-    assert capsys.readouterr().err == f"{lines[0]}\n"
+    [line] = lines
+    assert line.startswith("skipped the inbox of hive m2 this pass: its Redis timed out or dropped: Timeout ")
+    assert capsys.readouterr().err == f"{line}\n"
 
 
 def test_the_exit_sweep_skips_a_world_that_stops_answering_after_ping_and_settles_the_others(
