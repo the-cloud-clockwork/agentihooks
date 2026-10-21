@@ -1596,6 +1596,64 @@ def test_stopped_swarm_skips_outer_tick_work_but_consumes_control_commands(store
     assert runtime.spawned == []
 
 
+def test_stopped_retired_swarm_wakes_only_when_a_new_task_arrives(store):
+    import json
+
+    store.update("sw", state="stopped")
+    store.redis.set(store.key("sw", "master-retired-tasks"), json.dumps(["t1"]))
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    assert tick("sw", store, ledger, runtime, 1) == []
+    assert store.config("sw").state == "stopped"
+    assert runtime.masters == []
+    ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open"}
+    tick("sw", store, ledger, runtime, 2)
+    assert store.config("sw").state == "paused"
+    assert len(runtime.masters) == 1
+    assert runtime.spawned == []
+    assert store.redis.get(store.key("sw", "master-retired-tasks")) is None
+
+
+def test_closed_doctor_stays_stopped_and_withdraws_its_wake_message(store, monkeypatch):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import tick as module
+
+    store.update("sw", state="stopped", template=module.priming.TEMPLATE)
+    ledger, runtime = tasks(), FakeRuntime()
+    monkeypatch.setattr(ledger, "closed", lambda slug: True)
+    inbox = InboxStore(store.redis)
+    inbox.send("operator", "master@sw", "operator wrote after closing")
+    assert tick("sw", store, ledger, runtime, 1) == []
+    assert store.config("sw").state == "stopped"
+    assert runtime.masters == []
+    assert inbox.pending_items("master@sw") == []
+
+
+def test_newly_open_phase_sends_its_planning_notice_on_the_same_tick(store, monkeypatch):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import cli
+
+    ledger = FakeLedger([{"id": "t1", "phase": "p1", "state": "done"}])
+    ledger.phases = [
+        {"id": "p1", "title": "First", "planning": "manual"},
+        {"id": "p2", "title": "Next", "planning": "auto", "depends_on": ["p1"]},
+    ]
+
+    def finish(*args):
+        ledger.phases[0]["done"] = True
+        return ["finished first phase"]
+
+    def add(slug, row, by):
+        ledger.rows[row["task"]] = {**row, "id": row["task"], "state": "open"}
+
+    ledger.add_task = add
+    monkeypatch.setattr(cli.phases, "phase_pass", finish)
+    inbox = InboxStore(store.redis)
+    actions = cli._phase_steps(inbox, store, "sw", ledger.state("sw"), ledger)
+    assert "queued plan-p2 for phase p2" in actions
+    assert ledger.rows["plan-p2"]["phase"] == "p2"
+    assert any("phase p2 Next needs a plan" in item.text for item in inbox.inbox("master@sw"))
+
+
 def test_a_dead_master_is_respawned(store):
     runtime = FakeRuntime()
     tick("sw", store, tasks(), runtime, 1)
