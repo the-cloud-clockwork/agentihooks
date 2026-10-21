@@ -16,12 +16,16 @@ UNKNOWN_OWNER = "the agent it was sent to is unknown, so no branch was checked"
 LANE_SEAT = re.compile(r"(eng|ci|plan)-(\d+)@.+")
 
 
-def settle(inbox, name, seat, exit_text):
+def settle(inbox, name, seat, exit_text, worlds=None):
     """seat is where the work goes on, '' when nobody takes it up. A master's mail passes to its successor, or waits
-    for one while none is spawned yet."""
+    for one while none is spawned yet. worlds is the sweep's pass, which skips a world whose Redis stops answering."""
     inbox.seats.record_exit(name, seat, exit_text)
-    for world in inbox.worlds():
-        _settle_world(world, name, seat, exit_text)
+    if worlds is None:
+        for world in inbox.worlds():
+            _settle_world(world, name, seat, exit_text)
+        return
+    for world in list(worlds.up):
+        worlds.run(world, lambda w: _settle_world(w, name, seat, exit_text))
 
 
 def _settle_world(inbox, name, seat, exit_text):
@@ -157,9 +161,7 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
         pending = [entry for entry in pending if entry not in due]
         for name, seat in due:
             goes_to, exit_text = _gone_exit(seat, tasks.get(name, {}).get("state"), outcomes[name])
-            inbox.seats.record_exit(name, goes_to, exit_text)
-            for world in list(worlds.up):
-                worlds.run(world, lambda w: _settle_world(w, name, goes_to, exit_text))
+            settle(inbox, name, goes_to, exit_text, worlds)
     _move_seat_mail(inbox, worlds, live)
     for world in list(worlds.up):
         worlds.run(world, lambda w: _settle_world_seats(w, slug, store, seats, live, active))
