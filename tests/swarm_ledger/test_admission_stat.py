@@ -18,7 +18,7 @@ def stat_text(browser, swarm):
         show(tab, shell_html(), ledger=ledger_state(DOC), swarm=swarm)
         row = tab.locator('#stats [data-stat="admission-refusals"]')
         row.wait_for()
-        return row.locator("dt").inner_text().strip(), row.locator("dd").inner_text().strip()
+        return row.locator("dt").text_content().strip(), row.locator("dd").text_content().strip()
     finally:
         tab.close()
 
