@@ -228,16 +228,15 @@ def test_an_engineers_freeze_write_is_refused():
     assert rejected and targets(state) == [("freeze", "plans/a")]
 
 
-def test_the_master_writes_a_freeze_only_with_the_operators_recorded_words():
-    state, rejected = freeze("plans/a", by=MASTER, quote="freeze the swarm v2 plan")
-    assert rejected and state["freezes"] == []
+def test_the_master_writes_a_freeze_and_keeps_only_the_operators_recorded_words_as_its_quote():
+    state, rejected = freeze("plans/b", by=MASTER, quote="freeze the swarm v2 plan")
+    assert rejected == [] and "quote" not in state["freezes"][0]
+    write("freeze_clear", by=MASTER, target="plans/b")
     operator_words.record(MASTER, WORDS)
     state, rejected = freeze("plans/a", by=MASTER, quote="freeze the swarm v2 plan")
     assert rejected == []
     assert state["freezes"][0]["by"] == MASTER
     assert state["freezes"][0]["quote"] == "Freeze the swarm v2 plan"
-    state, rejected = freeze("plans/b", by=MASTER)
-    assert rejected and targets(state) == [("freeze", "plans/a")]
     state, rejected = write("freeze_clear", by=MASTER, target="plans/a", quote="freeze the swarm v2 plan")
     assert rejected == [] and state["freezes"] == []
     assert event_of(state)["by"] == MASTER
