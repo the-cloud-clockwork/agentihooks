@@ -94,8 +94,10 @@ def _start(tools: Tools, options: Options) -> dict:
         tools.out(f"hive create {saved['name']}: resuming the unfinished create")
         return saved
     name = f"{NAME_PREFIX}{int(tools.clock())}"
-    port = create_render.next_port(json.loads(_kubectl(tools, ["get", "service", "-A", "-o", "json"]))["items"])
-    return {"name": name, "record": invite.default_path(name), "ssh_port": port, "node": options.node}
+    services = json.loads(_kubectl(tools, ["get", "service", "-A", "-o", "json"]))["items"]
+    lan_ip = create_render.lan_address(services)
+    port = create_render.next_port(services, lan_ip)
+    return {"name": name, "record": invite.default_path(name), "ssh_port": port, "lan_ip": lan_ip, "node": options.node}
 
 
 def _save(tools: Tools) -> None:
@@ -157,7 +159,7 @@ def _ssh_keys(tools: Tools, options: Options) -> str:
 
 def _files(tools: Tools, options: Options) -> dict[str, str]:
     state = tools.state
-    hive = create_render.Hive(state["name"], state["record"], state["ssh_port"], state["node"])
+    hive = create_render.Hive(state["name"], state["record"], state["ssh_port"], state["node"], state["lan_ip"])
     template = create_github.read(tools.run, options.repo, create_render.TEMPLATE_PATH, options.base)
     homes = create_github.read(tools.run, options.repo, create_render.NFS_HOMES_PATH, options.base)
     files = create_render.render(template, hive)
@@ -214,12 +216,12 @@ def _live(tools: Tools, options: Options) -> str:
 
 
 def _target(state: Mapping) -> str:
-    return f"ssh://{SSH_USER}@{create_render.LAN_IP}:{state['ssh_port']}"
+    return f"ssh://{SSH_USER}@{state['lan_ip']}:{state['ssh_port']}"
 
 
 def _trust(tools: Tools) -> None:
     known = Path(tools.environ.get("HOME") or Path.home()) / ".ssh" / "known_hosts"
-    line = f"[{create_render.LAN_IP}]:{tools.state['ssh_port']} {_record(tools)[HOST_PUBLIC_KEY]}"
+    line = f"{machine.known_host(_target(tools.state))} {_record(tools)[HOST_PUBLIC_KEY]}"
     lines = known.read_text().splitlines() if known.is_file() else []
     if line not in lines:
         known.parent.mkdir(exist_ok=True)

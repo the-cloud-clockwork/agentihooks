@@ -4,7 +4,9 @@ from scripts.hive import auth, create_render
 
 pytestmark = pytest.mark.unit
 
-HIVE = create_render.Hive("swarm-hive-1800000000", "k8s/agentihooks-hive-swarm-hive-1800000000", 2225, "worker-002")
+HIVE = create_render.Hive(
+    "swarm-hive-1800000000", "k8s/agentihooks-hive-swarm-hive-1800000000", 2225, "worker-002", "10.10.30.207"
+)
 TEMPLATE = """# header lines before the first file are dropped
 #@ file: k8s/argocd/apps/${name}.yaml
 name: ${name}
@@ -78,8 +80,29 @@ def test_next_port_is_the_first_port_from_2222_free_on_the_lan_address():
         _service(None, 2225),
         {"metadata": {}},
     ]
-    assert create_render.next_port(services) == 2225
+    assert create_render.next_port(services, "10.10.30.207") == 2225
 
 
 def test_next_port_fills_a_gap():
-    assert create_render.next_port([_service("10.10.30.207", 2222, 2224)]) == 2223
+    assert create_render.next_port([_service("10.10.30.207", 2222, 2224)], "10.10.30.207") == 2223
+
+
+def _shared(ip, key=create_render.SHARED_IP_KEY):
+    service = _service(ip, 22)
+    service["metadata"]["annotations"][create_render.SHARED_IP_ANNOTATION] = key
+    return service
+
+
+def test_the_lan_address_is_the_one_the_swarm_services_share():
+    services = [_shared("10.10.30.207"), _shared("10.10.30.207"), _shared("10.9.9.9", "other"), _service("10.8.8.8", 1)]
+    assert create_render.lan_address([*services, _shared(None)]) == "10.10.30.207"
+
+
+@pytest.mark.parametrize(
+    ("services", "named"),
+    [([], "0 addresses ()"), ([_shared("10.1.1.1"), _shared("10.2.2.2")], "2 addresses (10.1.1.1, 10.2.2.2)")],
+)
+def test_no_single_shared_lan_address_is_a_refusal(services, named):
+    with pytest.raises(auth.HiveError) as refused:
+        create_render.lan_address(services)
+    assert str(refused.value) == f"the agentihooks-swarm LAN services name {named}; expected one"

@@ -21,7 +21,12 @@ NFS = "        - name: HIVES\n          value: agentihooks-hive\n"
 SERVICES = {
     "items": [
         {
-            "metadata": {"annotations": {create_render.LAN_IP_ANNOTATION: "10.10.30.207"}},
+            "metadata": {
+                "annotations": {
+                    create_render.LAN_IP_ANNOTATION: "10.10.30.207",
+                    create_render.SHARED_IP_ANNOTATION: create_render.SHARED_IP_KEY,
+                }
+            },
             "spec": {"ports": [{"port": 2222}, {"port": 2223}, {"port": 2224}]},
         }
     ]
@@ -325,7 +330,7 @@ def test_a_saved_pull_request_closed_without_merging_is_dropped_for_a_new_one(wo
     world.run.prs = [PR]
     world.tools.state = {}
     (world.home / "agentihooks").mkdir()
-    saved = {"name": NAME, "record": RECORD, "ssh_port": 2225, "node": "worker-001", "pr": PR}
+    saved = {"name": NAME, "record": RECORD, "ssh_port": 2225, "lan_ip": "10.10.30.207", "node": "worker-001", "pr": PR}
     (world.home / "agentihooks" / create.STATE_FILE).write_text(json.dumps(saved))
 
     with pytest.raises(auth.HiveError, match="was closed without merging; rerun hive create to open a new one"):

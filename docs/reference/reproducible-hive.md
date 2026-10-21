@@ -39,7 +39,7 @@ agentihooks hive create
 
 | Step | What it does | Skipped on a rerun when |
 |---|---|---|
-| name | `swarm-hive-<epoch seconds>`, the release, namespace, NFS home folder and herdr label; the SSH port is the first port from 2222 free on the swarm LAN address | an unfinished create is saved in `hive-create.json` under the agentihooks home |
+| name | `swarm-hive-<epoch seconds>`, the release, namespace, NFS home folder and herdr label; the LAN address is the one the `agentihooks-swarm` shared MetalLB services carry, and the SSH port is the first port from 2222 free on it | an unfinished create is saved in `hive-create.json` under the agentihooks home |
 | invite | `hive invite` into `k8s/agentihooks-hive-<name>`, like `k8s/agentihooks-swarm-workstation-hive` | the record holds a credential |
 | ssh keys | a new ed25519 host key and every `~/.ssh/*.pub` as `ssh_host_key`, `ssh_host_public_key` and `ssh_authorized_keys` in the same record | the record holds a host key |
 | manifests | renders antoncore `k8s/templates/agentihooks-hive.yaml`, adds the hive to the NFS home list and opens one pull request into antoncore `dev` | the saved create holds the pull request |

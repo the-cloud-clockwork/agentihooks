@@ -149,7 +149,7 @@ def test_a_full_create_makes_exactly_these_calls(world):
                 "tree": [
                     {"path": path, "mode": "100644", "type": "blob", "content": text}
                     for path, text in create.create_render.render(
-                        TEMPLATE, create_render.Hive(NAME, RECORD, 2225, "worker-001")
+                        TEMPLATE, create_render.Hive(NAME, RECORD, 2225, "worker-001", "10.10.30.207")
                     ).items()
                 ]
                 + [
