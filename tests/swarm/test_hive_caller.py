@@ -11,7 +11,7 @@ def test_wait_accepts_a_hive_placed_agent_through_its_current_member_redis(env, 
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     agent = store.start_execution(
-        "sw", AgentRecord(store.next_name("sw", "eng"), "eng", "t1", hive="current", started_at=1000)
+        "sw", AgentRecord(store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", hive="current", started_at=1000)
     )
     current_url = auth._with_user("rediss://hive.example:6380/0", "hive-current", "p")
     (tmp_path / "hive.env").write_text(f"AGENTIHOOKS_HIVE_ID=current\nAGENTIHOOKS_HIVE_REDIS_URL={current_url}\n")
