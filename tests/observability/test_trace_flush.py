@@ -1081,3 +1081,49 @@ def test_an_attempt_exports_with_the_identity_its_session_recorded(home, enabled
 def test_an_attempt_drops_the_callers_identity_for_a_session_that_recorded_none(home, tmp_path, monkeypatch):
     _request("legacy", "/t")
     assert _identity_seen(tmp_path, monkeypatch, "legacy") == dict.fromkeys(IDENTITY, "unset")
+
+
+def _account_names_seen(tmp_path, monkeypatch, owner):
+    for name in [name for name in os.environ if name.startswith("AH_")]:
+        monkeypatch.delenv(name)
+    for name in owner:
+        monkeypatch.setenv(name, "owner-value")
+    trace_flush.request("owned", "/t", "stop", owner_pid=os.getpid(), spawn=lambda s: None)
+    for name in owner:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("AH_CC_TOKEN_caller", "caller-value")
+    monkeypatch.setenv("AH_ROUTE_INTERACTIVE_caller", "1")
+    seen = tmp_path / "seen"
+    stub = tmp_path / "stub"
+    stub.write_text(f"#!/bin/sh\nenv | cut -d= -f1 | grep '^AH_' | sort > {seen}\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(trace_flush.sys, "executable", str(stub))
+    trace_flush.attempt("owned", "/t", 5, "recovery")
+    return seen.read_text().split()
+
+
+@pytest.mark.parametrize(
+    ("owner", "seen"),
+    [
+        (["AH_CC_TOKEN_owner"], ["AH_ROUTE_INTERACTIVE_owner"]),
+        (["AH_ROUTE_API"], ["AH_ROUTE_API"]),
+        ([], []),
+    ],
+)
+def test_an_attempt_carries_the_sessions_account_never_the_callers(home, enabled, tmp_path, monkeypatch, owner, seen):
+    assert _account_names_seen(tmp_path, monkeypatch, owner) == seen
+    assert "owner-value" not in json.dumps(json.loads(trace_flush.request_path("owned").read_text()))
+
+
+def test_an_attempt_applies_only_identity_names_from_the_request(home, tmp_path, monkeypatch):
+    seen = tmp_path / "seen"
+    stub = tmp_path / "stub"
+    stub.write_text(f'#!/bin/sh\nprintf "%s|%s" "$AGENTIHOOKS_SWARM" "$PATH" > {seen}\n')
+    stub.chmod(0o755)
+    monkeypatch.setattr(trace_flush.sys, "executable", str(stub))
+    trace_flush._write(
+        trace_flush.request_path("tampered"),
+        {"identity": {"AGENTIHOOKS_SWARM": "watched", "PATH": "/nowhere"}},
+    )
+    trace_flush.attempt("tampered", "/t", 5, "recovery")
+    assert seen.read_text() == f"watched|{os.environ['PATH']}"
