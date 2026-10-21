@@ -163,7 +163,7 @@ def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
         (b"not a zip", False),
         (b"", True),
         (b"{", True),
-        (b"\\xff", True),
+        (bytes([255]), True),
         (b"[]", True),
         (b"{}", True),
         (json.dumps({**_manifest(1), "tests": {}}).encode(), True),
@@ -204,7 +204,7 @@ def test_an_unusable_download_runs_every_test_and_names_its_own_fallback(
     out = tmp_path / "reused-tests.json"
     assert ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)]) == 0
     assert not out.exists()
-    assert output.read_text() == "reused=0\\nrun=\\ncommit=\\n"
+    assert output.read_text() == "reused=0\nrun=\ncommit=\n"
     report = capsys.readouterr().out
     assert "Unusable test record" in report
     assert "Dev run 1" in report
