@@ -31,6 +31,42 @@ def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
     assert int(result.stdout) == minutes * 60
 
 
+_RECORDED_QUEUE_RUNS = [
+    (347.0, 264),
+    (346.9, 268),
+    (346.7, 271),
+    (346.7, 278),
+    (347.0, 288),
+    (346.7, 282),
+    (346.9, 281),
+    (346.8, 315),
+    (346.7, 261),
+    (346.5, 262),
+    (346.7, 274),
+    (346.4, 257),
+    (346.4, 267),
+    (346.5, 280),
+    (342.6, 269),
+    (342.6, 265),
+    (342.7, 264),
+    (342.6, 270),
+    (342.6, 286),
+    (342.6, 346),
+]
+_RECORDED_SLOWDOWN = 1.5
+
+
+def test_the_planned_slowest_queue_shard_is_within_ten_percent_of_the_recorded_real_slowest_shard():
+    from tests.queue_shards import SLOWDOWN, STARTUP_SECONDS
+
+    ratios = sorted(
+        (STARTUP_SECONDS + SLOWDOWN * (planned - STARTUP_SECONDS) / _RECORDED_SLOWDOWN) / real
+        for planned, real in _RECORDED_QUEUE_RUNS
+    )
+
+    assert 0.9 <= ratios[len(ratios) // 2] <= 1.1
+
+
 def test_queue_durations_keep_the_slowest_recent_measurement_and_expire_old_runs(tmp_path, monkeypatch):
     samples = tmp_path / "samples"
     for run, seconds in [("10", 99), ("11", 1), ("12", 9), ("13", 2)]:
