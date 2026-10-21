@@ -448,7 +448,7 @@ def test_a_headless_hive_without_a_usable_master_login_refuses_the_front_door_la
     order, admitted, task = headless_front_door_order(setup, route)
     runtime = Mock()
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
-    assert (ack.status, ack.failure) == ("failed", reason)
+    assert (ack.status, ack.target, ack.failure) == ("failed", {}, reason)
     runtime.spawn.assert_not_called()
 
 

@@ -450,6 +450,7 @@ def test_reservation_contention_ends_the_unlaunched_execution(setup):
     request = request_for(setup)
     from unittest.mock import patch
 
+    setup.launcher.wait = Mock(return_value="pending")
     with patch.object(type(setup.launcher.slots), "reserve", return_value=False):
         result = setup.launcher.spawn(request)
     assert result.status is Status.UNAVAILABLE
