@@ -15,9 +15,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hooks.observability.agent_trace import TRIGGER_ENV
+from hooks.observability.correlation import KEYS
 from scripts.scheduler.process_timer import wait as scheduled_wait
 
 POLL_SEC = 1.0
+IDENTITY_KEYS = (*KEYS, "AGENTIHOOKS_SWARM_LANE")
 
 
 @dataclass(frozen=True)
@@ -122,6 +124,7 @@ def request(
         "target": os.environ.get("AGENTIHOOKS_TARGET", "claude"),
         "reason": reason,
         "at": time.time_ns(),
+        "identity": {key: os.environ[key] for key in IDENTITY_KEYS if key in os.environ},
     }
     _write(request_path(session_id), record)
     if alive(_owner(_read(owner_path(session_id)), "supervisor_")):
@@ -206,7 +209,13 @@ def _transcript(session_id: str, record: dict) -> str:
 def attempt(session_id: str, transcript_path: str, timeout: float, trigger: str) -> bool:
     from hooks._async import _worker_env
 
-    env = {**_worker_env(), TRIGGER_ENV: trigger, "AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC": str(timeout)}
+    caller = {key: value for key, value in _worker_env().items() if key not in IDENTITY_KEYS}
+    env = {
+        **caller,
+        **_read(request_path(session_id)).get("identity", {}),
+        TRIGGER_ENV: trigger,
+        "AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC": str(timeout),
+    }
     command = [sys.executable, "-m", "hooks.observability.trace_flush", session_id, transcript_path]
     try:
         return subprocess.run(command, env=env, timeout=timeout).returncode == 0
