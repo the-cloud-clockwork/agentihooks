@@ -72,7 +72,9 @@ spec:
             {{- else }}
             {{- include "swarm.redisEnv" (dict "Values" .Values "Chart" .Chart "Release" .Release "role" "hive-join") | nindent 12 }}
             {{- end }}
+            {{- if $join.serveLedgerCa }}
             {{- include "swarm.ledgerCa" . | nindent 12 }}
+            {{- end }}
           ports:
             - name: join
               containerPort: {{ $join.port }}

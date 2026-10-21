@@ -91,12 +91,14 @@ def render(chart: str, values: str | None) -> dict:
 HIVES = {
     "workers": {
         "replicas": 1,
+        "hiveUrl": "https://join.example:8770",
         "homeVolume": HOST["workers"]["homeVolume"],
         "nodeSelector": HOST["workers"]["nodeSelector"],
         "maxAgents": 1,
         "hives": [
             {
                 "name": "pool-1",
+                "hiveUrl": "https://pool.example:8770",
                 "maxAgents": 3,
                 "credentialSecret": {"name": "member-pool-1", "key": "credential"},
                 "homeVolume": {"emptyDir": {}},
@@ -135,6 +137,8 @@ def hive_problems(name: str, deployment: dict, expected: dict) -> list[str]:
         found.append(f"hive{name} selects component {component}")
     if join != expected["credential"]:
         found.append(f"hive{name} mounts credential {join}, expected {expected['credential']}")
+    if env.get("AGENTIHOOKS_HIVE_URL") != expected["hiveUrl"]:
+        found.append(f"hive{name} refreshes at {env.get('AGENTIHOOKS_HIVE_URL')}, expected {expected['hiveUrl']}")
     if env["HIVE_MAX_AGENTS"] != expected["agents"]:
         found.append(f"hive{name} runs {env['HIVE_MAX_AGENTS']} agents, expected {expected['agents']}")
     if container["resources"]["requests"]["memory"] != expected["memory"]:
@@ -161,6 +165,7 @@ def hives_problems(chart: str) -> list[str]:
     expected = {
         "": {
             "credential": "member",
+            "hiveUrl": "https://join.example:8770",
             "agents": "1",
             "memory": "700Mi",
             "home": {"hostPath": host["homeVolume"]["hostPath"]},
@@ -168,6 +173,7 @@ def hives_problems(chart: str) -> list[str]:
         },
         "-pool-1": {
             "credential": "member-pool-1",
+            "hiveUrl": "https://pool.example:8770",
             "agents": "3",
             "memory": "2100Mi",
             "home": {"emptyDir": {}},
@@ -175,6 +181,7 @@ def hives_problems(chart: str) -> list[str]:
         },
         "-pool-2": {
             "credential": "member-pool-2",
+            "hiveUrl": "https://join.example:8770",
             "agents": "1",
             "memory": "700Mi",
             "home": {"emptyDir": {}},
