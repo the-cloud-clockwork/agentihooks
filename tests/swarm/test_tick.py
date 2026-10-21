@@ -696,7 +696,8 @@ def test_a_launch_that_spends_the_budget_leaves_the_next_task_for_the_next_pass(
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1")]
     assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
-    assert "claimed_by" not in ledger.rows["t2"]
+    assert ledger.rows["t2"].get("claimed_by", "") == ""
+    assert ledger.rows["t2"]["state"] == "open"
     assert not store.redis.exists(store.key("sw", "claim", "t2"))
 
 
