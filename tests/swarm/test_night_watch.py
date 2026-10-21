@@ -313,7 +313,7 @@ def test_ready_work_held_by_the_tick_spawn_hold_names_that_hold(store, monkeypat
     decide(store, configured={"eng": 1, "ci": 0, "plan": 0}, placements={"eng": ["acct"]}, reason="eng is placed")
     until(store, rig, NOW, NOW + 30 * MINUTE)
     (finding,) = night_watch.findings(store, SLUG)
-    assert finding.evidence == ("Hold: no named hold", "Evidence: holding spawns: panes are full")
+    assert finding.evidence == ("Hold: tick", "Evidence: holding spawns: panes are full")
 
 
 def test_a_quota_hold_without_a_reason_says_no_lane_is_placed(store, monkeypatch):
@@ -727,7 +727,21 @@ def test_the_merge_failures_finding_carries_its_exact_words(store, monkeypatch, 
             "o/r",
             f"The last {lead}{streak} merge group runs failed in a row with 3 queued entries",
             ("Queue length: 3", "Newest failed merge group run: 99"),
-            "3 merge group runs failing in a row while the queue holds entries",
+            "3 merge group runs failing in a row",
             streak,
+        )
+    ]
+
+
+def test_the_merge_failures_finding_stands_with_an_empty_dev_queue(store, monkeypatch):
+    stalled(monkeypatch, queue=0, merged=0, streak=3, head=99)
+    assert merge_stall.findings(store, SLUG, "/repo", NOW) == [
+        Finding(
+            "merge failures",
+            "o/r",
+            "The last 3 merge group runs failed in a row with 0 queued entries",
+            ("Queue length: 0", "Newest failed merge group run: 99"),
+            "3 merge group runs failing in a row",
+            3,
         )
     ]

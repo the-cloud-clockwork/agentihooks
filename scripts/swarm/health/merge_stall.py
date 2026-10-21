@@ -92,7 +92,7 @@ def observe(repo: str, at: int) -> dict:
     try:
         name = request(repo, ["repo", "view", "--json", "nameWithOwner"])["nameWithOwner"]
         length, merged = queue(repo, name)
-        streak, head = failing(repo, name) if length else (0, 0)
+        streak, head = failing(repo, name)
         stalled = length and merged and at - merged >= HOUR_MS
         failed = failed_checks(repo, name) if stalled else "none observed"
         return {
@@ -139,7 +139,7 @@ def findings(store, slug: str, repo: str, at: int) -> list[Finding]:
 
 def _failing(state: dict) -> list[Finding]:
     streak = state.get("streak", 0)
-    if not state.get("queue") or streak < STREAK:
+    if streak < STREAK:
         return []
     return [
         Finding(
@@ -148,7 +148,7 @@ def _failing(state: dict) -> list[Finding]:
             f"The last {'at least ' if streak >= RUNS else ''}{streak} merge group runs failed in a row "
             f"with {state['queue']} queued entries",
             (f"Queue length: {state['queue']}", f"Newest failed merge group run: {state['head']}"),
-            f"{STREAK} merge group runs failing in a row while the queue holds entries",
+            f"{STREAK} merge group runs failing in a row",
             streak,
         )
     ]
