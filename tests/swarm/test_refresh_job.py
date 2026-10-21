@@ -124,6 +124,7 @@ def test_start_spawns_at_most_once_every_five_minutes(store, monkeypatch):
     assert refresh_job.start(store, "sw") is True
     assert refresh_job.start(store, "sw") is False
     assert spawned == ["sw"]
+    assert store.redis.get(refresh_job.started_key(store, "sw")) == "1"
     assert 299_000 <= store.redis.pttl(refresh_job.started_key(store, "sw")) <= 300_000
     store.redis.delete(refresh_job.started_key(store, "sw"))
     assert refresh_job.start(store, "sw") is True
