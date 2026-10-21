@@ -5,7 +5,7 @@ import socket
 
 
 def notify(message: str, environ=os.environ) -> bool:
-    address = environ.get("NOTIFY_SOCKET", "")
+    address = environ.get("NOTIFY_SOCKET")
     if not address:
         return False
     if address.startswith("@"):
