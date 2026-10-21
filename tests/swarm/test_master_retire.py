@@ -192,6 +192,41 @@ def test_a_contended_close_still_clears_the_request(swarm, monkeypatch):
     assert master_retire.forget(store, "sw", master.name) is False
 
 
+def test_a_lost_close_race_is_retried_until_the_ask_is_closed(swarm, monkeypatch):
+    store, _, _, master = swarm
+    master_retire.hold(store, "sw", master, "test", True, 200)
+    (ask,) = asks(store, master.name)
+    close, lost = InboxStore.close, []
+
+    def racing(inbox, *args):
+        if len(lost) < 2:
+            lost.append(args)
+            raise Contended("changed meanwhile")
+        return close(inbox, *args)
+
+    monkeypatch.setattr(InboxStore, "close", racing)
+    assert master_retire.forget(store, "sw", master.name) is True
+    assert len(lost) == 2
+    assert InboxStore(store.redis).get(ask.id).state == "done"
+    assert master_retire.reason(store, "sw", master.name) == ""
+
+
+def test_a_close_that_keeps_losing_gives_up_after_its_attempts(swarm, monkeypatch):
+    store, _, _, master = swarm
+    master_retire.hold(store, "sw", master, "test", True, 200)
+    (ask,) = asks(store, master.name)
+    calls = []
+
+    def contended(*args):
+        calls.append(args)
+        raise Contended("changed meanwhile")
+
+    monkeypatch.setattr(InboxStore, "close", contended)
+    assert master_retire.forget(store, "sw", master.name) is True
+    assert len(calls) == master_retire.CLOSE_ATTEMPTS == 3
+    assert InboxStore(store.redis).get(ask.id).state == "pending"
+
+
 def test_an_idle_master_that_hands_off_is_retired_and_not_respawned(swarm):
     store, runtime, ledger, master = swarm
     hours = 6 * 60 * 60 * 1000
