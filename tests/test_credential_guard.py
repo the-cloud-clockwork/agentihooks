@@ -191,6 +191,46 @@ CASES = [
         False,
     ),
     (
+        "python calls env helper",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"auth.env_text(record)\""}},
+        False,
+    ),
+    (
+        "python references env attribute",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(auth.env_name)\""}},
+        False,
+    ),
+    (
+        "python references credential attribute",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(auth.netrc_path)\""}},
+        False,
+    ),
+    (
+        "python reads member dotenv",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('auth.env').read())\""}},
+        True,
+    ),
+    (
+        "python reads dotenv beside helper call",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"auth.env_text(open('/app/auth.env').read())\""}},
+        True,
+    ),
+    (
+        "python reads named dotenv variant",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('/app/.env.production-local').read())\""}},
+        True,
+    ),
+    (
+        "python reads shell config",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('/home/user/.bashrc').read())\""}},
+        True,
+    ),
+    (
+        "python reads credential file",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('/home/user/.netrc').read())\""}},
+        True,
+    ),
+    (
         "python opens dotenv",
         {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('.env').read())\""}},
         True,
