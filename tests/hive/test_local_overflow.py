@@ -326,6 +326,24 @@ def test_a_failed_local_spawn_releases_its_reservation(setup, monkeypatch):
     assert admission.pending(setup.store.redis, "box") == 0
 
 
+def test_the_host_line_leaves_out_the_task_itself_and_measures_without_pending(setup, monkeypatch):
+    from scripts.hive import headroom
+    from scripts.swarm.store import AgentRecord
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    measured = []
+    reading = {"cpus": 10, "load5": 8.0, "available_mb": 10**6, "total_mb": 10**6}
+    monkeypatch.setattr(headroom, "measure", lambda pending, now: measured.append(pending) or reading)
+    local_agents(setup, 4)
+    setup.store.put_agent(setup.config.slug, AgentRecord("eng-self", "eng", "task"))
+    assert fenced.placement_refusal("eng", {"id": "task"}) == (
+        f"{HIVE_FULL}, and the local machine runs 4 of its 4 agents: cpu: five minute load 8.00 on 10 CPUs, "
+        "0.5 CPU per agent, fits 0 more under the 80 percent line"
+    )
+    assert set(measured) == {0}
+
+
 def test_a_slot_counts_once_while_its_agent_runs_and_not_after_it_leaves(setup):
     from scripts.swarm import local_slots
     from scripts.swarm.store import AgentRecord

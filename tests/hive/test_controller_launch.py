@@ -1247,6 +1247,28 @@ def test_a_launch_that_loses_the_last_room_to_a_concurrent_reservation_waits_on_
     assert admission.pending(setup.store.redis, "remote") == 1
 
 
+def test_a_spawn_refused_at_reservation_records_the_wait_and_returns_the_reason(setup, monkeypatch):
+    from scripts.hive import admission, placement_waits
+    from scripts.swarm_v2.runtime.base import Status
+
+    publish_room(setup.store, "remote", 1)
+    monkeypatch.setattr(admission, "reserve", lambda *args, **kwargs: (False, 1))
+    refused = (
+        "no hive for eng has room: remote "
+        "ram: 20700 of 100000 MB available, 700 MB per agent, fits 1 more under the 80 percent line"
+    )
+    result = setup.launcher.spawn(request_for(setup))
+    assert (result.operation, result.status, result.backend, result.detail) == (
+        "spawn",
+        Status.UNAVAILABLE,
+        "hive",
+        refused,
+    )
+    assert {
+        task: (row["lane"], row["reason"]) for task, row in placement_waits.read(setup.store, "fixture").items()
+    } == {"task": ("eng", refused)}
+
+
 def test_terminal_order_is_cleared_even_when_replacement_has_no_account_room(setup):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 

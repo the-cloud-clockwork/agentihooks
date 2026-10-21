@@ -156,6 +156,13 @@ def test_the_master_never_lands_on_a_hive_that_excludes_it():
     assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live UI hive takes qa")
 
 
+def test_a_full_fleet_names_every_hive_refusal_in_order():
+    hives = [eng("a", room=0, refusal="cpu: busy"), eng("b", room=0), eng("c", room=0, refusal="ram: low")]
+    assert place("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Wait(
+        "no hive for eng has room: a cpu: busy; c ram: low"
+    )
+
+
 def test_a_full_master_ui_hive_keeps_the_master_without_counting_against_it():
     hives = [hive("vm", agents=2), eng("a")]
     assert place("master", "claude", "acct", "subscription", REPO, hives, NOW) == "vm"

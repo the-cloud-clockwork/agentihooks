@@ -32,6 +32,19 @@ redis.call('PEXPIRE', KEYS[1], ARGV[3])
 return {1, held}
 """
 
+_PENDING = """
+local now = redis.call('TIME')
+local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+return redis.call('ZCOUNT', KEYS[1], '(' .. millis, '+inf')
+"""
+
+_RECORD = """
+local now = redis.call('TIME')
+local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+redis.call('ZADD', KEYS[1], millis + tonumber(ARGV[2]), ARGV[1])
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
+"""
+
 
 @dataclass(frozen=True)
 class Room:
@@ -58,7 +71,7 @@ def _host(measured: dict, pending: int) -> list[tuple[int, str, str]]:
 
 def _swarm(measured: dict, agents: int) -> list[tuple[int, str, str]]:
     cpus, total = measured["cpus"], measured["total_mb"]
-    cpu = int(SWARM_PERCENT * cpus // (100 * AGENT_CPU)) - agents
+    cpu = int(SWARM_PERCENT * cpus / (100 * AGENT_CPU)) - agents
     ram = SWARM_PERCENT * total // (100 * AGENT_MB) - agents
     share = f"under the {SWARM_PERCENT} percent swarm share"
     return [
@@ -94,14 +107,11 @@ def reserve(redis: "Redis", machine: str, member: str, limit: int, ttl_ms: int =
 
 
 def record(redis: "Redis", machine: str, member: str) -> None:
-    seconds, micros = redis.time()
-    redis.zadd(key(machine), {member: int(seconds) * 1000 + int(micros) // 1000 + PENDING_MS})
-    redis.pexpire(key(machine), PENDING_MS)
+    redis.eval(_RECORD, 1, key(machine), member, PENDING_MS)
 
 
 def pending(redis: "Redis", machine: str) -> int:
-    seconds, micros = redis.time()
-    return redis.zcount(key(machine), f"({int(seconds) * 1000 + int(micros) // 1000}", "+inf")
+    return int(redis.eval(_PENDING, 1, key(machine)))
 
 
 def release(redis: "Redis", machine: str, member: str) -> None:

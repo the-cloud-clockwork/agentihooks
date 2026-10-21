@@ -234,6 +234,28 @@ def test_a_reservation_holds_for_three_five_minute_load_windows(redis):
 
 def test_a_recorded_launch_counts_even_past_the_room(redis):
     assert admission.reserve(redis, "box", "s/one", 1) == (True, 0)
+    seconds, micros = redis.time()
     admission.record(redis, "box", "s/two")
     assert admission.pending(redis, "box") == 2
+    expiry = redis.zscore(admission.key("box"), "s/two") - (int(seconds) * 1000 + int(micros) // 1000)
+    assert 899_000 <= expiry <= 901_000
     assert 899_000 <= redis.pttl(admission.key("box")) <= 900_000
+
+
+def test_the_ram_line_counts_whole_agents_under_eighty_percent_less_pending_launches():
+    measured = reading(cpus=64, available_mb=24_000, total_mb=100_000)
+    line = "700 MB per agent{}, fits {} more under the 80 percent line"
+    assert admission.room(measured) == admission.Room(
+        5, admission.RAM, "24000 of 100000 MB available, " + line.format("", 5)
+    )
+    assert admission.room(measured, pending=2) == admission.Room(
+        3, admission.RAM, "24000 of 100000 MB available, " + line.format(" with 2 pending launches", 3)
+    )
+
+
+def test_a_tie_names_the_host_line_first():
+    assert admission.room(reading(cpus=10, load5=4.0), 0) == admission.Room(
+        8,
+        admission.CPU,
+        "five minute load 4.00 on 10 CPUs, 0.5 CPU per agent, fits 8 more under the 80 percent line",
+    )
