@@ -636,7 +636,7 @@ class HiveAcks(FakeRuntime):
     def __init__(self, fail=()):
         super().__init__()
         self.ordered, self.collected, self.acked, self.failing, self.broken = [], [], set(), set(fail), set()
-        self.refused = set()
+        self.refused, self.collected_slugs = set(), set()
 
     def spawn(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER
@@ -654,6 +654,7 @@ class HiveAcks(FakeRuntime):
 
         assert task[ACK_LATER] is True
         self.collected.append(name)
+        self.collected_slugs.add(config.slug)
         if name in self.broken:
             raise ConnectionError("redis went away")
         if name in self.failing:
@@ -730,10 +731,16 @@ def test_every_refused_hive_order_in_one_pass_reports_its_failure(store):
 
 
 def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(store, monkeypatch):
+    from scripts.swarm import tick as tick_module
+    from scripts.swarm.tick import LEASE_MS
     from scripts.swarm_v2.runtime import codex
 
     admitted, admit = [], codex.admit_legacy
-    monkeypatch.setattr(codex, "admit_legacy", lambda *args: admitted.append(args[0]) or admit(*args))
+    monkeypatch.setattr(codex, "admit_legacy", lambda *args: admitted.append(args) or admit(*args))
+    refreshed, refresh = [], store.refresh
+    monkeypatch.setattr(store, "refresh", lambda *args: refreshed.append(args) or refresh(*args))
+    started, start = [], tick_module._started
+    monkeypatch.setattr(tick_module, "_started", lambda *args: started.append(args) or start(*args))
     ledger, runtime = tasks(("t1", "eng")), HiveAcks()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     first = runtime.ordered[0]
@@ -741,12 +748,15 @@ def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(s
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
     assert ledger.rows["t1"]["claimed_by"] == first and store.claimant("sw", "t1") == first
+    assert ("sw", "t1", first, LEASE_MS) in refreshed
     runtime.broken.clear()
     runtime.acked.add(first)
     tick("sw", store, ledger, runtime, now_ms=3_000)
     assert [row["state"] for row in store.launches("sw")] == ["started"]
     assert runtime.ordered == [first]
-    assert admitted and all(seen is store for seen in admitted)
+    assert [(args[0], args[1], args[3]) for args in admitted if args[2].name == first] == [(store, "sw", runtime)]
+    assert [(args[3], args[5].task["lane"]) for args in started if args[5].record.name == first] == [(ledger, "eng")]
+    assert runtime.collected_slugs == {"sw"}
 
 
 def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(store):
