@@ -470,6 +470,52 @@ class InboxStore:
             pipe.execute()
             return moved
 
+    def move_world(self, item_id: str, target: "InboxStore", by: str, reason: str) -> Item | None:
+        """Move an open item, its history and ledger entry into target's world, pending at the same address."""
+        from redis.exceptions import WatchError
+
+        for _ in range(MOVE_ATTEMPTS):
+            try:
+                return self._try_move_world(item_id, target, by, reason)
+            except WatchError:
+                continue
+        raise InboxError(f"message {item_id} changed meanwhile; run the command again")
+
+    def _try_move_world(self, item_id, target, by, reason):
+        key, history = self.key("item", item_id), self.key("history", item_id)
+        with self.redis.pipeline() as pipe:
+            pipe.watch(key, history, self.key("entry", item_id))
+            item = _item(pipe.hgetall(key), item_id)
+            if item.state in CLOSED:
+                return None
+            entries = pipe.lrange(history, 0, -1)
+            entry = pipe.get(self.key("entry", item_id))
+            last = self.last_pending(pipe, item)
+            moved = replace(item, state="pending", updated_at=now_ms(), reason=reason)
+            pipe.multi()
+            pipe.delete(key, history, self.key("entry", item_id))
+            pipe.zrem(self.key("address", item.address), item_id)
+            pipe.zrem(self.key("open", item.address), item_id)
+            pipe.decr(self.key("open-size", item.address))
+            pipe.zrem(self.key("pending", item.address), item_id)
+            pipe.zrem(self.key("delivered"), item_id)
+            if last:
+                pipe.srem(self.key("waiting"), item.address)
+            pipe.hset(target.key("item", item_id), mapping=_fields(moved))
+            pipe.rpush(target.key("history", item_id), *entries, _entry("pending", by, reason, moved.updated_at))
+            if entry:
+                pipe.set(target.key("entry", item_id), entry)
+            pipe.zadd(target.key("address", item.address), {item_id: item.created_at})
+            pipe.zadd(target.key("open", item.address), {item_id: item.created_at})
+            pipe.incr(target.key("open-size", item.address))
+            pipe.zadd(target.key("pending", item.address), {item_id: item.created_at})
+            pipe.sadd(target.key("waiting"), item.address)
+            if target.persist is not None:
+                target.persist(pipe)
+            pipe.publish(NOTIFY, item.address)
+            pipe.execute()
+            return moved
+
     def _move_address(self, pipe, item, address):
         """pipe is in MULTI: move item's address and open entries, and the open counts, to address."""
         pipe.zrem(self.key("address", item.address), item.id)
