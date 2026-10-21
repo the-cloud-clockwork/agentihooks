@@ -199,7 +199,7 @@ def _new(store, slug, runtime, at):
 
 
 def _front_doors(store, slug, live):
-    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.state != "finished" and a.name in live]
+    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.name in live]
 
 
 def _free_seat(store, slug, live):
@@ -215,7 +215,7 @@ def _beside(store, slug, runtime, at, live):
     seats = max(master_seats.MasterSeats(store.redis).count(slug), index)
 
     def prepare(record):
-        task = {"id": seat_name, "handoff": store.handoff(slug, seat_name), "owns": [], "masters": seats}
+        task = {"id": seat_name, "handoff": store.handoff(slug, seat_name), "masters": seats}
         return _filled(primed(store, slug, record.seat, task), config)
 
     try:
@@ -259,4 +259,4 @@ def up(store, slug, runtime, at, choice, ask, say):
     say(f"The last master cannot be resumed: {why}")
     if _answer(ask, OFFER) not in ("y", "yes"):
         raise SwarmError("no master started")
-    return _fresh(store, slug, runtime, at, live, replace_live)
+    return _fresh(store, slug, runtime, at, live, False)

@@ -389,6 +389,52 @@ def test_a_new_master_skips_every_master_seat_already_held(up, monkeypatch, caps
     assert printed(capsys)["seat"] == "master-3@sw"
 
 
+def test_a_new_master_beside_a_live_front_door_reads_its_own_seat_handoff_and_launch(up, monkeypatch, capsys):
+    from scripts.swarm_v2 import masters as master_seats
+
+    store, _, rt = up
+    live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
+    store.put_agent("sw", live)
+    rt.live.add(live.name)
+    gone = AgentRecord("master@a1b2c3-0006", MASTER, MASTER, state="finished", seat="master-2@sw", started_at=5)
+    store.put_agent("sw", gone)
+    rt.live.add(gone.name)
+    master_seats.MasterSeats(store.redis).set_count("sw", 4)
+    store.put_handoff("sw", "master-3", "seat three handoff")
+    store.redis.hset(store.key("sw", "launch-assignments"), "master-3", json.dumps({"profile": "", "harness": ""}))
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    launched = printed(capsys)
+    assert (launched["seat"], launched["choice"]) == ("master-3@sw", "new")
+    [(_, task)] = rt.masters
+    assert (task["handoff"], task["masters"]) == ("seat three handoff", 4)
+    assert task["launch_assignment"]["profile"] == "master"
+    assert store.handoff("sw", "master-3") == ""
+    assert store.redis.hget(store.key("sw", "launch-assignments"), "master-3") is None
+
+
+def test_a_finished_front_door_still_running_keeps_its_seat(up, monkeypatch, capsys):
+    store, _, rt = up
+    live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="finished", seat="master@sw", started_at=5)
+    store.put_agent("sw", live)
+    rt.live.add(live.name)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    assert printed(capsys)["seat"] == "master-2@sw"
+
+
+def test_a_failed_launch_beside_the_front_door_says_why_and_leaves_no_record(up, monkeypatch, capsys):
+    store, _, rt = up
+    live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
+    store.put_agent("sw", live)
+    rt.live.add(live.name)
+    rt.fail = True
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 1
+    assert "the new master could not start: herdr down" in capsys.readouterr().err
+    assert [a.name for a in masters(store)] == [live.name]
+
+
 def test_a_replacing_master_retires_the_live_front_door_first(up, monkeypatch, capsys):
     store, _, rt = up
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
