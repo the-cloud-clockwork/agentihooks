@@ -51,7 +51,7 @@ def _held(store: RedisStore, claims: dict, own: str, now: int) -> tuple[list[str
 
 
 def _pending(record, age: int) -> bool:
-    return record[1].state == STARTING if record else age < PENDING_MS
+    return age < PENDING_MS and (record is None or record[1].state == STARTING)
 
 
 def _local_worker(agent) -> bool:

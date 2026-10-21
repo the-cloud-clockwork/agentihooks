@@ -299,6 +299,7 @@ def test_a_slot_counts_once_while_its_agent_runs_and_not_after_it_leaves(setup):
 
 def test_a_claim_whose_agent_never_appears_expires(setup):
     from scripts.swarm import lease, local_slots
+    from scripts.swarm.store import AgentRecord
 
     slug = setup.config.slug
     now = lease.now_ms(setup.store)
@@ -309,4 +310,7 @@ def test_a_claim_whose_agent_never_appears_expires(setup):
     assert local_slots.claim(setup.store, "box", slug, "fourth", "eng-4", 2) == 2
     assert sorted(setup.store.redis.hkeys(local_slots.key("box"))) == [f"{slug}/eng-3", f"{slug}/new"]
     local_slots.release(setup.store, "box", slug, "eng-3")
+    assert local_slots.held(setup.store, "box", slug, "other") == 1
+    setup.store.put_agent(slug, AgentRecord("stuck", "eng", "stuck", state="starting"))
+    setup.store.redis.hset(local_slots.key("box"), f"{slug}/stuck", now - local_slots.PENDING_MS)
     assert local_slots.held(setup.store, "box", slug, "other") == 1
