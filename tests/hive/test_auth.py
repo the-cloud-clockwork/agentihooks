@@ -90,7 +90,9 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:merge-stall",
                     f"~{ROOT}:swarm:*:merge-stall-notice",
                     f"~{ROOT}:swarm:*:hive-placement-waits",
+                    f"~{ROOT}:swarm:*:dev-red",
                     f"~{ROOT}:seat:*:recaps",
+                    f"~{ROOT}:seat:*:learned",
                     f"~{ROOT}:seat-of:*:exit",
                 ),
                 "channels": (f"{ROOT}:*",),
@@ -146,7 +148,9 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("swarm:proof:merge-stall", True),
         ("swarm:proof:merge-stall-notice", True),
         ("swarm:proof:hive-placement-waits", True),
+        ("swarm:proof:dev-red", True),
         ("seat:eng-1@proof:recaps", True),
+        ("seat:eng-1@proof:learned", True),
         ("seat-of:engineer@0001-0001:exit", True),
         ("swarm:proof:config", False),
         ("swarm:proof:claim-journal:t1", False),
@@ -154,7 +158,8 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("swarm:proof:tick-lock", False),
         ("swarm:proof:launches", False),
         ("swarm:index", False),
-        ("seat:eng-1@proof:learned", False),
+        ("swarm:proof:dev-red-runs", False),
+        ("seat:eng-1@proof:culture", False),
         ("names:engineer@0001-0001", False),
     ],
 )
@@ -165,6 +170,18 @@ def test_a_member_writes_the_keys_a_worker_uses_for_done_ready_park_wait_and_sta
     patterns = [pattern[1:] for pattern in auth._acl_keys("m1") if pattern.startswith("~")]
 
     assert any(fnmatchcase(key, pattern) for pattern in patterns) is writable
+
+
+def test_a_member_writes_the_keys_swarm_block_and_swarm_learned_write():
+    from fnmatch import fnmatchcase
+
+    from scripts.inbox.seats import SeatMemory
+    from scripts.swarm import dev_red
+
+    patterns = [pattern[1:] for pattern in auth._acl_keys("m1") if pattern.startswith("~")]
+
+    for key in (dev_red.key("proof"), SeatMemory(None).key("eng-1@proof", "learned")):
+        assert any(fnmatchcase(key, pattern) for pattern in patterns), key
 
 
 def test_the_grant_sizes_and_member_record(admin, redis_lib):
