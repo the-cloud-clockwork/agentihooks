@@ -67,6 +67,29 @@ def test_a_shard_lost_again_on_its_in_run_rerun_is_not_requeued():
     assert reason == "failed again on its in-run rerun: unit rerun (3.11, 2)"
 
 
+def test_a_timed_out_rerun_is_listed_so_it_refuses_the_requeue(monkeypatch):
+    jobs = {
+        "total_count": 2,
+        "jobs": [
+            {"id": 1, "name": "unit (3.12, 2)", "conclusion": "failure"},
+            {"id": 2, "name": "unit rerun (3.12, 2)", "conclusion": "timed_out"},
+        ],
+    }
+
+    def api(*args):
+        if args[0].endswith("jobs?filter=latest&per_page=100"):
+            return json.dumps(jobs)
+        return "##[error]" + SHUTDOWN if args[0].endswith("/logs") else "[]"
+
+    monkeypatch.setattr(ci_queue_retry, "_api", api)
+    failed = ci_queue_retry.failed_jobs("o/r", 7)
+    assert [entry["name"] for entry in failed] == ["unit (3.12, 2)", "unit rerun (3.12, 2)"]
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (
+        False,
+        "failed again on its in-run rerun: unit rerun (3.12, 2)",
+    )
+
+
 @pytest.mark.parametrize(("annotation", "lost"), [(LOST, True), ("Process completed with exit code 1.", False)])
 def test_a_job_without_a_log_is_judged_by_its_annotations(monkeypatch, annotation, lost):
     def api(*args):

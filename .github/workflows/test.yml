@@ -1273,7 +1273,7 @@ jobs:
           retention-days: 7
 
   unit-lost:
-    if: ${{ !cancelled() && github.event_name == 'merge_group' && needs.unit.result == 'failure' }}
+    if: ${{ !cancelled() && github.event_name == 'merge_group' && (needs.unit.result == 'failure' || needs.unit.result == 'cancelled') }}
     needs: [unit, split]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 10
@@ -2328,7 +2328,7 @@ jobs:
             fi
             if python3 -m scripts.ci_budget.jobs "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" > "$RUNNER_TEMP/jobs.jsonl"; then
               misses=0
-              verdict=$(python3 -m scripts.ci_queue_fail_fast "$RUNNER_TEMP/jobs.jsonl")
+              verdict=$(python3 -m scripts.ci_queue_fail_fast "$RUNNER_TEMP/jobs.jsonl" --repo "$GITHUB_REPOSITORY")
               if [[ "$verdict" != wait ]]; then
                 echo "$verdict" >> "$GITHUB_OUTPUT"
                 exit 0
@@ -2378,7 +2378,7 @@ jobs:
               | . as $jobs
               | ($event == "merge_group" or (($mutation == "true" or $mutation == "false") and ($scope == "full" or $scope == "selected" or $scope == "none")))
                 and ($event != "merge_group" or has("queue-fail-fast"))
-                and ($event != "merge_group" or ([$jobs.unit.result, $jobs."unit-lost".result, $jobs."unit-rerun".result] | IN(["success", "skipped", "skipped"], ["failure", "success", "success"])))
+                and ($event != "merge_group" or ([$jobs.unit.result, $jobs."unit-lost".result, $jobs."unit-rerun".result] | IN(["success", "skipped", "skipped"], ["failure", "success", "success"], ["cancelled", "success", "success"])))
                 and all($required[]; . as $job | $jobs[$job].result == "success")
                 and all(to_entries[]; .key as $job |
                   if $required | index($job) then .value.result == "success" elif $event == "merge_group" and $job == "queue-fail-fast" then (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == "" elif $event == "merge_group" and ($job | IN("unit", "unit-lost", "unit-rerun")) then true else .value.result == "skipped" end)

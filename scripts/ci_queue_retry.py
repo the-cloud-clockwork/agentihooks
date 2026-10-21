@@ -60,11 +60,15 @@ def _api(*args: str) -> str:
     return subprocess.run(["gh", "api", *args], stdout=subprocess.PIPE, text=True, check=True).stdout
 
 
+def log_errors(repo: str, job_id: int) -> list[str]:
+    text = _api(f"repos/{repo}/actions/jobs/{job_id}/logs", "--allow-escape-sequences")
+    return [line for line in text.splitlines() if "##[error]" in line]
+
+
 def job_text(repo: str, job_id: int, log: bool) -> str:
     notes = [note["message"] for note in json.loads(_api(f"repos/{repo}/check-runs/{job_id}/annotations"))]
     if log:
-        text = _api(f"repos/{repo}/actions/jobs/{job_id}/logs", "--allow-escape-sequences")
-        notes += [line for line in text.splitlines() if "##[error]" in line]
+        notes += log_errors(repo, job_id)
     return "\n".join(notes)
 
 
@@ -81,7 +85,7 @@ def failed_jobs(repo: str, run_id: int) -> list[dict]:
     failed = []
     for job in jobs["jobs"]:
         shard = base_name(job["name"]) == SHARD
-        if job["conclusion"] != "failure" and not (shard and job["conclusion"] == "cancelled"):
+        if job["conclusion"] not in ("failure", "timed_out") and not (shard and job["conclusion"] == "cancelled"):
             continue
         text = job_text(repo, job["id"], shard)
         if job["conclusion"] == "cancelled" and not RUNNER_LOSS.search(text):

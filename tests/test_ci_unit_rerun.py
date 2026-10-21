@@ -73,7 +73,10 @@ def test_main_writes_the_matrix_and_fails_without_a_rerun(monkeypatch, tmp_path,
 def test_the_rerun_job_runs_the_unit_shard_steps_for_the_classified_legs():
     jobs = _jobs()
     lost, rerun = jobs["unit-lost"], jobs["unit-rerun"]
-    assert lost["if"] == "${{ !cancelled() && github.event_name == 'merge_group' && needs.unit.result == 'failure' }}"
+    assert lost["if"] == (
+        "${{ !cancelled() && github.event_name == 'merge_group'"
+        " && (needs.unit.result == 'failure' || needs.unit.result == 'cancelled') }}"
+    )
     assert lost["runs-on"] == jobs["shard-check"]["runs-on"]
     read, classify = lost["steps"][-2:]
     assert read["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
