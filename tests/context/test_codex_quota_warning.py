@@ -300,7 +300,7 @@ def test_posttool_context_follows_the_policy_switch_and_the_wait_tools(monkeypat
     monkeypatch.setattr(qp, "handed_off_block", lambda session: None)
     monkeypatch.setattr(qp, "early_warning", lambda session: "early")
     assert qp.posttool_context(SID, "CronCreate", "/repo").startswith("QUOTA WAIT")
-    assert qp.posttool_context(SID, "Bash", "/repo") == "early"
+    assert qp.posttool_context(SID, "Bash", "/repo").startswith("QUOTA WAIT")
     monkeypatch.setattr(qp, "QUOTA_POLICY_ENABLED", False)
     assert qp.posttool_context(SID, "CronCreate", "/repo") is None
 
