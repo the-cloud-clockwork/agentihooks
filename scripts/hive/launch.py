@@ -79,15 +79,24 @@ def _open_claude_rows(rows: list, hived: dict[str, int]) -> list:
 
 
 def _hive_sessions(redis: object, now_ms: int) -> dict[str, int]:
+    """Worker sessions each live hive reports for itself, so local launches are never counted twice."""
     from scripts.routing import aggregate
 
     if aggregate.enabled():
         return {}
-    return {
-        _key(row["account"]): row["sessions"]
-        for row in aggregate.read(redis, now_ms / 1000).values()
-        if row["harness"] == "claude"
-    }
+    from scripts.swarm.commands import hive_id
+
+    local = hive_id()
+    counted: dict[str, int] = {}
+    for hive in registry.hives(redis):
+        if hive["id"] == local or not registry.live(hive, now_ms):
+            continue
+        counts = json.loads(redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
+        for slot, count in counts.items():
+            harness, _, account = slot.partition(":")
+            if harness == "claude" and account:
+                counted[_key(account)] = counted.get(_key(account), 0) + count
+    return counted
 
 
 def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: int | None) -> int | None:
