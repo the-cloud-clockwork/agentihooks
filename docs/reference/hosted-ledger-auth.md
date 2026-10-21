@@ -73,6 +73,8 @@ SWARM_ACCESS_CLIENT_ID="$SWARM_ACCESS_CLIENT_ID"         # off the tailnet only
 SWARM_ACCESS_CLIENT_SECRET="$SWARM_ACCESS_CLIENT_SECRET"
 ```
 
+Workstation agents get the Access service token without any of it written to a file. `agentihooks access env` reads OpenBao record `cloudflare-access-service-token` (fields `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`; `AGENTIHOOKS_ACCESS_TOKEN_PATH` moves it) with `OPENBAO_URL` and `OPENBAO_TOKEN`, and prints the two `SWARM_ACCESS_*` exports. Every launcher `init-agent` writes evaluates it right after sourcing the operator's env files, and so does the shell block `agentihooks init` writes, beside `accounts env`. It prints nothing when OpenBao is unset, unreachable within 3 seconds or the record lacks a field; an unreachable OpenBao says so on stderr.
+
 ## Usage
 
 Derive an agent token for one ledger and one name, with the secret in the environment:
