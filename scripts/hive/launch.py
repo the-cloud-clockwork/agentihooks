@@ -83,8 +83,8 @@ def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: 
     return caps[0] if caps else fallback
 
 
-def _master_login(hives: list[dict], hive_id: str) -> str:
-    return next((hive.get("master_login", {}).get("claude", "") for hive in hives if hive["id"] == hive_id), "")
+def _master_login(hives: list[dict], hive_id: str) -> bool:
+    return any(hive["id"] == hive_id and hive["master_login"].get("claude") for hive in hives)
 
 
 def _by_origin(hives: list[dict], repo: str) -> list[dict]:
@@ -185,7 +185,7 @@ class HiveLaunch:
         found = replace(found, role=role) if isinstance(found, placement.Wait) else found
         return self._record_wait(lane, task, found)
 
-    def _master_selection(self, config, decision, hives, now, rows, front=False):
+    def _master_selection(self, config, decision, hives, now, rows, front):
         accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
         available = [
             {**hive, "slots": [slot for slot in hive["slots"] if _key(slot["account"]) in accounts]} for hive in hives

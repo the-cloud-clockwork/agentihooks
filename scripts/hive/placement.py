@@ -124,7 +124,7 @@ def place_master(
         if not live(hive, now) or repo not in hive["repos"] or not hosts(MASTER, hive):
             continue
         headless = hive["ui"] != YES
-        forced = hive.get("master_login", {}).get(harness, "") if front else ""
+        forced = front and hive["master_login"].get(harness)
         if forced:
             if login in ("", forced):
                 placed = MasterPlacement(hive["id"], forced, INTERACTIVE, False)

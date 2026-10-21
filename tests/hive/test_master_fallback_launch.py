@@ -296,12 +296,12 @@ def master_login_hive(setup):
     ("seat", "expected"),
     [
         ("master@fixture", ("login", "interactive", 4)),
-        ("", ("login", "interactive", 4)),
+        (None, ("login", "interactive", 4)),
         ("master-2@fixture", ("account", "subscription", 6)),
     ],
 )
 def test_the_front_door_master_is_ordered_on_the_hive_master_login_account(setup, seat, expected):
-    task = {**master(setup), "seat": seat}
+    task = master(setup) if seat is None else {**master(setup), "seat": seat}
     master_login_hive(setup)
     selected = setup.launcher.select(setup.config, "master", task)
     assert (selected.account.name, selected.route_kind, selected.account.cap) == expected
@@ -334,6 +334,27 @@ def test_a_secondary_master_on_a_native_login_reserves_one_launch_beside_a_maste
     )
     selected = setup.launcher.select(setup.config, "master", task)
     assert (selected.account.name, selected.route_kind, selected.account.cap) == ("login", "interactive", 1)
+
+
+def test_a_front_door_master_on_a_native_hive_reserves_one_launch_while_another_hive_has_a_master_login(setup):
+    task = {**master(setup), "seat": "master@fixture"}
+    master_login_hive(setup)
+    write_hive(setup, excluded=["master"], master_login={"claude": "login"})
+    write_hive(
+        setup,
+        id="desk",
+        excluded=[],
+        ui="yes",
+        interactive={"claude": "native"},
+        slots=[{"harness": "claude", "account": "native", "kind": "subscription", "cap": 4}],
+    )
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert (selected.hive, selected.account.name, selected.route_kind, selected.account.cap) == (
+        "desk",
+        "native",
+        "interactive",
+        1,
+    )
 
 
 def test_a_front_door_successor_on_a_master_login_hive_starts_on_its_first_order(setup):

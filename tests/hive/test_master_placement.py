@@ -164,3 +164,18 @@ def test_a_declared_login_matching_the_hive_master_login_is_placed_there():
     assert placement.place_master("claude", "operator", REPO, hives, NOW, front=True) == placement.MasterPlacement(
         "login", "operator", "interactive", False
     )
+
+
+def test_a_master_login_outranks_a_preferred_hive_slot_and_follows_master_preference():
+    hives = [
+        hive("login", master_login={"claude": "operator"}, prefer={"master": 2}),
+        hive("slot", prefer={"master": 1}),
+    ]
+    assert placement.place_master("claude", "", REPO, hives, NOW, front=True).hive == "login"
+    hives = [
+        hive("a", master_login={"claude": "first"}, prefer={"master": 2}),
+        hive("b", master_login={"claude": "second"}, prefer={"master": 1}),
+    ]
+    assert placement.place_master("claude", "", REPO, hives, NOW, front=True) == placement.MasterPlacement(
+        "b", "second", "interactive", False
+    )
