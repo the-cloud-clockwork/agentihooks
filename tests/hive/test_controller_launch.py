@@ -883,6 +883,31 @@ def test_heartbeat_execution_ids_prevent_double_counting_and_masters_are_exempt(
     assert setup.launcher.hives()[0]["agents"] == 1
 
 
+@pytest.mark.parametrize(("running", "expected"), [(2, 2), (1, 2), (3, 3)])
+def test_reported_processes_absorb_agents_the_hive_lists_no_execution_for(setup, running, expected):
+    from scripts.hive import registry
+    from scripts.swarm.store import AgentRecord
+
+    for index in range(2):
+        setup.store.start_execution(
+            "fixture",
+            AgentRecord(
+                setup.store.next_name("fixture", "eng"),
+                "eng",
+                "task",
+                seat=f"eng-{index + 1}@fixture",
+                harness="claude",
+                account="account",
+                hive="remote",
+                runtime_target={"host_id": "remote"},
+            ),
+        )
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", json.dumps({"claude:account": running}))
+    write_hive(setup, max_agents=4)
+    assert setup.launcher.hives()[0]["agents"] == expected
+    assert setup.launcher.select(setup.config, "eng", {"id": "next"}).hive == "remote"
+
+
 def test_default_wait_sleep_and_exact_deadline_are_exercised(setup):
     from unittest.mock import patch
 
