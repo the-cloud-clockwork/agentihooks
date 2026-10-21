@@ -24,6 +24,22 @@ def test_hive_launch_uses_report_and_keeps_brain_optional():
     assert report["state"] == "reported"
 
 
+def test_an_agent_placed_on_this_machine_hive_is_checked_as_local_without_a_join_report(monkeypatch):
+    from fakeredis import FakeRedis
+
+    from scripts.swarm import commands, launch_check
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, state="running"))
+    code = store.ensure_code("sw").code
+    monkeypatch.setattr(commands, "hive_id", lambda: "root")
+    agent = AgentRecord(f"master@{code}-0002", "master", "master", execution_id="execution", hive="root")
+    assert "hive_join" not in launch_check.misses(store, "sw", agent, {}, {}, True, [])
+    remote = replace(agent, hive="worker")
+    assert "hive_join" in launch_check.misses(store, "sw", remote, {}, {}, True, [])
+
+
 @pytest.mark.parametrize("missing", [None, "ledger_write", "settings", "pane"])
 def test_hive_missing_required_evidence_is_enforced(missing):
     from fakeredis import FakeRedis
