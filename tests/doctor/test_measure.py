@@ -44,6 +44,14 @@ def test_a_gone_finding_naming_a_retired_agent_is_refused():
     )
 
 
+def test_an_unseen_nested_finding_suggests_its_root_class():
+    with pytest.raises(SwarmError) as refused:
+        measure.exact("turn-gap/eng/s1", [], [], {}, set())
+    assert str(refused.value) == (
+        "no finding turn-gap/eng/s1 has been seen; measure the class turn-gap to read every live target"
+    )
+
+
 @pytest.mark.parametrize("evidence,live", [(["agent eng@a"], {"eng@a"}), (["task t1"], set())])
 def test_a_gone_finding_of_a_live_or_unnamed_agent_reads_zero(evidence, live):
     assert measure.exact("turn-gap/s1", [], [], {"turn-gap/s1": {"evidence": evidence}}, live) == 0
@@ -96,3 +104,9 @@ def test_a_failed_spawn_count_reads_a_known_task_or_the_master():
 def test_a_failed_spawn_count_refuses_a_task_the_ledger_lacks():
     with pytest.raises(SwarmError, match="^failed-spawn/mu9 names no task on the watched ledger$"):
         measure.spawn_count("failed-spawn/mu9", [], {"mu1"})
+
+
+def test_a_failed_spawn_count_refuses_a_nested_subject_ending_in_a_known_task():
+    failures = [found("failed spawn", "mu1", 2)]
+    with pytest.raises(SwarmError, match="^failed-spawn/x/mu1 names no task on the watched ledger$"):
+        measure.spawn_count("failed-spawn/x/mu1", failures, {"mu1"})
