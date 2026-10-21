@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 RETRY = ROOT / ".github/scripts/pypi-retry.sh"
 LABEL = "::error title=Python package index unavailable::"
-BAD_GATEWAY = "  Caused by: HTTP status server error (502 Bad Gateway) for url (https://pypi.org/simple/setuptools/)\n"
+BAD_GATEWAY = "  cause: HTTP status server error (502 Bad Gateway) for url (https://pypi.org/simple/setuptools/)\n"
 
 
 def _bin(tmp_path):
@@ -69,16 +69,28 @@ def _retry(tmp_path, answers, **env):
     "error",
     [
         BAD_GATEWAY,
-        "  Caused by: HTTP status server error (503 Service Unavailable) for url (https://pypi.org/simple/pytest/)\n",
-        "  Caused by: HTTP status client error (429 Too Many Requests) for url (https://pypi.org/simple/pytest/)\n",
-        "  Caused by: error sending request for url (https://pypi.org/simple/pytest/)\n",
-        "  Caused by: tcp connect error: Connection refused (os error 111)\n",
-        "  Caused by: Connection reset by peer (os error 104)\n",
-        "  Caused by: dns error: failed to lookup address information\n",
-        "  Caused by: operation timed out\n",
-        "  Caused by: deadline has elapsed\n",
+        "  cause: HTTP status server error (503 Service Unavailable) for url (https://pypi.org/simple/pytest/)\n",
+        "  cause: HTTP status client error (408 Request Timeout) for url (https://pypi.org/simple/pytest/)\n",
+        "  cause: HTTP status client error (429 Too Many Requests) for url (https://pypi.org/simple/pytest/)\n",
+        "  cause: tcp connect error: Connection refused (os error 111)\n",
+        "  cause: Connection reset by peer (os error 104)\n",
+        "  cause: dns error: failed to lookup address information\n",
+        "  cause: operation timed out\n",
+        "  cause: deadline has elapsed\n",
+        "  Caused by: HTTP status server error (502 Bad Gateway) for url (https://pypi.org/simple/setuptools/)\n",
     ],
-    ids=["bad-gateway", "unavailable", "too-many", "send", "refused", "reset", "dns", "timeout", "deadline"],
+    ids=[
+        "bad-gateway",
+        "unavailable",
+        "request-timeout",
+        "too-many",
+        "refused",
+        "reset",
+        "dns",
+        "timeout",
+        "deadline",
+        "caused-by",
+    ],
 )
 def test_a_short_index_outage_is_retried_with_backoff_until_the_install_succeeds(tmp_path, error):
     result, calls, sleeps, summary = _retry(tmp_path, [(error, 2), (error, 2), ("Installed 90 packages\n", 0)])
@@ -100,7 +112,7 @@ def test_an_index_that_stays_down_retries_for_two_minutes_then_names_the_outage(
     assert len(calls) == 8
     assert LABEL in result.stderr
     message = result.stderr.split(LABEL)[1]
-    assert "Install dependencies failed 8 times over 155s" in message
+    assert "Install dependencies failed after 8 attempts and 155s of backoff" in message
     assert "502 Bad Gateway" in message
     assert "not a code verdict" in message
     assert "Python package index unavailable" in summary
@@ -119,9 +131,11 @@ def test_the_retry_budget_is_configurable(tmp_path):
     [
         "  Caused by: HTTP status client error (404 Not Found) for url (https://pypi.org/simple/nope/)\n",
         "  × No solution found when resolving dependencies:\n",
+        "  cause: error sending request for url (https://pypi.org/simple/pytest/)\n",
+        "      Build step timed out: Connection refused by the test server\n",
         "",
     ],
-    ids=["not-found", "resolution", "silent"],
+    ids=["not-found", "resolution", "send-only", "build-output", "silent"],
 )
 def test_a_failure_that_is_not_an_index_outage_fails_at_once(tmp_path, error):
     result, calls, sleeps, summary = _retry(tmp_path, [(error, 1), ("", 0)])
@@ -130,6 +144,20 @@ def test_a_failure_that_is_not_an_index_outage_fails_at_once(tmp_path, error):
     assert sleeps == []
     assert LABEL not in result.stdout + result.stderr
     assert summary == ""
+
+
+def test_a_command_without_the_separator_is_never_run(tmp_path):
+    bin_dir = _fake(tmp_path, [("", 0)])
+    result = subprocess.run(
+        ["bash", str(RETRY), "Install dependencies", "install", "-e", "."],
+        cwd=tmp_path,
+        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != 0
+    assert not (tmp_path / "calls").exists()
 
 
 class _BadGateway(BaseHTTPRequestHandler):

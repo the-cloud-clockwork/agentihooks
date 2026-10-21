@@ -5,10 +5,11 @@ label="$1"
 [[ "$2" == -- ]]
 shift 2
 
-outage='HTTP status server error|HTTP status client error \((408|429) |error sending request for url|tcp connect error|Connection (refused|reset)|dns error|timed out|deadline has elapsed'
+outage='^[[:space:]]*(cause|Caused by): .*(HTTP status server error|HTTP status client error \((408|429) |tcp connect error|Connection (refused|reset)|dns error|operation timed out|deadline has elapsed)'
 deadline="${PYPI_RETRY_SECONDS:-150}"
-log=$(mktemp)
-trap 'rm -f "$log"' EXIT
+out=$(mktemp)
+err=$(mktemp)
+trap 'rm -f "$out" "$err"' EXIT
 waited=0
 wait=5
 attempt=0
@@ -16,13 +17,14 @@ attempt=0
 while true; do
   attempt=$((attempt + 1))
   status=0
-  "$@" > "$log" 2>&1 || status=$?
-  cat "$log" >&2
+  "$@" > "$out" 2> "$err" || status=$?
+  cat "$err" >&2
+  cat "$out"
   ((status != 0)) || exit 0
-  reason=$(grep -E "$outage" "$log" | tail -n1 | sed 's/^[[:space:]]*//' || true)
+  reason=$(cat "$out" "$err" | grep -E "$outage" | tail -n1 | sed 's/^[[:space:]]*//' || true)
   [[ -n "$reason" ]] || exit "$status"
   if ((waited >= deadline)); then
-    message="$label failed $attempt times over ${waited}s: $reason. PyPI or the network did not answer; this is not a code verdict."
+    message="$label failed after $attempt attempts and ${waited}s of backoff: $reason. PyPI or the network did not answer; this is not a code verdict."
     echo "::error title=Python package index unavailable::$message" >&2
     [[ -z "${GITHUB_STEP_SUMMARY:-}" ]] || echo "Python package index unavailable: $message" >> "$GITHUB_STEP_SUMMARY"
     exit "$status"
