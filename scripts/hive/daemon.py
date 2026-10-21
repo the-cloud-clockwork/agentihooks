@@ -74,6 +74,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+    close_dead_tabs(set(hosted["names"]))
     publish_config(redis, local_id, report["repos"])
 
 
@@ -440,3 +441,15 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
             "pane": asdict(herdr.observe(agent)),
         }
     return report
+
+
+def close_dead_tabs(live: set[str]) -> list[str]:
+    from scripts import herdr_gc, herdr_host
+
+    environ = dict(os.environ)
+    if not herdr_host.binary() or not herdr_host.server_running(environ):
+        return []
+    try:
+        return herdr_gc.close_dead_tabs(environ, int(time.time() * 1000), herdr_gc.Herdr(environ), live)
+    except herdr_gc.READ_ERRORS:
+        return []
