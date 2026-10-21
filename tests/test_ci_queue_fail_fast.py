@@ -55,7 +55,11 @@ def test_the_first_failed_job_listed_is_named():
     assert fail_fast.failed([_job("lint", "failure"), _job("sonar", "failure")]) == "lint"
 
 
-@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out"])
+def test_a_timed_out_unit_shard_is_named_at_once():
+    assert fail_fast.failed([_job("unit (3.12, 4)", "timed_out")], lambda job: True) == "unit (3.12, 4)"
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled"])
 def test_a_unit_shard_that_lost_its_runner_waits_for_its_rerun(conclusion):
     jobs = [_job("unit (3.12, 4)", conclusion), _job("lint", "success")]
     assert fail_fast.failed(jobs, lambda job: True) is None
@@ -79,6 +83,9 @@ def test_a_rerun_classifier_or_judge_failure_is_named_even_when_lost(name):
         ("##[error]Process completed with exit code 1.", False),
         ("##[error]Process completed with exit code 128.\n##[error]The runner has received a shutdown signal.", True),
         ("", True),
+        ("##[error]Process completed with exit code 127.", False),
+        ("##[error]Process completed with exit code 137.", True),
+        ("##[error]Process completed with exit code 143.", True),
         ("E   AssertionError: Process completed with exit code 1", True),
     ],
 )

@@ -11,7 +11,7 @@ SELF = "queue-fail-fast"
 # Needs every graded job, so once it completes nothing graded can still fail.
 LAST = "stage-budget"
 FATAL = ("failure", "timed_out", "cancelled")
-EXITED = re.compile(r"##\[error\]Process completed with exit code [1-9]")
+EXITED = re.compile(r"##\[error\]Process completed with exit code (?:[1-9]|[1-9]\d|1[01]\d|12[0-7])\.")
 
 
 def failed(jobs: list[dict], lost: Callable[[dict], bool] = lambda job: False) -> str | None:
@@ -21,7 +21,7 @@ def failed(jobs: list[dict], lost: Callable[[dict], bool] = lambda job: False) -
             for job in jobs
             if job["name"] != SELF
             and job.get("conclusion") in FATAL
-            and not (base_name(job["name"]) == SHARD and lost(job))
+            and not (base_name(job["name"]) == SHARD and job["conclusion"] != "timed_out" and lost(job))
         ),
         None,
     )
