@@ -267,6 +267,7 @@ def test_lost_hive_worker_leaves_a_task_awaiting_merge_in_pull_request(remote):
     actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
 
     assert actions == [f"retired {remote.agent.name}: its hive stopped reporting"]
+    remote.runtime.retire.assert_not_called()
     ledger.update_task.assert_not_called()
     assert rows["task"] == row
     assert remote.store.agents("fixture") == []
