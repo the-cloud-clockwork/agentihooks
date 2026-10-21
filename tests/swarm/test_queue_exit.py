@@ -77,7 +77,7 @@ def test_cancelled_and_passed_own_runs_are_no_failure():
     assert run.calls == [["gh", "api", PATH.format(page=1)], ["gh", "api", jobs_path(1)]]
 
 
-@pytest.mark.parametrize("conclusion", queue_exit.FAILED_JOB)
+@pytest.mark.parametrize("conclusion", ["failure", "timed_out", "startup_failure"])
 def test_a_cancelled_own_run_with_a_failed_job_is_the_entrys_own_failure(conclusion):
     run = runner([run_of(7, "cancelled", run_id=5)], jobs={5: [["success", conclusion, "cancelled"]]})
     assert queue_exit.own_failures(URL, SINCE, run) == ["Tests https://github.com/o/r/actions/runs/5"]
