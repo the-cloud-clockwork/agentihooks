@@ -1,4 +1,4 @@
-"""agentihooks hive add|invite|refresh|revoke|controller|serve|set|show|list|run|install|bundle-origin|setup."""
+"""agentihooks hive add|invite|refresh|revoke|remove|controller|serve|set|show|list|run|install|bundle-origin|setup."""
 
 import argparse
 import contextlib
@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator, Mapping, MutableMapping
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -136,6 +137,27 @@ def _invite(args: argparse.Namespace) -> str:
     return invite.invite(redis_client(), bao, request, redis_url(os.environ))
 
 
+def _remove(args: argparse.Namespace) -> list[str]:
+    from scripts import openbao_kv
+    from scripts.hive import invite, remove
+    from scripts.swarm.store import RedisStore
+
+    bao = openbao_kv.from_env(os.environ)
+    if bao is None:
+        raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
+    store = RedisStore(redis_client())
+    label = args.label or remove.label(store.redis, args.id)
+    plan = remove.Plan(args.id, label, args.path or invite.default_path(label), args.antoncore, args.wait)
+    return remove.remove(store, bao, plan, remove.Host())
+
+
+def _retire(args: argparse.Namespace) -> str:
+    if args.command == "revoke":
+        auth.revoke(redis_client(), args.id)
+        return f"revoked {args.id}"
+    return "\n".join(_remove(args))
+
+
 def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
@@ -170,6 +192,14 @@ def _parser() -> argparse.ArgumentParser:
     invited.add_argument("--swarm-url", help="ledger address the new hive reaches")
     sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its hive endpoint")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
+    removed = sub.add_parser(
+        "remove", help="Drain a hive, then delete it from Redis, herdr, known hosts, OpenBao and antoncore"
+    )
+    removed.add_argument("id")
+    removed.add_argument("--label", help="herdr label and manifest name; defaults to the member's name")
+    removed.add_argument("--path", help="OpenBao record under the secret mount; defaults to k8s/agentihooks-hive-LABEL")
+    removed.add_argument("--antoncore", type=Path, help="antoncore checkout to remove the hive's manifests from")
+    removed.add_argument("--wait", type=int, default=3600, help="seconds to wait for its agents to hand off")
     sub.add_parser(
         "controller", help="Write a new controller service credential to a private file, retiring the previous one"
     )
@@ -289,9 +319,8 @@ def main(argv: list[str]) -> int:
             print(
                 f"refreshed the Redis credential of hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}"
             )
-        elif args.command == "revoke":
-            auth.revoke(redis_client(), args.id)
-            print(f"revoked {args.id}")
+        elif args.command in ("revoke", "remove"):
+            print(_retire(args))
         elif args.command in ("run", "install"):
             return _daemon(args.command)
         elif args.command == "compare":
