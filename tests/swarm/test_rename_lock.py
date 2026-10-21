@@ -109,3 +109,45 @@ def test_a_rename_refuses_a_swarm_whose_tick_holds_the_lock(store):
     with pytest.raises(SwarmError, match="another tick or rename is running"):
         rename_swarm(store, "sw", LEDGER, None, 10)
     assert store.redis.get(store.key("sw", "tick-lock")) == tick
+
+
+def two_agent_herdr(store, on_rename):
+    store.put_agent("sw", AgentRecord("sw-eng-2", "eng", "t2", pane_id="w1:p2"))
+    panes = [
+        {"pane_id": "w1:p1", "name": "sw-eng-1", "workspace_id": "w1"},
+        {"pane_id": "w1:p2", "name": "sw-eng-2", "workspace_id": "w1"},
+    ]
+    renamed = []
+
+    def herdr(args):
+        if args[:2] == ["agent", "rename"]:
+            renamed.append(args[2])
+            on_rename(args[2])
+        return {"agents": panes, "workspaces": []}
+
+    return SimpleNamespace(herdr=herdr), renamed
+
+
+def test_a_long_rename_keeps_its_lease(store, monkeypatch):
+    import time
+
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "1")
+    runtime, renamed = two_agent_herdr(store, lambda pane: time.sleep(1.6))
+    rename_swarm(store, "sw", LEDGER, runtime, 10)
+    assert renamed == ["w1:p1", "w1:p2"]
+    live = lease.current(store, "sw")
+    assert live is not None and live.owner == commands.hive_id()
+    assert lease.acquire(store, "sw", "another-hive") is None
+
+
+def test_a_rename_that_lost_its_lease_stops_before_the_next_write(store):
+    def take_over(pane):
+        store.redis.delete(store.key("sw", "control-owner"))
+        assert lease.acquire(store, "sw", "another-hive") is not None
+
+    runtime, renamed = two_agent_herdr(store, take_over)
+    with pytest.raises(SwarmError, match="the controller lease is stale"):
+        rename_swarm(store, "sw", LEDGER, runtime, 10)
+    assert renamed == ["w1:p1"]
+    assert set(store.redis.hkeys(store.key("sw", "agents"))) == {"sw-eng-1", "sw-eng-2"}
+    assert lease.current(store, "sw").owner == "another-hive"

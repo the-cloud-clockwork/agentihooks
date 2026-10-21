@@ -59,15 +59,19 @@ def test_a_live_tick_holder_keeps_its_lock(locked_store):
     assert store.redis.get(store.key("sw", "tick-lock")) == original
 
 
-def test_a_stale_controller_cannot_replace_or_renew_the_current_lock(locked_store):
+def test_a_newer_epoch_tick_leaves_a_live_holders_lock_alone(locked_store):
     store, held = locked_store
     original = controller.take_tick_lock(store, "sw", held, 600_000)
     assert lease.release(store, "sw", held)
     current = lease.acquire(store, "sw", "successor")
-    replacement = controller.take_tick_lock(store, "sw", current, 600_000)
-    assert replacement is not None
+    assert current.epoch == held.epoch + 1
+    assert controller.take_tick_lock(store, "sw", current, 600_000) is None
+    assert store.redis.get(store.key("sw", "tick-lock")) == original
     with pytest.raises(SwarmError, match="stale"):
         controller.take_tick_lock(store, "sw", held, 600_000)
+    store.redis.delete(store.key("sw", "tick-lock"))
+    replacement = controller.take_tick_lock(store, "sw", current, 600_000)
+    assert replacement is not None
     controller.release_tick_lock(store, "sw", original)
     assert store.redis.get(store.key("sw", "tick-lock")) == replacement
 

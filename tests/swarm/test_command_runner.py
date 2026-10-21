@@ -234,7 +234,7 @@ def test_spawn_receiver_refuses_epoch_after_launch_preparation(store, monkeypatc
     assert calls == []
 
 
-def test_new_epoch_can_tick_while_the_old_tick_is_still_locked(store, monkeypatch):
+def test_new_epoch_waits_while_the_old_tick_is_still_locked(store, monkeypatch):
     from scripts.swarm import lease
 
     monkeypatch.setenv("SWARM_HIVE_ID", "home")
@@ -243,10 +243,13 @@ def test_new_epoch_can_tick_while_the_old_tick_is_still_locked(store, monkeypatc
     assert cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({})) == ["another tick is running"]
     assert lease.release(store, "sw", held)
     monkeypatch.setenv("SWARM_HIVE_ID", "other")
-    result = cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({}))
-    assert "another tick is running" not in result
+    assert cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({})) == ["another tick is running"]
     assert lease.current(store, "sw").epoch == 2
     assert lease.current(store, "sw").owner == "other"
+    assert store.redis.get(store.key("sw", "tick-lock")) == '{"epoch": 1, "token": "old tick"}'
+    store.redis.delete(store.key("sw", "tick-lock"))
+    result = cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({}))
+    assert "another tick is running" not in result
     assert store.redis.get(store.key("sw", "tick-lock")) is None
 
 
@@ -261,6 +264,8 @@ def test_old_tick_cannot_release_a_new_epochs_lock(store):
     assert store.redis.pttl(store.key("sw", "tick-lock")) > 9000
     assert lease.release(store, "sw", first)
     second = lease.acquire(store, "sw", "other")
+    assert controller.take_tick_lock(store, "sw", second, 10000) is None
+    store.redis.delete(store.key("sw", "tick-lock"))
     new = controller.take_tick_lock(store, "sw", second, 10000)
     assert json.loads(new)["epoch"] == 2
     assert old != new
