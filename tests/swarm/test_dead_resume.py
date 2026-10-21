@@ -540,6 +540,7 @@ def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(
     agent = next(a for a in store.agents("sw") if a.lane == "eng")
     store.put_agent("sw", replace(agent, conversation_id="original-conversation", profile="engineer"))
     monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+    monkeypatch.setattr(tick_module.reaper, "scratch_homes", lambda slug, task: [f"{slug}/{task}"])
     claims = store.claims("sw", "t1")
     deliberate_exit.record(store, "sw", agent.name, 5)
     runtime.live.discard(agent.name)
@@ -548,6 +549,7 @@ def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(
     actions = tick_module._reap("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2)
 
     assert actions == [f"retired {agent.name} after a deliberate terminate, task t1 reopened"]
+    assert runtime.homes[agent.name] == ["sw/t1"]
     assert runtime.resumed == []
     assert agent.name not in {a.name for a in store.agents("sw")}
     assert ledger.rows["t1"]["state"] == "open"

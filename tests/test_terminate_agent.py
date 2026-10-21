@@ -250,6 +250,35 @@ def test_a_withdrawal_the_swarm_store_refuses_is_reported(monkeypatch, capsys):
     assert capsys.readouterr().out.splitlines() == ["swarm_exit=not-withdrawn (down)"]
 
 
+@pytest.mark.parametrize(
+    ("environ", "refused", "expected"),
+    [
+        (("rig", "e@1"), False, ("rig", "e@1")),
+        (("rig", "e@1"), True, ("", "")),
+        (("", "e@1"), False, ("", "")),
+        (("rig", ""), False, ("", "")),
+    ],
+)
+def test_mark_exit_returns_the_mark_it_recorded(monkeypatch, environ, refused, expected):
+    from scripts.swarm.store import Unreachable
+    from scripts.terminate_agent import _mark_exit
+
+    seen = []
+
+    def record(target, slug, name, at):
+        if refused:
+            raise Unreachable("down")
+        seen.append((slug, name, at))
+
+    monkeypatch.setattr("scripts.terminate_agent.agent_environ", lambda pid, keys, proc=Path("/proc"): environ)
+    monkeypatch.setattr("scripts.terminate_agent.time.time", lambda: 1792607.25)
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: object())
+    monkeypatch.setattr("scripts.swarm.deliberate_exit.record", record)
+
+    assert _mark_exit(200) == expected
+    assert seen == ([("rig", "e@1", 1792607250)] if expected[0] else [])
+
+
 def test_terminate_uses_process_group(monkeypatch):
     from scripts.terminate_agent import terminate
 
