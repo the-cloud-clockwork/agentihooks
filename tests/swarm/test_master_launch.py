@@ -371,7 +371,7 @@ def test_a_new_master_beside_a_live_front_door_takes_its_own_seat_and_title(up, 
     launched = printed(capsys)
     seats = {a.name: a.seat for a in masters(store) if a.state != "finished"}
     assert seats == {live.name: "master@sw", launched["master"]: "master-2@sw"}
-    assert launched["seat"] == "master-2@sw"
+    assert (launched["seat"], launched["pane"]) == ("master-2@sw", "w1:m1")
     assert rt.killed == []
     [(_, task)] = rt.masters
     assert (task["id"], task["seat"], task["masters"]) == ("master-2", "master-2@sw", 2)
