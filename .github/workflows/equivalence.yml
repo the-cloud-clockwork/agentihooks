@@ -43,9 +43,9 @@ jobs:
           from pathlib import Path
           for path, needle, planted in (
               (
-                  Path('fault-store/scripts/swarm_ledger/repository/file.py'),
-                  'core.apply_changes(doc, changes or [], ctx)',
-                  'core.apply_changes(doc, [], ctx)',
+                  Path('fault-store/scripts/swarm_ledger/repository/mutation.py'),
+                  'rejected = core.apply_changes(doc, changes or [], ctx)',
+                  'rejected = core.apply_changes(doc, [], ctx)',
               ),
               (
                   Path('fault-chat/scripts/swarm_ledger/static/js/chat.js'),
