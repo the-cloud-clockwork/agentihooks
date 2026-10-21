@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     files = sorted(args.reports.rglob("*.jsonl"))
     if not files:
-        print(f"no flake reports under {args.reports}", file=sys.stderr)
+        print(f"::error::No flake reports under {args.reports}")
         return 1
     history = _lines(args.history) if args.history.exists() else []
     now_s = time.time() if args.now is None else args.now
