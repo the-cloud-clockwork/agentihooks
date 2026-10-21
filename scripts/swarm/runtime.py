@@ -1020,21 +1020,18 @@ class HerdrRuntime:
         slug = store.names.slug_of(agent.name)
         recorded = bindings.viewers(slug, record.execution_id)
         try:
-            viewers = self._viewer_panes(agent.pane_id, recorded)
+            owned = self._owned_panes(agent, recorded)
         except Exception as exc:
             self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"pane list: {exc}"}
             return False
-        if agent.pane_id:
+        for pane in owned:
             try:
-                self._close_owned_pane(agent)
+                if pane == agent.pane_id:
+                    self._close_owned_pane(agent)
+                else:
+                    self.close_pane(pane)
             except Exception as exc:
-                self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"pane {agent.pane_id}: {exc}"}
-                return False
-        for pane in viewers:
-            try:
-                self.close_pane(pane)
-            except Exception as exc:
-                self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"viewer pane {pane}: {exc}"}
+                self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"pane {pane}: {exc}"}
                 return False
         directory = execution_directory(record)
         if directory is not None and directory.exists():
@@ -1049,14 +1046,14 @@ class HerdrRuntime:
         self.refusals.pop(agent.name, None)
         return True
 
-    def _viewer_panes(self, launch_pane, recorded):
-        """A recorded viewer is closed only while herdr still lists its pane on the terminal it was opened with,
-        because herdr reuses a closed pane's id."""
-        live = []
-        if recorded:
-            listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"])["panes"]}
-            live = [pane for pane, terminal in recorded.items() if terminal and listed.get(pane) == terminal]
-        return [pane for pane in live if pane != launch_pane]
+    def _owned_panes(self, agent, recorded):
+        from scripts.codex_session.attach import recorded_terminals
+
+        known = recorded_terminals(agent.name, recorded, dict(os.environ))
+        if not known:
+            return []
+        listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"])["panes"]}
+        return [pane for pane, terminal in known.items() if listed.get(pane) == terminal]
 
     def retire_process(self, agent, pid, homes=(), start=0):
         if live_binding.managed(agent):

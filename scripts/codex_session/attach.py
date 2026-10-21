@@ -112,7 +112,28 @@ def reopenable(store: "RedisStore", slug: str, execution_id: str) -> "AgentRecor
     return agent
 
 
-def reopen(store: "RedisStore", slug: str, agent: "AgentRecord", open_viewer: Open, codex_bin: str) -> dict:
+def recorded_terminals(name: str, viewers: dict[str, str], environ: dict[str, str]) -> dict[str, str]:
+    """herdr reuses a closed pane's id, so a pane is the agent's only on the terminal recorded at its launch or as its
+    viewer."""
+    from scripts import herdr_panes
+    from scripts.swarm import naming
+
+    launched = {
+        r.pane_id: r.terminal_id
+        for r in herdr_panes.load(environ)
+        if r.kind == "init-agent" and naming.plain(r.owner_session) == naming.plain(name)
+    }
+    return {pane: terminal for pane, terminal in {**launched, **viewers}.items() if terminal}
+
+
+def reopen(
+    store: "RedisStore",
+    slug: str,
+    agent: "AgentRecord",
+    open_viewer: Open,
+    codex_bin: str,
+    close_earlier: Callable[[str], None] = lambda pane: None,
+) -> dict:
     from scripts.swarm import live_binding
 
     record = live_binding.transport(store, agent)
@@ -120,6 +141,8 @@ def reopen(store: "RedisStore", slug: str, agent: "AgentRecord", open_viewer: Op
         raise AttachError(NO_THREAD.format(agent.name))
     placed = open_viewer(agent.name, viewer_argv(codex_bin, record))
     store.execution_registry.set_pane(slug, agent.execution_id, placed.pane_id)
+    if agent.pane_id and agent.pane_id != placed.pane_id:
+        close_earlier(agent.pane_id)
     return {"agent": agent.name, "thread": record.thread_id, "pane": placed.pane_id}
 
 
@@ -132,13 +155,21 @@ def local_terminal(store: "RedisStore", slug: str, execution_id: str, environ: d
         return None
     config = store.config(slug)
     workspace = naming.space(config.repo, config.code, config.slug)
+    bindings = BindingStore(store)
 
     def open_viewer(title: str, argv: list[str]) -> "Placement":
         placed = herdr_host.open_command(Path(config.repo), title, argv, workspace, environ)
-        BindingStore(store).add_viewer(slug, execution_id, placed.pane_id, placed.terminal_id)
+        bindings.add_viewer(slug, execution_id, placed.pane_id, placed.terminal_id)
         return placed
 
-    return reopen(store, slug, agent, open_viewer, "codex")
+    def close_earlier(pane_id: str) -> None:
+        terminal = recorded_terminals(agent.name, bindings.viewers(slug, execution_id), environ).get(pane_id)
+        listed = {p["pane_id"]: p.get("terminal_id") for p in herdr_host._cli(["pane", "list"], environ)["panes"]}
+        if terminal and listed.get(pane_id) == terminal:
+            herdr_host._cli(["pane", "close", pane_id], environ)
+            bindings.forget_viewers(slug, [pane_id])
+
+    return reopen(store, slug, agent, open_viewer, "codex", close_earlier)
 
 
 def _parser() -> argparse.ArgumentParser:
