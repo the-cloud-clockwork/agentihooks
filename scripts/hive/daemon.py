@@ -262,7 +262,11 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
     slots, quota = [], {}
     for account in sorted(claude):
         at, result = observed.get(account, (None, None))
-        cap = balancer.account_cap(result, now) if result and session_bands.fresh(at, now) else None
+        cap = (
+            balancer.account_cap(result, now, ceiling=session_bands.hive_ceiling(environ))
+            if result and session_bands.fresh(at, now)
+            else None
+        )
         kind = "interactive" if account == account_sessions.UNROUTED else "subscription"
         slots.append({"harness": "claude", "account": account, "kind": kind, "cap": cap or 0})
         quota[f"claude:{account}"] = (

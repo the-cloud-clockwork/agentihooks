@@ -719,6 +719,18 @@ def test_a_reset_window_counts_as_full_and_a_rejected_account_takes_no_session()
     assert balancer.account_cap(balancer._error_result("x", "failed"), NOW) is None
 
 
+def test_a_ceiling_scales_the_cap_with_the_tighter_window():
+    full = balancer.ProbeResult("a", "allowed", "NORMAL", 96.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(2.0))
+    assert balancer.account_cap(full, 1000) == 6
+    assert balancer.account_cap(full, 1000, ceiling=12) == 11
+    fable = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 96.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(2.0), balancer.QuotaWindow(50.0)
+    )
+    assert balancer.account_cap(fable, 1000, include_fable=True, ceiling=12) == 6
+    rejected = balancer.ProbeResult("x", "rejected", "BLOCKED", 0.0, full.five_hour, full.seven_day)
+    assert balancer.account_cap(rejected, 1000, ceiling=12) == 0
+
+
 def test_fable_routing_caps_on_the_tighter_weekly_window():
     result = balancer.parse_probe("FABLE", _stream(0.20, 0.30, 0.97), 100, include_fable=True)
     assert balancer.account_cap(result, 1000) == 6

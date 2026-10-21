@@ -231,6 +231,7 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | `AGENTIHOOKS_ROUTE_ACCOUNT` | set by the router | Account a Claude launch was routed to (`api` for the api side) |
 | — | — | Api weights and caps are routing settings, not variables: `agentihooks balance set` (see [CLI Commands](cli-commands.md#agentihooks-balance)) |
 | — | — | Each account's live session cap comes from its five-hour window alone: 6 at 60%+ left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5% until reset; no new session below 5% of the week. The next session goes to the eligible account with the fewest live sessions, ties to the soonest resetting week. |
+| `AGENTIHOOKS_HIVE_SESSION_CEILING` | `12` | Most live sessions a hive reports for one Claude subscription; the hive cap is this ceiling times the smaller of five hour and week left, never below the band |
 | `QUOTA_POLICY_ENABLED` | `true` | Hand off / wait / stop when a session's own quota runs out |
 | `AGENTIHOOKS_HANDOFF_WEEK_PCT` | `98` | 7-day used % that triggers the quota policy |
 | `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the quota policy |

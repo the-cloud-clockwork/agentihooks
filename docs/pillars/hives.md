@@ -385,6 +385,12 @@ missing or older takes the cap and reading of the newest one another live hive p
 that holds a token but never probes it, such as a worker pod, still shows the account's real cap; interactive and
 api slots keep their own.
 
+A hive's subscription cap scales with quota left: the ceiling `AGENTIHOOKS_HIVE_SESSION_CEILING` (default 12) times
+the smaller of the five hour and week percentage left, never below the band in
+[Claude account load balancing](load-balancing.md) and never above the ceiling. An account at 96% of both windows
+left reports 11; one with under 10% of its five hour window left keeps the band's 2; under 5% of either window it
+reports 0. Launches outside a hive keep the band.
+
 ### Master placement
 
 Every master seat, the lead and seats two and up, follows the same host rule as role placement: it runs only on a
