@@ -97,8 +97,15 @@ EOF
   sleep 1
   kill -0 "$sshd_pid"
 fi
+ledger_credential() {
+  grep -m1 '^AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=' "$1" 2>/dev/null || true
+}
 if [[ -n "${HIVE_CREDENTIAL_FILE:-}" ]]; then
-  install -m 0600 "$HIVE_CREDENTIAL_FILE" "$AGENTIHOOKS_HOME/hive.env"
+  # hive refresh retires the mounted password, so a restart keeps the saved refresh of the same member.
+  if [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]] \
+    || [[ "$(ledger_credential "$HIVE_CREDENTIAL_FILE")" != "$(ledger_credential "$AGENTIHOOKS_HOME/hive.env")" ]]; then
+    install -m 0600 "$HIVE_CREDENTIAL_FILE" "$AGENTIHOOKS_HOME/hive.env"
+  fi
 elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
   wait_s="${HIVE_DELIVERY_WAIT_S:-900}"
   deadline=$(( $(date +%s) + wait_s ))

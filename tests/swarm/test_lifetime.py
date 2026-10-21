@@ -44,6 +44,13 @@ def test_old_idle_master_retires_once_with_recap_and_closed_pane(store, state):
     agent, rt = idle_master(store, state)
     ledger = FakeLedger([])
     actions = tick("sw", store, ledger, rt, 6 * HOUR + 2)
+    if state == "stopped":
+        assert actions == tick("sw", store, ledger, rt, 7 * HOUR) == []
+        assert store.agents("sw") == [agent]
+        assert rt.killed == rt.closed == []
+        assert store.memory.recaps(agent.seat) == []
+        assert store.seats.exit_of(agent.name) == {}
+        return
     assert store.agents("sw") == []
     assert rt.killed == [agent.name] and rt.closed == [agent.pane_id]
     assert len(store.memory.recaps(agent.seat)) == 1
@@ -116,6 +123,10 @@ def test_workers_end_by_next_tick_in_every_state(store, state, lane, ending):
         [{"id": "t1", "state": "claimed" if ending == "handoff" else ending, "claimed_by": worker.name}]
     )
     tick("sw", store, ledger, rt, 2)
+    if state == "stopped":
+        assert store.agents("sw") == [worker]
+        assert rt.killed == rt.closed == []
+        return
     assert worker.name not in {a.name for a in store.agents("sw")}
     assert rt.killed == [worker.name] and worker.pane_id in rt.closed
     assert ledger.rows["t1"]["state"] != "blocked" if ending == "handoff" else ledger.rows["t1"]["state"] == ending
@@ -124,10 +135,11 @@ def test_workers_end_by_next_tick_in_every_state(store, state, lane, ending):
 @pytest.mark.parametrize("wake", ["inbox", "new task"])
 @pytest.mark.parametrize("state", ["paused", "drained", "stopped"])
 def test_retired_master_returns_for_message_or_new_task(store, state, wake):
-    _, rt = idle_master(store, state)
+    _, rt = idle_master(store, "paused" if state == "stopped" else state)
     ledger = FakeLedger([])
     tick("sw", store, ledger, rt, 6 * HOUR + 2)
     assert store.agents("sw") == []
+    store.update("sw", state=state)
     if wake == "inbox":
         InboxStore(store.redis).send("operator", "master@sw", "please answer")
     else:
@@ -158,7 +170,7 @@ def test_start_after_master_retirement_runs_workers_only_with_claimable_work(env
 def test_space_closes_when_last_master_retires(store, state):
     _, rt = idle_master(store, state)
     tick("sw", store, FakeLedger([]), rt, 6 * HOUR + 2)
-    assert rt.closed_spaces == ["sw"]
+    assert rt.closed_spaces == ([] if state == "stopped" else ["sw"])
 
 
 def test_stopped_swarm_with_no_agents_closes_its_space(store):

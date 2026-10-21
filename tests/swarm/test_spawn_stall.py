@@ -189,7 +189,7 @@ def test_normal_findings_pass_sends_no_duplicate_alarm(stalled):
 
 @pytest.mark.parametrize("unavailable", ["paused", "stopped", "seat", "quota", "harness", "task"])
 def test_unavailable_launch_conditions_reset_the_alarm(stalled, monkeypatch, unavailable):
-    store, ledger, _, clock, _ = stalled
+    store, ledger, runtime, clock, _ = stalled
     tick_failure(stalled)
     clock[0] += 600_000
     if unavailable in ("paused", "stopped"):
@@ -202,7 +202,10 @@ def test_unavailable_launch_conditions_reset_the_alarm(stalled, monkeypatch, una
         store.update("sw", lanes={"eng": {"agent": "codex"}})
     else:
         ledger.rows["t1"]["state"] = "blocked"
-    tick_failure(stalled)
+    if unavailable == "stopped":
+        assert cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({})) == []
+    else:
+        tick_failure(stalled)
     assert alarms(stalled) == []
     assert InboxStore(store.redis).pending_mail("master@sw") == []
 

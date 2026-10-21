@@ -153,6 +153,67 @@ def test_an_https_refresh_completes_the_tls_handshake(admin, cert, tmp_path, mon
     assert capsys.readouterr().out.startswith("refreshed the Redis credential of hive member ")
 
 
+def _refresh_over_tls(admin, cert, tmp_path, monkeypatch):
+    httpd = server.make_server(admin, PUBLIC, "localhost", 0, cert)
+    port = _serve(httpd)
+    for name in ("LEDGER_CA_PEM", "LEDGER_CA_FILE"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_URL", f"https://localhost:{port}")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", auth.mint(admin, "laptop", PUBLIC)["ledger_credential"])
+    return httpd
+
+
+def _refresh(httpd):
+    try:
+        return cli.main(["refresh"])
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_a_refresh_trusts_the_ledger_ca_pem(admin, cert, tmp_path, monkeypatch, capsys):
+    httpd = _refresh_over_tls(admin, cert, tmp_path, monkeypatch)
+    monkeypatch.setenv("LEDGER_CA_PEM", Path(cert[0]).read_text())
+
+    assert _refresh(httpd) == 0
+    assert capsys.readouterr().out.startswith("refreshed the Redis credential of hive member ")
+
+
+def test_a_refresh_trusts_the_saved_ledger_ca_file(admin, cert, tmp_path, monkeypatch, capsys):
+    httpd = _refresh_over_tls(admin, cert, tmp_path, monkeypatch)
+    (tmp_path / "ledger-ca.pem").write_text(Path(cert[0]).read_text())
+
+    assert _refresh(httpd) == 0
+    assert capsys.readouterr().out.startswith("refreshed the Redis credential of hive member ")
+
+
+def test_a_refresh_without_the_ledger_ca_refuses_the_unverified_hive(admin, cert, tmp_path, monkeypatch, capsys):
+    httpd = _refresh_over_tls(admin, cert, tmp_path, monkeypatch)
+
+    assert _refresh(httpd) == 1
+    assert "CERTIFICATE_VERIFY_FAILED" in capsys.readouterr().err
+
+
+def test_a_refresh_waits_at_most_the_request_timeout(tmp_path, monkeypatch):
+    seen = []
+
+    def urlopen(request, timeout):
+        seen.append(timeout)
+        return io.BytesIO(json.dumps({"id": "ab12", "redis_url": PUBLIC}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    environ = {
+        "AGENTIHOOKS_HOME": str(tmp_path),
+        "AGENTIHOOKS_HIVE_URL": "https://hive.example",
+        "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": "led",
+    }
+
+    assert cli.refresh_env(environ) == "ab12"
+    assert seen == [server.REQUEST_TIMEOUT_S]
+
+
 def _head_and_body(port, request):
     with socket.create_connection(("127.0.0.1", port), timeout=5) as conn:
         conn.sendall(request)
