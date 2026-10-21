@@ -227,7 +227,9 @@ def test_spawn_receiver_refuses_epoch_after_launch_preparation(store, monkeypatc
     assert lease.release(store, "sw", held)
     lease.acquire(store, "sw", "other")
     with pytest.raises(SwarmError) as error:
-        receiver._launch(SimpleNamespace(slug="sw"), "eng", "t", "one", ["--agent", "claude"], controller_epoch=1)
+        receiver._launch(
+            SimpleNamespace(slug="sw"), "eng", "t", "one", ["--dir", "/repo", "--agent", "claude"], controller_epoch=1
+        )
     assert str(error.value) == "the controller lease is stale"
     assert calls == []
 
@@ -424,7 +426,9 @@ def test_launch_receiver_accepts_the_current_epoch(store, monkeypatch, tmp_path)
     receiver = runtime.HerdrRuntime(home=tmp_path, run=launch)
     config = SimpleNamespace(slug="sw", autonomy="delegate", compact_limit=0)
     with pytest.raises(SwarmError) as error:
-        receiver._launch(config, "eng", "t", "one", ["--agent", "claude"], controller_epoch=held.epoch)
+        receiver._launch(
+            config, "eng", "t", "one", ["--dir", "/repo", "--agent", "claude"], controller_epoch=held.epoch
+        )
     assert str(error.value) == "launch reached"
 
 
