@@ -140,5 +140,7 @@ def test_the_shell_block_loads_the_access_token_after_the_accounts(tmp_path, mon
 
     install._update_bashrc_block()
 
-    loader = 'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)" && eval "$(agentihooks access env)"\n'
+    loader = (
+        'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)" && eval "$(agentihooks access env)"\n'
+    )
     assert bashrc.read_text().count(loader) == 1
