@@ -42,7 +42,7 @@ def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pu
         "repository": "the-cloud-clockwork/agentihooks",
     }
     for job in ("hierarchy", "load"):
-        assert resolve(callee["jobs"][job]["runs-on"], **push) not in {"anton-oss", "anton-oss-queue", "ubuntu-latest"}
+        assert resolve(callee["jobs"][job]["runs-on"], **push) == "anton-oss-batch"
 
 
 def _graded_needs(promote, analysis="A1"):
@@ -61,6 +61,14 @@ def test_a_red_or_cancelled_promotion_dependency_prevents_all_promotion_writes(j
     assert enabled(promote["if"], "push", needs)
     needs[job].result = result
     assert not enabled(promote["if"], "push", needs)
+
+
+@pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
+def test_promotion_requires_a_successful_hierarchy_proof(result):
+    promote = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["promote"]
+    needs = _graded_needs(promote)
+    needs["hierarchy-cpu"].result = result
+    assert enabled(promote["if"], "push", needs) == (result == "success")
 
 
 def test_a_revision_sonar_graded_promotes_from_its_own_analysis():
