@@ -250,10 +250,9 @@ def test_cli_add_help_names_every_option(monkeypatch, capsys):
         assert f" {text}\n" in out
 
 
-@pytest.mark.parametrize("command", [["invite", "laptop"], ["join", URL, "code"]])
-def test_invite_and_join_are_gone(command, capsys):
+def test_join_is_gone(capsys):
     with pytest.raises(SystemExit) as refused:
-        cli.main(command)
+        cli.main(["join", URL, "code"])
 
     assert refused.value.code == 2
     assert "invalid choice" in capsys.readouterr().err

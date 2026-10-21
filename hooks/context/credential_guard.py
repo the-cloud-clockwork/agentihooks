@@ -187,7 +187,7 @@ SENSITIVE_FRAGMENT = re.compile(
     r"|\.zshrc|\.zprofile|\.zshenv|\.bash_history|\.zsh_history"
     r"|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass|launch-grant"
     r"|\.aws/credentials"
-    r")"
+    r")(?![\w-])"
 )
 
 GREP_VERBS = ("grep", "egrep", "fgrep")

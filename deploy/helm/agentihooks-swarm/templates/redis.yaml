@@ -1,4 +1,4 @@
-{{- if and .Values.redis.enabled (not .Values.redis.url) (not .Values.redis.existingSecret.name) }}
+{{- if and (not .Values.hiveOnly) .Values.redis.enabled (not .Values.redis.url) (not .Values.redis.existingSecret.name) }}
 {{- $name := printf "%s-redis" (include "swarm.fullname" .) }}
 apiVersion: v1
 kind: Service
