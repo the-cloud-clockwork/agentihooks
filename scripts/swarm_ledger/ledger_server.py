@@ -1261,13 +1261,15 @@ def reloading(environ=os.environ) -> bool:
 
 
 def scheduled_wait(interval: float) -> None:
+    from redis.exceptions import NoPermissionError
+
     from scripts.scheduler.process_timer import wait
 
     if not SCHEDULER_UNAVAILABLE.is_set():
         try:
             wait(interval)
             return
-        except OSError as exc:
+        except (OSError, NoPermissionError) as exc:
             SCHEDULER_UNAVAILABLE.set()
             sys.stderr.write(f"scheduler wait unavailable, sleeping instead: {exc}\n")
     time.sleep(interval)

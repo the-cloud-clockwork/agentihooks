@@ -307,8 +307,15 @@ def watcher(base: str, credentials: dict, deadline: float, results: dict) -> Non
     )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as stream:
-            while time.monotonic() < deadline:
-                if not stream.read1(65536):
+            while (remaining := deadline - time.monotonic()) > 0:
+                stream.fp.raw._sock.settimeout(min(TIMEOUT_S, remaining))
+                try:
+                    chunk = stream.read1(65536)
+                except TimeoutError:
+                    if remaining <= TIMEOUT_S:
+                        break
+                    raise
+                if not chunk and time.monotonic() < deadline:
                     raise ConnectionError("the server closed the stream before the load ended")
     except Exception as exc:  # a dropped or silent stream is a red request
         results["errors"].append(f"event stream: {type(exc).__name__}: {exc}")

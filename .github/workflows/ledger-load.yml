@@ -14,7 +14,7 @@ on:
         type: boolean
         default: false
       compare:
-        description: Run identical load gates on base and head on one runner
+        description: Run identical load gates concurrently on base and head on one runner
         type: boolean
         default: false
       base:
@@ -178,25 +178,33 @@ jobs:
           cp tests/ledger_load/gate.py load-base/tests/ledger_load/gate.py
           mkdir -p "$GITHUB_WORKSPACE/load-evidence"
 
-      - name: Run one base and head pair of load gates on this runner, base first on odd pairs
+      - name: Run the base and head load windows concurrently on this runner
         env:
           PAIR: ${{ matrix.pair }}
         run: |
           set -o pipefail
-          ( cd load-base && "$HOME/venv/bin/python" -c 'import pathlib, scripts.swarm_ledger.ledger_server as m; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), m.__file__' )
           order=(base head)
           [[ "$PAIR" == [135] ]] || order=(head base)
           database=1
-          failed=""
+          pids=()
           for side in "${order[@]}"; do
             directory="$GITHUB_WORKSPACE"
             [[ "$side" == head ]] || directory="$GITHUB_WORKSPACE/load-base"
-            ( cd "$directory" && REDIS_URL="redis://127.0.0.1:6379/$database" \
-              AGENTIHOOKS_SWARM_REDIS_URL="redis://127.0.0.1:6379/$database" \
-              "$HOME/venv/bin/python" -m tests.ledger_load.gate \
-              --folder "$GITHUB_WORKSPACE/load-evidence/$side" \
-              --base FETCH_HEAD 2>&1 | tee "$GITHUB_WORKSPACE/load-evidence/$side.log" ) || failed="$failed $side"
+            (
+              cd "$directory"
+              "$HOME/venv/bin/python" -c 'import pathlib, scripts.swarm_ledger.ledger_server as m; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), m.__file__'
+              REDIS_URL="redis://127.0.0.1:6379/$database" \
+                AGENTIHOOKS_SWARM_REDIS_URL="redis://127.0.0.1:6379/$database" \
+                "$HOME/venv/bin/python" -m tests.ledger_load.gate \
+                --folder "$GITHUB_WORKSPACE/load-evidence/$side" \
+                --base FETCH_HEAD 2>&1 | tee "$GITHUB_WORKSPACE/load-evidence/$side.log"
+            ) &
+            pids+=("$!")
             database=$((database + 1))
+          done
+          failed=""
+          for index in "${!pids[@]}"; do
+            wait "${pids[$index]}" || failed="$failed ${order[$index]}"
           done
           [[ -z "$failed" ]] || { echo "::error::load gate failed on$failed"; exit 1; }
 

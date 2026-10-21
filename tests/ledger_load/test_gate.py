@@ -390,3 +390,52 @@ def test_a_reader_stops_at_the_deadline_without_sleeping_toward_a_read_it_will_n
     ledger_load.reader(Api(), ledger_load.single_items(0), 0.0, 2.5, results)
     assert (len(results["item_reads"]), results["errors"]) == (3, [])
     assert clock.now <= 2.5
+
+
+class EventStream:
+    def __init__(self, clock, chunks):
+        self.clock = clock
+        self.chunks = iter(chunks)
+        self.timeout = ledger_load.TIMEOUT_S
+        self.fp = SimpleNamespace(raw=SimpleNamespace(_sock=self))
+        self.closed = False
+
+    def settimeout(self, seconds):
+        self.timeout = seconds
+
+    def read1(self, count):
+        delay, chunk = next(self.chunks)
+        self.clock.sleep(min(delay, self.timeout))
+        if delay > self.timeout:
+            raise TimeoutError("silent event stream")
+        return chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.closed = True
+
+
+def test_the_event_stream_stops_at_the_window_end_without_waiting_for_the_next_heartbeat(monkeypatch):
+    clock = Clock()
+    stream = EventStream(clock, [(0.0, b"heartbeat"), (ledger_load.TIMEOUT_S, b"heartbeat")])
+    monkeypatch.setattr(ledger_load, "time", clock)
+    monkeypatch.setattr(ledger_load.urllib.request, "urlopen", lambda *args, **kwargs: stream)
+    results = {"errors": []}
+    ledger_load.watcher("http://localhost", {}, 2.5, results)
+    assert clock.now == 2.5
+    assert results["errors"] == []
+    assert stream.closed
+
+
+def test_a_silent_event_stream_inside_the_window_stays_red(monkeypatch):
+    clock = Clock()
+    stream = EventStream(clock, [(0.0, b"heartbeat"), (ledger_load.TIMEOUT_S + 1, b"heartbeat")])
+    monkeypatch.setattr(ledger_load, "time", clock)
+    monkeypatch.setattr(ledger_load.urllib.request, "urlopen", lambda *args, **kwargs: stream)
+    results = {"errors": []}
+    ledger_load.watcher("http://localhost", {}, ledger_load.TIMEOUT_S * 2, results)
+    assert clock.now == ledger_load.TIMEOUT_S
+    assert results["errors"] == ["event stream: TimeoutError: silent event stream"]
+    assert stream.closed
