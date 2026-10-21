@@ -167,6 +167,18 @@ def test_a_leaving_member_agents_unread_mail_reaches_its_seats_next_occupant_on_
     assert member.inbox(SEAT) == []
 
 
+def test_seat_mail_a_leaving_member_agent_took_reaches_its_seats_next_occupant_on_the_workstation(store, agent):
+    item = InboxStore(store.redis).send("sender", SEAT, "contract")
+    member = InboxStore(store.redis, world="m1")
+    member.deliver(item.id, agent.name)
+    exits.settle(InboxStore(store.redis), agent.name, SEAT, "handed off its seat")
+    store.put_agent("sw", replace(agent, state="finished"))
+    successor = seat_successor(store, agent, "")
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert [i.id for i in InboxStore(store.redis, world="").pending_mail(successor)] == [item.id]
+    assert member.inbox(SEAT) == []
+
+
 def test_a_redirect_moves_a_member_item_with_its_history_into_the_inbox_its_address_resolves_to(store, agent, mail):
     member, item = mail
     successor = seat_successor(store, agent, "")
