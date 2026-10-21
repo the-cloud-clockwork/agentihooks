@@ -5,11 +5,26 @@ import pytest
 from scripts.hive.placement import LOCAL_MACHINE, Choice, Wait, overflow
 from scripts.swarm.store import SwarmError
 from scripts.swarm.tick import SpawnError
+from tests.hive.test_controller_launch import publish_room, write_hive
 from tests.hive.test_controller_launch import setup as setup
-from tests.hive.test_controller_launch import write_hive
 
 FULL = "no hive for eng has room"
-CAPPED = f"{FULL}, and the local machine runs 8 of its 8 agents"
+ANTON = "anton ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more under the 80 percent line"
+HIVE_FULL = f"{FULL}: {ANTON}"
+
+
+def capped(held, of, running, cpus=10):
+    return (
+        f"{HIVE_FULL}, and the local machine runs {held} of its {of} agents: cpu: {running} swarm agents at 0.5 CPU "
+        f"each on {cpus} CPUs, fits {of - running} more under the 40 percent swarm share"
+    )
+
+
+def workstation(monkeypatch, cpus):
+    from scripts.hive import headroom
+
+    reading = {"cpus": cpus, "load5": 0.0, "available_mb": 10**6, "total_mb": 10**6, "pending": 0, "measured_at": 0}
+    monkeypatch.setattr(headroom, "measure", lambda pending, now: reading)
 
 
 @pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "dispatcher", ""])
@@ -37,6 +52,7 @@ def hybrid(setup, monkeypatch, deployment="hybrid"):
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
     monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    workstation(monkeypatch, 10)
     setup.store.redis.delete(registry.key("remote"))
     setup.store.redis.srem(registry.INDEX, "remote")
     write_hive(setup, id="anton", ui="no", excluded=["master", "qa", "frontend"], max_agents=2)
@@ -52,6 +68,7 @@ def fill_anton(setup):
     from scripts.hive import registry
 
     setup.store.redis.set(f"{registry.key('anton')}:sessions", '{"eng": 2}')
+    publish_room(setup.store, "anton", 0)
 
 
 def local_agents(setup, count, slug=None, **fields):
@@ -90,21 +107,21 @@ def test_the_local_machine_cap_holds_the_spawn_with_the_reason(setup, monkeypatc
     fill_anton(setup)
     local_agents(setup, 8)
     task = {"id": "task", "seat": "eng-1@fixture"}
-    assert fenced.placement_refusal("eng", task) == CAPPED
-    with pytest.raises(SpawnError, match=f"^{CAPPED}$") as raised:
+    assert fenced.placement_refusal("eng", task) == capped(8, 8, 8)
+    with pytest.raises(SpawnError) as raised:
         fenced.spawn(setup.config, "eng", "eng name", task)
-    assert raised.value.status == "unavailable"
+    assert (str(raised.value), raised.value.status) == (capped(8, 8, 8), "unavailable")
     setup.herdr.spawn.assert_not_called()
     fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
-def test_the_local_machine_cap_is_the_swarm_setting(setup, monkeypatch):
+def test_the_local_machine_cap_is_its_swarm_cpu_share(setup, monkeypatch):
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
     local_agents(setup, 2)
-    setup.store.update(setup.config.slug, local_max_agents=2)
-    assert fenced.placement_refusal("eng", {"id": "task"}) == f"{FULL}, and the local machine runs 2 of its 2 agents"
-    setup.store.update(setup.config.slug, local_max_agents=3)
+    workstation(monkeypatch, 3)
+    assert fenced.placement_refusal("eng", {"id": "task"}) == capped(2, 2, 2, cpus=3)
+    workstation(monkeypatch, 4)
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
 
 
@@ -113,7 +130,7 @@ def test_the_cap_counts_only_live_local_workers_of_every_swarm_but_not_the_task_
 
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
-    setup.store.update(setup.config.slug, local_max_agents=2)
+    workstation(monkeypatch, 3)
     setup.store.create(SwarmConfig("other", "agentihooks", 1, 1))
     local_agents(setup, 1, slug="other")
     stored = setup.store.agents
@@ -128,7 +145,7 @@ def test_the_cap_counts_only_live_local_workers_of_every_swarm_but_not_the_task_
     monkeypatch.setattr(setup.store, "agents", lambda slug: agents.get(slug, []))
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
     agents[setup.config.slug] = [*others, AgentRecord("eng-1", "eng", "busy")]
-    assert fenced.placement_refusal("eng", {"id": "task"}) == f"{FULL}, and the local machine runs 2 of its 2 agents"
+    assert fenced.placement_refusal("eng", {"id": "task"}) == capped(2, 2, 2, cpus=3)
 
 
 def test_the_local_machine_cap_defaults_to_eight(setup):
@@ -156,7 +173,7 @@ def test_the_role_comes_from_the_hive_profile_decision_not_the_task_fields(setup
     task = {"id": "task", "profile": "qa", "profile_decision": {"profile": "qa"}}
     assert fenced.placement_refusal("eng", task) == ""
     selected = fenced.runtime.hive_launch.select(setup.config, "eng", task)
-    assert (selected, selected.role) == (Wait(FULL), "eng")
+    assert (selected, selected.role) == (Wait(HIVE_FULL), "eng")
 
 
 def test_the_local_spawn_refusal_is_the_exact_overflow_text(setup, monkeypatch):
@@ -180,14 +197,14 @@ def test_a_codex_worker_no_hive_can_launch_runs_locally_unless_its_role_needs_a_
 def test_a_task_pinned_to_a_hive_never_moves_to_the_local_machine(setup, monkeypatch):
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
-    assert fenced.placement_refusal("eng", {"id": "task", "hive": "anton"}) == FULL
+    assert fenced.placement_refusal("eng", {"id": "task", "hive": "anton"}) == HIVE_FULL
 
 
 @pytest.mark.parametrize("deployment", ["compose", "distributed"])
 def test_only_the_workstation_controller_spawns_locally(setup, monkeypatch, deployment):
     fenced = hybrid(setup, monkeypatch, deployment)
     fill_anton(setup)
-    assert fenced.placement_refusal("eng", {"id": "task"}) == FULL
+    assert fenced.placement_refusal("eng", {"id": "task"}) == HIVE_FULL
 
 
 def test_no_workstation_herdr_leaves_the_hive_wait(setup, monkeypatch):
@@ -196,7 +213,7 @@ def test_no_workstation_herdr_leaves_the_hive_wait(setup, monkeypatch):
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
     monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
-    assert fenced.placement_refusal("eng", {"id": "task"}) == FULL
+    assert fenced.placement_refusal("eng", {"id": "task"}) == HIVE_FULL
 
 
 @pytest.mark.parametrize("excluded", ["eng", "ci"])
@@ -210,7 +227,7 @@ def test_a_lane_or_role_the_local_hive_excludes_waits_for_a_hive_instead_of_runn
     fill_anton(setup)
     write_hive(setup, id="workstation", ui="yes", excluded=[excluded], max_agents=0)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "workstation")
-    assert fenced.placement_refusal("eng", {"id": "task"}) == "no hive for ci has room"
+    assert fenced.placement_refusal("eng", {"id": "task"}) == f"no hive for ci has room: {ANTON}"
 
 
 def test_a_lane_the_local_hive_keeps_still_runs_locally_when_no_hive_has_room(setup, monkeypatch):
@@ -261,7 +278,7 @@ def test_two_concurrent_spawns_at_cap_minus_one_yield_one_local_spawn_and_one_wa
 
     with ThreadPoolExecutor(2) as pool:
         outcomes = sorted(pool.map(attempt, ["first", "second"]))
-    assert outcomes == [CAPPED, "placed on the workstation"]
+    assert outcomes == [capped(8, 8, 7), "placed on the workstation"]
     assert setup.herdr.spawn.call_count == 1
 
 
@@ -324,9 +341,9 @@ def test_the_machine_count_leaves_out_the_task_itself_and_holds_other_swarms_pen
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "box")
-    setup.store.update(setup.config.slug, local_max_agents=2)
+    workstation(monkeypatch, 3)
     setup.store.put_agent(setup.config.slug, AgentRecord("eng-self", "eng", "task"))
     assert local_slots.claim(setup.store, "box", "other", "elsewhere", "eng-other", 8) == 1
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
     assert fenced.spawn(setup.config, "eng", "eng name", {"id": "task"}) == "placed on the workstation"
-    assert fenced.placement_refusal("eng", {"id": "next"}) == f"{FULL}, and the local machine runs 3 of its 2 agents"
+    assert fenced.placement_refusal("eng", {"id": "next"}) == capped(3, 2, 1, cpus=3)
