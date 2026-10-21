@@ -48,6 +48,18 @@ def mail(redis, agent):
     return member, item
 
 
+def test_the_controller_inbox_reads_every_member_world_with_its_persist_hook(store):
+    persist = object()
+    assert [(w.world, w.persist) for w in InboxStore(store.redis, persist=persist, world="").worlds()] == [
+        ("", persist),
+        ("m1", persist),
+    ]
+
+
+def test_a_member_world_inbox_reads_only_itself_on_the_controller(store):
+    assert [w.world for w in InboxStore(store.redis, world="m1").worlds()] == ["m1"]
+
+
 def test_the_wake_pass_escalates_a_member_agents_unread_mail_to_the_controller_master(redis, agent, mail):
     member, item = mail
     agents = [agent, AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm")]

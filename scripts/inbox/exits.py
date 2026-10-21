@@ -247,7 +247,7 @@ def _withdraw_escalations(inbox: "InboxStore", item_id: str, seat: str) -> None:
     from scripts.inbox.store import InboxStore
     from scripts.inbox.wake import raised_id
 
-    worlds = [inbox] if scope.member() else InboxStore(inbox.redis, persist=inbox.persist, world="").worlds()
+    worlds = [inbox] if scope.member() else InboxStore(inbox.redis).worlds()
     for entry in inbox.history(item_id):
         if raised := raised_id(entry):
             for world in worlds:
