@@ -199,6 +199,28 @@ def test_no_workstation_herdr_leaves_the_hive_wait(setup, monkeypatch):
     assert fenced.placement_refusal("eng", {"id": "task"}) == FULL
 
 
+@pytest.mark.parametrize("excluded", ["eng", "ci"])
+def test_a_lane_or_role_the_local_hive_excludes_waits_for_a_hive_instead_of_running_locally(
+    setup, monkeypatch, excluded
+):
+    from scripts.swarm.profile_choice import ProfileDecision
+
+    fenced = hybrid(setup, monkeypatch)
+    setup.herdr._profile_decision.return_value = ProfileDecision("cicd", "task", "cicd")
+    fill_anton(setup)
+    write_hive(setup, id="workstation", ui="yes", excluded=[excluded], max_agents=0)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "workstation")
+    assert fenced.placement_refusal("eng", {"id": "task"}) == "no hive for ci has room"
+
+
+def test_a_lane_the_local_hive_keeps_still_runs_locally_when_no_hive_has_room(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    write_hive(setup, id="workstation", ui="yes", excluded=["master"], max_agents=0)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "workstation")
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+
+
 def test_swarm_set_stores_the_local_machine_cap(setup, capsys):
     import argparse
     import json
