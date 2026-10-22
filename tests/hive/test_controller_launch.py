@@ -284,6 +284,30 @@ def order_for(setup, request, selected):
     )
 
 
+def test_admit_keeps_the_claim_timestamp_the_tick_wrote_before_the_launch(setup):
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    name = setup.store.next_name(setup.config.slug, "eng")
+    seat = "eng-1@fixture"
+    claimed_at = 123_456
+    setup.store.put_agent(
+        "fixture", AgentRecord(name, "eng", "task", seat=seat, state="starting", started_at=claimed_at)
+    )
+    setup.store.seats.occupy(seat, name, claimed_at)
+    request = SpawnRequest(
+        setup.config,
+        "eng",
+        name,
+        {"id": "task", "title": "Launch on a hive", "seat": seat, "controller_epoch": setup.held.epoch},
+    )
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+    admitted = setup.launcher.admit(request, selected)
+    assert admitted.started_at == claimed_at
+    agents = {agent.name: agent for agent in setup.store.agents(setup.config.slug)}
+    assert agents[name].started_at == claimed_at
+
+
 def test_disabled_hive_never_falls_back_to_local_spawn(setup):
     from scripts.swarm.controller import FencedRuntime
     from scripts.swarm_v2.runtime.base import RuntimeRouter
