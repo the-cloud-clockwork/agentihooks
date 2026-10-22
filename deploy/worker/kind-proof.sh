@@ -174,9 +174,11 @@ from scripts.swarm.store import PREFIX, AgentRecord, RedisStore, redis_client
 store = RedisStore(redis_client())
 if os.environ['STEP'] == 'start':
     store.redis.sadd(f'{PREFIX}:index', 'drain-proof')
-    store.start_execution('drain-proof', AgentRecord('engineer@drain', 'eng', 't1', seat='eng-1@drain-proof', hive=os.environ['HIVE']))
+    store.names.adopt('drain-proof', '999999', '', '')
+    store.redis.hset(store.names.key('name', 'engineer@999999-1'), mapping={'swarm': 'drain-proof', 'code': '999999'})
+    store.start_execution('drain-proof', AgentRecord('engineer@999999-1', 'eng', 't1', seat='eng-1@drain-proof', hive=os.environ['HIVE']))
 else:
-    store.drop_agent('drain-proof', 'engineer@drain')
+    store.drop_agent('drain-proof', 'engineer@999999-1')
 PY
 }
 hold_agent start
