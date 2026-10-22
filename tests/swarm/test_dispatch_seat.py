@@ -5,7 +5,7 @@ import pytest
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import dispatch_seat, naming, prompt, seat_spawn
+from scripts.swarm import dispatch_seat, lifetime, naming, prompt, seat_spawn
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.templates import DEFAULT_PROFILES
@@ -158,6 +158,8 @@ def test_done_from_the_seat_passes_while_the_swarm_sleeps_as_the_tick_raises_not
     assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, found, NOW) == ""
     woken = {**found, "tasks": [{"id": "t2", "state": "open"}]}
     assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, woken, NOW).startswith("dispatcher triggers")
+    assert lifetime.sleeping(SLUG, store, {"t2": woken["tasks"][0]}) is False
+    assert store.redis.get(store.key(SLUG, "master-retired-tasks")) is None
     assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, found, NOW).startswith("dispatcher triggers")
 
 
@@ -641,6 +643,7 @@ def test_quota_pressure_closes_after_automatic_routing_is_applied(ci_agent):
     store.update(SLUG, lanes={"eng": {"agent": "claude"}, "ci": {"agent": ci_agent}})
     held(store, "quota")
     quota_caps(store, eng=0)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
     assert "bottleneck" in dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(), NOW)
 
     store.update(SLUG, lanes={"eng": {"agent": "auto"}, "ci": {"agent": ci_agent}})
@@ -787,3 +790,119 @@ def test_every_trigger_kind_wakes_the_live_seat_once_and_closes_with_its_signal(
     assert run(store, runtime, found, NOW + 2 * MINUTE) == []
     store.update(SLUG, autonomy="delegate")
     assert run(store, runtime, found, NOW + 3 * MINUTE) == [f"ended dispatcher {NAME}: its triggers closed"]
+
+
+def hive_member(monkeypatch):
+    from fnmatch import fnmatchcase
+
+    from fakeredis._helpers import SimpleError
+    from fakeredis._msgs import NO_PERMISSION_KEY_ERROR
+    from fakeredis.model._acl import AccessControlList, UserAccessControlList
+
+    from scripts.hive import auth
+
+    grant = auth._acl_keys("m1")
+    readable = [pattern[3:] for pattern in grant if pattern.startswith("%R~")]
+    writable = [pattern[1:] for pattern in grant if pattern.startswith("~")]
+
+    def validate(_acl, _username, _client, fields):
+        info = UserAccessControlList._get_command_info(fields)
+        if fields[0].lower() in (b"eval", b"evalsha"):
+            keys, allowed = fields[3 : 3 + int(fields[2])], writable
+        else:
+            keys = UserAccessControlList()._get_keys(info, fields)
+            allowed = writable if info and b"write" in info[2] else readable + writable
+        for key in keys:
+            if not any(fnmatchcase(key.decode(), pattern) for pattern in allowed):
+                raise SimpleError(NO_PERMISSION_KEY_ERROR)
+
+    monkeypatch.setattr(AccessControlList, "validate_command", validate)
+    for variable in ("AGENTIHOOKS_HIVE_REDIS_URL", "AGENTIHOOKS_SWARM_REDIS_URL"):
+        monkeypatch.setenv(variable, "redis://hive.example:6380/0")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
+
+
+def test_the_hive_member_rules_refuse_a_key_outside_the_grant(monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    store = swarm()
+    hive_member(monkeypatch)
+    assert store.config(SLUG).slug == SLUG
+    with pytest.raises(NoPermissionError, match="No permissions to access a key"):
+        store.redis.delete(store.key(SLUG, "dispatcher-quota-lanes"))
+    store.redis.delete(store.key(SLUG, "claim", "t1"))
+
+
+def test_the_refusal_a_hive_seat_reads_leaves_the_tick_bookkeeping_to_the_tick(monkeypatch):
+    from scripts.swarm import stage_cover
+
+    store = swarm()
+    held(store)
+    lanes, covers, retired = (
+        store.key(SLUG, "dispatcher-quota-lanes"),
+        store.key(SLUG, stage_cover.KEY),
+        store.key(SLUG, "master-retired-tasks"),
+    )
+    opened = {**doc(), "tasks": [{"id": "t7", "state": "open"}]}
+    stage_cover.cover(store, SLUG, opened, stage_cover.Request("review", "tasks/t7", "owned", NAME), NOW)
+    store.redis.set(lanes, json.dumps({"eng": 2}))
+    store.redis.set(retired, json.dumps(["t1"]))
+    hive_member(monkeypatch)
+    closed = {**doc(), "tasks": [{"id": "t7", "state": "done"}]}
+    assert (
+        dispatch_seat.refusal(SLUG, store.config(SLUG), store, closed, NOW)
+        .splitlines()[1]
+        .startswith("- The bottleneck report named the same share 3 ticks running")
+    )
+    assert store.redis.get(lanes) == json.dumps({"eng": 2})
+    assert list(store.redis.hgetall(covers)) == ["review"]
+    assert store.redis.get(retired) == json.dumps(["t1"])
+    monkeypatch.undo()
+    assert run(store, FakeRuntime(), closed) == [f"spawned dispatcher {NAME} for 1 trigger"]
+    assert store.redis.get(lanes) is None
+    assert store.redis.hgetall(covers) == {}
+
+
+def test_the_refusal_a_hive_seat_reads_records_no_quota_lanes_and_the_tick_records_only_a_deficit(monkeypatch):
+    store = swarm()
+    lanes = store.key(SLUG, "dispatcher-quota-lanes")
+    held(store, "quota")
+    quota_caps(store)
+    hive_member(monkeypatch)
+    assert "bottleneck" in dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(), NOW)
+    assert store.redis.get(lanes) is None
+    monkeypatch.undo()
+    quota_caps(store, eng=2)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+    assert store.redis.get(lanes) is None
+    quota_caps(store)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+    assert store.redis.get(lanes) == json.dumps({"eng": 0})
+
+
+def test_done_from_a_hive_dispatcher_seat_writes_only_keys_the_hive_member_may_write(monkeypatch, capsys):
+    from argparse import Namespace
+
+    from scripts.hive import registry
+    from scripts.swarm import cli
+
+    store, runtime = swarm(), FakeRuntime()
+    run(store, runtime, doc(priority()))
+    [seat] = seats(store)
+
+    class Ledger:
+        def state(self, slug):
+            assert slug == SLUG
+            return doc()
+
+    monkeypatch.setattr(cli, "LedgerClient", Ledger)
+    hive_member(monkeypatch)
+    assert not store.redis.exists(f"{registry.key('m1')}:inbox:open-indexed")
+    cli.cmd_done(store, Namespace(slug=SLUG, name=seat.name))
+    assert [a.state for a in seats(store)] == ["finished"]
+    assert store.redis.sismember(f"{registry.key('m1')}:inbox:open-indexed", f"dispatcher@{SLUG}")
+    assert json.loads(capsys.readouterr().out) == {
+        "seat": seat.name,
+        "state": "finished",
+        "next": "stop now; the swarm closes this session",
+    }
