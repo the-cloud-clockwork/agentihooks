@@ -424,6 +424,17 @@ def test_a_reader_outage_bounds_its_failure_detail_per_pass():
     assert found.measure == 53
 
 
+def test_a_reader_outage_keeps_unreadable_traces_of_the_pass_without_counting_them():
+    unreadable = ["trace t1 unreadable: TimeoutError", "trace t2 unreadable: TimeoutError"]
+    historical = {"traces": 2, "covered": 0, "complete": False, "unreadable": unreadable}
+    record = _record(
+        _binding(read=False, traces=[], remote=None), failures=["f"], down_since=NOW, historical=historical
+    )
+    [found] = traces.reader(record, LIMITS)
+    assert found.evidence[:4] == ("f", *unreadable, "active bindings read 0 of 1")
+    assert found.measure == 1
+
+
 def test_a_reader_outage_at_the_bound_keeps_every_failure_with_no_overflow_line():
     failures = [f"failure {n}" for n in range(50)]
     record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)

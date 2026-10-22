@@ -430,7 +430,11 @@ def reader(record: dict, limits: Limits) -> list[Finding]:
                 "trace reader unavailable",
                 f"{record['slug']}.{state['down_since']}",
                 f"{len(state['failures'])} Langfuse reads failed or ran out of time",
-                (*_failure_detail(state["failures"]), *coverage, "unread bindings are not judged on Langfuse evidence"),
+                (
+                    *_failure_detail([*state["failures"], *historical.get("unreadable", [])]),
+                    *coverage,
+                    "unread bindings are not judged on Langfuse evidence",
+                ),
                 f"any failed or unfinished Langfuse read, {_cadence(limits)}",
                 len(state["failures"]),
             )
