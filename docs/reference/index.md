@@ -18,6 +18,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Configuration](configuration.md) | All environment variables across every integration, in one place |
 | [Deployed swarm host capacity](../pillars/swarm.md#deployed-host-capacity) | Worker namespace quota and pool budgets, autoscale inspection, configuration and disabled host pressure alerts |
 | [Git maintenance and object counts](cli-commands.md#git-maintenance-and-object-counts) | Register managed primary checkouts, repair missing registrations, configure discovery, read loose object and pack counts and diagnose failures |
+| [Tool dependency synchronization](../getting-started/installation.md#synchronize-an-editable-tool-installation) | Update the editable source checkout and its running tool environment, check missing requirements and recover failed installs |
 | [CLI Commands](cli-commands.md) | All `agentihooks` subcommands and flags: init, uninstall, claude, ignore |
 | [Developer account login](account-login.md) | Claude and Codex login, managed shell tokens, OpenBao paths and key names, refresh authority and token stores |
 | [Task scope authorizations](../pillars/swarm.md#task-scope-authorizations) | Record master or operator scope, retrace a plan, interpret authorized pieces and configure enforcement |

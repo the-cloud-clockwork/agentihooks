@@ -114,6 +114,37 @@ AGENTIHOOKS_MCP_FILE=/shared/gateway-mcp.json agentihooks init
 
 ---
 
+## `agentihooks deps`
+
+Inspect and maintain the running CLI's declared Python dependencies and the
+linked bundle's development tools.
+
+```bash
+agentihooks deps check
+agentihooks deps sync
+agentihooks deps ensure [--quiet]
+agentihooks deps mark-changed --reason "MCP registration changed"
+```
+
+| Action | Behavior |
+|--------|----------|
+| `check` | Report dangling skill links, missing declared Python distributions and unsatisfied bundle tools; exit 1 if any are missing, otherwise 0. Python reports include a repair command using the current interpreter. |
+| `sync` | Require the CLI's own source checkout to be on `dev`, fast forward from `origin/dev`, install added or changed runtime requirements plus missing distributions into the running Python environment, and report installed specs. Exit 1 on a refused branch, failed pull or failed install. |
+| `ensure` | Repair skill links and refresh the Codex hook wrapper; on an uncached bundle preflight, attempt missing declared Python requirements and bundle tool repairs. Required missing system tools need operator intervention and return status 2. Declared Python install errors are reported while preflight continues. |
+| `mark-changed` | Record a session-affecting dependency change so managed sessions restart at their next stop. `--reason` defaults to `manual`; this action does not install packages. |
+
+`--quiet` suppresses installation messages and declared Python install errors
+from `ensure`; it does not turn `sync` or `check` output off. `sync` chooses its
+source checkout from the running code, not the shell's working directory. It
+installs with `uv pip install --python` using the current interpreter, so invoke
+the installed CLI to update its tool environment.
+
+For examples, requirement declarations, Doctor integration, preflight caching,
+version-check limitations and recovery after a pull succeeds but installation
+fails, see [Synchronize an editable tool installation](../getting-started/installation.md#synchronize-an-editable-tool-installation).
+
+---
+
 ## `agentihooks settings-profile`
 
 Quick-switch the settings layer without touching persona (rules, CLAUDE.md, skills, agents, commands).
