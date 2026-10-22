@@ -134,7 +134,22 @@ def test_only_the_named_images_of_one_ledger_are_dropped():
     assert media_files.load("other-drop", "a.png") == b"three"
 
 
-def test_an_artifact_sweep_drops_unused_rows_of_both_stores():
+def test_a_sweep_of_a_moved_ledger_folder_leaves_its_image_rows(monkeypatch):
+    from contextlib import contextmanager
+
+    from scripts.swarm_ledger.storage_migration import hosted
+
+    @contextmanager
+    def moved(directory, slug):
+        yield False
+
+    monkeypatch.setattr(hosted, "media_mutation", moved)
+    media_files.save("moved-media", "old.png", b"x", 0)
+    assert ledger_media.sweep("moved-media", set(), 3_600_001) == set()
+    assert media_files.load("moved-media", "old.png") == b"x"
+
+
+def test_an_artifact_sweep_marks_unused_image_rows_unstored():
     make_ledger("both-stores")
     state = core.sync("both-stores")[0]
     media_files.save("both-stores", "old.png", b"x", 0)
