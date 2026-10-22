@@ -673,6 +673,8 @@ def test_hive_observations_end_the_same_execution_the_spoke_started(rig, state):
     started, exited = [item.event for item in events]
     assert (exited.key, exited.version, exited.cause) == (started.key, started.version, started.id)
     assert exited.data == started.data
+    assert exited.data["task_generation"] == rig.event.version
+    assert exited.data["generation"] == rig.request.task["execution_generation"]
     assert {key: exited.data[key] for key in ("claim_key", "claim_revision")} == {
         "claim_key": request.task["claim_fence"]["key"],
         "claim_revision": request.task["claim_fence"]["revision"],

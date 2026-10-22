@@ -204,6 +204,7 @@ class Spoke:
             author=self.config.hive,
             data={
                 "task": event.key,
+                "task_generation": event.version,
                 "claim_key": key,
                 "claim_revision": revision,
                 "generation": generation,

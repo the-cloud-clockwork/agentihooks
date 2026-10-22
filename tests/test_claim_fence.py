@@ -157,7 +157,7 @@ def test_hook_dispatch_passes_the_normalized_payload_through_the_claim_fence():
     handler = Mock()
     with (
         patch.object(hook_manager.sys, "stdin", io.StringIO(json.dumps(payload))),
-        patch.object(hook_manager.os, "_exit", side_effect=SystemExit),
+        patch.object(hook_manager.os, "_exit", side_effect=hook_manager.sys.exit),
         patch.dict(hook_manager.EVENT_HANDLERS, {"Notification": handler}),
         patch.object(claim_fence, "check", return_value=None) as check,
     ):
