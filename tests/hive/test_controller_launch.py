@@ -988,15 +988,20 @@ def test_full_hive_accounts_report_local_and_remote_session_counts(setup, monkey
     setup.herdr._quota_accounts = [
         Account("claude", "account", "room", 2, 80, 80, 6),
         Account("codex", "other", "room", 0, 80, 80, 6),
+        Account("claude", "second", "room", 3, 80, 80, 4),
+        Account("claude", "third", "room", 1, 80, 80, 2),
     ]
-    setup.store.redis.set(f"{registry.key('remote')}:sessions", '{"claude:account": 4}')
+    setup.store.redis.set(
+        f"{registry.key('remote')}:sessions", '{"claude:account": 4, "claude:second": 1, "claude:third": 1}'
+    )
     setup.herdr.planned_account.return_value = account
 
     result = setup.launcher.select(setup.config, "eng", {"id": "task"})
 
     assert isinstance(result, placement.Wait)
     assert result.reason == (
-        "no Claude account has room after hive sessions: account 2 here and 4 on hives of 6"
+        "no Claude account has room after hive sessions: account 2 here and 4 on hives of 6, "
+        "second 3 here and 1 on hives of 4, third 1 here and 1 on hives of 2"
         + ("; pinned to account" if account else "")
     )
     assert result.role == "eng"
