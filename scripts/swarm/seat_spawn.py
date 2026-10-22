@@ -58,5 +58,5 @@ def place_seat(slug: str, config, store, runtime, seat: Seat, now_ms: int, prepa
         placed = replace(placed, execution=admitted) if admitted.execution_id else placed
     except Exception as exc:
         raise SeatFailed(record, exc) from exc
-    tick._spend_host(store, name, now_ms)
+    tick._spend_local(store, admitted, now_ms)
     return record, placed
