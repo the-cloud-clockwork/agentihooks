@@ -116,7 +116,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     bus = open_bus(BusConfig.from_environ(os.environ))
-    hub = HubRunner(bus, registry.REACTORS, os.environ.get("HOSTNAME") or socket.gethostname())
+    hub = HubRunner(bus, registry.configured(bus), os.environ.get("HOSTNAME") or socket.gethostname())
     previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         return {"run": _run}[args.action](hub, args.once)

@@ -42,3 +42,9 @@ def durable(reactor: Reactor) -> str:
 
 
 REACTORS = Registry()
+
+
+def configured(bus) -> Registry:
+    from scripts.hub.lifecycle import Lifecycle
+
+    return Registry([*REACTORS, Lifecycle(bus).reactor()])

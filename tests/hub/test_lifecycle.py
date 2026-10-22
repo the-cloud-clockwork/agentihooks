@@ -144,3 +144,37 @@ def test_the_hub_consumes_each_execution_version_once(rig):
     assert hub.run_once() == {"lifecycle": ["skipped"]}
     assert len(rig.returned) == len(rig.ledger.writes) == 1
     hub.stop()
+
+
+def test_default_registry_wires_the_lifecycle_consumer(rig):
+    reactors = {reactor.name: reactor for reactor in registry.configured(rig.bus)}
+    reactor = reactors["lifecycle"]
+    assert reactor.subject == "swarm.*.execution.exited"
+    assert reactor.singleton is True
+    assert isinstance(reactor.handler.__self__, lifecycle.Lifecycle)
+    assert reactor.handler.__self__.bus is rig.bus
+
+
+def test_a_ledger_outage_retries_settlement_without_returning_the_slot_again(rig):
+    saved = rig.ledger.update_task
+
+    def unavailable(*_, **__):
+        raise OSError("ledger unavailable")
+
+    rig.ledger.update_task = unavailable
+    with pytest.raises(OSError, match="ledger unavailable"):
+        rig.react.handle(rig.event)
+    assert len(rig.returned) == 1
+    rig.ledger.update_task = saved
+    rig.react.handle(rig.event)
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == len(rig.store.released) == len(rig.store.dropped) == 1
+
+
+def test_exit_accepts_the_launching_entry_revision_before_started_is_written(rig):
+    claims = rig.bus.state("spoke-work")
+    entry = claims.get("claim")
+    revision = claims.update("claim", json.dumps({"state": "launching"}).encode(), entry.revision)
+    rig.react.handle(replace(rig.event, data={**rig.event.data, "claim_revision": revision}))
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
