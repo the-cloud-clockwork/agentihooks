@@ -6,7 +6,7 @@ import pytest
 from hooks.classifier import Answer, DecisionResult
 from scripts.swarm import cli, trace_plan
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm_ledger import ledger, ledger_authority, ledger_server, ledger_workspace, storage
+from scripts.swarm_ledger import ledger, ledger_authority, ledger_route, ledger_server, ledger_workspace, storage
 from tests.swarm_ledger.test_ledger_authority import SLUG
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
@@ -23,7 +23,8 @@ def hosted(live, monkeypatch, tmp_path):
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, str(tmp_path), 1, 0))
-    store.update(SLUG, api_url=f"http://{live['host']}")
+    url = f"http://{live['host']}"
+    store.update(SLUG, api_url=url)
     name = store.next_name(SLUG, "eng")
     store.start_execution(SLUG, AgentRecord(name, "eng", "t9", seat=f"eng-1@{SLUG}", launched_at=10001))
     secret = secrets.token_hex(32)
@@ -43,18 +44,19 @@ def hosted(live, monkeypatch, tmp_path):
     folder = ledger_workspace.folder(SLUG, "t9")
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "plan.md").write_text(PLAN)
-    return name, folder
+    return name, folder, url
 
 
 def test_trace_plan_on_a_hosted_ledger_files_the_cut_piece_as_the_pinned_agent(hosted, capsys):
-    name, folder = hosted
+    name, folder, url = hosted
 
     assert cli.main([SLUG, "trace-plan"]) == 0
 
     report = json.loads(capsys.readouterr().out)
     assert (report["task"], report["verdict"], report["cut"]) == ("t9", "pass", ["a generator"])
     assert json.loads((folder / "plan-verdict.json").read_text())["verdict"] == "pass"
-    filed = [item for item in ledger.request(SLUG)["followups"] if item["text"] == CUT]
+    with ledger_route.scoped(SLUG, url):
+        filed = [item for item in ledger.request(SLUG)["followups"] if item["text"] == CUT]
     assert len(filed) == 1
     events = storage.default().events_since(SLUG, 0)
     added = [event for event in events if event["target"] == f"followups/{filed[0]['id']}"]
