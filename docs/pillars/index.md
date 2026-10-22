@@ -14,6 +14,8 @@ See [proof loop health findings](swarm.md#proof-loop-health-findings) for rerun 
 
 See [stalled activity findings](swarm.md#stalled-activity-findings) for threshold configuration, wrapper loss recovery and investigation of active agents reported as stalled.
 
+For publication retries, see [publishing unchanged files](swarm.md#publishing-unchanged-files): automatic remote comparison, skipped gates and pushes, output and missing branch handling.
+
 For resumed work, see [publishing after a successor prepares a branch](swarm.md#publishing-after-a-successor-prepares-a-branch): branch selection, restacking, repository configuration and publication retries. See [recording a published upstream branch](swarm.md#recording-a-published-upstream-branch) for successor tracking setup, task metadata and pull request head checks.
 
 For an existing pull request, see [continuing with one push](swarm.md#continue-an-existing-pull-request-with-one-push): retained branch selection, Stop behavior and lease failures.
