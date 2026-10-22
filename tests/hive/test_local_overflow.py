@@ -156,6 +156,31 @@ def test_the_local_machine_cap_defaults_to_eight(setup):
     assert SwarmConfig("s", "r", 1, 1).local_max_agents == 8
 
 
+def test_the_swarm_setting_refuses_local_launches_even_with_spare_cpu(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.update(setup.config.slug, local_max_agents=2)
+    local_agents(setup, 2)
+    with pytest.raises(SpawnError, match="local machine is full"):
+        fenced.spawn(setup.config, "eng", "eng-new", {"id": "task"})
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_the_workstation_hive_limit_counts_another_swarm(setup, monkeypatch):
+    from scripts.swarm import commands
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=2)
+    setup.store.create(SwarmConfig("doctor", "agentihooks", 1, 1))
+    local_agents(setup, 2, slug="doctor")
+    with pytest.raises(SpawnError, match="local machine is full"):
+        fenced.spawn(setup.config, "eng", "eng-new", {"id": "task"})
+    setup.herdr.spawn.assert_not_called()
+
+
 @pytest.mark.parametrize("profile", ["qa", "frontend"])
 def test_ui_role_work_keeps_waiting_for_its_ui_host(setup, monkeypatch, profile):
     from scripts.swarm.profile_choice import ProfileDecision
