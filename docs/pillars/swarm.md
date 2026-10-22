@@ -653,7 +653,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
 | `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
-| `agentihooks swarm <id> branch` | Record the current worktree branch on the task once it is on origin, with its repository (`branch_repo`, the origin remote without credentials), so dependent tasks can start from it. |
+| `agentihooks swarm <id> branch` | Record the published branch and its repository (`branch_repo`, the origin remote without credentials). When the local branch tracks `origin/<task branch>`, retain that recorded task branch even when the local name differs; otherwise use the local branch. The selected branch must exist on origin. See [recording a published upstream branch](#recording-a-published-upstream-branch). |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. Rounds spent before the task records a pull request, on its first pull request and on each later one, count on separate counters ([Review round counters](#review-round-counters)). |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
 | `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; their swarm owners receive an inbox message. Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. Each reorder, deferral, replay and restore is recorded in the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
@@ -986,16 +986,23 @@ worker's branch name:
 | Restacking removed that ancestry, and no other eligible recorded branch passes the ancestry check | Use the prepared checkout's own branch. The parked predecessor branch stays at its previous head. |
 | No recorded branch exists, or its local `origin` ref is missing | Use the prepared checkout's own branch unless another recorded candidate passes the ancestry check. A missing ref does not print a fatal Git diagnostic. |
 
-The current implementation checks a retained continuation from the handoff or
-reclaim record first, then the branch supplied by repository and checkout
-selection. Each candidate must pass the ancestry check. Inside a task worktree,
-checkout selection supplies the local branch; preserving a predecessor target
-there requires a retained handoff or reclaim continuation. From a primary
-checkout, selection can instead supply the task's recorded repository branch.
-In those continuation contexts, a different local branch name alone does not
-require a new remote branch: even parked work stays on an eligible recorded
-branch when it still fast forwards, including when there were no task commits
-beyond the stacked base.
+The current implementation tries these candidates in order, accepting the first
+whose local `refs/remotes/origin/` ref is an ancestor of `HEAD`:
+
+1. The retained continuation from the handoff or reclaim record.
+2. The checkout's tracked upstream, when it names a branch in the task's
+   `branch` or `repository_branches` records and is not `dev`, `main`, `master`
+   or `v1`. An upstream belonging to another task is not followed merely
+   because Git tracks it.
+3. The branch supplied by repository and checkout selection.
+
+Inside a task worktree, checkout selection supplies the local branch. From a
+primary checkout, it can supply the task's recorded repository branch. A
+successor's different local name therefore does not require a new remote
+branch: a recorded upstream can preserve the delivery target even when the
+handoff envelope has no continuation, or the repository branch entry still
+holds a stale local name. If no candidate passes, publication uses the local
+branch.
 
 After a successful push, the result's `branch` names the actual target and
 `head` names the published commit. The task records that target in `branch` and
@@ -1012,12 +1019,20 @@ pushed. This removes the second branch push that previously started another
 Mutation preflight for the same commit. The `push-stop` gate uses the same
 retained target when it pushes committed work at Stop.
 
-The retained target comes from `continue_from` in the task's handoff envelope,
-or its reclaim record when there is no nonempty handoff envelope. It must name
-an `origin/` branch, and its local remote tracking ref must be an ancestor of
-`HEAD`. The protected names `dev`, `main`, `master` and `v1` are excluded from
-retained targets. A fresh continuation supplies no retained target. These are
-runtime records; no new flag or environment variable enables this behavior.
+For `publish`, the retained target can come from `continue_from` in the
+handoff envelope, its reclaim record when there is no nonempty handoff
+envelope, or the task-recorded upstream described above. `prepare` uses the
+same branch selection, records the delivery target separately for each
+repository, and sets a differently named local branch to track
+`origin/<delivery branch>`. Its returned `branch` names that delivery target,
+not necessarily the local branch printed by `git branch --show-current`.
+This works without a continuation in the handoff envelope.
+
+The `push-stop` path uses the handoff or reclaim continuation; it does not
+perform `publish`'s additional recorded-upstream selection. Its retained target
+must name an `origin/` branch whose tracking ref is an ancestor of `HEAD`;
+`dev`, `main`, `master` and `v1` are excluded. These are runtime records and Git
+upstream settings; no new flag or environment variable enables the behavior.
 
 For example, a successor may prepare a local branch with its own worker name
 while its handoff retains the predecessor's pull request branch. Work in the
@@ -1064,6 +1079,62 @@ and [successful mutation preflight](https://github.com/the-cloud-clockwork/agent
 Those proofs establish the tested branch selection and gate results; inspecting
 one live continuation's workflow runs is a separate operational check.
 
+### Recording a published upstream branch
+
+Run `swarm branch` in the successor's worktree to record an already published
+branch. It keeps the task's existing `branch` when the local upstream is
+exactly `origin/<that branch>`. Otherwise it records the local branch. It
+checks that the chosen branch exists on origin; it does not push commits or
+update the per-repository `repository_branches` map. `prepare` and `publish`
+maintain that map.
+
+For a task already recording `delivery-fix`, a successor with local branch
+`successor-work` can track the existing delivery branch without renaming its
+local branch:
+
+```bash
+git fetch origin
+git branch --set-upstream-to=origin/delivery-fix
+agentihooks swarm <id> branch
+```
+
+The command returns `branch: delivery-fix`, `branch_repo` and the task name,
+plus its existing `pr_url` when present. An arbitrary upstream is insufficient:
+the task must already record `delivery-fix`. No upstream, an upstream on
+another remote, or an upstream for another recorded name leaves selection on
+the local branch. A detached checkout is refused.
+
+Compare all three records from the task worktree; replace the task identifier
+and pull request number:
+
+```bash
+git branch --show-current
+git rev-parse --abbrev-ref '@{upstream}'
+agentihooks ledger --slug <id> show | jq \
+  '.tasks[] | select(.id == "TASK") | {branch, branch_repo, repository_branches, pr_url}'
+gh api 'repos/{owner}/{repo}/pulls/PR_NUMBER' \
+  --jq '{branch: .head.ref, head: .head.sha}'
+```
+
+The local name may differ. For a continuation updating an existing pull
+request, the published target and the pull request head branch should agree.
+
+| Symptom | Action |
+|---|---|
+| `branch <name> is not on origin; push it first ...` | The selected branch has not been published. Check the task's recorded branch and local upstream before following the suggested push; publish the intended delivery target rather than creating a duplicate branch. |
+| `swarm branch` records the successor's local name | Its upstream does not exactly match the task's recorded `origin/<branch>`. Confirm the pull request head and task record before configuring the upstream. |
+| `publish` selects a new branch despite an upstream | Check that the upstream is task-recorded, unprotected, and its local origin ref is an ancestor of `HEAD`. Fetch origin and reconcile divergent history; selection does not repair it. |
+| `branch` agrees with the pull request but `repository_branches` still names an old local branch | `swarm branch` writes only `branch` and `branch_repo`. A successful `prepare` or `publish` records the selected delivery target in the repository map. |
+
+[Pull request 4418](https://github.com/the-cloud-clockwork/agentihooks/pull/4418)
+delivered the preparation and publication correction. Its reported incident
+started four duplicate preflights on a successor's new branch before the same
+commits reached the existing pull request branch. The focused regression was
+[red](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39104180650)
+and then [green](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39104598310).
+These runs prove the tested selection behavior; they do not establish a live
+before and after count of mismatched task branches or duplicate preflights.
+
 ### Resume parked work and publish
 
 Use this sequence as the task's current worker, after reading its handoff and
@@ -1083,7 +1154,9 @@ cd <returned-worktree>
 agentihooks swarm <id> restack
 ```
 
-A rebase conflict leaves the parked list intact. Resolve the reported files,
+A successful `restack` clears the prepared upstream, so a parked successor can
+publish its own branch after rebasing onto `dev`. A rebase conflict leaves the
+parked list intact. Resolve the reported files,
 stage the resolved files explicitly, run `git rebase --continue`, and run
 `swarm restack` again to finish. Once restacking succeeds and the task changes
 are ready, publish the selected files:
