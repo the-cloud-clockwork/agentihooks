@@ -7,6 +7,7 @@ from typing import Any, Protocol
 from scripts.events.bus import Bus, StateConflict
 from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
+from scripts.events.subjects import subject
 from scripts.hive import admission, headroom
 from scripts.swarm import readiness
 from scripts.swarm_v2.runtime.base import Runtime, SpawnRequest
@@ -62,4 +63,29 @@ class Spoke:
             claims.update(key, json.dumps({"state": "withdrawn"}).encode(), revision)
             delivery.term()
             return "withdrawn"
-        return "claimed"
+        outcome = self.runtime.spawn(request)
+        placed = outcome.value
+        started = Envelope(
+            id=f"started:{key}",
+            type="execution.started",
+            swarm=event.swarm,
+            entity="execution",
+            key=request.name,
+            version=event.version,
+            time=time.time_ns() // 1_000_000,
+            author=self.config.hive,
+            data={
+                "task": event.key,
+                "lane": self.config.lane,
+                "hive": self.config.hive,
+                "name": request.name,
+                "pane_id": placed.pane_id,
+                "harness": placed.harness,
+                "account": placed.account,
+            },
+            cause=event.id,
+        )
+        claims.update(key, json.dumps({"state": "started", "event": started.to_dict()}).encode(), revision)
+        self.bus.events.publish(subject(event.swarm, "execution", "started"), started)
+        delivery.ack()
+        return "started"
