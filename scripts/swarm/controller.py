@@ -269,6 +269,14 @@ def _stat(pid) -> list[str]:
     return _read(f"/proc/{pid}/stat").rsplit(")", 1)[-1].split()
 
 
+CONTAINER_MARKS = ("/.dockerenv", "/run/.containerenv")
+
+
+def _contained() -> bool:
+    # Pods built from one image share a machine id across nodes.
+    return bool(os.environ.get("KUBERNETES_SERVICE_HOST")) or any(Path(p).exists() for p in CONTAINER_MARKS)
+
+
 def _holder() -> dict:
     host, fields, machine = _host(), _stat(os.getpid()), _read("/etc/machine-id")
     if not host or len(fields) <= 19:
@@ -298,7 +306,7 @@ def _dead(raw: str) -> bool:
 
 
 def _ended_boot(held: dict, host: str) -> bool:
-    machine = _read("/etc/machine-id")
+    machine = "" if _contained() else _read("/etc/machine-id")
     boot = str(held.get("host", "")).partition(":")[0]
     return bool(machine) and held.get("machine") == machine and bool(boot) and boot != host.partition(":")[0]
 
