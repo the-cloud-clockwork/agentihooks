@@ -666,6 +666,7 @@ def test_a_tick_pass_never_waits_on_hive_acknowledgements_and_a_later_pass_recor
     assert waits <= set(actions)
     assert len(names) == 3 and runtime.spawned == []
     assert sorted(row["state"] for row in store.launches("sw")) == ["acknowledging"] * 3
+    assert {row["error"] for row in store.launches("sw")} == {"hive launch ordered, waiting for its acknowledgement"}
     tick("sw", store, ledger, runtime, now_ms=STARTUP_GRACE_MS + 2_000)
     assert sorted(runtime.collected) == sorted(names) and runtime.ordered == names
     assert [store.claimant("sw", t) for t in ("t1", "t2", "t3")] == [
@@ -718,6 +719,20 @@ def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(s
     tick("sw", store, ledger, runtime, now_ms=3_000)
     assert [row["state"] for row in store.launches("sw")] == ["started"]
     assert runtime.ordered == [first]
+
+
+def test_a_collected_hive_launch_is_admitted_against_the_swarm_store(store, monkeypatch):
+    from scripts.swarm_v2.runtime import codex
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    admitted = []
+    real = codex.admit_legacy
+    monkeypatch.setattr(codex, "admit_legacy", lambda *args: admitted.append(args[0]) or real(*args))
+    runtime.acked.add(runtime.ordered[0])
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert admitted == [store]
+    assert [row["state"] for row in store.launches("sw")] == ["started"]
 
 
 def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(store):
