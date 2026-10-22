@@ -368,7 +368,7 @@ class ExecutionRegistry:
             with self.redis.pipeline() as pipe:
                 try:
                     archived = self.store.key(slug, ARCHIVE)
-                    pipe.watch(key, archived)
+                    pipe.watch(key)
                     live = pipe.hget(key, execution_id)
                     raw = live or pipe.hget(archived, execution_id)
                     if not raw:
