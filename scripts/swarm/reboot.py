@@ -4,6 +4,7 @@ reopens each recorded agent in its own conversation and seat; hive agents are ne
 import json
 import os
 import subprocess
+import tempfile
 import time
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -69,11 +70,9 @@ def prepare(store, slug, now_ms, run=subprocess.run):
     }
     target = record_path(slug)
     target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_suffix(".partial")
-    partial.write_text(
-        json.dumps(doc),
-    )
-    partial.replace(target)
+    with tempfile.NamedTemporaryFile("w", dir=target.parent, delete=False) as partial:
+        json.dump(doc, partial)
+    Path(partial.name).replace(target)
     inbox = InboxStore(store.redis)
     for master in (a for a in agents if a.lane == MASTER and local(a)):
         inbox.send(exits.BY, master.name, ASK.format(path=handoff_path(slug)))

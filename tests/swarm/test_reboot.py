@@ -223,7 +223,11 @@ def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, re
         eng.task,
         eng.conversation_id,
     )
-    assert (outcome["reason"], outcome["at"]) == ("own conversation did not reopen after the workstation rebooted", 900)
+    assert (outcome["reason"], outcome["at"], outcome["lane"]) == (
+        "own conversation did not reopen after the workstation rebooted",
+        900,
+        "eng",
+    )
     assert other in store.restored("sw")
     transfer = transfers.get(store, "sw", outcome["transfer"])
     assert (transfer["handoff"], transfer["reason"], transfer["at"]) == ("carry on from the parser", "restore", 900)
@@ -331,6 +335,7 @@ def test_shutdown_creates_the_swarm_folder(store, swarm, monkeypatch, tmp_path):
     reboot.prepare(store, "sw", 500)
 
     assert json.loads((target.parent / "reboot.json").read_text())["taken_at"] == 500
+    assert [p.name for p in target.parent.iterdir()] == ["reboot.json"]
 
 
 def test_a_boot_with_every_recorded_agent_live_starts_nothing(store, rebooted):
