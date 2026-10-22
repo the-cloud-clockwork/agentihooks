@@ -173,12 +173,13 @@ def test_only_a_local_holder_whose_process_is_gone_is_dead(monkeypatch, host, lo
     )
 
 
-def test_a_container_names_no_machine_so_no_holder_is_dead_by_boot(monkeypatch, tmp_path):
+@pytest.mark.parametrize("machine", ["m", "XXXX"])
+def test_a_container_names_no_machine_so_no_holder_is_dead_by_boot(monkeypatch, tmp_path, machine):
     mark = tmp_path / "dockerenv"
     monkeypatch.setattr(controller, "CONTAINER_MARKS", (str(mark),))
     monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
-    monkeypatch.setattr(controller, "_read", lambda path: "m" if path == "/etc/machine-id" else "")
-    held = {"host": "oldboot:ns", "machine": "m"}
+    monkeypatch.setattr(controller, "_read", lambda path: machine if path == "/etc/machine-id" else "")
+    held = {"host": "oldboot:ns", "machine": machine}
     assert controller._contained() is False
     assert controller._ended_boot(held, "boot:ns") is True
     mark.write_text("")
