@@ -965,7 +965,9 @@ def _spend_host(store, name, now_ms):
 
 
 def _spend_local(store, agent, now_ms):
-    if not agent.hive:
+    from scripts.swarm.commands import hive_id
+
+    if not agent.hive or agent.hive == hive_id():
         _spend_host(store, agent.name, now_ms)
 
 
