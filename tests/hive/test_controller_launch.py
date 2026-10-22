@@ -1472,11 +1472,53 @@ def test_a_hive_without_a_fresh_headroom_reading_refuses_on_missing_telemetry(se
     )
 
 
-def test_reported_worker_sessions_no_longer_fill_hive_room(setup):
+def test_reported_worker_sessions_fill_the_hive_up_to_its_max_agents(setup):
     from scripts.hive import registry
+    from scripts.hive.placement import Wait
 
-    setup.store.redis.set(f"{registry.key('remote')}:sessions", json.dumps({"claude:account": 3}))
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", json.dumps({"claude:account": 2}))
     assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", json.dumps({"claude:account": 3}))
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        "no hive for eng has room: remote max agents: 3 of 3 agents on the hive, fits 0 more"
+    )
+
+
+def test_max_agents_of_mixed_lanes_refuse_the_next_launch_with_its_reason(setup):
+    from scripts.hive import placement_waits
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import Status
+
+    write_hive(setup, max_agents=3)
+    publish_room(setup.store, "remote", 10)
+    rows = [("ci", "working"), ("eng", "working"), ("eng", "launching")]
+    for index, (lane, state) in enumerate(rows):
+        setup.store.start_execution(
+            "fixture",
+            AgentRecord(
+                setup.store.next_name("fixture", lane),
+                lane,
+                f"busy-{index}",
+                seat=f"{lane}-{index + 1}@fixture",
+                state=state,
+                harness="claude",
+                account="account",
+                hive="remote",
+                runtime_target={"host_id": "remote"},
+            ),
+        )
+    reason = "no hive for eng has room: remote max agents: 3 of 3 agents on the hive, fits 0 more"
+    assert setup.launcher.hives()[0]["agents"] == 3
+    result = setup.launcher.spawn(request_for(setup))
+    assert (result.operation, result.status, result.backend, result.detail) == (
+        "spawn",
+        Status.UNAVAILABLE,
+        "hive",
+        reason,
+    )
+    assert {
+        task: (row["lane"], row["reason"]) for task, row in placement_waits.read(setup.store, "fixture").items()
+    } == {"task": ("eng", reason)}
 
 
 def test_a_launch_that_loses_the_last_room_to_a_concurrent_reservation_waits_on_the_reason(setup):
