@@ -1105,13 +1105,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
 
             launched = codex.admit_legacy(store, slug, placed_record(record, placed), runtime)
         except Exception as exc:
-            if _acknowledging_error(exc):
-                store.record_launch(slug, record, ACKNOWLEDGING)
-                actions.append(f"{name} waits for the hive acknowledgement of {task['id']}")
-            elif refused := _room_wait(runtime, lane, task):
-                actions.append(_room_refused(slug, store, ledger, runtime, rows, Failed(record, task, exc), refused))
-            else:
-                actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(record, task, exc), now_ms)
+            actions += _not_launched(slug, store, ledger, runtime, rows, Failed(record, task, exc), now_ms)
             continue
         actions += _started(slug, config, store, ledger, doc, Started(record, task, placed, launched), now_ms)
     return actions
@@ -1160,6 +1154,16 @@ def _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms):
     if isinstance(exc, ProfileUnresolved):
         actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
     return actions
+
+
+def _not_launched(slug, store, ledger, runtime, rows, failed, now_ms):
+    record, task = failed.record, failed.task
+    if _acknowledging_error(failed.error):
+        store.record_launch(slug, record, ACKNOWLEDGING)
+        return [f"{record.name} waits for the hive acknowledgement of {task['id']}"]
+    if refused := _room_wait(runtime, record.lane, task):
+        return [_room_refused(slug, store, ledger, runtime, rows, failed, refused)]
+    return _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms)
 
 
 def _room_refused(slug, store, ledger, runtime, rows, failed, refused):
