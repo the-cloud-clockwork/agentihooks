@@ -9,7 +9,7 @@ def edges(table):
     return {(current, target) for current, targets in table.items() for target in targets}
 
 
-def test_task_table_follows_the_ledger_task_states():
+def test_task_table_allows_only_these_moves():
     assert edges(TASK) == {
         ("open", "claimed"),
         ("claimed", "open"),
@@ -44,7 +44,7 @@ def test_hive_table_joins_lives_and_leaves():
     assert HIVE["removed"] == ()
 
 
-def test_slot_table_follows_the_account_slot_states():
+def test_slot_table_allows_only_these_moves():
     assert edges(SLOT) == {("reserved", "occupied"), ("reserved", "ended"), ("occupied", "ended")}
     assert SLOT["ended"] == ()
 
@@ -79,6 +79,14 @@ def test_transition_refuses_an_unknown_current_state():
 
 def test_transition_refuses_an_unknown_target_state():
     assert str(refusal("task", "open", "parked")) == "task has no state 'parked'"
+
+
+def test_transition_names_the_current_state_when_both_are_unknown():
+    assert str(refusal("task", "parked", "lost")) == "task has no state 'parked'"
+
+
+def test_transition_refuses_an_empty_state():
+    assert str(refusal("task", "", "open")) == "task has no state ''"
 
 
 def test_transition_refuses_leaving_a_terminal_state():
