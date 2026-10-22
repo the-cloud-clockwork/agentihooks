@@ -249,6 +249,56 @@ def test_launch_failure_without_one_failing_harness_is_proposed(store, home, shi
     assert lane_of(store, "eng") == ("claude", "opus")
 
 
+def hive_only(store, monkeypatch, excluded="eng"):
+    from scripts.hive import registry
+    from scripts.swarm import commands
+
+    store.update(SLUG, hive_placement=True)
+    registry.update(store.redis, "ws", [f"excluded={excluded}"])
+    monkeypatch.setattr(commands, "hive_id", lambda: "ws")
+
+
+def test_launch_failure_keeps_a_hive_only_lane_on_the_harness_hives_place(store, home, shipped, monkeypatch):
+    hive_only(store, monkeypatch)
+    pin(store, "eng", "claude")
+    detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
+    why = bottleneck_remedy.UNPLACEABLE.format(target="codex", lane="eng")
+    assert why == "no eligible host places codex for the eng lane"
+    assert run(store) == [proposed(FAILED, why)]
+    assert lane_of(store, "eng") == ("claude", "opus")
+    assert logged(home) == [(NOW, "dispatcher", "propose", "", RULE, proposed(FAILED, why))]
+    assert master_items(store) == [proposal("launch failure", FAILED, why)]
+
+
+def test_launch_failure_moves_a_lane_the_workstation_hosts_off_claude(store, home, shipped, monkeypatch):
+    hive_only(store, monkeypatch, excluded="plan")
+    pin(store, "eng", "claude")
+    detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
+    text = bottleneck_remedy.MOVED.format(lane="eng", source="claude", target="codex", targeted=FAILED)
+    assert run(store) == [text]
+    assert lane_of(store, "eng") == ("codex", "auto")
+
+
+def test_launch_failure_moves_a_lane_off_claude_with_no_workstation_record(store, home, shipped, monkeypatch):
+    from scripts.swarm import commands
+
+    store.update(SLUG, hive_placement=True)
+    monkeypatch.setattr(commands, "hive_id", lambda: "ws")
+    pin(store, "eng", "claude")
+    detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
+    text = bottleneck_remedy.MOVED.format(lane="eng", source="claude", target="codex", targeted=FAILED)
+    assert run(store) == [text]
+
+
+def test_quota_hold_moves_a_hive_only_lane_back_to_claude(store, home, shipped, monkeypatch):
+    hive_only(store, monkeypatch)
+    pin(store, "eng", "codex")
+    detect(store, "quota_hold", 3.0, 2.0, labels=("codex",))
+    text = bottleneck_remedy.MOVED.format(lane="eng", source="codex", target="claude", targeted=HELD)
+    assert run(store) == [text]
+    assert lane_of(store, "eng") == ("claude", "auto")
+
+
 def test_quota_hold_moves_the_lane_pinned_to_the_held_harness_once(store, home, shipped):
     pin(store, "ci", "codex")
     detect(store, "quota_hold", 3.0, 2.0, labels=("codex",))
