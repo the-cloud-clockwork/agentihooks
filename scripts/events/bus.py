@@ -62,6 +62,7 @@ class StateStore(Protocol):
 @runtime_checkable
 class Bus(Protocol):
     events: EventLog
+    dead: EventLog
 
     def queue(self, name: str, policy: QueuePolicy) -> WorkQueue: ...
 
