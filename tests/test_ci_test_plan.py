@@ -318,6 +318,24 @@ def test_the_budget_holds_when_every_candidate_reads_its_jobs_and_download(monke
     )
 
 
+def test_a_page_whose_worst_case_exactly_fills_the_budget_is_still_read(monkeypatch, capsys):
+    runs = [_run(n) for n in range(200, 0, -1)]
+    costly = [run["id"] for index, run in enumerate(runs[:30]) if index % 5 < 3]
+    _github(
+        monkeypatch,
+        runs,
+        manifests={n: _manifest(n) for n in costly},
+        failed={(n, "unit (3.12, 4)") for n in costly},
+    )
+    requests = _counted(monkeypatch)
+    assert ci_test_plan.find_record(REPOSITORY, LATER) is None
+    assert len(requests) == 80
+    assert capsys.readouterr().out == (
+        "Searched 40 dev push runs in 80 of 100 GitHub requests, request budget exhausted:"
+        " 22 kept no manifest or shard coverage, 18 failed unit shards, 0 recorded another commit\n"
+    )
+
+
 def test_the_search_ends_when_no_older_runs_remain(monkeypatch, capsys):
     _github(monkeypatch, [_run(n) for n in range(15, 0, -1)], manifests={})
     requests = _counted(monkeypatch)
