@@ -251,6 +251,16 @@ def resolution(held: dict) -> str:
         return ""
 
 
+def _moved(target, run, outcome):
+    try:
+        stale = _stale(target, run)
+    except RateLimited:
+        raise
+    except UNREADABLE:
+        return f"{outcome}, now red; the branch head is unreadable"
+    return f"{outcome}, now red; the branch moved past the graded head" if stale else ""
+
+
 def _resolve(held):
     target = held["target"]
     run = read(target)
@@ -261,13 +271,8 @@ def _resolve(held):
     if run.get("status") != "completed":
         return ""
     outcome = f"mutation preflight {target}"
-    try:
-        if _stale(target, run):
-            return f"{outcome}, now red; the branch moved past the graded head"
-    except RateLimited:
-        raise
-    except UNREADABLE:
-        return f"{outcome}, now red; the branch head is unreadable"
+    if moved := _moved(target, run, outcome):
+        return moved
     if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
         return f"{outcome}, now red; run {run.get('conclusion')}"
     try:
