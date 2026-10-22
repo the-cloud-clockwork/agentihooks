@@ -954,8 +954,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"
         active_env = _launch_environ(_with_predecessor(active_env, args.handoff), name, args.handoff)
-        if args.claim_fence:
-            active_env["AGENTIHOOKS_CLAIM_FENCE"] = args.claim_fence
+        active_env.update({"AGENTIHOOKS_CLAIM_FENCE": args.claim_fence} if args.claim_fence else {})
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
         agent, reason = (

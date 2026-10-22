@@ -37,3 +37,11 @@ def check(payload: dict) -> str | None:
         return None
     terminate(agent_pid())
     return REVOKED
+
+
+def enforce(payload: dict) -> None:
+    from hooks.hook_manager import BlockAction
+
+    message = check(payload)
+    if message:
+        raise BlockAction(message)
