@@ -1,3 +1,4 @@
+import importlib
 import json
 import secrets
 
@@ -112,7 +113,16 @@ def _failing_followups(monkeypatch, failures, applied):
 def test_a_refused_cut_keeps_the_pass_and_is_filed_once_on_the_next_run(hosted, monkeypatch, capsys):
     name, folder, url = hosted
     text = "Cut from the plan: a petrol generator"
-    _failing_followups(monkeypatch, 1, applied=False)
+    agent_ops = importlib.import_module("ledger_agent_ops")
+    checked, left = agent_ops.check, [1]
+
+    def refusing(op, task_ids=()):
+        if op["op"] == "add_item" and left[0]:
+            left[0] -= 1
+            raise ValueError("the ledger refuses this follow up")
+        return checked(op, task_ids)
+
+    monkeypatch.setattr(agent_ops, "check", refusing)
 
     assert cli.main([SLUG, "trace-plan"]) != 0
     assert _verdict(folder)["verdict"] == "pass"
@@ -155,12 +165,12 @@ def test_repeated_refusals_retry_with_one_identity_until_one_cut_is_filed(hosted
         sent.extend(op["id"] for op in ops or () if op.get("op") == "add_item")
         return real(self, slug, ops)
 
-    monkeypatch.setattr(LedgerClient, "_call", recording)
     _failing_followups(monkeypatch, 3, applied=False)
+    monkeypatch.setattr(LedgerClient, "_call", recording)
 
     assert [cli.main([SLUG, "trace-plan"]) for _ in range(5)] == [1, 1, 1, 0, 0]
     [item] = _filed(url, text)
-    assert len(set(sent)) == 1 and sent[0] == item["id"]
+    assert len(sent) == 4 and set(sent) == {item["id"]}
     assert _verdict(folder)["verdict"] == "pass"
 
 

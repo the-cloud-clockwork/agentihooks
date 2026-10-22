@@ -177,7 +177,7 @@ class LedgerClient:
         return self._write(slug, _op("add_item", by, list="followups", text=text, **flag), "item")
 
     def followup_once(self, slug, text, by, op_id):
-        self._call(slug, [{**_op("add_item", by, list="followups", text=text), "id": op_id}])
+        return "queued" not in self._call(slug, [{**_op("add_item", by, list="followups", text=text), "id": op_id}])
 
     def priority(self, slug, item, text):
         return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")

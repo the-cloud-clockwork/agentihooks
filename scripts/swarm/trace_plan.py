@@ -301,16 +301,19 @@ def _log(record, who, mode, home):
         gate_log.append(who.swarm, gate_log.Row.of(GATE.name, FAIL_KINDS[mode], who, reason=reason), home)
 
 
+def _legacy_filed(record, key, text, ledger, who):
+    return key in record["filed"] and text in {item["text"] for item in ledger.state(who.swarm).get("followups", [])}
+
+
 def _file_cuts(folder, record, ledger, who, home):
-    accepted, legacy, texts = record.setdefault("accepted", []), record["filed"], None
+    accepted = record.setdefault("accepted", [])
     for row in record["pieces"]:
         key, text = _row_key(row), followup_text(who.task, row["what"])
         if row["kept"] or key in accepted:
             continue
-        if key in legacy and texts is None:
-            texts = {item["text"] for item in ledger.state(who.swarm).get("followups", [])}
-        if key not in legacy or text not in texts:
-            ledger.followup_once(who.swarm, text, who.name, cut_id(who, key))
+        if not _legacy_filed(record, key, text, ledger, who):
+            if not ledger.followup_once(who.swarm, text, who.name, cut_id(who, key)):
+                continue
             gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "count", who, reason=f"cut: {row['what']}"), home)
         accepted.append(key)
         save(folder, record)

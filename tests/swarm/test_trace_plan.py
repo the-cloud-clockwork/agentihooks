@@ -638,6 +638,7 @@ class Ledger:
         assert (slug, by) == ("sw", "engineer@1-1")
         self.followups.append(text)
         self.ids.append(op_id)
+        return not self.refuse
 
     def state(self, slug):
         assert slug == "sw"
@@ -772,6 +773,42 @@ def test_a_legacy_filed_cut_is_resent_only_when_the_ledger_lacks_its_text(ask, t
     run(folder, ledger, home)
     assert len(ledger.ids) == 2 and ledger.ids[0] == ledger.ids[1]
     assert json.loads((folder / "plan-verdict.json").read_text())["accepted"] == record["filed"]
+
+
+def test_a_cut_queued_while_the_ledger_is_down_stays_unaccepted_and_resends_its_identity(ask, tmp_path):
+    folder, home, queued = tmp_path / "t1", tmp_path / "home", Ledger(refuse=True)
+    write_plan(folder)
+    ask(0.9, 0.8, 0.1)
+    record, _ = run(folder, queued, home)
+    assert (record["verdict"], record["accepted"], rows(home)) == ("pass", [], [])
+    assert json.loads((folder / "plan-verdict.json").read_text())["accepted"] == []
+    ledger = Ledger()
+    record, _ = run(folder, ledger, home)
+    assert ledger.ids == queued.ids and len(ledger.ids) == 1
+    assert record["accepted"] == ["a diesel generator | power/generator | it powers the light"]
+    assert [row["reason"] for row in rows(home)] == ["cut: a diesel generator"]
+
+
+def test_followup_once_reports_a_queued_write_as_not_accepted(monkeypatch):
+    from scripts.swarm import ledger_client
+
+    sent = []
+    answers = iter([{"queued": "cut-1"}, {"followups": []}])
+    monkeypatch.setattr(
+        ledger_client.LedgerClient, "_call", lambda self, slug, ops: sent.append((slug, ops)) or next(answers)
+    )
+    client = ledger_client.LedgerClient()
+    assert client.followup_once("sw", "Cut from the plan: a light", "engineer@1-1", "cut-1") is False
+    assert client.followup_once("sw", "Cut from the plan: a light", "engineer@1-1", "cut-1") is True
+    [(slug, [op])] = sent[:1]
+    assert (slug, op["op"], op["id"], op["by"], op["list"], op["text"]) == (
+        "sw",
+        "add_item",
+        "cut-1",
+        "engineer@1-1",
+        "followups",
+        "Cut from the plan: a light",
+    )
 
 
 def test_a_cut_identity_is_stable_and_names_swarm_task_and_piece():
