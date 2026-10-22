@@ -110,3 +110,27 @@ def test_unconfigured_or_empty_hive_observation_needs_no_bus(monkeypatch):
         execution_events.observe("hive-a", report("working"))
         monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
         execution_events.observe("hive-a", {"executions": {}})
+
+
+def test_a_reused_agent_name_never_inherits_an_older_generation_envelope():
+    from scripts.events.envelope import Envelope
+    from scripts.hive.execution_events import publish, started
+
+    bus = open_bus(BusConfig())
+    first = Envelope(
+        "first-start",
+        "execution.started",
+        "rig",
+        "execution",
+        "first-execution",
+        6,
+        123,
+        "hive-a",
+        {"name": "agent-a", "claim_key": "first-claim", "claim_revision": 2},
+    )
+    started(bus, first)
+    publish(bus, "hive-a", report("dead"))
+    events = bus.events.consumer("audit", "swarm.rig.execution.*").fetch(10, 0)
+    assert [(item.event.key, item.event.version) for item in events] == [("first-execution", 6), ("execution-a", 7)]
+    assert "claim_key" not in events[1].event.data
+    bus.close()

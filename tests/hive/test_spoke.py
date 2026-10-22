@@ -649,7 +649,12 @@ def test_hive_observations_end_the_same_execution_the_spoke_started(rig, state):
     report = {
         "observed_at": 1234,
         "executions": {
-            "registered-execution": {"slug": "rig", "name": request.name, "generation": 9, "pane": {"state": "working"}}
+            "registered-execution": {
+                "slug": "rig",
+                "name": request.name,
+                "generation": rig.event.version,
+                "pane": {"state": "working"},
+            }
         },
     }
     publish(rig.bus, "hive-a", report)
@@ -664,3 +669,32 @@ def test_hive_observations_end_the_same_execution_the_spoke_started(rig, state):
         "claim_key": request.task["claim_fence"]["key"],
         "claim_revision": request.task["claim_fence"]["revision"],
     }
+
+
+def test_a_heartbeat_during_spawn_waits_for_the_canonical_started_envelope(rig):
+    from scripts.hive.execution_events import publish
+
+    outcome = rig.runtime.spawn.return_value
+    report = {
+        "observed_at": 1234,
+        "executions": {
+            "registered-execution": {
+                "slug": "rig",
+                "name": rig.request.name,
+                "generation": rig.event.version,
+                "pane": {"state": "working"},
+            }
+        },
+    }
+
+    def spawn(request):
+        publish(rig.bus, "hive-a", report)
+        assert rig.bus.events.consumer("during-spawn", "swarm.rig.execution.*").fetch(10, 0) == []
+        return outcome
+
+    rig.runtime.spawn.side_effect = spawn
+    assert rig.spoke.poll() == "started"
+    publish(rig.bus, "hive-a", report)
+    events = rig.bus.events.consumer("audit", "swarm.rig.execution.*").fetch(10, 0)
+    assert len(events) == 1
+    assert events[0].event.data["claim_revision"] == rig.runtime.spawn.call_args.args[0].task["claim_fence"]["revision"]

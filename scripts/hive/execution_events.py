@@ -16,8 +16,8 @@ ENDED = frozenset({"exited", "dead"})
 _LOG = logging.getLogger(__name__)
 
 
-def identity(swarm: str, name: str) -> str:
-    return hashlib.sha256(json.dumps([swarm, name]).encode()).hexdigest()
+def identity(swarm: str, name: str, generation: int) -> str:
+    return hashlib.sha256(json.dumps([swarm, name, generation]).encode()).hexdigest()
 
 
 def emit(bus: Bus, event: Envelope) -> None:
@@ -29,9 +29,16 @@ def emit(bus: Bus, event: Envelope) -> None:
     states.create(key, b"sent")
 
 
+def prepare(bus: Bus, swarm: str, name: str, generation: int) -> None:
+    starts = bus.state(STARTS)
+    key = identity(swarm, name, generation)
+    if starts.get(key) is None:
+        starts.create(key, b"null")
+
+
 def started(bus: Bus, event: Envelope) -> None:
     starts = bus.state(STARTS)
-    key = identity(event.swarm, event.data["name"])
+    key = identity(event.swarm, event.data["name"], event.version)
     previous = starts.get(key)
     value = json.dumps(event.to_dict()).encode()
     if previous is None:
@@ -41,11 +48,12 @@ def started(bus: Bus, event: Envelope) -> None:
     emit(bus, event)
 
 
-def initial(bus: Bus, hive: str, execution: str, record: dict, now: int) -> Envelope:
-    stored = bus.state(STARTS).get(identity(record["slug"], record["name"]))
+def initial(bus: Bus, hive: str, execution: str, record: dict, now: int) -> Envelope | None:
+    stored = bus.state(STARTS).get(identity(record["slug"], record["name"], record["generation"]))
     if stored is not None:
-        return Envelope.from_dict(json.loads(stored.value))
-    key = identity(hive, execution)
+        value = json.loads(stored.value)
+        return Envelope.from_dict(value) if value else None
+    key = identity(hive, execution, record["generation"])
     return Envelope(
         id=f"started:{key}:{record['generation']}",
         type="execution.started",
@@ -65,6 +73,8 @@ def publish(bus: Bus, hive: str, report: dict) -> None:
         if observed not in LIVE and observed not in ENDED:
             continue
         event = initial(bus, hive, execution, record, report["observed_at"])
+        if event is None:
+            continue
         exited = replace(
             event, id=f"exited:{event.id}", type="execution.exited", time=report["observed_at"], cause=event.id
         )
