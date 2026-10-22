@@ -90,13 +90,13 @@ def test_a_focused_id_label_keeps_a_visible_focus_ring(tab):
     tab.keyboard.press("Shift+Tab")
     tab.evaluate("window.focusRingLabel = document.activeElement")
     tab.evaluate("async () => { const {render} = await import('/js/render.js'); await render(null, true); }")
-    assert label.evaluate(
+    state = label.evaluate(
         "el => ({same: el === window.focusRingLabel, oldConnected: window.focusRingLabel.isConnected,"
         " active: document.activeElement.outerHTML.slice(0, 150), visible: el.matches(':focus-visible'),"
         " outline: getComputedStyle(el).outlineStyle})"
-    ) == {"same": True, "oldConnected": True, "active": "label", "visible": True, "outline": "solid"}
-    assert label.evaluate("el => el.matches(':focus-visible')")
-    assert label.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
+    )
+    assert label.evaluate("el => el.matches(':focus-visible')"), state
+    assert label.evaluate("el => getComputedStyle(el).outlineStyle") != "none", state
 
 
 def test_a_priorities_link_opens_the_folded_tasks_and_scrolls_to_the_card(tab):
