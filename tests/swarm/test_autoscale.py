@@ -104,12 +104,12 @@ def test_host_room_caps_the_target_and_applies_a_lower_ceiling_at_once():
     assert decision["reason"] == "Quota seats 20 (claude 10, codex 10); host room 1; ceiling 5 of 5."
 
 
-def test_a_changed_target_restarts_the_three_consecutive_ticks():
+def test_a_changed_target_keeps_counting_until_the_raise_is_interrupted():
     previous = calculate({"eng": 2}, {"claude": 6}, 10, {"eng": 100})
     previous = calculate({"eng": 2}, {"claude": 6}, 10, {"eng": 100}, previous)
     changed = calculate({"eng": 2}, {"claude": 7}, 10, {"eng": 100}, previous)
-    assert changed["ceilings"] == {"plan": 0, "ci": 0, "eng": 3}
-    assert changed["pending_raise"] == {"target": 9, "ticks": 1}
+    assert changed["ceilings"] == {"plan": 0, "ci": 0, "eng": 5}
+    assert changed["pending_raise"] == {"target": 9, "ticks": 3}
     interrupted = calculate({"eng": 2}, {"claude": 0}, 10, {"eng": 100}, changed)
     assert interrupted["pending_raise"] == {"target": None, "ticks": 0}
     restarted = calculate({"eng": 2}, {"claude": 7}, 10, {"eng": 100}, interrupted)
@@ -205,3 +205,23 @@ def test_lane_shifts_respect_sparse_live_counts_and_the_requested_shift():
         )
         assert decision["ceilings"] == expected
         assert decision["shift"] == moved
+
+
+def test_a_raise_whose_target_grows_each_tick_still_lifts_the_ceiling_on_the_third_tick():
+    live = {"plan": 0, "ci": 1, "eng": 6}
+    previous = {
+        "ceilings": {"plan": 0, "ci": 1, "eng": 8},
+        "pending_raise": {"target": None, "ticks": 0},
+        "reason": "",
+    }
+    decisions = []
+    for room in (15, 20, 25, 30):
+        previous = calculate(live, {"claude": 23, "codex": 10}, room, {"eng": 5}, previous)
+        decisions.append(previous)
+    assert [d["pending_raise"] for d in decisions] == [
+        {"target": 22, "ticks": 1},
+        {"target": 27, "ticks": 2},
+        {"target": 32, "ticks": 3},
+        {"target": 37, "ticks": 3},
+    ]
+    assert [sum(d["ceilings"].values()) for d in decisions] == [9, 9, 11, 12]
