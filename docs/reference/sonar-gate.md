@@ -106,8 +106,9 @@ the outer line timestamp is `19:10:28.3286316Z`. Retain the run URL, revision,
 attempt, scope and interval.
 Compare successful first Sonar attempts on dev push runs with the same scope;
 report sample counts and medians. Queue delay, the scanner step duration and
-whole job duration are separate measurements. A skipped or superseded analysis
-supplies no first sensor sample.
+whole job duration are separate measurements. A skipped scan supplies no first
+sensor sample. Exclude superseded analyses from the successful cohort even when
+they reached a sensor before the quality gate reported supersession.
 
 `Wait for the coverage merge` prints the background merge log and coverage
 table. `Wait for the test dependency manifest` prints its separate build log.
