@@ -681,7 +681,9 @@ def test_a_tick_pass_never_waits_on_hive_acknowledgements_and_a_later_pass_recor
     ]
     assert all(ledger.rows[t]["claimed_by"] in names for t in ("t1", "t2", "t3"))
     runtime.acked.update(names)
-    tick("sw", store, ledger, runtime, now_ms=STARTUP_GRACE_MS + 3_000)
+    actions = tick("sw", store, ledger, runtime, now_ms=STARTUP_GRACE_MS + 3_000)
+    spawned = {f"spawned {ledger.rows[t]['claimed_by']} for {t}" for t in ("t1", "t2", "t3")}
+    assert spawned <= set(actions)
     assert sorted(name for _, name, _ in runtime.spawned) == sorted(names)
     assert {lane for lane, _, _ in runtime.spawned} == {"eng"}
     assert sorted(row["state"] for row in store.launches("sw")) == ["started"] * 3
