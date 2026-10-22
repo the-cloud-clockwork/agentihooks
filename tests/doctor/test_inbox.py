@@ -174,3 +174,13 @@ def test_a_quiet_live_reader_of_an_item_on_an_empty_seat_is_still_raised():
     assert inbox.past_window([row], 20 * MIN, WINDOW, working) == []
     gone = {**seat, "engineer@a-0001": inbox.Receiver()}
     assert inbox.past_window([row], 20 * MIN, WINDOW, gone) == []
+
+
+def test_an_empty_seat_item_does_not_hide_a_later_live_occupant_item():
+    empty = {**_delivered("eng-1@demo"), "id": "empty", "state": "pending"}
+    live = {**_delivered("eng-2@demo"), "id": "live", "state": "pending"}
+    receivers = {
+        empty["address"]: inbox.Receiver(seat_wait=True),
+        live["address"]: inbox.Receiver(live=True, occupant="demo-eng-2", quiet_ms=WINDOW),
+    }
+    assert [f.subject for f in inbox.past_window([empty, live], 20 * MIN, WINDOW, receivers)] == ["live"]
