@@ -22,6 +22,7 @@ ENDINGS = "launch-endings"
 PENDING = "hive launch ordered, waiting for its acknowledgement"
 GONE = "the hive launch order ended before its acknowledgement"
 EXPIRED = "hive launch acknowledgement expired"
+LATE = "hive launch reservation expired"
 
 
 @dataclass(frozen=True)
@@ -399,7 +400,10 @@ class HiveLaunch:
         _match("pane", agent.pane_id, ack.execution.get("pane_id", agent.pane_id))
         _match("state", "working", agent.state)
         if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(agent.execution_id):
-            return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch reservation expired")
+            self.reap(order, agent)
+            self.end(agent, LATE)
+            self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
+            return Outcome("spawn", Status.REFUSED, HIVE, detail=LATE)
         placed = Placed(
             agent.pane_id,
             agent.harness,
