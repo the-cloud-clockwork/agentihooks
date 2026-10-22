@@ -1,6 +1,7 @@
 import io
 import json
 import subprocess
+import threading
 import zipfile
 from pathlib import Path
 
@@ -137,6 +138,94 @@ def test_a_record_reads_all_jobs_of_its_run_in_one_request(monkeypatch):
     monkeypatch.setattr(listing.subprocess, "run", run)
     assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
     assert len(requests) == 1
+
+
+def test_the_candidate_runs_list_their_artifacts_at_the_same_time(monkeypatch):
+    runs = [_run(n) for n in range(ci_test_plan.CANDIDATES, 0, -1)]
+    _github(monkeypatch, runs, manifests={1: _manifest(1)})
+    api = ci_test_plan._api
+    listings = threading.Barrier(len(runs), timeout=10)
+
+    def concurrent(endpoint):
+        if endpoint.endswith("/artifacts?per_page=100"):
+            listings.wait()
+        return api(endpoint)
+
+    monkeypatch.setattr(ci_test_plan, "_api", concurrent)
+    assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
+
+
+def test_the_lookup_pool_holds_one_worker_per_candidate_run(monkeypatch):
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    sizes = []
+    pool = ci_test_plan.ThreadPoolExecutor
+
+    def sized(max_workers=None):
+        sizes.append(max_workers)
+        return pool(max_workers=max_workers)
+
+    monkeypatch.setattr(ci_test_plan, "ThreadPoolExecutor", sized)
+    assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
+    assert sizes == [ci_test_plan.CANDIDATES]
+
+
+def test_a_record_downloads_while_its_jobs_are_read(monkeypatch):
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    api, jobs = ci_test_plan._api, ci_test_plan.read_jobs
+    both = threading.Barrier(2, timeout=10)
+
+    def download(endpoint):
+        if endpoint.endswith("/zip"):
+            both.wait()
+        return api(endpoint)
+
+    def listing(endpoint, size=None):
+        both.wait()
+        return jobs(endpoint, size)
+
+    monkeypatch.setattr(ci_test_plan, "_api", download)
+    monkeypatch.setattr(ci_test_plan, "read_jobs", listing)
+    assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
+
+
+def test_a_run_whose_unit_shards_failed_does_not_consume_its_download(monkeypatch):
+    _github(
+        monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(2), 1: _manifest(1)}, failed={(2, "unit (3.12, 4)")}
+    )
+    api = ci_test_plan._api
+    monkeypatch.setattr(
+        ci_test_plan, "_api", lambda endpoint: b"broken" if endpoint.endswith("/2/zip") else api(endpoint)
+    )
+    assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
+
+
+def test_a_skipped_run_whose_download_fails_does_not_stop_the_lookup(monkeypatch):
+    _github(
+        monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(2), 1: _manifest(1)}, failed={(2, "unit (3.12, 4)")}
+    )
+    api = ci_test_plan._api
+
+    def fail(endpoint):
+        if endpoint.endswith("/artifacts/2/zip"):
+            raise subprocess.CalledProcessError(1, ["gh"])
+        return api(endpoint)
+
+    monkeypatch.setattr(ci_test_plan, "_api", fail)
+    assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
+
+
+def test_a_failed_download_of_the_chosen_run_stays_red(monkeypatch):
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    api = ci_test_plan._api
+
+    def fail(endpoint):
+        if endpoint.endswith("/zip"):
+            raise subprocess.CalledProcessError(1, ["gh"])
+        return api(endpoint)
+
+    monkeypatch.setattr(ci_test_plan, "_api", fail)
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_test_plan.find_record(REPOSITORY, LATER)
 
 
 def test_every_interpreter_leg_ignores_dev_runs_that_finished_after_its_run_started(monkeypatch):
