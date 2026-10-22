@@ -3,9 +3,9 @@ import shutil
 
 import pytest
 
-from scripts.swarm_ledger import ledger_artifacts, plan_ranges
+from scripts.swarm_ledger import ledger_artifacts, ledger_bin, plan_ranges
 from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_ledger.repository import artifact_files
+from scripts.swarm_ledger.repository import artifact_files, bin_storage
 from tests.swarm_ledger import test_plan_ranges
 from tests.swarm_ledger.test_plan_kind import add
 from tests.swarm_ledger.test_plan_publish import task
@@ -65,6 +65,15 @@ def test_only_the_named_artifacts_of_one_ledger_are_dropped(plan_ledger):
     found = [artifact_files.load(slug, name) for slug, name in ((plan_ledger, "a.md"), (plan_ledger, "b.md"))]
     assert found == [None, b"two"]
     assert artifact_files.load("other", "a.md") == b"three"
+
+
+def test_a_ledger_purged_from_the_bin_takes_its_artifacts_with_it():
+    artifact_files.save("binned", "a.md", b"gone")
+    artifact_files.save("kept", "a.md", b"stays")
+    ledger_bin.delete("binned", now=0)
+    assert "binned" in bin_storage.purge_expired(now=ledger_bin.KEEP_DAYS * ledger_bin.DAY_MS + 1)
+    assert artifact_files.load("binned", "a.md") is None
+    assert artifact_files.load("kept", "a.md") == b"stays"
 
 
 def test_a_malformed_artifact_id_is_refused_before_any_lookup(published):
