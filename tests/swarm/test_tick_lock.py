@@ -178,3 +178,29 @@ def test_read_strips_a_file_and_reads_a_missing_one_as_empty(tmp_path):
     path.write_text("abc\n")
     assert controller._read(str(path)) == "abc"
     assert controller._read(str(tmp_path / "missing")) == ""
+
+
+@pytest.mark.parametrize(
+    ("machine", "lock", "dead"),
+    [
+        ("m", {"host": "oldboot:ns", "pid": 7, "start": "s", "machine": "m"}, True),
+        ("m", {"host": "boot:ns", "pid": 8, "start": "s", "machine": "m"}, False),
+        ("m", {"host": "oldboot:ns", "pid": 8, "start": "s", "machine": "other"}, False),
+        ("m", {"host": "oldboot:ns", "pid": 8, "start": "s"}, False),
+        ("", {"host": "oldboot:ns", "pid": 8, "start": "s", "machine": ""}, False),
+    ],
+)
+def test_a_holder_from_an_ended_boot_of_this_machine_is_dead(monkeypatch, machine, lock, dead):
+    monkeypatch.setattr(controller, "_host", lambda: "boot:ns")
+    monkeypatch.setattr(controller, "_read", lambda path: machine if path == "/etc/machine-id" else "")
+    monkeypatch.setattr(controller, "_gone", lambda pid, start: pid == 7)
+    assert controller._dead(json.dumps({"epoch": 1, "token": "t", **lock})) is dead
+
+
+def test_a_holder_records_its_machine_when_one_is_known(monkeypatch):
+    pid = controller.os.getpid()
+    monkeypatch.setattr(controller, "_host", lambda: "h")
+    monkeypatch.setattr(
+        controller, "_read", lambda path: {f"/proc/{pid}/stat": STAT, "/etc/machine-id": "m"}.get(path, "")
+    )
+    assert controller._holder() == {"host": "h", "pid": pid, "start": "22", "machine": "m"}
