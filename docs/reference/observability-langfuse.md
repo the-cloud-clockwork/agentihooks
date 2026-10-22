@@ -286,7 +286,7 @@ backfill, which keep their own budget.
 | Wait history budget | 15 seconds | the wait history of an agent with a turn gap over the limit, also inside the step deadline |
 | Trace listing pages | 20 pages | the trace listing, 100 traces per page |
 | Backfill pages | 20 pages | each trace's observation backfill, 50 observations per page |
-| Active freshness rows | 10 observations | each binding's newest observations since its watermark |
+| Active freshness rows | 10 observations | the first page of each binding's observations since its watermark |
 | Step deadline | 55 seconds | the trace reads and the wait history together |
 
 The request timeout stays under half the active budget, so one stalled request
@@ -335,7 +335,7 @@ finding is absent.
 | `read` below `bindings` with only budget lines | the Langfuse requests are slow; check the response time of the trace listing with the same keys, and the Langfuse server load, before calling it an outage |
 | one binding's line ends at an `httpx` frame | that request failed or timed out against Langfuse; the line's error names the status or timeout |
 | a line ends at a file system or JSON frame | the exporter cursor or transcript of that session could not be read on this host |
-| every read fails with the same error | the keys, host or ingress route are wrong; `LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set` means the keys the reader was given are empty |
+| every read fails with the same error | the keys, host or ingress route are wrong; `LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set` means the keys the reader was given are missing or empty |
 
 ### Historical findings
 
