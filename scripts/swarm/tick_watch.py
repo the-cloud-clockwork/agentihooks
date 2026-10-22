@@ -5,7 +5,7 @@ import json
 import sys
 import time
 from collections.abc import Callable
-from threading import Thread
+from threading import Lock, Thread
 
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import sd_notify, tick_heartbeat, timing
@@ -54,12 +54,15 @@ class Repair:
     """The scheduler serves every swarm on the machine, so it restarts at most once per stale window."""
 
     def __init__(self, restart: Callable[[], str], respawn: Callable[[str], list[str]]):
-        self.restart, self.respawn, self.restarted = restart, respawn, None
+        self.restart, self.respawn, self.restarted, self.lock = restart, respawn, None, Lock()
 
     def __call__(self, slug: str, now: int) -> list[str]:
         actions = []
-        if self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS:
-            self.restarted = now
+        with self.lock:
+            due = self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS
+            if due:
+                self.restarted = now
+        if due:
             actions.append(self.restart())
         return actions + self.respawn(slug)
 
@@ -106,23 +109,28 @@ def run(
     store: RedisStore, now: Callable[[], int], repair=None, wait=None, passes: int | None = None, beat=None
 ) -> None:
     beat = beat or _watchdog
-    since, done, blocked = now(), 0, []
+    since, done, held = now(), 0, {}
     while passes is None or done < passes:
         beat()
         for slug in store.slugs():
-            blocked = [worker for worker in blocked if worker.is_alive()]
-            if len(blocked) >= BLOCKED_LIMIT:
-                raise RuntimeError(f"{len(blocked)} swarm passes are blocked; the watcher exits so systemd restarts it")
-            worker = Thread(target=_pass, args=(store, slug, now(), since, repair), daemon=True)
-            worker.start()
-            if not _awaited(worker, beat):
-                timing.emit(
-                    sys.stderr, f"{slug}: its pass is still blocked after {SLUG_PASS_S} seconds; the watch goes on"
-                )
-                blocked.append(worker)
+            _judge(store, slug, now(), since, repair, held, beat)
             beat()
         done += 1
         (wait or time.sleep)(PASS_S)
+
+
+def _judge(store, slug, now, since, repair, held, beat) -> None:
+    """One worker per swarm, so a blocked pass never races a later pass of the same swarm on its episode."""
+    worker, blocked = held.get(slug, (None, 0))
+    if worker is None or not worker.is_alive():
+        worker, blocked = Thread(target=_pass, args=(store, slug, now, since, repair), daemon=True), 0
+        worker.start()
+    if _awaited(worker, beat):
+        return
+    if blocked + 1 >= BLOCKED_LIMIT:
+        raise RuntimeError(f"the pass of {slug} stayed blocked through {BLOCKED_LIMIT} passes; the watcher exits")
+    held[slug] = (worker, blocked + 1)
+    timing.emit(sys.stderr, f"{slug}: its pass is still blocked after {SLUG_PASS_S} seconds; the watch goes on")
 
 
 def _pass(store, slug, now, since, repair) -> None:
@@ -133,11 +141,11 @@ def _pass(store, slug, now, since, repair) -> None:
         timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
 
-def _awaited(worker: Thread, beat: Callable[[], None]) -> bool:
-    deadline = time.monotonic() + SLUG_PASS_S
+def _awaited(worker: Thread, beat: Callable[[], None], clock: Callable[[], float] = time.monotonic) -> bool:
+    deadline = clock() + SLUG_PASS_S
     while True:
-        worker.join(min(BEAT_S, deadline - time.monotonic()))
-        if not worker.is_alive() or time.monotonic() >= deadline:
+        worker.join(min(BEAT_S, deadline - clock()))
+        if not worker.is_alive() or clock() >= deadline:
             return not worker.is_alive()
         beat()
 

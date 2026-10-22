@@ -356,20 +356,33 @@ def test_the_pause_between_passes_ends_on_its_own_clock_never_on_the_scheduler_i
     assert slept == [tick_watch.PASS_S, tick_watch.PASS_S]
 
 
-def test_the_watch_bounds_one_swarm_pass_well_inside_the_systemd_watchdog():
+def test_the_watch_beats_several_times_inside_the_systemd_watchdog_while_a_pass_is_blocked():
+    from scripts.swarm import timer
+
+    unit = timer.units("/installed/bin/agentihooks")["agentihooks-tick-watch.service"]
+
+    assert "WatchdogSec=600\n" in unit
     assert (tick_watch.PASS_S, tick_watch.SLUG_PASS_S, tick_watch.BEAT_S, tick_watch.BLOCKED_LIMIT) == (60, 120, 30, 5)
+    assert tick_watch.BEAT_S * 4 <= 600
 
 
-def blocking(store, monkeypatch, blocked="other"):
-    store.create(SwarmConfig(blocked, "/repo", max_eng=1, max_ci=0))
-    release, threads, real = threading.Event(), [], tick_watch.watch_pass
+def blocking(store, monkeypatch, healthy=None):
+    store.create(SwarmConfig("other", "/repo", max_eng=1, max_ci=0))
+    gates, threads, real = [], [], healthy or tick_watch.watch_pass
 
     def judged(store, slug, *args):
-        if slug == blocked:
-            threads.append(threading.current_thread())
-            release.wait(30)
-            return []
-        return real(store, slug, *args)
+        if slug != "other":
+            return real(store, slug, *args)
+        gates.append(threading.Event())
+        threads.append(threading.current_thread())
+        gates[-1].wait(30)
+        return []
+
+    def release():
+        for gate in gates:
+            gate.set()
+        for thread in threads:
+            thread.join(5)
 
     monkeypatch.setattr(tick_watch, "watch_pass", judged)
     monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 0.3)
@@ -393,44 +406,68 @@ def test_a_blocked_call_in_one_swarm_pass_keeps_the_watchdog_beating_and_the_sta
             beat=lambda: events.append("beat"),
         )
     finally:
-        release.set()
+        release()
 
     out = capsys.readouterr()
+    baseline = 2 * (1 + len(store.slugs()))
     assert events.count("wait") == 2
-    assert events.count("beat") >= 2 * (1 + len(store.slugs())) + 4
+    assert baseline + 4 <= events.count("beat") <= baseline + 2 * 8
     assert f"sw: told {FRONT_DOOR} the tick is stale" in out.out
     assert out.err.count("other: its pass is still blocked after 0.3 seconds; the watch goes on") == 2
-    assert len(threads) == 2 and all(thread.daemon for thread in threads)
+    assert len(threads) == 1 and threads[0].daemon
 
 
-def test_a_watcher_with_too_many_blocked_passes_exits_so_systemd_restarts_it(store, monkeypatch):
-    release, _ = blocking(store, monkeypatch)
+def test_a_pass_blocked_through_the_limit_of_passes_exits_the_watcher_so_systemd_restarts_it(store, monkeypatch):
+    release, threads = blocking(store, monkeypatch, healthy=lambda *args: [])
     monkeypatch.setattr(tick_watch, "BLOCKED_LIMIT", 2)
-    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 0.05)
     waits = []
     try:
         with pytest.raises(RuntimeError) as raised:
             tick_watch.run(store, lambda: START, None, waits.append, passes=5, beat=lambda: None)
     finally:
-        release.set()
+        release()
 
-    assert str(raised.value) == "2 swarm passes are blocked; the watcher exits so systemd restarts it"
-    assert len(waits) == 2
+    assert str(raised.value) == "the pass of other stayed blocked through 2 passes; the watcher exits"
+    assert waits == [tick_watch.PASS_S]
+    assert len(threads) == 1
 
 
-def test_a_blocked_pass_that_ends_no_longer_counts_toward_the_exit(store, monkeypatch):
-    release, threads = blocking(store, monkeypatch)
-    monkeypatch.setattr(tick_watch, "BLOCKED_LIMIT", 1)
-    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 0.05)
-
-    def wait(seconds):
-        release.set()
-        for thread in threads:
-            thread.join(5)
-
-    tick_watch.run(store, lambda: START, None, wait, passes=3, beat=lambda: None)
+def test_a_blocked_pass_that_ends_lets_the_next_pass_start_its_count_afresh(store, monkeypatch, capsys):
+    release, threads = blocking(store, monkeypatch, healthy=lambda *args: [])
+    monkeypatch.setattr(tick_watch, "BLOCKED_LIMIT", 2)
+    try:
+        tick_watch.run(store, lambda: START, None, lambda seconds: release(), passes=3, beat=lambda: None)
+    finally:
+        release()
 
     assert len(threads) == 3
+    assert capsys.readouterr().err.count("other: its pass is still blocked") == 3
+
+
+class Stuck:
+    def __init__(self, clock, joins, ends_after=None):
+        self.clock, self.joins, self.ends_after = clock, joins, ends_after
+
+    def join(self, timeout):
+        self.joins.append(timeout)
+        self.clock[0] += timeout
+
+    def is_alive(self):
+        return self.ends_after is None or len(self.joins) < self.ends_after
+
+
+@pytest.mark.parametrize(
+    ("ends_after", "awaited", "joins", "beats"),
+    [(None, False, [50, 50, 20], [1050, 1100]), (2, True, [50, 50], [1050]), (1, True, [50], [])],
+)
+def test_a_pass_is_awaited_in_beat_slices_up_to_its_deadline(monkeypatch, ends_after, awaited, joins, beats):
+    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 120)
+    monkeypatch.setattr(tick_watch, "BEAT_S", 50)
+    clock, seen, beaten = [1000], [], []
+
+    found = tick_watch._awaited(Stuck(clock, seen, ends_after), lambda: beaten.append(clock[0]), lambda: clock[0])
+
+    assert (found, seen, beaten) == (awaited, joins, beats)
 
 
 def test_the_watch_command_runs_without_a_parsed_swarm(monkeypatch):
