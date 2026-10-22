@@ -111,13 +111,17 @@ def test_a_runner_assignment_confirms_the_start_of_a_job_still_marked_queued():
     assigned = {**REFINE, "status": "queued", "completed_at": None}
     assert ci_speed.findings([{**PREFLIGHT, "jobs": [assigned]}], FOUND_AT - 60000, FOUND_AT) == []
     late = {**assigned, "started_at": "2026-10-19T15:37:00Z"}
-    [finding] = ci_speed.findings([{**PREFLIGHT, "jobs": [late]}], FOUND_AT - 60000, FOUND_AT)
+    [finding] = ci_speed.findings(
+        [{**PREFLIGHT, "status": "completed", "conclusion": "success", "jobs": [late]}], FOUND_AT - 60000, FOUND_AT
+    )
     assert finding.id == WAIT_ID and finding.measure == 304
 
 
 def test_a_confirmed_long_wait_remains_a_runner_wait():
     late = {**REFINE, "started_at": "2026-10-19T15:37:00Z"}
-    [finding] = ci_speed.findings([{**PREFLIGHT, "jobs": [late]}], FOUND_AT - 60000, FOUND_AT)
+    [finding] = ci_speed.findings(
+        [{**PREFLIGHT, "status": "completed", "conclusion": "success", "jobs": [late]}], FOUND_AT - 60000, FOUND_AT
+    )
     assert finding.id == WAIT_ID
     assert finding.threshold == "runner queue wait over 5 minutes"
 
@@ -142,7 +146,7 @@ def test_rereads_stop_at_the_pass_cap_and_leave_the_rest_unconfirmed():
 
 def test_a_late_start_supersedes_the_queue_age_but_keeps_the_runner_wait():
     late = {**REFINE, "started_at": "2026-10-19T15:37:00Z"}
-    gone = ci_speed.cleared([{**PREFLIGHT, "jobs": [late]}])
+    gone = ci_speed.cleared([{**PREFLIGHT, "status": "completed", "conclusion": "success", "jobs": [late]}])
     assert AGE_ID in gone
     assert WAIT_ID not in gone
     assert set(ci_speed.cleared([{**PREFLIGHT, "jobs": [REFINE]}])) >= {AGE_ID, WAIT_ID}
@@ -207,7 +211,11 @@ def test_the_status_line_reports_queued_jobs_not_reread(store, monkeypatch):  # 
 def test_a_confirmed_runner_wait_covers_the_still_queued_siblings_of_its_run_and_labels():
     late = {**REFINE, "id": 1, "started_at": "2026-10-19T15:37:00Z"}
     sibling = {**STALE, "id": 2, "created_at": "2026-10-19T15:21:56Z", "started_at": "2026-10-19T15:21:56Z"}
-    found = ci_speed.findings([{**PREFLIGHT, "jobs": [late, sibling]}], FOUND_AT - 60000, FOUND_AT)
+    found = ci_speed.findings(
+        [{**PREFLIGHT, "status": "completed", "conclusion": "success", "jobs": [late, sibling]}],
+        FOUND_AT - 60000,
+        FOUND_AT,
+    )
     assert [finding.id for finding in found] == [WAIT_ID]
 
 
@@ -225,5 +233,5 @@ def test_a_confirmed_wait_retracts_an_earlier_queue_age_of_its_still_queued_sibl
     late = {**REFINE, "id": 1, "started_at": "2026-10-19T15:37:00Z"}
     sibling = {**OLD, "id": 2}
     assert [finding.id for finding in ci_speed.findings([{**PREFLIGHT, "jobs": [sibling]}], 0, FOUND_AT)] == [AGE_ID]
-    gone = ci_speed.cleared([{**PREFLIGHT, "jobs": [late, sibling]}])
+    gone = ci_speed.cleared([{**PREFLIGHT, "status": "completed", "conclusion": "success", "jobs": [late, sibling]}])
     assert gone == [AGE_ID]
