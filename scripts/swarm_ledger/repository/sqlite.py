@@ -661,7 +661,7 @@ class SQLiteLedgerRepository:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
 
     def purge(self, slug: str, connection) -> None:
-        for table in PER_LEDGER:
+        for table in (*PER_LEDGER, artifact_files.TABLE):
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
 

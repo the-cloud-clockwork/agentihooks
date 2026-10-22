@@ -1,5 +1,7 @@
 import base64
 
+TABLE = "artifact_files"
+
 SAVE = "INSERT OR IGNORE INTO artifact_files VALUES (?, ?, ?)"
 LOAD = "SELECT data FROM artifact_files WHERE slug=? AND id=?"
 DROP = "DELETE FROM artifact_files WHERE slug=? AND id=?"
