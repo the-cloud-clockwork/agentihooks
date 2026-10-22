@@ -106,7 +106,7 @@ def path_of(slug, media_id):
     return path
 
 
-def read(slug, media_id):
+def served(slug, media_id):
     return path_of(slug, media_id).read_bytes()
 
 

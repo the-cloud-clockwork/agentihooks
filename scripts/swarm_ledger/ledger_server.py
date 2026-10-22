@@ -1073,7 +1073,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not core.SLUG_RE.match(slug):
                 raise ValueError("not a ledger")
-            data = store.read(slug, media_id)
+            data = store.served(slug, media_id)
         except (ValueError, OSError):
             return self.send(404, "no such file", "text/plain")
         ctype = store.TYPES[media_id.rsplit(".", 1)[1]]

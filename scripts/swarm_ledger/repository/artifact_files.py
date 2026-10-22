@@ -22,6 +22,9 @@ def load(slug: str, file_id: str) -> bytes | None:
     return None if row is None else base64.b64decode(row[0])
 
 
-def drop(connection, slug: str, file_ids: set[str]) -> None:
-    for file_id in sorted(file_ids):
-        connection.execute(DROP, (slug, file_id))
+def drop(slug: str, file_ids: set[str]) -> None:
+    if not file_ids:
+        return
+    with _repository().connect() as connection, connection:
+        for file_id in sorted(file_ids):
+            connection.execute(DROP, (slug, file_id))

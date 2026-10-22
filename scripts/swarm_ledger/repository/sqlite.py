@@ -531,7 +531,7 @@ class SQLiteLedgerRepository:
                 state = entry.mutable()
                 rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
                 written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
-                artifact_files.drop(connection, slug, ctx.unstored)
+            artifact_files.drop(slug, ctx.unstored)
             self._remember(slug, written)
         return (written.mutable() if copy_state else written.state), rejected
 

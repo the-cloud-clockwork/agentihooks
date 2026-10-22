@@ -105,11 +105,17 @@ def path_of(slug, artifact_id):
     return path
 
 
-def read(slug, artifact_id):
-    if not isinstance(artifact_id, str) or not ID_RE.match(artifact_id):
-        raise ValueError("not an artifact id")
+def read(slug, artifact_id, adopt=False):
     data = artifact_files.load(slug, artifact_id)
-    return path_of(slug, artifact_id).read_bytes() if data is None else data
+    if data is None:
+        data = path_of(slug, artifact_id).read_bytes()
+        if adopt:
+            artifact_files.save(slug, artifact_id, data)
+    return data
+
+
+def served(slug, artifact_id):
+    return read(slug, artifact_id, adopt=True)
 
 
 def entry(slug, artifact_id):

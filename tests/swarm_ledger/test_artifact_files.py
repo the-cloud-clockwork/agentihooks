@@ -3,7 +3,7 @@ import shutil
 
 import pytest
 
-from scripts.swarm_ledger import ledger_artifacts, plan_ranges, storage
+from scripts.swarm_ledger import ledger_artifacts, plan_ranges
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger.repository import artifact_files
 from tests.swarm_ledger import test_plan_ranges
@@ -61,8 +61,7 @@ def test_only_the_named_artifacts_of_one_ledger_are_dropped(plan_ledger):
     artifact_files.save(plan_ledger, "b.md", b"two")
     artifact_files.save("other", "a.md", b"three")
     artifact_files.save(plan_ledger, "a.md", b"ignored")
-    with storage.default().connect() as connection, connection:
-        artifact_files.drop(connection, plan_ledger, {"a.md", "missing.md"})
+    artifact_files.drop(plan_ledger, {"a.md", "missing.md"})
     found = [artifact_files.load(slug, name) for slug, name in ((plan_ledger, "a.md"), (plan_ledger, "b.md"))]
     assert found == [None, b"two"]
     assert artifact_files.load("other", "a.md") == b"three"
