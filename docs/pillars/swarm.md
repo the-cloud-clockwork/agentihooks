@@ -2464,10 +2464,10 @@ The health pass compares each started life with the previous started life of
 the same task. The later start is excluded from the rerun count when both
 recorded heads are comparable and differ. An empty head followed by a SHA is a
 change, because a pull request appeared between the two starts; a SHA followed
-by an empty head is a change as well. Two equal heads, two
-empty heads, or a `null` head on either side leave the start counted, unless
-its `after` cause excludes it. An `after` exclusion and a head change are
-independent; either one excludes the start.
+by an empty head is a change as well. Two equal heads, two empty heads, or a
+`null` head on either side leave the start counted, unless its `after` cause
+excludes it. An `after` exclusion and a head change are independent; either one
+excludes the start.
 
 | Recorded heads of started lives in order | Counted reruns | Default finding? |
 |---|---|---|
@@ -2480,8 +2480,9 @@ independent; either one excludes the start.
 In the second row the starts that keep `a`, keep `b` twice and keep `c` count;
 the moves to `b` and to `c` do not. A task whose agents keep restarting after
 merge queue ejections or dev breaks, and push a fix each life, therefore raises
-no rerun based proof loop finding; review rounds over their cap still raise one. A task whose lives end on the head they started on still
-does. Review round counting does not use heads.
+no rerun based proof loop finding; review rounds over their cap still raise
+one. A task whose lives end on the head they started on still does. Review
+round counting does not use heads.
 
 Launch rows recorded before head recording shipped have no `head` and read as
 `null`, so they count as before. A head read that fails at one start makes
@@ -2550,9 +2551,9 @@ If a restart that pushed a new head is still counted, read the `head` of that
 started row and of the previous one. A `null` on either side means the head
 read failed or the row predates head recording; the start counts and the
 retained history cannot show the move. Equal recorded heads mean the head did
-not move between the two starts, whatever else the previous life did. Only the head at each start is
-recorded, so a life that pushed and then force pushed back to the head it
-started on reads as unchanged.
+not move between the two starts, whatever else the previous life did. Only the
+head at each start is recorded, so a life that pushed and then force pushed
+back to the head it started on reads as unchanged.
 
 [Pull request #4344](https://github.com/the-cloud-clockwork/agentihooks/pull/4344)
 records the head comparison and its regression proofs for moving heads,
