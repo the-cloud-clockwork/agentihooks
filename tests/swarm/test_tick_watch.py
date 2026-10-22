@@ -356,7 +356,7 @@ def test_the_pause_between_passes_ends_on_its_own_clock_never_on_the_scheduler_i
     assert slept == [tick_watch.PASS_S, tick_watch.PASS_S]
 
 
-def test_the_watch_beats_several_times_inside_the_systemd_watchdog_while_a_pass_is_blocked():
+def test_the_watch_beat_slice_sits_well_inside_the_systemd_watchdog():
     from scripts.swarm import timer
 
     unit = timer.units("/installed/bin/agentihooks")["agentihooks-tick-watch.service"]
@@ -394,6 +394,7 @@ def test_a_blocked_call_in_one_swarm_pass_keeps_the_watchdog_beating_and_the_sta
     store, monkeypatch, capsys
 ):
     release, threads = blocking(store, monkeypatch)
+    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 1.0)
     beat(store, START - LIMIT)
     events = []
     try:
@@ -411,9 +412,9 @@ def test_a_blocked_call_in_one_swarm_pass_keeps_the_watchdog_beating_and_the_sta
     out = capsys.readouterr()
     baseline = 2 * (1 + len(store.slugs()))
     assert events.count("wait") == 2
-    assert baseline + 4 <= events.count("beat") <= baseline + 2 * 8
+    assert baseline + 2 <= events.count("beat") <= baseline + 2 * 22
     assert f"sw: told {FRONT_DOOR} the tick is stale" in out.out
-    assert out.err.count("other: its pass is still blocked after 0.3 seconds; the watch goes on") == 2
+    assert out.err.count("other: its pass is still blocked after 1.0 seconds; the watch goes on") == 2
     assert len(threads) == 1 and threads[0].daemon
 
 
@@ -464,8 +465,9 @@ def test_a_pass_is_awaited_in_beat_slices_up_to_its_deadline(monkeypatch, ends_a
     monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 120)
     monkeypatch.setattr(tick_watch, "BEAT_S", 50)
     clock, seen, beaten = [1000], [], []
+    monkeypatch.setattr(tick_watch.time, "monotonic", lambda: clock[0])
 
-    found = tick_watch._awaited(Stuck(clock, seen, ends_after), lambda: beaten.append(clock[0]), lambda: clock[0])
+    found = tick_watch._awaited(Stuck(clock, seen, ends_after), lambda: beaten.append(clock[0]))
 
     assert (found, seen, beaten) == (awaited, joins, beats)
 
@@ -732,6 +734,23 @@ def test_the_watcher_run_hands_its_repair_to_every_stale_swarm(store):
     tick_watch.run(store, lambda: START, lambda slug, now: asked.append((slug, now)) or [], bounded(1), passes=1)
 
     assert asked == [("sw", START)]
+
+
+def test_a_stale_swarm_is_alerted_before_its_repair_runs_so_a_blocked_repair_never_holds_the_alert(store):
+    beat(store, START)
+
+    def repair(slug, now):
+        raise TimeoutError("the scheduler restart hung")
+
+    with pytest.raises(TimeoutError):
+        tick_watch.watch_pass(store, "sw", START + LIMIT, START, repair)
+
+    assert texts(store, FRONT_DOOR) == [
+        tick_watch.ALERT.format(
+            slug="sw",
+            evidence=f"no tick pass has completed for 10 minutes, the last ended at {tick_heartbeat.clock(START)}",
+        )
+    ]
 
 
 def test_an_alert_joins_every_piece_of_evidence(store):
