@@ -257,9 +257,11 @@ def test_every_mutation_dependency_install_runs_uv_through_the_retry():
         ("mutation-preflight.yml", "refine"),
         ("mutation-preflight.yml", "mutation-shard"),
     }
-    for (workflow, job, name), lines in installs.items():
+    for (workflow, job, _), lines in installs.items():
         for line in lines:
-            assert line.startswith(f'bash .github/scripts/pypi-retry.sh "{name}" -- uv pip install --system '), (
+            assert line.startswith(
+                'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system '
+            ), (
                 workflow,
                 job,
                 line,

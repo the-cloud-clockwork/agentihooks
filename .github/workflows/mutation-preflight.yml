@@ -71,7 +71,7 @@ jobs:
 
       - name: Install dependencies for the suite speed contracts
         if: steps.suite.outputs.changed == 'true'
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies for the suite speed contracts" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Run the suite speed contracts
         if: steps.suite.outputs.changed == 'true'
