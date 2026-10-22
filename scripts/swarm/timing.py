@@ -24,8 +24,9 @@ def raised_at(exc: BaseException) -> str:
     here = []
     for frame in traceback.extract_tb(exc.__traceback__):
         path = Path(frame.filename).resolve()
-        if path.is_relative_to(ROOT) and path.relative_to(ROOT).parts[0] in PACKAGES:
-            here.append(f"{path.relative_to(ROOT).as_posix()}:{frame.lineno} {frame.name}")
+        relative = path.relative_to(ROOT) if path.is_relative_to(ROOT) else None
+        if relative and relative.parts[0] in PACKAGES:
+            here.append(f"{relative.as_posix()}:{frame.lineno} {frame.name}")
     return here[-1] if here else ""
 
 
