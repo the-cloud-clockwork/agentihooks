@@ -150,6 +150,26 @@ def test_install_of_nothing_runs_nothing():
     assert tool_deps.install([], lambda argv: pytest.fail(f"ran {argv}"), "/tool/python") == []
 
 
+def _core() -> list[str]:
+    return tool_deps.declared((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+
+
+@pytest.mark.parametrize("module", ["psycopg2", "boto3"])
+def test_a_tool_install_without_extras_receives_each_module_the_tick_imports(module):
+    providers = {name.lower() for name in importlib.metadata.packages_distributions()[module]}
+    core = {tool_deps._NAME.match(spec).group(1).lower() for spec in _core()}
+    assert providers & core, f"{module} comes from {sorted(providers)}, none of them a core dependency"
+
+
+def test_missing_names_the_tick_database_and_storage_distributions_when_absent():
+    def found(name):
+        if name in {"psycopg2-binary", "boto3"}:
+            raise importlib.metadata.PackageNotFoundError(name)
+
+    absent = tool_deps.missing(_core(), found)
+    assert sorted(tool_deps._NAME.match(spec).group(1) for spec in absent) == ["boto3", "psycopg2-binary"]
+
+
 def _wheel(folder: Path) -> None:
     files = {
         "fakedep_t442/__init__.py": b"VALUE = 442\n",
