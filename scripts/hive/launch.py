@@ -124,6 +124,14 @@ def _first_choice(
     return fallen or reason
 
 
+def _match(check: str, expected: object, actual: object) -> None:
+    if expected != actual:
+        raise SwarmError(
+            f"hive launch acknowledgement does not match the live execution: "
+            f"{check} expected {expected!r}, got {actual!r}"
+        )
+
+
 class HiveLaunch:
     backend = HIVE
     capabilities = frozenset((Capability.SPAWN,))
@@ -348,16 +356,13 @@ class HiveLaunch:
             status = Status.AMBIGUOUS if ack.failure == "ambiguous" else Status.REFUSED
             return Outcome("spawn", status, HIVE, detail=f"hive launch failed: {ack.failure}")
         current = self.store.execution_occupants(self.slug).get(agent.seat)
-        if current is None or current.execution_id != order.execution_id or agent.generation != order.generation:
-            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        _match("seat occupant", order.execution_id, current.execution_id if current else None)
+        _match("generation", order.generation, agent.generation)
         if agent.state == "launching":
             agent = self.record(agent, order, ack)
-        if (
-            agent.runtime_target != ack.target
-            or agent.pane_id != ack.execution.get("pane_id", agent.pane_id)
-            or agent.state != "working"
-        ):
-            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        _match("runtime target", agent.runtime_target, ack.target)
+        _match("pane", agent.pane_id, ack.execution.get("pane_id", agent.pane_id))
+        _match("state", "working", agent.state)
         if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(agent.execution_id):
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch reservation expired")
         placed = Placed(
@@ -380,8 +385,8 @@ class HiveLaunch:
     def record(self, agent: AgentRecord, order: LaunchOrder, ack: Ack) -> AgentRecord:
         """A joined hive cannot write the swarm keyspace, so the controller records what it acknowledged."""
         decision = ack.execution.get("profile_decision", {})
-        if ack.target.get("host_id") != order.hive or not isinstance(decision, dict):
-            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        _match("ack host", order.hive, ack.target.get("host_id"))
+        _match("profile decision type", "dict", type(decision).__name__)
         kept = (
             {"master_placement": agent.profile_decision["master_placement"]}
             if "master_placement" in agent.profile_decision

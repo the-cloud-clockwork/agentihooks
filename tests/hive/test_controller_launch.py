@@ -676,7 +676,7 @@ def test_live_acknowledgement_refuses_inconsistent_execution_identity(setup, bad
     with patch.object(setup.store.execution_registry, "occupants", return_value=current):
         with pytest.raises(SwarmError) as error:
             setup.launcher.complete(order, ack)
-    assert str(error.value) == "hive launch acknowledgement does not match the live execution"
+    assert str(error.value).startswith("hive launch acknowledgement does not match the live execution: ")
 
 
 def test_live_process_with_an_expired_reservation_stays_ambiguous(setup):
@@ -1514,5 +1514,5 @@ def test_a_malformed_profile_decision_is_refused_before_recording(setup):
     _, order, ack = live_order(setup)
     with pytest.raises(SwarmError) as error:
         setup.launcher.complete(order, replace(ack, execution={**ack.execution, "profile_decision": []}))
-    assert str(error.value) == "hive launch acknowledgement does not match the live execution"
+    assert str(error.value).startswith("hive launch acknowledgement does not match the live execution: ")
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"

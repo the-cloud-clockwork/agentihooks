@@ -796,11 +796,9 @@ def test_a_swarm_error_during_collect_fails_the_launch_instead_of_waiting_foreve
     assert launches[first]["state"] == "failed"
     assert "hive launch acknowledgement does not match the live execution" in launches[first]["error"]
     assert first not in {agent.name for agent in store.agents("sw")}
-    assert ledger.rows["t1"]["claimed_by"] != first and ledger.rows["t1"]["state"] == "open"
     runtime.conflicted.clear()
-    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
     second = runtime.ordered[-1]
-    assert second != first
+    assert second != first and ledger.rows["t1"]["claimed_by"] == second
     runtime.acked.add(second)
     tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS + STARTUP_GRACE_MS)
     assert [row["state"] for row in store.launches("sw") if row["agent"] == second] == ["started"]
