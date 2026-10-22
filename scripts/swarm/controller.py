@@ -220,7 +220,7 @@ class FencedRuntime:
 
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
         with lease.kept(self.store, self.slug, self.held):
-            self.runtime.hive_launch.expire(request)
+            return self.runtime.hive_launch.expire(request)
 
 
 def _hive_lane(lane: str, task: dict) -> bool:

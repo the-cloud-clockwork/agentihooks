@@ -924,7 +924,7 @@ def test_expiring_a_launch_the_hive_acknowledged_leaves_it_running(setup):
     from scripts.swarm.tick import ACK_LATER
 
     request, order, _ = live_order(setup)
-    setup.launcher.expire(replace(request, task={**request.task, ACK_LATER: True}))
+    assert setup.launcher.expire(replace(request, task={**request.task, ACK_LATER: True})) is False
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
     assert setup.launcher.orders_for("task") == order
     assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
@@ -934,8 +934,12 @@ def test_an_acknowledgement_records_an_expired_slot_live_only_for_a_named_slot_a
     slots = setup.launcher.slots
     assert not slots.acknowledge("unnamed")
     assert slots.counts() == {}
+    from scripts.swarm.keyspace import ROOT
+
     assert slots.acknowledge("expired", "claude:account")
+    setup.store.redis.pexpire(f"{ROOT}:launch-slot:expired", 1000)
     assert slots.acknowledge("expired", "claude:account")
+    assert 0 < setup.store.redis.pttl(f"{ROOT}:launch-slot:expired") <= 1000
     assert slots.counts() == {"claude:account": 1}
     assert slots.reserve("claude:account", "released", 6, 300000)
     assert slots.release("released")
@@ -1411,7 +1415,8 @@ def test_a_controller_expire_retires_the_order_under_the_held_lease(setup, monke
     monkeypatch.setattr(controller.lease, "kept", keep)
     fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
     task = {"id": "task", "seat": "eng-1@fixture", ACK_LATER: True}
-    assert fenced.expire(setup.config, "eng", "engineer", task) is None
+    routed.hive_launch.expire.return_value = False
+    assert fenced.expire(setup.config, "eng", "engineer", task) is False
     routed.hive_launch.expire.assert_called_once_with(
         SpawnRequest(setup.config, "eng", "engineer", {**task, "controller_epoch": setup.held.epoch})
     )

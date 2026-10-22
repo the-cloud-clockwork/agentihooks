@@ -336,15 +336,13 @@ class HiveLaunch:
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
         return self.spawn(request)
 
-    def expire(self, request: SpawnRequest) -> None:
+    def expire(self, request: SpawnRequest) -> bool | None:
+        """False when the hive acknowledged the order, which leaves its launch running for a later collect."""
         order = self.orders_for(request.task["id"])
         previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
-        if (
-            previous
-            and previous.name == request.name
-            and previous.state not in ("ended", "finished")
-            and self.orders.ack(order) is None
-        ):
+        if previous and previous.name == request.name and previous.state not in ("ended", "finished"):
+            if self.orders.ack(order) is not None:
+                return False
             self.retire(order, previous)
 
     def reserve_room(self, request: SpawnRequest, selected: Selection) -> str:

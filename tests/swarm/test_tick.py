@@ -637,7 +637,7 @@ class HiveAcks(FakeRuntime):
         super().__init__()
         self.ordered, self.collected, self.acked, self.failing, self.broken = [], [], set(), set(fail), set()
         self.refused, self.collected_slugs, self.conflicted = set(), set(), set()
-        self.expired, self.expire_broken = [], {}
+        self.expired, self.expire_broken, self.kept = [], {}, set()
 
     def expire(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER
@@ -647,6 +647,8 @@ class HiveAcks(FakeRuntime):
         self.expired.append(name)
         if name in self.expire_broken:
             raise self.expire_broken[name]
+        if name in self.kept:
+            return False
 
     def spawn(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER
@@ -855,6 +857,26 @@ def test_a_launch_the_hive_cannot_expire_at_the_claim_lease_keeps_waiting(store,
     assert f'{first} collect for t1 raised RuntimeError("expiring the launch raised {error!r}"), waiting' in (
         capsys.readouterr().err
     )
+
+
+@pytest.mark.parametrize("broken", [False, True])
+def test_a_launch_the_hive_acknowledged_keeps_its_claim_when_collect_fails_at_the_claim_lease(store, broken):
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    runtime.kept.add(first)
+    if broken:
+        runtime.broken.add(first)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
+    assert runtime.expired == [first]
+    assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
+    assert ledger.rows["t1"]["claimed_by"] == first and store.claimant("sw", "t1") == first
+    runtime.broken.discard(first)
+    runtime.acked.add(first)
+    tick("sw", store, ledger, runtime, now_ms=2_000 + LEASE_MS)
+    assert [row["state"] for row in store.launches("sw")] == ["started"]
 
 
 def test_an_acknowledgement_collected_at_the_claim_lease_keeps_the_agent_and_its_claim(store):
