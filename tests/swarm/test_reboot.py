@@ -249,25 +249,38 @@ def test_no_record_and_no_snapshot_name_no_agent(store):
     assert reboot.recorded(store, "sw", "boot-1") == set()
 
 
-def test_last_quota_reads_the_newest_reading_however_old(monkeypatch):
+def test_last_quota_reuses_a_stale_reading_only_until_a_window_resets(monkeypatch):
     from scripts import claude_quota_balancer as balancer
+    from scripts import session_bands
+
+    class Window:
+        def __init__(self, resets_at):
+            self.resets_at = resets_at
 
     class Reading:
-        def __init__(self, account, cap):
+        def __init__(self, account, cap, resets=(500, 900)):
             self.account, self.cap = account, cap
+            self.five_hour, self.seven_day = Window(resets[0]), Window(resets[1])
 
-    monkeypatch.setattr(
-        balancer,
-        "cached_observations",
-        lambda: [(3.0, Reading("a", 0)), (1.0, Reading("a", 3)), (2.0, Reading("b", 0))],
-    )
-    monkeypatch.setattr(balancer, "account_cap", lambda result: result.cap)
+    readings = [
+        (30.0, Reading("a", 0)),
+        (10.0, Reading("a", 3)),
+        (20.0, Reading("b", 2, resets=(150, 900))),
+        (20.0, Reading("c", 2, resets=(None, 900))),
+    ]
+    monkeypatch.setattr(balancer, "cached_observations", lambda: readings)
+    monkeypatch.setattr(balancer, "account_cap", lambda result, now: result.cap)
+    monkeypatch.setattr(session_bands, "fresh", lambda at, now: now - at <= 50)
 
-    assert reboot.last_quota("claude", "a") is False
-    assert reboot.last_quota("claude", "b") is False
-    assert reboot.last_quota("claude", "c") is None
-    monkeypatch.setattr(balancer, "account_cap", lambda result: None)
-    assert reboot.last_quota("claude", "a") is None
+    assert reboot.last_quota("claude", "a", now=60) is False
+    assert reboot.last_quota("claude", "a", now=200) is False
+    assert reboot.last_quota("claude", "b", now=60) is True
+    assert reboot.last_quota("claude", "b", now=200) is None
+    assert reboot.last_quota("claude", "c", now=200) is None
+    assert reboot.last_quota("claude", "a", now=600) is None
+    assert reboot.last_quota("claude", "d", now=60) is None
+    monkeypatch.setattr(balancer, "account_cap", lambda result, now: None)
+    assert reboot.last_quota("claude", "a", now=60) is None
 
 
 def test_last_quota_asks_the_codex_router_for_codex(monkeypatch):

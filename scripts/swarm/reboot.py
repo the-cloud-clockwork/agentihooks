@@ -4,6 +4,7 @@ reopens each recorded agent in its own conversation and seat; hive agents are ne
 import json
 import os
 import subprocess
+import time
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -102,14 +103,23 @@ def boot_id():
     return BOOT_ID.read_text(encoding="utf-8").strip()
 
 
-def last_quota(harness, account):
-    """The account's last quota reading however old, so a fresh boot routes before new readings arrive."""
+def last_quota(harness, account, now=None):
+    """The account's last quota reading, reused past the freshness window until one of its windows resets, so a
+    fresh boot routes before new readings arrive."""
     if harness != "claude":
         return resume.account_quota(harness, account)
+    from scripts import session_bands
     from scripts.claude_quota_balancer import account_cap, cached_observations
 
+    now = time.time() if now is None else now
     seen = [(at, result) for at, result in cached_observations() if result.account == account]
-    cap = account_cap(max(seen, key=lambda reading: reading[0])[1]) if seen else None
+    if not seen:
+        return None
+    at, result = max(seen, key=lambda reading: reading[0])
+    resets = [w.resets_at for w in (result.five_hour, result.seven_day)]
+    if not session_bands.fresh(at, now) and not all(r is not None and r > now for r in resets):
+        return None
+    cap = account_cap(result, now)
     return None if cap is None else bool(cap)
 
 
