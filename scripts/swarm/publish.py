@@ -81,8 +81,28 @@ def repository_root(repo: Path) -> Path:
     return Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")).parent
 
 
+def repository_name(value: str) -> str:
+    return stack.repo_key(value).rpartition("/")[2]
+
+
+def local_repository(value: str, repo: str) -> Path:
+    if Path(value).is_dir():
+        return repository_root(Path(value))
+    from scripts.hive import daemon
+
+    name = repository_name(value)
+    candidates = [found.parent for found in Path(repo).parent.glob("*/.git")] + daemon._checkouts()
+    found = {repository_root(path) for path in candidates if (path / ".git").is_dir() and path.name == name}
+    if len(found) != 1:
+        raise SwarmError(f"repository {value} has {len(found)} checkouts named {name} on this host")
+    return found.pop()
+
+
 def repository_task(repo: Path, task: dict) -> dict:
-    branch = task.get("repository_branches", {}).get(str(repo))
+    branches = task.get("repository_branches", {})
+    branch = branches.get(str(repo))
+    if branch is None:
+        branch = next((value for key, value in branches.items() if repository_name(key) == repo.name), None)
     if branch is None:
         branch = task.get("branch", "")
         remote = task.get("branch_repo")
@@ -99,7 +119,7 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         root = Path(current.stdout.strip())
         primary = repository_root(root)
         declared = task.get("repositories")
-        if declared and primary not in {repository_root(Path(value)) for value in declared}:
+        if declared and primary not in {local_repository(value, repo) for value in declared}:
             raise SwarmError(f"current worktree repository {primary} is not in the task repositories")
         scoped = repository_task(primary, task)
         branch = require_branch(git(root, "branch", "--show-current"))
@@ -112,7 +132,7 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
     repositories = task.get("repositories") or [repo]
     if len(repositories) != 1:
         raise SwarmError("publish from the task worktree to select one of its repositories")
-    primary = repository_root(Path(repositories[0]))
+    primary = local_repository(repositories[0], repo)
     scoped = repository_task(primary, task)
     return existing(primary, scoped, agent), primary, scoped
 
@@ -132,7 +152,7 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
     fields = []
-    repositories = dict.fromkeys(repository_root(Path(value)) for value in task.get("repositories") or [repo])
+    repositories = dict.fromkeys(local_repository(value, repo) for value in task.get("repositories") or [repo])
     for repository in repositories:
         scoped = repository_task(repository, task)
         root = existing(repository, scoped, agent)
