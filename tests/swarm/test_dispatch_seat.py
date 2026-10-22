@@ -839,8 +839,10 @@ def test_the_refusal_a_hive_seat_reads_leaves_the_tick_bookkeeping_to_the_tick(m
     store.redis.set(retired, json.dumps(["t1"]))
     hive_member(monkeypatch)
     closed = {**doc(), "tasks": [{"id": "t7", "state": "done"}]}
-    assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, closed, NOW).splitlines()[1].startswith(
-        "- The bottleneck report named the same share 3 ticks running"
+    assert (
+        dispatch_seat.refusal(SLUG, store.config(SLUG), store, closed, NOW)
+        .splitlines()[1]
+        .startswith("- The bottleneck report named the same share 3 ticks running")
     )
     assert store.redis.get(lanes) == json.dumps({"eng": 2})
     assert list(store.redis.hgetall(covers)) == ["review"]
