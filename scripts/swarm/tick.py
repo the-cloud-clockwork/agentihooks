@@ -86,6 +86,9 @@ from scripts.swarm_v2 import masters as master_seats
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 20
 STARTUP_GRACE_MS = 6 * 60 * 1000
+ACK_LATER = "hive_ack_later"
+ACKNOWLEDGING = "acknowledging"
+ACK_EXPIRED = "no hive acknowledged the launch within the claim lease"
 EXITED_BEFORE_LIFE = "its agent process exited before its launch check passed"
 SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
@@ -232,6 +235,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
         actions += skip_refused(lost_runner.sweep, slug, config, store, now_ms)
         actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, config, doc)
+        actions += skip_refused(_collect_acks, slug, config, store, ledger, runtime, doc, now_ms)
         if not sleeping:
             actions += skip_refused(_codex_hook_order)
             actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
@@ -364,7 +368,11 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
     agents, actions = [a for a in store.agents(slug) if a.name not in judged], []
     facts, live_names = runtime.bindings(agents), runtime.live_names()
     for agent in agents:
-        if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
+        if (
+            agent.state == "awaiting-decision"
+            or (agent.lane == MASTER and agent.state == "starting")
+            or _acknowledging(slug, store, agent)
+        ):
             continue
         task = rows.get(agent.task, {})
         if _ended(agent, rows):
@@ -587,7 +595,11 @@ def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     live, actions = runtime.live_names(), []
     for agent in store.agents(slug):
-        if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
+        if (
+            agent.state == "awaiting-decision"
+            or (agent.lane == MASTER and agent.state == "starting")
+            or _acknowledging(slug, store, agent)
+        ):
             continue
         if reason := _remote_gone_reason(slug, store, runtime, agent, now_ms):
             actions.append(_drop_remote(slug, store, ledger, rows, agent, reason))
@@ -978,7 +990,8 @@ def _spawn_stop(slug, config, store, runtime, now_ms):
 
 
 def _budget_spent(task, begun, tried):
-    if tried and time.monotonic() - begun >= SPAWN_BUDGET_S:
+    spent = time.monotonic() - begun
+    if tried and spent + spent / tried >= SPAWN_BUDGET_S:
         return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
     return None
 
@@ -1010,7 +1023,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
     order, actions = _spawn_order(slug, config, store, agents, rows, doc, runtime)
-    begun, tried = time.monotonic(), False
+    begun, tried = time.monotonic(), 0
     for lane, task in order:
         expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
         if held:
@@ -1074,31 +1087,102 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.record_launch(slug, record, "pending")
             store.seats.occupy(seat, name, now_ms)
             task["transfer"] = transfers.attach(store, slug, record)
-            tried = True
-            placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
+            tried += 1
+            placed = runtime.spawn(config, lane, name, {**primed(store, slug, seat, task), ACK_LATER: True})
             from scripts.swarm_v2.runtime import codex
 
             launched = codex.admit_legacy(store, slug, placed_record(record, placed), runtime)
         except Exception as exc:
-            _release_admission(slug, runtime, task)
-            _record_spawn_failure(slug, store, record, exc, now_ms)
-            actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
-            if isinstance(exc, ProfileUnresolved):
-                actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
+            if _acknowledging_error(exc):
+                store.record_launch(slug, record, ACKNOWLEDGING)
+                actions.append(f"{name} waits for the hive acknowledgement of {task['id']}")
+            else:
+                actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(record, task, exc), now_ms)
             continue
-        store.count_claim(slug, task["id"])
-        after = store.take_restart(slug, task["id"]) or _master_set(doc, task["id"])
-        head = (ledger_events.head(task["pr_url"]) or None) if task.get("pr_url") else ""
-        store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started", after=after, head=head)
-        store.put_agent(slug, launched)
-        launch_check.begin(store, slug, record, now_ms)
-        store.count_spawn(slug, placed.harness)
-        _spend_host(store, name, now_ms)
-        store.clear_handoff(slug, task["id"])
-        store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
-        profile_first.spawned(slug, store, task["id"])
-        actions.append(f"spawned {name} for {task['id']}")
-        actions += dispatcher.chain_claimed(slug, config, ledger, doc, task, lane, now_ms)
+        actions += _started(slug, config, store, ledger, doc, Started(record, task, placed, launched), now_ms)
+    return actions
+
+
+@dataclass(frozen=True)
+class Started:
+    record: AgentRecord
+    task: dict
+    placed: Placed
+    launched: AgentRecord
+
+
+def _started(slug, config, store, ledger, doc, started, now_ms):
+    record, task, placed = started.record, started.task, started.placed
+    store.count_claim(slug, task["id"])
+    after = store.take_restart(slug, task["id"]) or _master_set(doc, task["id"])
+    head = (ledger_events.head(task["pr_url"]) or None) if task.get("pr_url") else ""
+    store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started", after=after, head=head)
+    store.put_agent(slug, started.launched)
+    launch_check.begin(store, slug, record, now_ms)
+    store.count_spawn(slug, placed.harness)
+    _spend_host(store, record.name, now_ms)
+    store.clear_handoff(slug, task["id"])
+    store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
+    profile_first.spawned(slug, store, task["id"])
+    return [
+        f"spawned {record.name} for {task['id']}",
+        *dispatcher.chain_claimed(slug, config, ledger, doc, task, record.lane, now_ms),
+    ]
+
+
+@dataclass(frozen=True)
+class Failed:
+    record: AgentRecord
+    task: dict
+    error: Exception
+
+
+def _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms):
+    record, task, exc = failed.record, failed.task, failed.error
+    _release_admission(slug, runtime, task)
+    _record_spawn_failure(slug, store, record, exc, now_ms)
+    actions = [f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}"]
+    if isinstance(exc, ProfileUnresolved):
+        actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
+    return actions
+
+
+def _acknowledging_error(exc):
+    from scripts.swarm_v2.runtime.base import Status
+
+    return isinstance(exc, SpawnError) and exc.status == Status.PENDING
+
+
+def _acknowledging(slug, store, agent):
+    if agent.lane == MASTER:
+        return False
+    raw = store.redis.hget(store.key(slug, "launches"), agent.name)
+    return bool(raw) and json.loads(raw).get("state") == ACKNOWLEDGING
+
+
+def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
+    from scripts.swarm_v2.runtime import codex
+
+    rows, actions = {t["id"]: t for t in doc["tasks"]}, []
+    for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
+        task = rows.get(agent.task) or {"id": agent.task}
+        try:
+            if now_ms - agent.started_at >= LEASE_MS:
+                raise SpawnError(ACK_EXPIRED)
+            placed = runtime.collect(
+                config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True}
+            )
+            launched = codex.admit_legacy(store, slug, placed_record(agent, placed), runtime)
+        except Exception as exc:
+            if _acknowledging_error(exc):
+                store.refresh(slug, agent.task, agent.name, LEASE_MS)
+            elif isinstance(exc, SpawnError | SwarmError):
+                actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(agent, task, exc), now_ms)
+            else:
+                print(f"{agent.name} collect for {task['id']} raised {exc!r}, waiting for the hive", file=sys.stderr)
+                store.refresh(slug, agent.task, agent.name, LEASE_MS)
+            continue
+        actions += _started(slug, config, store, ledger, doc, Started(agent, task, placed, launched), now_ms)
     return actions
 
 

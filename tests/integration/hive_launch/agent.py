@@ -4,7 +4,7 @@ import subprocess
 import sys
 import time
 
-from scripts.hive import registry
+from scripts.hive import headroom, registry
 from scripts.hive.orders import Consumer
 from scripts.swarm import lease
 from scripts.swarm.capacity import Account
@@ -59,6 +59,20 @@ def worker() -> None:
                     registry.key(HIVE), mapping={key: registry._encode(key, value) for key, value in hive.items()}
                 )
                 pipe.sadd(registry.INDEX, HIVE)
+                pipe.set(
+                    headroom.key(HIVE),
+                    json.dumps(
+                        {
+                            "cpus": 8,
+                            "load5": 0.0,
+                            "available_mb": 100_000,
+                            "total_mb": 100_000,
+                            "pending": 0,
+                            "measured_at": hive["heartbeat_at"],
+                        }
+                    ),
+                    px=headroom.STALE_MS,
+                )
                 pipe.set(READY, "ready", ex=10)
                 pipe.execute()
             consumer.poll()

@@ -7,7 +7,7 @@ REPO = "agentihooks"
 
 
 def hive(name, **fields):
-    return {
+    record = {
         **registry._default(name, "yes"),
         "repos": [REPO],
         "heartbeat_at": NOW,
@@ -15,6 +15,7 @@ def hive(name, **fields):
         "slots": [{"harness": "claude", "account": "token", "kind": "subscription"}],
         **fields,
     }
+    return {"room": record["max_agents"] - record["agents"], **record}
 
 
 def test_master_prefers_the_declared_interactive_login_before_ui_tokens():

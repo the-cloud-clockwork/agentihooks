@@ -58,11 +58,16 @@ jobs:
           enable-cache: false
       - name: Start Redis on this runner
         run: |
-          archive=/etc/apt/sources.list.d/ubuntu.sources
-          [[ -f "$archive" ]] || archive=/etc/apt/sources.list
-          only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)
-          sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete; installing redis-server from the indexes that loaded"
-          sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" redis-server
+          if command -v redis-server >/dev/null; then
+            echo "redis-server comes from the runner image; no package fetch"
+            redis-server --version
+          else
+            archive=/etc/apt/sources.list.d/ubuntu.sources
+            [[ -f "$archive" ]] || archive=/etc/apt/sources.list
+            only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)
+            sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete; installing redis-server from the indexes that loaded"
+            sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" redis-server
+          fi
           redis-server --port 6379 --save '' --appendonly no --daemonize yes
           for _ in $(seq 30); do redis-cli -p 6379 ping 2>/dev/null | grep -q PONG && exit 0; sleep 1; done
           exit 1
@@ -132,11 +137,16 @@ jobs:
           enable-cache: false
       - name: Start Redis on this runner
         run: |
-          archive=/etc/apt/sources.list.d/ubuntu.sources
-          [[ -f "$archive" ]] || archive=/etc/apt/sources.list
-          only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)
-          sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete; installing redis-server from the indexes that loaded"
-          sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" redis-server
+          if command -v redis-server >/dev/null; then
+            echo "redis-server comes from the runner image; no package fetch"
+            redis-server --version
+          else
+            archive=/etc/apt/sources.list.d/ubuntu.sources
+            [[ -f "$archive" ]] || archive=/etc/apt/sources.list
+            only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)
+            sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete; installing redis-server from the indexes that loaded"
+            sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" redis-server
+          fi
           redis-server --port 6379 --save '' --appendonly no --daemonize yes
           for _ in $(seq 30); do redis-cli -p 6379 ping 2>/dev/null | grep -q PONG && exit 0; sleep 1; done
           exit 1

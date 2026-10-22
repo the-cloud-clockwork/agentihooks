@@ -57,6 +57,8 @@ def steering(task: dict, doc: dict | None = None) -> str:
 
 
 def rewrite(task: dict) -> None:
+    if not Path(task["workspace"]).is_dir():
+        return
     (Path(task["workspace"]) / "steering.md").write_text(steering(task), encoding="utf-8")
 
 

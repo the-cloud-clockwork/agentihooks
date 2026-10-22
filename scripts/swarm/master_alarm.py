@@ -42,7 +42,7 @@ def clear(store, slug) -> list[str]:
     told = [*state.get("told", []), *([seat_address(state["doctor"], MASTER)] if state.get("doctor") else [])]
     inbox = InboxStore(store.redis)
     for address in told:
-        inbox.send(SENDER, address, BACK.format(slug=slug))
+        inbox.send(SENDER, address, BACK.format(slug=slug), fyi=True)
     return [f"told {address} the master is back" for address in told]
 
 

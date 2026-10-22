@@ -1184,6 +1184,9 @@ def cmd_status(store, args):
     quota = quota_view.lines(capacity.read(store, args.slug), now_ms())
     held = spawn_holds(store, args.slug) + failed_panes.status_lines(store, args.slug)
     held += incidents.status_lines(store, args.slug)
+    from scripts.hive import admission, placement_waits
+
+    held += admission.status_lines(placement_waits.read(store, args.slug))
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
@@ -1778,8 +1781,10 @@ def cmd_wait(store, args):
             raise SwarmError(problem)
         if held["kind"] == "checks" and waits.PULL_URL.fullmatch(held["target"]):
             head = ledger_events.head(held["target"])
-            if not head:
+            if head == "":
                 raise SwarmError("cannot read the pull request head; retry the checks wait")
+            if head is None:
+                waits.mutation_wait.admitted_pending(held["target"])
             held["head"] = head
         if held["kind"] == "mutation":
             held["head"] = waits.mutation_wait.bind(held["target"])

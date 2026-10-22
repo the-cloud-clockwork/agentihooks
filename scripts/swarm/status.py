@@ -11,7 +11,7 @@ from scripts.gates import log as gate_log
 from scripts.gates import quiet as quiet_gate
 from scripts.gates.talk import WORKER_LANES
 from scripts.handoff import transfers
-from scripts.hive import placement_waits, reports
+from scripts.hive import admission, placement_waits, reports
 from scripts.inbox import outbox
 from scripts.inbox.store import InboxStore
 from scripts.swarm import (
@@ -340,6 +340,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
         "transitions": telemetry.timelines(store, slug, [a.seat for a in store.agents(slug)]),
         "bottleneck": bottleneck.read(store, slug),
         "top_bottleneck": bottleneck_status.report(store, slug, now_ms()),
+        "admission": admission.counts(placement_waits.read(store, slug)),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
         "master_affinity": affinity.report(store, slug, config, store.agents(slug)),

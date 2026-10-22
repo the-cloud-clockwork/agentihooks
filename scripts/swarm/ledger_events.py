@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import merge_queue, outage
+from scripts.swarm import merge_queue, mutation_wait, outage
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
@@ -318,6 +318,8 @@ def _gate_files(tree):
 
 def view(url, run=subprocess.run, required_checks=None):
     number = _number(url)
+    if mutation_wait.backing_off():
+        return None
     try:
         done = run(
             ["gh", "api", "graphql", "-f", f"query={PULL_QUERY.replace('$number', number)}", "-f", f"url={url}"],
@@ -325,6 +327,9 @@ def view(url, run=subprocess.run, required_checks=None):
             text=True,
             timeout=20,
         )
+        if done.returncode != 0 and mutation_wait.rate_limited(getattr(done, "stderr", None)):
+            mutation_wait.hold("graphql")
+            return None
         if done.returncode != 0:
             return _merged_without_rollup(json.loads(done.stdout))
         return _view_resource(
@@ -347,7 +352,9 @@ def head(url, run=subprocess.run):
     try:
         owner, repo, _, number = url.split("/")[-4:]
         return merge_queue.rest(f"repos/{owner}/{repo}/pulls/{number}", run)["head"]["sha"]
-    except (SwarmError, ValueError, KeyError, TypeError):
+    except SwarmError as error:
+        return None if mutation_wait.rate_limited(str(error)) else ""
+    except (ValueError, KeyError, TypeError):
         return ""
 
 

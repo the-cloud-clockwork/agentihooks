@@ -136,7 +136,7 @@ def _listing(slug, get, budget, deadline, clock):
                 return rows, False, max(body["meta"]["totalItems"] - len({row["id"] for row in rows}), 0), []
             page += 1
     except Exception as exc:  # noqa: BLE001
-        return rows, False, 0, [f"trace listing failed: {registry.failure(exc)}"]
+        return rows, False, 0, [registry.failed_read("trace listing", exc)]
 
 
 def _backfill(get, cache, trace, budget, deadline, clock):
@@ -148,7 +148,7 @@ def _backfill(get, cache, trace, budget, deadline, clock):
         if capped:
             entry["capped"] = True
     except Exception as exc:  # noqa: BLE001
-        entry = {"updated_at": trace.get("updatedAt"), "failed": registry.failure(exc)}
+        entry = {"updated_at": trace.get("updatedAt"), "failed": registry.failed_read("observation read", exc)}
     entry["deduplicated"] = True
     if _settled(entry):
         registry.save(_cache_path(cache, trace["id"]), entry)
