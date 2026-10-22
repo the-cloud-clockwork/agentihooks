@@ -3900,6 +3900,115 @@ A stopped swarm whose master seat holds a pending item is paused, so the tick st
 The ledger hook, the ledger watch and the inbox share one seen mark per agent and write. Stable item ids keep
 relay retries from creating a second item; an unconfirmed delivery may still be shown again.
 
+### Inbox escalation sender exclusion
+
+Unread work climbs the inbox wake ladder without sending an escalation back to
+its own sender. When the next rung is the master, the tick checks the sender's
+name and recorded master seat membership. A message from the current master or
+an earlier occupant of that master seat skips that rung and goes directly to an
+operator follow up on the ledger, flagged as needing the operator. A normal
+agent's unread message still escalates to its master.
+
+| Sender and unread receiver | Next escalation |
+|---|---|
+| Current master to a session with no typed wake | Operator follow up; no escalation item to the master |
+| Earlier occupant of the current master's seat to a session with no typed wake | Operator follow up; no escalation item back to that seat |
+| Agent to a session with no typed wake | Master seat, or master name when it has no seat; operator follow up after another retry window if the original remains pending |
+| Work with no available master, or unread work already addressed to the master | Operator follow up when escalation is due |
+
+The sender is recorded automatically by `agentihooks msg send`; it is the
+session's `AGENTIHOOKS_AGENT_NAME`, falling back to its session identity. There
+is no sender exclusion toggle. Recorded seat membership lets the check survive
+a master handoff; the current agent name alone would miss an earlier occupant.
+
+#### Usage and configuration
+
+Send an action request normally, from the agent that owns it:
+
+```bash
+agentihooks msg send <receiver-name> "Review the open pull request and reply with the result."
+```
+
+If this runs in a master session and the receiver has no typed wake, an unread
+request reaches the operator at the first due escalation instead of coming
+back as work for that master. The same request from an engineer still reaches
+the master first. Use `--fyi` only for information requiring no action: FYI items
+do not enter this escalation ladder.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` | `300` seconds | Time between wake retries and escalation steps |
+| `AGENTIHOOKS_INBOX_QUIET_S` | `180` seconds | Quiet period after an operator prompt during which a worker pane is not typed into |
+| `AGENTIHOOKS_INBOX_REDELIVER_S` | `300` seconds | Separate timeout for returning unconfirmed delivery to pending |
+
+For example, configure the process running the swarm tick with these environment
+variables to use a ten minute retry window while retaining the default quiet
+and redelivery periods:
+
+```bash
+export AGENTIHOOKS_INBOX_RETRY_WINDOW_S=600
+export AGENTIHOOKS_INBOX_QUIET_S=180
+export AGENTIHOOKS_INBOX_REDELIVER_S=300
+```
+
+Setting these in a sending agent's shell alone does not reconfigure an already
+running tick. The retry clock excludes outage time and can be held while a seat
+awaits a successor. A pane eligible for a typed wake can receive up to three
+wake attempts before escalation. Push delivery, busy panes and typed input
+have their own protections; see [Transport capabilities](#transport-capabilities)
+and [Outage holds and recovery](#outage-holds-and-recovery).
+
+#### Inspecting an escalation
+
+List the relevant master's seat items, then inspect the original message by its
+id. Replace the placeholders with the real seat address and message id:
+
+```bash
+agentihooks msg inbox --of master@<swarm>
+agentihooks msg read <message-id>
+```
+
+The inbox listing is read only. `msg read` records receipt as read, so use it
+when taking responsibility for the item; receipt leaves the work open. Its
+history distinguishes `escalated_master` from `escalated_operator`. The master
+step names the raised item and its destination; the operator step records that
+it was shown on the ledger page. Check the ledger's operator follow ups for the
+request itself. An operator escalation records the step without closing the
+original work item. After handling it, reply or close it with an outcome:
+
+```bash
+agentihooks msg reply <message-id> "Reviewed the pull request; the requested correction is complete."
+```
+
+| Symptom | Check and response |
+|---|---|
+| A master's unread request appears as an operator follow up without a master escalation | Expected sender exclusion; handle the follow up on the ledger |
+| An engineer's unread request reaches the master | Expected first escalation; answer or close the original item after handling it |
+| An old master's request returns to the master seat | Check recorded sender and seat history, and confirm the deployed tick contains the sender exclusion fix |
+| No escalation appears after five minutes | Check the configured retry window, item state, FYI flag, outage holds and successor holds before diagnosing a failure |
+| The ledger refuses the operator follow up | A cancellable refusal closes the original with a reason beginning `refused by the ledger page:` and sends its sender a refusal notice; this notice is distinct from an escalation. Protected work can remain open when cancellation is refused |
+
+#### Delivery evidence and measurement limits
+
+[Delivered pull request 4558](https://github.com/the-cloud-clockwork/agentihooks/pull/4558)
+includes regression cases for an unseated master, a master whose seat was never
+occupied, the current seated master, an earlier occupant and an engineer sender.
+The [red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39141962530)
+failed the master sender cases; the
+[green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39142204086)
+passed the inbox wake tests. These CI cases are the primary behavior proof.
+
+The Doctor source task recorded application at **18 October 2026, 18:47:21 UTC**.
+Its cause measurement at **15:40:12 UTC** inspected 41,383 retained inbox
+histories: 31 of 72 retained escalations named their sender or its seat, all
+from master senders. The preceding 24 hours had zero of three, so that daily
+sample could not demonstrate a decrease. The master's accepted comparison uses
+the same cause measurement script on escalations sent after application, once
+at least ten exist, against the retained 31 of 72 baseline; the target is zero.
+That comparison uses different cohorts, rather than equal daily windows. The
+source code task records no completed after count; the CI proofs above establish
+the routing change without claiming a measured production decrease.
+
 ### Transport capabilities
 
 `agentihooks swarm <id> status` and the ledger page Agents panel show, for every
