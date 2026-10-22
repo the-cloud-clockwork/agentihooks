@@ -122,6 +122,17 @@ def test_a_removed_item_is_written_as_a_removal_with_empty_data():
     assert json.loads(value)["swarm"] == "demo"
 
 
+def test_a_key_with_subject_reserved_characters_is_escaped_in_the_subject_and_kept_whole_in_the_event():
+    connection = sqlite3.connect(":memory:")
+    connection.executescript(sqlite.SCHEMA)
+    key = "<id> a.b*%"
+    outbox.write(connection, "demo", 3, {}, {"tasks": [{"id": key}]})
+    [(subject, value)] = connection.execute("SELECT subject,value FROM outbox")
+    assert subject == "swarm.demo.task.<id%3E%20a%2Eb%2A%25"
+    assert Envelope.decode(value.encode()).key == key
+    assert outbox.token("t-admit-headroom") == "t-admit-headroom"
+
+
 def test_the_postgres_schema_and_statement_carry_the_outbox():
     assert "CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY" in sqlite.SCHEMA
     assert (
