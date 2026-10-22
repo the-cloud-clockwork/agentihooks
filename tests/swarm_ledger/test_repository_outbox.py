@@ -96,6 +96,25 @@ def test_a_replacing_import_writes_rows_for_the_tasks_and_phases_it_changes_and_
     ]
 
 
+def test_purging_a_ledger_writes_a_removal_row_per_task_and_phase(tmp_path):
+    repo = store(tmp_path)
+    revision = repo.get_document("ledger")["_meta"]["rev"]
+    with repo.transaction() as transaction:
+        transaction.purge("ledger")
+    assert [(row[2], row[3], event.type, event.data) for row, event in zip(rows(repo), events(repo))] == [
+        (revision, "swarm.ledger.phase.p1", "phase.removed", {}),
+        (revision, "swarm.ledger.task.t1", "task.removed", {}),
+        (revision, "swarm.ledger.task.t2", "task.removed", {}),
+    ]
+
+
+def test_purging_a_slug_with_no_ledger_writes_no_outbox_row(tmp_path):
+    repo = store(tmp_path)
+    with repo.transaction() as transaction:
+        transaction.purge("absent")
+    assert rows(repo) == []
+
+
 def test_a_ledger_write_that_fails_after_the_outbox_row_leaves_neither(tmp_path, monkeypatch):
     repo = store(tmp_path)
     before = repo.get_document("ledger")
