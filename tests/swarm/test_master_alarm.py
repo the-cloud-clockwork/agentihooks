@@ -87,6 +87,17 @@ def test_a_master_that_binds_ends_the_outage_so_the_next_one_alarms_again(store)
     )
 
 
+def test_the_master_back_notice_reaches_agents_and_the_doctor_as_information(store):  # noqa: F811
+    runtime, ledger = broken_outage(doctored(store), startup=False)
+    runtime.broken = False
+    tick("sw", store, ledger, runtime, 1 + DOWN)
+    back = master_alarm.BACK.format(slug="sw")
+    told = [*(agent.name for agent in workers(store)), DOCTOR_MASTER]
+    items = [item for name in told for item in InboxStore(store.redis).inbox(name) if item.text == back]
+    assert len(items) == len(told) == 3
+    assert all(item.fyi for item in items)
+
+
 def test_an_agent_that_goes_live_during_the_outage_is_told_when_it_goes_live(store):  # noqa: F811
     runtime, ledger = BrokenMaster(), tasks(("t1", "eng"))
     tick("sw", store, ledger, runtime, 1)
