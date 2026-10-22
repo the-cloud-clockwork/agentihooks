@@ -57,20 +57,20 @@ REFUSALS = {
     "an account only the workstation advertises": (
         "nestor_coltatgmail_com",
         anton(),
-        Choice("root", "no headless hive for eng advertises the claude slot nestor_coltatgmail_com"),
+        Choice("root"),
     ),
     "a headless hive without the repo": (
         ANTON_ACCOUNT,
         anton(repos=[POD]),
-        Choice("root", f"no headless hive for eng lists the repo {ORIGIN}"),
+        Choice("root"),
     ),
-    "a full headless hive": (ANTON_ACCOUNT, anton(agents=1), Choice("root", "no headless hive for eng has room")),
-    "the headless hive takes its own account": (ANTON_ACCOUNT, anton(), Choice(ANTON)),
+    "a full headless hive": (ANTON_ACCOUNT, anton(agents=1), Choice("root")),
+    "an equal share prefers the durable workstation": (ANTON_ACCOUNT, anton(), Choice("root")),
 }
 
 
 @pytest.mark.parametrize(("account", "headless", "expected"), REFUSALS.values(), ids=REFUSALS.keys())
-def test_a_headless_refusal_for_any_reason_falls_back_to_the_workstation(account, headless, expected):
+def test_workers_can_use_the_workstation_beside_a_headless_hive(account, headless, expected):
     assert choose("eng", "claude", account, "subscription", ORIGIN, [root(), headless], NOW) == expected
 
 
@@ -83,11 +83,12 @@ def live(setup, tmp_path):
     (checkout / ".git" / "config").write_text(
         '[core]\n\tbare = false\n[remote "origin"]\n\turl = https://github.com/the-cloud-clockwork/agentihooks.git\n'
     )
-    for record in (root(), anton()):
+    for record in (root(agents=1), anton()):
         write_hive(setup, **{**record, "heartbeat_at": setup.hive["heartbeat_at"]})
     setup.store.redis.delete(registry.key("remote"))
     setup.store.redis.srem(registry.INDEX, "remote")
     setup.herdr._quota_accounts = [Account("claude", name, "room", 0, 80, 80, 6) for name in ROOT_ACCOUNTS]
+    setup.herdr.planned_account = lambda *args: ANTON_ACCOUNT
     setup.config = replace(setup.config, repo=str(checkout))
     return setup
 
@@ -158,11 +159,11 @@ def test_a_master_placed_by_origin_names_the_origin_to_launch_in(live):
     assert (selected.hive, selected.origin) == ("root", ORIGIN)
 
 
-def test_a_full_anton_hive_sends_the_engineer_to_the_workstation_with_the_reason(live):
+def test_a_full_anton_hive_sends_the_engineer_to_the_workstation_without_a_fallback(live):
     publish_room(live.store, ANTON, 0)
     selected = live.launcher.select(live.config, "eng", {"id": "task"})
-    assert (selected.hive, selected.account.name) == ("root", ROOT_ACCOUNTS[0])
-    assert selected.fallback == f"no headless hive for eng has room: {ANTON} {NO_RAM}"
+    assert (selected.hive, selected.account.name) == ("root", ANTON_ACCOUNT)
+    assert selected.fallback == ""
 
 
 def test_a_hive_listing_another_origin_does_not_take_the_checkout(live):
@@ -200,7 +201,7 @@ def test_a_tick_logs_the_wait_when_both_live_hives_are_full(live):
     runtime = LiveHives()
     live.store.create(replace(live.config, slug="sw"))
     actions = tick("sw", live.store, tasks(("t1", "eng")), runtime, now_ms=1_000)
-    assert f"task t1 waits: no headless hive for eng has room: {ANTON} {NO_RAM}" in actions
+    assert f"task t1 waits: no hive for eng has room: {ANTON} {NO_RAM}; root {NO_RAM}" in actions
     assert runtime.spawned == []
 
 
