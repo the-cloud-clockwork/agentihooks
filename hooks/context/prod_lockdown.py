@@ -1,6 +1,7 @@
 """Production workflow and image guards; CI alone owns protected promotion."""
 
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -322,6 +323,17 @@ def _check_pr_merge(line: str, cwd: str, bypass: bool) -> None:
         )
 
 
+def _check_swarm_enqueue(command: str, check_text: str) -> None:
+    slug = os.environ.get("AGENTIHOOKS_SWARM")
+    if not slug or not re.search(r"\benqueuePullRequest\b", command):
+        return
+    if re.search(r"\bgh\b[^|&;\n]*\bapi\b|\bcurl\b", check_text):
+        raise BlockAction(
+            "BLOCKED [raw enqueuePullRequest in a swarm]: the swarm queue command records every merge queue "
+            f"entry in its journal. Queue it with `agentihooks swarm {slug} merge queue <url>`."
+        )
+
+
 def check_prod_lockdown(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     try:
@@ -354,6 +366,7 @@ def check_prod_lockdown(payload: dict) -> None:
         raise BlockAction(
             f"BLOCKED [{name}]: {reason}\nAdd --emergency-prod / 'prod override' / 'emergency' to your message."
         )
+    _check_swarm_enqueue(command, check_text)
     from hooks.context.branch_guard import _resolve_cwd
 
     cwd = _resolve_cwd(command, payload.get("cwd", ""))
