@@ -128,6 +128,7 @@ def _crossings(state, runs, span, incidents, held):
         ci_speed.group(groups, runs, since, now_ms, window, github_status.windows(incidents, now_ms))
     state["groups"] = groups
     current = {identity: entry for identity, entry in groups.items() if entry["window"] == window}
+    gone = [identity for identity in gone if identity not in current]
     found = []
     if not held:
         found.extend(ci_speed.grouped(current))

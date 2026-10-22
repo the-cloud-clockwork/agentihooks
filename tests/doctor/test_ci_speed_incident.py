@@ -474,3 +474,18 @@ def test_a_verdict_on_a_window_or_stable_id_covers_only_the_same_scope(store, ju
     later = replace(original, subject=current)
     found = ci_speed.unjudged([later], store.redis.hgetall(judgments.key), AFTER + 1, 60000)
     assert found == ([later] if expected is None else expected)
+
+
+def test_a_group_emptied_and_refilled_in_one_pass_is_not_retracted(store, monkeypatch):  # noqa: F811
+    status(monkeypatch)
+    first = waiting(1, "2026-10-19T16:40:00Z")
+    records = [first]
+    runs(monkeypatch, records)
+    cli.timer(store, DOCTOR, AFTER + 60000, False)
+    first["jobs"][0].update(status="in_progress", started_at="2026-10-19T16:41:00Z", runner_name="r")
+    records.append(waiting(2, "2026-10-19T16:40:00Z"))
+    cli.timer(store, DOCTOR, AFTER + 120000, False)
+    identity = 'ci-queue-age-unconfirmed/["anton-oss", "self-hosted"]'
+    assert [finding["id"] for finding in details(store)] == [identity]
+    for texts in items(store).values():
+        assert not any(text.startswith("Retracted") for text in texts)
