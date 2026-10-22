@@ -903,6 +903,23 @@ def test_live_acknowledgement_after_its_reservation_expired_ends_the_execution_a
     ]
 
 
+def test_a_pass_longer_than_the_reservation_still_lands_a_launch_the_hive_acknowledged_in_time(setup):
+    from scripts.swarm.keyspace import ROOT
+    from scripts.swarm.tick import ACK_LATER
+
+    request, order, _ = live_order(setup)
+    late = replace(order, expires_at=0)
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(late.__dict__))
+    setup.store.redis.delete(f"{ROOT}:launch-slot:{order.execution_id}")
+    outcome = setup.launcher.collect(replace(request, task={**request.task, ACK_LATER: True}))
+    assert outcome.ok
+    assert outcome.value.execution.state == "working"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "working"
+    assert setup.launcher.orders_for("task") == late
+    assert setup.launcher.slots.counts() == {"claude:account": 1}
+    assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
+
+
 def test_ambiguous_receipt_keeps_the_reservation_and_order(setup):
     from scripts.hive.orders import Ack
     from scripts.swarm_v2.runtime.base import Outcome, Status
