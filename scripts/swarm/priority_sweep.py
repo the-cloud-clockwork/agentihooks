@@ -4,7 +4,7 @@ The sweep clears an agent's priority whose item is done, out of scope, merged or
 chat line on an item that carries a priority asks the classifier whether that write resolves what the priority
 asks. A yes clears it, closes a follow-up, records an operator comment on a question as its answer and notes the
 reason on the item; a no or a silent classifier leaves it. A priority that waits on an operator decision, a question,
-a merge approval, a follow-up flagged for him or an escalated plan, and one a dispatcher seat handed to him by raising
+a merge approval, a follow-up flagged for him or an escalated plan, and one a master or dispatcher seat handed to him by raising
 it under its own name, counts only the operator's writes, a verified master relay among them; an agent's write on it is
 never judged.
 """
@@ -113,7 +113,9 @@ def _writes(doc, rows, events):
 
 
 def _counts(doc, row, write):
-    return write.by == OPERATOR or not operator_only(doc, row)
+    found = naming.parse(row.get("by"))
+    master = found is not None and found.kind == "master"
+    return write.by == OPERATOR or not (master or operator_only(doc, row))
 
 
 def operator_only(doc, row):
