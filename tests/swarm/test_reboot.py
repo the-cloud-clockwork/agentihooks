@@ -111,6 +111,41 @@ def test_shutdown_records_every_local_agent_and_asks_the_master_for_its_handoff(
     assert str(reboot.handoff_path("sw")).endswith("/sw/master-shutdown-handoff.md")
 
 
+def test_shutdown_leaves_a_finished_agent_out_of_the_record_and_unasked(store, swarm, monkeypatch):
+    _taken(monkeypatch, [])
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    store.put_agent("sw", replace(master, state="finished"))
+
+    doc = reboot.prepare(store, "sw", 500)
+
+    assert master.name not in {a["name"] for a in doc["agents"]}
+    assert InboxStore(store.redis).inbox(master.name) == []
+
+
+def test_the_shutdown_command_prints_the_record_and_its_local_agents(store, monkeypatch, capsys):
+    from scripts.swarm import cli
+
+    doc = {"agents": [{"name": "engineer@a1b2c3-0001"}, {"name": "master@a1b2c3-0001"}]}
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli.reboot, "prepare", lambda store, slug, now: doc)
+
+    cli.main(["sw", "shutdown"])
+
+    assert json.loads(capsys.readouterr().out) == {
+        "swarm": "sw",
+        "record": str(reboot.record_path("sw")),
+        "local_agents": ["engineer@a1b2c3-0001", "master@a1b2c3-0001"],
+    }
+
+
+def test_an_automatic_snapshot_without_agents_names_none(store):
+    folder = snapshot.auto_dir("sw")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "auto-700.json").write_text(json.dumps({"taken_at": 700, "state": {"keys": {}}}))
+
+    assert reboot.recorded(store, "sw", "boot-1") == set()
+
+
 def _recorded(store, monkeypatch):
     _taken(monkeypatch, [])
     reboot.prepare(store, "sw", 500)
@@ -152,7 +187,7 @@ def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_ac
             before[name].task,
             before[name].account,
         )
-        assert agent.pane_id == "reopened:pane"
+        assert (agent.pane_id, agent.launched_at) == ("reopened:pane", 900)
     assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-2"
 
 
@@ -161,6 +196,8 @@ def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, re
     eng = next(a for a in _local(store).values() if a.lane == "eng")
     store.put_agent("sw", replace(eng, account="spent"))
     store.put_handoff("sw", eng.task, "carry on from the parser", seat=eng.seat)
+    other = {"name": "engineer@ffffff-0001", "outcome": "resumed"}
+    store.put_restored("sw", [other, {"name": eng.name, "outcome": "stale"}])
 
     actions, _ = _booted(store, ledger, runtime, quota=lambda harness, account: account != "spent")
 
@@ -180,7 +217,10 @@ def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, re
         eng.task,
         eng.conversation_id,
     )
-    assert transfers.get(store, "sw", outcome["transfer"])["handoff"] == "carry on from the parser"
+    assert outcome["reason"] == "own conversation did not reopen after the workstation rebooted"
+    assert other in store.restored("sw")
+    transfer = transfers.get(store, "sw", outcome["transfer"])
+    assert (transfer["handoff"], transfer["reason"]) == ("carry on from the parser", "restore")
     assert ledger.rows[eng.task]["claimed_by"] == eng.name
     assert f"{action}; nothing was started in its place." in ledger.notes
     assert not any(note.startswith("Starting a fresh agent") for note in ledger.notes)
@@ -229,7 +269,12 @@ def test_an_account_without_room_resumes_on_whatever_account_the_router_picks(st
     for agent in local.values():
         store.put_agent("sw", replace(agent, account="spent" if agent.lane == MASTER else "roomy"))
 
-    _booted(store, ledger, runtime, quota=lambda harness, account: True if account == "roomy" else reading)
+    _booted(
+        store,
+        ledger,
+        runtime,
+        quota=lambda harness, account: True if (harness, account) == ("claude", "roomy") else reading,
+    )
 
     routed = {a.lane: a.account for a in runtime.resumed}
     assert routed == {MASTER: "", "eng": "roomy"}
@@ -331,6 +376,9 @@ def test_last_quota_reuses_a_stale_reading_only_until_a_window_resets(monkeypatc
     assert reboot.last_quota("claude", "b", now=200) is None
     assert reboot.last_quota("claude", "c", now=200) is None
     assert reboot.last_quota("claude", "a", now=600) is None
+    assert reboot.last_quota("claude", "a", now=500) is None
+    readings.append((30.0, Reading("a", 5)))
+    assert reboot.last_quota("claude", "a", now=60) is False
     assert reboot.last_quota("claude", "d", now=60) is None
     monkeypatch.setattr(balancer, "account_cap", lambda result, now: None)
     assert reboot.last_quota("claude", "a", now=60) is None
