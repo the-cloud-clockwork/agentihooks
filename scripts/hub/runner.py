@@ -43,6 +43,7 @@ def _record(store: StateStore, key: str, version: int) -> None:
             continue
 
 
+# A singleton lease renews only between deliveries, so one singleton handler must finish within lease_ttl_ms.
 class HubRunner:
     def __init__(
         self, bus: Bus, reactors: Registry, holder: str, clock: lease.Clock = lease.wall_ms, lease_ttl_ms: int = 15_000
