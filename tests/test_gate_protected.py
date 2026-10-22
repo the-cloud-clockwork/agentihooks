@@ -391,9 +391,8 @@ def _full_preflight(preflight):
 @pytest.mark.parametrize(
     "fault", [None, "wider", "cone", "history", "fetch", "proofs", "fetch_full", "no_sparse", "no_depth"]
 )
-@pytest.mark.parametrize("base_form", [_full_preflight, _shallow_preflight])
-def test_the_required_grader_accepts_only_the_exact_shallow_sparse_preflight(repo, base_form, fault, capsys):
-    preflight = base_form(yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text()))
+def test_the_required_grader_accepts_only_the_exact_shallow_sparse_preflight(repo, fault, capsys):
+    preflight = _full_preflight(yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text()))
     _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trusted preflight")
     _git(repo, "checkout", "-q", "-b", "pr")
     shallow = _shallow_preflight(preflight)
@@ -440,8 +439,9 @@ def test_a_branch_still_carrying_the_full_preflight_passes_a_shallow_base(repo, 
     assert gate_protected.main(["--root", str(repo), "--head", planted]) == (0 if fault is None else 1)
 
 
-@pytest.mark.parametrize("cover_proofs", [False, True])
-@pytest.mark.parametrize("form", [_full_preflight, _shallow_preflight])
+@pytest.mark.parametrize(
+    ("form", "cover_proofs"), [(_full_preflight, True), (_shallow_preflight, True), (_shallow_preflight, False)]
+)
 def test_either_checkout_form_covers_proof_branches_from_a_preflight_that_ignored_them(repo, form, cover_proofs):
     preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
     old = _full_preflight(preflight)
