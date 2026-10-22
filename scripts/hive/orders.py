@@ -1,5 +1,6 @@
 import hashlib
 import json
+import uuid
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING
 
@@ -69,6 +70,9 @@ COMMAND_BATCH = 32
 SENT = {"sent": "1"}
 OPENING, DIGEST, SEEDS = prompt.CARRIED, "hive_opening_digest", "hive_seeds"
 ORIGIN = "hive_origin"
+RESTARTED = "restarted"
+POD = uuid.uuid4().hex
+POD_SECONDS = 45
 
 
 def build_opening(request: SpawnRequest) -> str:
@@ -99,6 +103,9 @@ class Orders:
 
     def receipt(self, order: LaunchOrder) -> str:
         return f"{registry.key(order.hive)}:launch-orders:{order.slug}:{order.execution_id}:{order.generation}"
+
+    def pod(self, hive: str, pod: str) -> str:
+        return f"{registry.key(hive)}:pod:{pod}"
 
     def send(self, hive: str, order: LaunchOrder) -> str:
         return self.redis.xadd(self.stream(hive), {"order": json.dumps(asdict(order))})
@@ -147,10 +154,10 @@ class Orders:
 
 
 class Consumer:
-    def __init__(self, redis: "Redis", hive: str, runtime: "LocalHerdrRuntime") -> None:
+    def __init__(self, redis: "Redis", hive: str, runtime: "LocalHerdrRuntime", pod: str = POD) -> None:
         self.store = RedisStore(redis)
         self.orders = Orders(redis)
-        self.hive, self.runtime = hive, runtime
+        self.hive, self.runtime, self.pod = hive, runtime, pod
 
     @classmethod
     def local(cls, redis: "Redis", hive: str) -> "Consumer":
@@ -244,9 +251,12 @@ class Consumer:
         if started is not None:
             if order.expires_at <= now:
                 return Ack("failed", {}, "expired")
+            if self.orphaned(order):
+                return Ack("failed", {}, RESTARTED)
             return Ack("failed", {}, "ambiguous") if now - int(started) >= 300000 else None
         if not self.store.redis.hsetnx(self.orders.receipt(order), "started", str(now)):
             return None
+        self.store.redis.hset(self.orders.receipt(order), "pod", self.pod)
         if order.expires_at <= now:
             return Ack("failed", {}, "expired")
         try:
@@ -275,6 +285,10 @@ class Consumer:
             return self.launch(order, agent, task)
         except SwarmError:
             return Ack("failed", {}, "refused")
+
+    def orphaned(self, order: LaunchOrder) -> bool:
+        owner = self.store.redis.hget(self.orders.receipt(order), "pod")
+        return owner not in (None, self.pod) and not self.store.redis.exists(self.orders.pod(self.hive, owner))
 
     def identity(self, order: LaunchOrder, agent: AgentRecord) -> None:
         if (
@@ -361,6 +375,10 @@ class Consumer:
     def _stop(self, agent: AgentRecord, failure: str) -> Ack:
         outcome = self.runtime.terminate(agent)
         return Ack("failed", agent.runtime_target, failure if outcome.ok else "ambiguous")
+
+
+def alive(redis: "Redis", hive: str, pod: str = POD) -> None:
+    redis.set(Orders(redis).pod(hive, pod), "1", ex=POD_SECONDS)
 
 
 def _done(ok: bool) -> Ack:
