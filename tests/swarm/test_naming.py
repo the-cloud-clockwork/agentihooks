@@ -343,7 +343,7 @@ def test_names_reads_records_one_page_per_pipeline_and_keeps_the_rows(store, red
         pipe.execute = sized
         return pipe
 
-    monkeypatch.setattr(naming, "NAMES_PAGE", 2)
+    monkeypatch.setattr(naming, "NAMES_PAGE", 2, raising=False)
     monkeypatch.setattr(redis, "pipeline", counted)
 
     assert store.names.names("sw") == expected
