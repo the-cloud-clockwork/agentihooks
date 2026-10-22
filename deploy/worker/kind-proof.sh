@@ -175,10 +175,10 @@ store = RedisStore(redis_client())
 if os.environ['STEP'] == 'start':
     store.redis.sadd(f'{PREFIX}:index', 'drain-proof')
     store.names.adopt('drain-proof', '999999', '', '')
-    store.redis.hset(store.names.key('name', 'engineer@999999-1'), mapping={'swarm': 'drain-proof', 'code': '999999'})
-    store.start_execution('drain-proof', AgentRecord('engineer@999999-1', 'eng', 't1', seat='eng-1@drain-proof', hive=os.environ['HIVE']))
+    name = store.names.next('drain-proof', 'eng')
+    store.start_execution('drain-proof', AgentRecord(name, 'eng', 't1', seat='eng-1@drain-proof', hive=os.environ['HIVE']))
 else:
-    store.drop_agent('drain-proof', 'engineer@999999-1')
+    store.drop_agent('drain-proof', 'engineer@999999-0001')
 PY
 }
 hold_agent start
