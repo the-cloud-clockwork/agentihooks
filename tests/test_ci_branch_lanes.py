@@ -399,6 +399,17 @@ def test_only_refused_workflows_the_push_can_trigger_are_waited_for(tmp_path, mo
     assert calls == [("o/r", sha, {f"{lanes.WORKFLOWS}/fired.yml"}, 60.0)]
 
 
+def test_an_unquoted_on_key_is_read_as_the_push_trigger(tmp_path, monkeypatch):
+    body = "name: Replay\non:\n  push:\njobs:\n  replay:\n    runs-on: x\n"
+    base, head, sha = _repo(tmp_path, {"fired.yml": body})
+    monkeypatch.chdir(base)
+    monkeypatch.setenv("GIT_DIR", str(head / ".git"))
+    calls = []
+    monkeypatch.setattr(lanes, "cancel", lambda *args: calls.append(args) or set())
+    assert lanes.main(["--head", sha, "--repo", "o/r"]) == 1
+    assert calls == [("o/r", sha, {f"{lanes.WORKFLOWS}/fired.yml"}, 60.0)]
+
+
 @pytest.mark.parametrize("body", ["jobs: [\n", "- push\n"])
 def test_a_refused_workflow_that_is_not_a_mapping_is_still_waited_for(tmp_path, monkeypatch, body):
     base, head, sha = _repo(tmp_path, {"broken.yml": body})

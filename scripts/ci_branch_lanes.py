@@ -166,7 +166,7 @@ def refused(head: str, root: Path) -> dict[str, list[str]]:
     return {path: found for path, found in graded.items() if found}
 
 
-def push_fired(head: str, path: str) -> bool:
+def fires_on_head(head: str, path: str) -> bool:
     try:
         workflow = yaml.safe_load(git("show", f"{head}:{path}"))
     except yaml.YAMLError:
@@ -174,7 +174,7 @@ def push_fired(head: str, path: str) -> bool:
     if not isinstance(workflow, dict):
         return True
     for on in events(workflow):
-        names = [on] if isinstance(on, str) else on if isinstance(on, (list, dict)) else []
+        names = on if isinstance(on, (list, dict)) else [on]
         if any(name in ("push", "pull_request", "pull_request_target") for name in names):
             return True
     return False
@@ -210,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     if not found:
         print("Every workflow that exists only on this head queues on a shared hosted lane.")
         return 0
-    fired = {path for path in found if push_fired(args.head, path)}
+    fired = {path for path in found if fires_on_head(args.head, path)}
     if args.repo and fired:
         for run in sorted(cancel(args.repo, args.head, fired, args.wait)):
             print(f"Cancelled run {run}.")
