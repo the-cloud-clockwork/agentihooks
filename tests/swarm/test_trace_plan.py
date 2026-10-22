@@ -789,6 +789,20 @@ def test_a_cut_queued_while_the_ledger_is_down_stays_unaccepted_and_resends_its_
     assert [row["reason"] for row in rows(home)] == ["cut: a diesel generator"]
 
 
+def test_a_refused_cut_does_not_stop_the_next_cut_in_the_same_run(ask, tmp_path):
+    class RefusesFirst(Ledger):
+        def followup_once(self, slug, text, by, op_id):
+            return super().followup_once(slug, text, by, op_id) and len(self.ids) > 1
+
+    folder, home, ledger = tmp_path / "t1", tmp_path / "home", RefusesFirst()
+    write_plan(folder, DOGHOUSE + "- a dog bed | doghouse/bed | the dog sleeps on it\n")
+    ask(0.9, 0.8, 0.1, 0.1)
+    record, _ = run(folder, ledger, home)
+    assert ledger.followups == ["Cut from the plan: a diesel generator", "Cut from the plan: a dog bed"]
+    assert record["accepted"] == ["a dog bed | doghouse/bed | the dog sleeps on it"]
+    assert [row["reason"] for row in rows(home)] == ["cut: a dog bed"]
+
+
 def test_followup_once_reports_a_queued_write_as_not_accepted(monkeypatch):
     from scripts.swarm import ledger_client
 
