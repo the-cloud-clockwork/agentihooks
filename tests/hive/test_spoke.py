@@ -16,6 +16,7 @@ def test_a_spoke_does_not_take_work_until_its_local_cgroup_admits_another_agent(
     from scripts.hive.spoke import Spoke, SpokeConfig
 
     bus, runtime, tasks = Mock(), Mock(), Mock()
+    bus.state.return_value.get.return_value = None
     spoke = Spoke(SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a"), bus, runtime, tasks, lambda: measured)
 
     assert spoke.poll(17) == "held"
@@ -29,6 +30,7 @@ def test_an_admitted_spoke_takes_only_from_its_own_lane_with_the_requested_timeo
     from scripts.hive.spoke import Spoke, SpokeConfig
 
     bus, runtime, tasks = Mock(), Mock(), Mock()
+    bus.state.return_value.get.return_value = None
     bus.queue.return_value.take.return_value = None
     policy = QueuePolicy(max_deliver=3, backoff_ms=(10, 20))
     spoke = Spoke(SpokeConfig(SimpleNamespace(slug="rig"), "ci", "hive-a", policy), bus, runtime, tasks, reading)
@@ -160,14 +162,12 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
     assert real_take(0) is None
 
 
-@pytest.mark.parametrize("failure", ["request", "spawn", "outcome"])
+@pytest.mark.parametrize("failure", ["request", "outcome"])
 def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, failure):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     if failure == "request":
         rig.tasks.request.side_effect = [RuntimeError("unavailable"), rig.request]
-    elif failure == "spawn":
-        rig.runtime.spawn.side_effect = [RuntimeError("unavailable"), rig.runtime.spawn.return_value]
     else:
         rig.runtime.spawn.side_effect = [
             Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room"),
@@ -319,9 +319,13 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
     for now in (0, 10, 30):
         rig.clock.now = now
         assert rig.spoke.poll() == "retry"
-    rig.clock.now = 100_000
-    assert rig.queue.take(0) is None
     target.publish = real_publish
+    for _ in range(rig.config.policy.max_deliver):
+        rig.clock.now += rig.config.policy.ack_wait_ms
+        delivery = rig.queue.take(0)
+        if delivery is not None:
+            delivery.nak(0)
+    assert rig.queue.take(0) is None
     rig.tasks.reopen.side_effect = None
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, lambda: None)
     assert restarted.poll() == ("started" if boundary == "started" else "dead")

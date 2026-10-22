@@ -47,14 +47,23 @@ class Spoke:
         measure: Callable[[], dict | None] = measured,
     ):
         self.config, self.bus, self.runtime, self.tasks, self.measure = config, bus, runtime, tasks, measure
+        self._pending_key = hashlib.sha256(
+            json.dumps([config.swarm.slug, config.lane, config.hive]).encode()
+        ).hexdigest()
 
     def poll(self, timeout_ms: int = 0) -> str:
-        if admission.room(self.measure()).room < 1:
-            return "held"
-        queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
-        delivery = queue.take(timeout_ms)
+        held = admission.room(self.measure()).room < 1
+        try:
+            queue = (
+                None
+                if held
+                else self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
+            )
+            delivery = None if held else queue.take(timeout_ms)
+        except Exception:
+            return self._reconcile("retry")
         if delivery is None:
-            return "empty"
+            return self._reconcile("held" if held else "empty")
         try:
             return self._apply(delivery)
         except Exception:
@@ -67,6 +76,47 @@ class Spoke:
             delivery.nak(steps[min(delivery.attempt - 1, len(steps) - 1)])
             return "retry"
 
+    def _reconcile(self, fallback: str) -> str:
+        try:
+            return self._recover() or fallback
+        except Exception:
+            return "retry"
+
+    def _reserve(self, delivery: Delivery) -> int:
+        pending = self.bus.state("spoke-pending")
+        entry = pending.get(self._pending_key)
+        if entry and json.loads(entry.value):
+            raise StateConflict("pending completion is busy")
+        value = json.dumps({"event": delivery.event.to_dict(), "attempt": delivery.attempt}).encode()
+        return (
+            pending.update(self._pending_key, value, entry.revision)
+            if entry
+            else pending.create(self._pending_key, value)
+        )
+
+    def _clear_pending(self, revision: int) -> None:
+        self.bus.state("spoke-pending").update(self._pending_key, b"{}", revision)
+
+    def _recover(self) -> str | None:
+        pending = self.bus.state("spoke-pending").get(self._pending_key)
+        if pending is None or not (record := json.loads(pending.value)):
+            return None
+        event = Envelope.from_dict(record["event"])
+        entry = self.bus.state("spoke-work").get(claim_key(event))
+        state = json.loads(entry.value)
+        status = state["state"]
+        if status == "started":
+            self._publish(Envelope.from_dict(state["event"]))
+        elif status == "dead_pending" or (status == "ready" and record["attempt"] >= self.config.policy.max_deliver):
+            self._finish_dead(event, record["attempt"])
+            status = "dead"
+        elif status == "launching":
+            return "uncertain"
+        elif status == "claimed":
+            return "busy"
+        self._clear_pending(pending.revision)
+        return None if status == "ready" else status
+
     def _apply(self, delivery: Delivery) -> str:
         event = delivery.event
         claims = self.bus.state("spoke-work")
@@ -74,15 +124,18 @@ class Spoke:
         entry = claims.get(key)
         prior = json.loads(entry.value) if entry else {}
         if prior.get("state") == "started":
-            return self._announce(delivery, Envelope.from_dict(prior["event"]))
-        if prior.get("state") == "dead":
+            self._publish(Envelope.from_dict(prior["event"]))
+            self._clear_current(event)
+            delivery.ack()
+            return "started"
+        if prior.get("state") == "launching":
+            delivery.nak(self.config.policy.ack_wait_ms)
+            return "uncertain"
+        if prior.get("state") in ("dead", "withdrawn"):
             delivery.term()
-            return "dead"
+            return prior["state"]
         if prior.get("state") == "dead_pending":
             return self._exhaust(delivery)
-        if prior.get("state") == "withdrawn":
-            delivery.term()
-            return "withdrawn"
         if entry and prior["state"] != "ready":
             delivery.nak(self.config.policy.ack_wait_ms)
             return "busy"
@@ -93,26 +146,44 @@ class Spoke:
             delivery.nak(self.config.policy.ack_wait_ms)
             return "busy"
         try:
-            started = self._spawn(event, key)
+            pending_revision = self._reserve(delivery)
         except Exception:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
             raise
+        try:
+            started = self._spawn(event, key, revision)
+        except Exception:
+            current = json.loads(claims.get(key).value)
+            if current["state"] == "ready" and delivery.attempt < self.config.policy.max_deliver:
+                self._clear_pending(pending_revision)
+            raise
         if started is None:
-            claims.update(key, json.dumps({"state": "withdrawn"}).encode(), revision)
+            self._clear_pending(pending_revision)
             delivery.term()
             return "withdrawn"
-        claims.update(key, json.dumps({"state": "started", "event": started.to_dict()}).encode(), revision)
-        return self._announce(delivery, started)
+        self._publish(started)
+        self._clear_pending(pending_revision)
+        delivery.ack()
+        return "started"
 
-    def _spawn(self, event: Envelope, key: str) -> Envelope | None:
-        request = self.tasks.request(event)
+    def _spawn(self, event: Envelope, key: str, revision: int) -> Envelope | None:
+        claims = self.bus.state("spoke-work")
+        try:
+            request = self.tasks.request(event)
+        except Exception:
+            claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
+            raise
         if request is None:
+            claims.update(key, json.dumps({"state": "withdrawn"}).encode(), revision)
             return None
+        intent = json.dumps({"state": "launching", "owner": self.config.hive, "name": request.name}).encode()
+        revision = claims.update(key, intent, revision)
         outcome = self.runtime.spawn(request)
         if not outcome.ok:
+            claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
             raise RuntimeError(outcome.detail)
         placed = outcome.value
-        return Envelope(
+        started = Envelope(
             id=f"started:{key}",
             type="execution.started",
             swarm=event.swarm,
@@ -132,27 +203,37 @@ class Spoke:
             },
             cause=event.id,
         )
+        claims.update(key, json.dumps({"state": "started", "event": started.to_dict()}).encode(), revision)
+        return started
 
-    def _announce(self, delivery: Delivery, event: Envelope) -> str:
+    def _publish(self, event: Envelope) -> None:
         self.bus.events.publish(subject(event.swarm, "execution", "started"), event)
-        delivery.ack()
-        return "started"
 
-    def _exhaust(self, delivery: Delivery) -> str:
-        event = delivery.event
+    def _clear_current(self, event: Envelope) -> None:
+        pending = self.bus.state("spoke-pending").get(self._pending_key)
+        if pending and json.loads(pending.value).get("event") == event.to_dict():
+            self._clear_pending(pending.revision)
+
+    def _finish_dead(self, event: Envelope, attempt: int) -> None:
         claims = self.bus.state("spoke-work")
         key = claim_key(event)
         entry = claims.get(key)
-        prior = json.loads(entry.value) if entry else {}
-        if prior.get("state") == "dead_pending":
+        prior = json.loads(entry.value)
+        if prior["state"] == "dead_pending":
             letter = Envelope.from_dict(prior["event"])
             revision = entry.revision
-        else:
-            letter = dead_letter(event, readiness.queue_name(event.swarm, self.config.lane), delivery.attempt)
+        elif prior["state"] == "ready":
+            letter = dead_letter(event, readiness.queue_name(event.swarm, self.config.lane), attempt)
             value = json.dumps({"state": "dead_pending", "event": letter.to_dict()}).encode()
-            revision = claims.update(key, value, entry.revision) if entry else claims.create(key, value)
+            revision = claims.update(key, value, entry.revision)
+        else:
+            raise StateConflict("execution state requires recovery")
         self.bus.dead.publish(f"dead.{event.swarm}", letter)
         self.tasks.reopen(event)
         claims.update(key, json.dumps({"state": "dead"}).encode(), revision)
+
+    def _exhaust(self, delivery: Delivery) -> str:
+        self._finish_dead(delivery.event, delivery.attempt)
+        self._clear_current(delivery.event)
         delivery.term()
         return "dead"
