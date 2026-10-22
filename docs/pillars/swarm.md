@@ -2537,7 +2537,38 @@ When the pull request is no longer in the queue, the pass decides from its state
 | Left the queue green while one of its own merge group runs is still running | Nothing changes; the pass tries again on the next tick. | `could not read the merge group runs of <url> for task <id>: merge group runs still running: <run urls>` |
 | Left the queue green and the GitHub runs listing failed | Nothing changes; the pass tries again on the next tick. | `could not read the merge group runs of <url> for task <id>: <error>` |
 
-A merge group run counts as the pull request's own when its branch is `gh-readonly-queue/<base>/pr-<number>-<sha>` for that pull request number and it was created at or after the second the pass queued the pull request. The pass lists at most five pages of 100 `merge_group` runs; more than that counts as not listed. A run concluded `success`, `cancelled`, `skipped` or `neutral` is clean. With no failure of its own, the same head is queued again rather than handed to another engineer.
+A merge group run counts as the pull request's own when its branch is `gh-readonly-queue/<base>/pr-<number>-<sha>` for that pull request number and it was created at or after the second the pass last queued the pull request. Runs of other pull requests, and runs on any other branch, are ignored. The pass lists at most five pages of 100 `merge_group` runs; more than that counts as not listed. Each own run is judged by its conclusion:
+
+| Own run conclusion | Judged |
+|---|---|
+| `success`, `skipped` or `neutral` | Clean. |
+| `cancelled`, and every job listed with none concluded `failure`, `timed_out` or `startup_failure` | Clean. GitHub cancels a group's run when it rebuilds the group, for example after a removal or an enqueue ahead of it. |
+| `cancelled`, with a job concluded `failure`, `timed_out` or `startup_failure` | Failed. The run was cancelled after a job of its own failed. |
+| `cancelled`, and its jobs could not all be listed (at most five pages of 100) | Failed. |
+| Any other conclusion, such as `failure`, `timed_out` or `startup_failure` | Failed. |
+
+With no failure of its own, the same head is queued again rather than handed to another engineer. Each requeue adds one to the task's `requeues` count in its ready record; the sixth green exit of the same release reopens the task. A queue refusal while requeueing writes no comment and adds nothing to the count; the pass handles it like any other queue failure of the merge pass.
+
+This path exists because removals with no failure of their own spent claims. On 18 October two Doctor tasks reached the claim cap only through queue removals: pull request 4418 left the queue twice, and pull request 4540 left it after both its merge group Tests runs were cancelled while its checks stayed green. Each removal reopened the task and spawned an engineer whose only work was to queue the same head again. Pull request [4616](https://github.com/the-cloud-clockwork/agentihooks/pull/4616) added the requeue; pull request [5466](https://github.com/the-cloud-clockwork/agentihooks/pull/5466) made a cancelled run with a failed job count as the pull request's own failure.
+
+To read the own merge group runs the pass judged, list the runs created since it queued the pull request, keep the ones whose branch names the pull request number, then read a cancelled run's jobs:
+
+```bash
+gh api "repos/<owner>/<repo>/actions/runs?event=merge_group&created=>=<queued at, UTC>&per_page=100" \
+  --jq '.workflow_runs[] | select(.head_branch | test("/pr-<number>-[0-9a-f]+$")) | [.id, .name, .conclusion, .html_url] | @tsv'
+gh api "repos/<owner>/<repo>/actions/runs/<run id>/jobs?per_page=100" \
+  --jq '.jobs[] | [.name, .conclusion] | @tsv'
+```
+
+A removal reason of `failed_checks` on the pull request's timeline does not settle the question: GitHub gives that reason even when every own run was cancelled.
+
+`agentihooks swarm <id> merge queue <url>` applies a stricter check before it queues a head by hand. It lists the own merge group runs created since the head commit's committer time, takes the newest group, and refuses when a finished run of that group failed by the judgment above:
+
+```text
+head <sha> failed its last merge group run (Tests https://github.com/<owner>/<repo>/actions/runs/<run id>); push a new commit before queueing again
+```
+
+When those runs cannot all be listed it refuses with `could not list every merge group run since head <sha> landed`. A head with no own merge group run passes. The merge pass's own requeue does not run this check; it judges only the runs since it last queued the pull request.
 
 A red exit skips that read because the failure is already on the pull request's own checks. The reopen comment reads `Reopened by the swarm: its pull request <url> left the merge queue without merging. The next engineer continues it from the handoff its engineer left.` The next engineer fixes the failing check with a new commit, waits for the pull request checks and queues it with `agentihooks swarm <id> merge queue <url>`.
 
