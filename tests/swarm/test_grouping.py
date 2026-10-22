@@ -339,6 +339,18 @@ def test_a_grouped_member_leaves_the_claim_queue(store):
     ]
 
 
+def test_the_claim_queue_judges_readiness_on_the_swarm_snapshot(monkeypatch, store):
+    from scripts.swarm import readiness
+
+    seen = []
+    monkeypatch.setattr(readiness, "claimable", lambda t, lane, view: seen.append((t["id"], lane, view.slug)) or True)
+    rows = {"a": task("a")}
+    assert [t["id"] for t in _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng")] == [
+        "a"
+    ]
+    assert seen == [("a", "eng", "sw")]
+
+
 def test_the_tick_groups_open_tasks(asked, store):
     asked(0.9)
     ledger = GroupLedger([task("a"), task("b")])
