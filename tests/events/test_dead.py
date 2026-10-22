@@ -10,7 +10,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_dead_letters_retain_the_original_envelope_and_delivery_context(monkeypatch):
-    monkeypatch.setattr(dead, "time", SimpleNamespace(time_ns=lambda: 1_234_567_890))
+    monkeypatch.setattr(dead, "time", SimpleNamespace(time_ns=lambda: 1_234_567_890_000_000))
     original = Envelope("e1", "task.claimed", "s", "task", "t1", 1, 10, "worker", {"nested": [1]}, "parent")
     letter = dead.dead_letter(original, "queue.work", 3)
     assert letter.to_dict() == {
@@ -20,7 +20,7 @@ def test_dead_letters_retain_the_original_envelope_and_delivery_context(monkeypa
         "entity": "task",
         "key": "t1",
         "version": 1,
-        "time": 1234,
+        "time": 1_234_567_890,
         "author": "worker",
         "data": {"event": original.to_dict(), "source": "queue.work", "attempts": 3},
         "cause": "e1",

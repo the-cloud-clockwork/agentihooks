@@ -378,6 +378,15 @@ def test_a_dead_consumer_keeps_a_server_side_attempt_cap(bus):
     assert config.filter_subject == "dead.>"
 
 
+def test_the_dead_stream_uses_the_configured_dedupe_window(url):
+    opened = nats.open_bus(BusConfig(backend="nats", url=url, dedupe_window_ms=1_234))
+    try:
+        config = opened._loop.run(opened._js.stream_info("AGENTIHOOKS_DEAD")).config
+        assert config.duplicate_window == 1.234
+    finally:
+        opened.close()
+
+
 def test_reopening_a_capped_consumer_enables_dead_letter_handling(bus):
     config = api.ConsumerConfig(
         durable_name="legacy",
