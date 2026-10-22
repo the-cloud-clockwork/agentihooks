@@ -94,10 +94,9 @@ class LocalHerdrRuntime:
             retired = self.herdr.retire(agent, homes=homes)
         else:
             namespace = self.namespace()
-            pid = process.resolve(agent, namespace, self.table())
-            if pid is Unqualified.FOREIGN_NAMESPACE and process.previous_boot(
-                agent.runtime_target["process_namespace"], namespace
-            ):
+            ended_boot = process.previous_boot(agent.runtime_target.get("process_namespace", ""), namespace)
+            pid = process.resolve(agent, namespace, {} if ended_boot else self.table())
+            if pid is Unqualified.FOREIGN_NAMESPACE and ended_boot:
                 return Outcome("terminate", Status.OK, LOCAL, detail=ENDED_NAMESPACE)
             if isinstance(pid, Unqualified):
                 return Outcome("terminate", Status.REFUSED, LOCAL, pid, pid.value)

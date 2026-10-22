@@ -233,6 +233,7 @@ def test_a_local_record_from_a_previous_boot_retires_as_ended_without_signalling
     local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
     router = RuntimeRouter([local])
     agent = record(namespace=f"boot-before/{pid_namespace}")
+    monkeypatch.setattr(local, "table", lambda: pytest.fail("previous boot retirement read the current process table"))
     assert router.terminate(agent, ("/scratch/t1",)) == Outcome(
         "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
     )
