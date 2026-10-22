@@ -1,3 +1,4 @@
+import json
 from unittest.mock import Mock
 
 import pytest
@@ -24,7 +25,7 @@ def workstation(monkeypatch, cpus):
     from scripts.hive import headroom
 
     reading = {"cpus": cpus, "load5": 0.0, "available_mb": 10**6, "total_mb": 10**6, "pending": 0, "measured_at": 0}
-    monkeypatch.setattr(headroom, "measure", lambda pending, now: reading)
+    monkeypatch.setattr(headroom, "measure", lambda pending, now, previous: reading)
 
 
 @pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "dispatcher", ""])
@@ -301,7 +302,7 @@ def test_pending_local_launches_hold_the_host_line_until_the_load_shows_them(set
     fill_anton(setup)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "box")
     reading = {"cpus": 10, "load5": 6.0, "available_mb": 10**6, "total_mb": 10**6}
-    monkeypatch.setattr(headroom, "measure", lambda pending, now: reading)
+    monkeypatch.setattr(headroom, "measure", lambda pending, now, previous: reading)
     for index in range(4):
         assert fenced.spawn(setup.config, "eng", f"eng {index}", {"id": f"t{index}"}) == "placed on the workstation"
     assert admission.pending(setup.store.redis, "box") == 4
@@ -333,17 +334,23 @@ def test_the_host_line_leaves_out_the_task_itself_and_measures_without_pending(s
 
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "box")
+    published = {"cpus": 10, "load5": 1.0, "pod_cpu_usec": 7, "measured_at": lease.now_ms(setup.store)}
+    setup.store.redis.set(headroom.key("box"), json.dumps(published))
     measured = []
     reading = {"cpus": 10, "load5": 8.0, "available_mb": 10**6, "total_mb": 10**6}
-    monkeypatch.setattr(headroom, "measure", lambda pending, now: measured.append((pending, now)) or reading)
+    monkeypatch.setattr(
+        headroom, "measure", lambda pending, now, previous: measured.append((pending, now, previous)) or reading
+    )
     local_agents(setup, 4)
     setup.store.put_agent(setup.config.slug, AgentRecord("eng-self", "eng", "task"))
     assert fenced.placement_refusal("eng", {"id": "task"}) == (
         f"{HIVE_FULL}, and the local machine runs 4 of its 4 agents: cpu: five minute load 8.00 on 10 CPUs, "
         "0.5 CPU per agent, fits 0 more under the 80 percent line"
     )
-    assert [pending for pending, _ in measured] == [0] * len(measured)
-    assert all(abs(now - lease.now_ms(setup.store)) < 60_000 for _, now in measured)
+    assert [pending for pending, _, _ in measured] == [0] * len(measured)
+    assert all(abs(now - lease.now_ms(setup.store)) < 60_000 for _, now, _ in measured)
+    assert [previous for _, _, previous in measured] == [published] * len(measured) != []
 
 
 def test_a_slot_counts_once_while_its_agent_runs_and_not_after_it_leaves(setup):

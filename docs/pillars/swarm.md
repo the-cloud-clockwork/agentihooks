@@ -1617,13 +1617,13 @@ agentihooks swarm example-swarm trace-plan
 
 The command resolves the agent and claimed task from the session. Before any
 classifier call it checks each piece's follow-up text,
-`Cut from the plan of task <task id>: <what>`, against the ledger's plain words
+`Cut from the plan: <what>`, against the ledger's plain words
 rules. Its report names the verdict, kept pieces and cut pieces. If the
 classifier cuts the unrelated piece and the plan passes, the filed follow-up
 reads:
 
 ```text
-Cut from the plan of task promo-38842603017-0: Add an unrelated feature
+Cut from the plan: Add an unrelated feature
 ```
 
 Classifier scope and size judgments still apply; accepting the identifier does
@@ -2831,6 +2831,56 @@ it wakes anyone, the tick closes an event item whose follow up or question was a
 (follow up closed or flagged, question answered or out of scope), so the master never handles a decision twice.
 A task item stays until the master closes it, so a done task's proof check always reaches the master.
 
+#### Task notices when a seat changes tasks
+
+The three pull request notices addressed to an engineer in the table above follow the task when its seat
+passes to a different live agent working on another task. The notice becomes a comment by `swarm` on the
+original task, where its next claimant can read it. The new occupant receives no seat inbox item for that notice.
+This applies to merged pull requests still in `pr`, pull requests closed without merging, and red checks
+with no push; it does not reroute arbitrary messages sent with `msg send`.
+
+The tick checks ownership both when sending a notice and after sending it:
+
+| Situation | Result |
+|---|---|
+| The claimant's seat already has a different live occupant holding another task | Write the notice as a comment on the original task instead of sending a seat item |
+| An indexed notice is still open when the seat passes to a different live occupant holding another task | Copy its text onto the original task as a `swarm` comment, remove its task index entry, and close the seat item as `done` |
+| The seat is empty, or its successor holds the same task | Keep the existing seat notice for the successor |
+| The claimant is no longer running when a new notice is due | Send to the task's owning master; this item is not indexed for seat relocation |
+
+For example, an engineer receives a red checks notice for task `t17` at `eng-2@<id>`. That seat is later assigned
+to an engineer working on `t23`. On a later ledger event pass, the indexed notice moves onto `t17`; the new
+engineer continues `t23` without inheriting the request to fix `t17`. If the successor instead continues `t17`,
+the notice stays in the seat inbox.
+
+**Configuration and scope.** Routing is automatic in the running swarm tick; there is no separate setting or
+environment variable to enable it. The ten and twenty minute notice thresholds above still apply. Notices
+sent to a seat by this path are indexed with their task when sent, so relocation covers those indexed items,
+not every historical seat message. Already closed items leave the index without creating another comment.
+If the task is no longer in the ledger, the entry leaves the index and this pass leaves the seat item alone.
+
+**Inspecting a notice.** Substitute your swarm id and task id in these read commands:
+
+```bash
+agentihooks swarm <id> status --json
+agentihooks ledger --slug <id> show \
+  | jq '.tasks[] | select(.id == "t17") | {id, state, claimed_by, comments}'
+agentihooks msg inbox --of eng-2@<id>
+agentihooks msg read <message-id>
+```
+
+The task's comments contain the original notice text under author `swarm`. A relocated item's close reason
+reads `moved onto task t17; eng-2@<id> now holds another task`. `msg read` records receipt; use it only when
+taking up that item. Reading the task comment does not fix the pull request: its next claimant must still
+address the checks or finish the task as the notice requests.
+
+| Symptom | Check and action |
+|---|---|
+| No seat item exists for a pull request notice | Read the original task's comments; the seat may already have changed tasks when the notice became due |
+| A notice disappears from a reassigned seat | Read the original task comment and the item's close reason; relocation retains the notice on the task |
+| An open notice stays at a seat | Check whether the seat is empty, continues the same task, or the item was outside this indexed notice path |
+| A reassigned seat's indexed notice has not moved | Check that a tick has completed since reassignment; see [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher) before diagnosing delivery |
+
 ### Priorities clear themselves
 
 Each tick first sweeps the priorities agents raised: one whose item is done, out of scope or gone, or a task whose
@@ -3003,6 +3053,113 @@ writers above or `task set`.
   time; set `contract.after_at` or clear the field with `task set ID awaiting=`.
 - **No label appears.** Check the task's `state`: a `done` task never shows one. Otherwise set the field with
   `task set`, never by writing the ledger database.
+
+## Ledger artifacts
+
+An artifact is a file published on the ledger for the operator to review: markdown, JSON, SVG, or a PNG, JPEG,
+WebP or GIF image, at most 8 MB, with a title of at most 200 characters. The ledger stores it by content hash beside
+the ledger media and lists it in `artifacts`. An artifact is only a file the operator asked for. Test runs, logs,
+review notes and proofs go on the task proof and the pull request.
+
+Two commands publish one:
+
+| Command | What it sends |
+|---|---|
+| `agentihooks ledger --slug <slug> --as <name> artifact <path> "<title>" [--task <id>] [--request <entry id>]` | One artifact. `--task` defaults to the session's swarm task (`AGENTIHOOKS_SWARM_TASK`). `--request` names the operator's chat line or comment that asked for the file. Prints `{"published": true}`. |
+| `agentihooks ledger --slug <slug> --as <name> publish-plan <path> --phase <ids> [--title <t>] [--repo <owner/name>]` | An accepted plan, marked as a plan. It opens or reuses a GitHub issue where the repository has issues, otherwise the ledger artifact is the published plan. It records the plan, links it on each named phase, comments each phase and adds the plan's slices. Prints `{"plan_url": …, "published_to": "issue"\|"artifact", "phases": […]}`. |
+
+### Where the artifact check runs
+
+The ledger checks every artifact twice with the same rule:
+
+1. **Upload.** The file goes to `POST /api/v1/ledgers/<slug>/uploads/artifacts` with the author in
+   `X-Ledger-Agent` and the task, title and optional `request` or `plan` in `X-Artifact-Request`. A refused upload
+   answers `403` with the reason and stores nothing. The command exits with
+   `server refused the file: 403 <reason>`.
+2. **Ledger write.** The `artifact_add` op that lists the stored file. A refused op is rejected and its reason is
+   the command's exit text.
+
+An uploader that has not joined the ledger is refused before the rule runs:
+`403 agent must join this ledger before uploading`.
+
+### The acceptance rule
+
+The rule reads the author, the task the upload names, the author's ledger membership and the two marks:
+`request`, the id of an operator entry, and `plan`, which only `publish-plan` sends and which must be `true`.
+
+| Author and task | Accepted when | Otherwise |
+|---|---|---|
+| Not a ledger member | never | `join the ledger first and name a task it holds` |
+| A master seat: a `master` lane name, joined as `orchestrator`, naming task `master` | the upload is marked as a plan, or `request` names an operator entry | refused with the artifact refusal below |
+| Any author naming a task the ledger does not hold | never | `join the ledger first and name a task it holds` |
+| Any other author, with a held task or no task | the upload is marked as a plan, the task is marked artifact requested, or `request` names an operator entry | refused with the artifact refusal below |
+
+`request` counts only when it names a live entry the operator wrote in any ledger thread: a chat line, a comment
+or a note. A deleted entry or one written by an agent does not count.
+
+The artifact refusal text is:
+
+```text
+an artifact is only a file the operator asked for: mark its task as artifact requested or name his message with request, and proofs go on the task proof and the pull request
+```
+
+A master's artifact is stored with an empty task, so it lists under the ledger's artifacts rather than under a task.
+
+### A master's plan publish
+
+A plan counts as artifact requested for every author, a master seat included. A master that accepts a plan with the
+operator publishes it with `publish-plan`; the plan mark passes both checks without a task marked artifact requested
+and without an operator request. The same master's unmarked upload still needs `--request`.
+
+Before pull request #4316 the master seat's branch returned the operator request check before it reached the plan
+mark, so a master's `publish-plan` exited with `server refused the file: 403 an artifact is only a file the operator
+asked for: …` while a planner's passed. A master then had to open the plan issue by hand.
+
+### Examples
+
+A master publishes an accepted plan for phases `p4` and `p5`:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 publish-plan plan.md --phase p4,p5
+# {"plan_url": "https://github.com/<owner>/<repo>/issues/<n>", "published_to": "issue", "phases": ["p4", "p5"]}
+```
+
+A master publishes a diagram the operator asked for in chat entry `c-1a2b3c4d5e`:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 artifact flow.svg "Inbox flow" --request c-1a2b3c4d5e
+# {"published": true}
+```
+
+An engineer publishes a file for a task the operator marked artifact requested:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 task set t42 artifact=yes
+agentihooks ledger --slug rig-grade-swarm --as engineer@d44a5a-0002 artifact palette.json "Palette" --task t42
+```
+
+The same master without a plan mark or a request is refused:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 artifact audit.md "Audit summary"
+# server refused the file: 403 an artifact is only a file the operator asked for: …
+```
+
+### Troubleshooting
+
+- **`publish-plan` from a master exits with `403 an artifact is only a file the operator asked for`.** The ledger
+  server runs code from before #4316. Pull dev and restart the ledger server, then publish again; do not open the plan
+  issue by hand.
+- **`403 agent must join this ledger before uploading`.** Run `agentihooks ledger --slug <slug> --as <name> join`
+  first. A master joins as `orchestrator`; a master that joined as a plain member is judged as any other author and
+  needs a plan mark, an artifact requested task or a request.
+- **`join the ledger first and name a task it holds`** after joining. `--task` names a task id the ledger does not
+  hold. Leave `--task` off to use the session's swarm task, or name an existing task.
+- **`--request` is refused.** The entry id must belong to an entry the operator wrote and has not deleted. An agent's
+  own chat line does not count.
+- **The ledger write of `publish-plan` was refused after the issue step.** Unless a plan or phase on the ledger
+  already links that issue, the command comments that the ledger refused the publish and closes the issue. Publishing
+  the same plan again reopens it with a comment.
 
 ## Redis
 

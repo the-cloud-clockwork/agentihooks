@@ -21,6 +21,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Developer account login](account-login.md) | Claude and Codex login, managed shell tokens, OpenBao paths and key names, refresh authority and token stores |
 | [Task scope authorizations](../pillars/swarm.md#task-scope-authorizations) | Record master or operator scope, retrace a plan, interpret authorized pieces and configure enforcement |
 | [Master inbox intent grouping](../pillars/swarm.md#intent-grouping) | Settings, how a pooled item is matched to a master, token cost per item, fallbacks to round robin, Redis keys and troubleshooting |
+| [Task notices when a seat changes tasks](../pillars/swarm.md#task-notices-when-a-seat-changes-tasks) | Automatic routing to task comments, relocation of indexed seat notices, successor and master fallback rules, inspection commands and troubleshooting |
 | [Decision classifier](classifier.md) | `hooks.classifier`: typed questions to the LiteLLM decision models, failover, down cache, decision log, `classify` and `classifier stats` |
 | [Observability with Langfuse](observability-langfuse.md) | Every telemetry path and where it goes, turning Langfuse on per profile, other OTLP backends, checking a trace arrived, how the Doctor reads traces |
 | [Presentation layer architecture](presentation-layer.md) | The ledger pages, HOME and BIN as a product: constraints, today's architecture, limits, target (static pages, `/api/v1`, server-sent events, SQLite behind a repository) and the migration order |

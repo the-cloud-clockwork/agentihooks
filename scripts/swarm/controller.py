@@ -145,7 +145,10 @@ class FencedRuntime:
         running = local_slots.running(self.store, self.slug, task["id"])
         held = local_slots.held(self.store, machine, self.slug, task["id"])
         pending = max(0, admission.pending(self.store.redis, machine) - (held - running))
-        found = admission.room(headroom.measure(0, lease.now_ms(self.store)), running, pending)
+        now = lease.now_ms(self.store)
+        found = admission.room(
+            headroom.measure(0, now, previous=headroom.read(self.store.redis, machine, now)), running, pending
+        )
         local_max = running + found.room
         refused = f": {found.reason}: {found.detail}"
         chosen = overflow(waited.role, waited, held, local_max)
