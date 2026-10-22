@@ -1430,10 +1430,10 @@ def test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pin
     declared = {re.split(r"[<>=!\[]", spec)[0].lower(): spec for spec in project["optional-dependencies"]["dev"]}
     declared |= {re.split(r"[<>=!\[]", spec)[0].lower(): spec for spec in project["dependencies"]}
     specs = [declared[name] for name in sorted(PLANNER_PACKAGES)]
-    assert install[
-        "run"
-    ] == 'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system ' + " ".join(
-        f'"{spec}"' for spec in specs
+    assert (
+        install["run"]
+        == 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system '
+        + " ".join(f'"{spec}"' for spec in specs)
     )
     assert _planner_third_party() == set(PLANNER_PACKAGES.values())
 
