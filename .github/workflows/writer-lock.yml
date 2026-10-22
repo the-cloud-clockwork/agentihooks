@@ -70,7 +70,7 @@ jobs:
         shell: bash
         run: |
           python -m pytest tests/swarm_ledger/test_postgres_writer_lock.py tests/swarm_ledger/test_postgres_outbox.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/writer-lock.log"
-          grep -q ' 3 passed' "$RUNNER_TEMP/writer-lock.log" || { echo '::error::The writer lock and outbox scenarios did not run.'; exit 1; }
+          grep -q ' 4 passed' "$RUNNER_TEMP/writer-lock.log" || { echo '::error::The writer lock and outbox scenarios did not run.'; exit 1; }
 
       - name: Save the passed input key
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
