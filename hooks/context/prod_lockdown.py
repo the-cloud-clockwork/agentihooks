@@ -28,6 +28,8 @@ _MERGE_QUEUE = (
     " repository { mergeQueue(branch: $branch) { id } } } } }"
 )
 
+_ENQUEUE_READERS = frozenset({"agentihooks", "cat", "git", "grep", "rg"})
+
 _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
         re.compile(r"(ghcr\.io|docker\.io)/[^/\s]+/[^:\s]+:(latest|prod|stable)\b", re.I),
@@ -336,14 +338,15 @@ def _check_swarm_enqueue(command: str) -> None:
 
 
 def _runs_enqueue(node: Node) -> bool:
-    if node.type == "command" and b"enqueuePullRequest" in node.text:
-        program = Path(node.child_by_field_name("name").text.decode()).name
+    command = node.child_by_field_name("body") if node.type == "redirected_statement" else node
+    if command and command.type == "command" and b"enqueuePullRequest" in node.text:
+        program = Path(shlex.split(command.child_by_field_name("name").text.decode())[0]).name
         arguments = [
             child.text.decode()
-            for index, child in enumerate(node.named_children)
-            if node.field_name_for_named_child(index) == "argument"
+            for index, child in enumerate(command.named_children)
+            if command.field_name_for_named_child(index) == "argument"
         ]
-        if program == "curl" or (program == "gh" and arguments[:1] == ["api"]):
+        if program not in _ENQUEUE_READERS and (program != "gh" or "api" in arguments):
             return True
     return any(_runs_enqueue(child) for child in node.named_children)
 

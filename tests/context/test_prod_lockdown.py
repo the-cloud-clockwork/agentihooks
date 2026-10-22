@@ -275,6 +275,10 @@ _ENQUEUE = (
     [
         _ENQUEUE,
         f"git status && GH_TOKEN=$T {_ENQUEUE}",
+        _ENQUEUE.replace("gh api", "gh -R owner/repo api"),
+        _ENQUEUE.replace("gh api", "env gh api"),
+        f'bash -c "{_ENQUEUE}"',
+        "python3 - <<'EOF'\nrequests.post(url, json={'query': 'mutation { enqueuePullRequest(input: {}) { clientMutationId } }'})\nEOF",
         'gh api graphql -f query="$(cat <<\'EOF\'\nmutation { enqueuePullRequest(input: {pullRequestId: "x"}) { clientMutationId } }\nEOF\n)"',
         'curl -s https://api.github.com/graphql -d \'{"query": "mutation { enqueuePullRequest(input: {}) { clientMutationId } }"}\'',
     ],
@@ -298,6 +302,12 @@ def test_swarm_session_cannot_run_the_raw_enqueue_mutation(monkeypatch, command)
         "grep -rn enqueuePullRequest scripts/swarm",
         "gh api repos/owner/repo/pulls/12 --jq .title; grep -rn enqueuePullRequest scripts/swarm",
         "curl -s https://example.com/merge_queue.py | grep enqueuePullRequest",
+        "\\grep -n enqueuePullRequest scripts/swarm/merge_queue.py > hits.txt",
+        'gh pr comment 12 --body "queued with the swarm command, not the enqueuePullRequest api"',
+        "cat <<'EOF' > notes.md\nenqueuePullRequest writes no journal row\nEOF",
+        "git log -S enqueuePullRequest --oneline",
+        "rg -n enqueuePullRequest hooks",
+        'agentihooks swarm rig say "never call enqueuePullRequest by hand"',
     ],
 )
 def test_swarm_session_keeps_the_swarm_queue_command(monkeypatch, command):
