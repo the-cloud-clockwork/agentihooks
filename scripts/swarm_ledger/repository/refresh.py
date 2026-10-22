@@ -8,7 +8,9 @@ SCHEMA = (
 )
 RECORD = "INSERT INTO row_changes VALUES (?, ?, ?)"
 PRUNE = "DELETE FROM row_changes WHERE slug=? AND generation<=?"
-CHANGES = "SELECT generation, paths FROM row_changes WHERE slug=? AND generation>? AND generation<=? ORDER BY generation"
+CHANGES = (
+    "SELECT generation, paths FROM row_changes WHERE slug=? AND generation>? AND generation<=? ORDER BY generation"
+)
 ROOT = "[]"
 
 
