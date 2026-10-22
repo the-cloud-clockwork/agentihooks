@@ -542,41 +542,38 @@ def test_a_kind_change_succeeds_when_the_work_folder_lives_on_another_host(live,
 
 def test_an_owned_task_changes_kind_over_http_and_an_invalid_kind_changes_nothing(live, tmp_path):
     contract = {"must": "The number moved", "check": "Before and after", "judge": "Standards reader"}
-    create = {
-        "op": "task_add",
-        "id": uuid.uuid4().hex,
-        "by": "swarm",
-        "task": "t1",
-        "title": "Owned repair",
-        "lane": "eng",
-        "phase": "p1",
-        "workspace": str(tmp_path / "elsewhere" / "t1"),
-        "contract": contract,
-    }
-    claim = {
-        "op": "task_update",
-        "id": uuid.uuid4().hex,
-        "by": "swarm",
-        "item": "tasks/t1",
-        "fields": {"state": "claimed", "claimed_by": "eng-owner"},
-    }
-    note = {"op": "add", "id": uuid.uuid4().hex, "by": "eng-owner", "thread": "tasks/t1/comments", "text": "Work"}
-    for operation in (create, claim, note):
-        assert request(live, "POST", "operations", {"ops": [operation], "guards": {}})[0] == 200
+
+    def post(operation):
+        operation = {"id": uuid.uuid4().hex, "by": "swarm", **operation}
+        target = schemas.target(operation)
+        guards = {} if operation["op"] in schemas.UNGUARDED else {target: request(live, "GET", target)[1]["revision"]}
+        return request(live, "POST", "operations", {"ops": [operation], "guards": guards})
+
+    created = post(
+        {
+            "op": "task_add",
+            "task": "t1",
+            "title": "Owned repair",
+            "lane": "eng",
+            "phase": "p1",
+            "workspace": str(tmp_path / "elsewhere" / "t1"),
+            "contract": contract,
+        }
+    )
+    assert created[0] == 200
+    claim = {"state": "claimed", "claimed_by": "eng-owner"}
+    assert post({"op": "task_update", "item": "tasks/t1", "fields": claim})[0] == 200
+    assert post({"op": "add", "by": "eng-owner", "thread": "tasks/t1/comments", "text": "Work"})[0] == 200
     comments = request(live, "GET", "tasks/t1/comments")[1]["data"]
 
-    def change(kind):
-        operation = {"op": "task_update", "id": uuid.uuid4().hex, "by": "swarm", "item": "tasks/t1"}
-        return request(live, "POST", "operations", {"ops": [{**operation, "fields": {"kind": kind}}], "guards": {}})
-
-    assert change("tune")[0] == 200
+    assert post({"op": "task_update", "item": "tasks/t1", "fields": {"kind": "tune"}})[0] == 200
     before = request(live, "GET", "tasks/t1")[1]
     task = before["data"]
     assert (task["id"], task["kind"], task["state"], task["claimed_by"]) == ("t1", "tune", "claimed", "eng-owner")
     assert task["contract"] == contract
     assert request(live, "GET", "tasks/t1/comments")[1]["data"] == comments != []
     assert not (tmp_path / "elsewhere").exists()
-    status, error = change("bogus")
+    status, error = post({"op": "task_update", "item": "tasks/t1", "fields": {"kind": "bogus"}})
     assert status == 400
     assert error["error"]["code"] == "schema_invalid"
     assert "kind must be one of" in error["error"]["message"]
