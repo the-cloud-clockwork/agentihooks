@@ -1246,7 +1246,14 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         ready, refused = profile_first.placeable(slug, config, store, runtime, lane, ready, max(cap - busy, 0))
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
-    return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])], waits
+    queue.sort(
+        key=lambda entry: (
+            dispatched(entry[2])[0] if dispatched else ledger_rank.order(entry[2]),
+            bool(store.launch_failure(slug, entry[2]["id"])),
+            entry[0],
+        )
+    )
+    return [(lane, task) for _, lane, task in queue], waits
 
 
 def _room_wait(runtime, lane, task):
