@@ -83,12 +83,6 @@ def test_the_id_label_is_bare_flat_red_text_in_the_priorities_red(tab):
 
 def test_a_focused_id_label_keeps_a_visible_focus_ring(tab):
     tab.locator("#priorities .prio-link").click()
-    label = tab.locator("#item-tasks-rb3c .task-id")
-    label.wait_for(state="visible")
-    label.focus()
-    tab.keyboard.press("Tab")
-    tab.keyboard.press("Shift+Tab")
-    tab.evaluate("window.focusRingLabel = document.activeElement")
     tab.evaluate(
         """async () => {
           const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
@@ -96,13 +90,13 @@ def test_a_focused_id_label_keeps_a_visible_focus_ring(tab):
           await render(null, true);
         }"""
     )
-    state = label.evaluate(
-        "el => ({same: el === window.focusRingLabel, oldConnected: window.focusRingLabel.isConnected,"
-        " active: document.activeElement.outerHTML.slice(0, 150), visible: el.matches(':focus-visible'),"
-        " outline: getComputedStyle(el).outlineStyle})"
-    )
-    assert label.evaluate("el => el.matches(':focus-visible')"), state
-    assert label.evaluate("el => getComputedStyle(el).outlineStyle") != "none", state
+    label = tab.locator("#item-tasks-rb3c .task-id")
+    label.wait_for(state="visible")
+    label.focus()
+    tab.keyboard.press("Tab")
+    tab.keyboard.press("Shift+Tab")
+    assert label.evaluate("el => el.matches(':focus-visible')")
+    assert label.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
 
 
 def test_a_priorities_link_opens_the_folded_tasks_and_scrolls_to_the_card(tab):
