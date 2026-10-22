@@ -1489,7 +1489,6 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
-        f"{skipped} && hashFiles('.github/actions/nats-server/action.yml') != ''",
     )
     for job in (stats, mutation):
         assert all(step["if"] == skipped or step["if"] in unguarded for step in job["steps"])
@@ -1500,16 +1499,62 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
     assert steps["Upload complete mutation evidence"]["if"] == f"always() && {skipped}"
 
 
-def test_jobs_on_the_pull_request_head_skip_the_nats_action_when_that_head_predates_it():
+def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revision():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     head = "${{ github.event.pull_request.head.sha }}"
-    nats = [
-        (name, step)
+    local = {
+        name: [step for step in job["steps"] if step.get("uses", "").startswith("./.")]
         for name, job in jobs.items()
-        if any(s.get("with", {}).get("ref") == head for s in job.get("steps", []))
-        for step in job["steps"]
-        if step.get("uses") == "./.github/actions/nats-server"
-    ]
-    assert {name for name, _ in nats} == {"mutation-stats", "mutation"}
-    for _, step in nats:
-        assert step["if"].endswith("&& hashFiles('.github/actions/nats-server/action.yml') != ''")
+        if name.startswith("mutation") and any(s.get("with", {}).get("ref") == head for s in job.get("steps", []))
+    }
+    assert {"mutation-stats", "mutation"} <= set(local)
+    assert all(not steps for name, steps in local.items() if name not in {"mutation-stats", "mutation"})
+    for name in ("mutation-stats", "mutation"):
+        steps = jobs[name]["steps"]
+        names = [step.get("name") for step in steps]
+        take = steps[names.index("Take the local actions from the workflow revision")]
+        assert take["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert take["run"].splitlines() == [
+            "mkdir -p .workflow-revision",
+            'git archive "$GITHUB_SHA" .github/actions | tar -x -C .workflow-revision',
+        ]
+        assert names.index("Take the helper scripts from the workflow revision") < steps.index(take)
+        assert {step["uses"] for step in local[name]} == {
+            "./.workflow-revision/.github/actions/nats-server",
+            "./.workflow-revision/.github/actions/browser-cache",
+        }
+        assert all(steps.index(take) < steps.index(step) for step in local[name])
+        assert all("hashFiles" not in step["if"] for step in local[name])
+
+
+def test_a_head_that_predates_the_local_actions_gets_them_from_the_workflow_revision(tmp_path):
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t"}
+    env["GIT_COMMITTER_EMAIL"] = "t@t"
+
+    def git(*args):
+        command = ["git", "-c", "commit.gpgsign=false", *args]
+        return subprocess.run(command, cwd=tmp_path, env=env, check=True, capture_output=True, text=True).stdout
+
+    git("init", "-q", "-b", "dev")
+    (tmp_path / "README").write_text("old\n")
+    git("add", ".")
+    git("commit", "-qm", "head without the actions")
+    head = git("rev-parse", "HEAD").strip()
+    for action in ("nats-server", "browser-cache"):
+        (tmp_path / ".github/actions" / action).mkdir(parents=True)
+        (tmp_path / ".github/actions" / action / "action.yml").write_text(f"name: {action}\n")
+    git("add", ".")
+    git("commit", "-qm", "workflow revision")
+    workflow_sha = git("rev-parse", "HEAD").strip()
+    git("checkout", "-q", "--detach", head)
+    assert not (tmp_path / ".github/actions").exists()
+
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation-stats"]["steps"]
+    take = next(s for s in steps if s.get("name") == "Take the local actions from the workflow revision")
+    run_env = {**env, "GITHUB_SHA": workflow_sha}
+    subprocess.run(["bash", "-euo", "pipefail", "-c", take["run"]], cwd=tmp_path, env=run_env, check=True)
+
+    for step in steps:
+        if step.get("uses", "").startswith("./."):
+            assert (tmp_path / step["uses"] / "action.yml").read_text() == f"name: {Path(step['uses']).name}\n"
+    assert git("status", "--porcelain", "--", ".github") == ""
