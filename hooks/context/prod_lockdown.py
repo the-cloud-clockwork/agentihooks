@@ -28,7 +28,7 @@ _MERGE_QUEUE = (
     " repository { mergeQueue(branch: $branch) { id } } } } }"
 )
 
-_ENQUEUE_READERS = frozenset({"agentihooks", "cat", "git", "grep", "rg"})
+_ENQUEUE_READERS = frozenset({"agentihooks", "cat", "grep"})
 
 _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
