@@ -239,6 +239,7 @@ def test_measure_is_none_on_an_unreadable_pod_limit(proc, cgroup, files):
     [
         ({"pod_cpu_usec": 6_000_000, "measured_at": 5_000}, {"pod_load": 0.2}),
         ({"pod_cpu_usec": 9_000_000, "measured_at": 5_000}, {"pod_load": 0.0}),
+        ({"pod_cpu_usec": 8_999_000, "measured_at": 19_999}, {"pod_load": 1.0}),
         (None, {}),
         ({"measured_at": 5_000}, {}),
         ({"pod_cpu_usec": 9_000_001, "measured_at": 5_000}, {}),
