@@ -173,6 +173,47 @@ def test_only_a_local_holder_whose_process_is_gone_is_dead(monkeypatch, host, lo
     )
 
 
+def test_the_machine_names_its_id_hostname_and_boot(monkeypatch):
+    files = {"/etc/machine-id": "m", "/proc/sys/kernel/random/boot_id": "b"}
+    monkeypatch.setattr(controller, "_read", lambda path: files.get(path, ""))
+    monkeypatch.setattr(controller.socket, "gethostname", lambda: "ws")
+    assert controller._machine() == {"machine": "m:ws", "boot": "b"}
+    files["/etc/machine-id"] = ""
+    assert controller._machine() == {}
+    files.update({"/etc/machine-id": "m", "/proc/sys/kernel/random/boot_id": ""})
+    assert controller._machine() == {}
+
+
+@pytest.mark.parametrize(
+    ("lock", "dead"),
+    [
+        ({"machine": "m:ws", "boot": "old"}, True),
+        ({"machine": "m:ws", "boot": "now"}, False),
+        ({"machine": "m:pod", "boot": "old"}, False),
+        ({"machine": "m:ws"}, False),
+        ({"boot": "old"}, False),
+    ],
+)
+def test_a_holder_from_an_earlier_boot_of_this_machine_is_dead(monkeypatch, lock, dead):
+    monkeypatch.setattr(controller, "_machine", lambda: {"machine": "m:ws", "boot": "now"})
+    monkeypatch.setattr(controller, "_host", lambda: "elsewhere")
+    monkeypatch.setattr(controller, "_gone", lambda pid, start: pytest.fail("a pid of another boot was probed"))
+    assert controller._dead(json.dumps({"epoch": 1, "token": "t", "host": "h", "pid": 7, "start": "s", **lock})) is dead
+
+
+def test_a_holder_records_its_machine_and_boot(monkeypatch):
+    monkeypatch.setattr(controller, "_host", lambda: "h")
+    monkeypatch.setattr(controller, "_stat", lambda pid: [str(n) for n in range(30)])
+    monkeypatch.setattr(controller, "_machine", lambda: {"machine": "m:ws", "boot": "now"})
+    assert controller._holder() == {
+        "host": "h",
+        "pid": controller.os.getpid(),
+        "start": "19",
+        "machine": "m:ws",
+        "boot": "now",
+    }
+
+
 def test_read_strips_a_file_and_reads_a_missing_one_as_empty(tmp_path):
     path = tmp_path / "boot_id"
     path.write_text("abc\n")

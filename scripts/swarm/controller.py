@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import signal
+import socket
 import sys
 import uuid
 from collections.abc import Mapping
@@ -269,9 +270,17 @@ def _stat(pid) -> list[str]:
     return _read(f"/proc/{pid}/stat").rsplit(")", 1)[-1].split()
 
 
+def _machine() -> dict:
+    """The machine and its boot; a holder recorded on this machine in an earlier boot cannot still be running.
+
+    The hostname joins the machine id because pods built from one image share their machine id."""
+    machine, boot = _read("/etc/machine-id"), _read("/proc/sys/kernel/random/boot_id")
+    return {"machine": f"{machine}:{socket.gethostname()}", "boot": boot} if machine and boot else {}
+
+
 def _holder() -> dict:
     host, fields = _host(), _stat(os.getpid())
-    return {"host": host, "pid": os.getpid(), "start": fields[19]} if host and len(fields) > 19 else {}
+    return {"host": host, "pid": os.getpid(), "start": fields[19], **_machine()} if host and len(fields) > 19 else {}
 
 
 def _gone(pid: int, start: str) -> bool:
@@ -287,6 +296,9 @@ def _gone(pid: int, start: str) -> bool:
 
 def _dead(raw: str) -> bool:
     held = json.loads(raw) if raw.startswith("{") else {}
+    machine = _machine()
+    if machine and held.get("machine") == machine["machine"] and held.get("boot") not in (None, machine["boot"]):
+        return True
     host = _host()
     if not host or held.get("host") != host or not {"pid", "start"} <= held.keys():
         return False
