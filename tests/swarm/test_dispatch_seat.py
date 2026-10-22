@@ -448,6 +448,30 @@ def test_a_seat_placed_on_a_hive_spends_no_workstation_host_room():
     assert store.redis.zrange(tick_module.HOST_SPENDS, 0, -1) == []
 
 
+def test_a_seat_failing_on_a_hive_releases_its_hive_room_and_launch_slot():
+    from dataclasses import replace
+
+    from scripts.hive import admission
+    from scripts.routing.reservation import LaunchSlots
+    from scripts.swarm.tick import SpawnError
+
+    class FailsOnHive(FakeRuntime):
+        def spawn(self, config, lane, name, task):
+            record = next(a for a in store.agents(SLUG) if a.name == name)
+            hive = replace(record, hive="remote", runtime_target={"host_id": "remote"}, state="launching")
+            started = store.start_execution(SLUG, hive, "")
+            assert slots.reserve("claude:acct", started.execution_id, 6, 300_000)
+            assert admission.reserve(store.redis, "remote", f"{SLUG}/{name}", 3) == (True, 0)
+            raise SpawnError("hive launch failed: ambiguous", "ambiguous")
+
+    store, runtime = swarm(), FailsOnHive()
+    slots = LaunchSlots(store.redis)
+    with pytest.raises(seat_spawn.SeatFailed):
+        seat_spawn.place(SLUG, store.config(SLUG), store, runtime, dispatch_seat.LANE, NOW, lambda r: {"id": r.task})
+    assert admission.pending(store.redis, "remote") == 0
+    assert slots.counts() == {}
+
+
 def crew(found, members=(), joined=()):
     return {**found, "_meta": {"members": {name: {"role": "member"} for name in members}, "join_history": dict(joined)}}
 
