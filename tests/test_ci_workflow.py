@@ -1489,6 +1489,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
+        f"{skipped} && hashFiles('.github/actions/nats-server/action.yml') != ''",
     )
     for job in (stats, mutation):
         assert all(step["if"] == skipped or step["if"] in unguarded for step in job["steps"])
@@ -1497,3 +1498,18 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
     assert steps["Mutate dispatched Python files"]["if"] == f"github.event_name == 'workflow_dispatch' && {skipped}"
     assert "Download the reused preflight report" not in steps
     assert steps["Upload complete mutation evidence"]["if"] == f"always() && {skipped}"
+
+
+def test_jobs_on_the_pull_request_head_skip_the_nats_action_when_that_head_predates_it():
+    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    head = "${{ github.event.pull_request.head.sha }}"
+    nats = [
+        (name, step)
+        for name, job in jobs.items()
+        if any(s.get("with", {}).get("ref") == head for s in job.get("steps", []))
+        for step in job["steps"]
+        if step.get("uses") == "./.github/actions/nats-server"
+    ]
+    assert {name for name, _ in nats} == {"mutation-stats", "mutation"}
+    for _, step in nats:
+        assert step["if"].endswith("&& hashFiles('.github/actions/nats-server/action.yml') != ''")

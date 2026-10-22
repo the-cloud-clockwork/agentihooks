@@ -55,8 +55,10 @@ def admit_legacy(store: RedisStore, slug: str, agent: AgentRecord, runtime: Runt
         pid = agent.profile_decision.get("validation", {}).get("pid")
         target = process.launch_target(pid, process.local_namespace(), processes())
         previous = store.execution_occupants(slug).get(agent.seat)
+        from scripts.swarm.commands import hive_id
+
         return store.start_execution(
-            slug, replace(agent, runtime_target=target), previous.execution_id if previous else ""
+            slug, replace(agent, hive=hive_id(), runtime_target=target), previous.execution_id if previous else ""
         )
     except Exception as exc:
         runtime.retire(agent)

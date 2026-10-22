@@ -64,10 +64,17 @@ def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iter
 
 
 async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    transient = (RedisConnectionError, RedisTimeoutError)
     stopped = stop if stop is not None else _on_signals()
     with machine_lock("runner"):
         while not stopped.is_set():
-            await asyncio.to_thread(scheduler.run_due)
+            try:
+                await asyncio.to_thread(scheduler.run_due)
+            except transient:
+                print("scheduler pass skipped: Redis did not answer", file=sys.stderr)
             try:
                 await asyncio.wait_for(stopped.wait(), timeout=1)
             except TimeoutError:
