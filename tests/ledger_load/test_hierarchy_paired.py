@@ -160,6 +160,7 @@ def test_redis_starts_from_the_image_and_fetches_packages_only_when_absent(tmp_p
         )
         lines = calls.read_text().splitlines()
         assert any(line.startswith("sudo apt-get install") for line in lines) is not baked, (name, lines)
+        assert ("redis-server --version" in lines) is baked, (name, lines)
         assert lines[-1] == "redis-server --port 6379 --save  --appendonly no --daemonize yes", (name, lines)
 
 
