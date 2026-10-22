@@ -510,3 +510,26 @@ def test_the_rollout_tail_holds_a_whole_exec_program(monkeypatch, tree, tmp_path
     rollout.write_bytes(head + program + b" " * (rest - 1) + b"\n")
     call = codex_call(monkeypatch, rollout, "gh pr ready 1", tree)
     assert call.tool_input["workdir"] == str(work)
+
+
+@pytest.mark.parametrize("unpushed_command", [False, True])
+def test_ready_honors_json_quoted_exec_fields(monkeypatch, tree, tmp_path, unpushed_command):
+    work = tmp_path / "command"
+    git(tree, "worktree", "add", "--detach", str(work), "HEAD")
+    changed = work if unpushed_command else tree
+    (changed / "a.txt").write_text("unpublished\n")
+    git(changed, "commit", "-q", "-am", "unpublished")
+    command = "gh pr ready 1"
+    program = "await tools.exec_command(" + json.dumps({"cmd": command, "workdir": str(work)}) + ");"
+    rollout = codex_rollout(tmp_path, program)
+    decision = gate(target="codex").decide(codex_call(monkeypatch, rollout, command, tree), ME, state(tmp_path))
+    assert decision.allowed is not unpushed_command, decision.reason
+    if unpushed_command:
+        assert f"Checked worktree: {work}" in decision.reason
+
+
+def test_ready_refusal_names_the_shell_checkout(tree, tmp_path):
+    (tree / "a.txt").write_text("unpublished\n")
+    decision = gate(target="codex").decide(bash(f"cd {tree} && gh pr ready 1", tmp_path), ME, state(tmp_path))
+    assert not decision.allowed
+    assert f"Checked worktree: {tree}" in decision.reason
