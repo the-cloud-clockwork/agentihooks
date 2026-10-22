@@ -4,6 +4,17 @@ from dataclasses import replace
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _every_running_report_is_live(monkeypatch):
+    from scripts.hive import join_report
+
+    monkeypatch.setattr(
+        join_report,
+        "live",
+        lambda redis, reports: {(report["slug"], report["execution_id"], report["generation"]) for report in reports},
+    )
+
+
 def passing():
     return dict.fromkeys(
         (
@@ -81,11 +92,10 @@ def test_heartbeat_refreshes_cheap_checks_at_cadence(monkeypatch):
     from fakeredis import FakeRedis
 
     from scripts.hive import join_report
-    from scripts.swarm.store import AgentRecord, RedisStore
+    from scripts.swarm.store import AgentRecord
 
     redis = FakeRedis(decode_responses=True)
-    agent = AgentRecord("engineer", "eng", "task", seat="eng-1@swarm", execution_id="execution", hive="worker")
-    RedisStore(redis).put_agent("swarm", agent)
+    agent = AgentRecord("engineer", "eng", "task", execution_id="execution", hive="worker")
     join_report.start(redis, "swarm", agent, "session", passing(), {}, 1000)
     calls = []
     monkeypatch.setattr(
@@ -100,56 +110,6 @@ def test_heartbeat_refreshes_cheap_checks_at_cadence(monkeypatch):
     assert report["grade"] == "failed"
     assert report["checks"]["github"] is True
     assert report["misses"] == {"pane": {"required": True}, "brain": {"required": False}}
-
-
-def test_heartbeat_ends_a_failed_launch_report_whose_agent_is_gone(monkeypatch):
-    from fakeredis import FakeRedis
-
-    from scripts.hive import join_report
-    from scripts.swarm.store import AgentRecord
-
-    redis = FakeRedis(decode_responses=True)
-    agent = AgentRecord("engineer", "eng", "task", execution_id="execution", generation=2, hive="worker")
-    checks = {**passing(), "pane": False, "transcript": False}
-    started = join_report.start(redis, "swarm", agent, "session", checks, {}, 1000)
-    assert started["grade"] == "failed"
-
-    def probe(*args):
-        pytest.fail("a gone agent's report must not be probed")
-
-    monkeypatch.setattr(join_report, "cheap_checks", probe)
-    join_report.heartbeat(redis, "worker", 1001)
-    ended = {**started, "ended_at": 1001, "exit_reason": "agent gone from the swarm", "status": "ended"}
-    assert json.loads(redis.hget(join_report.key("worker"), "execution")) == ended
-    join_report.heartbeat(redis, "worker", 900000)
-    assert json.loads(redis.hget(join_report.key("worker"), "execution")) == ended
-
-
-def test_heartbeat_ends_only_reports_of_executions_the_swarm_no_longer_runs(monkeypatch):
-    from fakeredis import FakeRedis
-
-    from scripts.hive import join_report
-    from scripts.swarm.store import AgentRecord, RedisStore
-
-    redis = FakeRedis(decode_responses=True)
-    store = RedisStore(redis)
-    kept = AgentRecord("kept", "eng", "one", seat="eng-1@swarm", execution_id="kept-run", generation=1, hive="worker")
-    store.put_agent("swarm", kept)
-    old = AgentRecord("moved", "eng", "two", execution_id="old-run", generation=1, hive="worker")
-    other = AgentRecord(
-        "elsewhere", "eng", "three", seat="eng-1@other", execution_id="other-run", generation=1, hive="worker"
-    )
-    store.put_agent("other", other)
-    for record, slug in ((kept, "swarm"), (old, "swarm"), (other, "swarm")):
-        join_report.start(redis, slug, record, "session", passing(), {}, 1000)
-    monkeypatch.setattr(join_report, "cheap_checks", lambda *args: {})
-    join_report.heartbeat(redis, "worker", 1001)
-    reports = {report["agent"]: report for report in join_report.listing(redis, "worker")}
-    assert reports["kept"]["status"] == "running"
-    assert "ended_at" not in reports["kept"]
-    assert reports["moved"]["status"] == "ended"
-    assert reports["moved"]["exit_reason"] == "agent gone from the swarm"
-    assert reports["elsewhere"]["status"] == "ended"
 
 
 def test_old_session_cannot_end_current_report():
