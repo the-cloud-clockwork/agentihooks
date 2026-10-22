@@ -259,7 +259,7 @@ def _checkout_forms(preflight: dict) -> list[dict]:
     ):
         form = deepcopy(preflight)
         steps = ((form.get("jobs") or {}).get("grade") or {}).get("steps") or [{}]
-        settings = steps[0].setdefault("with", {})
+        settings = steps[0].get("with", {})
         for key in SHALLOW_PREFLIGHT_CHECKOUT:
             settings.pop(key, None)
         settings.update(checkout)
