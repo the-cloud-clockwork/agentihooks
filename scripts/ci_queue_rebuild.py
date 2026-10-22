@@ -19,7 +19,7 @@ QUERY = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
 } } }"""
 UNSEEN = (
     "no entry ahead was enqueued and this pull request was not removed while the group ran; "
-    "a removal ahead, a base push or a ruleset change is not visible in queue entries"
+    "a removal ahead with no queue run at the old parent, a base push or a ruleset change is not visible in queue entries"
 )
 CORRELATED = (
     "the queue entry was enqueued ahead of this pull request while the cancelled group ran; "
@@ -44,6 +44,14 @@ def base_pull(repo: str, parent: str | None, run) -> str | None:
     runs = merge_queue.rest(f"repos/{repo}/actions/runs?event=merge_group&head_sha={parent}", run)["workflow_runs"]
     found = next((m for r in runs if (m := QUEUE_BRANCH.match(r["head_branch"]))), None)
     return found and f"https://github.com/{repo}/pull/{found[1]}"
+
+
+def base_removals(repo: str, parent: str | None, run) -> dict | None:
+    try:
+        ahead = base_pull(repo, parent, run)
+        return ahead and {"pull": ahead, "events": timeline(ahead, run)}
+    except SwarmError:
+        return None
 
 
 def cause(
@@ -109,9 +117,7 @@ def record(observed: str, env, run, now: str | None = None) -> dict:
         groups = journal.groups() or []
         if journal.gaps:
             raise SwarmError(journal.gaps[0])
-        ahead = base_pull(repo, old_parent, run)
-        base = ahead and {"pull": ahead, "events": timeline(ahead, run)}
-        linked = cause(pull, started, now, groups, timeline(pull, run), base)
+        linked = cause(pull, started, now, groups, timeline(pull, run), base_removals(repo, old_parent, run))
     except (SwarmError, KeyError, TypeError) as exc:
         linked = {"action": "unknown", "gap": f"queue unreadable: {exc}"}
     own = next((g for g in groups if g["pull"] == pull), {})

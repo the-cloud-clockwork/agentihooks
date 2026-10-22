@@ -405,6 +405,13 @@ def test_an_old_parent_on_the_base_branch_has_no_pull_request_ahead():
     assert not [c for c in gh.calls if c[2] == "graphql" and f"url={PULL}4917" in c]
 
 
+@pytest.mark.parametrize("fail", ["head_sha=oldparent", f"url={PULL}4917"])
+def test_an_unreadable_base_ref_pull_request_keeps_this_pull_requests_own_cause(fail):
+    runs = [{"head_branch": "gh-readonly-queue/dev/pr-4917-a4788b6d"}]
+    record = rebuild.record("", ENV, Gh(fail=fail, runs=runs, ahead=[removed("2026-10-16T01:12:00Z")]), now=UNTIL)
+    assert record["cause"]["gap"] == rebuild.CORRELATED
+
+
 def test_the_summary_names_the_removal_ahead():
     found = {"action": "removed_ahead", "pull": PULL + "4917", "actor": "bot", "reason": "FAILED_CHECKS", "at": "t"}
     assert (
