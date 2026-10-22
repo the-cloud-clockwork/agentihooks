@@ -2831,6 +2831,56 @@ it wakes anyone, the tick closes an event item whose follow up or question was a
 (follow up closed or flagged, question answered or out of scope), so the master never handles a decision twice.
 A task item stays until the master closes it, so a done task's proof check always reaches the master.
 
+#### Task notices when a seat changes tasks
+
+The three pull request notices addressed to an engineer in the table above follow the task when its seat
+passes to a different live agent working on another task. The notice becomes a comment by `swarm` on the
+original task, where its next claimant can read it. The new occupant receives no seat inbox item for that notice.
+This applies to merged pull requests still in `pr`, pull requests closed without merging, and red checks
+with no push; it does not reroute arbitrary messages sent with `msg send`.
+
+The tick checks ownership both when sending a notice and after sending it:
+
+| Situation | Result |
+|---|---|
+| The claimant's seat already has a different live occupant holding another task | Write the notice as a comment on the original task instead of sending a seat item |
+| An indexed notice is still open when the seat passes to a different live occupant holding another task | Copy its text onto the original task as a `swarm` comment, remove its task index entry, and close the seat item as `done` |
+| The seat is empty, or its successor holds the same task | Keep the existing seat notice for the successor |
+| The claimant is no longer running when a new notice is due | Send to the task's owning master; this item is not indexed for seat relocation |
+
+For example, an engineer receives a red checks notice for task `t17` at `eng-2@<id>`. That seat is later assigned
+to an engineer working on `t23`. On a later ledger event pass, the indexed notice moves onto `t17`; the new
+engineer continues `t23` without inheriting the request to fix `t17`. If the successor instead continues `t17`,
+the notice stays in the seat inbox.
+
+**Configuration and scope.** Routing is automatic in the running swarm tick; there is no separate setting or
+environment variable to enable it. The ten and twenty minute notice thresholds above still apply. Notices
+sent to a seat by this path are indexed with their task when sent, so relocation covers those indexed items,
+not every historical seat message. Already closed items leave the index without creating another comment.
+If the task is no longer in the ledger, the entry leaves the index and this pass leaves the seat item alone.
+
+**Inspecting a notice.** Substitute your swarm id and task id in these read commands:
+
+```bash
+agentihooks swarm <id> status --json
+agentihooks ledger --slug <id> show \
+  | jq '.tasks[] | select(.id == "t17") | {id, state, claimed_by, comments}'
+agentihooks msg inbox --of eng-2@<id>
+agentihooks msg read <message-id>
+```
+
+The task's comments contain the original notice text under author `swarm`. A relocated item's close reason
+reads `moved onto task t17; eng-2@<id> now holds another task`. `msg read` records receipt; use it only when
+taking up that item. Reading the task comment does not fix the pull request: its next claimant must still
+address the checks or finish the task as the notice requests.
+
+| Symptom | Check and action |
+|---|---|
+| No seat item exists for a pull request notice | Read the original task's comments; the seat may already have changed tasks when the notice became due |
+| A notice disappears from a reassigned seat | Read the original task comment and the item's close reason; relocation retains the notice on the task |
+| An open notice stays at a seat | Check whether the seat is empty, continues the same task, or the item was outside this indexed notice path |
+| A reassigned seat's indexed notice has not moved | Check that a tick has completed since reassignment; see [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher) before diagnosing delivery |
+
 ### Priorities clear themselves
 
 Each tick first sweeps the priorities agents raised: one whose item is done, out of scope or gone, or a task whose
