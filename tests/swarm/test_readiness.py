@@ -154,6 +154,19 @@ def test_a_new_claim_generation_is_offered_again(bus):
     assert queued(bus, "eng", reopened) == ["a"]
 
 
+def test_an_unfrozen_task_is_offered_again_once_the_dedupe_window_from_its_first_offer_passes(bus, clock):
+    found = doc([task("a")])
+    readiness.publish(bus, snapshot(found), NOW)
+    frozen = snapshot(doc([task("a")], freezes=[{"verb": "freeze", "target": "tasks/a"}]))
+    queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
+    assert readiness.take(queue, frozen, 0) is None
+    clock.now += BusConfig().dedupe_window_ms - 1
+    assert readiness.publish(bus, snapshot(found), clock.now) == []
+    clock.now += 1
+    assert readiness.publish(bus, snapshot(found), clock.now) == ["ready:sw:a:0"]
+    assert queued(bus, "eng", snapshot(found)) == ["a"]
+
+
 def test_publish_uses_the_given_queue_policy(bus):
     policy = QueuePolicy(max_deliver=2)
     readiness.publish(bus, snapshot(doc([task("a")])), NOW, policy)
