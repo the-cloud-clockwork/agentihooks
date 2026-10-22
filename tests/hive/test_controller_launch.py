@@ -1006,12 +1006,12 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
 def test_a_saved_codex_task_with_no_codex_placement_launches_on_claude(setup):
     from scripts.swarm.capacity import Account
 
-    saved = {"profile": "engineer", "harness": "codex", "account": "codex-account"}
-    setup.herdr._quota_accounts.append(Account("claude", "codex-account", "room", 0, 80, 80, 6))
+    saved = {"profile": "engineer", "harness": "codex", "account": "a-codex-account"}
+    setup.herdr._quota_accounts.append(Account("claude", "a-codex-account", "room", 0, 80, 80, 6))
     setup.herdr.planned_account.return_value = "account"
     write_hive(
         setup,
-        slots=[*setup.hive["slots"], {"harness": "claude", "account": "codex-account", "kind": "subscription"}],
+        slots=[*setup.hive["slots"], {"harness": "claude", "account": "a-codex-account", "kind": "subscription"}],
     )
     request = request_for(setup)
     request = replace(request, task={**request.task, "launch_assignment": saved})
