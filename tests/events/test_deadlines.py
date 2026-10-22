@@ -70,3 +70,49 @@ def test_shared_contract_refuses_unknown_kinds():
     with pytest.raises(ValueError) as error:
         deadlines.schedule(source(), "unknown", 1200)
     assert str(error.value) == "unknown deadline kind 'unknown'"
+
+
+@pytest.mark.parametrize(
+    ("changes", "data", "message"),
+    [
+        ({"type": "execution.changed"}, None, "expected a deadline request"),
+        ({"entity": "task"}, None, "expected a deadline request"),
+        ({}, {}, "deadline request fields differ"),
+        ({}, {"extra": True}, "deadline request fields differ"),
+        ({}, {"kind": "unknown"}, "unknown deadline kind 'unknown'"),
+        ({}, {"entity": ""}, "deadline target must have an entity and key"),
+        ({}, {"key": ""}, "deadline target must have an entity and key"),
+        ({}, {"entity": 1}, "deadline target must have an entity and key"),
+        ({}, {"key": 1}, "deadline target must have an entity and key"),
+        ({"key": "wrong"}, None, "deadline key differs from its target"),
+        ({}, {"deadline_ms": -1}, "deadline must be a non negative integer"),
+        ({"type": "deadline.cancelled"}, None, "cancelled deadline must be null"),
+    ],
+)
+def test_wire_requests_are_validated(changes, data, message):
+    from dataclasses import replace
+
+    from scripts.events import deadlines
+
+    request = deadlines.schedule(source(), "idle", 1200)
+    deadlines.validate(request)
+    deadlines.validate(deadlines.cancel(source(2), "idle"))
+    values = request.data if data is None else {**request.data, **data} if data else {}
+    with pytest.raises(ValueError) as error:
+        deadlines.validate(replace(request, **changes, data=values))
+    assert str(error.value) == message
+
+
+def test_zero_deadlines_and_target_identities_are_preserved():
+    from dataclasses import replace
+
+    from scripts.events import deadlines
+
+    event = source()
+    request = deadlines.schedule(event, "idle", 0)
+    deadlines.validate(request)
+    assert deadlines.expired(request).time == 0
+    assert request.key != deadlines.schedule(replace(event, swarm="other"), "idle", 0).key
+    assert request.key != deadlines.schedule(replace(event, entity="claim"), "idle", 0).key
+    assert request.key != deadlines.schedule(replace(event, key="other"), "idle", 0).key
+    assert request.id != deadlines.cancel(event, "idle").id

@@ -77,7 +77,7 @@ class HubRunner:
                 outcomes.append("standby")
                 continue
             outcomes.append(self._deliver(reactor, delivery))
-        if reactor.poll is not None and len(outcomes) < batch:
+        if reactor.poll is not None:
             try:
                 reactor.poll(held.acquire if held is not None else lambda: True)
             except Exception:

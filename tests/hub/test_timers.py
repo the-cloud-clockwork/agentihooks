@@ -162,3 +162,159 @@ def test_expiry_events_do_not_reschedule_themselves():
     assert replace(request, type="deadline.expired") != request
     timers.fire()
     assert len(bus.events.consumer("expiry", "swarm.*.deadline.expired").fetch(10, 0)) == 1
+
+
+def test_hub_command_registers_and_fires_the_default_timer(monkeypatch):
+    from scripts.events import deadlines
+
+    bus = open_bus(BusConfig())
+    request = deadlines.schedule(source(), "idle", 0)
+    bus.events.publish(deadlines.subject(request), request)
+    monkeypatch.setattr(runner, "open_bus", lambda config: bus)
+    assert runner.main(["run", "--once"]) == 0
+    deliveries = bus.events.consumer("expiry", "swarm.*.deadline.expired").fetch(10, 0)
+    assert [delivery.event for delivery in deliveries] == [deadlines.expired(request)]
+
+
+def test_a_lost_lease_stops_due_publication_until_the_next_holder():
+    from scripts.events import deadlines
+    from scripts.hub.timers import Timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = Timers(bus, clock)
+    request = deadlines.schedule(source(), "idle", 1000)
+    timer.handle(request)
+    output = bus.events.consumer("expiry", "swarm.*.deadline.expired")
+    timer.fire(lambda: False)
+    assert output.fetch(10, 0) == []
+    Timers(bus, clock).fire()
+    assert [delivery.event for delivery in output.fetch(10, 0)] == [deadlines.expired(request)]
+
+
+def test_equal_versions_and_completed_versions_cannot_rearm_a_timer():
+    from scripts.events import deadlines
+    from scripts.hub.timers import Timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = Timers(bus, clock)
+    first = deadlines.schedule(source(), "idle", 1000)
+    timer.handle(first)
+    timer.handle(deadlines.schedule(source(), "idle", 2000))
+    timer.fire()
+    timer.handle(first)
+    timer.fire()
+    second = deadlines.schedule(source(2), "idle", 1000)
+    timer.handle(second)
+    timer.fire()
+    events = bus.events.consumer("expiry", "swarm.*.deadline.expired").fetch(10, 0)
+    assert [delivery.event for delivery in events] == [deadlines.expired(first), deadlines.expired(second)]
+
+
+def test_cancelling_an_unseen_timer_is_a_durable_tombstone():
+    from scripts.events import deadlines
+    from scripts.hub.timers import Timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = Timers(bus, clock)
+    timer.fire()
+    timer.handle(deadlines.cancel(source(2), "handoff"))
+    timer.handle(deadlines.schedule(source(), "handoff", 0))
+    Timers(bus, clock).fire()
+    assert bus.events.consumer("expiry", "swarm.*.deadline.expired").fetch(10, 0) == []
+
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+@pytest.mark.parametrize("permanent", [False, True])
+def test_timer_state_compare_and_swap_retries_or_reports_contention(monkeypatch, operation, permanent):
+    from scripts.events import deadlines
+    from scripts.events.bus import StateConflict
+    from scripts.hub import timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = timers.Timers(bus, clock)
+    if operation == "update":
+        timer.handle(deadlines.schedule(source(), "idle", 2000))
+    store = bus.state(timers.BUCKET)
+    original = getattr(store, operation)
+    calls = []
+
+    def conflict(*args):
+        calls.append(args)
+        assert args[0] == "deadlines"
+        if permanent or len(calls) == 1:
+            raise StateConflict("competing writer")
+        return original(*args)
+
+    monkeypatch.setattr(store, operation, conflict)
+    event = deadlines.schedule(source(2), "idle", 1000)
+    if permanent:
+        with pytest.raises(StateConflict) as error:
+            timer.handle(event)
+        assert str(error.value) == "deadline index remained contended"
+        assert len(calls) == 8
+    else:
+        timer.handle(event)
+        timer.fire()
+        assert len(calls) == (2 if operation == "create" else 3)
+        events = bus.events.consumer("expiry", "swarm.*.deadline.expired").fetch(10, 0)
+        assert [delivery.event for delivery in events] == [deadlines.expired(event)]
+
+
+def test_hub_reports_failed_timer_callback_and_retries_without_losing_the_deadline(monkeypatch, capsys):
+    from scripts.events import deadlines
+    from scripts.hub.timers import Timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = Timers(bus, clock)
+    hub = runner.HubRunner(bus, registry.Registry([timer.reactor()]), "holder", clock)
+    request = deadlines.schedule(source(), "stale", 1000)
+    bus.events.publish(deadlines.subject(request), request)
+    publish = bus.events.publish
+
+    def fail(subject, event):
+        assert subject == "swarm.crew.deadline.expired"
+        assert event == deadlines.expired(request)
+        raise OSError("publication unavailable")
+
+    monkeypatch.setattr(bus.events, "publish", fail)
+    assert hub.run_once(timeout_ms=0) == {"timers": ["handled", "failed"]}
+    assert "hub: reactor timers timer callback failed" in capsys.readouterr().err
+    monkeypatch.setattr(bus.events, "publish", publish)
+    hub.run_once(timeout_ms=0)
+    events = bus.events.consumer("expiry", "swarm.*.deadline.expired").fetch(10, 0)
+    assert [delivery.event for delivery in events] == [deadlines.expired(request)]
+    hub.stop()
+
+
+def test_full_input_batches_do_not_starve_a_due_timer():
+    from scripts.events import deadlines
+    from scripts.hub.timers import Timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = Timers(bus, clock)
+    hub = runner.HubRunner(bus, registry.Registry([timer.reactor()]), "holder", clock)
+    first = deadlines.schedule(source(), "idle", 1000)
+    later = deadlines.schedule(source(2), "handoff", 2000)
+    for event in (first, later):
+        bus.events.publish(deadlines.subject(event), event)
+    assert hub.run_once(batch=1, timeout_ms=0) == {"timers": ["handled"]}
+    events = bus.events.consumer("expiry", "swarm.*.deadline.expired").fetch(10, 0)
+    assert [delivery.event for delivery in events] == [deadlines.expired(first)]
+    hub.stop()
+
+
+def test_reacquiring_a_lease_refreshes_cancelled_cached_deadlines():
+    from scripts.events import deadlines
+    from scripts.hub.timers import Timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    first, successor = Timers(bus, clock), Timers(bus, clock)
+    request = deadlines.schedule(source(), "idle", 1000)
+    first.handle(request)
+
+    def takeover():
+        successor.handle(deadlines.cancel(source(2), "idle"))
+        return True
+
+    first.fire(takeover)
+    assert bus.events.consumer("expiry", "swarm.*.deadline.expired").fetch(10, 0) == []

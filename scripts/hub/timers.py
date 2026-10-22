@@ -67,9 +67,11 @@ class Timers:
         self._revision = entry.revision
 
     def fire(self, guard: Callable[[], bool] = lambda: True) -> None:
-        self._restore()
-        while self._pending and self._pending[0][0] <= self._clock():
+        for _ in range(32):
             if not guard():
+                return
+            self._restore()
+            if not self._pending or self._pending[0][0] > self._clock():
                 return
             _, _, raw = self._pending[0]
             request = Envelope.from_dict(raw)
