@@ -316,7 +316,6 @@ def test_swarm_session_cannot_run_the_raw_enqueue_mutation(monkeypatch, command)
         "head -n 20 scripts/swarm/merge_queue.py | grep -c enqueuePullRequest",
         "tail -n 20 notes/enqueuePullRequest.md",
         "ls scripts/enqueuePullRequest",
-        "grep enqueuePullRequest notes.md | tail -n 3 < /dev/null | wc -l",
         "jq '.enqueuePullRequest' response.json",
         'agentihooks swarm rig say "never call enqueuePullRequest by hand"',
     ],

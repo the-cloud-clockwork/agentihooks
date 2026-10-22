@@ -348,9 +348,8 @@ def _runs_enqueue(node: Node) -> bool:
 
 
 def _program(node: Node) -> str | None:
-    command = node.child_by_field_name("body") if node.type == "redirected_statement" else node
-    if command and command.type == "command":
-        return Path(shlex.split(command.child_by_field_name("name").text.decode())[0]).name
+    if node.type == "command":
+        return Path(shlex.split(node.child_by_field_name("name").text.decode())[0]).name
 
 
 def _sends_enqueue(command: Node) -> bool:
