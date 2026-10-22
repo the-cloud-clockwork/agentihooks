@@ -54,7 +54,7 @@ def _local(store):
 
 def _taken(monkeypatch, written):
     def take(store, slug, now_ms, run=None):
-        written.append(now_ms)
+        written.append((now_ms, reboot.record_path(slug).exists()))
         return snapshot.path(slug)
 
     monkeypatch.setattr(reboot.snapshot, "take", take)
@@ -63,11 +63,10 @@ def _taken(monkeypatch, written):
 def test_shutdown_records_every_local_agent_and_asks_the_master_for_its_handoff(store, swarm, monkeypatch):
     written = []
     _taken(monkeypatch, written)
-    snapshot.path("sw").parent.mkdir(parents=True, exist_ok=True)
 
     doc = reboot.prepare(store, "sw", 500)
 
-    assert written == [500]
+    assert written == [(500, True)]
     assert json.loads(reboot.record_path("sw").read_text()) == doc
     assert (doc["slug"], doc["taken_at"], doc["hive"], doc["snapshot"]) == (
         "sw",
@@ -101,7 +100,6 @@ def test_shutdown_records_every_local_agent_and_asks_the_master_for_its_handoff(
 
 def _recorded(store, monkeypatch):
     _taken(monkeypatch, [])
-    snapshot.path("sw").parent.mkdir(parents=True, exist_ok=True)
     reboot.prepare(store, "sw", 500)
 
 

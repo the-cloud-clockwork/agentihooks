@@ -53,23 +53,26 @@ def entry(agent):
 
 
 def prepare(store, slug, now_ms, run=subprocess.run):
-    """Snapshot the swarm, record its local agents beside the snapshot and ask each master for its handoff."""
-    taken = snapshot.take(store, slug, now_ms, run)
+    """Record the swarm's local agents and ask each master for its handoff, then snapshot the swarm.
+
+    The record lands first because a full snapshot can take minutes and the shutdown may not wait for it."""
     agents = [a for a in store.agents(slug) if a.state != "finished"]
     doc = {
         "slug": slug,
         "taken_at": now_ms,
         "hive": commands.hive_id(),
-        "snapshot": str(taken),
+        "snapshot": str(snapshot.path(slug)),
         "agents": [entry(a) for a in agents if local(a)],
     }
     target = record_path(slug)
+    target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_suffix(".partial")
     partial.write_text(json.dumps(doc), encoding="utf-8")
     partial.replace(target)
     inbox = InboxStore(store.redis)
     for master in (a for a in agents if a.lane == MASTER):
         inbox.send(exits.BY, master.name, ASK.format(path=handoff_path(slug)))
+    snapshot.take(store, slug, now_ms, run)
     return doc
 
 
