@@ -67,11 +67,16 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
             max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
+        from scripts.swarm import local_slots
+        from scripts.swarm.commands import hive_id
+
+        held = admission.pending(store.redis, hive["id"])
+        if hive["id"] == hive_id():
+            hive["agents"] = max(hive["agents"], local_slots.running(store, "", ""))
+            held = max(held, local_slots.held(store, hive["id"], "", "") - hive["agents"])
         found = admission.capped(
-            admission.room(
-                headroom.read(store.redis, hive["id"], now), pending=admission.pending(store.redis, hive["id"])
-            ),
-            hive["agents"],
+            admission.room(headroom.read(store.redis, hive["id"], now), pending=held),
+            hive["agents"] + held,
             hive["max_agents"],
         )
         hive["room"] = found.room

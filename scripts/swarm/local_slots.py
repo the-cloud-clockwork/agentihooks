@@ -15,12 +15,7 @@ def held(store: RedisStore, machine: str, slug: str, task: str) -> int:
 
 
 def running(store: RedisStore, slug: str, task: str) -> int:
-    own = f"{slug}/{task}"
-    return sum(
-        f"{swarm}/{agent.task}" != own and _local_worker(agent)
-        for swarm in store.slugs()
-        for agent in store.agents(swarm)
-    )
+    return len(_workers(_records(store), f"{slug}/{task}"))
 
 
 def claim(store: RedisStore, machine: str, slug: str, task: str, name: str, local_max: int) -> int:
@@ -49,14 +44,34 @@ def release(store: RedisStore, machine: str, slug: str, name: str) -> None:
 
 
 def _held(store: RedisStore, claims: dict, own: str, now: int) -> tuple[list[str], list[str]]:
-    records = {
+    records = _records(store)
+    agents = _workers(records, own)
+    pending = [
+        named
+        for named, at in claims.items()
+        if named.split("/", 1)[1] not in agents and _pending(records.get(named), own, now - int(at))
+    ]
+    return [*agents, *pending], [named for named in claims if named not in pending]
+
+
+def _records(store: RedisStore) -> dict:
+    return {
         f"{slug}/{agent.name}": (f"{slug}/{agent.task}", agent)
         for slug in store.slugs()
         for agent in store.agents(slug)
     }
-    agents = [named for named, (task, agent) in records.items() if task != own and _local_worker(agent)]
-    pending = [named for named, at in claims.items() if _pending(records.get(named), own, now - int(at))]
-    return [*agents, *pending], [named for named in claims if named not in pending]
+
+
+def live() -> set[str]:
+    from scripts.terminate_agent import sessions
+
+    return {row.name for row in sessions() if row.name and not row.name.startswith("master@")}
+
+
+def _workers(records: dict, own: str) -> set[str]:
+    excluded = {agent.name for task, agent in records.values() if task == own}
+    stored = {agent.name for task, agent in records.values() if _local_worker(agent)}
+    return (stored | live()) - excluded
 
 
 def _pending(record, own: str, age: int) -> bool:
@@ -64,9 +79,11 @@ def _pending(record, own: str, age: int) -> bool:
 
 
 def _local_worker(agent) -> bool:
+    from scripts.swarm.commands import hive_id
+
     return (
         agent.runtime_backend == LOCAL
-        and not agent.hive
+        and agent.hive in ("", hive_id())
         and agent.lane != "master"
         and agent.state not in (STARTING, "finished")
     )

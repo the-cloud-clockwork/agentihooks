@@ -161,7 +161,7 @@ def test_the_swarm_setting_refuses_local_launches_even_with_spare_cpu(setup, mon
     fill_anton(setup)
     setup.store.update(setup.config.slug, local_max_agents=2)
     local_agents(setup, 2)
-    with pytest.raises(SpawnError, match="local machine is full"):
+    with pytest.raises(SpawnError, match="the local machine runs"):
         fenced.spawn(setup.config, "eng", "eng-new", {"id": "task"})
     setup.herdr.spawn.assert_not_called()
 
@@ -176,7 +176,7 @@ def test_the_workstation_hive_limit_counts_another_swarm(setup, monkeypatch):
     write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=2)
     setup.store.create(SwarmConfig("doctor", "agentihooks", 1, 1))
     local_agents(setup, 2, slug="doctor")
-    with pytest.raises(SpawnError, match="local machine is full"):
+    with pytest.raises(SpawnError, match="the local machine runs"):
         fenced.spawn(setup.config, "eng", "eng-new", {"id": "task"})
     setup.herdr.spawn.assert_not_called()
 
@@ -259,7 +259,7 @@ def test_a_lane_or_role_the_local_hive_excludes_waits_for_a_hive_instead_of_runn
 def test_a_lane_the_local_hive_keeps_still_runs_locally_when_no_hive_has_room(setup, monkeypatch):
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
-    write_hive(setup, id="workstation", ui="yes", excluded=["master"], max_agents=0)
+    write_hive(setup, id="workstation", ui="yes", excluded=["master"], max_agents=1)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "workstation")
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
 

@@ -150,7 +150,11 @@ class FencedRuntime:
         found = admission.room(
             headroom.measure(0, now, previous=headroom.read(self.store.redis, machine, now)), running, pending
         )
-        local_max = running + found.room
+        maximum = self.store.config(self.slug).local_max_agents
+        if local is not None:
+            maximum = min(maximum, local["max_agents"])
+        found = admission.capped(found, running, maximum)
+        local_max = min(maximum, running + found.room)
         refused = f": {found.reason}: {found.detail}"
         chosen = overflow(waited.role, waited, held, local_max)
         if not isinstance(chosen, Choice):
