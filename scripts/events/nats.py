@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import threading
 from collections.abc import Coroutine, Iterator
 
@@ -25,7 +26,7 @@ LOOP_STOP_S = 5
 
 
 def queue_stream(name: str) -> str:
-    return f"AGENTIHOOKS_QUEUE_{name}"
+    return f"AGENTIHOOKS_QUEUE_{hashlib.sha256(name.encode()).hexdigest()}"
 
 
 def _seconds(ms: int) -> float:

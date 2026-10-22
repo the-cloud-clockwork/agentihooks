@@ -278,7 +278,7 @@ def test_queue_names_have_stable_bounded_nats_stream_identifiers():
         "AGENTIHOOKS_QUEUE_ca99d3a2340278a9654e1cae8e2a90ce639c9f79f5d643206ccde38b8a0fd396"
     )
     assert nats.queue_stream("swarm-rig-ready-eng") != nats.queue_stream("swarm.rig.ready.eng")
-    assert len(nats.queue_stream("x" * 1000)) == 81
+    assert len(nats.queue_stream("x" * 1000)) == 82
 
 
 def test_a_readiness_subject_can_name_a_real_nats_work_queue(bus):
