@@ -159,13 +159,13 @@ def test_repeated_refusals_retry_with_one_identity_until_one_cut_is_filed(hosted
     name, folder, url = hosted
     text = "Cut from the plan: a wind generator"
     sent = []
-    real = LedgerClient._call
+    _failing_followups(monkeypatch, 3, applied=False)
+    failing = LedgerClient._call
 
     def recording(self, slug, ops=None):
         sent.extend(op["id"] for op in ops or () if op.get("op") == "add_item")
-        return real(self, slug, ops)
+        return failing(self, slug, ops)
 
-    _failing_followups(monkeypatch, 3, applied=False)
     monkeypatch.setattr(LedgerClient, "_call", recording)
 
     assert [cli.main([SLUG, "trace-plan"]) for _ in range(5)] == [1, 1, 1, 0, 0]
