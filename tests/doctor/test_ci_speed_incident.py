@@ -191,7 +191,8 @@ def test_judged_runs_do_not_notify_again_in_the_next_window(store, monkeypatch):
         ({"evidence_identity": ("1", 899), "measure": 899}, False),
         ({"evidence_identity": ("1", "2", "3", 900)}, True),
         ({"evidence_identity": ("1", "2 attempt 2", 900)}, True),
-        ({"measure": 901}, True),
+        ({"measure": 901}, False),
+        ({"evidence_identity": ("1", "2", 901)}, True),
         ({"subject": "200-pull_request"}, True),
         ({"kind": "ci queue age unconfirmed"}, True),
         ({"elapsed": 60000}, True),
@@ -489,3 +490,47 @@ def test_a_group_emptied_and_refilled_in_one_pass_is_not_retracted(store, monkey
     assert [finding["id"] for finding in details(store)] == [identity]
     for texts in items(store).values():
         assert not any(text.startswith("Retracted") for text in texts)
+
+
+def test_a_judged_open_crossing_does_not_return_as_its_clock_grows(store, monkeypatch):  # noqa: F811
+    status(monkeypatch)
+    job = {**waiting(4, "2026-10-19T16:40:00Z")["jobs"][0], "status": "in_progress", "runner_name": "r"}
+    job["started_at"] = "2026-10-19T16:41:00Z"
+    wall = {
+        "id": 4,
+        "event": "merge_group",
+        "status": "in_progress",
+        "path": ".github/workflows/test.yml",
+        "jobs": [job],
+    }
+    runs(monkeypatch, [wall])
+    cli.timer(store, DOCTOR, AFTER, False)
+    [finding] = details(store)
+    assert json.loads(store.redis.hget(loop.verdicts(store, DOCTOR).key, finding["id"]))["evidence_identity"] == [
+        "4",
+        0,
+    ]
+    loop.verdicts(store, DOCTOR).judge(finding["id"], "established", "investigated", "reader", AFTER)
+    cli.timer(store, DOCTOR, AFTER + 60000, False)
+    cli.timer(store, DOCTOR, AFTER + 660000, False)
+    for texts in items(store).values():
+        assert len(texts) == 1
+    job.update(status="completed", conclusion="success", completed_at="2026-10-19T17:15:00Z")
+    wall.update(status="completed", conclusion="success")
+    cli.timer(store, DOCTOR, AFTER + 1200000, False)
+    for texts in items(store).values():
+        assert len(texts) == 2
+
+
+def test_a_member_kept_before_open_ends_were_recorded_counts_as_settled():
+    groups = {
+        "ci-tier-wall-time/merge_group": {
+            "kind": "ci tier wall time",
+            "subject": "merge_group",
+            "text": "queue",
+            "window": 0,
+            "members": {"a": {"order": [1, 1], "run": "1", "measure": 950, "evidence": "run 1", "during": []}},
+        }
+    }
+    [finding] = ci_speed.grouped(groups)
+    assert finding.evidence_identity == ("1", 950)
