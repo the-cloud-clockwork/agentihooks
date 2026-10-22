@@ -352,9 +352,9 @@ export function timeLeftInputs(calc) {
   return `Larger of a ${calc.chain}m chain and ${calc.work}m of work over ${slots} · ${calc.remaining} tasks left · ${tiers} · ${ci}${held}`;
 }
 
-function admissionList(counts) {
-  const rows = Object.entries(counts || {}).map(([reason, count]) => `${reason} ${count}`);
-  return h("ul", { class: "admission-list" }, ...(rows.length ? rows : [counts ? "none" : "—"]).map((text) => h("li", { text })));
+function withRefusals(top, counts) {
+  const shown = Object.entries(counts || {}).map(([reason, count]) => `${reason} ${count}`).join(" · ");
+  return shown ? { ...(top || {}), waits: [...((top && top.waits) || []), `Admission refusals ${shown}`] } : top;
 }
 
 export function renderStats() {
@@ -390,7 +390,6 @@ export function renderStats() {
     row("Inbox pending", figure(swarm && inboxPending(swarm))),
     row("Agents · 2 h", String(activeAgents())),
     row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"),
-    row("Admission refusals", admissionList(swarm && (swarm.admission || {}))),
-    bottleneckStat(swarm && swarm.top_bottleneck));
+    bottleneckStat(withRefusals(swarm && swarm.top_bottleneck, swarm && swarm.admission)));
   document.dispatchEvent(new Event("stats"));
 }

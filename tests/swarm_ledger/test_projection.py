@@ -110,7 +110,7 @@ let doc = {phases: [{done: true}, {done: false}], followups: [], questions: [], 
             + function_source("statKey")
             + function_source("statGrip")
             + function_source("bottleneckStat")
-            + function_source("admissionList")
+            + function_source("withRefusals")
             + function_source("renderStats")
         )
         script += """
