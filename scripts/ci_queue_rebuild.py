@@ -6,6 +6,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scripts.ci_queue_retry import QUEUE_BRANCH
 from scripts.swarm import merge_queue, queue_record
 from scripts.swarm.store import SwarmError
 
@@ -30,9 +31,25 @@ def actor(event: dict) -> str | None:
     return (event.get("actor") or {}).get("login")
 
 
-def cause(pull: str, started: str, until: str, groups: list[dict], events: list[dict]) -> dict:
+def window(events: list[dict], started: str, until: str) -> list[dict]:
     unique = {e["id"]: e for e in events if started <= e["createdAt"] <= until}
-    events = sorted(unique.values(), key=lambda e: e["createdAt"])
+    return sorted(unique.values(), key=lambda e: e["createdAt"])
+
+
+def timeline(url: str, run) -> list[dict]:
+    return merge_queue.graphql(QUERY, {"url": url}, run)["resource"]["timelineItems"]["nodes"]
+
+
+def base_pull(repo: str, parent: str | None, run) -> str | None:
+    runs = merge_queue.rest(f"repos/{repo}/actions/runs?event=merge_group&head_sha={parent}", run)["workflow_runs"]
+    found = next((m for r in runs if (m := QUEUE_BRANCH.match(r["head_branch"]))), None)
+    return found and f"https://github.com/{repo}/pull/{found[1]}"
+
+
+def cause(
+    pull: str, started: str, until: str, groups: list[dict], events: list[dict], base: dict | None = None
+) -> dict:
+    events = window(events, started, until)
     removals = [e for e in events if e["__typename"] == "RemovedFromMergeQueueEvent"]
     adds = [e for e in events if e["__typename"] == "AddedToMergeQueueEvent"]
     own = next((g for g in groups if g["pull"] == pull), None)
@@ -54,6 +71,17 @@ def cause(pull: str, started: str, until: str, groups: list[dict], events: list[
             "removed_reason": removals[-1].get("reason"),
             "at": adds[-1]["createdAt"],
             "events": [removals[-1]["id"], adds[-1]["id"]],
+        }
+    if base and (
+        gone := [e for e in window(base["events"], started, until) if e["__typename"] == "RemovedFromMergeQueueEvent"]
+    ):
+        return {
+            "action": "removed_ahead",
+            "pull": base["pull"],
+            "actor": actor(gone[-1]),
+            "reason": gone[-1].get("reason"),
+            "at": gone[-1]["createdAt"],
+            "events": [gone[-1]["id"]],
         }
     ahead = [g for g in groups if g["position"] < own["position"] and started <= g["enqueued_at"] <= until]
     if not ahead:
@@ -81,8 +109,9 @@ def record(observed: str, env, run, now: str | None = None) -> dict:
         groups = journal.groups() or []
         if journal.gaps:
             raise SwarmError(journal.gaps[0])
-        events = merge_queue.graphql(QUERY, {"url": pull}, run)["resource"]["timelineItems"]["nodes"]
-        linked = cause(pull, started, now, groups, events)
+        ahead = base_pull(repo, old_parent, run)
+        base = ahead and {"pull": ahead, "events": timeline(ahead, run)}
+        linked = cause(pull, started, now, groups, timeline(pull, run), base)
     except (SwarmError, KeyError, TypeError) as exc:
         linked = {"action": "unknown", "gap": f"queue unreadable: {exc}"}
     own = next((g for g in groups if g["pull"] == pull), {})
@@ -110,6 +139,8 @@ def summary(found: dict) -> str:
         text = f"dequeue by {linked['actor']} ({linked['reason']})"
     elif action == "requeue":
         text = f"requeue by {linked['actor']}"
+    elif action == "removed_ahead":
+        text = f"removal of {linked['pull']} ahead by {linked['actor']} ({linked['reason']})"
     else:
         text = f"unknown cause: {linked['gap']}"
         for g in linked.get("correlated", []):
