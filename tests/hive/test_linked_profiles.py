@@ -106,3 +106,29 @@ def test_linked_profile_without_a_repository_is_refused_instead_of_silently_omit
     (home / "state.json").write_text(json.dumps({"linked_profiles": [{"name": "memory", "path": str(tmp_path)}]}))
     with pytest.raises(auth.HiveError, match="linked profile"):
         setup.entries({}, home)
+
+
+@pytest.mark.parametrize("change", ["remote", "branch"])
+def test_profile_sources_without_a_remote_or_branch_are_refused(tmp_path, change):
+    from scripts.hive import auth, linked_profiles
+
+    home, repo = source(tmp_path)
+    if change == "remote":
+        git(repo, "remote", "remove", "origin")
+    else:
+        git(repo, "switch", "--detach")
+    with pytest.raises(auth.HiveError, match="origin and a branch"):
+        linked_profiles.sources(home)
+
+
+def test_a_cloned_profile_symlink_cannot_escape_its_repository(tmp_path):
+    from scripts.hive import linked_profiles
+
+    _, repo = source(tmp_path)
+    git(repo, "rm", "profiles/memory/profile.yml")
+    (repo / "profiles/memory").symlink_to(tmp_path, target_is_directory=True)
+    git(repo, "add", "profiles/memory")
+    git(repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "symlink")
+    spec = {"name": "recall", "url": str(repo), "ref": "dev", "path": "profiles/memory"}
+    with pytest.raises(ValueError, match="symlink"):
+        linked_profiles.install({"HIVE_REPO_ROOT": str(tmp_path), "HIVE_LINKED_PROFILES": json.dumps([spec])})

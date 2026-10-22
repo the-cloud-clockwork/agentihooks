@@ -302,6 +302,56 @@ def test_bundle_is_cloned_beside_the_repos_and_linked_by_init(tmp_path):
     assert commands.endswith("hive run\n")
 
 
+def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path, monkeypatch):
+    origin = tmp_path / "linked-origin"
+    origin.mkdir()
+    subprocess.run(["git", "init", "--initial-branch=dev", str(origin)], check=True, capture_output=True)
+    profile = origin / "profiles" / "memory"
+    profile.mkdir(parents=True)
+    (profile / "profile.yml").write_text("name: memory\n")
+    subprocess.run(["git", "-C", str(origin), "add", "profiles/memory/profile.yml"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(origin),
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "-m",
+            "fixture",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.setenv(
+        "HIVE_LINKED_PROFILES",
+        json.dumps([{"name": "memory", "url": str(origin), "ref": "dev", "path": "profiles/memory"}]),
+    )
+    worker = tmp_path / "worker"
+    worker.mkdir()
+    result, commands, home, _ = startup(worker)
+    assert result.returncode == 0, result.stderr
+    cloned = worker / "repos/.linked-profiles/memory/profiles/memory"
+    assert (cloned / "profile.yml").read_text() == "name: memory\n"
+    registration = f"link-profile link {cloned} --name memory --no-append --no-init"
+    assert commands.splitlines().index(registration) < commands.splitlines().index("init")
+    assert "HIVE_LINKED_PROFILES=" in (home / "hive-container.env").read_text()
+
+
+def test_a_failed_linked_profile_clone_refuses_hive_start(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "HIVE_LINKED_PROFILES",
+        json.dumps([{"name": "memory", "url": str(tmp_path / "absent"), "ref": "dev", "path": "."}]),
+    )
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode != 0
+    assert "init" not in commands.splitlines()
+    assert "hive run" not in commands.splitlines()
+
+
 def test_github_token_reaches_git_by_reference_and_is_never_written(tmp_path):
     result, _, home, repo = startup(tmp_path, bundle=True)
     assert result.returncode == 0, result.stderr
