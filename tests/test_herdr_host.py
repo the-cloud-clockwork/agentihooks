@@ -688,3 +688,24 @@ def test_prompt_reports_a_submission_herdr_refused(monkeypatch, error):
 
     monkeypatch.setattr(herdr_host, "_cli", cli)
     assert herdr_host.prompt("w1:p2", "text", {}) is False
+
+
+def test_ensure_server_keeps_agent_identity_out_of_the_server(monkeypatch):
+    answers = iter([False, True])
+    started = {}
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: next(answers))
+    monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
+    monkeypatch.setattr(herdr_host.subprocess, "Popen", lambda args, env, **kw: started.update(env=env))
+    environ = {
+        "HOME": "/home/op",
+        "PATH": "/usr/bin",
+        "AGENTIHOOKS_PROFILE": "documentation",
+        "AGENTIHOOKS_SWARM": "s1",
+        "CLAUDE_CONFIG_DIR": "/home/op/.agentihooks/profiles/.homes/documentation/claude",
+        "CODEX_HOME": "/x",
+        "COPILOT_HOME": "/y",
+    }
+
+    assert herdr_host.ensure_server(environ) is True
+    assert started["env"] == {"HOME": "/home/op", "PATH": "/usr/bin"}
+    assert environ["AGENTIHOOKS_PROFILE"] == "documentation"

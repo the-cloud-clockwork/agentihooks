@@ -5,7 +5,9 @@ from contextlib import closing
 import psycopg2
 import pytest
 
-from scripts.swarm_ledger.repository import postgres, sqlite
+from scripts.events import memory
+from scripts.events.config import BusConfig
+from scripts.swarm_ledger.repository import outbox, postgres, sqlite
 
 URL = os.environ.get("LEDGER_TEST_POSTGRES_URL", "")
 CONTENT = {
@@ -61,3 +63,17 @@ def test_a_failed_postgres_ledger_write_leaves_neither_the_change_nor_its_outbox
     monkeypatch.undo()
     assert subjects(slug) == created
     assert postgres.PostgresLedgerRepository(URL).get_document(slug) == before
+
+
+def test_the_relay_publishes_postgres_outbox_rows_once_and_marks_them_sent(ledger):
+    repository, slug = ledger
+    bus = memory.open_bus(BusConfig(), clock=lambda: 1_000)
+    pending = [subject for subject, _ in subjects(slug)]
+    drained = [outbox.relay(repository, bus.events, batch=1000) for _ in range(20)]
+    assert drained[-1] == 0
+    assert [subject for subject, _ in bus.events.entries if subject.startswith(f"swarm.{slug}.")] == pending
+    with closing(psycopg2.connect(URL)) as reader, reader.cursor() as cursor:
+        cursor.execute(
+            "SELECT count(*) FROM outbox WHERE slug = %s AND id NOT IN (SELECT id FROM outbox_sent)", (slug,)
+        )
+        assert cursor.fetchone() == (0,)

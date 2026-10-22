@@ -3,10 +3,11 @@
 import hashlib
 import json
 import sys
+import time
 from collections.abc import Callable
+from threading import Lock, Thread
 
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import sd_notify, tick_heartbeat, timing
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import front_door
@@ -14,6 +15,9 @@ from scripts.swarm_v2 import front_door
 KEY = "tick-watch"
 SENDER = "swarm"
 PASS_S = 60
+SLUG_PASS_S = 120
+BEAT_S = 30
+BLOCKED_LIMIT = 5
 WATCHDOG = "WATCHDOG=1"
 ALERT = (
     "The tick of swarm {slug} is stale: {evidence}. Until it recovers no swarm alert, nudge, merge or spawn happens; "
@@ -41,8 +45,8 @@ def watch_pass(
     beat = tick_heartbeat.read(store, slug)
     evidence = tick_heartbeat.stale(beat, now, None if beat else since)
     if evidence:
-        repaired = repair(slug, now) if repair and not tick_heartbeat.halted(store, slug) else []
-        return _alert(store, slug, now, episode, evidence) + repaired
+        told = _alert(store, slug, now, episode, evidence)
+        return told + (repair(slug, now) if repair and not tick_heartbeat.halted(store, slug) else [])
     return _resolve(store, slug, now, episode, RESOLVED, "runs again") if episode else []
 
 
@@ -50,12 +54,15 @@ class Repair:
     """The scheduler serves every swarm on the machine, so it restarts at most once per stale window."""
 
     def __init__(self, restart: Callable[[], str], respawn: Callable[[str], list[str]]):
-        self.restart, self.respawn, self.restarted = restart, respawn, None
+        self.restart, self.respawn, self.restarted, self.lock = restart, respawn, None, Lock()
 
     def __call__(self, slug: str, now: int) -> list[str]:
         actions = []
-        if self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS:
-            self.restarted = now
+        with self.lock:
+            due = self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS
+            if due:
+                self.restarted = now
+        if due:
             actions.append(self.restart())
         return actions + self.respawn(slug)
 
@@ -102,18 +109,44 @@ def run(
     store: RedisStore, now: Callable[[], int], repair=None, wait=None, passes: int | None = None, beat=None
 ) -> None:
     beat = beat or _watchdog
-    since, done = now(), 0
+    since, done, held = now(), 0, {}
     while passes is None or done < passes:
         beat()
         for slug in store.slugs():
-            try:
-                for action in watch_pass(store, slug, now(), since, repair):
-                    timing.emit(sys.stdout, f"{slug}: {action}")
-            except Exception as exc:
-                timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
+            _judge(store, slug, now(), since, repair, held, beat)
             beat()
         done += 1
-        (wait or scheduled_wait)(PASS_S)
+        (wait or time.sleep)(PASS_S)
+
+
+def _judge(store, slug, now, since, repair, held, beat) -> None:
+    if slug not in held or not held[slug][0].is_alive():
+        held[slug] = (Thread(target=_pass, args=(store, slug, now, since, repair), daemon=True), 0)
+        held[slug][0].start()
+    worker, blocked = held[slug]
+    if _awaited(worker, beat):
+        return
+    if blocked + 1 >= BLOCKED_LIMIT:
+        raise RuntimeError(f"the pass of {slug} stayed blocked through {BLOCKED_LIMIT} passes; the watcher exits")
+    held[slug] = (worker, blocked + 1)
+    timing.emit(sys.stderr, f"{slug}: its pass is still blocked after {SLUG_PASS_S} seconds; the watch goes on")
+
+
+def _pass(store, slug, now, since, repair) -> None:
+    try:
+        for action in watch_pass(store, slug, now, since, repair):
+            timing.emit(sys.stdout, f"{slug}: {action}")
+    except Exception as exc:
+        timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
+
+
+def _awaited(worker: Thread, beat: Callable[[], None]) -> bool:
+    deadline = time.monotonic() + SLUG_PASS_S
+    while True:
+        worker.join(min(BEAT_S, deadline - time.monotonic()))
+        if not worker.is_alive() or time.monotonic() >= deadline:
+            return not worker.is_alive()
+        beat()
 
 
 def _watchdog() -> None:

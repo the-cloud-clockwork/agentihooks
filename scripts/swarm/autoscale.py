@@ -60,7 +60,7 @@ def calculate(
     total = target
     if target > current:
         prior = previous["pending_raise"] if previous is not None else pending
-        ticks = min(prior["ticks"] + 1, 3) if prior["target"] == target else 1
+        ticks = min(prior["ticks"] + 1, 3)
         pending = {"target": target, "ticks": ticks}
         total = current if ticks < 3 else min(target, current + 2)
         if total == target:

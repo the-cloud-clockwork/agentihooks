@@ -125,7 +125,7 @@ RUN = [
     "bundle unlink",
     "init",
     "deps ensure",
-    "hive set worker-member ui=no ephemeral=yes draining=no excluded=master max-agents=20",
+    "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master max-agents=20",
     "hive run",
 ]
 

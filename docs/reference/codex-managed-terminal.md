@@ -87,6 +87,75 @@ The inbox waker skips pane typing when the execution's transport owns push
 delivery. Master panes are never typed into by that worker wake path. An unsent
 draft in the viewer is separate from incoming inbox work.
 
+## Hook identity after server detachment
+
+Managed local Codex launches detach the supervised server with `setsid` while
+the remote terminal viewer stays in the launch pane. The detached server shell
+sets `AGENTIHOOKS_SWARM_LAUNCHER` to its own process id before starting
+`scripts.codex_session serve`. Hooks run by the app-server can then reach that
+launcher through their parent processes and retain the execution's swarm and
+agent identity. Activity recording, heartbeats and swarm context injection
+depend on that identity.
+
+This assignment is automatic. Select `codex-inbox-transport=app_server` for
+subsequent admitted launches using [Choose the transport](#choose-the-transport);
+there is no separate hook identity setting. Do not export a guessed launcher
+pid or unset `AGENTIHOOKS_SWARM_LAUNCHER` to bypass the check. A separate agent
+started inside the managed agent remains nested and must not inherit the outer
+agent's task identity. Reopening the viewer does not replace the server or
+repair its inherited launch environment.
+
+### Investigate a no hook event finding
+
+A Doctor `no-hook-event` finding can indicate missing attribution even when
+tools ran. In the incident documented in
+[issue 4720](https://github.com/the-cloud-clockwork/agentihooks/issues/4720),
+the reported Codex agent had 126 Bash and about 100 MCP pre-tool hooks, but
+no swarm activity record. The detached server's parents never reached the
+original launcher. The nested-session check instead found the remote viewer
+in the launcher's terminal session and discarded the server's swarm identity
+before hook dispatch.
+
+The correction in
+[pull request 4722](https://github.com/the-cloud-clockwork/agentihooks/pull/4722)
+makes the detached shell the launcher. Its regression test executes the
+generated shell command and checks that the inherited launcher id equals the
+child process's parent id. The source task records a failing CI run before the
+fix and passing checks after it; this evidence does not establish that every
+later startup finding has the same cause.
+
+1. Read the Doctor finding and inspect the execution's recorded harness,
+   transport and state:
+
+   ```bash
+   agentihooks swarm <id> status --json
+   ```
+
+2. Compare the agent's transcript and progress with its hook activity for the
+   same session and time window. No recorded tools requires startup diagnosis;
+   hooked tool calls without swarm activity require attribution diagnosis.
+   A connected server alone proves neither tool activity nor correct attribution.
+3. For a local managed execution, inspect process ancestry without printing
+   command arguments or environment values. Substitute its recorded server pid:
+
+   ```bash
+   ps -o pid,ppid,sid,comm -p <server-pid>
+   ```
+
+   Repeat for the parent pids to compare the server, supervisor and detached
+   shell. The viewer is a separate process; its presence in the launch pane
+   does not establish the app-server's hook ancestry.
+4. Confirm the installed launcher includes the correction before a subsequent
+   admitted launch. An existing server keeps its inherited environment; use the
+   normal lifecycle controls rather than changing a running process. Compare
+   a subsequent tool call with newly recorded activity and the next Doctor pass.
+   Retain the finding, session and process evidence if attribution still fails.
+
+For the related terminal-session fallback used after wrapper loss, see
+[Wrapper loss and swarm identity](../pillars/swarm.md#wrapper-loss-and-swarm-identity).
+That fallback addresses a different process shape from the detached managed
+server corrected here.
+
 ## Open and reopen a viewer
 
 The managed launch starts the server separately and runs the attach helper in

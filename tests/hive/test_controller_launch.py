@@ -1888,3 +1888,33 @@ def test_a_malformed_profile_decision_is_refused_before_recording(setup):
         "hive launch acknowledgement does not match the live execution: profile decision type expected "
     )
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
+
+
+def test_a_pod_restart_releases_the_reservations_of_orders_the_dead_pod_started(setup):
+    from scripts.hive import admission
+    from scripts.hive.orders import Consumer
+    from scripts.swarm.tick import ACK_LATER
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    request = request_for(setup)
+    request = replace(request, task={**request.task, ACK_LATER: True})
+    assert setup.launcher.spawn(request).status is Status.PENDING
+    order = setup.launcher.orders_for("task")
+    assert setup.launcher.slots.counts() == {"claude:account": 1}
+    assert admission.pending(setup.store.redis, "remote") == 1
+    runtime = Mock()
+    runtime.spawn.side_effect = KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        Consumer(setup.store.redis, "remote", runtime, pod="old").poll()
+    Consumer(setup.store.redis, "remote", runtime, pod="new").poll()
+    assert setup.launcher.collect(request) == Outcome(
+        "spawn", Status.REFUSED, "hive", detail="hive launch failed: restarted"
+    )
+    assert setup.launcher.slots.counts() == {}
+    assert admission.pending(setup.store.redis, "remote") == 0
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
+    assert setup.launcher.orders_for("task") is None
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [(json.loads(fields["order"])["action"], json.loads(fields["order"])["name"]) for _, fields in commands] == [
+        ("reap", request.name)
+    ]

@@ -33,6 +33,7 @@ INT_FIELDS = ("max_agents", "heartbeat_at")
 LEGACY = "roles"
 LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
+KEPT = (*UNSET, "ui", "ephemeral")
 
 
 def key(hive_id: str) -> str:
@@ -170,26 +171,29 @@ def migrate(redis: "Redis", hive_id: str) -> None:
 
 def seed(pipe: "Pipeline", hive_id: str) -> None:
     for field, value in _default(hive_id).items():
-        if field not in UNSET:
+        if field not in KEPT:
             pipe.hsetnx(key(hive_id), field, _encode(field, value))
 
 
-def update(redis: "Redis", hive_id: str, pairs: list[str]) -> dict:
+def update(redis: "Redis", hive_id: str, pairs: list[str], keep: bool = False) -> dict:
     if not HIVE_ID.fullmatch(hive_id):
         raise HiveError(f"hive id {hive_id!r} must be letters, digits, dots, dashes or underscores")
     if not pairs:
         raise HiveError("hive set needs at least one setting")
-    fields = parse(pairs)
+    parsed = parse(pairs)
 
     def write(pipe: "Pipeline") -> dict:
         legacy = pipe.hexists(key(hive_id), LEGACY)
-        record = _settle(hive_id, {**(_stored(pipe, hive_id) or {}), **fields})
+        stored = _stored(pipe, hive_id) or {}
+        fields = {f: v for f, v in parsed.items() if not (keep and f in KEPT and f in stored)}
+        record = _settle(hive_id, {**stored, **fields})
         _check(record)
         pipe.multi()
         if legacy:
             pipe.hdel(key(hive_id), *LEGACY_FIELDS)
         seed(pipe, hive_id)
-        pipe.hset(key(hive_id), mapping={field: _encode(field, value) for field, value in fields.items()})
+        if fields:
+            pipe.hset(key(hive_id), mapping={field: _encode(field, value) for field, value in fields.items()})
         if hive_id != scope.member():
             pipe.sadd(INDEX, hive_id)
         return record

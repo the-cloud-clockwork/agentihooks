@@ -26,6 +26,7 @@ CREATE INDEX IF NOT EXISTS events_revision ON events(slug,revision);
 CREATE INDEX IF NOT EXISTS events_position ON events(slug,position);
 CREATE TABLE IF NOT EXISTS relay_journal (kind TEXT, slug TEXT, revision INTEGER, PRIMARY KEY(kind,slug,revision));
 CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, slug TEXT NOT NULL, revision INTEGER NOT NULL, subject TEXT NOT NULL, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS outbox_sent (id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS artifact_files (slug TEXT, id TEXT, data TEXT, PRIMARY KEY(slug,id));
 CREATE TABLE IF NOT EXISTS media_files (slug TEXT, id TEXT, data TEXT, saved_at INTEGER, PRIMARY KEY(slug,id));
 """
