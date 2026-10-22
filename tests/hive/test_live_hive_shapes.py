@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 
 import pytest
@@ -83,10 +84,11 @@ def live(setup, tmp_path):
     (checkout / ".git" / "config").write_text(
         '[core]\n\tbare = false\n[remote "origin"]\n\turl = https://github.com/the-cloud-clockwork/agentihooks.git\n'
     )
-    for record in (root(agents=1), anton()):
+    for record in (root(), anton()):
         write_hive(setup, **{**record, "heartbeat_at": setup.hive["heartbeat_at"]})
     setup.store.redis.delete(registry.key("remote"))
     setup.store.redis.srem(registry.INDEX, "remote")
+    setup.store.redis.set(f"{registry.key('root')}:sessions", json.dumps({f"claude:{ROOT_ACCOUNTS[0]}": 1}))
     setup.herdr._quota_accounts = [Account("claude", name, "room", 0, 80, 80, 6) for name in ROOT_ACCOUNTS]
     setup.herdr.planned_account = lambda *args: ANTON_ACCOUNT
     setup.config = replace(setup.config, repo=str(checkout))

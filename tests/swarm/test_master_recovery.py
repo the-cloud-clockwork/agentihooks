@@ -496,9 +496,10 @@ def test_the_lost_hive_move_places_the_master_on_the_hive_with_room(store):  # n
     from tests.hive.test_controller_launch import publish_room
 
     _hive(store, "lost", NOW - GRACE_MS - 1)
-    for hive, room in (("big", 0), ("small", 2)):
+    for hive, room, workers in (("big", 0, 8), ("small", 2, 6)):
         _hive(store, hive, NOW)
         store.redis.hset(registry.key(hive), "max_agents", 8)
+        store.redis.set(f"{registry.key(hive)}:sessions", json.dumps({"claude:one": workers}))
         publish_room(store, hive, room)
     _hive_master(store)
     runtime = RecoveryRuntime()
