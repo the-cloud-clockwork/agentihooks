@@ -400,7 +400,7 @@ The operation schema accepts `task` on any `add_item`; the domain check then acc
 | `t2`, `fx-f517f382.code_1`, an id of 128 characters | Accepted |
 | A number or `null` | Refused by the operation schema |
 | An empty id, `a/b`, an id with a newline, an id of 129 characters | Refused by the domain check |
-| Any value on a question | Refused by the domain check |
+| A valid id on a question | Refused by the domain check |
 
 List the follow ups that carry a task, with their task and state:
 
@@ -412,7 +412,7 @@ agentihooks ledger --slug my-swarm show \
 The [schema change](https://github.com/the-cloud-clockwork/agentihooks/pull/4696) fixed a regression from the
 [task routing change](https://github.com/the-cloud-clockwork/agentihooks/pull/4636). That change made the CLI
 send `task` and the domain check accept it, but the operation schema still listed `add_item` without `task`, so
-from the ledger server restart at 06:53 UTC on 19 October every follow up add from a task session was refused at
+from the ledger server restart on 19 October every follow up add from a task session was refused at
 field `task`. Its tests used fake ledgers that skip the schema; the delivered tests send each CLI item add through
 `schemas.check_operations` with the real ledger core.
 
