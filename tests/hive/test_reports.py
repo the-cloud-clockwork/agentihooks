@@ -635,10 +635,13 @@ def test_the_hive_retires_the_recorded_process_identity(remote, monkeypatch):
 def test_a_hive_restarted_since_launch_retires_without_signalling(remote, monkeypatch):
     from scripts.hive.orders import Ack, Consumer, Orders
 
+    agent = replace(remote.agent, runtime_target={**remote.agent.runtime_target, "process_namespace": "old-boot/pid:[1]"})
+    remote.agent = agent
+    remote.store.put_agent("fixture", agent)
     _publish(remote)
-    runtime, agent = remote.runtime, remote.agent
+    runtime = remote.runtime
     assert runtime.retire(agent) is False
-    hive, ended = _hive_side(monkeypatch, "another", {12: SimpleNamespace(pid=12, start_time=34)})
+    hive, ended = _hive_side(monkeypatch, "new-boot/pid:[1]", {12: SimpleNamespace(pid=12, start_time=34)})
     Consumer(remote.redis, HIVE, hive).poll_commands()
     assert ended == []
     monkeypatch.setenv("SWARM_HIVE_ID", "controller")
