@@ -151,11 +151,14 @@ def test_the_reader_is_the_latest_agent_that_took_delivery_or_read_the_item():
     assert inbox.reader({"history": [took, {"state": "delivered", "by": "engineer@a-0003"}]}) == "engineer@a-0003"
 
 
-def test_an_informational_item_on_an_emptied_seat_is_never_counted_and_a_work_item_still_is():
+def test_an_item_on_an_empty_seat_awaiting_a_successor_is_not_counted_and_a_live_occupant_item_still_is():
     work = {**_delivered(), "id": "work1", "state": "pending", "fyi": False}
     fyi = {**copy.deepcopy(work), "id": "fyi1", "fyi": True}
     waiting = {work["address"]: inbox.Receiver(seat_wait=True)}
-    [found] = inbox.past_window([work, fyi], 11 * MIN, WINDOW, waiting)
+    assert inbox.past_window([work, fyi], 11 * MIN, WINDOW, waiting) == []
+    assert inbox.findings([work, fyi], 11 * MIN, WINDOW, waiting) == []
+    live = {work["address"]: inbox.Receiver(live=True, occupant="demo-eng-1")}
+    [found] = inbox.past_window([work, fyi], 11 * MIN, WINDOW, live)
     assert found.id == "inbox-past-window/work1"
-    assert found.summary == "seat wait; sent 10 minutes ago"
+    assert found.summary == "unread delivery; sent 10 minutes ago"
     assert inbox.past_window([fyi], 11 * MIN, WINDOW, {}) == []
