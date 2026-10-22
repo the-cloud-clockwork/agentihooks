@@ -426,6 +426,10 @@ def test_expired_order_of_a_departed_claimant_left_working_is_abandoned(setup):
         "reason": "hive launch order abandoned",
         "generation": order.generation,
     }
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [(json.loads(fields["order"])["action"], json.loads(fields["order"])["name"]) for _, fields in commands] == [
+        ("reap", request.name)
+    ]
     replacement = setup.launcher.orders_for("task")
     assert replacement.execution_id != order.execution_id
 

@@ -1179,13 +1179,14 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
         try:
-            if now_ms - agent.started_at >= LEASE_MS:
-                raise SpawnError(ACK_EXPIRED)
             placed = runtime.collect(
                 config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True}
             )
             launched = codex.admit_legacy(store, slug, placed_record(agent, placed), runtime)
         except Exception as exc:
+            transient = _acknowledging_error(exc) or not isinstance(exc, SpawnError | SwarmError)
+            if transient and now_ms - agent.started_at >= LEASE_MS:
+                exc = SpawnError(ACK_EXPIRED)
             if _acknowledging_error(exc):
                 store.refresh(slug, agent.task, agent.name, LEASE_MS)
             elif isinstance(exc, SpawnError | SwarmError):

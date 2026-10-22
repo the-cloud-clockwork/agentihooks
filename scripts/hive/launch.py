@@ -249,6 +249,7 @@ class HiveLaunch:
             if previous.state in ("ended", "finished"):
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif self.abandoned(order, previous):
+                self.reap(order, previous)
                 self.end(previous, "hive launch order abandoned")
             elif self.unacknowledged(order):
                 self.retire(order, previous)
