@@ -965,7 +965,9 @@ def _spend_host(store, name, now_ms):
 
 
 def _spend_local(store, agent, now_ms):
-    if not agent.hive:
+    from scripts.swarm.commands import hive_id
+
+    if not agent.hive or agent.hive == hive_id():
         _spend_host(store, agent.name, now_ms)
 
 
@@ -1182,12 +1184,12 @@ def _acknowledging(slug, store, agent):
     return bool(raw) and json.loads(raw).get("state") == ACKNOWLEDGING
 
 
-def _expire_launch(config, runtime, agent):
+def _expire_launch(config, runtime, agent, error):
     try:
-        runtime.expire(config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True})
+        kept = runtime.expire(config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True})
     except Exception as exc:
         return RuntimeError(f"expiring the launch raised {exc!r}")
-    return SpawnError(ACK_EXPIRED)
+    return error if kept is False else SpawnError(ACK_EXPIRED)
 
 
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
@@ -1214,7 +1216,7 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
             error = exc
             transient = _acknowledging_error(exc) or not isinstance(exc, SpawnError | SwarmError)
             if transient and now_ms - agent.started_at >= LEASE_MS:
-                error = _expire_launch(config, runtime, agent)
+                error = _expire_launch(config, runtime, agent, error)
             if _acknowledging_error(error):
                 store.refresh(slug, agent.task, agent.name, LEASE_MS)
             elif isinstance(error, SpawnError | SwarmError):
