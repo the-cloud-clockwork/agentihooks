@@ -375,3 +375,26 @@ def test_pending_publication_is_recovered_before_taking_new_work_from_a_busy_lan
     assert rig.spoke.poll() == "started"
     assert rig.runtime.spawn.call_count == 2
     rig.tasks.reopen.assert_not_called()
+
+
+def test_default_admission_reuses_the_previous_cpu_sample_before_taking_again(monkeypatch):
+    from scripts.hive import spoke
+
+    first = reading(pod_cpu_usec=10, measured_at=1234)
+    busy = reading(pod_cpu_usec=20, measured_at=5678, pod_cpus=1, pod_load=1)
+    samples = []
+
+    def measure(pending, now_ms, *, previous=None):
+        samples.append((pending, now_ms, previous))
+        return first if previous is None else busy
+
+    monkeypatch.setattr(spoke.headroom, "measure", measure)
+    monkeypatch.setattr(spoke, "time", SimpleNamespace(time_ns=Mock(side_effect=[1_234_000_000, 5_678_000_000])))
+    bus = Mock()
+    bus.state.return_value.get.return_value = None
+    bus.queue.return_value.take.return_value = None
+    worker = spoke.Spoke(spoke.SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a"), bus, Mock(), Mock())
+    assert worker.poll() == "empty"
+    assert worker.poll() == "held"
+    assert samples == [(0, 1234, None), (0, 5678, first)]
+    bus.queue.assert_called_once_with("swarm.rig.ready.eng", worker.config.policy)
