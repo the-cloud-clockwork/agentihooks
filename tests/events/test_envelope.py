@@ -89,6 +89,11 @@ def test_envelope_refuses_a_bad_time(value):
         Envelope(**_fields(time=value))
 
 
+def test_envelope_accepts_zero_version_and_time():
+    event = Envelope(**_fields(version=0, time=0))
+    assert (event.version, event.time) == (0, 0)
+
+
 def test_envelope_refuses_an_empty_cause():
     with pytest.raises(ValueError, match="event cause must be non empty text or None"):
         Envelope(**_fields(cause=""))

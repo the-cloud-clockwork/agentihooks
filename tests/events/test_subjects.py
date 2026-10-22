@@ -15,7 +15,7 @@ def test_subjects_of_two_swarms_never_overlap():
 
 
 def test_subject_needs_at_least_one_token():
-    with pytest.raises(ValueError, match="event subject needs at least one token"):
+    with pytest.raises(ValueError, match=r"^event subject needs at least one token$"):
         subject("crew")
 
 
