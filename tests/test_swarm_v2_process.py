@@ -228,6 +228,52 @@ def test_a_foreign_namespace_terminate_signals_nothing_and_counts_one_rejection(
     assert router.rejected == {(LOCAL, Unqualified.FOREIGN_NAMESPACE): 1}
 
 
+@pytest.mark.parametrize("pid_namespace", ["pid:[4026531836]", "pid:[4026539999]"])
+def test_a_local_record_from_a_previous_boot_retires_as_ended_without_signalling(tmp_path, monkeypatch, pid_namespace):
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    router = RuntimeRouter([local])
+    agent = record(namespace=f"boot-before/{pid_namespace}")
+    assert router.terminate(agent, ("/scratch/t1",)) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {}
+
+
+@pytest.mark.parametrize("host_id", ["", "hive-a"])
+def test_a_same_boot_foreign_pid_namespace_stays_refused(tmp_path, monkeypatch, host_id):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = record(namespace="boot-anton/pid:[4026539999]")
+    if host_id:
+        agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": host_id})
+    router = RuntimeRouter([local])
+    assert router.terminate(agent) == Outcome(
+        "terminate", Status.REFUSED, LOCAL, Unqualified.FOREIGN_NAMESPACE, "process belongs to another PID namespace"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {(LOCAL, Unqualified.FOREIGN_NAMESPACE): 1}
+
+
+@pytest.mark.parametrize(
+    ("recorded", "current", "expected"),
+    [
+        ("old/pid:[1]", "new/pid:[1]", True),
+        ("old/pid:[1]", "new/pid:[2]", True),
+        ("same/pid:[1]", "same/pid:[2]", False),
+        ("same/pid:[1]", "same/pid:[1]", False),
+        ("", "new/pid:[1]", False),
+        ("old/pid:[1]", "", False),
+        ("old", "new/pid:[1]", False),
+        ("old/pid:[1]", "new", False),
+        ("/pid:[1]", "new/pid:[1]", False),
+        ("old/pid:[1]", "/pid:[1]", False),
+    ],
+)
+def test_previous_boot_requires_two_readable_boot_qualified_namespaces(recorded, current, expected):
+    assert process.previous_boot(recorded, current) is expected
+
+
 def test_a_record_this_host_launched_before_its_namespace_restarted_retires_without_signalling(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
     local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
