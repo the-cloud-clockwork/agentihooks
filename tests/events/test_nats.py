@@ -1,5 +1,6 @@
 import asyncio
 import threading
+import time
 from types import SimpleNamespace
 from unittest import mock
 
@@ -217,6 +218,29 @@ def test_a_loop_that_never_runs_is_refused_at_its_start_bound(monkeypatch):
     with pytest.raises(RuntimeError, match="^bus loop did not start$"):
         nats._Loop()
     assert _Unset.timeouts == [nats.LOOP_START_S]
+
+
+class _Late(_Unset):
+    def wait(self, timeout):
+        time.sleep(0.2)
+        return super().wait(timeout)
+
+
+def test_a_running_loop_that_misses_its_start_bound_is_stopped_and_closed(monkeypatch):
+    monkeypatch.setattr(_Unset, "timeouts", [])
+    monkeypatch.setattr(nats.threading, "Event", _Late)
+    threads = []
+    real = nats.threading.Thread
+
+    def record(*args, **kwargs):
+        threads.append(real(*args, **kwargs))
+        return threads[-1]
+
+    monkeypatch.setattr(nats.threading, "Thread", record)
+    with pytest.raises(RuntimeError, match="^bus loop did not start$"):
+        nats._Loop()
+    threads[0].join(5)
+    assert not threads[0].is_alive()
 
 
 def test_a_loop_that_never_stops_is_refused_at_its_stop_bound():
