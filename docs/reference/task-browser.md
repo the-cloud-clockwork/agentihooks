@@ -57,8 +57,8 @@ browser, run its task with the frontend profile
 | Moment | What runs |
 |---|---|
 | Session opens | The Python proxy only. Playwright and `playwright-mcp` stay unstarted. |
-| Harness lists tools (`tools/list`) | Answered from the tool list cache when its key matches. With no matching cache, `playwright-mcp` starts once, its list is written to the cache and the upstream stays running. |
-| First tool call | Playwright resolves the Chromium executable, then `playwright-mcp` starts headless and isolated with a 1920x1080 viewport. |
+| Harness lists tools (`tools/list`) | Answered from the tool list cache when its key matches. With no matching cache, the upstream starts as on a first tool call, its list is written to the cache and the upstream stays running. |
+| First tool call, or a `tools/list` cache miss if that comes first | Playwright resolves the Chromium executable, then `playwright-mcp` starts headless and isolated with a 1920x1080 viewport. |
 | Later tool calls | Reuse the same `playwright-mcp` session. |
 
 Screenshots and other files a tool names land in the task folder: the swarm
@@ -126,5 +126,5 @@ lane. #4540 removed that proxy from engineer, CI and planner homes.
 | A seat has no `playwright-cmd` tools | Its chain is engineer, CI or planner without the frontend overlay | Set the task's profile to `frontend` |
 | Browser tools are missing or stale after a `playwright-mcp` upgrade on another path | The cache key matches the binary still first on `PATH` | Fix `PATH`, or delete `~/.agentihooks/browser/tools.json` |
 | Every session starts `playwright-mcp` at once | No `playwright-mcp` on `PATH`, so nothing is cached | Install `playwright-mcp` through `agentihooks deps ensure` |
-| The first browser call is slow | Playwright and the upstream start on that call | Expected once per session |
+| The first browser call, or a tool listing after a cache miss, is slow | Playwright and the upstream start on that request | Expected once per session |
 | Browser tools stop answering in a session | The upstream failed to start and the proxy ended | Restart the session; read the harness MCP log for the start error |
