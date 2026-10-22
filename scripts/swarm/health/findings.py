@@ -231,6 +231,8 @@ def proof_loops(
     rounds = {tid: max(reviews.get(tid, {}).values(), default=0) for tid in tasks}
     found = []
     for tid in tasks:
+        if tasks[tid].get("state") == "done":
+            continue
         if reruns[tid] > limits.reruns or rounds[tid] > limits.review_rounds:
             found.append(
                 Finding(
