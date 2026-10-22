@@ -73,7 +73,7 @@ def worker_stage(name):
 
 def test_hive_image_installs_agentihooks_cloned_from_the_chosen_branch():
     dockerfile = (ROOT / "deploy/worker/Dockerfile").read_text()
-    assert "ARG AGENTIHOOKS_SOURCE=git\n" in dockerfile[: dockerfile.index("\nFROM ")]
+    assert "ARG AGENTIHOOKS_SOURCE=git" in dockerfile[: dockerfile.index("\nFROM ")].splitlines()
     clone = worker_stage("source-git")
     assert "ARG AGENTIHOOKS_REF=dev\n" in clone
     assert "ADD https://github.com/the-cloud-clockwork/agentihooks.git#${AGENTIHOOKS_REF} /build\n" in clone
