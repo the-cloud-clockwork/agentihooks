@@ -701,6 +701,15 @@ def test_started_order_without_a_recorded_pod_keeps_waiting(setup):
     setup.runtime.spawn.assert_not_called()
 
 
+def test_started_order_of_this_pod_keeps_waiting_without_its_liveness_key(setup):
+    from scripts.hive.orders import Consumer
+
+    setup.redis.hset(setup.orders.receipt(setup.order), mapping={"started": "1", "pod": "new"})
+    order = replace(setup.order, expires_at=2**62)
+    assert Consumer(setup.redis, "host", setup.runtime, pod="new").apply(order) is None
+    setup.runtime.spawn.assert_not_called()
+
+
 def test_pod_liveness_key_lives_under_the_hive(setup):
     from scripts.hive import registry
 
