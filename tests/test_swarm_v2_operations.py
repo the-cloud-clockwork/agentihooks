@@ -124,6 +124,19 @@ def test_stale_generation_is_refused_before_dispatch(fixture):
     assert transport.creations == 0
 
 
+def test_an_archived_attempt_is_refused_as_stale(fixture):
+    store, agent, transport, operations = fixture
+    store.start_execution(
+        "fixture",
+        replace(agent, name=store.next_name("fixture", "eng"), execution_id="", generation=0),
+        agent.execution_id,
+    )
+    assert store.execution_registry.archive("fixture") == 1
+    with pytest.raises(OperationConflict, match="stale"):
+        operations.execute("fixture", request(agent))
+    assert transport.creations == 0
+
+
 def test_unknown_observation_never_authorizes_another_mutation(fixture):
     store, agent, transport, operations = fixture
     first = operations.execute("fixture", request(agent))
