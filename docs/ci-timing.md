@@ -141,6 +141,206 @@ Each integration push runs the promotion tier, including module coverage, schedu
 
 See [Delivery tiers](/docs/reference/delivery-tiers/) for check ownership. The measurements below record earlier workflow versions; their old event assignments do not describe the current tiers. Tests and mutation runs execute in CI only.
 
+## OCI runner migration measurements
+
+The [Doctor measurement](https://github.com/the-cloud-clockwork/agentihooks/issues/4564#issuecomment-6252369563)
+records what happened to agentihooks CI around three runner changes on
+13 and 14 October 2026. Placement increased median push to `Gate Required`
+time; raising runner CPU requests later reduced the merge queue median and
+tail. These are historical observations of the workflow used then. Use
+[Delivery tiers](reference/delivery-tiers.md) for current check ownership.
+
+### Cohorts and measurement rules
+
+The measurement reused the method from
+[Doctor's earlier gate measurement](https://github.com/the-cloud-clockwork/agentihooks/issues/3146):
+select Tests runs whose **first attempt starts** inside each named UTC window,
+keep `pull_request` and `merge_group` separate, and read attempt 1 jobs.
+Measure gate completion from workflow `created_at`, which is a proxy for the
+push trigger rather than an observed Git push timestamp. A run can finish
+after its selection window ends.
+
+Report cohort size, completed gates, missing gates and successful gates
+separately. The main p50 and p90 include completed noncancelled gates that
+failed. A failed gate can finish quickly; these percentiles do not measure
+time to a successful merge. Keep successful-only percentiles alongside them.
+Worker image wall time is job completion minus job start; it excludes runner
+pickup. Slowest unit wall time is the maximum unit job wall time per run.
+Neither alone establishes the whole run's critical path.
+
+| Comparison | Before UTC | After UTC | Window length per side |
+|---|---|---|---|
+| OCI placement | 13 Oct 13:10:34–19:10:34 | 13 Oct 19:10:34–14 Oct 01:10:34 | Six hours nominally; before excludes a 599 second planned cordon |
+| On demand EC2 removed | 14 Oct 03:44–07:37 | 14 Oct 07:37–11:30 | 3 h 53 min |
+| Runner CPU request raised | 14 Oct 07:45–11:30 | 14 Oct 11:45–15:30 | 3 h 45 min; after starts fifteen minutes after application |
+
+All dates in this section are in 2026. The placement comparison has 21001
+included seconds before and 21600 after because it excludes the planned
+18:08:01–18:18 cutover. Preserve that exclusion and disclose the unequal
+included durations when reusing the results.
+
+### Placement results and cordons
+
+[antoncore pull request 829](https://github.com/the-cloud-clockwork/antoncore/pull/829)
+merged at 19:10:34 UTC on 13 October. That placement preferred OCI for `anton`
+and `anton-oss`, with on demand EC2 overflow after six minutes. This describes
+the intermediate migration configuration. The operator's destination was
+every CI runner set on OCI, accepting slower image builds; these measurements
+do not authorize moving runners back to EC2.
+
+Times below are seconds. Each arrow reads before → after.
+
+| Event | Cohort | Completed gates | Missing gates | Gate p50 | Gate p90 | Successful gates | Successful-only p50 / p90 |
+|---|---|---|---|---|---|---|---|
+| Pull request | 109 → 102 | 105 → 100 | 4 → 2 | 1076 → 2140 | 3762 → 3429 | 43 → 41 | 2574 / 4069 → 2847 / 3707 |
+| Merge queue | 38 → 47 | 38 → 47 | 0 → 0 | 1637 → 3101 | 4210 → 3893 | 25 → 33 | 2272 / 4045 → 3101 / 3714 |
+
+| Worker image event | Measured jobs | Wall p50 | Wall p90 |
+|---|---|---|---|
+| Pull request | 74 → 69 | 363 → 361 | 411 → 497 |
+| Merge queue | 36 → 33 | 363 → 363 | 439 → 480 |
+
+The planned 18:08 cutover is excluded from the before cohort. Two later
+intervals, 19:12–19:22 and 20:05–20:15, had all EC2 CI nodes cordoned while
+OCI runners were pending. **No plan was recorded for those later cordons.**
+The source task records the watched master's 20:15 observation: 29 of 39
+`anton-oss` runners pending for insufficient CPU on fifteen full Oracle nodes,
+33 EC2 nodes cordoned, no dev merge since 17:47, and queue entries dropping
+at the sixty minute check timeout.
+
+Retain those intervals in the primary after result and report them separately:
+one pull request run first started in each, with failed gates completing at
+1014 and 1944 seconds respectively; no merge group run first started in
+either interval. Excluding both gives 100 pull request runs, 98 completed
+gates and p50 / p90 of 2175 / 3457 seconds; queue results are unchanged.
+Selecting by run start does not count every already-running job affected by
+the cordons.
+
+### Hourly runner wait
+
+The original runner wait reader reported `anton-oss` unit pickup p90 by UTC
+hour, splitting wait into scale set cap, node provisioning and boot. Across
+these hours it attributed wait to the runner cap, with node provisioning p90
+between zero and ten seconds. Pending pods at a particular instant and this
+windowed wait attribution answer different questions.
+
+| Before hour, 13 Oct UTC | Wait p90 seconds | After hour UTC | Wait p90 seconds |
+|---|---|---|---|
+| 13 | 1330 | 13 Oct 19 | 1386 |
+| 14 | 879 | 13 Oct 20 | 1315 |
+| 15 | 368 | 13 Oct 21 | 941 |
+| 16 | 345 | 13 Oct 22 | 1802 |
+| 17 | 1498 | 13 Oct 23 | 1286 |
+| 18 | 1951 | 14 Oct 00 | 1536 |
+| 19 | 1630 | 14 Oct 01 | 1626 |
+
+The retained whole-window p90 is 1420 → 1488 seconds, with 2219 of 2234
+jobs measured before and 2126 of 2126 after. This reader was not the audited
+attempt 1 gate collector: its before output also contains eighteen latest
+attempt rerun jobs in hour 20 with p90 **−1297 seconds**. That is a timestamp
+artifact, not negative queueing. The table omits that invalid bucket; the
+quoted whole-window values remain the original report, not a recomputed,
+cleaned first-attempt estimate. Do not use them as precise causal proof of
+the cloud change.
+
+### Infrastructure loss and CPU requests
+
+Near 07:37 UTC on 14 October the operator's spot change took on demand EC2
+CI nodes to zero and about ten nodes left together. Jobs on those nodes lost
+runner contact. Treat that burst as infrastructure loss when interpreting
+failures.
+
+| Event around EC2 removal | Completed gates / cohort before → after | Gate p50 | Gate p90 | Slowest unit wall p50 |
+|---|---|---|---|---|
+| Pull request | 50 / 52 → 28 / 29 | 1256 → 1850 | 4062 → 5437 | 294 → 549 |
+| Merge queue | 48 / 48 → 31 / 31 | 2071 → 2186 | 5678 → 4178 | 307 → 542 |
+
+No Gate Required succeeded in either event's after cohort. The lower queue
+p90 therefore does not establish recovery.
+
+The watched investigation in
+[antoncore issue 839](https://github.com/the-cloud-clockwork/antoncore/issues/839)
+associated the unit tail regression with CPU packing: runners requested two
+CPUs with a four CPU limit, allowing six to seven on a sixteen CPU OCI node
+at about 96 percent CPU. Median shard execution stayed near 250 seconds
+while the slowest grew from about five to about 9.5 minutes.
+[antoncore pull request 841](https://github.com/the-cloud-clockwork/antoncore/pull/841)
+raised the request to 3500 millicores, retaining the four CPU limit, live
+about 11:30 UTC on 14 October. The resource shape was:
+
+```yaml
+resources:
+  requests:
+    cpu: "3500m"
+  limits:
+    cpu: "4"
+```
+
+This is a runner container resource excerpt, not a complete scale set manifest
+or an agentihooks environment setting. Placement, capacity and resource
+changes belong in reviewed antoncore configuration and CI delivery.
+
+| Event around CPU request change | Completed gates / cohort before → after | Gate p50 | Gate p90 | Slowest unit wall p50 | Unit pickup p90 | Worker image wall p90 |
+|---|---|---|---|---|---|---|
+| Pull request | 26 / 26 → 17 / 17 | 1850 → 1854 | 5372 → 2675 | 558 → 395 | 2276 → 913 | 524 → 465 |
+| Merge queue | 31 / 31 → 58 / 58 | 2186 → 1805 | 4178 → 2951 | 542 → 396 | 1485 → 1209 | 725 → 516 |
+
+Successful gates increased from zero to four pull requests and ten merge
+groups in these CPU comparison cohorts. The master's earlier seven-run sample
+from 11:45–12:10 still had every run failing, mostly at the worker-count
+dependent shard check exactly once step, tracked separately as watched task
+t639. Faster execution does not imply that test partition failures are fixed.
+
+### Inspect and reproduce the measurement
+
+The published source issue contains the complete output. On the original
+Doctor workspace, its retained scripts reproduce the report:
+
+```bash
+cd "$HOME/.agentihooks/swarm/rig-grade-swarm-doctor/tasks/t195"
+python3 -I measure.py
+python3 -I report.py
+python3 -I close-proof.py
+```
+
+These are task evidence scripts, not installed product commands. They require
+the original retained workspace and authenticated GitHub access; the runner
+wait evidence additionally depends on historical cluster metrics. The source
+also ran the original runner wait reader for both placement windows. For a
+new comparison, record explicit UTC boundaries, exclusions, placement revision
+and application time, and preserve raw attempt-specific responses. Keep the
+same estimator on both sides and report missing evidence rather than zero.
+
+Inspect GitHub records without running local tests:
+
+```bash
+gh api --method GET \
+  repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs \
+  -f event=pull_request \
+  -f created='2026-10-13T13:10:34Z..2026-10-14T01:10:34Z' \
+  -f per_page=100 --paginate \
+  --jq '.workflow_runs[] | {id,event,created_at,run_started_at,run_attempt}'
+gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/attempts/1
+gh api --paginate \
+  repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/attempts/1/jobs \
+  --jq '.jobs[] | {name,conclusion,created_at,started_at,completed_at,runner_name,labels}'
+```
+
+Repeat the listing with `event=merge_group`. The `created` search is a
+discovery filter, not the cohort rule: widen it to catch runs created before
+the window whose first attempt starts inside it, then select by the first
+attempt's start time. Split busy searches into smaller UTC ranges if the API
+reaches its 1000-result search ceiling. Do not substitute latest-attempt job
+timestamps for attempt 1 or silently drop runs without a completed gate.
+
+| Symptom | Inspection |
+|---|---|
+| Gate p90 falls while merges still fail | Compare successful-only gates and missing counts; inspect failure conclusions. |
+| Runner wait rises | Separate cap wait, node provisioning and boot; inspect the allocation and pending reason before attributing it to OCI. |
+| Runner contact disappears during node removal | Classify the infrastructure burst separately from assertion failures. |
+| Historical wait is negative or a metric window is absent | Preserve the evidence gap; verify attempt identity and metric retention before computing another comparison. |
+| Unit execution improves but gates stay red | Inspect the shard check and test partition, separately from runner CPU resources. |
+
 ## Resource sampling and stop condition regression checks
 
 Two regression checks cover live process tree sampling and a pre push gate that overruns its stop condition budget. Their checks distinguish sampling leaks from inherited garbage, and condition execution time from hook startup and exit time.
