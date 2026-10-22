@@ -290,6 +290,15 @@ def test_launch_failure_moves_a_lane_off_claude_with_no_workstation_record(store
     assert run(store) == [text]
 
 
+def test_launch_failure_moves_a_lane_the_workstation_excludes_without_hive_placement(store, home, shipped, monkeypatch):
+    hive_only(store, monkeypatch)
+    store.update(SLUG, hive_placement=False)
+    pin(store, "eng", "claude")
+    detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
+    text = bottleneck_remedy.MOVED.format(lane="eng", source="claude", target="codex", targeted=FAILED)
+    assert run(store) == [text]
+
+
 def test_quota_hold_moves_a_hive_only_lane_back_to_claude(store, home, shipped, monkeypatch):
     hive_only(store, monkeypatch)
     pin(store, "eng", "codex")
