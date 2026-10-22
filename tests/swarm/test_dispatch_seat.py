@@ -806,8 +806,12 @@ def hive_member(monkeypatch):
 
     def validate(_acl, _username, _client, fields):
         info = UserAccessControlList._get_command_info(fields)
-        allowed = writable if info and b"write" in info[2] else readable + writable
-        for key in UserAccessControlList()._get_keys(info, fields):
+        if fields[0].lower() in (b"eval", b"evalsha"):
+            keys, allowed = fields[3 : 3 + int(fields[2])], writable
+        else:
+            keys = UserAccessControlList()._get_keys(info, fields)
+            allowed = writable if info and b"write" in info[2] else readable + writable
+        for key in keys:
             if not any(fnmatchcase(key.decode(), pattern) for pattern in allowed):
                 raise SimpleError(NO_PERMISSION_KEY_ERROR)
 
