@@ -8,7 +8,7 @@ from pathlib import Path
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, hierarchy, media_files, outbox
+from . import artifact_files, heap, hierarchy, media_files, outbox
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
@@ -466,6 +466,7 @@ class SQLiteLedgerRepository:
             fragments = document(state)
             entry = Entry(row[0], None, fragments.value, fragments)
             self._remember(slug, entry)
+            heap.release()
         return entry
 
     def _remember(self, slug: str, entry: Entry) -> None:
@@ -506,6 +507,7 @@ class SQLiteLedgerRepository:
             entry = self._entry(connection, slug)
         if view not in entry.views:
             entry.views[view] = view(entry.state)
+            heap.release()
         return entry.views[view]
 
     def read(self, slug: str, *keys: str) -> dict:

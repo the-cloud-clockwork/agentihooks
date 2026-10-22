@@ -237,6 +237,17 @@ def test_only_a_whole_rebuild_hands_its_freed_heap_back(tmp_path, monkeypatch):
     assert released == [True]
 
 
+def test_a_view_hands_its_freed_heap_back_once_per_generation(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    repo.create("ledger", CONTENT)
+    repo.current("ledger")
+    released = []
+    monkeypatch.setattr(sqlite.heap, "release", lambda: released.append(True))
+    assert json.loads(repo.encoded_view("ledger", json.dumps))["title"] == "Store"
+    repo.encoded_view("ledger", json.dumps)
+    assert released == [True]
+
+
 def test_a_reader_of_an_older_revision_keeps_the_newer_copy_for_the_next_writer(tmp_path, monkeypatch):
     repo = store(tmp_path)
     repo.create("ledger", CONTENT)
