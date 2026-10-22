@@ -36,6 +36,9 @@ class Selection:
     origin: str = ""
 
 
+ROOM_DETAILS = {"reason": "", "detail": ""}
+
+
 def loaded_hives(store: RedisStore) -> list[dict]:
     """Every registered hive with the worker agents it runs or is launching.
 
@@ -67,11 +70,19 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
             max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
+        from scripts.swarm import local_slots
+        from scripts.swarm.commands import hive_id
+
+        held = admission.pending(store.redis, hive["id"])
+        used = hive["agents"]
+        if hive["id"] == hive_id():
+            running, taken = local_slots.occupancy(store, hive["id"])
+            hive["agents"] = max(hive["agents"], running)
+            used = max(hive["agents"], taken)
+            held = max(held, used - hive["agents"])
         found = admission.capped(
-            admission.room(
-                headroom.read(store.redis, hive["id"], now), pending=admission.pending(store.redis, hive["id"])
-            ),
-            hive["agents"],
+            admission.room(headroom.read(store.redis, hive["id"], now), pending=held),
+            used,
             hive["max_agents"],
         )
         hive["room"] = found.room
@@ -85,14 +96,12 @@ def _key(account: str) -> str:
 
 
 def _open_claude_rows(rows: list, hived: dict[str, int]) -> list:
-    """Claude accounts with a free seat once the sessions every live hive reports are counted beside local ones."""
     return [
         row for row in rows if row.harness == "claude" and capacity.free_seats(row) - hived.get(_key(row.name), 0) > 0
     ]
 
 
 def _hive_sessions(redis: object, now_ms: int) -> dict[str, int]:
-    """Worker sessions each live hive reports for itself, so local launches are never counted twice."""
     from scripts.routing import aggregate
 
     if aggregate.enabled():
@@ -171,8 +180,11 @@ def _match(check: str, expected: object, actual: object) -> None:
 
 
 def release(store: RedisStore, slug: str, agent: AgentRecord) -> None:
+    from scripts.swarm import local_slots
+
     LaunchSlots(store.redis).release(agent.execution_id)
     admission.release(store.redis, agent.hive, f"{slug}/{agent.name}")
+    local_slots.release(store, agent.hive, slug, agent.name)
 
 
 class HiveLaunch:
@@ -211,6 +223,17 @@ class HiveLaunch:
             front = front_door.holds(self.slug, task.get("seat", ""))
             selected = self._master_selection(config, decision, hives, now, rows, front)
             return self._record_wait(lane, task, selected)
+        from scripts.swarm import local_slots
+        from scripts.swarm.commands import hive_id
+
+        if lane != placement.MASTER:
+            for hive in hives:
+                if hive["id"] == hive_id():
+                    bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
+                    taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
+                    limited = admission.capped(admission.Room(hive["room"], **ROOM_DETAILS), taken, bound)
+                    if limited.room < hive["room"]:
+                        hive["room"], hive["refusal"] = limited.room, admission.refusal(limited)
         account = saved.get("account") or self.herdr.planned_account(task["id"], "claude")
         hived = _hive_sessions(self.store.redis, now)
         open_rows = _open_claude_rows(rows, hived)
@@ -284,6 +307,19 @@ class HiveLaunch:
     def reap(self, order: LaunchOrder, agent: AgentRecord) -> None:
         self.orders.command(order.hive, CommandOrder(f"reap:{agent.name}", "reap", name=agent.name))
 
+    def reap_execution(self, order: LaunchOrder) -> None:
+        lease.require_epoch(self.store, self.slug, self.held.epoch)
+        self.orders.command(
+            order.hive,
+            CommandOrder(
+                f"reap:{order.slug}:{order.execution_id}:{order.generation}",
+                "reap_execution",
+                slug=order.slug,
+                execution_id=order.execution_id,
+                generation=order.generation,
+            ),
+        )
+
     def spawn(self, request: SpawnRequest) -> Outcome:
         lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
         if order := self.orders_for(request.task["id"]):
@@ -318,7 +354,10 @@ class HiveLaunch:
         try:
             return self.send_order(request, selected, task)
         except BaseException:
+            from scripts.swarm import local_slots
+
             admission.release(self.store.redis, selected.hive, f"{self.slug}/{request.name}")
+            local_slots.release(self.store, selected.hive, self.slug, request.name)
             raise
 
     def send_order(self, request: SpawnRequest, selected: Selection, task: dict) -> Outcome:
@@ -370,11 +409,24 @@ class HiveLaunch:
     def reserve_room(self, request: SpawnRequest, selected: Selection) -> str:
         if selected.master_placement is not None:
             return ""
+        from scripts.swarm import local_slots
+        from scripts.swarm.commands import hive_id
+
         reading = headroom.read(self.store.redis, selected.hive, lease.now_ms(self.store))
         member = f"{self.slug}/{request.name}"
+        local = selected.hive == hive_id() and request.lane != placement.MASTER
+        if local:
+            running = local_slots.running(self.store, self.slug, request.task["id"])
+            bound = local_slots.maximum(self.store, self.slug, running + admission.room(reading).room)
+            taken = local_slots.claim(self.store, selected.hive, self.slug, request.task["id"], request.name, bound)
+            if taken >= bound:
+                refused = f"no hive has room{placement.LOCAL_FULL}{taken} of its {bound} agents"
+                return refused  # nosemgrep: python.flask.security.audit.directly-returned-format-string.directly-returned-format-string
         reserved, held = admission.reserve(self.store.redis, selected.hive, member, admission.room(reading).room)
         if reserved:
             return ""
+        if local:
+            local_slots.release(self.store, selected.hive, self.slug, request.name)
         refused = admission.refusal(admission.room(reading, pending=held))
         return f"no hive for {request.lane} has room: {selected.hive} {refused}"
 
@@ -433,21 +485,25 @@ class HiveLaunch:
     def complete(self, order: LaunchOrder, ack: Ack) -> Outcome:
         agent = self.store.execution_registry.get(self.slug, order.execution_id)
         if ack.status != "live":
-            if ack.failure == "expired":
+            if ack.failure in ("expired", orders.RESTARTED):
                 self.reap(order, agent)
             if ack.failure != "ambiguous":
                 self.end(agent, ack.failure)
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             status = Status.AMBIGUOUS if ack.failure == "ambiguous" else Status.REFUSED
             return Outcome("spawn", status, HIVE, detail=f"hive launch failed: {ack.failure}")
-        current = self.store.execution_occupants(self.slug).get(agent.seat)
-        _match("seat occupant", order.execution_id, current.execution_id if current else None)
-        _match("generation", order.generation, agent.generation)
-        if agent.state == "launching":
-            agent = self.record(agent, order, ack)
-        _match("runtime target", agent.runtime_target, ack.target)
-        _match("pane", agent.pane_id, ack.execution.get("pane_id", agent.pane_id))
-        _match("state", "working", agent.state)
+        try:
+            current = self.store.execution_occupants(self.slug).get(agent.seat)
+            _match("seat occupant", order.execution_id, current.execution_id if current else None)
+            _match("generation", order.generation, agent.generation)
+            if agent.state == "launching":
+                agent = self.record(agent, order, ack)
+            _match("runtime target", agent.runtime_target, ack.target)
+            _match("pane", agent.pane_id, ack.execution.get("pane_id", agent.pane_id))
+            _match("state", "working", agent.state)
+        except SwarmError:
+            self.reap_execution(order)
+            raise
         if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(agent.execution_id):
             self.reap(order, agent)
             self.end(agent, LATE)

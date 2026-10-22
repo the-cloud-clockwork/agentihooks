@@ -1156,6 +1156,11 @@ jobs:
             --captures "$RUNNER_TEMP/dev-coverage/js-coverage" --captures-out "$GITHUB_WORKSPACE/js-coverage"
 
       # Page tests drive Chromium; the coverage shards run them so the page JavaScript they reach is measured.
+      - name: Install the pinned nats server for the bus backend tests
+        if: needs.split.outputs.source == ''
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
+
       - name: Install the browser that page tests drive
         if: needs.split.outputs.source == '' && matrix.python-version == '3.12' && github.event_name != 'merge_group'
         timeout-minutes: 6
@@ -1403,6 +1408,10 @@ jobs:
         run: |
           echo "$HOME/codex" >> "$GITHUB_PATH"
           echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"
+
+      - name: Install the pinned nats server for the bus backend tests
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
 
       - name: Install the browser that page tests drive
         if: matrix.python-version == '3.12'
@@ -2767,6 +2776,11 @@ jobs:
         with:
           name: mutation-selection
 
+      - name: Install the pinned nats server for the bus backend tests
+        if: needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.github/actions/nats-server/action.yml') != ''
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
+
       - name: Install the browser that page tests drive
         id: browser
         if: needs.mutation-plan.outputs.browser == 'true'
@@ -2865,6 +2879,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: mutation-selection
+
+      - name: Install the pinned nats server for the bus backend tests
+        if: needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.github/actions/nats-server/action.yml') != ''
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
 
       - name: Install the browser that page tests drive
         id: browser

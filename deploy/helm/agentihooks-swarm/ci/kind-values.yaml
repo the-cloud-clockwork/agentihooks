@@ -18,7 +18,7 @@ controller:
     periodSeconds: 1
     timeoutSeconds: 5
     failureThreshold: 2
-  terminationGracePeriodSeconds: 1
+  terminationGracePeriodSeconds: 30
   # Never created in kind; optional lets the controller start without it.
   secretEnv:
     - name: AGENTIHOOKS_WORKER_TERMINAL

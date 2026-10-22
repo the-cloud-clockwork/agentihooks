@@ -13,7 +13,7 @@ SIGTERM_EXIT = 143
 
 STOP = threading.Event()
 _HELD: dict[str, Callable[[], None]] = {}
-_GUARD = threading.Lock()
+_GUARD = threading.RLock()
 
 
 class Stopped(BaseException):

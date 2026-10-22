@@ -190,9 +190,9 @@ class Claim:
         self.graph = hierarchy.project(doc)[0]
 
     def __call__(self, task: dict) -> bool:
-        from scripts.swarm import tick
+        from scripts.swarm import readiness
 
-        return tick.ready(task, self.rows, self.doc, self.graph, self.fix_phase)
+        return readiness.ready(task, self.rows, self.doc, self.graph, self.fix_phase)
 
     def opens(self, task: dict) -> Callable[["Mark"], bool]:
         chain = freeze.ancestry(task, self.graph)

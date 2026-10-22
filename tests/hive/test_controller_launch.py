@@ -75,7 +75,9 @@ def test_no_advertised_slot_does_not_probe_controller_credentials(setup):
     from scripts.hive.placement import Wait
 
     setup.herdr._quota_accounts = []
-    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait("no advertised Claude account has room")
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        "no Claude account has room after hive sessions: "
+    )
     setup.herdr.choose.assert_not_called()
 
 
@@ -777,6 +779,112 @@ def test_live_acknowledgement_refuses_inconsistent_execution_identity(setup, bad
     )
 
 
+@pytest.mark.parametrize("bad", ["generation", "missing occupant", "replaced occupant"])
+def test_live_acknowledgement_failing_its_identity_reaps_that_execution_never_the_seat_occupant(setup, bad):
+    from unittest.mock import patch
+
+    from scripts.swarm.store import SwarmError
+
+    _, order, ack = live_order(setup)
+    live = setup.store.execution_registry.get("fixture", order.execution_id)
+    current = {live.seat: replace(live, execution_id="occupant")} if bad == "replaced occupant" else {}
+    if bad == "generation":
+        current, order = {live.seat: live}, replace(order, generation=order.generation + 1)
+    with patch.object(setup.store.execution_registry, "occupants", return_value=current):
+        with pytest.raises(SwarmError):
+            setup.launcher.complete(order, ack)
+    sent = [
+        json.loads(fields["order"]) for _, fields in setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    ]
+    assert [(o["action"], o["slug"], o["name"], o["execution_id"], o["generation"]) for o in sent] == [
+        ("reap_execution", "fixture", "", order.execution_id, order.generation)
+    ]
+
+
+def test_rejected_executions_have_separate_idempotent_reap_commands(setup):
+    _, order, _ = live_order(setup)
+    replacement = replace(order, execution_id="replacement", generation=order.generation + 1)
+    setup.launcher.reap_execution(order)
+    setup.launcher.reap_execution(order)
+    setup.launcher.reap_execution(replacement)
+    sent = [
+        json.loads(fields["order"]) for _, fields in setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    ]
+    assert [(row["execution_id"], row["generation"]) for row in sent] == [
+        (order.execution_id, order.generation),
+        (replacement.execution_id, replacement.generation),
+    ]
+
+
+def test_hive_reaps_the_process_it_acknowledged_for_the_named_execution(setup):
+    from scripts.hive.orders import Ack, CommandOrder, Consumer
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    _, order, ack = live_order(setup)
+    runtime = Mock()
+    runtime.terminate.return_value = Outcome("terminate", Status.OK, "local")
+    reap = CommandOrder("reap", "reap_execution", "fixture", "", order.execution_id, order.generation)
+    assert Consumer(setup.store.redis, "remote", runtime).command(reap) == Ack("done", ack.target)
+    (reaped,), _ = runtime.terminate.call_args
+    assert (reaped.execution_id, reaped.runtime_target, reaped.pane_id) == (order.execution_id, ack.target, "pane")
+    runtime.herdr.reap_name.assert_not_called()
+
+
+@pytest.mark.parametrize("status,detail", [("ok", ""), ("refused", "process identity changed")])
+def test_execution_reap_uses_the_receipt_even_when_the_registry_pane_changed(setup, status, detail):
+    from unittest.mock import patch
+
+    from scripts.hive.orders import Ack, CommandOrder, Consumer
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    _, order, ack = live_order(setup)
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    changed = replace(
+        agent,
+        generation=agent.generation + 1,
+        pane_id="replacement",
+        runtime_target={"host_id": "elsewhere", "pid": 999},
+    )
+    runtime = Mock()
+    runtime.terminate.return_value = Outcome("terminate", Status(status), "local", detail=detail)
+    reap = CommandOrder("reap", "reap_execution", "fixture", "", order.execution_id, order.generation)
+    expected = Ack("done" if status == "ok" else "failed", ack.target, detail)
+    consumer = Consumer(setup.store.redis, "remote", runtime)
+    with patch.object(consumer.store.execution_registry, "get", return_value=changed):
+        assert consumer.command(reap) == expected
+    (reaped,), _ = runtime.terminate.call_args
+    assert (reaped.execution_id, reaped.generation, reaped.runtime_target, reaped.pane_id) == (
+        order.execution_id,
+        order.generation,
+        ack.target,
+        "pane",
+    )
+    runtime.herdr.reap_name.assert_not_called()
+
+
+@pytest.mark.parametrize("bad", ["generation", "execution", "hive", "missing", "failed", "foreign target"])
+def test_hive_never_reaps_an_execution_it_did_not_acknowledge(setup, bad):
+    from scripts.hive.orders import FOREIGN, CommandOrder, Consumer
+
+    _, order, ack = live_order(setup)
+    if bad == "missing":
+        setup.store.redis.hdel(setup.launcher.orders.receipt(order), "ack")
+    elif bad == "failed":
+        setup.store.redis.hset(setup.launcher.orders.receipt(order), "ack", replace(ack, status="failed").encode())
+    elif bad == "foreign target":
+        setup.store.redis.hset(
+            setup.launcher.orders.receipt(order), "ack", replace(ack, target={"host_id": "elsewhere"}).encode()
+        )
+    runtime = Mock()
+    generation = order.generation + (bad == "generation")
+    execution = "other" if bad == "execution" else order.execution_id
+    reap = CommandOrder("reap", "reap_execution", "fixture", "", execution, generation)
+    hive = "elsewhere" if bad == "hive" else "remote"
+    assert Consumer(setup.store.redis, hive, runtime).command(reap) == FOREIGN
+    runtime.terminate.assert_not_called()
+    runtime.herdr.reap_name.assert_not_called()
+
+
 def test_live_acknowledgement_after_its_reservation_expired_ends_the_execution_and_reaps_its_pane(setup):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
@@ -950,6 +1058,61 @@ def test_selected_account_is_frozen_ahead_of_less_used_accounts(setup, pin):
         setup.herdr.planned_account.assert_called_once_with("task", "claude")
 
 
+@pytest.mark.parametrize("pin", ["saved", "planned", "none"])
+def test_hive_sessions_force_a_full_account_to_fall_back_to_one_with_room(setup, monkeypatch, pin):
+    from scripts.hive import registry
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
+    setup.herdr._quota_accounts = [
+        Account("claude", "full_on_hives", "room", 0, 80, 80, 6),
+        Account("claude", "account", "room", 1, 80, 80, 6),
+    ]
+    write_hive(
+        setup,
+        max_agents=10,
+        slots=[{"harness": "claude", "account": "full_on_hives", "kind": "subscription"}, *setup.hive["slots"]],
+    )
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", '{"claude:full_on_hives": 6}')
+    task = {"id": "task"}
+    if pin == "saved":
+        task["launch_assignment"] = {"harness": "claude", "account": "full_on_hives"}
+    elif pin == "planned":
+        setup.herdr.planned_account.return_value = "full_on_hives"
+
+    assert setup.launcher.select(setup.config, "eng", task).account.name == "account"
+
+
+@pytest.mark.parametrize("account", ["account", ""])
+def test_full_hive_accounts_report_local_and_remote_session_counts(setup, monkeypatch, account):
+    from scripts.hive import placement, registry
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "room", 2, 80, 80, 6),
+        Account("codex", "other", "room", 0, 80, 80, 6),
+        Account("claude", "second", "room", 3, 80, 80, 4),
+        Account("claude", "third", "room", 1, 80, 80, 2),
+    ]
+    setup.store.redis.set(
+        f"{registry.key('remote')}:sessions", '{"claude:account": 4, "claude:second": 1, "claude:third": 1}'
+    )
+    setup.herdr.planned_account.return_value = account
+
+    result = setup.launcher.select(setup.config, "eng", {"id": "task"})
+
+    assert isinstance(result, placement.Wait)
+    assert result.reason == (
+        "no Claude account has room after hive sessions: account 2 here and 4 on hives of 6, "
+        "second 3 here and 1 on hives of 4, third 1 here and 1 on hives of 2"
+        + ("; pinned to account" if account else "")
+    )
+    assert result.role == "eng"
+
+
 def test_account_selection_orders_room_by_usage_then_name(setup):
     from scripts.swarm.capacity import Account
 
@@ -964,14 +1127,19 @@ def test_account_selection_orders_room_by_usage_then_name(setup):
     assert setup.launcher.select(setup.config, "eng", {"id": "task"}).account.name == "a"
 
 
-@pytest.mark.parametrize("row", [("codex", 0, 6), ("claude", 6, 6)])
-def test_non_claude_and_full_accounts_cannot_place_a_worker(setup, row):
+@pytest.mark.parametrize(
+    ("row", "seats"),
+    [(("codex", 0, 6), ""), (("claude", 6, 6), "account 6 here and 0 on hives of 6")],
+)
+def test_non_claude_and_full_accounts_cannot_place_a_worker(setup, row, seats):
     from scripts.hive.placement import Wait
     from scripts.swarm.capacity import Account
 
     harness, sessions, cap = row
     setup.herdr._quota_accounts = [Account(harness, "account", "room", sessions, 80, 80, cap)]
-    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait("no advertised Claude account has room")
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        f"no Claude account has room after hive sessions: {seats}", "eng"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1587,7 +1755,7 @@ def test_terminal_order_is_cleared_even_when_replacement_has_no_account_room(set
     setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
     setup.herdr._quota_accounts = []
     assert setup.launcher.spawn(request_for(setup)) == Outcome(
-        "spawn", Status.UNAVAILABLE, "hive", detail="no advertised Claude account has room"
+        "spawn", Status.UNAVAILABLE, "hive", detail="no Claude account has room after hive sessions: "
     )
     assert setup.launcher.orders_for("task") is None
 
@@ -1638,7 +1806,7 @@ def test_capacity_wait_is_recorded_without_a_missing_hive_finding(setup):
     setup.herdr._quota_accounts = []
     setup.launcher.select(setup.config, "eng", {"id": "task"})
     record = placement_waits.read(setup.store, setup.config.slug)["task"]
-    assert record["reason"] == "no advertised Claude account has room"
+    assert record["reason"] == "no Claude account has room after hive sessions: "
     assert record["lane"] == "eng"
     assert placement_waits.findings(setup.store, setup.config.slug, record["started_at"] + 1_800_000) == []
 
@@ -1782,3 +1950,33 @@ def test_a_malformed_profile_decision_is_refused_before_recording(setup):
         "hive launch acknowledgement does not match the live execution: profile decision type expected "
     )
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
+
+
+def test_a_pod_restart_releases_the_reservations_of_orders_the_dead_pod_started(setup):
+    from scripts.hive import admission
+    from scripts.hive.orders import Consumer
+    from scripts.swarm.tick import ACK_LATER
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    request = request_for(setup)
+    request = replace(request, task={**request.task, ACK_LATER: True})
+    assert setup.launcher.spawn(request).status is Status.PENDING
+    order = setup.launcher.orders_for("task")
+    assert setup.launcher.slots.counts() == {"claude:account": 1}
+    assert admission.pending(setup.store.redis, "remote") == 1
+    runtime = Mock()
+    runtime.spawn.side_effect = KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        Consumer(setup.store.redis, "remote", runtime, pod="old").poll()
+    Consumer(setup.store.redis, "remote", runtime, pod="new").poll()
+    assert setup.launcher.collect(request) == Outcome(
+        "spawn", Status.REFUSED, "hive", detail="hive launch failed: restarted"
+    )
+    assert setup.launcher.slots.counts() == {}
+    assert admission.pending(setup.store.redis, "remote") == 0
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
+    assert setup.launcher.orders_for("task") is None
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [(json.loads(fields["order"])["action"], json.loads(fields["order"])["name"]) for _, fields in commands] == [
+        ("reap", request.name)
+    ]

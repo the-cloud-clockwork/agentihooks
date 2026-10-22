@@ -66,6 +66,38 @@ async def test_runner_polls_again_after_the_wait_timeout(monkeypatch, tmp_path):
     assert drain.call_count == 2
 
 
+@pytest.mark.parametrize("failure", ["ConnectionError", "TimeoutError"])
+async def test_runner_survives_a_redis_that_does_not_answer_yet(monkeypatch, tmp_path, capsys, failure):
+    from redis import exceptions
+
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    stop, passes = asyncio.Event(), []
+
+    def drain():
+        passes.append(1)
+        if len(passes) == 1:
+            raise getattr(exceptions, failure)("Timeout reading from socket")
+        stop.set()
+
+    await service.run(SimpleNamespace(run_due=drain), stop)
+    assert passes == [1, 1]
+    assert capsys.readouterr().err == "scheduler pass skipped: Redis did not answer\n"
+
+
+async def test_runner_still_stops_on_any_other_error(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+
+    def drain():
+        raise KeyError("pending")
+
+    with pytest.raises(KeyError):
+        await service.run(SimpleNamespace(run_due=drain), asyncio.Event())
+
+
 def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch, tmp_path):
     from scripts.scheduler import service
 

@@ -36,6 +36,9 @@ def test_beat_refreshes_reported_fields_and_expires_telemetry(redis, monkeypatch
     monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
     monkeypatch.setattr(daemon.time, "time", lambda: 123.456)
     daemon.beat(redis, "machine")
+    from scripts.hive import orders
+
+    assert redis.ttl(orders.Orders(redis).pod("machine", orders.POD)) == orders.POD_SECONDS
     record = registry.show(redis, "machine")
     assert record["name"] == "Worker"
     assert record["max_agents"] == 8
@@ -79,9 +82,13 @@ def test_beat_publishes_the_master_login_account(redis, monkeypatch, account):
 
 @pytest.mark.parametrize(("member", "indexed", "ttl"), [("machine", set(), 10), ("other", {"machine"}, 45)])
 def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis, monkeypatch, member, indexed, ttl):
+    import time
+
     from scripts.routing.reservation import LaunchSlots
     from scripts.swarm.keyspace import ROOT
 
+    now = time.time()
+    monkeypatch.setattr(time, "time", lambda: now)
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", member)
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
@@ -166,7 +173,10 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
 def _paced(monkeypatch, rounds):
     import threading
 
-    stop, waits = threading.Event(), []
+    from scripts.hive import orders
+
+    stop, waits, beats = threading.Event(), [], []
+    monkeypatch.setattr(orders, "alive", lambda client, hive: beats.append((client, hive)))
 
     def wait(seconds, redis, timeout):
         waits.append((seconds, redis, timeout))
@@ -174,7 +184,7 @@ def _paced(monkeypatch, rounds):
             stop.set()
 
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
-    return stop, waits
+    return stop, waits, beats
 
 
 def test_headroom_publishes_on_the_scheduler_cadence_until_stopped(monkeypatch):
@@ -183,10 +193,11 @@ def test_headroom_publishes_on_the_scheduler_cadence_until_stopped(monkeypatch):
     calls = []
     monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: calls.append((client, hive, now_ms)))
     monkeypatch.setattr(daemon.time, "time", lambda: 7.5)
-    stop, waits = _paced(monkeypatch, 3)
+    stop, waits, beats = _paced(monkeypatch, 3)
     connection, waiter = object(), object()
     PUBLISH_HEADROOM(connection, waiter, "local", stop)
     assert calls == [(connection, "local", 7_500), (connection, "local", 7_500)]
+    assert beats == [(connection, "local"), (connection, "local")]
     assert waits == [(daemon.HEADROOM_SECONDS, waiter, daemon.HEADROOM_SECONDS + daemon.WAKE_SLACK_S)] * 3
     assert (daemon.HEADROOM_SECONDS + daemon.WAKE_SLACK_S) * 1000 < headroom.STALE_MS
 
@@ -210,9 +221,10 @@ def test_headroom_keeps_its_cadence_through_a_failed_publish(monkeypatch, capsys
 
     monkeypatch.setattr(headroom, "publish", publish)
     monkeypatch.setattr(daemon.time, "time", lambda: 1)
-    stop, _ = _paced(monkeypatch, 3)
+    stop, _, beats = _paced(monkeypatch, 3)
     PUBLISH_HEADROOM(object(), object(), "local", stop)
     assert calls == [1_000, 1_000]
+    assert len(beats) == 1
     assert capsys.readouterr().err == f"hive headroom publish failed ({error}: {failure})\n"
 
 
@@ -253,8 +265,11 @@ def test_headroom_keeps_publishing_while_a_beat_blocks(monkeypatch):
         assert published.wait(5)
         raise KeyboardInterrupt
 
+    from scripts.hive import orders
+
     connection = object()
     monkeypatch.setattr(headroom, "publish", publish)
+    monkeypatch.setattr(orders, "alive", lambda client, hive: None)
     monkeypatch.setattr(daemon, "beat", beat)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(_once(connection))
@@ -549,7 +564,8 @@ def test_a_beat_moves_a_legacy_roles_record_and_seeds_its_own_key(redis, monkeyp
     daemon.beat(redis, "machine")
     stored = redis.hgetall(registry.key("machine"))
     assert "roles" not in stored and "max_agents" not in stored
-    assert (stored["name"], stored["ephemeral"]) == ("machine", "no")
+    assert stored["name"] == "machine"
+    assert "ephemeral" not in stored
 
 
 def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
@@ -799,30 +815,44 @@ def test_a_stalled_wait_socket_reconnects_and_beats_within_one_beat_interval(mon
     assert capsys.readouterr().err.endswith("); reconnecting in 1s\n")
 
 
-@pytest.mark.wall_clock
 def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkeypatch, capsys):
     import time
+    from types import SimpleNamespace
 
     import fakeredis
 
     from scripts.scheduler import process_timer
 
     silent = fakeredis.FakeRedis(decode_responses=True)
-    beats = []
+    clock, beats, waits = [0.0], [], []
+
+    def monotonic():
+        return clock[0]
+
+    def never_wakes(key, timeout):
+        assert 0 < timeout <= process_timer.RECHECK_S
+        waits.append(timeout)
+        clock[0] += timeout
+        return None
 
     def beat(redis, hive):
-        beats.append(time.monotonic())
+        beats.append(monotonic())
         if len(beats) == 2:
             raise KeyboardInterrupt
 
     def scheduler_down():
-        assert time.monotonic() - beats[-1] < daemon.BEAT_SECONDS + 0.25, "the timer wait outlived its bound"
+        assert monotonic() - beats[-1] < daemon.BEAT_SECONDS + 0.25, "the timer wait outlived its bound"
 
+    monkeypatch.setattr(daemon, "time", SimpleNamespace(monotonic=monotonic, time=time.time, sleep=Mock()))
+    monkeypatch.setattr(daemon, "publish_headroom", Mock())
+    monkeypatch.setattr(process_timer, "time", SimpleNamespace(monotonic=monotonic))
+    monkeypatch.setattr(silent, "blpop", never_wakes)
     monkeypatch.setattr(process_timer, "RECHECK_S", 0.05)
     monkeypatch.setattr(process_timer.service, "ensure_running", scheduler_down)
     connects = []
     _stall_run(monkeypatch, lambda: connects.append(silent) or (silent, silent), beat)
     assert len(connects) == 1
+    assert waits
     assert beats[1] - beats[0] < daemon.BEAT_SECONDS
     assert capsys.readouterr().err == ""
 

@@ -162,6 +162,6 @@ unset LEDGER_CA_PEM
 agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
-agentihooks hive set "$member" ui=no ephemeral=yes draining=no \
+agentihooks hive set --keep "$member" ui=no ephemeral=yes draining=no \
   "excluded=${HIVE_EXCLUDED-master}" "max-agents=${HIVE_MAX_AGENTS:-20}"
 exec agentihooks hive run

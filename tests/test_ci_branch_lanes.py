@@ -353,7 +353,9 @@ def test_a_head_whose_new_workflows_all_queue_on_a_lane_is_allowed(tmp_path, mon
 
 
 def test_a_refused_head_is_red_names_each_reason_and_cancels_its_runs(tmp_path, monkeypatch, capsys):
-    base, head, sha = _repo(tmp_path, {"plant.yml": _workflow(), "laned.yml": _workflow(LANED)})
+    base, head, sha = _repo(
+        tmp_path, {"plant.yml": {**_workflow(), "on": {"push": None}}, "laned.yml": _workflow(LANED)}
+    )
     monkeypatch.chdir(base)
     monkeypatch.setenv("GIT_DIR", str(head / ".git"))
     calls = []
@@ -367,6 +369,56 @@ def test_a_refused_head_is_red_names_each_reason_and_cancels_its_runs(tmp_path, 
     calls.clear()
     assert lanes.main(["--head", sha, "--repo", "o/r", "--wait", "3"]) == 1
     assert calls[0][3] == 3.0
+
+
+@pytest.mark.parametrize(
+    "on", [{"release": {"types": ["published"]}}, "workflow_dispatch", ["schedule", "workflow_call"], None]
+)
+def test_a_refused_workflow_the_push_cannot_trigger_is_red_without_waiting_for_its_run(
+    tmp_path, monkeypatch, capsys, on
+):
+    base, head, sha = _repo(tmp_path, {"release.yml": {**_workflow(), "on": on}})
+    monkeypatch.chdir(base)
+    monkeypatch.setenv("GIT_DIR", str(head / ".git"))
+    monkeypatch.setattr(lanes, "cancel", lambda *a: pytest.fail("no push run to wait for"))
+    assert lanes.main(["--head", sha, "--repo", "o/r"]) == 1
+    assert capsys.readouterr().out == (
+        f"Refused {lanes.WORKFLOWS}/release.yml: job replay has no shared hosted lane concurrency group.\n"
+    )
+
+
+@pytest.mark.parametrize("on", ["push", ["release", "pull_request"], {"pull_request_target": None}])
+def test_only_refused_workflows_the_push_can_trigger_are_waited_for(tmp_path, monkeypatch, on):
+    files = {"fired.yml": {**_workflow(), "on": on}, "release.yml": {**_workflow(), "on": "release"}}
+    base, head, sha = _repo(tmp_path, files)
+    monkeypatch.chdir(base)
+    monkeypatch.setenv("GIT_DIR", str(head / ".git"))
+    calls = []
+    monkeypatch.setattr(lanes, "cancel", lambda *args: calls.append(args) or set())
+    assert lanes.main(["--head", sha, "--repo", "o/r"]) == 1
+    assert calls == [("o/r", sha, {f"{lanes.WORKFLOWS}/fired.yml"}, 60.0)]
+
+
+def test_an_unquoted_on_key_is_read_as_the_push_trigger(tmp_path, monkeypatch):
+    body = "name: Replay\non:\n  push:\njobs:\n  replay:\n    runs-on: x\n"
+    base, head, sha = _repo(tmp_path, {"fired.yml": body})
+    monkeypatch.chdir(base)
+    monkeypatch.setenv("GIT_DIR", str(head / ".git"))
+    calls = []
+    monkeypatch.setattr(lanes, "cancel", lambda *args: calls.append(args) or set())
+    assert lanes.main(["--head", sha, "--repo", "o/r"]) == 1
+    assert calls == [("o/r", sha, {f"{lanes.WORKFLOWS}/fired.yml"}, 60.0)]
+
+
+@pytest.mark.parametrize("body", ["jobs: [\n", "- push\n"])
+def test_a_refused_workflow_that_is_not_a_mapping_is_still_waited_for(tmp_path, monkeypatch, body):
+    base, head, sha = _repo(tmp_path, {"broken.yml": body})
+    monkeypatch.chdir(base)
+    monkeypatch.setenv("GIT_DIR", str(head / ".git"))
+    calls = []
+    monkeypatch.setattr(lanes, "cancel", lambda *args: calls.append(args) or set())
+    assert lanes.main(["--head", sha, "--repo", "o/r"]) == 1
+    assert calls == [("o/r", sha, {f"{lanes.WORKFLOWS}/broken.yml"}, 60.0)]
 
 
 def test_a_refused_head_without_a_repository_cancels_nothing(tmp_path, monkeypatch, capsys):
@@ -481,7 +533,16 @@ def test_the_workflow_grades_every_branch_push_with_the_dev_grader():
     assert workflow["concurrency"]["cancel-in-progress"] is False
     assert workflow["permissions"] == {"contents": "read", "actions": "write"}
     steps = workflow["jobs"]["grade"]["steps"]
-    assert steps[0]["with"]["ref"] == "dev"
+    assert steps[0]["with"] == {
+        "ref": "dev",
+        "fetch-depth": 1,
+        "sparse-checkout": (
+            "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
+        ),
+        "sparse-checkout-cone-mode": False,
+        "persist-credentials": False,
+    }
+    assert {"name": "Fetch the head as data", "run": 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'} in steps
     assert steps[-1]["run"] == 'python -m scripts.ci_branch_lanes --head "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"'
 
 
