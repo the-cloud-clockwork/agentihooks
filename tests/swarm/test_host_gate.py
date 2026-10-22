@@ -134,6 +134,18 @@ def test_hive_launches_never_spend_the_workstation_host_room(store):
     assert tick._host_full("sw", store, 2_000) == ""
 
 
+@pytest.mark.parametrize(("hive", "spent"), [("", 1), ("workstation-root", 1), ("remote", 0)])
+def test_root_hive_launches_spend_workstation_room_while_remote_hives_do_not(store, monkeypatch, hive, spent):
+    from scripts.swarm import commands
+    from scripts.swarm.store import AgentRecord
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation-root")
+    agent = AgentRecord("codex-worker", "eng", "task", harness="codex", hive=hive)
+    tick._spend_local(store, agent, 1000)
+    assert tick.host_spent(store, 1000, 1000) == spent
+    assert store.redis.zrange(tick.HOST_SPENDS, 0, -1) == (["codex-worker"] if spent else [])
+
+
 def test_only_the_newest_thousand_spawns_are_kept(store):
     for n in range(tick.HOST_SPENDS_KEPT + 1):
         tick._spend_host(store, f"agent-{n}", 1_000 + n)

@@ -75,6 +75,7 @@ class _NoWatch:
 
 class _Bus:
     events = _EventLog()
+    dead = _EventLog()
 
     def queue(self, name: str, policy: QueuePolicy) -> WorkQueue:
         return _WorkQueue()

@@ -8,10 +8,11 @@ import nats as nats_client
 from nats.aio.msg import Msg
 from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
-from nats.js.errors import KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
+from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
 
 from .bus import StateConflict, StateEntry
 from .config import BusConfig, QueuePolicy
+from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
 from .subjects import PREFIX
 
@@ -69,7 +70,7 @@ def _consumer_config(durable: str, subject: str, policy: QueuePolicy) -> api.Con
     return api.ConsumerConfig(
         durable_name=durable,
         filter_subject=subject,
-        max_deliver=policy.max_deliver,
+        max_deliver=-1,
         ack_wait=_seconds(policy.ack_wait_ms),
         backoff=backoff or None,
     )
@@ -79,10 +80,14 @@ async def _pull(js, stream: str, durable: str, subject: str, policy: QueuePolicy
     try:
         info = await js.consumer_info(stream, durable)
     except NotFoundError:
-        await js.add_consumer(stream, config=_consumer_config(durable, subject, policy))
+        pass
     else:
         if info.config.filter_subject != subject:
             raise ValueError(f"durable consumer {durable!r} filters {info.config.filter_subject!r}, not {subject!r}")
+    config = _consumer_config(durable, subject, policy)
+    if stream == DEAD_STREAM:
+        config.max_deliver = policy.max_deliver
+    await js.add_consumer(stream, config=config)
     return await js.pull_subscribe_bind(durable=durable, stream=stream)
 
 
@@ -104,18 +109,37 @@ class NatsDelivery:
 
 
 class NatsConsumer:
-    def __init__(self, loop: _Loop, subscription: JetStreamContext.PullSubscription):
+    def __init__(
+        self,
+        loop: _Loop,
+        subscription: JetStreamContext.PullSubscription,
+        js: JetStreamContext,
+        policy: QueuePolicy,
+        identity: str,
+    ):
         self._loop = loop
         self._subscription = subscription
+        self._js = js
+        self._policy = policy
+        self._identity = identity
 
     def fetch(self, batch: int, timeout_ms: int) -> list[NatsDelivery]:
         return [NatsDelivery(self._loop, msg) for msg in self._loop.run(self._fetch(batch, timeout_ms))]
 
     async def _fetch(self, batch: int, timeout_ms: int) -> list:
         try:
-            return await self._subscription.fetch(batch, timeout=_seconds(max(timeout_ms, MIN_FETCH_MS)))
+            messages = await self._subscription.fetch(batch, timeout=_seconds(max(timeout_ms, MIN_FETCH_MS)))
         except FetchTimeout:
             return []
+        deliveries = []
+        for msg in messages:
+            if msg.metadata.num_delivered > self._policy.max_deliver:
+                event = Envelope.decode(msg.data)
+                await _publish_dead(self._js, event, self._identity, self._policy.max_deliver)
+                await msg.term()
+            else:
+                deliveries.append(msg)
+        return deliveries
 
 
 async def _publish(js, subject: str, stream: str, event: Envelope) -> bool:
@@ -123,17 +147,40 @@ async def _publish(js, subject: str, stream: str, event: Envelope) -> bool:
     return not ack.duplicate
 
 
+async def _publish_dead(js: JetStreamContext, event: Envelope, identity: str, attempts: int) -> None:
+    letter = dead_letter(event, identity, attempts)
+    subject = f"dead.{event.swarm}.{letter.id}"
+    try:
+        await js.publish(
+            subject,
+            letter.encode(),
+            stream=DEAD_STREAM,
+            headers={MSG_ID: letter.id, "Nats-Expected-Last-Subject-Sequence": "0"},
+        )
+    except APIError:
+        stored = await js.get_last_msg(DEAD_STREAM, subject)
+        if Envelope.decode(stored.data).id != letter.id:
+            raise
+
+
 class NatsEventLog:
-    def __init__(self, loop: _Loop, js: JetStreamContext, policy: QueuePolicy):
+    def __init__(self, loop: _Loop, js: JetStreamContext, policy: QueuePolicy, stream: str):
         self._loop = loop
         self._js = js
         self._policy = policy
+        self._stream = stream
 
     def publish(self, subject: str, event: Envelope) -> bool:
-        return self._loop.run(_publish(self._js, subject, EVENT_STREAM, event))
+        return self._loop.run(_publish(self._js, subject, self._stream, event))
 
     def consumer(self, durable: str, subject: str) -> NatsConsumer:
-        return NatsConsumer(self._loop, self._loop.run(_pull(self._js, EVENT_STREAM, durable, subject, self._policy)))
+        return NatsConsumer(
+            self._loop,
+            self._loop.run(_pull(self._js, self._stream, durable, subject, self._policy)),
+            self._js,
+            self._policy,
+            f"events.{durable}",
+        )
 
 
 class NatsWorkQueue:
@@ -154,6 +201,9 @@ class NatsWorkQueue:
         self._consumer = NatsConsumer(
             loop,
             loop.run(_pull(js, self._stream, self._stream.removeprefix("AGENTIHOOKS_QUEUE_"), self._subject, policy)),
+            js,
+            policy,
+            f"queue.{name}",
         )
 
     def offer(self, event: Envelope) -> bool:
@@ -221,10 +271,18 @@ class NatsBus:
                     duplicate_window=_seconds(config.dedupe_window_ms),
                 )
             )
+            self._loop.run(
+                self._js.add_stream(
+                    name=DEAD_STREAM,
+                    subjects=[DEAD_SUBJECT],
+                    duplicate_window=_seconds(config.dedupe_window_ms),
+                )
+            )
         except BaseException:
             self._loop.close()
             raise
-        self.events = NatsEventLog(self._loop, self._js, config.queue)
+        self.events = NatsEventLog(self._loop, self._js, config.queue, EVENT_STREAM)
+        self.dead = NatsEventLog(self._loop, self._js, config.queue, DEAD_STREAM)
 
     def queue(self, name: str, policy: QueuePolicy) -> NatsWorkQueue:
         with self._lock:
