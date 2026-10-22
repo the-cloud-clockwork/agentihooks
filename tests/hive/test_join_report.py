@@ -10,7 +10,7 @@ def _every_running_report_is_live(monkeypatch):
 
     monkeypatch.setattr(
         join_report,
-        "live",
+        "running_executions",
         lambda redis, reports: {(report["slug"], report["execution_id"], report["generation"]) for report in reports},
     )
 
