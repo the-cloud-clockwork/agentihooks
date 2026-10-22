@@ -219,13 +219,133 @@ def test_the_recorded_pid_of_a_reused_process_is_never_signalled_but_pane_and_ho
 def test_a_foreign_namespace_terminate_signals_nothing_and_counts_one_rejection(tmp_path, monkeypatch):
     local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
     router = RuntimeRouter([local])
-    outcome = router.terminate(record(namespace=WORKER))
+    outcome = router.terminate(record(namespace="boot-anton/pid:[4026539999]"))
     assert outcome == Outcome(
         "terminate", Status.REFUSED, LOCAL, Unqualified.FOREIGN_NAMESPACE, "process belongs to another PID namespace"
     )
     assert WORKER not in repr(outcome)
     assert (ended, calls) == ([], [])
     assert router.rejected == {(LOCAL, Unqualified.FOREIGN_NAMESPACE): 1}
+
+
+@pytest.mark.parametrize("pid_namespace", ["pid:[4026531836]", "pid:[4026539999]"])
+def test_a_local_record_from_a_previous_boot_retires_as_ended_without_signalling(tmp_path, monkeypatch, pid_namespace):
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    router = RuntimeRouter([local])
+    agent = record(namespace=f"boot-before/{pid_namespace}")
+    monkeypatch.setattr(local, "table", lambda: pytest.fail("previous boot retirement read the current process table"))
+    assert router.terminate(agent, ("/scratch/t1",)) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {}
+
+
+def test_an_old_boot_record_retires_its_reopened_conversation_process(tmp_path, monkeypatch):
+    from scripts.terminate_agent import Session
+
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = replace(record(namespace=WORKER), harness="codex", conversation_id="restored")
+    current = proc(pid=PID + 1, start=STARTED + 1)
+    unrelated = Session("another", "codex", NAME, proc(pid=PID + 2), "", "alive")
+    reopened = Session("restored", "codex", NAME, current, "", "alive")
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [unrelated, reopened])
+    router = RuntimeRouter([local])
+    assert router.terminate(agent, ("/scratch/t1",)) == Outcome("terminate", Status.OK, LOCAL)
+    assert ended == [(NAME, PID + 1, ("/scratch/t1",), STARTED + 1)]
+    assert ["pane", "close", "w1:p1"] in calls
+    assert router.rejected == {}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("name", "another"), ("session_id", "another"), ("target", "claude"), ("status", "dead")],
+)
+def test_previous_boot_retirement_does_not_signal_another_conversation_process(tmp_path, monkeypatch, field, value):
+    from scripts.terminate_agent import Session
+
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = replace(record(namespace=WORKER), harness="codex", conversation_id="restored")
+    candidate = replace(Session("restored", "codex", NAME, proc(pid=PID + 1), "", "alive"), **{field: value})
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [candidate])
+    assert RuntimeRouter([local]).terminate(agent) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
+    )
+    assert (ended, calls) == ([], [])
+
+
+def test_previous_boot_retirement_without_a_conversation_never_selects_a_named_process(tmp_path, monkeypatch):
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: pytest.fail("no recorded conversation to recover"))
+    assert RuntimeRouter([local]).terminate(record(namespace=WORKER)) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
+    )
+    assert (ended, calls) == ([], [])
+
+
+def test_reopened_process_retirement_keeps_the_reaper_refusal(tmp_path, monkeypatch):
+    from scripts.terminate_agent import Session
+
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = replace(record(namespace=WORKER), harness="codex", conversation_id="restored")
+    reopened = Session("restored", "codex", NAME, proc(pid=PID + 1), "", "alive")
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [reopened])
+    local.herdr.end = lambda *args: reaper.Outcome(process=PID + 1, refusal="process identity changed")
+    assert RuntimeRouter([local]).terminate(agent) == Outcome(
+        "terminate",
+        Status.REFUSED,
+        LOCAL,
+        {"process": PID + 1, "refusal": "process identity changed"},
+        "process identity changed",
+    )
+    assert (ended, calls) == ([], [])
+
+
+@pytest.mark.parametrize("host_id", ["", "hive-a"])
+def test_a_same_boot_foreign_pid_namespace_stays_refused(tmp_path, monkeypatch, host_id):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = record(namespace="boot-anton/pid:[4026539999]")
+    if host_id:
+        agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": host_id})
+    router = RuntimeRouter([local])
+    assert router.terminate(agent) == Outcome(
+        "terminate", Status.REFUSED, LOCAL, Unqualified.FOREIGN_NAMESPACE, "process belongs to another PID namespace"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {(LOCAL, Unqualified.FOREIGN_NAMESPACE): 1}
+
+
+@pytest.mark.parametrize("field", ["namespace", "pid", "start"])
+def test_local_retirement_refuses_an_incomplete_process_identity(tmp_path, monkeypatch, field):
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    router = RuntimeRouter([local])
+    assert router.terminate(record(**{field: None})) == Outcome(
+        "terminate", Status.REFUSED, LOCAL, Unqualified.NO_PROCESS, "runtime target names no process"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {(LOCAL, Unqualified.NO_PROCESS): 1}
+
+
+@pytest.mark.parametrize(
+    ("recorded", "current", "expected"),
+    [
+        ("old/pid:[1]", "new/pid:[1]", True),
+        ("old/pid:[1]", "new/pid:[2]", True),
+        ("same/pid:[1]", "same/pid:[2]", False),
+        ("same/pid:[1]", "same/pid:[1]", False),
+        ("", "new/pid:[1]", False),
+        ("old/pid:[1]", "", False),
+        ("old", "new/pid:[1]", False),
+        ("old/pid:[1]", "new", False),
+        ("/pid:[1]", "new/pid:[1]", False),
+        ("old/pid:[1]", "/pid:[1]", False),
+        ("old/", "new/pid:[1]", False),
+        ("old/pid:[1]", "new/", False),
+    ],
+)
+def test_previous_boot_requires_two_readable_boot_qualified_namespaces(recorded, current, expected):
+    assert process.previous_boot(recorded, current) is expected
 
 
 def test_a_record_this_host_launched_before_its_namespace_restarted_retires_without_signalling(tmp_path, monkeypatch):
@@ -235,7 +355,7 @@ def test_a_record_this_host_launched_before_its_namespace_restarted_retires_with
     agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": "hive-a"})
     router = RuntimeRouter([local])
     assert router.terminate(agent, ("/scratch/t1",)) == Outcome(
-        "terminate", Status.OK, LOCAL, detail="its process namespace has ended"
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
     )
     assert (ended, calls) == ([], [])
     assert router.rejected == {}
