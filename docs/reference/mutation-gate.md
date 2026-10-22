@@ -188,6 +188,7 @@ preserves custom worker hooks and the default CPU detection. The workflow
 writes the result to its `workers` step output and supplies it only to
 **Run the tests the branch touches**:
 
+{% raw %}
 ```yaml
 env:
   FILES: ${{ steps.touched.outputs.files }}
@@ -197,6 +198,7 @@ run: |
   read -ra files <<< "$FILES"
   python -m pytest "${files[@]}" -n auto --dist loadgroup --tb=short -p no:cacheprovider
 ```
+{% endraw %}
 
 This is existing CI configuration. Run tests in CI, not on the shared host.
 Keep the computed value scoped to the execution step; a job wide value would
