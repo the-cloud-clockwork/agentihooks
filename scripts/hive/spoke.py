@@ -9,14 +9,15 @@ from scripts.events.bus import Bus, Delivery, StateConflict
 from scripts.events.config import QueuePolicy
 from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
-from scripts.events.subjects import subject
-from scripts.hive import admission, headroom
+from scripts.hive import admission, execution_events, headroom
 from scripts.swarm import readiness
 from scripts.swarm_v2.runtime.base import Runtime, SpawnRequest
 
 
 class Tasks(Protocol):
-    def request(self, event: Envelope) -> SpawnRequest | None: ...
+    def request(self, event: Envelope) -> SpawnRequest | None:
+        """The task carries admitted execution_id, execution_generation and claim_generation."""
+        ...
 
     def reopen(self, event: Envelope) -> None: ...
 
@@ -174,6 +175,10 @@ class Spoke:
         claims = self.bus.state("spoke-work")
         try:
             request = self.tasks.request(event)
+            if request is not None:
+                execution_id = request.task["execution_id"]
+                generation = request.task["execution_generation"]
+                task_generation = request.task["claim_generation"]
         except Exception:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
             raise
@@ -183,6 +188,7 @@ class Spoke:
         intent = json.dumps({"state": "launching", "owner": self.config.hive, "name": request.name}).encode()
         revision = claims.update(key, intent, revision)
         request = replace(request, task={**request.task, "claim_fence": {"key": key, "revision": revision}})
+        execution_events.prepare(self.bus, event.swarm, request.name, generation)
         outcome = self.runtime.spawn(request)
         if not outcome.ok:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
@@ -193,12 +199,16 @@ class Spoke:
             type="execution.started",
             swarm=event.swarm,
             entity="execution",
-            key=request.name,
-            version=event.version,
+            key=execution_id,
+            version=generation,
             time=time.time_ns() // 1_000_000,
             author=self.config.hive,
             data={
                 "task": event.key,
+                "task_generation": task_generation,
+                "claim_key": key,
+                "claim_revision": revision,
+                "generation": generation,
                 "lane": self.config.lane,
                 "hive": self.config.hive,
                 "name": request.name,
@@ -216,7 +226,7 @@ class Spoke:
         return started
 
     def _publish(self, event: Envelope) -> None:
-        self.bus.events.publish(subject(event.swarm, "execution", "started"), event)
+        execution_events.started(self.bus, event)
 
     def _clear_current(self, event: Envelope) -> None:
         pending = self.bus.state("spoke-pending").get(self._pending_key)

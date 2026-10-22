@@ -1,9 +1,8 @@
 import json
 import os
-import subprocess
+import signal
 
 from hooks.context.account_sessions import agent_pid
-from hooks.lifecycle.handoff_close import close_command
 from scripts.events.config import BusConfig
 from scripts.events.factory import open_bus
 
@@ -14,12 +13,15 @@ REVOKED = "Claim ownership changed; this agent is ending."
 
 def terminate(pid: int) -> None:
     if pid > 1 and pid != os.getpid():
-        subprocess.run(close_command(pid), stdin=subprocess.DEVNULL, capture_output=True, timeout=120, check=False)
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
 
 
 def check(payload: dict) -> str | None:
     raw = os.environ.get(VARIABLE)
-    if not raw:
+    if not raw or payload.get("hook_event_name") == "SessionEnd":
         return None
     try:
         claim = json.loads(raw)
