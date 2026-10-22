@@ -4553,7 +4553,7 @@ Use the exact successful job names from a completed CI run on the candidate head
 
 The check reads the first `<!-- staged-compatibility` marker in the pull request body and parses the text up to the next `-->` as JSON. Text before and after the declaration is ignored, so the body keeps its description and any later HTML comments. A body with no marker is not checked.
 
-| Field | Required value |
+| Field | Meaning |
 |---|---|
 | `complete` | The JSON value `true`. `false`, a string or a missing field is refused. |
 | `prerequisite.url` | `https://github.com/OWNER/REPO/pull/NUMBER` of the tests-first prerequisite. |
@@ -4592,9 +4592,9 @@ Each path runs the check against the head it is about to admit, before it enqueu
 | `agentihooks swarm <slug> merge queue <url>` | The command fails with the message. No queue intent is recorded and nothing is enqueued. |
 | The `ready` merge pass, once the released pull request's checks pass | The task reopens with the comment `Reopened by the swarm: its pull request <url> could not be queued: staged compatibility: <reason>. The next engineer continues it from the handoff its engineer left.` |
 | The merge pass requeue after a transient unmergeable exit | The `requeue` ledger alert reads `The swarm could not queue <url> again for task <task> after a transient unmergeable state: staged compatibility: <reason>`. The pass retries with backoff and reopens the task after five tries. |
-| A queue priority for the pull request | The priority is refused before any entry leaves the queue. |
-| Restoring an entry a priority displaced | That entry stays out; the priority result lists `could not restore <url>: staged compatibility: <reason>`. |
-| The requeue of an entry left out by an interrupted priority | The `merge-priority-requeue:<url>` ledger alert names the reason, the task's claimant gets one inbox notice, and the swarm retries on every refresh. |
+| `agentihooks swarm <slug> merge priority <url>` for the pull request | The priority is refused before any entry leaves the queue. |
+| Restoring an entry that `merge priority` displaced | That entry stays out; the priority result lists `could not restore <url>: staged compatibility: <reason>`. |
+| The requeue of an entry left out by an interrupted `merge priority` | The `merge-priority-requeue:<url>` ledger alert names the reason, the task's claimant gets one inbox notice, and the swarm retries on every refresh. |
 | `python -m scripts.ci_requeue` | That pull request's row reads `refused: staged compatibility: <reason>` and the sweep continues. |
 
 #### Refusals and fixes
