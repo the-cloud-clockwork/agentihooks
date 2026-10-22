@@ -22,6 +22,7 @@ NO_READING = "no fresh headroom reading"
 # joined the schema still publishes them, so a reading missing only the RAM fields is read, not refused.
 CORE_FIELDS = ("cpus", "load5")
 RAM_FIELDS = frozenset({"available_mb", "total_mb"})
+POD_RAM_FIELDS = frozenset({"pod_available_mb", "pod_total_mb"})
 QUOTA_MARKS = ("account has room", "account reservation is full")
 
 _RESERVE = """
@@ -78,6 +79,23 @@ def _host(measured: dict, pending: int) -> list[tuple[int, str, str]]:
     return limits
 
 
+def _pod(measured: dict, pending: int) -> list[tuple[int, str, str]]:
+    line = f"under the {HOST_PERCENT} percent line"
+    held = f" with {pending} pending launches" if pending else ""
+    limits = []
+    if "pod_cpus" in measured:
+        cpus = measured["pod_cpus"]
+        cpu = int(HOST_PERCENT * cpus / (100 * AGENT_CPU)) - pending
+        limits.append((cpu, CPU, f"pod limit {cpus:g} CPUs, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {line}"))
+    if all(field in measured for field in POD_RAM_FIELDS):
+        available, total = measured["pod_available_mb"], measured["pod_total_mb"]
+        ram = (available * 100 - (100 - HOST_PERCENT) * total) // (100 * AGENT_MB) - pending
+        limits.append(
+            (ram, RAM, f"pod {available} of {total} MB available, {AGENT_MB} MB per agent{held}, fits {{}} more {line}")
+        )
+    return limits
+
+
 def _swarm(measured: dict, agents: int) -> list[tuple[int, str, str]]:
     cpus, total = measured["cpus"], measured["total_mb"]
     cpu = int(SWARM_PERCENT * cpus / (100 * AGENT_CPU)) - agents
@@ -92,7 +110,7 @@ def _swarm(measured: dict, agents: int) -> list[tuple[int, str, str]]:
 def room(measured: dict | None, swarm_agents: int | None = None, pending: int = 0) -> Room:
     if measured is None or any(field not in measured for field in CORE_FIELDS):
         return Room(0, MISSING, NO_READING)
-    limits = _host(measured, pending)
+    limits = _host(measured, pending) + _pod(measured, pending)
     if swarm_agents is not None and all(field in measured for field in RAM_FIELDS):
         limits += _swarm(measured, swarm_agents)
     count, reason, detail = min(limits, key=lambda limit: limit[0])

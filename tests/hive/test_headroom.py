@@ -33,7 +33,7 @@ def proc(tmp_path):
 def cgroup(tmp_path, monkeypatch):
     folder = tmp_path / "cgroup"
     folder.mkdir()
-    monkeypatch.setattr(headroom, "CGROUP", folder, raising=False)
+    monkeypatch.setattr(headroom, "CGROUP", folder)
     return folder
 
 

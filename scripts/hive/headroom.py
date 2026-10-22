@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 # Two heartbeats of the hive daemon; kept here so readers skip the daemon's imports.
 STALE_MS = 30_000
 MISSING = "headroom=missing"
+# cgroup v2 mounts the pod's own limits here; on a bare host the root cgroup carries no memory.max or cpu.max.
+CGROUP = Path("/sys/fs/cgroup")
+MIB = 1024 * 1024
 
 
 def key(hive: str) -> str:
@@ -26,6 +29,7 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc")) -> dict | Non
         load5 = float((proc / "loadavg").read_text().split()[1])
         available_mb = host_budget._memory_mb(proc)[0]
         total_mb = _total_mb(proc)
+        pod = _pod(CGROUP)
     except (OSError, ValueError, IndexError, KeyError, StopIteration):
         return None
     return {
@@ -33,6 +37,7 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc")) -> dict | Non
         "load5": load5,
         "available_mb": available_mb,
         "total_mb": total_mb,
+        **pod,
         "pending": pending,
         "measured_at": now_ms,
     }
@@ -41,6 +46,26 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc")) -> dict | Non
 def _total_mb(proc: Path) -> int:
     line = next(line for line in (proc / "meminfo").read_text().splitlines() if line.startswith("MemTotal:"))
     return int(line.split()[1]) // 1024
+
+
+def _pod(cgroup: Path) -> dict:
+    pod = {}
+    memory = _limit(cgroup / "memory.max")
+    if memory is not None:
+        total = int(memory[0])
+        pod["pod_total_mb"] = total // MIB
+        pod["pod_available_mb"] = (total - int((cgroup / "memory.current").read_text())) // MIB
+    cpu = _limit(cgroup / "cpu.max")
+    if cpu is not None:
+        pod["pod_cpus"] = int(cpu[0]) / int(cpu[1])
+    return pod
+
+
+def _limit(path: Path) -> list[str] | None:
+    if not path.exists():
+        return None
+    fields = path.read_text().split()
+    return None if fields[0] == "max" else fields
 
 
 def publish(redis: "Redis", hive: str, now_ms: int, proc: Path = Path("/proc")) -> None:
