@@ -11,6 +11,13 @@ from scripts import ci_branch_lanes, ci_reuse, ci_runner_trust, ci_wiring
 
 GATE = ci_wiring.GATE
 WORKFLOWS = ".github/workflows"
+SHALLOW_PREFLIGHT_CHECKOUT = {
+    "fetch-depth": 1,
+    "sparse-checkout": "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n",
+    "sparse-checkout-cone-mode": False,
+}
+PREFLIGHT_FETCH = 'git fetch --no-tags origin "$GITHUB_SHA"'
+SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -231,9 +238,19 @@ def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[st
     ignored = (events.get("push") or {}).get("branches-ignore", [])
     if "diffcheck/**" in ignored:
         ignored.remove("diffcheck/**")
-    if head_workflows.get("branch-lanes.yml") in (baseline, expanded):
+    if head_workflows.get("branch-lanes.yml") in (baseline, expanded, _shallow(baseline), _shallow(expanded)):
         return []
     return ["The head changes or removes the trusted branch lane preflight."]
+
+
+def _shallow(preflight: dict) -> dict:
+    shallow = deepcopy(preflight)
+    steps = shallow["jobs"]["grade"]["steps"]
+    steps[0]["with"].update(SHALLOW_PREFLIGHT_CHECKOUT)
+    for step in steps:
+        if step.get("run") == PREFLIGHT_FETCH:
+            step["run"] = SHALLOW_PREFLIGHT_FETCH
+    return shallow
 
 
 def main(argv: list[str] | None = None) -> int:
