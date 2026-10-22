@@ -221,6 +221,12 @@ class HiveLaunch:
         self.reap(order, previous)
         self.end(previous, "hive launch order expired without an acknowledgement")
 
+    def lapse(self, request: SpawnRequest, order: LaunchOrder, previous: AgentRecord) -> Outcome | None:
+        self.retire(order, previous)
+        if request.task.get(ACK_LATER) and previous.name == request.name:
+            return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch acknowledgement expired")
+        return None
+
     def reap(self, order: LaunchOrder, agent: AgentRecord) -> None:
         self.orders.command(order.hive, CommandOrder(f"reap:{agent.name}", "reap", name=agent.name))
 
@@ -233,7 +239,8 @@ class HiveLaunch:
             elif self.abandoned(order, previous):
                 self.end(previous, "hive launch order abandoned")
             elif self.unacknowledged(order):
-                self.retire(order, previous)
+                if lapsed := self.lapse(request, order, previous):
+                    return lapsed
             elif previous.name != request.name or previous.seat != request.task["seat"]:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
             else:
