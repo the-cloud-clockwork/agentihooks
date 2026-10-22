@@ -23,14 +23,28 @@ def doc(tasks, **extra):
     return {"overview": "o", "tasks": list(tasks), "phases": phases, **extra}
 
 
-def snapshot(found, claimed=(), fix=""):
+def snapshot(found, claimed=(), fix="", **admits):
     rows = {t["id"]: t for t in found["tasks"]}
-    return readiness.Snapshot(SLUG, rows, found, hierarchy.project(found)[0], fix, lambda task_id: task_id in claimed)
+    graph = hierarchy.project(found)[0]
+    return readiness.Snapshot(SLUG, rows, found, graph, fix, lambda task_id: task_id in claimed, **admits)
+
+
+class Clock:
+    def __init__(self):
+        self.now = NOW
+
+    def __call__(self):
+        return self.now
 
 
 @pytest.fixture
-def bus():
-    return memory.open_bus(BusConfig(), clock=lambda: NOW)
+def clock():
+    return Clock()
+
+
+@pytest.fixture
+def bus(clock):
+    return memory.open_bus(BusConfig(), clock=clock)
 
 
 def queued(bus, lane, view):
@@ -50,6 +64,7 @@ def test_ready_is_open_in_scope_unmerged_and_unheld():
             task("d", out_of_scope=True),
             task("e", merged_into="a"),
             task("f", depends_on=["c"]),
+            task("g", state="done"),
         ]
     )
     view = snapshot(found)
@@ -57,9 +72,24 @@ def test_ready_is_open_in_scope_unmerged_and_unheld():
 
 
 def test_claimable_needs_the_lane_readiness_and_no_claim():
-    view = snapshot(doc([task("a"), task("b", lane="ci"), task("c"), task("d", state="claimed")]), claimed={"c"})
+    found = doc([task("a"), task("b", lane="ci"), task("c"), task("d", state="claimed"), task("e", state="done")])
+    view = snapshot(found, claimed={"c"})
     assert [t for t in view.rows if readiness.claimable(view.rows[t], "eng", view)] == ["a"]
     assert [t for t in view.rows if readiness.claimable(view.rows[t], "ci", view)] == ["b"]
+
+
+def test_claimable_needs_the_tick_admission_for_release_and_apply_waits():
+    seen = []
+    view = snapshot(doc([task("a"), task("b")]), admits=lambda t: seen.append(t["id"]) or t["id"] == "b")
+    assert [t for t in view.rows if readiness.claimable(view.rows[t], "eng", view)] == ["b"]
+    assert seen == ["a", "b"]
+
+
+def test_a_snapshot_cannot_be_changed():
+    from dataclasses import FrozenInstanceError
+
+    with pytest.raises(FrozenInstanceError):
+        snapshot(doc([])).fix = "p1"
 
 
 def test_the_offer_id_names_the_swarm_task_and_claim_generation():
@@ -149,9 +179,11 @@ def test_an_offer_is_withdrawn_once_its_task_is_frozen_claimed_moved_or_gone():
     assert readiness.withdrawal(event, snapshot(doc([task("b")]))) == "the task is gone"
     assert readiness.withdrawal(event, snapshot(doc([task("a", state="done")]))) == "it is done"
     assert readiness.withdrawal(event, snapshot(doc([task("a", out_of_scope=True)]))) == "it is not ready"
+    held = snapshot(doc([task("a")]), admits=lambda t: False)
+    assert readiness.withdrawal(event, held) == "a release or apply wait holds it"
 
 
-def test_take_terminates_withdrawn_offers_and_returns_the_first_live_one(bus):
+def test_take_terminates_withdrawn_offers_and_returns_the_first_live_one(bus, clock):
     found = doc([task("a"), task("b"), task("c")])
     readiness.publish(bus, snapshot(found), NOW)
     now = snapshot(
@@ -161,6 +193,7 @@ def test_take_terminates_withdrawn_offers_and_returns_the_first_live_one(bus):
     delivery = readiness.take(queue, now, 0)
     assert (delivery.event.key, delivery.attempt) == ("c", 1)
     delivery.ack()
+    clock.now += QueuePolicy().ack_wait_ms
     assert readiness.take(queue, snapshot(found), 0) is None
 
 

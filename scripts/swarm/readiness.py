@@ -20,9 +20,10 @@ class Snapshot:
     graph: dict
     fix: str
     claimed: Callable[[str], bool]
+    admits: Callable[[dict], bool] = lambda task: True
 
 
-def ready(task, rows, doc, graph, fix):
+def ready(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> bool:
     return (
         task.get("state") == "open"
         and not task.get("out_of_scope")
@@ -36,11 +37,12 @@ def claimable(task: dict, lane: str, view: Snapshot) -> bool:
         task.get("lane") == lane
         and ready(task, view.rows, view.doc, view.graph, view.fix)
         and not view.claimed(task["id"])
+        and view.admits(task)
     )
 
 
 def generation(task: dict) -> int:
-    return int(task.get("claim_generation") or 0)
+    return task.get("claim_generation") or 0
 
 
 def offer_id(slug: str, task: dict) -> str:
@@ -93,9 +95,9 @@ def withdrawal(event: Envelope, view: Snapshot) -> str:
         return f"it is at generation {generation(task)}"
     if task.get("lane") != event.data["lane"]:
         return f"it moved to lane {task.get('lane')}"
-    if ready(task, view.rows, view.doc, view.graph, view.fix):
-        return ""
-    return claim_hold.hold(task, view.rows, view.doc, view.graph, view.fix) or "it is not ready"
+    if not ready(task, view.rows, view.doc, view.graph, view.fix):
+        return claim_hold.hold(task, view.rows, view.doc, view.graph, view.fix) or "it is not ready"
+    return "" if view.admits(task) else "a release or apply wait holds it"
 
 
 def take(queue: WorkQueue, view: Snapshot, timeout_ms: int) -> Delivery | None:
