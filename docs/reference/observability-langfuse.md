@@ -284,13 +284,16 @@ backfill, which keep their own budget.
 | Request timeout | 7 seconds | every Langfuse request the Doctor sends |
 | Historical budget | 45 seconds | the trace listing and observation backfill |
 | Wait history budget | 15 seconds | the wait history of an agent with a turn gap over the limit, also inside the step deadline |
-| Page caps | 20, 20, 10 | listing pages of 100 traces, backfill pages of 50 observations per trace, observations per active freshness read |
+| Trace listing pages | 20 pages | the trace listing, 100 traces per page |
+| Backfill pages | 20 pages | each trace's observation backfill, 50 observations per page |
+| Active freshness rows | 10 observations | each binding's newest observations since its watermark |
 | Step deadline | 55 seconds | the trace reads and the wait history together |
 
 The request timeout stays under half the active budget, so one stalled request
 leaves room for its retry. When the budget ends, no new attempt starts and every
-binding still being read is marked unread; a request already in flight runs on
-until its own 7 second timeout, and its answer is discarded. These limits are
+binding still being read is marked unread. A binding read already in flight
+issues no retry, but its remaining requests still run, each up to the 7 second
+timeout, and their answers are discarded. These limits are
 fixed in the `Budget` defaults of `scripts/doctor/traces_read.py`; no
 environment variable changes them.
 
@@ -361,8 +364,7 @@ unaccepted seconds; any other class name prints its current findings, with
 failed and no finding of the class is current. A `failed-spawn/<task>` id counts
 the spawn journal over its window, so zero there is a real reading for a task
 on the watched ledger or the master; any other task is refused.
-`python -m scripts.doctor.traces_read <slug>` prints
-the measures (active bindings, coverage) and findings for one swarm.
+To run one trace pass by hand, see [Read budget](#read-budget).
 
 ### The Langfuse connector
 
