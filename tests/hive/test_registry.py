@@ -92,11 +92,14 @@ def test_a_restarted_registration_keeps_the_stored_settings(redis):
     assert redis.hget(registry.key("box"), "max_agents") == "3"
 
 
-def test_a_restarted_registration_keeps_a_stored_ui_and_ephemeral(redis):
-    registry.update(redis, "box", ["ui=yes", "ephemeral=no"])
-    restarted = registry.update(redis, "box", ["ui=no", "ephemeral=yes", "name=Pod"], keep=True)
-    assert restarted == {**HEADED, "name": "Pod"}
-    assert redis.hmget(registry.key("box"), "ui", "ephemeral", "name") == ["yes", "no", "Pod"]
+def test_a_registration_after_a_heartbeat_seed_takes_the_advertised_ui_and_ephemeral(redis):
+    with redis.pipeline() as pipe:
+        registry.seed(pipe, "box")
+        pipe.execute()
+    registry.update(redis, "box", ["max-agents=3"])
+    restarted = registry.update(redis, "box", ["ui=yes", "ephemeral=yes", "max-agents=9"], keep=True)
+    assert restarted == {**HEADED, "ephemeral": "yes", "max_agents": 3}
+    assert redis.hmget(registry.key("box"), "ui", "ephemeral", "max_agents") == ["yes", "yes", "3"]
 
 
 def test_a_restarted_registration_with_nothing_new_writes_nothing(redis):
@@ -297,7 +300,7 @@ def test_cli_set_takes_any_number_of_key_value_settings(redis, monkeypatch, caps
 def test_cli_set_keep_help_names_the_kept_settings(monkeypatch):
     monkeypatch.setenv("COLUMNS", "300")
     parser = cli._parser()._subparsers._group_actions[0].choices["set"]
-    keep = r"(?m)^  --keep +Leave max-agents, excluded, ui and ephemeral as stored$"
+    keep = r"(?m)^  --keep +Leave max-agents and excluded as stored$"
     assert re.search(keep, parser.format_help())
 
 
