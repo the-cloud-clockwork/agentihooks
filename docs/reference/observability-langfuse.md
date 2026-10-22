@@ -430,7 +430,7 @@ the flag requirement made 1974 of 2000 cached traces read as unread and only
 about 30 were read again per ten minute scan, while the listing stopped at 2000
 of 3430 traces, so the old judgement could never reach full coverage. Measured
 with `agentihooks doctor rig-grade-swarm measure
-trace-coverage-partial/rig-grade-swarm` it read 1954 before the change; on a
+trace-coverage-partial/rig-grade-swarm` it showed 1954 traces unread before the change; on a
 copy of the live cache the in place upgrade covered 1975 of 2000 traces in the
 first scan.
 
