@@ -1,4 +1,7 @@
 import json
+import shlex
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -109,11 +112,14 @@ def test_the_probe_start_waits_for_its_pair(tmp_path, monkeypatch):
         hierarchy_probe.align(str(alone))
 
 
+def redis_start(name: str) -> str:
+    steps = workflow()["jobs"][name]["steps"]
+    return next(step["run"] for step in steps if step.get("name") == "Start Redis on this runner")
+
+
 def test_redis_installs_from_the_distribution_archive_alone():
     for name in ("hierarchy", "load"):
-        steps = workflow()["jobs"][name]["steps"]
-        start = next(step["run"] for step in steps if step.get("name") == "Start Redis on this runner")
-        apt = [line for line in start.splitlines() if "apt-get" in line or "archive" in line]
+        apt = [line.strip() for line in redis_start(name).splitlines() if "apt-get" in line or "archive" in line]
         assert apt == [
             "archive=/etc/apt/sources.list.d/ubuntu.sources",
             '[[ -f "$archive" ]] || archive=/etc/apt/sources.list',
@@ -122,6 +128,39 @@ def test_redis_installs_from_the_distribution_archive_alone():
             ' installing redis-server from the indexes that loaded"',
             'sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" redis-server',
         ], name
+
+
+@pytest.mark.parametrize("baked", [True, False])
+def test_redis_starts_from_the_image_and_fetches_packages_only_when_absent(tmp_path, baked):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("seq", "grep", "sleep", "chmod"):
+        (bin_dir / tool).symlink_to(shutil.which(tool))
+    calls = tmp_path / "calls"
+    server = bin_dir / "redis-server"
+    server_body = f'#!{shutil.which("bash")}\necho "redis-server $*" >> {calls}\n'
+    (bin_dir / "redis-cli").write_text(f"#!{shutil.which('bash')}\necho PONG\n")
+    (bin_dir / "sudo").write_text(
+        f'#!{shutil.which("bash")}\necho "sudo $*" >> {calls}\n'
+        f'[[ "$*" != *install* ]] || {{ printf %s {shlex.quote(server_body)} > {server}; chmod +x {server}; }}\n'
+    )
+    if baked:
+        server.write_text(server_body)
+    for tool in bin_dir.iterdir():
+        if not tool.is_symlink():
+            tool.chmod(0o755)
+    for name in ("hierarchy", "load"):
+        calls.unlink(missing_ok=True)
+        if not baked:
+            server.unlink(missing_ok=True)
+        subprocess.run(
+            [shutil.which("bash"), "--noprofile", "--norc", "-eo", "pipefail", "-c", redis_start(name)],
+            env={"PATH": str(bin_dir)},
+            check=True,
+        )
+        lines = calls.read_text().splitlines()
+        assert any(line.startswith("sudo apt-get install") for line in lines) is not baked, (name, lines)
+        assert lines[-1] == "redis-server --port 6379 --save  --appendonly no --daemonize yes", (name, lines)
 
 
 def test_the_command_grades_pair_folders_and_refuses_a_margin_below_the_same_code_bound(tmp_path, capsys):
