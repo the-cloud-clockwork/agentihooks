@@ -316,3 +316,40 @@ def test_the_tick_hands_an_urgent_hold_past_ten_minutes_to_the_findings_pass(env
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert "urgent-unclaimable/t1" not in shown[0]
     assert "urgent-unclaimable/t1" not in shown[-1]
+
+
+def judged_status(store, monkeypatch, found, at):
+    from scripts.swarm import status
+
+    monkeypatch.setattr(status, "now_ms", lambda: at)
+    rows = status.findings(store, SLUG, store.config(SLUG), found["tasks"], [])
+    return [row["id"] for row in rows if row["kind"] == "urgent unclaimable"]
+
+
+def test_a_judged_urgent_finding_does_not_return_on_unclaimed_minutes_alone(store, monkeypatch):
+    from scripts.swarm import status
+    from scripts.swarm.health import urgent_hold
+
+    found = doc([task("a", rank="urgent")])
+    urgent_hold.observe(store, SLUG, found, 0)
+    urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
+    assert judged_status(store, monkeypatch, found, 11 * MINUTE) == ["urgent-unclaimable/a"]
+    status.verdict_store(store, SLUG).judge("urgent-unclaimable/a", "established", "known", "master", 11 * MINUTE)
+    for minute in (80, 200, 400):
+        urgent_hold.observe(store, SLUG, found, minute * MINUTE)
+        assert judged_status(store, monkeypatch, found, minute * MINUTE) == []
+
+
+def test_a_judged_urgent_finding_returns_when_the_task_is_claimed_then_unclaimed_again(store, monkeypatch):
+    from scripts.swarm import status
+    from scripts.swarm.health import urgent_hold
+
+    found = doc([task("a", rank="urgent")])
+    urgent_hold.observe(store, SLUG, found, 0)
+    urgent_hold.observe(store, SLUG, found, 150 * MINUTE)
+    assert judged_status(store, monkeypatch, found, 150 * MINUTE) == ["urgent-unclaimable/a"]
+    status.verdict_store(store, SLUG).judge("urgent-unclaimable/a", "established", "known", "master", 150 * MINUTE)
+    urgent_hold.observe(store, SLUG, doc([task("a", rank="urgent", state="claimed")]), 155 * MINUTE)
+    urgent_hold.observe(store, SLUG, found, 160 * MINUTE)
+    urgent_hold.observe(store, SLUG, found, 230 * MINUTE)
+    assert judged_status(store, monkeypatch, found, 230 * MINUTE) == ["urgent-unclaimable/a"]
