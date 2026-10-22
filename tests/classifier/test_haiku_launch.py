@@ -139,6 +139,7 @@ def earlier_agent(tmp_path):
 
 STARTS_AGENT = (
     'ssh-agent 300 >/dev/null 2>&1 &\nSSH_AGENT_PID=$!; export SSH_AGENT_PID\necho "$!" > "$HOME/agent.pid"\n'
+    'timeout 5 bash -c \'until [ "$(cat "/proc/$SSH_AGENT_PID/comm")" = ssh-agent ]; do sleep 0.01; done\' || exit 1\n'
 )
 needs_proc = pytest.mark.skipif(not Path("/proc/self/stat").is_file(), reason="process start times come from /proc")
 
@@ -172,7 +173,7 @@ def test_agent_started_before_the_shell_survives_the_cli(monkeypatch, tmp_path, 
 
 @needs_proc
 def test_startup_process_that_is_no_agent_survives_the_cli(monkeypatch, tmp_path):
-    _shell_home(monkeypatch, tmp_path, STARTS_AGENT.replace("ssh-agent 300", "sleep 300"))
+    _shell_home(monkeypatch, tmp_path, STARTS_AGENT.replace("ssh-agent", "sleep"))
     assert fallbacks.ClaudeCliBackend().decide(REQUEST).source == "haiku"
     pid = int((tmp_path / "agent.pid").read_text())
     try:
