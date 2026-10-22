@@ -203,6 +203,7 @@ def test_a_zero_backoff_step_delivers_an_event_once_per_fetch(clock):
     assert [d.attempt for d in consumer.fetch(10, 0)] == [2]
 
 
+@pytest.fixture
 def waits(monkeypatch):
     seen = []
 
