@@ -116,6 +116,22 @@ def test_controller_routes_an_unpinned_primary_master_through_hive_placement(set
     )
 
 
+def test_controller_keeps_a_master_on_the_claude_login_off_hive_placement(setup, monkeypatch):
+    from scripts import master_claude_login
+    from scripts.swarm import controller
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    asked = []
+    monkeypatch.setattr(master_claude_login, "enabled", lambda *args: asked.append(args) or True)
+    task = master(setup)
+    fenced = controller.FencedRuntime(
+        setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
+    )
+    assert fenced.runtime.router.placed_backend("master", task) == "local"
+    assert asked == [(setup.config.slug, f"master@{setup.config.slug}", "master", "claude")]
+
+
 @pytest.mark.parametrize("route", ["interactive", "subscription", "api"])
 def test_master_order_preserves_placement_health_through_the_consumer(setup, route):
     from types import SimpleNamespace

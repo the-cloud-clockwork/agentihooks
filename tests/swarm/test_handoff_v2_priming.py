@@ -98,7 +98,8 @@ def test_a_successor_spawn_receives_the_stored_envelope(store, lane, monkeypatch
     store.put_agent("sw", replace(first, state="finished"))
     tick("sw", store, ledger, runtime, 2)
     primed = runtime.masters[-1][1] if lane == MASTER else runtime.tasks[-1]
-    assert primed["handoff_envelope"] == envelope
+    assert {key: value for key, value in primed["handoff_envelope"].items() if key != "launch"} == envelope
+    assert ("launch" in primed["handoff_envelope"]) is (lane == MASTER)
     assert store.handoff_envelope("sw", first.task) is None
 
 
