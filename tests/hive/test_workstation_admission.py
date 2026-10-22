@@ -46,7 +46,9 @@ def test_a_root_reservation_consumes_the_same_slot_as_overflow(setup, monkeypatc
 
 
 def test_local_deployment_obeys_the_workstation_cap(setup, monkeypatch):
-    fenced = hybrid(setup, monkeypatch, deployment="local")
+    from scripts.swarm.controller import FencedRuntime
+
+    fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
     local_agents(setup, 8)
     with pytest.raises(SpawnError, match="the local machine runs"):
         fenced.spawn(setup.config, "ci", "next", {"id": "task"})
