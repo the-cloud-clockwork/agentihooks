@@ -68,6 +68,10 @@ def judged(store, doctor, finding_id):
     return json.loads(raw), json.loads(stored)["verdict"]
 
 
+def seen(store, doctor):
+    return {k: json.loads(v) for k, v in store.redis.hgetall(_details_key(store, doctor)).items()}
+
+
 def news(watched, found):
     lines = [f"New Doctor findings on the swarm {watched}:"]
     for f in found:
