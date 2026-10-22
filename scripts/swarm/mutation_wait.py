@@ -1,12 +1,14 @@
 import io
 import json
+import os
 import re
 import subprocess
 import time
 import zipfile
 import zlib
-from datetime import datetime
+from datetime import datetime, timezone
 
+from scripts.swarm.lost_runner import home as _backoff_home
 from scripts.swarm.store import SwarmError
 
 RUN_URL = re.compile(r"https://github\.com/([^/]+/[^/]+)/actions/runs/([0-9]+)")
@@ -17,9 +19,18 @@ UNREADABLE = (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeErr
 
 BACKOFF = (2, 4)
 JOB_FAILURES = ("failure", "timed_out", "cancelled")
+SECONDARY_BACKOFF_S = 60
 
 
 class Unreachable(ValueError):
+    pass
+
+
+class RateLimited(Unreachable):
+    pass
+
+
+class HeadUnreadable(SwarmError):
     pass
 
 
@@ -35,13 +46,30 @@ class FetchFailed(Exception):
     pass
 
 
+def backing_off():
+    return _held_until() > _now()
+
+
+def rate_limited(text):
+    return "rate limit" in str(text).lower()
+
+
+def admitted_pending(target):
+    _record({"at": _now(), "admitted_pending": target})
+
+
 def _api(endpoint, binary=False):
+    if backing_off():
+        raise RateLimited(f"gh api {endpoint}: GitHub API rate limited until {_stamp(_held_until())}")
     try:
         done = subprocess.run(["gh", "api", endpoint], capture_output=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as error:
         raise Unreachable(f"gh api {endpoint}: {error}") from error
     if done.returncode:
         stderr = (done.stderr or b"").decode(errors="replace").strip()
+        if rate_limited(stderr):
+            until = hold(endpoint)
+            raise RateLimited(f"gh api {endpoint}: GitHub API rate limited until {_stamp(until)}")
         raise Unreachable(f"gh api {endpoint}: {stderr or f'exited {done.returncode}'}")
     if binary:
         return done.stdout
@@ -51,6 +79,56 @@ def _api(endpoint, binary=False):
         raise Unreachable(f"gh api {endpoint}: {error}") from error
 
 
+def _now():
+    return datetime.now().timestamp()
+
+
+def _stamp(at):
+    return datetime.fromtimestamp(at, timezone.utc).strftime("%H:%M:%S UTC")
+
+
+def _held_until():
+    try:
+        until = json.loads((_backoff_home() / "github-backoff.json").read_text())["until"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0
+    return until if isinstance(until, (int, float)) else 0
+
+
+def _core_reset(now):
+    try:
+        done = subprocess.run(["gh", "api", "rate_limit"], capture_output=True, timeout=20)
+        core = json.loads(done.stdout)["resources"]["core"]
+        if not done.returncode and core["remaining"] == 0 and core["reset"] > now:
+            return core["reset"]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        pass
+    return now + SECONDARY_BACKOFF_S
+
+
+def hold(endpoint):
+    now = _now()
+    until = max(_core_reset(now), _held_until())
+    home = _backoff_home()
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        staged = home / f"github-backoff.json.{os.getpid()}"
+        staged.write_text(json.dumps({"until": until}))
+        staged.replace(home / "github-backoff.json")
+    except OSError:
+        pass
+    _record({"at": now, "endpoint": endpoint, "until": until})
+    return until
+
+
+def _record(entry):
+    try:
+        with (_backoff_home() / "github-backoff.jsonl").open("a") as log:
+            log.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass
+
+
 def read(target: str) -> dict | None:
     match = RUN_URL.fullmatch(target)
     if not match:
@@ -58,12 +136,25 @@ def read(target: str) -> dict | None:
     repo, number = match.groups()
     try:
         return _api(f"repos/{repo}/actions/runs/{number}")
+    except RateLimited:
+        raise
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
 
 
-def bind(target: str) -> str:
-    run = read(target)
+def bind(target: str) -> str | None:
+    try:
+        return _bind(target)
+    except RateLimited:
+        admitted_pending(target)
+        return None
+
+
+def _bind(target):
+    return _bound(target, read(target))
+
+
+def _bound(target, run):
     if not run or not _graded(run):
         raise SwarmError(
             "wait on mutation needs a readable branch Mutation preflight or focused mutation proof run url"
@@ -72,8 +163,10 @@ def bind(target: str) -> str:
         raise SwarmError("cannot read the mutation preflight head; retry the mutation wait")
     try:
         stale = _stale(target, run)
+    except RateLimited:
+        raise
     except UNREADABLE:
-        raise SwarmError("cannot read the branch head; retry the mutation wait") from None
+        raise HeadUnreadable("cannot read the branch head; retry the mutation wait") from None
     if stale:
         raise SwarmError("the mutation run grades a stale head; wait on a run for the branch head")
     return run["head_sha"]
@@ -148,6 +241,8 @@ def _fetch(target, run):
     for pause in (*BACKOFF, None):
         try:
             return _report(target, run["run_started_at"])
+        except RateLimited:
+            raise
         except (Unreachable, zipfile.BadZipFile, zlib.error, EOFError) as error:
             if pause is None:
                 raise FetchFailed(error) from error
@@ -171,6 +266,33 @@ def _unfetched(outcome, conclusion, error):
 
 
 def resolution(held: dict) -> str:
+    try:
+        if not held.get("head"):
+            run = read(held["target"])
+            if run is None:
+                return ""
+            try:
+                held["head"] = _bound(held["target"], run)
+            except HeadUnreadable:
+                return ""
+            except SwarmError as error:
+                return f"mutation preflight {held['target']}, now red; {error}"
+        return _resolve(held)
+    except RateLimited:
+        return ""
+
+
+def _moved(target, run, outcome):
+    try:
+        stale = _stale(target, run)
+    except RateLimited:
+        raise
+    except UNREADABLE:
+        return f"{outcome}, now red; the branch head is unreadable"
+    return f"{outcome}, now red; the branch moved past the graded head" if stale else ""
+
+
+def _resolve(held):
     target = held["target"]
     run = read(target)
     if run is None:
@@ -180,11 +302,8 @@ def resolution(held: dict) -> str:
     if run.get("status") != "completed":
         return ""
     outcome = f"mutation preflight {target}"
-    try:
-        if _stale(target, run):
-            return f"{outcome}, now red; the branch moved past the graded head"
-    except UNREADABLE:
-        return f"{outcome}, now red; the branch head is unreadable"
+    if moved := _moved(target, run, outcome):
+        return moved
     if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
         return f"{outcome}, now red; run {run.get('conclusion')}"
     try:
@@ -225,13 +344,18 @@ def run_resolution(target: str) -> str:
         return f"{outcome}, now green"
     if conclusion == "cancelled":
         return f"{outcome}, cancelled; dispatch the run again and wait on the new one"
-    return f"{outcome}, now red; the run concluded {conclusion}{_failed_jobs(repo, number)}"
+    try:
+        return f"{outcome}, now red; the run concluded {conclusion}{_failed_jobs(repo, number)}"
+    except RateLimited:
+        return ""
 
 
 def _failed_jobs(repo, number):
     try:
         jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
         failed = [f"{job['name']} {job['conclusion']}" for job in jobs if job.get("conclusion") in JOB_FAILURES]
+    except RateLimited:
+        raise
     except (Unreachable, KeyError, TypeError, AttributeError):
         return "; its jobs could not be read"
     return f"; failed jobs: {', '.join(failed)}" if failed else ""
