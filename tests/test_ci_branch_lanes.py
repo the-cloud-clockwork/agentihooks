@@ -353,7 +353,9 @@ def test_a_head_whose_new_workflows_all_queue_on_a_lane_is_allowed(tmp_path, mon
 
 
 def test_a_refused_head_is_red_names_each_reason_and_cancels_its_runs(tmp_path, monkeypatch, capsys):
-    base, head, sha = _repo(tmp_path, {"plant.yml": {**_workflow(), "on": {"push": None}}, "laned.yml": _workflow(LANED)})
+    base, head, sha = _repo(
+        tmp_path, {"plant.yml": {**_workflow(), "on": {"push": None}}, "laned.yml": _workflow(LANED)}
+    )
     monkeypatch.chdir(base)
     monkeypatch.setenv("GIT_DIR", str(head / ".git"))
     calls = []
