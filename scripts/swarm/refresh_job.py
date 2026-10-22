@@ -9,6 +9,7 @@ from scripts.swarm import snapshot, snapshot_job
 from scripts.swarm.store import connect
 
 LOCK_MS = 15 * 60_000
+START_EVERY_MS = 5 * 60_000
 
 
 def now_ms():
@@ -17,6 +18,10 @@ def now_ms():
 
 def lock_key(store, slug):
     return store.key(slug, "refresh-lock")
+
+
+def started_key(store, slug):
+    return store.key(slug, "refresh-started")
 
 
 def log_path(slug):
@@ -38,6 +43,8 @@ def spawn(slug):
 
 def start(store, slug):
     if store.redis.exists(lock_key(store, slug)):
+        return False
+    if not store.redis.set(started_key(store, slug), 1, nx=True, px=START_EVERY_MS):
         return False
     spawn(slug)
     return True
