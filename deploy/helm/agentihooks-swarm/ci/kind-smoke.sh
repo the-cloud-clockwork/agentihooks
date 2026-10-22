@@ -466,6 +466,26 @@ fi
 printf 'controller restarts: 0\n'
 
 docker exec "$cluster-control-plane" pkill -STOP -f "agentihooks controller run"
+frozen_pod="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].metadata.name}')"
+frozen_container="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
+frozen_holder="$(kubectl exec "$frozen_pod" -c controller -- python -c 'import json; from scripts.swarm import controller; print(json.dumps({"host": controller._host(), "pid": 1, "start": controller._stat(1)[19]}))')"
+frozen_lock="$(kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HOLDER="$frozen_holder" python - <<'FROZEN'
+import json
+import os
+import uuid
+
+from scripts.swarm import lease
+from scripts.swarm.store import connect
+
+store = connect()
+slug = os.environ["SLUG"]
+held = lease.current(store, slug)
+token = json.dumps({"epoch": held.epoch, "token": uuid.uuid4().hex, **json.loads(os.environ["HOLDER"])})
+store.redis.set(store.key(slug, "tick-lock"), token, px=600_000, nx=True)
+print(store.redis.get(store.key(slug, "tick-lock")))
+FROZEN
+)"
+printf 'planted a held tick lock while the controller is frozen\n'
 printf 'controller frozen; its lease must lapse and the liveness probe must restart it\n'
 kubectl wait pod "${controller[@]}" --for=jsonpath='{.status.containerStatuses[0].restartCount}'=1 --timeout 5m || true
 restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
