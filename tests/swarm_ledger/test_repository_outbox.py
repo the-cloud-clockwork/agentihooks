@@ -164,6 +164,11 @@ def test_a_key_with_subject_reserved_characters_is_escaped_in_the_subject_and_ke
     assert outbox.token("t-admit-headroom") == "t-admit-headroom"
 
 
+def test_a_wide_whitespace_key_escapes_to_its_utf8_bytes_and_never_meets_another_key():
+    assert outbox.token(" ") == "%E2%80%80"
+    assert outbox.token(" 00") == "%2000"
+
+
 def test_the_postgres_schema_and_statement_carry_the_outbox():
     assert "CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY" in sqlite.SCHEMA
     assert (

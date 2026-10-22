@@ -9,7 +9,7 @@ RESERVED = re.compile(r"[%.*>\s]")
 
 
 def token(key: str) -> str:
-    return RESERVED.sub(lambda match: f"%{ord(match.group()):02X}", key)
+    return RESERVED.sub(lambda match: "".join(f"%{byte:02X}" for byte in match.group().encode()), key)
 
 
 def changed(before: dict, after: dict) -> list:
