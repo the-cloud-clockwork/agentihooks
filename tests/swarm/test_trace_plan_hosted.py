@@ -189,11 +189,13 @@ def test_a_legacy_cut_marked_filed_but_never_accepted_is_filed_once(hosted, monk
 def test_a_legacy_cut_already_on_the_ledger_is_not_filed_again(hosted, monkeypatch):
     name, folder, url = hosted
     text = "Cut from the plan: a steam generator"
-    _failing_followups(monkeypatch, 1, applied=False)
+    stable = trace_plan.cut_id
+    monkeypatch.setattr(trace_plan, "cut_id", lambda who, key: "add_item-0a1b2c3d4e")
+    _failing_followups(monkeypatch, 1, applied=True)
     assert cli.main([SLUG, "trace-plan"]) != 0
     _legacy(folder, "a steam generator | power | it powers a light")
-    LedgerClient().followup(SLUG, text, by=name)
+    monkeypatch.setattr(trace_plan, "cut_id", stable)
 
     assert cli.main([SLUG, "trace-plan"]) == 0
-    assert len(_filed(url, text)) == 1
+    assert [item["id"] for item in _filed(url, text)] == ["add_item-0a1b2c3d4e"]
     assert _verdict(folder)["accepted"] == ["a steam generator | power | it powers a light"]
