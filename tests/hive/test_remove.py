@@ -131,6 +131,7 @@ def _hive(hive_id, **fields):
         "prefer": {},
         "max_agents": 5,
         "agents": 0,
+        "room": 5,
         "slots": [{"harness": "claude", "account": "a", "kind": "subscription"}],
         "repos": ["r"],
         "interactive": {},

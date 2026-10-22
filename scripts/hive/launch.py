@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from scripts.hive import orders, placement, placement_waits, registry
+from scripts.hive import admission, headroom, orders, placement, placement_waits, registry
 from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
@@ -40,7 +40,7 @@ def loaded_hives(store: RedisStore) -> list[dict]:
 
     A hive counts a running agent in its slot's processes even when it lists no execution for it."""
     agents = [agent for slug in store.slugs() for agent in store.agents(slug)]
-    hives = registry.hives(store.redis)
+    hives, now = registry.hives(store.redis), lease.now_ms(store)
     for hive in hives:
         counts = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
         executions = counts.get("_executions", {})
@@ -66,6 +66,11 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
             max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
+        found = admission.room(
+            headroom.read(store.redis, hive["id"], now), pending=admission.pending(store.redis, hive["id"])
+        )
+        hive["room"] = found.room
+        hive["refusal"] = admission.refusal(found)
     return hives
 
 
@@ -250,6 +255,16 @@ class HiveLaunch:
             },
             self.opening(named),
         )
+        if refused := self.reserve_room(request, selected):
+            self._record_wait(request.lane, request.task, placement.Wait(refused))
+            return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
+        try:
+            return self.send_order(request, selected, task)
+        except BaseException:
+            admission.release(self.store.redis, selected.hive, f"{self.slug}/{request.name}")
+            raise
+
+    def send_order(self, request: SpawnRequest, selected: Selection, task: dict) -> Outcome:
         admitted = self.admit(request, selected)
         if selected.route_kind != placement.MASTER_LOGIN and not self.slots.reserve(
             f"claude:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
@@ -288,6 +303,17 @@ class HiveLaunch:
             self.retire(order, previous)
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
         return self.spawn(request)
+
+    def reserve_room(self, request: SpawnRequest, selected: Selection) -> str:
+        if selected.master_placement is not None:
+            return ""
+        reading = headroom.read(self.store.redis, selected.hive, lease.now_ms(self.store))
+        member = f"{self.slug}/{request.name}"
+        reserved, held = admission.reserve(self.store.redis, selected.hive, member, admission.room(reading).room)
+        if reserved:
+            return ""
+        refused = admission.refusal(admission.room(reading, pending=held))
+        return f"no hive for {request.lane} has room: {selected.hive} {refused}"
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
         agent = AgentRecord(
@@ -406,6 +432,7 @@ class HiveLaunch:
     def end(self, agent: AgentRecord, reason: str) -> None:
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         self.slots.release(agent.execution_id)
+        admission.release(self.store.redis, agent.hive, f"{self.slug}/{agent.name}")
         self.store.redis.hset(
             self.store.key(self.slug, ENDINGS),
             agent.execution_id,
