@@ -161,6 +161,12 @@ def test_changed_orders_many_keys_by_key_under_any_hash_seed():
     assert [key for _, key, _ in found] == sorted(keys)
 
 
+def test_changed_skips_tasks_and_phases_without_an_id():
+    before = {"tasks": [{"title": "old"}], "phases": [{"title": "gone"}]}
+    after = {"tasks": [{"title": "new"}, {"id": "t1"}], "phases": [{"title": "kept"}]}
+    assert outbox.changed(before, after) == [("task", "t1", {"id": "t1"})]
+
+
 def test_a_removed_item_is_written_as_a_removal_with_empty_data():
     connection = sqlite3.connect(":memory:")
     connection.executescript(sqlite.SCHEMA)

@@ -16,8 +16,8 @@ def changed(before: dict, after: dict) -> list:
     """(entity, id, item or None when removed) for every task and phase that differs."""
     found = []
     for collection, entity in ENTITIES.items():
-        old = {item["id"]: item for item in before.get(collection, [])}
-        new = {item["id"]: item for item in after.get(collection, [])}
+        old = {item["id"]: item for item in before.get(collection, []) if "id" in item}
+        new = {item["id"]: item for item in after.get(collection, []) if "id" in item}
         found += [
             (entity, key, new.get(key)) for key in sorted(old.keys() | new.keys()) if old.get(key) != new.get(key)
         ]
