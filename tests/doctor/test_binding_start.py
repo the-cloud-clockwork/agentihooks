@@ -43,9 +43,20 @@ def test_an_old_hive_launch_reports_its_observed_age(start):
 @pytest.mark.parametrize("start", [0, None, -1])
 def test_an_unknown_start_reports_an_evidence_gap_without_an_age(start):
     [found] = _findings(_agent(started_at=start, launched_at=0))
-    assert found.kind == "telemetry start unknown"
+    assert found.as_dict() == {
+        "kind": "telemetry start unknown",
+        "subject": "engineer@hive-1",
+        "summary": "working agent start is unknown",
+        "evidence": [
+            "agent engineer@hive-1",
+            "seat unknown",
+            "task unknown",
+            "session unknown",
+            "no positive spawn or launch timestamp; launch grace cannot be established",
+        ],
+        "threshold": "an observed start is required to judge active telemetry",
+    }
     assert found.measure == 1
-    assert "grace" in " ".join(found.evidence)
 
 
 def test_a_real_binding_start_keeps_its_lifetime_and_grace():
