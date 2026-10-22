@@ -431,6 +431,23 @@ def test_the_seat_spawn_helper_stamps_the_seat_and_the_host_spend():
     assert int(store.names.entry(NAME)["spawned_at"]) == NOW
 
 
+def test_a_seat_placed_on_a_hive_spends_no_workstation_host_room():
+    from dataclasses import replace
+
+    class OnHive(FakeRuntime):
+        def spawn(self, config, lane, name, task):
+            placed = super().spawn(config, lane, name, task)
+            record = next(a for a in store.agents(SLUG) if a.name == name)
+            return replace(placed, execution=replace(record, hive="remote"))
+
+    store, runtime = swarm(), OnHive()
+    record, _ = seat_spawn.place(
+        SLUG, store.config(SLUG), store, runtime, dispatch_seat.LANE, NOW, lambda r: {"id": r.task}
+    )
+    assert record.name == NAME
+    assert store.redis.zrange(tick_module.HOST_SPENDS, 0, -1) == []
+
+
 def crew(found, members=(), joined=()):
     return {**found, "_meta": {"members": {name: {"role": "member"} for name in members}, "join_history": dict(joined)}}
 

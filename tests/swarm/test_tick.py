@@ -854,6 +854,28 @@ def test_a_failed_hive_launch_releases_its_hive_room_and_launch_slot(store, endi
     assert slots.counts() == {}
 
 
+class HiveFailsAfterAdmission(HiveAcks):
+    def __init__(self, store):
+        super().__init__()
+        self.store, self.slots = store, None
+
+    def spawn(self, config, lane, name, task):
+        if lane == MASTER:
+            return super().spawn(config, lane, name, task)
+        self.slots = _hive_reservations(self.store, name)
+        raise SpawnError("hive launch failed: ambiguous", "ambiguous")
+
+
+def test_a_hive_launch_failing_after_admission_releases_its_hive_room_and_launch_slot(store):
+    from scripts.hive import admission
+
+    ledger, runtime = tasks(("t1", "eng")), HiveFailsAfterAdmission(store)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert any(action.startswith("spawn failed for t1") for action in actions)
+    assert admission.pending(store.redis, "remote") == 0
+    assert runtime.slots.counts() == {}
+
+
 def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)

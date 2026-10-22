@@ -1,10 +1,11 @@
 import json
+from dataclasses import replace
 
 import pytest
 
 from scripts.swarm import capacity, cli, host_budget, tick
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
-from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from tests.swarm.test_tick import FakeLedger, FakeRuntime, HiveAcks
 
 CAPS = {"eng": 2, "ci": 1, "plan": 0}
 MEMORY = "2100 MB available memory fits 3 at 700 MB each"
@@ -118,10 +119,6 @@ def test_the_master_seat_waits_for_host_room(store):
 
 
 def test_hive_launches_never_spend_the_workstation_host_room(store):
-    from dataclasses import replace
-
-    from tests.swarm.test_tick import HiveAcks
-
     _decide(store, 2)
     ledger, runtime = _ledger(), HiveAcks()
     tick.tick("sw", store, ledger, runtime, now_ms=1_000)

@@ -976,12 +976,10 @@ def _spend_local(store, agent, now_ms):
         _spend_host(store, agent.name, now_ms)
 
 
-def _release_hive_launch(slug, store, agent):
-    from scripts.hive import admission
-    from scripts.routing.reservation import LaunchSlots
+def _release_hive_launch(slug, store, record):
+    from scripts.hive import launch
 
-    LaunchSlots(store.redis).release(agent.execution_id)
-    admission.release(store.redis, agent.hive, f"{slug}/{agent.name}")
+    launch.release(store, slug, next((a for a in store.agents(slug) if a.name == record.name), record))
 
 
 def _hold(slug, store, text):
