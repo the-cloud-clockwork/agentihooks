@@ -43,7 +43,7 @@ BACKENDS = [pytest.param(_memory, id="memory")]
 def _event_log(harness: Harness) -> Channel:
     consumer = harness.bus.events.consumer("contract", "swarm.>")
     return Channel(
-        lambda event: harness.bus.events.publish("swarm.s.task", event),
+        lambda envelope: harness.bus.events.publish("swarm.s.task", envelope),
         lambda: consumer.fetch(1, harness.poll_ms),
     )
 
@@ -101,7 +101,9 @@ def test_an_event_is_never_delivered_past_the_attempt_cap(channel, harness):
 
 def test_a_nak_holds_the_event_until_its_delay_passes(channel, harness):
     channel.offer(event())
-    channel.take()[0].nak(30)
+    first = channel.take()
+    assert seen(first) == [("e1", 1)]
+    first[0].nak(30)
     harness.advance(29)
     assert channel.take() == []
     harness.advance(1)
@@ -120,10 +122,12 @@ def test_a_repeated_event_id_is_refused_inside_the_dedupe_window(channel, harnes
     harness.advance(1)
     assert channel.offer(event("e1")) is True
     delivered = []
-    while deliveries := channel.take():
+    for _ in range(3):
+        deliveries = channel.take()
         deliveries[0].ack()
         delivered += seen(deliveries)
     assert delivered == [("e1", 1), ("e2", 1), ("e1", 1)]
+    assert channel.take() == []
 
 
 def test_compare_and_set_refuses_an_existing_key_and_a_stale_revision(harness):
@@ -147,7 +151,8 @@ def test_watch_yields_a_keys_entries_from_a_revision_in_order(harness):
     other = store.create("other", b"o1")
     second = store.update("k", b"v2", first)
     third = store.update("k", b"v3", second)
-    assert list(islice(store.watch("k", other), 2)) == [
+    assert other < second
+    assert list(islice(store.watch("k", second), 2)) == [
         StateEntry("k", b"v2", second),
         StateEntry("k", b"v3", third),
     ]
