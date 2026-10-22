@@ -80,6 +80,15 @@ def test_an_entry_whose_images_are_all_elsewhere_names_no_paths():
     assert events == [{"target": "chat", "id": "m-away"}]
 
 
+def test_attachment_paths_skip_an_id_that_is_not_a_media_id():
+    outside = ledger_media.folder("escape-media").parent / "outside.png"
+    outside.write_bytes(png(1, 1))
+    doc = {"chat": [{"id": "m-escape", "attachments": [{"id": "../outside.png"}]}]}
+    events = [{"target": "chat", "id": "m-escape"}]
+    ledger_media.attach_paths("escape-media", doc, events)
+    assert events == [{"target": "chat", "id": "m-escape"}]
+
+
 def test_a_sweep_drops_old_unused_image_rows_after_the_write_commits():
     make_ledger("sweep-rows")
     files = [ledger_media.store("sweep-rows", png(n, n)) for n in range(1, 4)]

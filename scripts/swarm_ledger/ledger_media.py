@@ -148,7 +148,8 @@ def attach_paths(slug: str, doc: dict, events: list[dict]) -> None:
         target = event.get("target", "")
         thread = core.get_thread(doc, "chat" if target == "chat" else f"{target}/comments")
         item = next((item for item in thread or [] if item["id"] == event.get("id")), None)
-        here = [folder(slug) / att["id"] for att in (item or {}).get("attachments", [])]
+        ids = [att["id"] for att in (item or {}).get("attachments", []) if ID_RE.match(str(att["id"]))]
+        here = [folder(slug) / media_id for media_id in ids]
         paths = [str(path.resolve()) for path in here if path.is_file()]
         if paths:
             event["image_paths"] = paths
