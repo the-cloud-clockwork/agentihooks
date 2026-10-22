@@ -10,7 +10,7 @@ from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm.tick import Placed
+from scripts.swarm.tick import ACK_LATER, Placed
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
 
@@ -19,6 +19,9 @@ ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "planner": "plan", "dispatcher
 TTL_MS = 300000
 ORDERS = "controller-launch-orders"
 ENDINGS = "launch-endings"
+PENDING = "hive launch ordered, waiting for its acknowledgement"
+GONE = "the hive launch order ended before its acknowledgement"
+EXPIRED = "hive launch acknowledgement expired"
 
 
 @dataclass(frozen=True)
@@ -233,7 +236,7 @@ class HiveLaunch:
             elif previous.name != request.name or previous.seat != request.task["seat"]:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
             else:
-                return self.wait(order)
+                return self.answer(request, order)
         selected = self.select(request.config, request.lane, request.task)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
@@ -274,7 +277,17 @@ class HiveLaunch:
             pipe.hset(self.store.key(self.slug, ORDERS), request.task["id"], json.dumps(order.__dict__))
             Orders(pipe).send(selected.hive, order)
             pipe.execute()
-        return self.wait(order)
+        return self.answer(request, order)
+
+    def collect(self, request: SpawnRequest) -> Outcome:
+        order = self.orders_for(request.task["id"])
+        previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
+        if not previous or previous.state in ("ended", "finished"):
+            return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
+        if self.unacknowledged(order):
+            self.retire(order, previous)
+            return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
+        return self.spawn(request)
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
         agent = AgentRecord(
@@ -308,14 +321,21 @@ class HiveLaunch:
         with lease.fencing(self.held.epoch):
             return self.store.start_execution(self.slug, agent, previous.execution_id if ended else "")
 
+    def answer(self, request: SpawnRequest, order: LaunchOrder) -> Outcome:
+        return self.poll(order) if request.task.get(ACK_LATER) else self.wait(order)
+
     def wait(self, order: LaunchOrder) -> Outcome:
-        while True:
-            lease.require_epoch(self.store, self.slug, order.epoch)
-            if ack := self.orders.ack(order):
-                return self.complete(order, ack)
-            if lease.now_ms(self.store) >= order.expires_at:
-                return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch acknowledgement expired")
+        while (outcome := self.poll(order)).status is Status.PENDING:
             self.sleep(1)
+        return outcome
+
+    def poll(self, order: LaunchOrder) -> Outcome:
+        lease.require_epoch(self.store, self.slug, order.epoch)
+        if ack := self.orders.ack(order):
+            return self.complete(order, ack)
+        if lease.now_ms(self.store) >= order.expires_at:
+            return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
+        return Outcome("spawn", Status.PENDING, HIVE, detail=PENDING)
 
     def complete(self, order: LaunchOrder, ack: Ack) -> Outcome:
         agent = self.store.execution_registry.get(self.slug, order.execution_id)

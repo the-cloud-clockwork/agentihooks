@@ -31,6 +31,7 @@ class Status(StrEnum):
     UNAVAILABLE = "unavailable"
     UNSUPPORTED = "unsupported"
     REFUSED = "refused"
+    PENDING = "pending"
 
 
 class Unqualified(StrEnum):
