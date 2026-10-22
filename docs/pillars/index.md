@@ -10,7 +10,7 @@ AgentiHooks is organised around four pillars: Identity, Guardrails, Context Inte
 
 The [swarm guide](swarm.md) covers fleet task execution, including [ready handoffs for tasks split across pull requests](swarm.md#ready-handoffs-for-split-tasks) and [what the ready merge pass does when a pull request leaves the merge queue](swarm.md#ready-merge-pass-queue-exits).
 
-See [proof loop health findings](swarm.md#proof-loop-health-findings) for rerun exclusions, review counts, cap configuration and verdict examples.
+See [proof loop health findings](swarm.md#proof-loop-health-findings) for rerun exclusions, [pull request head changes](swarm.md#pull-request-head-changes), review counts, cap configuration and verdict examples.
 
 See [stalled activity findings](swarm.md#stalled-activity-findings) for threshold configuration, wrapper loss recovery and investigation of active agents reported as stalled.
 
@@ -22,10 +22,12 @@ See [worker execution lease through a controller rollout](swarm.md#worker-execut
 
 See [one push per pull request](swarm.md#one-push-per-pull-request) for when a worker may open a pull request, when a push is refused while checks run, gate modes and troubleshooting.
 
-See [plan tracing for promotion fixer tasks](swarm.md#plan-tracing-for-promotion-fixer-tasks) for usage, gate modes and the limits on run numbers in ledger prose.
+See [plan tracing for promotion fixer tasks](swarm.md#plan-tracing-for-promotion-fixer-tasks) for usage, gate modes and the limits on run numbers in ledger prose, and [plan refusals in the gate log](swarm.md#plan-refusals-in-the-gate-log) for the row each refused plan writes and how Doctor rates counts it.
 
 See [hives](hives.md) for joining machines, roles, placement, launches on a hive, failover and fencing, and [deployment modes](../reference/deployment-modes.md) for where the controller, ledger and Redis run.
 
 See [hive endpoint limits](hives.md#hive-endpoint-limits) for the hive endpoint request, handler and Redis time limits, the 503 it answers when Redis does not reply, and what a client does after it.
 
 See [promotion fixer intake](swarm.md#promotion-fixer-intake) for how one swarm per repository files and closes promotion fixer tasks, hands intake over and shows its owner.
+
+See [ledger artifacts](swarm.md#ledger-artifacts) for what the ledger accepts as an artifact, a master's plan publish, the two checks and refusal troubleshooting.

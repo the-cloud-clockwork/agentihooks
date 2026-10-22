@@ -22,6 +22,9 @@ NO_READING = "no fresh headroom reading"
 # joined the schema still publishes them, so a reading missing only the RAM fields is read, not refused.
 CORE_FIELDS = ("cpus", "load5")
 RAM_FIELDS = frozenset({"available_mb", "total_mb"})
+POD_RAM_FIELDS = frozenset({"pod_available_mb", "pod_total_mb"})
+POD_CPU_FIELDS = frozenset({"pod_cpus", "pod_load"})
+LINE = f"under the {HOST_PERCENT} percent line"
 QUOTA_MARKS = ("account has room", "account reservation is full")
 
 _RESERVE = """
@@ -59,21 +62,59 @@ class Room:
 
 def _host(measured: dict, pending: int) -> list[tuple[int, str, str]]:
     cpus, load5 = measured["cpus"], measured["load5"]
-    line = f"under the {HOST_PERCENT} percent line"
-    held = f" with {pending} pending launches" if pending else ""
-    cpu = int((HOST_PERCENT * cpus - 100 * load5) // (100 * AGENT_CPU)) - pending
+    held = _held(pending)
     limits = [
         (
-            cpu,
+            _cpu_room(cpus, load5, pending),
             CPU,
-            f"five minute load {load5:.2f} on {cpus} CPUs, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {line}",
+            f"five minute load {load5:.2f} on {cpus} CPUs, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {LINE}",
         )
     ]
     if all(field in measured for field in RAM_FIELDS):
         available, total = measured["available_mb"], measured["total_mb"]
-        ram = (available * 100 - (100 - HOST_PERCENT) * total) // (100 * AGENT_MB) - pending
         limits.append(
-            (ram, RAM, f"{available} of {total} MB available, {AGENT_MB} MB per agent{held}, fits {{}} more {line}")
+            (
+                _ram_room(available, total, pending),
+                RAM,
+                f"{available} of {total} MB available, {AGENT_MB} MB per agent{held}, fits {{}} more {LINE}",
+            )
+        )
+    return limits
+
+
+def _held(pending: int) -> str:
+    return f" with {pending} pending launches" if pending else ""
+
+
+def _cpu_room(cpus: float, load: float, pending: int) -> int:
+    return int((HOST_PERCENT * cpus - 100 * load) // (100 * AGENT_CPU)) - pending
+
+
+def _ram_room(available: int, total: int, pending: int) -> int:
+    return (available * 100 - (100 - HOST_PERCENT) * total) // (100 * AGENT_MB) - pending
+
+
+def _pod(measured: dict, pending: int) -> list[tuple[int, str, str]]:
+    held = _held(pending)
+    limits = []
+    if all(field in measured for field in POD_CPU_FIELDS):
+        cpus, load = measured["pod_cpus"], measured["pod_load"]
+        limits.append(
+            (
+                _cpu_room(cpus, load, pending),
+                CPU,
+                f"pod load {load:.2f} on a {cpus:g} CPU limit, {AGENT_CPU:g} CPU per agent{held}, "
+                f"fits {{}} more {LINE}",
+            )
+        )
+    if all(field in measured for field in POD_RAM_FIELDS):
+        available, total = measured["pod_available_mb"], measured["pod_total_mb"]
+        limits.append(
+            (
+                _ram_room(available, total, pending),
+                RAM,
+                f"pod {available} of {total} MB available, {AGENT_MB} MB per agent{held}, fits {{}} more {LINE}",
+            )
         )
     return limits
 
@@ -92,7 +133,7 @@ def _swarm(measured: dict, agents: int) -> list[tuple[int, str, str]]:
 def room(measured: dict | None, swarm_agents: int | None = None, pending: int = 0) -> Room:
     if measured is None or any(field not in measured for field in CORE_FIELDS):
         return Room(0, MISSING, NO_READING)
-    limits = _host(measured, pending)
+    limits = _host(measured, pending) + _pod(measured, pending)
     if swarm_agents is not None and all(field in measured for field in RAM_FIELDS):
         limits += _swarm(measured, swarm_agents)
     count, reason, detail = min(limits, key=lambda limit: limit[0])

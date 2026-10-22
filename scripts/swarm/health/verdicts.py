@@ -36,6 +36,8 @@ class VerdictStore:
             if grew and new_evidence:
                 key = "evidence_identity" if finding.evidence_identity is not None else "evidence"
                 grew = record[key] != verdict.get(key, before.get(key))
+            elif verdict and finding.evidence_identity is not None and not new_evidence:
+                grew = record["evidence_identity"] != verdict["evidence_identity"]
             if grew and not show and now_ms >= verdict["at"] + cooldown_ms:
                 record["returned"] = show = True
             if record != before:

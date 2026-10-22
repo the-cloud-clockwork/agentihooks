@@ -650,13 +650,13 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 |---|---|
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
-| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. |
+| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
 | `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the current worktree branch on the task once it is on origin, with its repository (`branch_repo`, the origin remote without credentials), so dependent tasks can start from it. |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. Rounds spent before the task records a pull request, on its first pull request and on each later one, count on separate counters ([Review round counters](#review-round-counters)). |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
-| `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; their swarm owners receive an inbox message. Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. |
+| `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; their swarm owners receive an inbox message. Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. Each reorder, deferral, replay and restore is recorded in the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
 | `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue. Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff and leave the worktree in place; a green ejection with no failed merge group run of its own is queued again instead ([Ready merge pass queue exits](#ready-merge-pass-queue-exits)). Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. A dependency that is not `done` turns the block into a checked wait on that task instead, keeping the claim. Before blocking, refuses while a task worktree holds commits its remote branch lacks, naming the push to run, and records a pushed branch on the task; see [Blocking with unpushed commits](#blocking-with-unpushed-commits). |
 | `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
@@ -1617,13 +1617,13 @@ agentihooks swarm example-swarm trace-plan
 
 The command resolves the agent and claimed task from the session. Before any
 classifier call it checks each piece's follow-up text,
-`Cut from the plan of task <task id>: <what>`, against the ledger's plain words
+`Cut from the plan: <what>`, against the ledger's plain words
 rules. Its report names the verdict, kept pieces and cut pieces. If the
 classifier cuts the unrelated piece and the plan passes, the filed follow-up
 reads:
 
 ```text
-Cut from the plan of task promo-38842603017-0: Add an unrelated feature
+Cut from the plan: Add an unrelated feature
 ```
 
 Classifier scope and size judgments still apply; accepting the identifier does
@@ -1673,6 +1673,72 @@ comment. Put run evidence in the task proof and link the Actions run when
 referencing it in ledger prose. If only the generated task token is refused,
 confirm the claimed task appears in the swarm ledger under that exact
 identifier. Retrying unchanged text does not resolve a validation refusal.
+
+### Plan refusals in the gate log
+
+Every plan `trace-plan` refuses before tracing writes one `trace-plan` row to
+the swarm gate log, `~/.agentihooks/swarm/<swarm>/gates/log.jsonl`, before the
+command prints the refusal. These refusals are:
+
+| Refusal | Reason text |
+|---|---|
+| No `plan.md` in the task work folder | `write the plan first: <work folder>/plan.md, one piece per line: - what \| area, area \| why` |
+| A line starting `- ` that is not three non empty fields | `plan line <n> is not a piece; write one piece per line: - what \| area, area \| why` |
+| A piece whose follow-up the ledger would refuse | `plan line <n>: the ledger would refuse its follow up, write what in plain words: <violations>` |
+| No piece lines | `the plan holds no pieces; write one piece per line: - what \| area, area \| why` |
+| More than 100 pieces | `the plan holds <count> pieces, at most 100` |
+
+The row carries the refusal text as `reason`, with the agent, the task and the
+time; `tool` is empty. Its `kind` follows `trace-plan-gate`, the same as a
+failed verdict:
+
+| Mode | Row kind |
+|---|---|
+| `deny` | `deny` |
+| `log only` | `observe` |
+| `skip` | no row |
+
+A refusal stops the trace in every mode: no classifier call, no saved verdict,
+no failed plan counted toward the block and no filed follow-up. The previous
+`plan-verdict.json` stays as it was. Each run on a refused plan writes another
+row, so an agent retrying unchanged text shows up as repeated rows. A plan that
+parses writes the same rows as before: a `deny` or `observe` row for a failed
+verdict, `fail-open` for an unchecked one, `count` for each filed cut, and none
+for a rerun on an unchanged plan with unchanged authorizations.
+
+A plan whose second line reads `- Rerun 38842603017 after the fix | scripts/ci_coverage.py | Confirm the fix`
+writes this row under `deny`:
+
+```json
+{"at": 1792652269698, "gate": "trace-plan", "kind": "deny", "agent": "engineer@d44a5a-0566", "task": "promo-38842603017-0", "tool": "", "reason": "plan line 2: the ledger would refuse its follow up, write what in plain words: run or job id '38842603017'"}
+```
+
+List the refusals of one swarm:
+
+```bash
+jq -c 'select(.gate == "trace-plan" and (.kind == "deny" or .kind == "observe"))
+  | {at, agent, task, reason}' ~/.agentihooks/swarm/example-swarm/gates/log.jsonl
+```
+
+`agentihooks doctor <swarm> rates` counts these rows under `gate trace-plan`
+with the failed verdicts, in the same `deny` or `observe` column. Given a
+Doctor swarm, it reads the gate log of the swarm that Doctor watches. To compare
+before and after a fix, pass the fix time and a window:
+
+```bash
+agentihooks doctor example-swarm rates --at 2026-10-17T19:40:58Z --hours 24 --json
+```
+
+Refusals raised before the trace reads the plan write no row: the session is
+not a swarm worker or is the master, or the ledger or swarm config read failed.
+Rows begin with [pull request 4173](https://github.com/the-cloud-clockwork/agentihooks/pull/4173);
+plan refusals before its merge survive only in agent comments.
+
+| Symptom | Cause and action |
+|---|---|
+| `trace-plan` printed a refusal and the gate log has no row | The mode is `skip`, or the refusal came before the plan was read. Check `gate_modes` in `swarm status --json`. |
+| Many identical refusal rows for one task | The agent reran `trace-plan` without changing `plan.md`. Rewrite the line the reason names. |
+| A refused plan never blocked the task | Refusals are not failed plans. Only a traced plan with a failed verdict counts toward the block. |
 
 ## Deployed host capacity
 
@@ -2428,8 +2494,8 @@ started life counts unless its recorded `after` cause excludes it:
 The controller records these causes at launch; operators do not need to edit
 launch history. A failed launch that never reached `started` does not count.
 Exclusions apply to the marked start, so a later ordinary restart still counts.
-The current health pass also excludes a later start when its recorded pull
-request head differs from the preceding start and both heads are known.
+A start whose pull request head moved is also excluded; see
+[pull request head changes](#pull-request-head-changes).
 
 With no review counter over its cap and no change of recorded head:
 
@@ -2446,6 +2512,48 @@ not their sum. For example, three rounds before the pull request and one on
 its first pull request give a review count of three. Four in one counter
 exceed the default cap. See [review round counters](#review-round-counters)
 for how those counters are separated and for the review gate's own limits.
+
+#### Pull request head changes
+
+A life that pushes a new pull request head made progress, so the next start is
+not a rerun. When the tick starts a life, it records in the started launch row
+the head commit of the task's pull request at that moment. That one value is
+the head the new life starts on, which is where the previous life left it:
+
+| Recorded `head` | When | Comparable? |
+|---|---|---|
+| Commit SHA | The task has a pull request and GitHub returned its head | Yes |
+| Empty string | The task has no pull request yet | Yes |
+| `null` | The head read failed, including a GitHub rate limit, or the row predates head recording | No |
+
+The health pass compares each started life with the previous started life of
+the same task. The later start is excluded from the rerun count when both
+recorded heads are comparable and differ. An empty head followed by a SHA is a
+change, because a pull request appeared between the two starts; a SHA followed
+by an empty head is a change as well. Two equal heads, two empty heads, or a
+`null` head on either side leave the start counted, unless its `after` cause
+excludes it. An `after` exclusion and a head change are independent; either one
+excludes the start.
+
+| Recorded heads of started lives in order | Counted reruns | Default finding? |
+|---|---|---|
+| empty, `a`, `b`, `c`, `d` | 0 | No |
+| `a`, `a`, `b`, `b`, `b`, `c`, `c` | 4 | Yes |
+| empty, empty, empty, empty | 3 | Yes |
+| `null`, `a`, `null`, `b` | 3 | Yes |
+| `a`, empty, empty, empty | 2 | No |
+
+In the second row the starts that keep `a`, keep `b` twice and keep `c` count;
+the moves to `b` and to `c` do not. A task whose agents keep restarting after
+merge queue ejections or dev breaks, and push a fix each life, therefore raises
+no rerun based proof loop finding; review rounds over their cap still raise
+one. A task whose lives end on the head they started on still does. Review
+round counting does not use heads.
+
+Launch rows recorded before head recording shipped have no `head` and read as
+`null`, so they count as before. A head read that fails at one start makes
+that start incomparable with both the previous and the next start, so both
+can count; later pairs are compared normally.
 
 #### Configure the caps
 
@@ -2504,6 +2612,20 @@ chain consisting only of parks. Its
 validates the implementation; it does not establish a live reduction in false
 findings. Comparing before and after rates requires equal windows after the
 running controller has loaded the correction.
+
+If a restart that pushed a new head is still counted, read the `head` of that
+started row and of the previous one. A `null` on either side means the head
+read failed or the row predates head recording; the start counts and the
+retained history cannot show the move. Equal recorded heads mean the head did
+not move between the two starts, whatever else the previous life did. Only the
+head at each start is recorded, so a life that pushed and then force pushed
+back to the head it started on reads as unchanged.
+
+[Pull request #4344](https://github.com/the-cloud-clockwork/agentihooks/pull/4344)
+records the head comparison and its regression proofs for moving heads,
+repeated heads, tasks without a pull request and rows without a recorded head.
+It addresses proof loop findings judged false positive because every extra
+life followed a dev break or a merge queue ejection and pushed a new head.
 
 ### Stalled activity findings
 
@@ -2709,6 +2831,56 @@ it wakes anyone, the tick closes an event item whose follow up or question was a
 (follow up closed or flagged, question answered or out of scope), so the master never handles a decision twice.
 A task item stays until the master closes it, so a done task's proof check always reaches the master.
 
+#### Task notices when a seat changes tasks
+
+The three pull request notices addressed to an engineer in the table above follow the task when its seat
+passes to a different live agent working on another task. The notice becomes a comment by `swarm` on the
+original task, where its next claimant can read it. The new occupant receives no seat inbox item for that notice.
+This applies to merged pull requests still in `pr`, pull requests closed without merging, and red checks
+with no push; it does not reroute arbitrary messages sent with `msg send`.
+
+The tick checks ownership both when sending a notice and after sending it:
+
+| Situation | Result |
+|---|---|
+| The claimant's seat already has a different live occupant holding another task | Write the notice as a comment on the original task instead of sending a seat item |
+| An indexed notice is still open when the seat passes to a different live occupant holding another task | Copy its text onto the original task as a `swarm` comment, remove its task index entry, and close the seat item as `done` |
+| The seat is empty, or its successor holds the same task | Keep the existing seat notice for the successor |
+| The claimant is no longer running when a new notice is due | Send to the task's owning master; this item is not indexed for seat relocation |
+
+For example, an engineer receives a red checks notice for task `t17` at `eng-2@<id>`. That seat is later assigned
+to an engineer working on `t23`. On a later ledger event pass, the indexed notice moves onto `t17`; the new
+engineer continues `t23` without inheriting the request to fix `t17`. If the successor instead continues `t17`,
+the notice stays in the seat inbox.
+
+**Configuration and scope.** Routing is automatic in the running swarm tick; there is no separate setting or
+environment variable to enable it. The ten and twenty minute notice thresholds above still apply. Notices
+sent to a seat by this path are indexed with their task when sent, so relocation covers those indexed items,
+not every historical seat message. Already closed items leave the index without creating another comment.
+If the task is no longer in the ledger, the entry leaves the index and this pass leaves the seat item alone.
+
+**Inspecting a notice.** Substitute your swarm id and task id in these read commands:
+
+```bash
+agentihooks swarm <id> status --json
+agentihooks ledger --slug <id> show \
+  | jq '.tasks[] | select(.id == "t17") | {id, state, claimed_by, comments}'
+agentihooks msg inbox --of eng-2@<id>
+agentihooks msg read <message-id>
+```
+
+The task's comments contain the original notice text under author `swarm`. A relocated item's close reason
+reads `moved onto task t17; eng-2@<id> now holds another task`. `msg read` records receipt; use it only when
+taking up that item. Reading the task comment does not fix the pull request: its next claimant must still
+address the checks or finish the task as the notice requests.
+
+| Symptom | Check and action |
+|---|---|
+| No seat item exists for a pull request notice | Read the original task's comments; the seat may already have changed tasks when the notice became due |
+| A notice disappears from a reassigned seat | Read the original task comment and the item's close reason; relocation retains the notice on the task |
+| An open notice stays at a seat | Check whether the seat is empty, continues the same task, or the item was outside this indexed notice path |
+| A reassigned seat's indexed notice has not moved | Check that a tick has completed since reassignment; see [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher) before diagnosing delivery |
+
 ### Priorities clear themselves
 
 Each tick first sweeps the priorities agents raised: one whose item is done, out of scope or gone, or a task whose
@@ -2881,6 +3053,113 @@ writers above or `task set`.
   time; set `contract.after_at` or clear the field with `task set ID awaiting=`.
 - **No label appears.** Check the task's `state`: a `done` task never shows one. Otherwise set the field with
   `task set`, never by writing the ledger database.
+
+## Ledger artifacts
+
+An artifact is a file published on the ledger for the operator to review: markdown, JSON, SVG, or a PNG, JPEG,
+WebP or GIF image, at most 8 MB, with a title of at most 200 characters. The ledger stores it by content hash beside
+the ledger media and lists it in `artifacts`. An artifact is only a file the operator asked for. Test runs, logs,
+review notes and proofs go on the task proof and the pull request.
+
+Two commands publish one:
+
+| Command | What it sends |
+|---|---|
+| `agentihooks ledger --slug <slug> --as <name> artifact <path> "<title>" [--task <id>] [--request <entry id>]` | One artifact. `--task` defaults to the session's swarm task (`AGENTIHOOKS_SWARM_TASK`). `--request` names the operator's chat line or comment that asked for the file. Prints `{"published": true}`. |
+| `agentihooks ledger --slug <slug> --as <name> publish-plan <path> --phase <ids> [--title <t>] [--repo <owner/name>]` | An accepted plan, marked as a plan. It opens or reuses a GitHub issue where the repository has issues, otherwise the ledger artifact is the published plan. It records the plan, links it on each named phase, comments each phase and adds the plan's slices. Prints `{"plan_url": …, "published_to": "issue"\|"artifact", "phases": […]}`. |
+
+### Where the artifact check runs
+
+The ledger checks every artifact twice with the same rule:
+
+1. **Upload.** The file goes to `POST /api/v1/ledgers/<slug>/uploads/artifacts` with the author in
+   `X-Ledger-Agent` and the task, title and optional `request` or `plan` in `X-Artifact-Request`. A refused upload
+   answers `403` with the reason and stores nothing. The command exits with
+   `server refused the file: 403 <reason>`.
+2. **Ledger write.** The `artifact_add` op that lists the stored file. A refused op is rejected and its reason is
+   the command's exit text.
+
+An uploader that has not joined the ledger is refused before the rule runs:
+`403 agent must join this ledger before uploading`.
+
+### The acceptance rule
+
+The rule reads the author, the task the upload names, the author's ledger membership and the two marks:
+`request`, the id of an operator entry, and `plan`, which only `publish-plan` sends and which must be `true`.
+
+| Author and task | Accepted when | Otherwise |
+|---|---|---|
+| Not a ledger member | never | `join the ledger first and name a task it holds` |
+| A master seat: a `master` lane name, joined as `orchestrator`, naming task `master` | the upload is marked as a plan, or `request` names an operator entry | refused with the artifact refusal below |
+| Any author naming a task the ledger does not hold | never | `join the ledger first and name a task it holds` |
+| Any other author, with a held task or no task | the upload is marked as a plan, the task is marked artifact requested, or `request` names an operator entry | refused with the artifact refusal below |
+
+`request` counts only when it names a live entry the operator wrote in any ledger thread: a chat line, a comment
+or a note. A deleted entry or one written by an agent does not count.
+
+The artifact refusal text is:
+
+```text
+an artifact is only a file the operator asked for: mark its task as artifact requested or name his message with request, and proofs go on the task proof and the pull request
+```
+
+A master's artifact is stored with an empty task, so it lists under the ledger's artifacts rather than under a task.
+
+### A master's plan publish
+
+A plan counts as artifact requested for every author, a master seat included. A master that accepts a plan with the
+operator publishes it with `publish-plan`; the plan mark passes both checks without a task marked artifact requested
+and without an operator request. The same master's unmarked upload still needs `--request`.
+
+Before pull request #4316 the master seat's branch returned the operator request check before it reached the plan
+mark, so a master's `publish-plan` exited with `server refused the file: 403 an artifact is only a file the operator
+asked for: …` while a planner's passed. A master then had to open the plan issue by hand.
+
+### Examples
+
+A master publishes an accepted plan for phases `p4` and `p5`:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 publish-plan plan.md --phase p4,p5
+# {"plan_url": "https://github.com/<owner>/<repo>/issues/<n>", "published_to": "issue", "phases": ["p4", "p5"]}
+```
+
+A master publishes a diagram the operator asked for in chat entry `c-1a2b3c4d5e`:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 artifact flow.svg "Inbox flow" --request c-1a2b3c4d5e
+# {"published": true}
+```
+
+An engineer publishes a file for a task the operator marked artifact requested:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 task set t42 artifact=yes
+agentihooks ledger --slug rig-grade-swarm --as engineer@d44a5a-0002 artifact palette.json "Palette" --task t42
+```
+
+The same master without a plan mark or a request is refused:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 artifact audit.md "Audit summary"
+# server refused the file: 403 an artifact is only a file the operator asked for: …
+```
+
+### Troubleshooting
+
+- **`publish-plan` from a master exits with `403 an artifact is only a file the operator asked for`.** The ledger
+  server runs code from before #4316. Pull dev and restart the ledger server, then publish again; do not open the plan
+  issue by hand.
+- **`403 agent must join this ledger before uploading`.** Run `agentihooks ledger --slug <slug> --as <name> join`
+  first. A master joins as `orchestrator`; a master that joined as a plain member is judged as any other author and
+  needs a plan mark, an artifact requested task or a request.
+- **`join the ledger first and name a task it holds`** after joining. `--task` names a task id the ledger does not
+  hold. Leave `--task` off to use the session's swarm task, or name an existing task.
+- **`--request` is refused.** The entry id must belong to an entry the operator wrote and has not deleted. An agent's
+  own chat line does not count.
+- **The ledger write of `publish-plan` was refused after the issue step.** Unless a plan or phase on the ledger
+  already links that issue, the command comments that the ledger refused the publish and closes the issue. Publishing
+  the same plan again reopens it with a comment.
 
 ## Redis
 
