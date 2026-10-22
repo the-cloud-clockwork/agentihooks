@@ -691,7 +691,7 @@ def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
 def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error):
     merging.pulls[URL] = GREEN
 
-    def failed(action, url):
+    def failed(action, url, journal=None):
         raise SwarmError(error)
 
     assert merging.run(queuer=failed) == [
@@ -719,7 +719,7 @@ def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error)
 def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(merging, error):
     merging.pulls[URL] = GREEN
 
-    def down(action, url):
+    def down(action, url, journal=None):
         raise SwarmError(error)
 
     for _ in range(6):
@@ -731,7 +731,7 @@ def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(mergi
 def test_a_pull_request_into_another_base_counts_as_a_refusal(merging):
     merging.pulls[URL] = GREEN
 
-    def elsewhere(action, url):
+    def elsewhere(action, url, journal=None):
         raise SwarmError("swarm merge queue operations require a pull request into dev")
 
     merging.run(queuer=elsewhere)
@@ -1263,7 +1263,7 @@ def test_a_requeue_the_queue_refuses_records_no_requeue_comment(merging):
     left_queue_green(merging)
     merging.exits.failures = []
 
-    def refuse(action, url):
+    def refuse(action, url, journal=None):
         raise SwarmError("timed out")
 
     for minute in range(ready.QUEUE_TRIES + 1):
