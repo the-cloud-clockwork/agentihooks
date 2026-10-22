@@ -308,3 +308,29 @@ def test_handoff_reader_reuses_supplied_empty_mail_snapshot(redis, tmp_path, mon
 
     monkeypatch.setattr(read, "inbox_items", unread)
     assert read.handoffs(store, inbox, tmp_path, SLUG, []) == []
+
+
+@pytest.mark.parametrize("batch, maximum_scans", [(100, 30), (1000, 5)])
+def test_recorded_pending_handoffs_keep_findings_with_bounded_scan_pages(redis, tmp_path, monkeypatch, batch, maximum_scans):
+    from pathlib import Path
+
+    recorded = json.loads((Path(__file__).parents[1] / "fixtures/doctor/handoffs.json").read_text())
+    store, box = RedisStore(redis), InboxStore(redis)
+    expected = []
+    for index, handoff in enumerate(recorded["handoffs"]):
+        task = f"recorded-{index}"
+        store.put_handoff(SLUG, task, handoff["document"], handoff["seat"], {"agent": handoff["from"]})
+        for recap in reversed(handoff["recaps"]):
+            store.memory.add_recap(handoff["seat"], recap["occupant"], recap["task"], recap["text"], recap["at"])
+        expected.append({**handoff, "task": task, "to": "", "at": 0, "asked": []})
+    redis.mset({f"unrelated:{index}": "value" for index in range(2500)})
+    store.put_handoff("other", "not-ours", "ignored")
+    scans = []
+    scan = redis.scan
+    monkeypatch.setattr(redis, "scan", lambda *a, **k: scans.append(1) or scan(*a, **k))
+    monkeypatch.setattr(read, "BATCH", batch)
+    rows = read.handoffs(store, box, tmp_path, SLUG, items=[])
+    assert rows == expected
+    assert handoffs.findings(rows) == handoffs.findings(expected)
+    assert [finding.id for finding in handoffs.findings(rows)] == ["missing-recap/master@rig-grade-swarm"]
+    assert len(scans) <= maximum_scans
