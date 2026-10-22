@@ -405,13 +405,34 @@ def test_quota_hold_keeps_a_lane_on_a_harness_with_available_accounts(store, hom
     assert lane_of(store, "eng") == (("claude", "opus") if source_room else ("codex", "auto"))
 
 
-def test_quota_hold_moves_a_hive_only_lane_back_to_claude(store, home, shipped, monkeypatch):
+@pytest.mark.parametrize(
+    ("hive", "moves"),
+    [
+        ({"room": 2}, True),
+        ({"room": 1}, True),
+        ({"room": 0}, False),
+        ({"room": 2, "heartbeat_at": NOW - 10 * 60_000}, False),
+        ({"room": 2, "excluded": ["eng"]}, False),
+        ({"room": 2, "excluded": ["engineer"]}, False),
+        ({"room": 2, "draining": "yes"}, False),
+    ],
+)
+def test_quota_hold_moves_a_hive_only_lane_back_to_claude_only_into_hive_room(
+    store, home, shipped, monkeypatch, hive, moves
+):
+    from scripts.hive import launch
+    from scripts.swarm import lease
+
     hive_only(store, monkeypatch)
+    loaded = {"id": "h1", "excluded": [], "draining": "no", "heartbeat_at": NOW, **hive}
+    monkeypatch.setattr(launch, "loaded_hives", lambda found: [loaded] if found is store else [])
+    monkeypatch.setattr(lease, "now_ms", lambda found: NOW if found is store else 0)
     pin(store, "eng", "codex")
     detect(store, "quota_hold", 3.0, 2.0, labels=("codex",))
     text = bottleneck_remedy.MOVED.format(lane="eng", source="codex", target="claude", targeted=HELD)
-    assert run(store) == [text]
-    assert lane_of(store, "eng") == ("claude", "auto")
+    why = bottleneck_remedy.UNPLACEABLE.format(target="claude", lane="eng")
+    assert run(store) == [text if moves else proposed(HELD, why)]
+    assert lane_of(store, "eng") == (("claude", "auto") if moves else ("codex", "opus"))
 
 
 def test_quota_hold_moves_the_lane_pinned_to_the_held_harness_once(store, home, shipped):
@@ -431,6 +452,22 @@ def test_quota_hold_naming_no_harness_is_proposed(store, home, shipped):
     detect(store, "quota_hold", 3.0, 2.0)
     assert run(store) == [proposed(HELD, bottleneck_remedy.UNKNOWN)]
     assert lane_of(store, "ci") == ("codex", "opus")
+
+
+def test_quota_hold_naming_both_harnesses_over_its_window_moves_the_one_lane_pinned_to_either(store, home, shipped):
+    pin(store, "eng", "codex")
+    detect(store, "quota_hold", 3.0, 2.0, labels=("claude", "codex"))
+    text = bottleneck_remedy.MOVED.format(lane="eng", source="codex", target="claude", targeted=HELD)
+    assert run(store) == [text]
+    assert lane_of(store, "eng") == ("claude", "auto")
+
+
+def test_quota_hold_naming_both_harnesses_with_both_pinned_is_proposed(store, home, shipped):
+    pin(store, "eng", "codex")
+    pin(store, "ci", "claude")
+    detect(store, "quota_hold", 3.0, 2.0, labels=("claude", "codex"))
+    assert run(store) == [proposed(HELD, bottleneck_remedy.UNKNOWN)]
+    assert (lane_of(store, "eng"), lane_of(store, "ci")) == (("codex", "opus"), ("claude", "opus"))
 
 
 def test_quota_held_samples_on_one_harness_move_its_pinned_lane_through_the_detector(store, home, shipped):
