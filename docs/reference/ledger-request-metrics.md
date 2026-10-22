@@ -17,7 +17,7 @@ The server journals its timings beside its ledgers and restores them when it
 reloads or restarts, so a reload no longer erases the records of the hour before
 it. When the server cannot account for a span, the reply names it.
 
-Delivered by [PR #4331](https://github.com/the-cloud-clockwork/agentihooks/pull/4331).
+Delivered by [pull request 4331](https://github.com/the-cloud-clockwork/agentihooks/pull/4331).
 Timing does not change what a write does.
 
 ## Reading timings
@@ -226,7 +226,7 @@ A `truncated: true` reply needs a shorter `--hours` or a higher `--limit`.
 | `complete: false` with `held_since` after the window start | The server holds nothing that old: the window starts before the seven day retention, or before the first journal |
 | `complete: false` with `evicted_through` at or after the window start | The 50000 record ring was full and dropped records in the window. Read a newer window |
 | `request metrics journal: …` on the server's stderr | The ledger folder refused a journal write. Fix the folder's permissions or free space; the next pass rewrites the whole journal |
-| No `.request-metrics.jsonl` in the ledger folder | The server has not started on code from PR #4331, or it cannot write the folder. Check the stderr line above |
+| No `.request-metrics.jsonl` in the ledger folder | The server has not started on code from pull request 4331, or it cannot write the folder. Check the stderr line above |
 
 Related: [Ledger load gate](ledger-load-gate.md) grades write latency on a
 scratch server in CI; this page reads the live server.
