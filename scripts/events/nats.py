@@ -19,6 +19,8 @@ MSG_ID = "Nats-Msg-Id"
 KV_HISTORY = 64
 # nats-py refuses a zero fetch timeout, and the server needs a moment to answer one that is nearly zero.
 MIN_FETCH_MS = 10
+LOOP_START_S = 5
+LOOP_STOP_S = 5
 
 
 def queue_stream(name: str) -> str:
@@ -33,8 +35,13 @@ class _Loop:
     def __init__(self):
         self.closed = False
         self._loop = asyncio.new_event_loop()
+        started = threading.Event()
+        self._loop.call_soon(started.set)
         self.thread = threading.Thread(target=self._loop.run_forever, name="agentihooks-nats-bus", daemon=True)
         self.thread.start()
+        if not started.wait(LOOP_START_S):
+            self._loop.close()
+            raise RuntimeError("bus loop did not start")
 
     def run(self, coro: Coroutine):
         if self.closed:
@@ -47,7 +54,9 @@ class _Loop:
             return
         self.closed = True
         self._loop.call_soon_threadsafe(self._loop.stop)
-        self.thread.join()
+        self.thread.join(LOOP_STOP_S)
+        if self.thread.is_alive():
+            raise RuntimeError("bus loop did not stop")
         self._loop.close()
 
 
@@ -175,7 +184,7 @@ class NatsStateStore:
         except KeyWrongLastSequenceError as err:
             raise StateConflict(f"state key {key!r} is not at revision {revision}") from err
 
-    def watch(self, key: str, from_revision: int = 0) -> Iterator[StateEntry]:
+    def watch(self, key: str, from_revision: int = 1) -> Iterator[StateEntry]:
         subject = f"$KV.{self._bucket}.{key}"
         sequence = max(from_revision, 1)
         while (msg := self._loop.run(self._next(subject, sequence))) is not None:
