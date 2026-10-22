@@ -89,7 +89,13 @@ def test_a_focused_id_label_keeps_a_visible_focus_ring(tab):
     tab.keyboard.press("Tab")
     tab.keyboard.press("Shift+Tab")
     tab.evaluate("window.focusRingLabel = document.activeElement")
-    tab.evaluate("async () => { const {render} = await import('/js/render.js'); await render(null, true); }")
+    tab.evaluate(
+        """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          const {render} = await import(new URL('render.js', main));
+          await render(null, true);
+        }"""
+    )
     state = label.evaluate(
         "el => ({same: el === window.focusRingLabel, oldConnected: window.focusRingLabel.isConnected,"
         " active: document.activeElement.outerHTML.slice(0, 150), visible: el.matches(':focus-visible'),"
