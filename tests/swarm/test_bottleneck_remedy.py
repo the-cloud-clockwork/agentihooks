@@ -262,8 +262,9 @@ def hive_only(store, monkeypatch, excluded="eng", herdr=True, deployment="local"
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", deployment)
 
 
-def test_launch_failure_keeps_a_hive_only_lane_on_the_harness_hives_place(store, home, shipped, monkeypatch):
-    hive_only(store, monkeypatch)
+@pytest.mark.parametrize("excluded", ["eng", "engineer", "plan,engineer"])
+def test_launch_failure_keeps_a_hive_only_lane_on_the_harness_hives_place(store, home, shipped, monkeypatch, excluded):
+    hive_only(store, monkeypatch, excluded=excluded)
     pin(store, "eng", "claude")
     detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
     why = bottleneck_remedy.UNPLACEABLE.format(target="codex", lane="eng")

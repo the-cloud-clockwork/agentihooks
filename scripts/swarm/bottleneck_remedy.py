@@ -176,6 +176,7 @@ def _placeable(store, config, lane, harness):
         return True
     from scripts import herdr_host
     from scripts.hive import placement, registry
+    from scripts.hive.launch import ROLE_PROFILES
     from scripts.swarm import controller
     from scripts.swarm.commands import hive_id
 
@@ -183,7 +184,8 @@ def _placeable(store, config, lane, harness):
     if controller.deployment_for(config, environ) != controller.HYBRID or not herdr_host.server_running(environ):
         return False
     local = registry.show(store.redis, hive_id())
-    return local is None or placement.hosts(lane, local)
+    profiles = tuple(profile for profile, role in ROLE_PROFILES.items() if role == lane)
+    return local is None or placement.hosts(lane, local, profiles)
 
 
 def _propose(slug, store, stage, why, fixer):
