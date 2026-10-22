@@ -334,6 +334,33 @@ def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeyp
     assert slept == [4.0]
 
 
+def test_a_sigterm_during_a_controller_pass_exits_143_through_the_running_tick(store, monkeypatch):
+    import signal
+
+    import scripts.operator_env
+
+    previous = signal.getsignal(signal.SIGTERM)
+    unwound = []
+
+    def run_once(saved):
+        try:
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+        finally:
+            unwound.append(True)
+
+    monkeypatch.setattr(scripts.operator_env, "fill", lambda environ: [])
+    monkeypatch.setattr(scripts.operator_env, "classifier", lambda environ: [])
+    monkeypatch.setattr(controller, "connect", lambda: store)
+    monkeypatch.setattr(controller, "run_once", run_once)
+    try:
+        with pytest.raises(SystemExit) as stopped:
+            controller.main(["run"])
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    assert stopped.value.code == 143
+    assert unwound == [True]
+
+
 def renewed(store, clock, wait_s=2.0):
     deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
