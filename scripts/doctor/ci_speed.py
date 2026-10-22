@@ -174,7 +174,7 @@ def _during(run, incidents):
     return sorted({name for start, end, name in incidents if any(start <= stamp <= end for stamp in created)})
 
 
-def _member(groups, finding, scope, text, window_ms, run, during, open_ended):
+def _member(groups, finding, scope, text, window_ms, run, during):
     identity = f"{finding.kind.replace(' ', '-')}/{scope}"
     group = groups.get(identity)
     if group is None or group["window"] != window_ms:
@@ -186,14 +186,14 @@ def _member(groups, finding, scope, text, window_ms, run, during, open_ended):
             "members": {},
         }
     attempt = run.get("run_attempt", 1)
-    group["members"][finding.id] = {
+    member = group["members"][finding.id] = {
         "order": [run["id"], attempt],
         "run": str(run["id"]) if attempt == 1 else f"{run['id']} attempt {attempt}",
         "measure": finding.measure,
-        "open": open_ended,
         "evidence": finding.evidence[0],
         "during": during,
     }
+    return member
 
 
 def group(
@@ -205,10 +205,11 @@ def group(
         for finding in _wait(run, run["jobs"], since_ms, now_ms):
             scope = finding.subject.split("-", 2)[2]
             text = ", ".join(json.loads(scope)) or "unassigned"
-            _member(groups, finding, scope, text, window_ms, run, during, finding.kind != "ci runner wait")
+            member = _member(groups, finding, scope, text, window_ms, run, during)
+            member["open"] = finding.kind != "ci runner wait"
         for finding in _wall(run, now_ms):
-            running = wall_ms(run, now_ms + 1) != wall_ms(run, now_ms)
-            _member(groups, finding, run["event"], TIERS[run["event"]], window_ms, run, during, running)
+            member = _member(groups, finding, run["event"], TIERS[run["event"]], window_ms, run, during)
+            member["open"] = wall_ms(run, now_ms + 1) != wall_ms(run, now_ms)
     return groups
 
 
