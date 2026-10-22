@@ -65,12 +65,33 @@ def test_kind_proof_layers_only_the_hive_on_a_current_base():
         assert '--build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}"' in hive
 
 
+def worker_stage(name):
+    dockerfile = (ROOT / "deploy/worker/Dockerfile").read_text()
+    start = dockerfile.rindex("\nFROM ", 0, dockerfile.index(f" AS {name}\n")) + 1
+    return dockerfile[start : dockerfile.index("\nFROM ", start)]
+
+
 def test_hive_image_installs_agentihooks_cloned_from_the_chosen_branch():
     dockerfile = (ROOT / "deploy/worker/Dockerfile").read_text()
-    wheel = dockerfile[dockerfile.index("AS wheel\n") : dockerfile.index("\nFROM ${WORKER_IMAGE}")]
-    assert "ARG AGENTIHOOKS_REF=dev\n" in wheel
-    assert "ADD https://github.com/the-cloud-clockwork/agentihooks.git#${AGENTIHOOKS_REF} /build\n" in wheel
+    assert "ARG AGENTIHOOKS_SOURCE=git\n" in dockerfile[: dockerfile.index("\nFROM ")]
+    clone = worker_stage("source-git")
+    assert "ARG AGENTIHOOKS_REF=dev\n" in clone
+    assert "ADD https://github.com/the-cloud-clockwork/agentihooks.git#${AGENTIHOOKS_REF} /build\n" in clone
+    assert "COPY" not in clone
+    wheel = worker_stage("wheel")
+    assert wheel.startswith("FROM source-${AGENTIHOOKS_SOURCE} AS wheel\n")
     assert "COPY" not in wheel
+    assert "ADD" not in wheel
+
+
+def test_hive_image_can_install_agentihooks_from_the_local_build_context():
+    local = worker_stage("source-local")
+    assert "ADD" not in local
+    sources = {s for line in re.findall(r"^COPY (.+) \S+$", local, re.M) for s in line.split()}
+    assert sources == {"pyproject.toml", "README.md", "hooks", "scripts", "profiles"}
+    allowed = (ROOT / "deploy/worker/Dockerfile.dockerignore").read_text().splitlines()
+    for source in sources:
+        assert f"!{source}" in allowed or f"!{source}/" in allowed, source
 
 
 def test_kind_proof_rebuilds_the_base_only_when_it_is_not_current():
