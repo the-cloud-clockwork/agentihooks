@@ -225,6 +225,14 @@ def _command(action, agent, text="", nonce=""):
     return CommandOrder(order_id, action, slug, agent.name, agent.execution_id, agent.generation, text)
 
 
+def _carries(pid, name):
+    from scripts.swarm.naming import resolve_name
+    from scripts.terminate_agent import agent_environ
+
+    carried = agent_environ(pid, ("AGENTIHOOKS_AGENT_NAME",))[0]
+    return bool(carried) and (carried == name or resolve_name(carried) == name)
+
+
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
 
@@ -1079,10 +1087,10 @@ class HerdrRuntime:
         from scripts.hive.orders import CommandOrder, Orders
         from scripts.terminate_agent import sessions
 
-        pids = [s.process.pid for s in sessions() if s.name == name]
-        host = "" if pids or self.hive is None else self.hive.holder(name)
+        held = [s.process.pid for s in sessions() if s.name == name]
+        host = "" if held or self.hive is None else self.hive.holder(name)
         if not host:
-            return not self.reap(pids).refusal
+            return not self.reap([pid for pid in held if _carries(pid, name)]).refusal
         order = CommandOrder(f"reap:{name}", "reap", name=name)
         reaped = self._order(host, order, name)
         if reaped:

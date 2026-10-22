@@ -776,6 +776,7 @@ def acknowledge_broadcast(session_id: str, message_id: str) -> bool:
 
 SESSION_MAX_AGE_SECONDS = 86400  # 24h retention for crash recovery
 SESSION_SUSPECT_SECONDS = 300
+LAUNCHER = "launcher"
 
 
 def _now_iso() -> str:
@@ -831,8 +832,8 @@ def register_session(
         # age to reflect the true session start, not the last event).
         existing = sessions.get(session_id)
         started_at = existing.get("started_at", now) if existing else now
-        name = (existing or {}).get("name") or name
-        named = {"name": name} if name else {}
+        launched = (existing or {}).get("name") if (existing or {}).get("named_by") == LAUNCHER else ""
+        named = {"name": launched, "named_by": LAUNCHER} if launched else ({"name": name} if name else {})
         sessions[session_id] = {
             **named,
             "started_at": started_at,
@@ -856,12 +857,12 @@ def deregister_session(session_id: str) -> None:
         _save_sessions(sessions)
 
 
-def _mark_session(pid: int, key: str, value: str) -> int:
+def _mark_session(pid: int, fields: dict[str, str]) -> int:
     with _file_lock(_sessions_path()):
         sessions = _load_sessions()
         live = [info for info in sessions.values() if info.get("pid") == pid and info.get("status") == "alive"]
         for info in live:
-            info[key] = value
+            info.update(fields)
         if live:
             _save_sessions(sessions)
     return len(live)
@@ -880,7 +881,7 @@ def _session_mark(pid: int, key: str) -> str:
 
 def name_session(pid: int, name: str) -> int:
     """Give every live session of ``pid`` an agent name; returns how many records carry it."""
-    return _mark_session(pid, "name", name)
+    return _mark_session(pid, {"name": name, "named_by": LAUNCHER})
 
 
 def session_name(pid: int) -> str:
@@ -888,7 +889,7 @@ def session_name(pid: int) -> str:
 
 
 def pin_session(pid: int, swarm: str) -> int:
-    return _mark_session(pid, "swarm", swarm)
+    return _mark_session(pid, {"swarm": swarm})
 
 
 def session_swarm(pid: int) -> str:
