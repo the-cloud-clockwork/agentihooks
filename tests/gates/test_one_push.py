@@ -129,7 +129,7 @@ def test_an_open_before_both_reviews_is_refused(tree, tmp_path):
     reviewed(tmp_path, "standards-reader")
     decision = gate().decide(bash("gh pr create --base dev", tree), ME, state(tmp_path))
     assert not decision.allowed
-    assert decision.reason == open_refusal("demo", ["spec-reader"], "")
+    assert decision.reason == open_refusal("demo", ["spec-reader"], "") + f". Checked worktree: {tree}"
 
 
 def test_an_open_after_both_reviews_with_the_work_on_origin_passes(tree, tmp_path):
@@ -157,14 +157,14 @@ def test_ready_counts_the_command_checkout_instead_of_the_session_checkout(tree,
     decision = gate(target="codex").decide(call, ME, state(tmp_path))
     assert decision.allowed is not unpushed_command, decision.reason
     if unpushed_command:
-        assert decision.reason == open_refusal("demo", [], "commits not on origin")
+        assert decision.reason == open_refusal("demo", [], "commits not on origin") + f". Checked worktree: {work}"
 
 
 def test_ready_without_a_command_folder_counts_the_session_checkout(tree, tmp_path):
     (tree / "a.txt").write_text("unpublished\n")
     git(tree, "commit", "-q", "-am", "unpublished")
     decision = gate(target="codex").decide(bash("gh pr ready 1", tree), ME, state(tmp_path))
-    assert decision.reason == open_refusal("demo", [], "commits not on origin")
+    assert decision.reason == open_refusal("demo", [], "commits not on origin") + f". Checked worktree: {tree}"
 
 
 def codex_rollout(tmp_path, *programs, filler=0):
@@ -222,7 +222,7 @@ def test_ready_counts_the_codex_exec_workdir_from_the_rollout(monkeypatch, tree,
     decision = gate(target="codex").decide(codex_call(monkeypatch, rollout, command, tree), ME, state(tmp_path))
     assert decision.allowed is not unpushed_command, decision.reason
     if unpushed_command:
-        assert decision.reason == open_refusal("demo", [], "commits not on origin")
+        assert decision.reason == open_refusal("demo", [], "commits not on origin") + f". Checked worktree: {work}"
 
 
 def test_ready_reads_the_latest_codex_exec_program(monkeypatch, tree, tmp_path):
@@ -259,7 +259,7 @@ def test_ready_without_a_codex_exec_workdir_counts_the_session_checkout(monkeypa
     call = codex_call(monkeypatch, rollouts[program](), "gh pr ready 1", tree)
     assert "workdir" not in call.tool_input
     decision = gate(target="codex").decide(call, ME, state(tmp_path))
-    assert decision.reason == open_refusal("demo", [], "commits not on origin")
+    assert decision.reason == open_refusal("demo", [], "commits not on origin") + f". Checked worktree: {tree}"
 
 
 def test_a_codex_payload_workdir_wins_over_the_rollout(monkeypatch, tree, tmp_path):
@@ -287,10 +287,10 @@ def test_an_open_over_uncommitted_or_unpushed_work_is_refused(tree, tmp_path):
     reviewed(tmp_path, "standards-reader", "spec-reader")
     (tree / "a.txt").write_text("b\n")
     decision = gate().decide(bash("gh pr create --base dev", tree), ME, state(tmp_path))
-    assert decision.reason == open_refusal("demo", [], "uncommitted changes")
+    assert decision.reason == open_refusal("demo", [], "uncommitted changes") + f". Checked worktree: {tree}"
     git(tree, "commit", "-q", "-am", "b")
     decision = gate().decide(bash("gh pr create --base dev", tree), ME, state(tmp_path))
-    assert decision.reason == open_refusal("demo", [], "commits not on origin")
+    assert decision.reason == open_refusal("demo", [], "commits not on origin") + f". Checked worktree: {tree}"
 
 
 def test_a_draft_open_passes_before_any_review(tree, tmp_path):
@@ -510,3 +510,26 @@ def test_the_rollout_tail_holds_a_whole_exec_program(monkeypatch, tree, tmp_path
     rollout.write_bytes(head + program + b" " * (rest - 1) + b"\n")
     call = codex_call(monkeypatch, rollout, "gh pr ready 1", tree)
     assert call.tool_input["workdir"] == str(work)
+
+
+@pytest.mark.parametrize("unpushed_command", [False, True])
+def test_ready_honors_json_quoted_exec_fields(monkeypatch, tree, tmp_path, unpushed_command):
+    work = tmp_path / "command"
+    git(tree, "worktree", "add", "--detach", str(work), "HEAD")
+    changed = work if unpushed_command else tree
+    (changed / "a.txt").write_text("unpublished\n")
+    git(changed, "commit", "-q", "-am", "unpublished")
+    command = "gh pr ready 1"
+    program = "await tools.exec_command(" + json.dumps({"cmd": command, "workdir": str(work)}) + ");"
+    rollout = codex_rollout(tmp_path, program)
+    decision = gate(target="codex").decide(codex_call(monkeypatch, rollout, command, tree), ME, state(tmp_path))
+    assert decision.allowed is not unpushed_command, decision.reason
+    if unpushed_command:
+        assert f"Checked worktree: {work}" in decision.reason
+
+
+def test_ready_refusal_names_the_shell_checkout(tree, tmp_path):
+    (tree / "a.txt").write_text("unpublished\n")
+    decision = gate(target="codex").decide(bash(f"cd {tree} && gh pr ready 1", tmp_path), ME, state(tmp_path))
+    assert not decision.allowed
+    assert f"Checked worktree: {tree}" in decision.reason

@@ -376,7 +376,7 @@ def _codex_answers(resp: Any) -> Any:
 
 # Codex 0.162.1 shell hooks omit workdir; it sits in the rollout's latest exec program.
 _EXEC_CALL = re.compile(r"exec_command\(\s*\{")
-_EXEC_FIELD = re.compile(r"[\s,]*(\w+)\s*:\s*(?:[^\"\s,}][^,}]*)?")
+_EXEC_FIELD = re.compile(r'[\s,]*"?(\w+)"?\s*:\s*(?:[^"\s,}][^,}]*)?')
 _JS_STRING = re.compile(r'"(?:[^"\\]|\\.)*"?', re.DOTALL)
 _JS_ESCAPE = re.compile(r"\\(.)", re.DOTALL)
 _JSON_KEPT_ESCAPES = '"\\/bfnrtux0123456789'
