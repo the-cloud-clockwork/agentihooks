@@ -1706,10 +1706,11 @@ parses writes the same rows as before: a `deny` or `observe` row for a failed
 verdict, `fail-open` for an unchecked one, `count` for each filed cut, and none
 for a rerun on an unchanged plan with unchanged authorizations.
 
-A refused piece line under `deny` writes a row like this:
+A plan whose second line reads `- Rerun 38842603017 after the fix | scripts/ci_coverage.py | Confirm the fix`
+writes this row under `deny`:
 
 ```json
-{"at": 1792652269698, "gate": "trace-plan", "kind": "deny", "agent": "engineer@d44a5a-0566", "task": "promo-38842603017-0", "tool": "", "reason": "plan line 2: the ledger would refuse its follow up, write what in plain words: <violations>"}
+{"at": 1792652269698, "gate": "trace-plan", "kind": "deny", "agent": "engineer@d44a5a-0566", "task": "promo-38842603017-0", "tool": "", "reason": "plan line 2: the ledger would refuse its follow up, write what in plain words: run or job id '38842603017'"}
 ```
 
 List the refusals of one swarm:
@@ -1728,9 +1729,9 @@ before and after a fix, pass the fix time and a window:
 agentihooks doctor example-swarm rates --at 2026-10-17T19:40:58Z --hours 24 --json
 ```
 
-Refusals raised before the trace reads the plan write no row: a session that
-is not a swarm worker, the master, or a failed ledger or swarm config read. Rows begin with
-[pull request 4173](https://github.com/the-cloud-clockwork/agentihooks/pull/4173);
+Refusals raised before the trace reads the plan write no row: the session is
+not a swarm worker or is the master, or the ledger or swarm config read failed.
+Rows begin with [pull request 4173](https://github.com/the-cloud-clockwork/agentihooks/pull/4173);
 plan refusals before its merge survive only in agent comments.
 
 | Symptom | Cause and action |
