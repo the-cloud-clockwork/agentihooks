@@ -356,6 +356,18 @@ def test_the_pause_between_passes_ends_on_its_own_clock_never_on_the_scheduler_i
     assert slept == [tick_watch.PASS_S, tick_watch.PASS_S]
 
 
+def test_a_given_wait_replaces_the_clock_pause(store, monkeypatch):
+    def slept(seconds):
+        raise AssertionError("the watcher slept on the clock despite a given wait")
+
+    monkeypatch.setattr(tick_watch.time, "sleep", slept)
+    waits = []
+
+    tick_watch.run(store, lambda: START, None, waits.append, passes=2, beat=capped([], 200))
+
+    assert waits == [tick_watch.PASS_S, tick_watch.PASS_S]
+
+
 def test_the_watch_beat_slice_sits_well_inside_the_systemd_watchdog():
     from scripts.swarm import timer
 
@@ -428,7 +440,7 @@ def test_a_blocked_call_in_one_swarm_pass_keeps_the_watchdog_beating_and_the_sta
 
 def test_a_pass_blocked_through_the_limit_of_passes_exits_the_watcher_so_systemd_restarts_it(store, monkeypatch):
     release, threads = blocking(store, monkeypatch, healthy=lambda *args: [])
-    monkeypatch.setattr(tick_watch, "BLOCKED_LIMIT", 2)
+    monkeypatch.setattr(tick_watch, "BLOCKED_LIMIT", 3)
     waits = []
     try:
         with pytest.raises(RuntimeError) as raised:
@@ -436,8 +448,8 @@ def test_a_pass_blocked_through_the_limit_of_passes_exits_the_watcher_so_systemd
     finally:
         release()
 
-    assert str(raised.value) == "the pass of other stayed blocked through 2 passes; the watcher exits"
-    assert waits == [tick_watch.PASS_S]
+    assert str(raised.value) == "the pass of other stayed blocked through 3 passes; the watcher exits"
+    assert waits == [tick_watch.PASS_S, tick_watch.PASS_S]
     assert len(threads) == 1
 
 

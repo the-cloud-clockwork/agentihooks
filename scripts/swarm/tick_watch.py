@@ -120,10 +120,10 @@ def run(
 
 
 def _judge(store, slug, now, since, repair, held, beat) -> None:
-    worker, blocked = held.get(slug, (None, 0))
-    if worker is None or not worker.is_alive():
-        worker, blocked = Thread(target=_pass, args=(store, slug, now, since, repair), daemon=True), 0
-        worker.start()
+    if slug not in held or not held[slug][0].is_alive():
+        held[slug] = (Thread(target=_pass, args=(store, slug, now, since, repair), daemon=True), 0)
+        held[slug][0].start()
+    worker, blocked = held[slug]
     if _awaited(worker, beat):
         return
     if blocked + 1 >= BLOCKED_LIMIT:
