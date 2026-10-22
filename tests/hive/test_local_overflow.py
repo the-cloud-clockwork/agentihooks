@@ -183,7 +183,7 @@ def test_the_local_spawn_refusal_is_the_exact_overflow_text(setup, monkeypatch):
     assert fenced._refusal("eng", {"id": "task"}) == "the local machine takes eng work"
 
 
-@pytest.mark.parametrize(("profile", "refused"), [("engineer", ""), ("qa", "Codex hive placement is not enabled")])
+@pytest.mark.parametrize(("profile", "refused"), [("engineer", ""), ("qa", "no live hive takes qa")])
 def test_a_codex_worker_no_hive_can_launch_runs_locally_unless_its_role_needs_a_ui_host(
     setup, monkeypatch, profile, refused
 ):
