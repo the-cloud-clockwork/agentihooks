@@ -316,7 +316,9 @@ def _beat(store, monkeypatch, runtime):  # noqa: F811
 
     runtime.redis = store.redis
     monkeypatch.setattr(daemon, "observe", lambda **kwargs: QUIET)
-    monkeypatch.setattr(daemon, "execution_report", lambda redis, hive, herdr: {})
+    monkeypatch.setattr(
+        daemon, "execution_report", lambda redis, hive, herdr: {"names": [], "panes": {}, "executions": {}}
+    )
     monkeypatch.setattr(orders.Consumer, "local", classmethod(lambda cls, redis, hive: cls(redis, hive, runtime)))
     monkeypatch.setattr(daemon.time, "time", lambda: NOW / 1000 + 5)
     polled = []

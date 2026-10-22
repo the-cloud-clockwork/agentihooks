@@ -1058,6 +1058,124 @@ def test_default_wait_sleep_and_exact_deadline_are_exercised(setup):
         )
 
 
+def test_deferred_launches_return_pending_at_once_and_a_replay_records_each_acknowledgement(setup, monkeypatch):
+    from scripts.hive import launch
+    from scripts.hive.orders import Consumer
+    from scripts.swarm import launch_check
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import ACK_LATER, Placed
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    setup.launcher.sleep = Mock(side_effect=AssertionError("a deferred launch must not wait"))
+    requests = []
+    for index in (1, 2, 3):
+        name = store.next_name(slug, "eng")
+        record = AgentRecord(name, "eng", f"task-{index}", seat=f"eng-{index}@{slug}", state="starting")
+        store.put_agent(slug, record)
+        store.seats.occupy(record.seat, name, 0)
+        task = {"id": record.task, "seat": record.seat, "controller_epoch": setup.held.epoch, ACK_LATER: True}
+        requests.append(SpawnRequest(setup.config, "eng", name, task))
+    pending = [setup.launcher.spawn(request) for request in requests]
+    assert pending == [Outcome("spawn", Status.PENDING, "hive", detail=launch.PENDING)] * 3
+    assert all(setup.launcher.orders_for(request.task["id"]) for request in requests)
+    assert setup.launcher.spawn(requests[0]) == pending[0]
+    runtime = Mock()
+    runtime.spawn.side_effect = [
+        Outcome(
+            "spawn",
+            Status.OK,
+            "local",
+            Placed(f"pane-{i}", "claude", "account", profile="engineer", profile_decision={"validation": {"pid": i}}),
+        )
+        for i in (1, 2, 3)
+    ]
+    runtime.namespace.return_value = "namespace"
+    runtime.table.return_value = {i: SimpleNamespace(start_time=30 + i) for i in (1, 2, 3)}
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): [])
+    consumer = Consumer(store.redis, "remote", runtime)
+    assert sum(consumer.poll() for _ in range(3)) == 3
+    replayed = [setup.launcher.spawn(request) for request in requests]
+    assert all(outcome.ok for outcome in replayed)
+    assert [outcome.value.execution.state for outcome in replayed] == ["working"] * 3
+    assert {outcome.value.pane_id for outcome in replayed} == {"pane-1", "pane-2", "pane-3"}
+    assert len(store.execution_registry.records(slug)) == 3
+
+
+def test_a_collect_without_a_live_order_refuses_instead_of_ordering_again(setup):
+    from scripts.hive import launch
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import ACK_LATER
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    name = store.next_name(slug, "eng")
+    record = AgentRecord(name, "eng", "task-1", seat=f"eng-1@{slug}", state="starting")
+    store.put_agent(slug, record)
+    store.seats.occupy(record.seat, name, 0)
+    task = {"id": "task-1", "seat": record.seat, "controller_epoch": setup.held.epoch, ACK_LATER: True}
+    request = SpawnRequest(setup.config, "eng", name, task)
+    gone = Outcome("spawn", Status.REFUSED, "hive", detail=launch.GONE)
+    assert setup.launcher.collect(request) == gone
+    assert setup.launcher.orders_for("task-1") is None
+    assert setup.launcher.spawn(request).status is Status.PENDING
+    assert setup.launcher.collect(request).status is Status.PENDING
+    order = setup.launcher.orders_for("task-1")
+    setup.launcher.reap = Mock()
+    order = replace(order, expires_at=launch.lease.now_ms(store) - 1)
+    store.redis.hset(store.key(slug, launch.ORDERS), "task-1", json.dumps(order.__dict__))
+    assert setup.launcher.collect(request) == Outcome("spawn", Status.AMBIGUOUS, "hive", detail=launch.EXPIRED)
+    assert setup.launcher.reap.call_args.args[0] == order
+    assert store.execution_registry.get(slug, order.execution_id).state == "ended"
+    assert setup.launcher.orders_for("task-1") == order
+    assert setup.launcher.collect(request) == gone
+    setup.launcher.spawn(request)
+    order = setup.launcher.orders_for("task-1")
+    setup.launcher.end(store.execution_registry.get(slug, order.execution_id), "ended before its acknowledgement")
+    assert setup.launcher.collect(request) == gone
+    assert setup.launcher.orders_for("task-1") == order
+    setup.launcher.spawn(request)
+    order = setup.launcher.orders_for("task-1")
+    store.execution_registry.update(
+        slug, replace(store.execution_registry.get(slug, order.execution_id), state="finished")
+    )
+    assert setup.launcher.collect(request) == gone
+    assert setup.launcher.orders_for("task-1") == order
+
+
+def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(setup, monkeypatch):
+    from contextlib import contextmanager
+
+    from scripts.swarm import controller
+    from scripts.swarm.tick import ACK_LATER, SpawnError
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    routed = Mock()
+    routed.spawn.side_effect = AssertionError("collect must not route the seat again")
+    routed.hive_launch.collect.side_effect = [
+        Outcome("spawn", Status.OK, "hive", "placed"),
+        Outcome("spawn", Status.PENDING, "hive", detail="waiting"),
+    ]
+    kept = []
+
+    @contextmanager
+    def keep(store, slug, held):
+        kept.append((store, slug, held))
+        yield
+
+    monkeypatch.setattr(controller.lease, "kept", keep)
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+    task = {"id": "task", "seat": "eng-1@fixture", ACK_LATER: True}
+    assert fenced.collect(setup.config, "eng", "engineer", task) == "placed"
+    routed.hive_launch.collect.assert_called_with(
+        SpawnRequest(setup.config, "eng", "engineer", {**task, "controller_epoch": setup.held.epoch})
+    )
+    with pytest.raises(SpawnError) as raised:
+        fenced.collect(setup.config, "eng", "engineer", task)
+    assert (str(raised.value), raised.value.status) == ("waiting", Status.PENDING)
+    assert kept == [(setup.store, setup.config.slug, setup.held)] * 2
+
+
 def test_old_controller_cannot_admit_after_lease_takeover(setup):
     from scripts.swarm import lease
     from scripts.swarm.store import SwarmError

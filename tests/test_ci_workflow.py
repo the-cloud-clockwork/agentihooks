@@ -123,7 +123,7 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     assert install["env"] == {"PYTHON_PATH": "${{ steps.python.outputs.python-path }}"}
     assert install["run"].strip().splitlines() == [
         'uv venv --python "$PYTHON_PATH" "$HOME/venv"',
-        'uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
+        'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
 
@@ -1430,7 +1430,11 @@ def test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pin
     declared = {re.split(r"[<>=!\[]", spec)[0].lower(): spec for spec in project["optional-dependencies"]["dev"]}
     declared |= {re.split(r"[<>=!\[]", spec)[0].lower(): spec for spec in project["dependencies"]}
     specs = [declared[name] for name in sorted(PLANNER_PACKAGES)]
-    assert install["run"] == "uv pip install --system " + " ".join(f'"{spec}"' for spec in specs)
+    assert install[
+        "run"
+    ] == 'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system ' + " ".join(
+        f'"{spec}"' for spec in specs
+    )
     assert _planner_third_party() == set(PLANNER_PACKAGES.values())
 
 

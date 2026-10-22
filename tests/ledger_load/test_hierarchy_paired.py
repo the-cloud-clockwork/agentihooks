@@ -80,6 +80,50 @@ def test_the_workflow_runs_an_even_number_of_hierarchy_pairs_against_the_merge_b
     assert "did not halve" not in script
 
 
+def test_the_pair_probes_run_side_by_side_from_one_start_on_their_own_data():
+    job = workflow()["jobs"]["hierarchy"]
+    script = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "set -o pipefail\norder=(base head)" in script
+    assert 'rm -rf "$RUNNER_TEMP/hierarchy-barrier"\npids=()' in script
+    assert 'HIERARCHY_START_BARRIER="$RUNNER_TEMP/hierarchy-barrier"' in script
+    assert '--basetemp "$RUNNER_TEMP/hierarchy-$side"' in script
+    assert ") &\n" in script
+    assert 'wait "${pids[$index]}" || failed="$failed ${order[$index]}"' in script
+    assert '[[ -z "$failed" ]] || { echo "::error::hierarchy probe failed on$failed"; exit 1; }' in script
+
+
+def test_the_probe_start_waits_for_its_pair(tmp_path, monkeypatch):
+    from tests.ledger_load import hierarchy_probe
+
+    hierarchy_probe.align(None)
+    barrier = tmp_path / "barrier"
+    barrier.mkdir()
+    (barrier / "other").touch()
+    hierarchy_probe.align(str(barrier))
+    assert len(list(barrier.iterdir())) == 2
+    alone = tmp_path / "alone"
+    clock = iter([0.0, 0.0, 301.0])
+    monkeypatch.setattr(hierarchy_probe.time, "monotonic", lambda: next(clock, 301.0))
+    monkeypatch.setattr(hierarchy_probe.time, "sleep", lambda seconds: None)
+    with pytest.raises(AssertionError, match="the paired hierarchy probe never became ready"):
+        hierarchy_probe.align(str(alone))
+
+
+def test_redis_installs_from_the_distribution_archive_alone():
+    for name in ("hierarchy", "load"):
+        steps = workflow()["jobs"][name]["steps"]
+        start = next(step["run"] for step in steps if step.get("name") == "Start Redis on this runner")
+        apt = [line for line in start.splitlines() if "apt-get" in line or "archive" in line]
+        assert apt == [
+            "archive=/etc/apt/sources.list.d/ubuntu.sources",
+            '[[ -f "$archive" ]] || archive=/etc/apt/sources.list',
+            'only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)',
+            'sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete;'
+            ' installing redis-server from the indexes that loaded"',
+            'sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" redis-server',
+        ], name
+
+
 def test_the_command_grades_pair_folders_and_refuses_a_margin_below_the_same_code_bound(tmp_path, capsys):
     folders = []
     for number, (base, head) in enumerate([(0.08, 0.04), (0.04, 0.08)], 1):
