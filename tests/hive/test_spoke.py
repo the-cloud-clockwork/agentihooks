@@ -56,7 +56,10 @@ def rig():
     config = SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a", policy)
     tasks, runtime = Mock(), Mock()
     request = SpawnRequest(
-        config.swarm, "eng", "agent-a", {"id": "task-a", "execution_id": "execution-a", "execution_generation": 7}
+        config.swarm,
+        "eng",
+        "agent-a",
+        {"id": "task-a", "execution_id": "execution-a", "execution_generation": 7, "claim_generation": 3},
     )
     tasks.request.return_value = request
     runtime.spawn.return_value = Outcome(
@@ -155,6 +158,7 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
     request = rig.runtime.spawn.call_args.args[0]
     assert event.data == {
         "task": "task-a",
+        "task_generation": 3,
         "claim_key": request.task["claim_fence"]["key"],
         "claim_revision": request.task["claim_fence"]["revision"],
         "generation": 7,
@@ -285,7 +289,7 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
                 config.swarm,
                 "eng",
                 "agent-a",
-                {"id": "task-a", "execution_id": "execution-a", "execution_generation": 7},
+                {"id": "task-a", "execution_id": "execution-a", "execution_generation": 7, "claim_generation": 3},
             )
             runtime.spawn.return_value = Outcome(
                 "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a")
@@ -673,7 +677,7 @@ def test_hive_observations_end_the_same_execution_the_spoke_started(rig, state):
     started, exited = [item.event for item in events]
     assert (exited.key, exited.version, exited.cause) == (started.key, started.version, started.id)
     assert exited.data == started.data
-    assert exited.data["task_generation"] == rig.event.version
+    assert exited.data["task_generation"] == rig.request.task["claim_generation"]
     assert exited.data["generation"] == rig.request.task["execution_generation"]
     assert {key: exited.data[key] for key in ("claim_key", "claim_revision")} == {
         "claim_key": request.task["claim_fence"]["key"],
@@ -710,8 +714,11 @@ def test_a_heartbeat_during_spawn_waits_for_the_canonical_started_envelope(rig):
     assert events[0].event.data["claim_revision"] == rig.runtime.spawn.call_args.args[0].task["claim_fence"]["revision"]
 
 
-def test_a_request_without_admitted_execution_identity_is_retried_without_spawning(rig):
-    rig.tasks.request.return_value = replace(rig.request, task={"id": "task-a"})
+@pytest.mark.parametrize("missing", ["execution_id", "execution_generation", "claim_generation"])
+def test_a_request_without_admitted_execution_identity_is_retried_without_spawning(rig, missing):
+    task = dict(rig.request.task)
+    del task[missing]
+    rig.tasks.request.return_value = replace(rig.request, task=task)
     assert rig.spoke.poll() == "retry"
     rig.runtime.spawn.assert_not_called()
     assert claim(rig) == {"state": "ready"}

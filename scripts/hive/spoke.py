@@ -16,7 +16,7 @@ from scripts.swarm_v2.runtime.base import Runtime, SpawnRequest
 
 class Tasks(Protocol):
     def request(self, event: Envelope) -> SpawnRequest | None:
-        """The task carries the admitted execution_id and execution_generation."""
+        """The task carries admitted execution_id, execution_generation and claim_generation."""
         ...
 
     def reopen(self, event: Envelope) -> None: ...
@@ -178,6 +178,7 @@ class Spoke:
             if request is not None:
                 execution_id = request.task["execution_id"]
                 generation = request.task["execution_generation"]
+                task_generation = request.task["claim_generation"]
         except Exception:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
             raise
@@ -204,7 +205,7 @@ class Spoke:
             author=self.config.hive,
             data={
                 "task": event.key,
-                "task_generation": event.version,
+                "task_generation": task_generation,
                 "claim_key": key,
                 "claim_revision": revision,
                 "generation": generation,
