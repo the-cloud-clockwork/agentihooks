@@ -181,6 +181,22 @@ def test_the_workstation_hive_limit_counts_another_swarm(setup, monkeypatch):
     setup.herdr.spawn.assert_not_called()
 
 
+@pytest.mark.parametrize("lane", ["eng", "ci"])
+def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch, lane):
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    workstation(monkeypatch, 40)
+    setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
+    local_agents(setup, 8, slug="other-swarm", harness="codex")
+    task = {"id": "task", "seat": f"{lane}-1@fixture", "launch_assignment": {"harness": "codex"}}
+    assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal(lane, task)
+    with pytest.raises(SpawnError, match="local machine runs 8 of its 8 agents"):
+        fenced.spawn(setup.config, lane, "eng name", task)
+    setup.herdr.spawn.assert_not_called()
+    fenced.runtime.hive_launch.spawn.assert_not_called()
+
+
 @pytest.mark.parametrize("profile", ["qa", "frontend"])
 def test_ui_role_work_keeps_waiting_for_its_ui_host(setup, monkeypatch, profile):
     from scripts.swarm.profile_choice import ProfileDecision
