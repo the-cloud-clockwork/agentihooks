@@ -9,6 +9,7 @@ from pathlib import Path
 from hooks.classifier import decision_log
 from scripts import agent_choice
 from scripts.gates import log as gate_log
+from scripts.hive import placement_waits
 from scripts.swarm import capacity, host_budget, metrics_outbox
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import SPAWN_HOLD
@@ -454,12 +455,18 @@ def held_harness(lanes: dict, held: dict) -> str:
     return agents.pop() if len(agents) == 1 and agents.issubset(agent_choice.AGENTS) else ""
 
 
-def held_pins(lanes: dict, held: dict) -> str:
-    return "".join(
-        f"; {count} {lane} {'spawn' if count == 1 else 'spawns'} held on the {lane} lane pinned to {agent}"
+def held_pins(lanes: dict, held: dict, reason: str) -> str:
+    notes = [
+        f"{count} {lane} {'spawn' if count == 1 else 'spawns'} held on the {lane} lane pinned to {agent}"
         for lane, count in sorted(held.items())
         if count and (agent := lanes.get(lane, {}).get("agent")) in agent_choice.AGENTS
-    )
+    ]
+    return "; ".join(part for part in (reason, *notes) if part)
+
+
+def hive_wait(store: RedisStore, slug: str, held: dict) -> str:
+    reasons = sorted(wait["reason"] for wait in placement_waits.read(store, slug).values() if held.get(wait["lane"]))
+    return f"hive room: {reasons[0]}" if reasons else ""
 
 
 def record_pass(
@@ -474,9 +481,10 @@ def record_pass(
     live = [asdict(agent) for agent in store.agents(slug)]
     held = _held_lanes(store, slug, doc, quota, live, bool(hold))
     quota["held_spawns"] = sum(held.values())
-    quota["held_by"] = ("host" if hold else "quota") if quota["held_spawns"] else ""
-    quota["held_harness"] = "" if hold else held_harness(store.config(slug).lanes, held)
-    quota["reason"] = hold or quota.get("reason", "") + held_pins(store.config(slug).lanes, held)
+    room = hold or hive_wait(store, slug, held)
+    quota["held_by"] = ("host" if room else "quota") if quota["held_spawns"] else ""
+    quota["held_harness"] = "" if room else held_harness(store.config(slug).lanes, held)
+    quota["reason"] = room or held_pins(store.config(slug).lanes, held, quota.get("reason", ""))
     quota.update(placement_counts(live))
     reviews, classifiers = read_review_events(slug, box), read_classifier_calls(box)
     rounds = read_review_rounds(slug, box)
