@@ -54,6 +54,8 @@ dependencies = [
     "cryptography>=42",
     # The Codex app server client connects over a unix socket (scripts/codex_session/protocol.py).
     "websockets>=15.0",
+    # The swarm event bus NATS JetStream backend (scripts/events/nats.py).
+    "nats-py>=2.9",
 ]
 
 [project.optional-dependencies]
