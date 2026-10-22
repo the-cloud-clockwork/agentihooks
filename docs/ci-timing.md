@@ -133,6 +133,130 @@ These branch samples demonstrate the delivered reduction. They are not a fixed
 runtime guarantee or a post merge promotion measurement; runner load and later
 proof changes can affect the interval.
 
+## Doctor CI speed reads across busy windows
+
+The [Doctor timer](pillars/swarm.md#doctor-timer-pass) reads Actions runs and
+jobs every tick. An incomplete read preserves its window and the completed
+runs already read, so a window with more runs than the per pass API budget
+can finish over later passes. Runner wait and tier time findings therefore
+retain the jobs collected earlier instead of repeatedly spending the entire
+budget on the same finished runs.
+
+### Completed jobs and retry behavior
+
+Discovery still reads workflow metadata. Saved jobs are reused only when both
+the saved run and the newly discovered run are `completed`, with the same
+`run_attempt`. New runs, active runs and reruns fetch jobs again with
+`filter=latest`. Reuse does not freeze the status of an active workflow or
+carry an earlier attempt's jobs into a rerun.
+
+After an incomplete read, the timer merges every successfully read completed
+run into its `known` state in Redis, including successes from the same batch
+as a failed jobs request. It retains only job identifiers, names, status,
+labels and creation, start and completion timestamps. Job steps and other
+unused response fields are not saved. Another failed pass preserves that
+progress. The timer advances its window only after a successful snapshot,
+then clears the saved completed jobs for that snapshot and keeps unfinished
+run identifiers for later reads. This is retry state, not a permanent cache
+of every Actions run.
+
+For example, the delivered regression fixture discovers 100 completed runs.
+Its first pass reads 54 before exhausting the budget. An intervening API
+outage leaves those 54 saved. The next successful pass fetches the remaining
+46 jobs responses and reports all 100 runs and jobs with 52 API calls. The
+fixture's counts depend on its discovery pages; they are not a fixed jobs
+allowance for a live pass.
+
+### Budgets and configuration
+
+No new operator flag or environment variable enables reuse. It is automatic
+in the Doctor timer and uses the existing Redis state. The reader's current
+code defaults are:
+
+| Reader input | Default | Meaning |
+|---|---|---|
+| `budget` | `(60, 25)` | At most 60 API calls and a 25 second deadline per read |
+| Jobs pool | Six workers | Concurrent requests share the call and time budget |
+| `known` | `None` | Completed run records supplied by the timer on retries |
+| `pending` | `None` | Previously unfinished runs to look up if discovery missed them |
+
+For a reviewed reader integration, `read(since_ms, now_ms,
+known=previous_completed, pending=unfinished_ids, budget=(60, 25))` preserves
+these defaults explicitly. `known` is keyed by string run id, for example:
+
+```json
+{
+  "123456": {
+    "status": "completed",
+    "run_attempt": 1,
+    "jobs": [{
+      "id": 987654,
+      "name": "lint",
+      "status": "completed",
+      "labels": ["ubuntu-latest"],
+      "created_at": "2026-10-18T12:00:00Z",
+      "started_at": "2026-10-18T12:00:01Z",
+      "completed_at": "2026-10-18T12:00:10Z"
+    }]
+  }
+}
+```
+
+This illustrates the internal input; operators should let the timer manage
+it. Changing the default budget or pool requires a code change through CI.
+Discovery, pagination, pending lookups and fresh jobs requests all consume
+calls. A cold window can still be incomplete, and continuous arrivals or
+active jobs can consume the budget faster than retry progress accumulates.
+Reuse makes a bounded backlog converge when enough capacity remains; it does
+not guarantee completion for unbounded traffic or an unavailable API.
+
+### Inspect and diagnose a read
+
+Read the existing timer actions without starting another timer:
+
+```bash
+journalctl --user -t agentihooks-swarm \
+  --since '2026-10-18 12:53:00 UTC' \
+  --until '2026-10-18 13:23:00 UTC' --no-pager -o cat \
+  | grep --line-buffered 'rig-grade-swarm-doctor' \
+  | grep --line-buffered 'doctor CI speed:'
+```
+
+Replace the Doctor swarm name and both UTC boundaries for a new measurement.
+Keep the raw lines and report the number of reads as well as the number
+containing the budget error. Use equal thirty minute windows and start the
+after window only once the fix is applied to the running Doctor. A zero count
+with no retained action lines does not demonstrate successful reads.
+
+Actions report `runs read of ... discovered`, jobs, crossings and API calls.
+Reused jobs count as read jobs even though they consumed no new jobs request.
+Current actions also report retractions and queued jobs not reread. Current
+window slicing can report `catching up`: that snapshot succeeded, but the
+reader has not yet reached the present. It is distinct from an API failure.
+
+| Symptom | Interpretation and action |
+|---|---|
+| `incomplete: Actions API read failed: RuntimeError: Actions API request or time budget exhausted` | The call or time budget was reached. Compare successive run counts; completed successes remain available for retry. |
+| Another `Actions API read failed: ...` error | Inspect the named request, authentication, timeout or pagination failure. Successful completed jobs remain saved; the read still reports incomplete. |
+| Rerun or active workflow fetches jobs again | Expected: reuse requires completed status and the same attempt. |
+| `catching up` | A historical slice completed; later ticks continue toward the present. |
+| Backlog never clears | Compare discovery and new or active workload with remaining request capacity; do not infer completion from a large saved count. |
+
+### Delivered proof and measurement limits
+
+[Pull request 4547](https://github.com/the-cloud-clockwork/agentihooks/pull/4547)
+merged on 18 October 2026. Its
+[red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39138882973)
+showed that a second pass over 100 completed runs remained incomplete; its
+[green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39139392387)
+passed with carryover. The regression checks also cover changed attempts,
+active runs and preservation of successful jobs when another request fails.
+
+The source task recorded 13 budget exhausted reads out of 17 during
+18 October 2026, 12:53–13:23 UTC. That is the historical before measurement.
+The regression proves convergence for its controlled backlog; it does not
+supply a comparable live thirty minute after count.
+
 ## Delivery tiers
 
 Pull request checks run once on the current head: lint, format, size, static analysis, changed-line coverage and mutation, and touched tests. The `dev` merge queue runs the full unit suite and test count checks on the merge group; it does not repeat the pull request checks. Shard time budgets do not hold the queue.
