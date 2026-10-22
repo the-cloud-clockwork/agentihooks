@@ -48,7 +48,7 @@ GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
 SLUGS = "SELECT slug FROM ledgers ORDER BY slug"
-ROOT = "[]"
+ROOT = refresh.ROOT
 REGISTRY_TABLE = "registry"
 UPDATE = "UPDATE ledgers SET revision=?, generation=?, summary=?, touched_at=? WHERE slug=?"
 INSERT = "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?, ?)"
