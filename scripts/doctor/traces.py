@@ -284,7 +284,7 @@ def _remote_fresh(binding, now_ms):
     return f"Langfuse last accepted event {_ago(now_ms, remote['fresh_ms'])} seconds ago"
 
 
-def _lag(binding, now_ms):
+def unaccepted_seconds(binding, now_ms):
     local = binding["local"]
     if not local or local["generated_bytes"] <= local["accepted_bytes"]:
         return 0
@@ -382,7 +382,7 @@ def _active_binding(binding, record, limits):
         return []
     wrong = _misattributed(binding)
     found = [wrong] if wrong else []
-    lag = _lag(binding, record["now_ms"])
+    lag = unaccepted_seconds(binding, record["now_ms"])
     if lag > limits.active_stale_seconds:
         found.append(_stale(binding, record, limits, lag))
     elif binding["read"] and not binding["remote"] and not wrong:
@@ -484,7 +484,7 @@ def measures(record: dict) -> dict:
                 "task": b["task"],
                 "session": b["session_id"],
                 "read": b["read"],
-                "unaccepted_seconds": _lag(b, now),
+                "unaccepted_seconds": unaccepted_seconds(b, now),
                 "langfuse_fresh_seconds": _ago(now, b["remote"]["fresh_ms"])
                 if b["remote"] and b["remote"]["fresh_ms"]
                 else None,

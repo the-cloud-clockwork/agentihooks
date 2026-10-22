@@ -86,6 +86,146 @@ def test_the_exit_sweep_moves_a_gone_member_agents_mail_to_its_seat(store, agent
     assert member.get(item.id).address == SEAT
 
 
+class AnsweringPingThenHung:
+    """A hive Redis that answers ping, then times out on every later call."""
+
+    def ping(self):
+        return True
+
+    def __getattr__(self, name):
+        from redis.exceptions import TimeoutError as RedisTimeoutError
+
+        def hung(*args, **kwargs):
+            raise RedisTimeoutError("Timeout reading from socket")
+
+        return hung
+
+
+@pytest.fixture
+def silent_redis():
+    """A real Redis client on a socket the kernel accepts and nobody ever answers, with a short socket timeout."""
+    import socket
+
+    import redis as redis_lib
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    host, port = listener.getsockname()
+    client = redis_lib.Redis(host=host, port=port, socket_timeout=0.2, socket_connect_timeout=0.2)
+    yield client
+    client.close()
+    listener.close()
+
+
+def _with_world(monkeypatch, world):
+    worlds = InboxStore.worlds
+    monkeypatch.setattr(InboxStore, "worlds", lambda self: [*worlds(self), world])
+
+
+@pytest.mark.wall_clock
+def test_the_exit_sweep_finishes_past_a_world_that_never_answers_and_settles_the_others(
+    store, agent, mail, monkeypatch, silent_redis, capsys
+):
+    import time
+
+    member, item = mail
+    _with_world(monkeypatch, InboxStore(silent_redis, world="m2"))
+    store.put_agent("sw", replace(agent, state="finished"))
+    started = time.monotonic()
+    lines = exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert time.monotonic() - started < 20
+    assert member.get(item.id).address == SEAT
+    [line] = lines
+    assert line.startswith("skipped the inbox of hive m2 this pass: its Redis timed out or dropped: Timeout ")
+    assert capsys.readouterr().err == f"{line}\n"
+
+
+def test_the_exit_sweep_skips_a_world_that_stops_answering_after_ping_and_settles_the_others(
+    store, agent, mail, monkeypatch, capsys
+):
+    member, item = mail
+    _with_world(monkeypatch, InboxStore(AnsweringPingThenHung(), world="m2"))
+    store.put_agent("sw", replace(agent, state="finished"))
+    lines = exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert member.get(item.id).address == SEAT
+    assert lines == [
+        "skipped the inbox of hive m2 this pass: its Redis timed out or dropped: Timeout reading from socket"
+    ]
+    assert capsys.readouterr() == ("", f"{lines[0]}\n")
+
+
+def test_a_skipped_controller_world_is_named_the_controller_and_leaves_the_pass(capsys):
+    world = InboxStore(AnsweringPingThenHung(), world="")
+    worlds = exits._WorldPass([world])
+    assert worlds.run(world, lambda w: w.redis.get("key")) is None
+    assert worlds.up == []
+    assert worlds.skipped == [
+        "skipped the inbox of the controller this pass: its Redis timed out or dropped: Timeout reading from socket"
+    ]
+    assert capsys.readouterr() == ("", f"{worlds.skipped[0]}\n")
+
+
+def test_a_quiet_move_candidate_does_not_stop_the_world_moving_a_later_seat_with_mail():
+    from types import SimpleNamespace
+
+    opened, moved = [], []
+
+    class World:
+        def quiet(self, seats):
+            return {"eng-1@sw"}
+
+        def open_items(self, seat):
+            opened.append(seat)
+            return [SimpleNamespace(id="i1")]
+
+        def move_world(self, item_id, home, by, reason):
+            moved.append((item_id, reason))
+
+    home = SimpleNamespace(world="m2")
+    candidates = [
+        (SimpleNamespace(seat="eng-1@sw", name="a1"), home),
+        (SimpleNamespace(seat="eng-2@sw", name="a2"), home),
+    ]
+    exits._move_world_mail(World(), candidates)
+    assert opened == ["eng-2@sw"]
+    assert moved == [("i1", "moved to hive m2, where a2 runs eng-2@sw")]
+
+
+def test_a_pass_with_every_world_down_records_the_exit_and_the_next_pass_settles_its_mail(
+    store, agent, mail, monkeypatch, silent_redis
+):
+    member, item = mail
+    worlds = InboxStore.worlds
+    with monkeypatch.context() as patch:
+        patch.setattr(InboxStore, "worlds", lambda self: [InboxStore(silent_redis, world="m1")])
+        store.put_agent("sw", replace(agent, state="finished"))
+        lines = exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert [line.split(":")[0] for line in lines] == ["skipped the inbox of hive m1 this pass"]
+    assert store.seats.exits([agent.name])[agent.name]
+    assert member.get(item.id).address == agent.name
+    assert InboxStore.worlds is worlds
+    assert exits.sweep(InboxStore(store.redis), "sw", store, lambda: {}) == []
+    assert member.get(item.id).address == SEAT
+
+
+def test_the_tick_redis_client_every_world_reads_through_carries_a_socket_timeout(monkeypatch):
+    import redis as redis_lib
+
+    from scripts.swarm import store as swarm_store
+
+    seen = {}
+
+    class Client:
+        def ping(self):
+            return True
+
+    monkeypatch.setattr(redis_lib.Redis, "from_url", lambda url, **kwargs: seen.update(kwargs) or Client())
+    swarm_store._pinged(redis_lib, "redis://hive:6379")
+    assert seen["socket_timeout"] == 10
+    assert seen["socket_connect_timeout"] == 3
+
+
 def test_the_exit_sweep_withdraws_the_master_escalation_of_a_member_agents_unfillable_seat(store, agent, mail):
     member, item = mail
     agents = [agent, AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm")]
@@ -291,6 +431,37 @@ def test_a_moved_seat_item_is_pending_with_its_history_and_a_move_entry(store, m
         "by": exits.BY,
         "reason": f"moved to hive m2, where {name} runs {SEAT}",
     }
+
+
+def test_the_sweep_skips_quiet_move_candidates_but_still_moves_a_seat_with_mail(store, agent, mail, monkeypatch):
+    from scripts.hive import auth
+
+    store.redis.hset(f"{auth.PREFIX}:member:m2", mapping={"name": "m2", "ledger": "digest"})
+    store.redis.sadd(auth.INDEX, "m2")
+    member, item = mail
+    store.put_agent("sw", replace(agent, state="finished"))
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    name = store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT, hive="m2"), agent.execution_id)
+    store.seats.occupy(SEAT, name, 2)
+    quiet_seats = [f"eng-{n}@sw" for n in range(2, 22)]
+    for n, seat in enumerate(quiet_seats, start=2):
+        quiet_name = store.next_name("sw", "eng")
+        store.start_execution("sw", AgentRecord(quiet_name, "eng", f"t{n}", seat=seat, hive="m1"))
+        store.seats.occupy(seat, quiet_name, n)
+    calls, original = [], InboxStore.open_items
+
+    def spy(self, address):
+        calls.append((self.world, address))
+        return original(self, address)
+
+    monkeypatch.setattr(InboxStore, "open_items", spy)
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert not any(address in quiet_seats for _, address in calls)
+    assert any(address == SEAT for _, address in calls)
+    target = InboxStore(store.redis, world="m2")
+    assert [i.id for i in target.open_mail(name)] == [item.id]
+    assert member.inbox(SEAT) == []
 
 
 def test_the_sweep_moves_open_seat_mail_to_a_new_occupant_on_the_controller(store, agent, mail):
