@@ -11,6 +11,7 @@ import ledger_core as core
 import ledger_media as media
 
 from scripts.swarm_ledger import ports
+from scripts.swarm_ledger.repository import artifact_files
 
 OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
 TRASH = "artifact_trash"
@@ -91,6 +92,7 @@ def store(slug, name, data):
     artifact_id = f"{hashlib.sha256(data).hexdigest()}.{ext}"
     path = media.folder(slug) / artifact_id
     media.write_file(path, data)
+    artifact_files.save(slug, artifact_id, data)
     return {"id": artifact_id, **fields, "size": len(data)}
 
 
@@ -103,8 +105,15 @@ def path_of(slug, artifact_id):
     return path
 
 
+def read(slug, artifact_id):
+    if not isinstance(artifact_id, str) or not ID_RE.match(artifact_id):
+        raise ValueError("not an artifact id")
+    data = artifact_files.load(slug, artifact_id)
+    return path_of(slug, artifact_id).read_bytes() if data is None else data
+
+
 def entry(slug, artifact_id):
-    data = path_of(slug, artifact_id).read_bytes()
+    data = read(slug, artifact_id)
     ext = artifact_id.rsplit(".", 1)[1]
     if ext in TEXT_TYPES:
         return {"id": artifact_id, "type": TEXT_TYPES[ext], "size": len(data)}
@@ -264,3 +273,4 @@ def sweep(slug, doc, ctx):
         used = in_use(doc)
         for file_id in dropped - used:
             (media.folder(slug) / file_id).unlink(missing_ok=True)
+        ctx.unstored |= dropped - used

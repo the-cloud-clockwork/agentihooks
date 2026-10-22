@@ -106,6 +106,10 @@ def path_of(slug, media_id):
     return path
 
 
+def read(slug, media_id):
+    return path_of(slug, media_id).read_bytes()
+
+
 def entry(slug, media_id):
     data = path_of(slug, media_id).read_bytes()
     kind, width, height = inspect(data)

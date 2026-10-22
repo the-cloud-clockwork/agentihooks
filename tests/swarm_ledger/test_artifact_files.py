@@ -1,7 +1,10 @@
 import shutil
 
-from scripts.swarm_ledger import ledger_artifacts, plan_ranges
+import pytest
+
+from scripts.swarm_ledger import ledger_artifacts, plan_ranges, storage
 from scripts.swarm_ledger import ledger_core as core
+from scripts.swarm_ledger.repository import artifact_files
 from tests.swarm_ledger import test_plan_ranges
 from tests.swarm_ledger.test_plan_kind import add
 from tests.swarm_ledger.test_plan_publish import task
@@ -25,3 +28,31 @@ def test_a_stored_artifact_is_served_without_its_disk_copy(published):
     assert plan_ranges.stored_text(state["phases"][0]["plan_ref"], state) == test_plan_ranges.PLAN
     assert ledger_artifacts.read(published, file_id) == test_plan_ranges.PLAN.encode()
     assert ledger_artifacts.entry(published, file_id) == artifact["file"]
+
+
+def test_a_purged_artifact_leaves_the_database(published):
+    state = core.sync(published)[0]
+    file_id = state["artifacts"][0]["file"]["id"]
+    assert artifact_files.load(published, file_id) == test_plan_ranges.PLAN.encode()
+    state, rejected = core.sync(published, ops=[{"op": "artifact_purge", "id": "purge", "by": "planner"}])
+    assert (rejected, state["artifacts"]) == ([], [])
+    assert artifact_files.load(published, file_id) is None
+    with pytest.raises(ValueError, match="no stored artifact"):
+        ledger_artifacts.read(published, file_id)
+
+
+def test_only_the_named_artifacts_of_one_ledger_are_dropped(plan_ledger):
+    artifact_files.save(plan_ledger, "a.md", b"one")
+    artifact_files.save(plan_ledger, "b.md", b"two")
+    artifact_files.save("other", "a.md", b"three")
+    artifact_files.save(plan_ledger, "a.md", b"ignored")
+    with storage.default().connect() as connection, connection:
+        artifact_files.drop(connection, plan_ledger, {"a.md", "missing.md"})
+    found = [artifact_files.load(slug, name) for slug, name in ((plan_ledger, "a.md"), (plan_ledger, "b.md"))]
+    assert found == [None, b"two"]
+    assert artifact_files.load("other", "a.md") == b"three"
+
+
+def test_a_malformed_artifact_id_is_refused_before_any_lookup(published):
+    with pytest.raises(ValueError, match="not an artifact id"):
+        ledger_artifacts.read(published, "../plan.md")

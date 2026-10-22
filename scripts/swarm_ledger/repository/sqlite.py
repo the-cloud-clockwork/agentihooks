@@ -8,7 +8,7 @@ from pathlib import Path
 
 from scripts.swarm_ledger import request_metrics
 
-from . import hierarchy
+from . import artifact_files, hierarchy
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS events (slug TEXT, key TEXT, revision INTEGER, positi
 CREATE INDEX IF NOT EXISTS events_revision ON events(slug,revision);
 CREATE INDEX IF NOT EXISTS events_position ON events(slug,position);
 CREATE TABLE IF NOT EXISTS relay_journal (kind TEXT, slug TEXT, revision INTEGER, PRIMARY KEY(kind,slug,revision));
+CREATE TABLE IF NOT EXISTS artifact_files (slug TEXT, id TEXT, data TEXT, PRIMARY KEY(slug,id));
 """
 ROWS_SCHEMA = "".join(
     f"CREATE TABLE IF NOT EXISTS {table} (slug TEXT, path TEXT, parent TEXT, key TEXT, "
@@ -530,6 +531,7 @@ class SQLiteLedgerRepository:
                 state = entry.mutable()
                 rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
                 written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
+                artifact_files.drop(connection, slug, ctx.unstored)
             self._remember(slug, written)
         return (written.mutable() if copy_state else written.state), rejected
 
