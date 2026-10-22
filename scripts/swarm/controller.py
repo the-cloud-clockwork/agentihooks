@@ -275,8 +275,10 @@ def _stat(pid) -> list[str]:
 
 
 def _holder() -> dict:
-    host, fields = _host(), _stat(os.getpid())
-    return {"host": host, "pid": os.getpid(), "start": fields[19]} if host and len(fields) > 19 else {}
+    host, fields, machine = _host(), _stat(os.getpid()), _read("/etc/machine-id")
+    if not host or len(fields) <= 19:
+        return {}
+    return {"host": host, "pid": os.getpid(), "start": fields[19], **({"machine": machine} if machine else {})}
 
 
 def _gone(pid: int, start: str) -> bool:
@@ -293,9 +295,17 @@ def _gone(pid: int, start: str) -> bool:
 def _dead(raw: str) -> bool:
     held = json.loads(raw) if raw.startswith("{") else {}
     host = _host()
+    if host and _ended_boot(held, host):
+        return True
     if not host or held.get("host") != host or not {"pid", "start"} <= held.keys():
         return False
     return _gone(held["pid"], held["start"])
+
+
+def _ended_boot(held: dict, host: str) -> bool:
+    machine = _read("/etc/machine-id")
+    boot = str(held.get("host", "")).split(":", 1)[0]
+    return bool(machine) and held.get("machine") == machine and bool(boot) and boot != host.split(":", 1)[0]
 
 
 def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int) -> str | None:

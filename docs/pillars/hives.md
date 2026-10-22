@@ -733,9 +733,14 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    and waits for one, up to `HIVE_DELIVERY_WAIT_S` (default 900) seconds, then exits 1 with
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
-5. Sets itself `ui=no ephemeral=yes excluded=<workers.excluded> max-agents=<workers.maxAgents>`, by default
-   `excluded=master max-agents=20`.
+5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> max-agents=<workers.maxAgents>`, by
+   default `excluded=master max-agents=20`.
 6. Runs `agentihooks hive run`.
+
+When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait
+<workers.drainSeconds>` (default 3600): the hive sets `draining=yes`, so placement sends it no new agent, and waits
+until no agent it hosts is running. The grace period is `workers.drainSeconds` plus 30 seconds, so a Recreate rollout
+starts the new pod only after the old hive's agents finish or the wait runs out.
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
 whole record from the workstation with one command:
