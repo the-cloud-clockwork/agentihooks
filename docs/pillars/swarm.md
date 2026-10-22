@@ -337,6 +337,54 @@ live masters it returns without reading the ledger. A live master of a mutually 
 message a live watched master seat for coordination; that exception does not permit instructions to an engineer
 claiming another master's task.
 
+##### Follow ups on a task
+
+A follow up an agent adds while it works a task belongs to the master that owns that task. `agentihooks ledger
+followup add` reads `AGENTIHOOKS_SWARM_TASK`, which the tick sets for every agent it spawns
+on a task, and stores that task id on the new follow up as `task`. The owner is resolved in this order:
+
+| The follow up carries | Owning master |
+|---|---|
+| `hive` (from `--hive ID`) | The seat set for that hive with `swarm <id> set hive.ID=SEAT` |
+| `task`, no `hive` | The owner of that task: its phase's owning master seat, or the front door for a task without a phase |
+| Neither | The front door |
+
+An owner seat with no live master falls back to the front door. The follow up's added notice reaches the owning
+master. Still undecided after 15 minutes, it gets a raise notice to the same owner; after 30 minutes it is raised to
+the operator's Priorities, and that priority notice also goes to the owner.
+
+The [master fence](#configuration-and-failure-handling) checks `followup done`, `followup open`, `followup flag` and
+`followup unflag` by a master: the owner passes, any other live master seat passes as a recorded cross owner write,
+and a master holding no live seat is refused. A comment on a follow up is not fenced. Once a master decides a follow
+up, the owner recorded with that decision stays its owner for later master writes, until a writer outside the master
+lane changes the follow up.
+
+```bash
+# In an engineer session on task t42, which sits in a phase master-2@my-swarm owns.
+# The tick exported AGENTIHOOKS_SWARM_TASK=t42 at spawn; no flag is needed.
+agentihooks ledger --slug my-swarm followup add "Retry the notes build once the cache rebuild lands"
+
+# The added notice reaches master-2@my-swarm, which decides it directly.
+agentihooks ledger --slug my-swarm followup done <followup id>
+agentihooks ledger --slug my-swarm followup flag <followup id>
+
+# Outside a task (AGENTIHOOKS_SWARM_TASK empty or unset) the follow up stays with the front door.
+AGENTIHOOKS_SWARM_TASK= agentihooks ledger --slug my-swarm followup add "Rename the notes cache key"
+```
+
+The ledger accepts `task` only on an added follow up, holding a task id of 1 to 128 letters, digits, dots,
+underscores or hyphens that starts with a letter or digit. Anything else is refused with `task needs a task id of up
+to 128 letters, digits, dots, underscores or hyphens`. The task id is not checked against the ledger's tasks; a
+follow up naming a task the ledger does not hold has no phase owner and routes to the front door. Follow ups added
+before this change carry no `task` and keep front door routing.
+
+| Symptom | Action |
+|---|---|
+| An agent's follow up reaches the front door instead of its task's master. | Check that the agent's session had `AGENTIHOOKS_SWARM_TASK` set, that the follow up has no `hive`, and that the owning phase seat has a live master. |
+| A master's `followup done` is refused with `followups/<id> belongs to <seat>`. | The writer holds no live master seat; ask the named seat with `masters-channel say`. |
+| A live master's decision on another master's follow up passes. | This is expected: the ledger records it as a cross owner write and keeps the owner. |
+| A ledger write from a script is refused with `task needs a task id ...`. | `task` is an `add_item` op field, not a CLI flag. Set it only on an `add_item` op for `followups`, as a plain task id, or leave it out. |
+
 ##### Configuration and failure handling
 
 `AGENTIHOOKS_MASTER_FENCE` enables the ownership check by default. The exact value `off` disables it in the process
