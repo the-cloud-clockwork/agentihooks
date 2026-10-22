@@ -181,8 +181,21 @@ def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_p
     assert names.index("docker/login-action@v3") > names.index(
         "Build the worker image while kind starts, then prove registration and order acknowledgement"
     )
-    dev_push = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
-    assert [step.get("if") for step in kind["steps"] if "ghcr.io" in str(step)] == [dev_push, dev_push]
+    publish = "github.event_name == 'push' && github.ref == 'refs/heads/dev' || github.event_name == 'release'"
+    assert [step.get("if") for step in kind["steps"] if "ghcr.io" in str(step)] == [publish, publish]
+
+
+def test_a_release_publishes_its_version_and_only_the_newest_tag_moves_release():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/hive-worker.yml").read_text())
+    assert workflow[True]["release"] == {"types": ["published"]}
+    steps = {step.get("name"): step for step in hive_jobs()["kind"]["steps"]}
+    main = steps["Require a release tag on main"]
+    assert main["if"] == "github.event_name == 'release'"
+    assert 'git merge-base --is-ancestor "$GITHUB_SHA" origin/main' in main["run"]
+    publish = steps["Publish the proven hive worker image"]
+    assert publish["env"]["LATEST"] == "${{ steps.main.outputs.latest }}"
+    assert 'tags=("${RELEASE#v}")' in publish["run"]
+    assert 'if [[ "$LATEST" == true ]]; then tags+=(release); fi' in publish["run"]
 
 
 def test_the_proven_image_skips_the_artifact_round_trip():
