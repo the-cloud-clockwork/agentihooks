@@ -148,7 +148,7 @@ class OnePush:
         budget = Budget(state.slug, SubagentBudget.name, state.home)
         missing = [name for name in READERS if not budget.spent(who.task, name)] if self.target() == "claude" else []
         held = unsaved(where)
-        return open_refusal(who.swarm, missing, held) if missing or held else ""
+        return f"{open_refusal(who.swarm, missing, held)}. Checked worktree: {where}" if missing or held else ""
 
     def pushing(self, who, where, args):
         task = next((t for t in self.ledger().tasks(who.swarm) if t.get("id") == who.task), {})
