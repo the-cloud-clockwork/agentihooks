@@ -51,7 +51,7 @@ def test_a_full_headless_fleet_uses_the_workstation_without_a_fallback(setup):
     assert selected.fallback == ""
     name = setup.store.next_name(setup.config.slug, "eng")
     admitted = setup.launcher.admit(SpawnRequest(setup.config, "eng", name, task), selected)
-    assert admitted.profile_decision["placement_fallback"] == ""
+    assert "placement_fallback" not in admitted.profile_decision
 
 
 def test_a_task_pinned_to_a_hive_uses_it_without_a_fallback(setup):
@@ -161,12 +161,11 @@ def test_a_dispatcher_spawn_uses_an_eligible_hive_without_a_display_fallback(set
     selected = fenced.runtime.hive_launch.select(setup.config, "dispatch", task)
     assert (selected.hive, selected.fallback) == ("anton", "")
     publish_room(setup.store, "anton", 0)
-    full = ""
     selected = fenced.runtime.hive_launch.select(setup.config, "dispatch", task)
-    assert (selected.hive, selected.fallback) == ("workstation", full)
+    assert (selected.hive, selected.fallback) == ("workstation", "")
     name = setup.store.next_name(setup.config.slug, "dispatch")
     admitted = setup.launcher.admit(SpawnRequest(setup.config, "dispatch", name, task), selected)
-    assert admitted.profile_decision["placement_fallback"] == full
+    assert "placement_fallback" not in admitted.profile_decision
 
 
 def hive_controller(setup):
