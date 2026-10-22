@@ -107,16 +107,10 @@ def _recorded(store, monkeypatch):
 
 def _booted(store, runtime, current="boot-2", quota=lambda harness, account: True):
     started = []
-    actions = reboot.boot_pass(
-        "sw",
-        store,
-        runtime.ledger,
-        runtime,
-        900,
-        current=current,
-        has_quota=quota,
-        server=lambda: started.append(1) or [],
-    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(reboot, "last_quota", quota)
+        patch.setattr(reboot, "start_server", lambda: started.append(1) or [])
+        actions = reboot.boot_pass("sw", store, runtime.ledger, runtime, 900, current=current)
     return actions, started
 
 

@@ -115,7 +115,7 @@ def start_server():
     return []
 
 
-def boot_pass(slug, store, ledger, runtime, now_ms, current=None, has_quota=last_quota, server=start_server):
+def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
     """On the first tick of a new boot, reopen each recorded local agent that lost its process."""
     current = boot_id() if current is None else current
     key = store.key(slug, "boot", commands.hive_id())
@@ -123,11 +123,11 @@ def boot_pass(slug, store, ledger, runtime, now_ms, current=None, has_quota=last
     store.redis.set(key, current)
     if seen is None or seen == current or store.config(slug).state in {"stopped", "stopping"}:
         return []
-    actions, wanted, live = server(), recorded(store, slug), runtime.live_names()
+    actions, wanted, live = start_server(), recorded(store, slug), runtime.live_names()
     for agent in store.agents(slug):
         if agent.name not in wanted or agent.name in live or agent.state == "finished" or not local(agent):
             continue
-        if agent.account and has_quota(agent.harness, agent.account) is False:
+        if agent.account and last_quota(agent.harness, agent.account) is False:
             agent = replace(agent, account="")
             store.put_agent(slug, agent)
         reopened = dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms)
