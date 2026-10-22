@@ -56,6 +56,94 @@ Dev push run [39064628062](https://github.com/the-cloud-clockwork/agentihooks/ac
 | `lint`, `semgrep` or `test-count` runs on a dev push | The `github.event_name != 'push'` clause was removed from its `if`. | Restore it; `tests/contracts/ci_tiers/test_workflow.py` fails on the change. |
 | `gate-protected.yml` fails with `The head's Gate — Required changes its steps; the protected branch grades with its own.` | The head's gate step matches none of the twelve accepted renderings of `scripts.ci_reuse.gate_steps`. | Render the step from `scripts.ci_reuse.gate_steps` instead of editing it by hand; a new form lands first in its own pull request that teaches `scripts.gate_protected` to accept it. |
 
+## Suite speed checks on pull requests
+
+On a pull request, the `select` job in `.github/workflows/test.yml` runs `scripts.ci_select` to choose the tests the change reaches. It prints one of three scopes:
+
+| Scope | When | What runs |
+|---|---|---|
+| `full` | The change touches a harness file or a `conftest.py`, the selected tests would need more than three legs, or no test was selected and the change is not documentation only | `split`, `unit` and `shard-check`, the whole suite |
+| `selected` | One or more tests were selected and fit in three legs | `unit-selected`, one job per leg, on the files listed in `files_1`, `files_2` and `files_3` |
+| `none` | Every changed file is documentation (`docs/` or a `.md` file) | no unit tests |
+
+The merge queue always runs the whole suite. `tests/test_suite_speed.py` holds two whole suite checks that read every test module mentioning `fakeredis`:
+
+- `test_fakeredis_test_modules_import_without_loading_redis`: importing those modules loads neither `redis` nor `fakeredis`. Import `fakeredis` inside the test or fixture that uses it, not at module level. On failure the assertion names the first module that loaded each package.
+- `test_fakeredis_test_modules_run_on_every_worker`: no such module carries an `xdist_group` mark, so the fakeredis modules spread across every pytest worker.
+
+Before pull request 4220 these checks ran only in full suite runs, so a pull request with a `selected` scope could pass its own tier and then be ejected from the queue. On 17 October that happened to two Doctor pull requests. Each ejection cost a merge group run.
+
+### When the selection adds them
+
+`scripts.ci_select` adds `tests/test_suite_speed.py` to a `selected` run when all three hold:
+
+1. At least one other test was selected. A change that selects nothing still runs the full suite or, for documentation only, no tests.
+2. `tests/test_suite_speed.py` exists in the pull request checkout.
+3. Either the change adds, edits, renames or deletes a file under `tests/` named `test_*.py`, or the text of any selected test file contains `fakeredis`.
+
+The changed file list comes from `git diff --name-only --no-renames`, so a renamed test module counts as a deleted path and an added path. The `fakeredis` text match covers a source change in `hooks/` or `scripts/` whose selected tests use fakeredis, even when no test module changed. Nothing else in the selection changes: the checks share a leg with the other selected files and do not change the scope.
+
+| Change | Suite speed checks |
+|---|---|
+| Adds or edits `tests/swarm/test_plain.py` | selected |
+| Deletes `tests/test_gone.py` and edits `tests/test_other.py` | selected |
+| Edits `hooks/sample.py`, imported by a test module that uses fakeredis | selected |
+| Edits `hooks/sample.py`, whose selected tests never mention fakeredis | not selected |
+| Edits only a non-Python file such as `scripts/static/ledger.js` | not selected, unless a selected test mentions fakeredis |
+| Changes `pyproject.toml` or a `conftest.py` | full suite, which already runs them |
+
+There is no setting to configure. The `select` step runs the selector from the base branch copy checked out under `$RUNNER_TEMP/grader`, so a pull request that changes `scripts/ci_select.py` is still graded by the rule already on `dev`. The rule applied to pull requests whose runs started after pull request 4220 merged.
+
+### Writing a fakeredis test module that passes
+
+```python
+import pytest
+
+pytestmark = pytest.mark.unit
+
+
+def test_store_round_trip():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    ...
+```
+
+Keep the `fakeredis` import and any import that loads `redis` inside the test or a fixture. Leave the `xdist_group` mark out of `pytestmark`.
+
+### Checking a run
+
+Read the `select` job output of the pull request's Tests run:
+
+```bash
+R=repos/the-cloud-clockwork/agentihooks
+RUN=<Tests run id>
+JOB=$(gh api "$R/actions/runs/$RUN/jobs?per_page=100" --jq '.jobs[]|select(.name=="select")|.id')
+gh api "$R/actions/jobs/$JOB/logs" | grep -E 'Z (scope|count|files_[0-9])='
+```
+
+Pull request [5785](https://github.com/the-cloud-clockwork/agentihooks/pull/5785) edited `scripts/doctor/read.py` and `tests/doctor/test_read.py`. Its [Tests run 39746367123](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39746367123) printed:
+
+```text
+scope=selected
+files_1=tests/doctor/test_empty_seats.py tests/doctor/test_read.py tests/test_suite_speed.py
+```
+
+The checks then fail inside `unit-selected` on the pull request instead of in the merge group.
+
+Delivered by pull request [4220](https://github.com/the-cloud-clockwork/agentihooks/pull/4220). Its [red run 39064033422](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39064033422) planted an unregistered fakeredis module, which the old selector left out. `tests/test_ci_select.py` holds the cases from the table above.
+
+### Troubleshooting
+
+| Symptom | Cause | Action |
+|---|---|---|
+| `unit-selected` fails `test_fakeredis_test_modules_import_without_loading_redis` | A fakeredis test module imports `fakeredis` or `redis`, directly or through a module it imports, at module level. The assertion message names the module. | Move the import into the test or fixture. |
+| `unit-selected` fails `test_fakeredis_test_modules_run_on_every_worker` | A fakeredis test module sets `pytest.mark.xdist_group` in `pytestmark`. | Remove the mark. |
+| `unit-selected` fails with `Import probe exited` | A test module that mentions fakeredis raises on import. The failure prints the probe's stderr, whose last `Importing` line names the module. | Fix the import error in that module. |
+| The queue ejects a pull request on a suite speed check its own run did not select | The change selected nothing, or no selected test mentions fakeredis, while a merge from `dev` or another queue entry brought in the failing module. | Read the merge group run's failed job, fix the named module in its own pull request, then requeue. |
+
 ## Rules
 
 - **A red integration branch keeps merging; promotion does not advance.** A failed promotion run never closes the queue or holds other pull requests. The release branch stays on the last green promoted head until a later run passes.

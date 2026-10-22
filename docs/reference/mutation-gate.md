@@ -56,6 +56,138 @@ restacking, a new prepared branch can be the intended publication target.
 Branch selection does not disable preflight or change its mutation grading
 and report reuse rules.
 
+## Suite speed contracts in the branch preflight
+
+A branch push that changes a test module runs the suite speed contracts in the
+preflight `plan` job before report reuse, statistics or any mutation shard. A
+contract break then fails the preflight in about a minute, instead of passing
+mutation and failing later in the pull request unit shards.
+
+### When the contracts run
+
+The `plan` job runs **Find a changed test module** after checkout. It lists
+the files changed between `BASE` and the branch head with
+`git diff --name-only --no-renames "$BASE...HEAD"`; on a branch push `BASE` is
+`origin/dev`. The contracts run when any listed path matches
+`^tests/(.+/)?test_[^/]*\.py$`.
+
+| Push | Contracts in the preflight |
+|---|---|
+| Branch adds or edits `tests/test_quota.py` | Run |
+| Branch deletes `tests/swarm_ledger/test_pages.py` | Run; a deleted path is still listed |
+| Branch renames a test module | Run; `--no-renames` lists both paths |
+| Branch changes only `tests/conftest.py`, `tests/fixtures/...` or code under `hooks` and `scripts` | Skipped |
+| Branch already has an open pull request into `dev` | Skipped with the rest of the preflight; the pull request checks own the work |
+| Push to `dev`, `main`, `wip/**`, `diffcheck/**`, `promotion/**` or a merge queue branch | The workflow does not run |
+| `workflow_call` from another workflow | Skipped; the step runs only for `push` events |
+
+There is no setting, input or environment variable to switch the step. A
+failure to compute the diff fails the step rather than skipping the contracts.
+
+### What runs and what a break skips
+
+When a test module changed, the job installs Python 3.12, pinned uv and the
+`.[dev,all]` dependencies, then runs:
+
+```bash
+python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider
+```
+
+The later **Install dependencies** step is then skipped, because the same
+environment already holds them. `tests/test_suite_speed.py` holds these
+contracts:
+
+| Test | Contract |
+|---|---|
+| `test_suite_never_runs_the_real_deps_preflight` | Under the suite, the dependency preflight finds no manifest even when the linked bundle holds `deps.json` |
+| `test_fakeredis_test_modules_import_without_loading_redis` | Importing every test module that names `fakeredis` loads neither `fakeredis` nor `redis` |
+| `test_fakeredis_test_modules_run_on_every_worker` | No test module that names `fakeredis` carries an `xdist_group` mark in its module `pytestmark` |
+
+A failing contract fails **Run the suite speed contracts** and the `plan` job.
+The size step never runs, so `stats`, `refine`, `mutation-shard` and
+`mutation` are skipped and the workflow concludes `failure`. `touched-tests`
+still runs, because it depends only on the open pull request check. The pull
+request tier keeps its own copy of these contracts; see
+[Delivery tiers](delivery-tiers.md).
+
+A test module that passes both fake Redis contracts imports `fakeredis` inside
+a fixture and keeps any worker group mark off the module:
+
+```python
+import pytest
+
+
+@pytest.fixture
+def redis_client():
+    import fakeredis
+
+    return fakeredis.FakeRedis()
+
+
+def test_round_trip(redis_client):
+    redis_client.set("k", "v")
+    assert redis_client.get("k") == b"v"
+```
+
+A top level `import fakeredis`, or
+`pytestmark = pytest.mark.xdist_group("redis")`, fails the preflight.
+
+### Inspect the contract step
+
+List the preflight runs for a pushed head and read the failing step. Replace
+`HEAD_SHA` and `RUN_ID`:
+
+```bash
+gh api --method GET \
+  'repos/{owner}/{repo}/actions/workflows/mutation-preflight.yml/runs' \
+  -f event=push \
+  -f head_sha=HEAD_SHA \
+  --jq '.workflow_runs[] | {id, head_branch, status, conclusion, html_url}'
+
+gh api 'repos/{owner}/{repo}/actions/runs/RUN_ID/jobs' \
+  --jq '.jobs[] | {name, conclusion}'
+
+gh run view RUN_ID --log-failed
+```
+
+A contract break shows `plan` as `failure`, `touched-tests` as `success` and
+the statistics and shard jobs as `skipped`. The failed log names each failing
+contract, for example
+`FAILED tests/test_suite_speed.py::test_fakeredis_test_modules_import_without_loading_redis - AssertionError: assert ['fakeredis', 'redis'] == []`.
+The assertion message maps each loaded library to the first test module that loaded it.
+
+### Delivery evidence
+
+[Pull request 4388](https://github.com/the-cloud-clockwork/agentihooks/pull/4388)
+added the step; it merged into `dev` on 2026-10-18 at 09:52 UTC and applies to
+branch pushes from then on. Its proof planted the same test module with a top
+level `import fakeredis` on both sides:
+
+| Side | Run | Result |
+|---|---|---|
+| Plant on `dev` before the change | [39098955827](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39098955827) | Preflight `success`; no contract step, break not caught |
+| Plant on the change | [39099046126](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099046126) | `plan` failed at **Run the suite speed contracts** 32 seconds after the run started; both fake Redis contracts failed; statistics and shards skipped; the whole run ended after 74 seconds |
+
+On a clean head, [run 39098970804](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39098970804)
+ran the contracts in about ten seconds and passed; the whole `plan` job took
+54 seconds against its ten minute timeout. The contract names in these runs
+predate the current worker group rule, which now refuses the mark instead of
+requiring one.
+
+The source task counted branches whose push preflight passed and whose pull
+request Tests run then failed a suite speed contract. The day before the change,
+2026-10-17 05:00 to 2026-10-18 05:00 UTC, read 1 such branch across 117 failed
+pull request Tests runs. No count for the day after the merge is recorded.
+
+### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Preflight fails at **Run the suite speed contracts** | A contract broke. Move the `fakeredis` or `redis` import into a fixture or test, or remove the module's `xdist_group` mark, then push again |
+| The step reads `skipped` although a test changed | The changed file does not match `tests/.../test_*.py`, such as `conftest.py` or a helper module, or the branch has an open pull request into `dev`. The pull request tier still runs the contracts |
+| **Import probe exited** with a traceback | A test module that names `fakeredis` fails to import at all. Fix the import error the stderr shows |
+| Preflight passed, then the pull request shards failed a contract | The preflight ran before the break was pushed, or skipped the step for one of the reasons above. Read the pull request run's failing test name; the fix is the same |
+
 ## Measured shards and split mutants
 
 The preflight collects shared function-to-test coverage and test durations, then its `refine` job builds the measured plan. Expensive mutants are placed first on the least loaded shard. A survivor must run all its covering tests, which can leave one shard running long after shards whose mutants were killed early.

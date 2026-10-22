@@ -22,6 +22,7 @@ ENDINGS = "launch-endings"
 PENDING = "hive launch ordered, waiting for its acknowledgement"
 GONE = "the hive launch order ended before its acknowledgement"
 EXPIRED = "hive launch acknowledgement expired"
+LATE = "hive launch reservation expired"
 
 
 @dataclass(frozen=True)
@@ -286,6 +287,7 @@ class HiveLaunch:
             if previous.state in ("ended", "finished"):
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif self.abandoned(order, previous):
+                self.reap(order, previous)
                 self.end(previous, "hive launch order abandoned")
             elif self.unacknowledged(order):
                 self.retire(order, previous)
@@ -354,6 +356,12 @@ class HiveLaunch:
             self.retire(order, previous)
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
         return self.spawn(request)
+
+    def expire(self, request: SpawnRequest) -> None:
+        order = self.orders_for(request.task["id"])
+        previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
+        if previous and previous.name == request.name and previous.state not in ("ended", "finished"):
+            self.retire(order, previous)
 
     def reserve_room(self, request: SpawnRequest, selected: Selection) -> str:
         if selected.master_placement is not None:
@@ -437,7 +445,10 @@ class HiveLaunch:
         _match("pane", agent.pane_id, ack.execution.get("pane_id", agent.pane_id))
         _match("state", "working", agent.state)
         if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(agent.execution_id):
-            return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch reservation expired")
+            self.reap(order, agent)
+            self.end(agent, LATE)
+            self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
+            return Outcome("spawn", Status.REFUSED, HIVE, detail=LATE)
         placed = Placed(
             agent.pane_id,
             agent.harness,

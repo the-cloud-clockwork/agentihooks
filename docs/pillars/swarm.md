@@ -653,11 +653,11 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
 | `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
-| `agentihooks swarm <id> branch` | Record the current worktree branch on the task once it is on origin, with its repository (`branch_repo`, the origin remote without credentials), so dependent tasks can start from it. |
+| `agentihooks swarm <id> branch` | Record the published branch and its repository (`branch_repo`, the origin remote without credentials). When the local branch tracks `origin/<task branch>`, retain that recorded task branch even when the local name differs; otherwise use the local branch. The selected branch must exist on origin. See [recording a published upstream branch](#recording-a-published-upstream-branch). |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. Rounds spent before the task records a pull request, on its first pull request and on each later one, count on separate counters ([Review round counters](#review-round-counters)). |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
 | `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; their swarm owners receive an inbox message. Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. Each reorder, deferral, replay and restore is recorded in the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
-| `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue. Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff and leave the worktree in place; a green ejection with no failed merge group run of its own is queued again instead ([Ready merge pass queue exits](#ready-merge-pass-queue-exits)). Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
+| `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue ([Ready on a task of any kind](#ready-on-a-task-of-any-kind)). Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff and leave the worktree in place; a green ejection with no failed merge group run of its own is queued again instead ([Ready merge pass queue exits](#ready-merge-pass-queue-exits)). Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. A dependency that is not `done` turns the block into a checked wait on that task instead, keeping the claim. Before blocking, refuses while a task worktree holds commits its remote branch lacks, naming the push to run, and records a pushed branch on the task; see [Blocking with unpushed commits](#blocking-with-unpushed-commits). |
 | `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
@@ -986,16 +986,23 @@ worker's branch name:
 | Restacking removed that ancestry, and no other eligible recorded branch passes the ancestry check | Use the prepared checkout's own branch. The parked predecessor branch stays at its previous head. |
 | No recorded branch exists, or its local `origin` ref is missing | Use the prepared checkout's own branch unless another recorded candidate passes the ancestry check. A missing ref does not print a fatal Git diagnostic. |
 
-The current implementation checks a retained continuation from the handoff or
-reclaim record first, then the branch supplied by repository and checkout
-selection. Each candidate must pass the ancestry check. Inside a task worktree,
-checkout selection supplies the local branch; preserving a predecessor target
-there requires a retained handoff or reclaim continuation. From a primary
-checkout, selection can instead supply the task's recorded repository branch.
-In those continuation contexts, a different local branch name alone does not
-require a new remote branch: even parked work stays on an eligible recorded
-branch when it still fast forwards, including when there were no task commits
-beyond the stacked base.
+The current implementation tries these candidates in order, accepting the first
+whose local `refs/remotes/origin/` ref is an ancestor of `HEAD`:
+
+1. The retained continuation from the handoff or reclaim record.
+2. The checkout's tracked upstream, when it names a branch in the task's
+   `branch` or `repository_branches` records and is not `dev`, `main`, `master`
+   or `v1`. An upstream belonging to another task is not followed merely
+   because Git tracks it.
+3. The branch supplied by repository and checkout selection.
+
+Inside a task worktree, checkout selection supplies the local branch. From a
+primary checkout, it can supply the task's recorded repository branch. A
+successor's different local name therefore does not require a new remote
+branch: a recorded upstream can preserve the delivery target even when the
+handoff envelope has no continuation, or the repository branch entry still
+holds a stale local name. If no candidate passes, publication uses the local
+branch.
 
 After a successful push, the result's `branch` names the actual target and
 `head` names the published commit. The task records that target in `branch` and
@@ -1012,12 +1019,20 @@ pushed. This removes the second branch push that previously started another
 Mutation preflight for the same commit. The `push-stop` gate uses the same
 retained target when it pushes committed work at Stop.
 
-The retained target comes from `continue_from` in the task's handoff envelope,
-or its reclaim record when there is no nonempty handoff envelope. It must name
-an `origin/` branch, and its local remote tracking ref must be an ancestor of
-`HEAD`. The protected names `dev`, `main`, `master` and `v1` are excluded from
-retained targets. A fresh continuation supplies no retained target. These are
-runtime records; no new flag or environment variable enables this behavior.
+For `publish`, the retained target can come from `continue_from` in the
+handoff envelope, its reclaim record when there is no nonempty handoff
+envelope, or the task-recorded upstream described above. `prepare` uses the
+same branch selection, records the delivery target separately for each
+repository, and sets a differently named local branch to track
+`origin/<delivery branch>`. Its returned `branch` names that delivery target,
+not necessarily the local branch printed by `git branch --show-current`.
+This works without a continuation in the handoff envelope.
+
+The `push-stop` path uses the handoff or reclaim continuation; it does not
+perform `publish`'s additional recorded-upstream selection. Its retained target
+must name an `origin/` branch whose tracking ref is an ancestor of `HEAD`;
+`dev`, `main`, `master` and `v1` are excluded. These are runtime records and Git
+upstream settings; no new flag or environment variable enables the behavior.
 
 For example, a successor may prepare a local branch with its own worker name
 while its handoff retains the predecessor's pull request branch. Work in the
@@ -1064,6 +1079,62 @@ and [successful mutation preflight](https://github.com/the-cloud-clockwork/agent
 Those proofs establish the tested branch selection and gate results; inspecting
 one live continuation's workflow runs is a separate operational check.
 
+### Recording a published upstream branch
+
+Run `swarm branch` in the successor's worktree to record an already published
+branch. It keeps the task's existing `branch` when the local upstream is
+exactly `origin/<that branch>`. Otherwise it records the local branch. It
+checks that the chosen branch exists on origin; it does not push commits or
+update the per-repository `repository_branches` map. `prepare` and `publish`
+maintain that map.
+
+For a task already recording `delivery-fix`, a successor with local branch
+`successor-work` can track the existing delivery branch without renaming its
+local branch:
+
+```bash
+git fetch origin
+git branch --set-upstream-to=origin/delivery-fix
+agentihooks swarm <id> branch
+```
+
+The command returns `branch: delivery-fix`, `branch_repo` and the task name,
+plus its existing `pr_url` when present. An arbitrary upstream is insufficient:
+the task must already record `delivery-fix`. No upstream, an upstream on
+another remote, or an upstream for another recorded name leaves selection on
+the local branch. A detached checkout is refused.
+
+Compare all three records from the task worktree; replace the task identifier
+and pull request number:
+
+```bash
+git branch --show-current
+git rev-parse --abbrev-ref '@{upstream}'
+agentihooks ledger --slug <id> show | jq \
+  '.tasks[] | select(.id == "TASK") | {branch, branch_repo, repository_branches, pr_url}'
+gh api 'repos/{owner}/{repo}/pulls/PR_NUMBER' \
+  --jq '{branch: .head.ref, head: .head.sha}'
+```
+
+The local name may differ. For a continuation updating an existing pull
+request, the published target and the pull request head branch should agree.
+
+| Symptom | Action |
+|---|---|
+| `branch <name> is not on origin; push it first ...` | The selected branch has not been published. Check the task's recorded branch and local upstream before following the suggested push; publish the intended delivery target rather than creating a duplicate branch. |
+| `swarm branch` records the successor's local name | Its upstream does not exactly match the task's recorded `origin/<branch>`. Confirm the pull request head and task record before configuring the upstream. |
+| `publish` selects a new branch despite an upstream | Check that the upstream is task-recorded, unprotected, and its local origin ref is an ancestor of `HEAD`. Fetch origin and reconcile divergent history; selection does not repair it. |
+| `branch` agrees with the pull request but `repository_branches` still names an old local branch | `swarm branch` writes only `branch` and `branch_repo`. A successful `prepare` or `publish` records the selected delivery target in the repository map. |
+
+[Pull request 4418](https://github.com/the-cloud-clockwork/agentihooks/pull/4418)
+delivered the preparation and publication correction. Its reported incident
+started four duplicate preflights on a successor's new branch before the same
+commits reached the existing pull request branch. The focused regression was
+[red](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39104180650)
+and then [green](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39104598310).
+These runs prove the tested selection behavior; they do not establish a live
+before and after count of mismatched task branches or duplicate preflights.
+
 ### Resume parked work and publish
 
 Use this sequence as the task's current worker, after reading its handoff and
@@ -1083,7 +1154,9 @@ cd <returned-worktree>
 agentihooks swarm <id> restack
 ```
 
-A rebase conflict leaves the parked list intact. Resolve the reported files,
+A successful `restack` clears the prepared upstream, so a parked successor can
+publish its own branch after rebasing onto `dev`. A rebase conflict leaves the
+parked list intact. Resolve the reported files,
 stage the resolved files explicitly, run `git rebase --continue`, and run
 `swarm restack` again to finish. Once restacking succeeds and the task changes
 are ready, publish the selected files:
@@ -1982,7 +2055,7 @@ the newest `dev`, and the agent also merges `dev` when GitHub refuses the enqueu
 
 ### Split tasks across pull requests
 
-A `code` or `ci` task can declare several plan line ranges for separate pull requests while keeping one task and its completion proof. Declare the split **before recording any pull request**. The ranges must be ordered, must not overlap and, when the task has `plan_lines`, must cover that range completely.
+A `code` or `ci` task can declare two to four halves for separate pull requests while keeping one task and its completion proof. A planned task names each half by a plan line range; a task with no plan names each half by a label (see [Labelled halves for tasks without a plan](#labelled-halves-for-tasks-without-a-plan)). Declare the split **before recording any pull request**. The ranges must be ordered, must not overlap and, when the task has `plan_lines`, must cover that range completely.
 
 For example, a task covering plan lines 1 through 20 can declare two halves:
 
@@ -2012,6 +2085,45 @@ agentihooks swarm <id> done --pr <final-pull-request-url>
 ```
 
 When the worker keeps the task, the merged final half still requires `done`. Completion refuses a missing half or any recorded pull request that is open, closed without merging or unreadable on GitHub. There is no separate configuration switch for the between-halves reset; the declared split and recorded merge state determine it.
+
+#### Labelled halves for tasks without a plan
+
+Standalone tasks, such as follow ups and operator orders, carry no `plan_lines` and no `plan_slice`, so they have no plan line ranges to split. Such a task names its halves by label instead, for example a compatibility change and a stacked repair:
+
+```bash
+agentihooks ledger --slug <id> --as <agent> \
+  task split <task> compatibility repair
+```
+
+The ledger stores the labels in `split` in the order given, and that order is the half order. Everything after the split works as it does for ranges: record each pull request with `swarm pr <url> --half <n>` in order, `split_pulls` keeps each half's pull request, the stop guard resets the active link between halves, and `done` and `ready` complete the task only when every declared half has a merged pull request.
+
+```bash
+agentihooks swarm <id> pr <compatibility-pull-request-url> --half 1
+agentihooks swarm <id> pr <repair-pull-request-url> --half 2
+```
+
+The ledger reads the halves as labels when any one of them is not a plan line range (`<first>-<last>`, such as `11-20`). Labels follow these rules:
+
+| Rule | Refusal |
+|---|---|
+| Two to four halves | `halves: 2 to 4` |
+| Every half is a non-empty label, or every half is a plan line range; labels and ranges never mix | `halves: plan line ranges` |
+| Labels are distinct | `halves: distinct labels` |
+| Labels only on a task with neither `plan_lines` nor a `plan_slice`; a planned task with labels is refused | `halves: plan line ranges` |
+
+The first three rules are checked when the ledger receives the split. The last is checked against the task when the split is applied, and its refusal is recorded as a ledger warning that names the task, such as `tasks/t7: halves: plan line ranges`.
+
+A planned task still needs plan line ranges: labelled halves on a task with `plan_lines` or a `plan_slice` are refused, and its ranges must still cover its plan lines. The other split refusals in the [table below](#split-refusals-and-stop-messages) apply to labelled halves unchanged.
+
+The intent check grades a labelled half by the task description with a note naming the half's label and the labels of the other halves, and reads no plan chunk. For the split above, the second pull request is judged on the description followed by:
+
+```text
+This pull request is half 2 of 2 of a split task: it carries only repair; half 1 carries compatibility in its own pull request.
+```
+
+A labelled split's task contract carries no plan lines, so a `plan_lines` value set after the split does not enter the verdict's contract. Merge matching of each half is the same as for ranged halves; see [Intent grading of each half](#intent-grading-of-each-half).
+
+Delivered by [pull request 4509](https://github.com/the-cloud-clockwork/agentihooks/pull/4509). Its proofs show labelled halves refused with `halves: plan line ranges` before the change ([red](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39127532741)) and accepted with their order kept, while a planned task without ranges is still refused ([green](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39127535288)). The behavior is pinned by `tests/swarm_ledger/test_task_split.py`, `tests/gates/test_intent_split.py` and `tests/swarm/test_split_pr.py`.
 
 #### Ready handoffs for split tasks
 
@@ -2046,7 +2158,7 @@ Delivered by [pull request 3290](https://github.com/the-cloud-clockwork/agentiho
 
 #### Intent grading of each half
 
-The [intent check](#commands) judges each half as its own pull request. When `swarm pr` records a half, the intent prompt names that half and its plan lines, notes which plan lines the other halves carry, and reads only that half's plan slice. Each recorded half keeps its own verdict, head and input fingerprint, so a `gh pr merge` of one half reads only that half's verdict.
+The [intent check](#commands) judges each half as its own pull request. When `swarm pr` records a half, the intent prompt names that half and its plan lines, notes which plan lines the other halves carry, and reads only that half's plan slice. A labelled half is named by its label and reads no plan slice. Each recorded half keeps its own verdict, head and input fingerprint, so a `gh pr merge` of one half reads only that half's verdict.
 
 Matching starts once the first half is recorded with `swarm pr <url> --half 1`; before that the task has no intent record, and a merge is not checked. From then on the `intent` gate matches every `gh pr merge` of the task to the half it belongs to before it reads a verdict:
 
@@ -2079,6 +2191,10 @@ A split cannot change which pull request a verdict belongs to. Once the task rec
 | Message or condition | Meaning and action |
 |---|---|
 | `the task has a pull request outside the split` | A pull request was already recorded before the split. The split is refused without changing the task; declare splits before recording the first pull request. |
+| `halves: plan line ranges` | The halves mix labels and ranges, include an empty label, or are labels on a task with `plan_lines` or a `plan_slice`. Give a planned task plan line ranges; give a task without a plan distinct labels only. |
+| `halves: distinct labels` | Two labelled halves share a label. Rename one. |
+| `halves: ordered, not overlapping` | Plan line ranges are out of order or overlap. List them in plan order with no shared line. |
+| `halves: cover plan lines <lines>` | The ranges leave part of the task's `plan_lines` uncovered. Extend them to cover every assigned line. |
 | `a half has a pull request` | A split half already has a recorded pull request, so the split cannot be rewritten. Keep the declared ranges and history. |
 | No open pull request and no wait, after a half merged | The stop guard has moved past the merged half. Continue the next half or declare the real condition being awaited. |
 | A half has no pull request yet | Completion is premature. Record and merge the remaining half before `done`. |
@@ -2087,6 +2203,63 @@ A split cannot change which pull request a verdict belongs to. Once the task rec
 | `Intent requires a pull request registered on this task.` | The merged pull request is not a single recorded half: it is unrecorded, or its bare number matches more than one half. Record it with `swarm pr <url> --half <n>` and wait for its verdict. |
 | `intent for task <task> was judged on <url>, not this pull request. Record this half first: agentihooks swarm <id> pr <pull request url> --half <n>, then wait for its verdict.` | The merged pull request is not the half the verdict was judged on. Follow the command in the message. |
 | `Intent must be checked on this pull request head and contract before it can merge.` | The half has no verdict for its current head or task contract, or its head could not be read. Wait for the tick to judge it, then merge again. |
+
+### Ready on a task of any kind
+
+`swarm ready` releases the seat of any task that records an open pull request, whatever its kind: code, ci, ops, tune, troubleshoot or research. An engineer whose tune or troubleshoot fix waits deep in the merge queue frees its seat the same way a code engineer does, and the tick keeps tracking the merge. The kind decides only what happens after the merge:
+
+| Kind | After the merge |
+|---|---|
+| code, ci | The task closes like `done`, with its group members, and the worktree is removed. |
+| ops, tune, troubleshoot, research, and any other kind | The task returns to `open` with no claimant. Its `pr_url` and the stored handoff stay, `awaiting` is empty, the worktree is removed and the swarm comments: `The swarm merged <url>. This <kind> task stays open for its proof; the next engineer continues it from the handoff its engineer left.` |
+
+A code or ci task that declares post merge proof which is not yet recorded follows the second row too, with `awaiting` set to `verify`; see [Post merge proof](../reference/post-merge-proof.md).
+
+The same requirements apply to every kind. `ready` refuses:
+
+| Refusal | Meaning |
+|---|---|
+| `this swarm runs at <autonomy> autonomy, where the operator approves each merge` | The swarm runs at `manual` or `assist`; follow the ship steps in your prompt. |
+| `record the pull request with swarm pr before swarm ready` | The task has no recorded pull request. A tune or troubleshoot task with no pull request closes with `done` and its proof. |
+| `pull request <url> is merged; close the task with swarm done` | The merge already happened; close with `done` and the proof the kind needs. |
+| `pull request <url> is <state>; swarm ready carries an open pull request` | The pull request is closed. |
+| `pull request <url> is a draft; mark it ready for review with gh pr ready first` | Take it out of draft first. |
+| `the worktree holds uncommitted changes; commit and push them first` | Commit and push, then run `ready` again. |
+| `the pull request head is not this worktree's head; push your last commit before swarm ready` | Push so the pull request head matches the worktree. |
+
+#### Example: a tune task
+
+A tune engineer has measured the value before, changed the setting through a pull request and wants to free its seat while the pull request waits in the queue:
+
+```bash
+agentihooks swarm example pr https://github.com/o/r/pull/812
+gh pr ready https://github.com/o/r/pull/812
+agentihooks ledger --slug example --as engineer@ab12cd-0042 leave
+agentihooks swarm example ready ~/scratchpad/r/t31/handoff.md
+```
+
+The handoff names the measuring command and the value before, so the next engineer can measure the same way. The task stays `pr` with `awaiting` set to `merge` until the merge pass sees the merge, prints `task t31 awaits its proof, https://github.com/o/r/pull/812 merged` and reopens the task. The tick then offers it to the next engineer, who reads the handoff, measures again once the change runs and closes it with the kind's proof:
+
+```bash
+agentihooks swarm example done --command "<the same command>" --output "<values before and after>"
+```
+
+A troubleshoot task closes the same way with `done --root-cause "<cause>" --evidence "<what shows it>" --fix <pr url>`.
+
+Red checks, a closed pull request or a queue ejection reopen a task of any kind with `awaiting` set to `fix`, as listed in [Ready merge pass queue exits](#ready-merge-pass-queue-exits).
+
+#### Current limits
+
+- The opening prompt for ops, tune, troubleshoot and research tasks does not name `swarm ready`; those steps end with `done` and its proof. An engineer of those kinds that holds a queued pull request runs `ready` as shown above.
+- `swarm done` checks the pull request only on code and ci tasks. A task of another kind closes with its proof even while its recorded pull request is still open, and the merge pass then has nothing left to track.
+
+#### Troubleshooting
+
+- **`swarm ready carries a code or ci pull request; this <kind> task closes with swarm done and its proof`.** This refusal was removed by pull request [4502](https://github.com/the-cloud-clockwork/agentihooks/pull/4502). Seeing it means the `agentihooks` that ran predates that change; update the install and run `ready` again.
+- **The pull request merged but the task still reads `pr` with `MERGE`.** The merge pass leaves the task alone while an agent that owns it is still live, and keeps its ready record when another agent holds the task's claim. It retries on each tick once the owner has ended.
+- **A tune task reopened with no `FIX` label after its pull request merged.** That is the expected outcome: the task waits for its proof. Read the swarm's comment on the task and the handoff, then close it with `done` and the proof.
+
+`tests/swarm/test_ready.py` pins this behavior: `test_ready_records_the_pull_request_and_head_and_ends_the_agent` runs for code, ci, tune, troubleshoot and ops tasks; `test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof` covers the reopen; `test_a_merged_pull_request_of_another_kind_waits_while_its_owner_is_live` and `test_a_merged_pull_request_of_another_kind_keeps_its_record_when_the_claim_release_is_refused` cover the two cases where the task is left unchanged. The tests failed first on [run 39126290206](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39126290206) (seven expected failures) and passed on [run 39126356416](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39126356416).
 
 ### Ready merge pass queue exits
 
@@ -3218,6 +3391,90 @@ writers above or `task set`.
   time; set `contract.after_at` or clear the field with `task set ID awaiting=`.
 - **No label appears.** Check the task's `state`: a `done` task never shows one. Otherwise set the field with
   `task set`, never by writing the ledger database.
+
+## Agent status comments
+
+Every agent, the master and the tick's own `swarm` author keep one status comment per ledger item. A new status
+from the same author either amends that comment in place or posts a new comment at the end of the thread. It amends
+only when the author's latest status comment is still the last live entry in the thread. Any later comment, by any
+author, makes the new status a new comment at the end, so the newest status always sits below everything written
+before it.
+
+### Which writes are status comments
+
+| Write | Thread entry |
+|---|---|
+| `ledger comment ITEM TEXT`, with or without `--image` | Status comment: amends or posts by the rule below |
+| `--status T` on `phase`, `followup` and `scope` | Status comment: `T` follows the same rule as `comment` |
+| A comment carrying an outcome, `done` or `blocked` | Always its own entry; no later status amends it |
+| An agent's answer to the operator, an entry with `to` | Always its own entry; it never amends or is amended |
+| The operator's comments on the page | Never amended by any agent |
+
+### The amend rule
+
+For a new status from author A on one item, the ledger reads the thread without deleted entries and takes A's
+latest entry that is not an answer to the operator:
+
+| Thread state | Result |
+|---|---|
+| A has no status comment on the item | New comment at the end |
+| A's latest status comment is the last live entry | Amended in place with the new text; the entry gains `edited_at` and the page shows `edited` |
+| Any live entry follows it: the master, another agent, the operator, the `swarm` tick, or A's own answer to the operator | New comment at the end; the earlier comment keeps its text |
+| A's latest entry carries an outcome | New comment at the end |
+| Only deleted entries follow it | Amended in place, as if the deleted entries were absent |
+
+An amend with the same text and attachments changes nothing. A replayed write with an entry id already in the
+thread is not added twice. Each write records `comment added` or `comment edited` in the ledger events and marks
+the author seen.
+
+### Example
+
+A task's thread holds a claim cap block from `swarm`, then a comment from the master that reopens the task:
+
+```text
+swarm    The swarm blocked this task before a fourth agent life: claimed 3 times, cap 3. ...
+master   Reopened by the master: ...
+```
+
+When the tick blocks the task again, its new notice posts at the end:
+
+```text
+swarm    The swarm blocked this task before a fourth agent life: claimed 3 times, cap 3. ...
+master   Reopened by the master: ...
+swarm    The swarm blocked this task before a fourth agent life: claimed 3 times, cap 3. ...
+```
+
+Before [pull request 4332](https://github.com/the-cloud-clockwork/agentihooks/pull/4332), only a later comment by
+the operator started a new entry. The second block notice amended the first one above the master's comment, so the
+thread looked unchanged and the master read the task as blocked with no reason. On 17 October two block notices
+were hidden that way; the rule above brings that count to zero.
+
+### Checking a thread
+
+Print one item's thread in order, with who wrote each entry and whether it was amended:
+
+```bash
+agentihooks ledger --slug SLUG show \
+  | jq -r '.tasks[] | select(.id == "t325") | .comments[]
+           | [.by, (if .edited_at then "edited" else "" end), (.outcome // ""), .text] | @tsv'
+```
+
+Use `.phases[]` or `.followups[]` for other items. The last row is the newest status. A row marked `edited` was
+amended in place and was the last live entry when it changed.
+
+### Troubleshooting
+
+- **A status appears as a new comment instead of amending the earlier one.** Someone wrote in the thread after
+  it, or the earlier entry carries an outcome. This is expected; the earlier comment keeps its text.
+- **An earlier comment's text changed after later comments were added.** Check its `edited_at` against the `at` of
+  the entries below it. An edit after them comes from an explicit `ledger edit` by its author or the master, never
+  from a status write.
+- **Several status comments from one author pile up.** Each one followed a later entry by someone else. Delete
+  stale ones with `ledger delete ITEM ENTRY`.
+
+The rule lives in the ledger's comment handling and is pinned by its tests for later comments by the master,
+another agent and the author's own answer, for an amend when the comment ends the thread, and for a deleted later
+comment. The swarm ledger skill states the same rule for agents.
 
 ## Ledger artifacts
 

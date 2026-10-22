@@ -289,7 +289,14 @@ agentihooks ledger --slug <id> --as <agent> \
   task split <task> 1-10 11-20
 ```
 
-Ranges are ordered, non-overlapping plan lines and must cover the task's assigned plan lines when present. A task with a recorded pull request, or a split with a recorded half, refuses the change. See [Split tasks across pull requests](../pillars/swarm.md#split-tasks-across-pull-requests) for recording each half, the automatic active-link reset between merges, completion and troubleshooting.
+Ranges are ordered, non-overlapping plan lines and must cover the task's assigned plan lines when present. A task with a recorded pull request, or a split with a recorded half, refuses the change. A task with no `plan_lines` and no `plan_slice` can name its halves by distinct labels instead, kept in the order given:
+
+```bash
+agentihooks ledger --slug <id> --as <agent> \
+  task split <task> compatibility repair
+```
+
+Labels and ranges never mix, and a planned task still needs ranges. See [Split tasks across pull requests](../pillars/swarm.md#split-tasks-across-pull-requests) for recording each half, the automatic active-link reset between merges, completion and troubleshooting.
 
 ---
 
