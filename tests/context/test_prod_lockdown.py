@@ -283,8 +283,12 @@ def test_swarm_session_cannot_run_the_raw_enqueue_mutation(monkeypatch, command)
     from hooks.hook_manager import BlockAction
 
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
-    with pytest.raises(BlockAction, match=r"agentihooks swarm rig merge queue <url>"):
+    with pytest.raises(BlockAction) as blocked:
         _check(command)
+    assert str(blocked.value) == (
+        "BLOCKED [raw enqueuePullRequest in a swarm]: the swarm queue command records every merge queue "
+        "entry in its journal. Queue it with `agentihooks swarm rig merge queue <url>`."
+    )
 
 
 @pytest.mark.parametrize(

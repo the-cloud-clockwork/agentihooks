@@ -337,8 +337,7 @@ def _check_swarm_enqueue(command: str) -> None:
 
 def _runs_enqueue(node: Node) -> bool:
     if node.type == "command" and b"enqueuePullRequest" in node.text:
-        name = node.child_by_field_name("name")
-        program = Path(name.text.decode()).name if name else ""
+        program = Path(node.child_by_field_name("name").text.decode()).name
         arguments = [
             child.text.decode()
             for index, child in enumerate(node.named_children)
