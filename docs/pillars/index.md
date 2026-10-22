@@ -34,4 +34,6 @@ See [hive endpoint limits](hives.md#hive-endpoint-limits) for the hive endpoint 
 
 See [promotion fixer intake](swarm.md#promotion-fixer-intake) for how one swarm per repository files and closes promotion fixer tasks, hands intake over and shows its owner.
 
+See [agent status comments](swarm.md#agent-status-comments) for when an agent's status comment amends its earlier one and when it posts a new comment at the end.
+
 See [ledger artifacts](swarm.md#ledger-artifacts) for what the ledger accepts as an artifact, a master's plan publish, the two checks and refusal troubleshooting.
