@@ -140,6 +140,28 @@ def test_an_unfinished_tier_uses_now(event):
     assert finding.measure == 901
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+@pytest.mark.parametrize("status", ["queued", "in_progress"])
+@pytest.mark.parametrize("conclusion", ["success", "failure", "cancelled"])
+def test_run_timing_is_judged_only_after_completion(event, status, conclusion):
+    first = job(307, created=-1200)
+    run = record([first], event, status=status)
+    for seconds in [0, 60, 409]:
+        found = ci_speed.findings([run], NOW - 60000, NOW + seconds * 1000)
+        assert not [entry for entry in found if entry.kind in {"ci runner wait", "ci tier wall time"}]
+    first.update(status="completed", completed_at=stamp(409))
+    run.update(status="completed", conclusion=conclusion)
+    found = ci_speed.findings([run], NOW + 408000, NOW + 409000)
+    if conclusion == "cancelled":
+        assert found == []
+    else:
+        assert [(entry.kind, entry.measure) for entry in found] == [
+            ("ci runner wait", 307),
+            ("ci tier wall time", 1609),
+        ]
+        assert ci_speed.findings([run], NOW + 409000, NOW + 900000) == found
+
+
 def test_every_crossing_is_reported_without_a_display_limit():
     records = [record([job(301)], identity=n) for n in range(150)]
     assert len(ci_speed.findings(records, NOW - 2000000, NOW)) == 150
