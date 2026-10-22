@@ -127,9 +127,11 @@ def node(number, position, head, base, *, jump=False, enqueued="2026-10-16T00:30
 
 
 class Gh:
-    def __init__(self, fail=None, more=False):
+    def __init__(self, fail=None, more=False, runs=(), ahead=()):
         self.fail = fail
         self.more = more
+        self.runs = list(runs)
+        self.ahead = list(ahead)
         self.calls = []
 
     def __call__(self, command, **kwargs):
@@ -140,14 +142,17 @@ class Gh:
             data = {
                 "repos/org/repo/actions/runs/7": {"created_at": STARTED},
                 "repos/org/repo/git/commits/old": {"parents": [{"sha": "oldparent"}]},
+                "repos/org/repo/actions/runs?event=merge_group&head_sha=oldparent": {"workflow_runs": self.runs},
             }[command[2]]
             return subprocess.CompletedProcess(command, 0, json.dumps(data), "")
         args = dict(item.split("=", 1) for item in command[4::2])
         query = args.pop("query")
-        assert args.pop("url") == PULL + "3505"
+        url = args.pop("url")
         if query == rebuild.QUERY:
-            data = {"resource": {"timelineItems": {"nodes": []}}}
+            assert url in (PULL + "3505", PULL + "4917")
+            data = {"resource": {"timelineItems": {"nodes": self.ahead if url == PULL + "4917" else []}}}
         else:
+            assert url == PULL + "3505"
             assert query == queue_record.GROUPS
             nodes = [
                 node(3505, 2, "new", "h3541"),
@@ -345,3 +350,63 @@ def test_an_unwritable_job_summary_still_prints_the_summary(tmp_path, monkeypatc
     assert out.out.startswith("record queue-rebuild-7-2: ")
     assert out.out.count("\n") == 1
     assert "\njob summary not written: " in out.err
+
+
+def ahead_of(events):
+    return {"pull": PULL + "4917", "events": list(events)}
+
+
+def test_the_removal_of_the_pull_request_in_the_base_ref_names_the_rebuild():
+    events = [removed("2026-10-16T01:00:30Z", reason="FAILED_CHECKS", actor="merge-bot", id="R2"), removed(STARTED)]
+    base = ahead_of([removed("2026-10-16T00:10:00Z", id="R0"), *events, events[0]])
+    assert rebuild.cause(PULL + "3505", STARTED, UNTIL, [group(3505, 1)], [], base) == {
+        "action": "removed_ahead",
+        "pull": PULL + "4917",
+        "actor": "merge-bot",
+        "reason": "FAILED_CHECKS",
+        "at": "2026-10-16T01:00:30Z",
+        "events": ["R2"],
+    }
+
+
+def test_a_base_ref_pull_request_removed_outside_the_group_run_links_nothing():
+    base = ahead_of([removed("2026-10-16T00:10:00Z"), added("2026-10-16T01:05:00Z"), removed("2026-10-16T01:30:00Z")])
+    found = rebuild.cause(PULL + "3505", STARTED, UNTIL, [group(3505, 1)], [], base)
+    assert found == {"action": "unknown", "gap": rebuild.UNSEEN}
+
+
+def test_this_pull_requests_own_requeue_outranks_a_removal_ahead():
+    own = [removed("2026-10-16T01:16:41Z", id="R"), added("2026-10-16T01:16:43Z", actor="ops", id="A")]
+    base = ahead_of([removed("2026-10-16T01:10:00Z")])
+    assert rebuild.cause(PULL + "3505", STARTED, UNTIL, [group(3505, 1)], own, base)["action"] == "requeue"
+
+
+def test_the_record_reads_the_base_ref_pull_request_from_the_old_parents_queue_run():
+    runs = [
+        {"head_branch": "dev"},
+        {"head_branch": "gh-readonly-queue/dev/pr-4917-a4788b6d64511df9993f874f40c1ad8e17317004"},
+    ]
+    ahead = [removed("2026-10-16T01:12:00Z", reason="FAILED_CHECKS", actor="github-merge-queue", id="R9")]
+    record = rebuild.record("", ENV, Gh(runs=runs, ahead=ahead), now=UNTIL)
+    assert record["cause"] == {
+        "action": "removed_ahead",
+        "pull": PULL + "4917",
+        "actor": "github-merge-queue",
+        "reason": "FAILED_CHECKS",
+        "at": "2026-10-16T01:12:00Z",
+        "events": ["R9"],
+    }
+
+
+def test_an_old_parent_on_the_base_branch_has_no_pull_request_ahead():
+    gh = Gh(runs=[{"head_branch": "dev"}], ahead=[removed("2026-10-16T01:12:00Z")])
+    record = rebuild.record("", ENV, gh, now=UNTIL)
+    assert record["cause"]["gap"] == rebuild.CORRELATED
+    assert not [c for c in gh.calls if c[2] == "graphql" and f"url={PULL}4917" in c]
+
+
+def test_the_summary_names_the_removal_ahead():
+    found = {"action": "removed_ahead", "pull": PULL + "4917", "actor": "bot", "reason": "FAILED_CHECKS", "at": "t"}
+    assert (
+        rebuild.summary({"id": "r", "cause": found}) == f"record r: removal of {PULL}4917 ahead by bot (FAILED_CHECKS)"
+    )
