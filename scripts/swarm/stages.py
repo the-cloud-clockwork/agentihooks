@@ -337,7 +337,7 @@ def _held_pieces(pieces: list, held: list[Span]) -> tuple[list, dict]:
     charged, cut = [], {}
     under = [piece for _, piece in pieces]
     for hold in held:
-        edges = {min(max(edge, hold.start), hold.end) for piece in under for edge in piece[1:3]}
+        edges = {min(max(edge, hold.start), hold.end) for _, start, end, *_ in under for edge in (start, end)}
         points = sorted(edges | {hold.start, hold.end})
         for low, high in zip(points, points[1:]):
             for piece in sorted(piece for piece in under if piece[1] <= low and high <= piece[2])[: hold.count]:

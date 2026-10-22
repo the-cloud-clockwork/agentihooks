@@ -501,6 +501,19 @@ def test_a_hold_charges_only_as_many_waiting_tasks_as_spawns_it_held_earliest_re
     assert [charged[task].get(("quota_hold", "codex"), 0.0) for task in ("t2", "t3", "t4")] == [600.0, 300.0, 0.0]
 
 
+def test_a_hold_splits_where_a_waiting_task_starts_or_stops_inside_it():
+    hold = stages.Span("quota_hold", 100_000, 200_000, "codex", 1)
+    starts = (("a", "t1"), 120_000, 300_000, 0, "")
+    stops = (("b", "t2"), 50_000, 150_000, 1, "")
+    spans = (("c", "t3"), 0, 400_000, 2, "")
+    charged, _ = stages._held_pieces([("eng", starts), ("eng", stops), ("eng", spans)], [hold])
+    assert charged == [
+        (1, "quota_hold", "codex", 20.0),
+        (0, "quota_hold", "codex", 30.0),
+        (0, "quota_hold", "codex", 50.0),
+    ]
+
+
 def test_a_piece_held_twice_with_a_gap_keeps_the_claim_wait_around_and_between_the_holds():
     piece = (("k", "t1"), 0, 100, 3, "")
     assert stages._uncut(piece, [(50, 60), (10, 20), (15, 30)]) == [
