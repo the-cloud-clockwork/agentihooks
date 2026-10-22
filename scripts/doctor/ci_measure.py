@@ -59,11 +59,11 @@ def _scope(labels):
 
 
 def _labels(job: dict) -> tuple:
-    return tuple(sorted(set(job["labels"])))
+    return tuple(sorted(dict.fromkeys(job["labels"])))
 
 
 def _pools(runs: list[dict]) -> list[str]:
-    return sorted({_scope(_labels(job)) for run in runs for job in run["jobs"]})
+    return sorted(dict.fromkeys(_scope(_labels(job)) for run in runs for job in run["jobs"]))
 
 
 def _named(runs: list[dict]) -> str:
