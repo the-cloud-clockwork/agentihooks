@@ -69,3 +69,10 @@ def test_active_tasks_still_cross_the_rerun_and_review_thresholds(state):
     assert reruns.measure == 3
     [reviews] = loops(tasks, count=1, reviews={"t1": {"head": 4}})
     assert reviews.measure == 4
+
+
+def test_completed_task_does_not_hide_a_later_active_loop():
+    tasks = {"done": {"state": "done"}, "active": {"state": "claimed"}}
+    [found] = loops(tasks)
+    assert found.subject == "active"
+    assert found.measure == 3
