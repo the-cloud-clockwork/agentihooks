@@ -319,6 +319,12 @@ class HiveLaunch:
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
         return self.spawn(request)
 
+    def expire(self, request: SpawnRequest) -> None:
+        order = self.orders_for(request.task["id"])
+        previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
+        if previous and previous.name == request.name and previous.state not in ("ended", "finished"):
+            self.retire(order, previous)
+
     def reserve_room(self, request: SpawnRequest, selected: Selection) -> str:
         if selected.master_placement is not None:
             return ""
