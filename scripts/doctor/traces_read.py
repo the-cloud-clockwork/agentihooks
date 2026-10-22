@@ -27,7 +27,7 @@ from scripts.swarm.runtime import SWARM_HOME
 
 DEFAULT_HOST = "https://langfuse.homeofanton.com"
 SWARM_PROJECT = "agent-swarm"
-KEY_NAMES = ("LANGFUSE_HOST", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
+CALLER_ROUTE = ("LANGFUSE_HOST", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
 INGRESS = httpx.URL(langfuse_route({})[0]).host
 PAGE = 100
 OBSERVATION_PAGE = 50
@@ -78,7 +78,7 @@ def installed_env(environ: Mapping[str, str]) -> dict[str, str]:
     """The caller's environment with its Langfuse host and keys replaced by the installed swarm telemetry keys,
     so the installed secret only ever reaches the default host."""
     keys = {name.removeprefix("OTEL_"): value for name, value in profile_telemetry.agentihooks_langfuse_keys().items()}
-    return {name: value for name, value in environ.items() if name not in KEY_NAMES} | keys
+    return {name: value for name, value in environ.items() if name not in CALLER_ROUTE} | keys
 
 
 def measured_client(environ: Mapping[str, str]) -> Callable[[str, dict], dict]:
