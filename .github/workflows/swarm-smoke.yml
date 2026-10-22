@@ -18,7 +18,7 @@ jobs:
     env:
       SWARM_SMOKE_IMAGE: local/agentihooks-swarm:clients-check
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
       - name: Pull the Python base with bounded retries
@@ -47,7 +47,7 @@ jobs:
           scripts/packaging/swarm-smoke.sh
           scripts/packaging/hive-join-smoke.sh
           scripts/packaging/compose-hive-smoke.sh
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
           python-version: '3.12'

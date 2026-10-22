@@ -19,17 +19,17 @@ jobs:
       matrix:
         revision: [base, head]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: proof
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ matrix.revision == 'base' && inputs.base || github.sha }}
           path: replay
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           version: '0.12.23'
           checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
@@ -49,7 +49,7 @@ jobs:
           python -m pytest tests/swarm_ledger/row_memory_replay.py -n 0 -s --tb=short
       - name: Retain every RSS sample
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: row-memory-${{ matrix.revision }}
           path: row-memory-${{ matrix.revision }}.json

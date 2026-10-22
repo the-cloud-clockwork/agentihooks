@@ -38,18 +38,18 @@ jobs:
         && 'ghcr.io/the-cloud-clockwork/agentihooks-worker-proof'
         || 'ghcr.io/the-cloud-clockwork/agentihooks-worker' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: ${{ github.event_name == 'release' && '0' || '1' }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Pull the locked worker base with bounded rate limit retries
         run: bash docker/swarm-node/pull-base.sh
       - name: Restore the candidate layers
         id: layers
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/worker-layers
           key: worker-layers-${{ hashFiles('docker/swarm-node/**', 'scripts/swarm_v2/worker_image.py') }}
@@ -142,7 +142,7 @@ jobs:
           github.event_name == 'release'
           || (github.event_name == 'push' || inputs.publish)
           && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/diffcheck/'))
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -178,13 +178,13 @@ jobs:
           mv "$RUNNER_TEMP/worker-layers-next" "$RUNNER_TEMP/worker-layers"
       - name: Save the qualified candidate layers
         if: steps.layers.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/worker-layers
           key: ${{ steps.layers.outputs.cache-primary-key }}
       - name: Upload the attestation
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: swarm-worker-image-attestation
           path: ${{ runner.temp }}/worker-image-attestation
@@ -201,7 +201,7 @@ jobs:
       IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
       RELEASE: ${{ github.event.release.tag_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Build the hive worker on the released worker image
@@ -214,7 +214,7 @@ jobs:
         run: >-
           docker run --rm --tmpfs /home/worker:uid=10001,gid=10001 --entrypoint bash "$IMAGE:${RELEASE#v}"
           -c 'agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"'
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
