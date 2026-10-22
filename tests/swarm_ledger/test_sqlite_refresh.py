@@ -100,5 +100,6 @@ def test_a_write_past_the_recorded_path_limit_falls_back_to_the_whole_rebuild(tm
     rebuilds = []
     original = sqlite.read_rows
     monkeypatch.setattr(sqlite, "read_rows", lambda *a: rebuilds.append(a) or original(*a))
-    assert reader.current("ledger").text == whole(tmp_path).text
+    served = reader.current("ledger")
     assert len(rebuilds) == 1
+    assert served.text == whole(tmp_path).text
