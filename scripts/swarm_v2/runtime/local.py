@@ -24,7 +24,7 @@ from scripts.swarm_v2.runtime.base import (
     legacy,
 )
 
-ENDED_NAMESPACE = "its process namespace has ended"
+ENDED_NAMESPACE = "its process ended with a previous boot"
 
 
 def _failed(operation: str, exc: SpawnError) -> Outcome:
@@ -93,13 +93,19 @@ class LocalHerdrRuntime:
         if legacy(agent) or reports.host(agent) or live_binding.managed(agent):
             retired = self.herdr.retire(agent, homes=homes)
         else:
-            pid = process.resolve(agent, self.namespace(), self.table())
-            # A host_id reaching here names this host, and its pane belonged to the herdr that ended with it.
-            if pid is Unqualified.FOREIGN_NAMESPACE and agent.runtime_target.get("host_id"):
-                return Outcome("terminate", Status.OK, LOCAL, detail=ENDED_NAMESPACE)
-            if isinstance(pid, Unqualified):
-                return Outcome("terminate", Status.REFUSED, LOCAL, pid, pid.value)
-            retired = self.herdr.retire_process(agent, pid, homes, agent.runtime_target["pid_start"])
+            namespace = self.namespace()
+            ended_boot = process.previous_boot(agent.runtime_target.get("process_namespace", ""), namespace)
+            pid = process.resolve(agent, namespace, {} if ended_boot else self.table())
+            if pid is Unqualified.FOREIGN_NAMESPACE and ended_boot:
+                reopened = process.reopened_process(agent)
+                if reopened is None:
+                    return Outcome("terminate", Status.OK, LOCAL, detail=ENDED_NAMESPACE)
+                pid, start = reopened.pid, reopened.start_time
+            else:
+                if isinstance(pid, Unqualified):
+                    return Outcome("terminate", Status.REFUSED, LOCAL, pid, pid.value)
+                start = agent.runtime_target["pid_start"]
+            retired = self.herdr.retire_process(agent, pid, homes, start)
         if retired:
             return Outcome("terminate", Status.OK, LOCAL)
         refusal = self.herdr.refusal(agent)
