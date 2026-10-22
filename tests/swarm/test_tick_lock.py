@@ -210,6 +210,7 @@ def test_read_strips_a_file_and_reads_a_missing_one_as_empty(tmp_path):
     ],
 )
 def test_a_holder_from_an_ended_boot_of_this_machine_is_dead(monkeypatch, machine, lock, dead):
+    monkeypatch.setattr(controller, "_contained", lambda: False)
     monkeypatch.setattr(controller, "_host", lambda: "boot:ns")
     monkeypatch.setattr(controller, "_read", lambda path: machine if path == "/etc/machine-id" else "")
     monkeypatch.setattr(controller, "_gone", lambda pid, start: pid == 7)
