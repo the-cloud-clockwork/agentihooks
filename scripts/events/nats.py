@@ -239,9 +239,11 @@ class NatsBus:
 
     def close(self) -> None:
         with self._lock:
-            if not self._loop.closed:
-                self._loop.run(self._nc.close())
-            self._loop.close()
+            try:
+                if not self._loop.closed:
+                    self._loop.run(self._nc.close())
+            finally:
+                self._loop.close()
 
 
 def open_bus(config: BusConfig) -> NatsBus:
