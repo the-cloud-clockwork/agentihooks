@@ -124,13 +124,32 @@ def test_bare_class_prints_every_scope_over_the_stated_window(actions, capsys):
         ("ci-tier-wall-time/10-2", ci_measure.Target("ci-tier-wall-time", 10, 2)),
         ('ci-runner-wait/20-1-["a-b", "c"]', ci_measure.Target("ci-runner-wait", 20, 1, ("a-b", "c"))),
         ("ci-queue-age-unconfirmed/20-3-117", ci_measure.Target("ci-queue-age-unconfirmed", 20, 3)),
+        ('ci-runner-wait/["anton-oss"]', ci_measure.Target("ci-runner-wait", scope="anton-oss")),
+        ('ci-runner-wait/1792617600000-["anton-oss"]', ci_measure.Target("ci-runner-wait", scope="anton-oss")),
+        ('ci-runner-wait/["b", "a", "b"]', ci_measure.Target("ci-runner-wait", scope="a, b")),
+        ("ci-queue-age-unconfirmed/[]", ci_measure.Target("ci-queue-age-unconfirmed", scope="unassigned")),
+        ("ci-tier-wall-time/pull_request", ci_measure.Target("ci-tier-wall-time", scope="pull request")),
+        ("ci-tier-wall-time/1792617600000-merge_group", ci_measure.Target("ci-tier-wall-time", scope="queue")),
     ],
 )
 def test_targets_parse_run_attempt_and_labels(finding, expected):
     assert ci_measure.target(finding) == expected
 
 
-@pytest.mark.parametrize("finding", ["ci-tier-wall-time/x-1", "ci-tier-wall-time/10", 'ci-runner-wait/1-1-["a"'])
+@pytest.mark.parametrize(
+    "finding",
+    [
+        "ci-tier-wall-time/x-1",
+        "ci-tier-wall-time/10",
+        'ci-runner-wait/1-1-["a"',
+        'ci-tier-wall-time/["anton-oss"]',
+        "ci-runner-wait/pull_request",
+        "ci-runner-wait/12-push",
+        'ci-runner-wait/"anton-oss"',
+        "ci-runner-wait/[1]",
+        'ci-runner-wait/["a"',
+    ],
+)
 def test_a_subject_without_a_run_attempt_is_refused(finding):
     with pytest.raises(SwarmError, match="names no run attempt"):
         ci_measure.target(finding)
@@ -305,3 +324,53 @@ def test_the_class_reads_active_jobs_up_to_now_not_the_window_end(monkeypatch):
         "ci-queue-age-unconfirmed anton-oss, window 1970-01-01T00:00:00Z to 2026-10-17T21:00:00Z: "
         "1 of 1 runs over 900 seconds, median 4000 seconds, worst 4000 seconds"
     ]
+
+
+def emitted(window_ms):
+    from scripts.doctor import ci_speed
+
+    return sorted(finding.id for finding in ci_speed.grouped(ci_speed.group({}, WINDOW, 0, NOW, window_ms, [])))
+
+
+GROUP_LINES = {
+    'ci-runner-wait/["anton-oss-light"]': "ci-runner-wait anton-oss-light, window 2026-10-17T21:00:00Z to "
+    "2026-10-17T22:00:00Z: 1 of 1 runs over 300 seconds, median 440 seconds, worst 440 seconds",
+    "ci-tier-wall-time/merge_group": "ci-tier-wall-time queue, window 2026-10-17T21:00:00Z to 2026-10-17T22:00:00Z: "
+    "1 of 1 runs over 900 seconds, median 2000 seconds, worst 2000 seconds",
+    "ci-tier-wall-time/pull_request": "ci-tier-wall-time pull request, window 2026-10-17T21:00:00Z to "
+    "2026-10-17T22:00:00Z: 2 of 3 runs over 900 seconds, median 952 seconds, worst 1200 seconds",
+}
+
+
+def test_detector_ids_measure_their_label_set_or_tier_over_the_window(actions, capsys):
+    window = NOW - NOW % 600000
+    stable = emitted(window)
+    assert stable == emitted(window - 600000)
+    assert stable == [
+        'ci-runner-wait/["anton-oss-light"]',
+        "ci-tier-wall-time/merge_group",
+        "ci-tier-wall-time/pull_request",
+    ]
+    legacy = {finding.replace("/", f"/{window}-", 1): finding for finding in stable}
+    capsys.readouterr()
+    for finding, stable_id in [*zip(stable, stable), *legacy.items()]:
+        assert doctor.main([WATCHED, "measure", finding]) == 0
+        assert lines(capsys) == [GROUP_LINES[stable_id]]
+    assert actions == [(NOW - HOUR_MS, NOW)] * 6
+
+
+def test_a_detector_id_takes_journal_bounds(actions, capsys):
+    capsys.readouterr()
+    flags = ["--since", "2026-10-17T19:00Z", "--until", "2026-10-17T21:00Z"]
+    assert doctor.main([WATCHED, "measure", "ci-tier-wall-time/merge_group", *flags]) == 0
+    assert lines(capsys) == [
+        "ci-tier-wall-time queue, window 2026-10-17T19:00:00Z to 2026-10-17T21:00:00Z: "
+        "1 of 1 runs over 900 seconds, median 2000 seconds, worst 2000 seconds"
+    ]
+    assert actions == [(NOW - 3 * HOUR_MS, NOW - HOUR_MS)]
+
+
+def test_a_malformed_detector_id_fails_at_the_measure_entry_point(actions, capsys):
+    assert doctor.main([WATCHED, "measure", "ci-tier-wall-time/1792617600000-push"]) == 1
+    assert "names no run attempt" in capsys.readouterr().err
+    assert actions == []

@@ -160,7 +160,7 @@ def test_a_finding_superseded_by_a_corrected_read_is_retracted(store, monkeypatc
     monkeypatch.setattr(ci_speed_read, "read", read)
     cli.timer(store, DOCTOR, FOUND_AT, False)
     details = store.redis.hgetall(store.key(DOCTOR, "doctor-details"))
-    raised = f'ci-queue-age-unconfirmed/{FOUND_AT - FOUND_AT % 600000}-["anton-oss-light"]'
+    raised = 'ci-queue-age-unconfirmed/["anton-oss-light"]'
     assert list(details) == [raised]
     cli.timer(store, DOCTOR, FOUND_AT + 60000, False)
     assert raised not in store.redis.hgetall(store.key(DOCTOR, "doctor-details"))

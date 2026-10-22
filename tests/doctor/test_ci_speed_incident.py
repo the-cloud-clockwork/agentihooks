@@ -405,7 +405,7 @@ def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents
         ],
     }
     groups = ci_speed.group({}, [retry, wall], start, now, window, incidents)
-    assert sorted(groups) == [f"ci-queue-age-unconfirmed/{window}-[]", f"ci-tier-wall-time/{window}-merge_group"]
+    assert sorted(groups) == ["ci-queue-age-unconfirmed/[]", "ci-tier-wall-time/merge_group"]
     queued, tier = sorted(ci_speed.grouped(groups), key=lambda finding: finding.kind)
     assert queued.summary == "unassigned jobs read as queued up to 20.00 minutes in 1 run"
     assert queued.evidence[:2] == (
@@ -416,3 +416,61 @@ def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents
     assert tier.summary == "queue tier took up to 30.00 minutes in 1 run"
     assert tier.evidence[1] == "1 of these runs had jobs created during the GitHub incident Actions delays"
     assert tier.threshold == "tier wall time over 15 minutes"
+
+
+def stalled_runs():
+    runner = waiting(1, "2026-10-19T16:00:00Z")
+    runner["jobs"][0].update(status="in_progress", started_at="2026-10-19T16:10:00Z", runner_name="r")
+    tier = {
+        "id": 2,
+        "event": "pull_request",
+        "status": "in_progress",
+        "path": ".github/workflows/test.yml",
+        "jobs": [{**runner["jobs"][0], "id": 20, "started_at": "2026-10-19T15:51:00Z"}],
+    }
+    return [runner, tier]
+
+
+def test_two_windows_with_the_same_tier_and_labels_yield_one_finding_id():
+    since, now = iso_ms("2026-10-19T16:00:00Z"), iso_ms("2026-10-19T16:30:00Z")
+    first, second = now - 1200000, now - 600000
+    ids = [
+        sorted(finding.id for finding in ci_speed.grouped(ci_speed.group({}, stalled_runs(), since, now, window, [])))
+        for window in (first, second)
+    ]
+    assert ids[0] == ids[1] == ['ci-runner-wait/["anton-oss", "self-hosted"]', "ci-tier-wall-time/pull_request"]
+
+
+def test_a_later_window_replaces_the_group_it_keeps_for_the_same_id():
+    since, now = iso_ms("2026-10-19T16:00:00Z"), iso_ms("2026-10-19T16:30:00Z")
+    groups = ci_speed.group({}, stalled_runs(), since, now, now - 1200000, [])
+    groups['ci-runner-wait/["anton-oss", "self-hosted"]']["members"]["stale"] = {"order": [0, 1]}
+    ci_speed.group(groups, stalled_runs(), since, now, now - 600000, [])
+    assert sorted(groups) == ['ci-runner-wait/["anton-oss", "self-hosted"]', "ci-tier-wall-time/pull_request"]
+    assert {entry["window"] for entry in groups.values()} == {now - 600000}
+    assert "stale" not in groups['ci-runner-wait/["anton-oss", "self-hosted"]']["members"]
+
+
+@pytest.mark.parametrize(
+    "judged,current,expected",
+    [
+        ('100-["a"]', '["a"]', []),
+        ("100-merge_group", "merge_group", []),
+        ('["a"]', '["a"]', []),
+        ("merge_group", "pull_request", None),
+        ('["a"]', '["a", "b"]', None),
+    ],
+)
+def test_a_verdict_on_a_window_or_stable_id_covers_only_the_same_scope(store, judged, current, expected):  # noqa: F811
+    from dataclasses import replace
+
+    from scripts.swarm.health.findings import Finding
+
+    kind = "ci tier wall time" if "_" in judged else "ci runner wait"
+    original = Finding(kind, judged, "slow", ("text",), "wall time", 900, evidence_identity=("1", 900))
+    loop.record(store, DOCTOR, [original], AFTER, 60000)
+    judgments = loop.verdicts(store, DOCTOR)
+    judgments.judge(original.id, "established", "investigated", "reader", AFTER)
+    later = replace(original, subject=current)
+    found = ci_speed.unjudged([later], store.redis.hgetall(judgments.key), AFTER + 1, 60000)
+    assert found == ([later] if expected is None else expected)

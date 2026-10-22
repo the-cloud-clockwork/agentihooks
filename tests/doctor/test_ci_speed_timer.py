@@ -15,7 +15,7 @@ from tests.doctor.test_ci_speed import NOW, job, record, stamp
 pytestmark = pytest.mark.unit
 DOCTOR = "speed-doctor"
 WATCHED = "speed-watched"
-QUEUED = f'ci-queue-age-unconfirmed/{NOW}-["anton-oss", "self-hosted"]'
+QUEUED = 'ci-queue-age-unconfirmed/["anton-oss", "self-hosted"]'
 
 
 @pytest.fixture
