@@ -30,6 +30,10 @@ class RateLimited(Unreachable):
     pass
 
 
+class HeadUnreadable(SwarmError):
+    pass
+
+
 class Missing(ValueError):
     pass
 
@@ -154,7 +158,7 @@ def _bound(target, run):
     except RateLimited:
         raise
     except UNREADABLE:
-        raise SwarmError("cannot read the branch head; retry the mutation wait") from None
+        raise HeadUnreadable("cannot read the branch head; retry the mutation wait") from None
     if stale:
         raise SwarmError("the mutation run grades a stale head; wait on a run for the branch head")
     return run["head_sha"]
@@ -261,6 +265,8 @@ def resolution(held: dict) -> str:
                 return ""
             try:
                 held["head"] = _bound(held["target"], run)
+            except HeadUnreadable:
+                return ""
             except SwarmError as error:
                 return f"mutation preflight {held['target']}, now red; {error}"
         return _resolve(held)

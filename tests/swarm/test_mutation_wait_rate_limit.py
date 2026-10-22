@@ -86,6 +86,23 @@ def test_an_unreadable_first_pass_keeps_a_pending_admission_open(github, monkeyp
     assert held["head"] is None
 
 
+def test_an_unreadable_branch_head_on_the_first_pass_keeps_a_pending_admission_open(github, monkeypatch):
+    github.limited = False
+    real = subprocess.run
+
+    def api(args, **kwargs):
+        if "/git/ref/heads/" in args[2]:
+            github.asked.append(args[2])
+            return subprocess.CompletedProcess(args, 1, b"", b"HTTP 502")
+        return real(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": None}
+    assert waits.resolution(held, {}, None, None, None, False) == ""
+    assert held["head"] is None
+    assert github.asked == [RUN, "repos/org/repo/git/ref/heads/feature/x"]
+
+
 def test_an_unreadable_quota_endpoint_backs_off_one_minute(github, monkeypatch):
     real = subprocess.run
 
