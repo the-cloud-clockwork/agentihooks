@@ -183,24 +183,56 @@ def test_headroom_publishes_on_its_own_cadence_until_stopped(monkeypatch):
     assert daemon.HEADROOM_SECONDS * 1000 < headroom.STALE_MS
 
 
-@pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError"])
-def test_headroom_keeps_its_cadence_through_a_lost_connection(monkeypatch, capsys, error):
+@pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError", "ResponseError", "JSONDecodeError", "KeyError"])
+def test_headroom_keeps_its_cadence_through_a_failed_publish(monkeypatch, capsys, error):
     from redis import exceptions
 
     from scripts.hive import headroom
 
     calls = []
+    failure = {
+        "JSONDecodeError": json.JSONDecodeError("gone", "", 0),
+        "KeyError": KeyError("gone"),
+    }.get(error) or getattr(exceptions, error)("gone")
 
     def publish(client, hive, now_ms):
         calls.append(now_ms)
         if len(calls) == 1:
-            raise getattr(exceptions, error)("gone")
+            raise failure
 
     monkeypatch.setattr(headroom, "publish", publish)
     monkeypatch.setattr(daemon.time, "time", lambda: 1)
     daemon.publish_headroom(object(), "local", _Stop([False, False, True]))
     assert calls == [1_000, 1_000]
-    assert capsys.readouterr().err == f"hive headroom publish failed ({error}: gone)\n"
+    assert capsys.readouterr().err == f"hive headroom publish failed ({error}: {failure})\n"
+
+
+def test_headroom_keeps_publishing_while_a_beat_blocks(monkeypatch):
+    import threading
+
+    from scripts.hive import headroom
+
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "local")
+    monkeypatch.setattr(daemon, "HEADROOM_SECONDS", 0.01)
+    published = threading.Event()
+    calls = []
+
+    def publish(client, hive, now_ms):
+        calls.append((client, hive))
+        if len(calls) == 3:
+            published.set()
+
+    def beat(redis, hive):
+        assert published.wait(5)
+        raise KeyboardInterrupt
+
+    connection = object()
+    monkeypatch.setattr(headroom, "publish", publish)
+    monkeypatch.setattr(daemon, "beat", beat)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(_once(connection))
+    assert calls[:3] == [(connection, "local")] * 3
 
 
 def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect(monkeypatch):
@@ -208,7 +240,10 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
 
     _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
-    monkeypatch.setattr(daemon, "_back_off", lambda exc, failures: None)
+    backed_off = []
+    monkeypatch.setattr(
+        daemon, "_back_off", lambda exc, failures: backed_off.append([t.args[2].is_set() for t in threads])
+    )
     first, second = object(), object()
     threads = []
 
@@ -237,6 +272,7 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
         (daemon.publish_headroom, (first, "local"), True),
         (daemon.publish_headroom, (second, "local"), True),
     ]
+    assert backed_off == [[True]]
     assert threads[1].args[2].is_set()
 
 

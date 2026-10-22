@@ -129,14 +129,14 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
 
 
 def publish_headroom(redis: "Redis", local_id: str, stop: threading.Event) -> None:
-    from redis.exceptions import ConnectionError, TimeoutError
+    from redis.exceptions import RedisError
 
     from scripts.hive import headroom
 
     while not stop.wait(HEADROOM_SECONDS):
         try:
             headroom.publish(redis, local_id, int(time.time() * 1000))
-        except (ConnectionError, TimeoutError) as exc:
+        except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
 
 
@@ -164,6 +164,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                 scheduled_wait(delay, redis=waiter, timeout=max(delay, BEAT_SECONDS - elapsed - WAKE_SLACK_S / 2))
                 failures = 0
         except lost as exc:
+            stop.set()
             _back_off(exc, failures)
             failures += 1
         finally:

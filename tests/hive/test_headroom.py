@@ -141,6 +141,7 @@ def test_beat_leaves_headroom_with_its_heartbeat_when_a_later_step_fails(redis, 
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
     monkeypatch.setattr(daemon.time, "time", lambda: 12.3456)
+    monkeypatch.setattr(headroom, "measure", lambda pending, now_ms, proc, previous: {"measured_at": now_ms})
 
     def fails(*args):
         raise RuntimeError("herdr timed out")
