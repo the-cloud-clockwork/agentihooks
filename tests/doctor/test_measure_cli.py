@@ -33,8 +33,9 @@ def started(env, monkeypatch, capsys):  # noqa: F811
 
 
 def detecting(monkeypatch, found=(), failing=False):
-    def readers(store, ledger, slug, now):
+    def readers(store, ledger, slug, now, telemetry):
         assert (store is None, ledger is None, slug, now) == (False, False, WATCHED, NOW)
+        assert telemetry is doctor.traces_read.measured_client
         read = {"trace": lambda: list(found)}
         return {**read, "inbox": lambda: 1 / 0} if failing else read
 
@@ -100,7 +101,7 @@ def test_a_reader_finding_is_refused_while_its_reader_timed_out(started, monkeyp
     def timed_out():
         raise TimeoutError
 
-    monkeypatch.setattr(doctor.detect, "readers", lambda *args: {"ci": timed_out, "trace": timed_out})
+    monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {"ci": timed_out, "trace": timed_out})
     code, out, err = measured(capsys, f"trace-reader-unavailable/{WATCHED}.1")
     assert (code, out) == (1, "")
     assert err.splitlines() == [
@@ -161,7 +162,7 @@ def test_the_telemetry_stale_class_counts_a_live_langfuse_finding(started, monke
 
 
 def test_the_telemetry_stale_class_is_refused_when_the_trace_detector_fails(started, monkeypatch, capsys):
-    monkeypatch.setattr(doctor.detect, "readers", lambda *args: {"trace": lambda: 1 / 0})
+    monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {"trace": lambda: 1 / 0})
     code, out, err = measured(capsys, "exporter-backlog")
     assert (code, out) == (1, "")
     assert (
