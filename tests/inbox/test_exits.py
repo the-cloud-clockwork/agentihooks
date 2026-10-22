@@ -630,7 +630,7 @@ def test_the_sweep_settles_a_closed_tasks_agent_with_its_task_outcome(redis, sta
     assert inbox.get(item.id).reason == f"cancelled: sw-eng-1 {exit_text} before closing it"
 
 
-def test_a_sweep_of_settled_agents_reads_the_open_index_once(redis, monkeypatch):
+def test_a_sweep_of_settled_agents_reads_the_open_index_once_per_settle_step(redis, monkeypatch):
     store, inbox = RedisStore(redis), InboxStore(redis)
     store.create(SwarmConfig("sw", "/repo", 0, 0))
     for n in (1, 2, 3):

@@ -2,6 +2,7 @@
 sender told."""
 
 import re
+import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,12 +16,16 @@ UNKNOWN_OWNER = "the agent it was sent to is unknown, so no branch was checked"
 LANE_SEAT = re.compile(r"(eng|ci|plan)-(\d+)@.+")
 
 
-def settle(inbox, name, seat, exit_text):
+def settle(inbox, name, seat, exit_text, worlds=None):
     """seat is where the work goes on, '' when nobody takes it up. A master's mail passes to its successor, or waits
-    for one while none is spawned yet."""
+    for one while none is spawned yet. worlds is the sweep's pass, which skips a world whose Redis stops answering."""
     inbox.seats.record_exit(name, seat, exit_text)
-    for world in inbox.worlds():
-        _settle_world(world, name, seat, exit_text)
+    if worlds is None:
+        for world in inbox.worlds():
+            _settle_world(world, name, seat, exit_text)
+        return
+    for world in list(worlds.up):
+        worlds.run(world, lambda w: _settle_world(w, name, seat, exit_text))
 
 
 def _settle_world(inbox, name, seat, exit_text):
@@ -133,37 +138,38 @@ def notice_address(inbox: "InboxStore", sender: str) -> str:
     return master
 
 
-def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Callable[[], dict]") -> None:
-    """live_rows reads the ledger's tasks at sweep time: a task closed after the tick's own read settles as closed."""
+def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Callable[[], dict]") -> list[str]:
+    """live_rows reads the ledger's tasks at sweep time: a task closed after the tick's own read settles as closed.
+    Returns a line for each world skipped this pass because its Redis timed out or dropped."""
     seats = store.seats.agent_seats(slug)
     live = [agent for agent in store.agents(slug) if agent.state != "finished"]
     active = {agent.name for agent in live}
     tasks = {row.get("claimed_by"): row for row in live_rows().values()}
     gone = [(name, seat) for name, seat in seats if name not in active]
     outcomes = store.seats.exits([name for name, _ in gone])
-    worlds = inbox.worlds()
+    worlds = _WorldPass(inbox.worlds())
     pending = gone
     for _ in range(len(gone)):
-        quiet = set.intersection(*(world.quiet([name for name, _ in pending]) for world in worlds))
+        names = [name for name, _ in pending]
+        quiets = [q for world in list(worlds.up) if (q := worlds.run(world, lambda w: w.quiet(names))) is not None]
+        quiet = set.intersection(*quiets) if quiets else set()
         due = [(name, seat) for name, seat in pending if not (outcomes[name] and name in quiet)]
         if not due:
             break
         pending = [entry for entry in pending if entry not in due]
         for name, seat in due:
-            _settle_gone(inbox, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
+            goes_to, exit_text = _gone_exit(seat, tasks.get(name, {}).get("state"), outcomes[name])
+            settle(inbox, name, goes_to, exit_text, worlds)
     _move_seat_mail(inbox, worlds, live)
-    for world in worlds:
-        _settle_seat_notices(world, {seat for _, seat in seats if seat}, active)
-        _settle_peer_mail(world, slug, store, active)
-        if slug in store.slugs():
-            empty = {seat for _, seat in seats} - {agent.seat for agent in live}
-            _settle_unfillable(world, store.config(slug), empty)
+    for world in list(worlds.up):
+        worlds.run(world, lambda w: _settle_world_seats(w, slug, store, seats, live, active))
+    return worlds.skipped
 
 
-def _move_seat_mail(inbox: "InboxStore", worlds: list["InboxStore"], live: list) -> None:
+def _move_seat_mail(inbox: "InboxStore", worlds: "_WorldPass", live: list) -> None:
     """A lane seat's open mail follows its live occupant into the world of the host it runs on; a master seat's
     mail stays with the master pool of its world."""
-    by_world = {world.world: world for world in worlds}
+    by_world = {world.world: world for world in worlds.up}
     moves = [
         (agent, by_world[home])
         for agent in live
@@ -171,27 +177,60 @@ def _move_seat_mail(inbox: "InboxStore", worlds: list["InboxStore"], live: list)
         and inbox.seats.occupant(agent.seat).occupant == agent.name
         and (home := inbox.home(agent.seat)) in by_world
     ]
-    for world in worlds:
-        candidates = [(agent, home) for agent, home in moves if world is not home]
-        if not candidates:
+    for world in list(worlds.up):
+        candidates = [(agent, home) for agent, home in moves if world is not home and home in worlds.up]
+        if candidates:
+            worlds.run(world, lambda w: _move_world_mail(w, candidates))
+
+
+def _move_world_mail(world: "InboxStore", candidates: list) -> None:
+    quiet = world.quiet([agent.seat for agent, _ in candidates])
+    for agent, home in candidates:
+        if agent.seat in quiet:
             continue
-        quiet = world.quiet([agent.seat for agent, _ in candidates])
-        for agent, home in candidates:
-            if agent.seat in quiet:
-                continue
-            where = f"hive {home.world}" if home.world else "the controller"
-            for item in world.open_items(agent.seat):
-                world.move_world(item.id, home, BY, f"moved to {where}, where {agent.name} runs {agent.seat}")
+        where = f"hive {home.world}" if home.world else "the controller"
+        for item in world.open_items(agent.seat):
+            world.move_world(item.id, home, BY, f"moved to {where}, where {agent.name} runs {agent.seat}")
 
 
-def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:
+def _gone_exit(seat: str, state: str | None, outcome: dict) -> tuple[str, str]:
+    """Where a gone agent's mail goes on and the exit text its senders read."""
     if state in ("done", "blocked"):
-        exit_text = "finished its task and exited" if state == "done" else "blocked its task and exited"
-        settle(inbox, name, "", exit_text)
-    elif outcome:
-        settle(inbox, name, outcome["seat"], outcome["reason"])
-    else:
-        settle(inbox, name, seat, "exited")
+        return "", "finished its task and exited" if state == "done" else "blocked its task and exited"
+    if outcome:
+        return outcome["seat"], outcome["reason"]
+    return seat, "exited"
+
+
+class _WorldPass:
+    """The inbox worlds a sweep pass still reaches; a world whose Redis times out or drops leaves the pass."""
+
+    def __init__(self, worlds: list["InboxStore"]):
+        self.up = list(worlds)
+        self.skipped: list[str] = []
+
+    def run(self, world: "InboxStore", function):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        from redis.exceptions import TimeoutError as RedisTimeoutError
+
+        try:
+            return function(world)
+        except (RedisConnectionError, RedisTimeoutError) as exc:
+            self.up.remove(world)
+            where = f"hive {world.world}" if world.world else "the controller"
+            self.skipped.append(f"skipped the inbox of {where} this pass: its Redis timed out or dropped: {exc}")
+            print(self.skipped[-1], file=sys.stderr)
+            return None
+
+
+def _settle_world_seats(
+    inbox: "InboxStore", slug: str, store: "RedisStore", seats: list, live: list, active: set
+) -> None:
+    _settle_seat_notices(inbox, {seat for _, seat in seats if seat}, active)
+    _settle_peer_mail(inbox, slug, store, active)
+    if slug in store.slugs():
+        empty = {seat for _, seat in seats} - {agent.seat for agent in live}
+        _settle_unfillable(inbox, store.config(slug), empty)
 
 
 def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:

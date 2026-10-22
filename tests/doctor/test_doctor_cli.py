@@ -622,6 +622,7 @@ def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsy
     store, _, _ = env
     assert doctor.main([WATCHED, "start"]) == 0
     capsys.readouterr()
+    monkeypatch.setattr(FileLedger, "tasks", lambda self, slug: [{"id": "mu1"}])
     since, until = "2026-10-07T09:58:24Z", "2026-10-07T12:58:24Z"
     monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
 
@@ -778,6 +779,7 @@ def test_failed_spawn_measure_accepts_a_window_ending_now(env, monkeypatch, caps
     store, _, _ = env
     assert doctor.main([WATCHED, "start"]) == 0
     capsys.readouterr()
+    monkeypatch.setattr(FileLedger, "tasks", lambda self, slug: [{"id": "mu1"}])
     monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
     seen = []
     monkeypatch.setattr(
