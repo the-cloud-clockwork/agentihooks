@@ -36,6 +36,16 @@ def test_an_agent_that_finished_before_its_acknowledgement_was_collected_is_no_s
     assert [a.state for a in store.agents("sw") if a.name == name] == ["finished"]
 
 
+def test_a_done_task_the_master_closed_records_the_master_as_why_it_was_open(store, monkeypatch):
+    ledger, runtime, name, _ = _finished_before_ack(store, monkeypatch)
+    doc = {
+        "tasks": [{"id": "t1", "lane": "eng", "state": "done"}],
+        "_meta": {"stamps": {"tasks/t1/state": {"by": "master@abc123-0001"}}},
+    }
+    _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
+    assert [(r["agent"], r["state"], r["after"]) for r in store.launches("sw")] == [(name, "started", "master")]
+
+
 def test_an_agent_finished_before_its_acknowledgement_on_an_open_task_is_still_a_spawn_failure(store, monkeypatch):
     ledger, runtime, name, released = _finished_before_ack(store, monkeypatch)
     doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "claimed"}]}

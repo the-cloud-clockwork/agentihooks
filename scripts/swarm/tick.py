@@ -1189,7 +1189,9 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
         if agent.state == "finished" and task.get("state") == "done":
             _release_hive_launch(slug, store, agent)
             store.count_claim(slug, agent.task)
-            store.record_launch(slug, agent, "started", after=store.take_restart(slug, agent.task))
+            store.record_launch(
+                slug, agent, "started", after=store.take_restart(slug, agent.task) or _master_set(doc, agent.task)
+            )
             actions.append(f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement")
             continue
         try:
