@@ -136,6 +136,22 @@ def test_beat_publishes_headroom_at_the_beat_time_in_whole_milliseconds(redis, m
     assert calls == [(redis, "machine", 12_345)]
 
 
+def test_beat_leaves_headroom_with_its_heartbeat_when_a_later_step_fails(redis, monkeypatch):
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(daemon.time, "time", lambda: 12.3456)
+
+    def fails(*args):
+        raise RuntimeError("herdr timed out")
+
+    monkeypatch.setattr(daemon, "execution_report", fails)
+    with pytest.raises(RuntimeError, match="^herdr timed out$"):
+        daemon.beat(redis, "machine")
+    assert redis.hget(registry.key("machine"), "heartbeat_at") == "12345"
+    assert json.loads(redis.get(headroom.key("machine")))["measured_at"] == 12_345
+
+
 def test_hive_list_shows_live_headroom_beside_each_hive(redis, monkeypatch, capsys):
     monkeypatch.setattr(cli, "redis_client", lambda: redis)
     monkeypatch.setattr(cli, "now_ms", lambda: 40_000)
