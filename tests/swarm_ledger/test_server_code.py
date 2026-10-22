@@ -34,6 +34,7 @@ def test_the_server_and_the_swarm_share_one_list_of_code_folders():
         "hive",
         "codex_session",
         "scheduler",
+        "events",
         "hooks",
     ]
 

@@ -161,6 +161,101 @@ restacking, a new prepared branch can be the intended publication target.
 Branch selection does not disable preflight or change its mutation grading
 and report reuse rules.
 
+## Touched test worker sizing
+
+The branch preflight's `touched-tests` job runs the existing test files changed
+between `origin/dev` and `HEAD`. It first collects their test cases without
+starting xdist workers. Parametrized cases count separately. The worker limit
+is `max(1, min(automatic maximum, collected cases))`:
+
+| Collected cases | Automatic maximum | Execution workers |
+|---|---|---|
+| 4 | 16 | 4 |
+| 10 | 2 | 2 |
+| 1 | 16 | 1 |
+
+This avoids starting a full worker pool for a small regression selection. It
+does not change which tests run or how full unit shards choose their workers.
+The current touched run uses `--dist loadgroup`: a group can still keep several
+cases on one worker, so worker count is an upper bound on concurrency.
+
+### Automatic configuration
+
+No new flag enables the limit. `worker_count` in `scripts.ci_touched_tests`
+collects with `--collect-only -q -n 0` and asks the pytest
+`pytest_xdist_auto_num_workers` hook for the existing automatic maximum. This
+preserves custom worker hooks and the default CPU detection. The workflow
+writes the result to its `workers` step output and supplies it only to
+**Run the tests the branch touches**:
+
+{% raw %}
+```yaml
+env:
+  FILES: ${{ steps.touched.outputs.files }}
+  PYTEST_XDIST_AUTO_NUM_WORKERS: ${{ steps.touched.outputs.workers }}
+  PYTHONUNBUFFERED: "1"
+run: |
+  read -ra files <<< "$FILES"
+  python -m pytest "${files[@]}" -n auto --dist loadgroup --tb=short -p no:cacheprovider
+```
+{% endraw %}
+
+This is existing CI configuration. Run tests in CI, not on the shared host.
+Keep the computed value scoped to the execution step; a job wide value would
+also affect the maximum read during collection. Change the existing worker
+policy through a reviewed code change when its maximum needs adjustment.
+
+If no existing test files changed, selection outputs `workers=1` but skips
+execution. If collection exits nonzero, selection exits with that status and
+the job fails before execution workers start. The one worker floor does not
+turn an empty or failed collection into a passing run.
+
+### Inspect a branch run
+
+Push the branch before opening its pull request, then inspect its preflight:
+
+```bash
+gh run list --workflow mutation-preflight.yml --branch <branch> --limit 5
+gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/jobs \
+  --jq '.jobs[] | {id, name, conclusion}'
+gh run view <run-id> --job <touched-tests-job-id> --log
+```
+
+In **Select the tests the branch touches**, check the collected case count and
+the `Touched tests:` file list. In **Run the tests the branch touches**, check
+`PYTEST_XDIST_AUTO_NUM_WORKERS` and xdist's `created: N/N workers` line. Match
+the run's head revision before comparing results. An open pull request makes
+the branch preflight skip; a skipped run provides no startup sample.
+
+| Symptom | Check |
+|---|---|
+| Selection fails before workers start | Read the collection exception; fix the test import, syntax or collection configuration. |
+| More cases than changed files | Parametrization and multiple tests per file increase the collected count. |
+| Fewer workers than cases | The existing automatic maximum can be lower than the selection size. |
+| Several cases run on one worker | `loadgroup` scheduling preserves test groups. |
+| Execution is skipped | Check for existing changed test files, a collection failure or an open pull request. |
+
+### Delivery evidence and timing limits
+
+[Pull request 4717](https://github.com/the-cloud-clockwork/agentihooks/pull/4717)
+merged on 19 October 2026. Its
+[red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39214635133)
+exposed excess workers for four and one cases and workers starting before a
+collection error. The
+[green preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39217754530)
+passed regressions for small selections, the maximum, the floor, default CPU
+detection, custom worker hooks and collection failure; its mutation grade
+killed all 26 mutants.
+
+The delivery reports ten earlier runs starting sixteen workers, with median
+startup of 4.65 seconds. Historical runner CPU seconds were not recorded and
+the ten run after comparison remained unverified. These proofs establish
+worker sizing, not a measured CPU saving or a guaranteed startup duration.
+For a new comparison, retain ten runs on each side with ten or fewer selected
+cases, exact revisions, raw job timestamps and the same startup interval.
+Record CPU seconds separately when available; whole job duration and runner
+queue wait measure different intervals.
+
 ## Suite speed contracts in the branch preflight
 
 A branch push that changes a test module runs the suite speed contracts in the
