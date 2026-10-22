@@ -1674,6 +1674,72 @@ referencing it in ledger prose. If only the generated task token is refused,
 confirm the claimed task appears in the swarm ledger under that exact
 identifier. Retrying unchanged text does not resolve a validation refusal.
 
+### Plan refusals in the gate log
+
+Every plan `trace-plan` refuses before tracing writes one `trace-plan` row to
+the swarm gate log, `~/.agentihooks/swarm/<swarm>/gates/log.jsonl`, before the
+command prints the refusal. These refusals are:
+
+| Refusal | Reason text |
+|---|---|
+| No `plan.md` in the task work folder | `write the plan first: <work folder>/plan.md, one piece per line: - what \| area, area \| why` |
+| A line starting `- ` that is not three non empty fields | `plan line <n> is not a piece; write one piece per line: - what \| area, area \| why` |
+| A piece whose follow-up the ledger would refuse | `plan line <n>: the ledger would refuse its follow up, write what in plain words: <violations>` |
+| No piece lines | `the plan holds no pieces; write one piece per line: - what \| area, area \| why` |
+| More than 100 pieces | `the plan holds <count> pieces, at most 100` |
+
+The row carries the refusal text as `reason`, with the agent, the task and the
+time; `tool` is empty. Its `kind` follows `trace-plan-gate`, the same as a
+failed verdict:
+
+| Mode | Row kind |
+|---|---|
+| `deny` | `deny` |
+| `log only` | `observe` |
+| `skip` | no row |
+
+A refusal stops the trace in every mode: no classifier call, no saved verdict,
+no failed plan counted toward the block and no filed follow-up. The previous
+`plan-verdict.json` stays as it was. Each run on a refused plan writes another
+row, so an agent retrying unchanged text shows up as repeated rows. A plan that
+parses writes the same rows as before: a `deny` or `observe` row for a failed
+verdict, `fail-open` for an unchecked one, `count` for each filed cut, and none
+for a rerun on an unchanged plan with unchanged authorizations.
+
+A plan whose second line reads `- Rerun 38842603017 after the fix | scripts/ci_coverage.py | Confirm the fix`
+writes this row under `deny`:
+
+```json
+{"at": 1792652269698, "gate": "trace-plan", "kind": "deny", "agent": "engineer@d44a5a-0566", "task": "promo-38842603017-0", "tool": "", "reason": "plan line 2: the ledger would refuse its follow up, write what in plain words: run or job id '38842603017'"}
+```
+
+List the refusals of one swarm:
+
+```bash
+jq -c 'select(.gate == "trace-plan" and (.kind == "deny" or .kind == "observe"))
+  | {at, agent, task, reason}' ~/.agentihooks/swarm/example-swarm/gates/log.jsonl
+```
+
+`agentihooks doctor <swarm> rates` counts these rows under `gate trace-plan`
+with the failed verdicts, in the same `deny` or `observe` column. Given a
+Doctor swarm, it reads the gate log of the swarm that Doctor watches. To compare
+before and after a fix, pass the fix time and a window:
+
+```bash
+agentihooks doctor example-swarm rates --at 2026-10-17T19:40:58Z --hours 24 --json
+```
+
+Refusals raised before the trace reads the plan write no row: the session is
+not a swarm worker or is the master, or the ledger or swarm config read failed.
+Rows begin with [pull request 4173](https://github.com/the-cloud-clockwork/agentihooks/pull/4173);
+plan refusals before its merge survive only in agent comments.
+
+| Symptom | Cause and action |
+|---|---|
+| `trace-plan` printed a refusal and the gate log has no row | The mode is `skip`, or the refusal came before the plan was read. Check `gate_modes` in `swarm status --json`. |
+| Many identical refusal rows for one task | The agent reran `trace-plan` without changing `plan.md`. Rewrite the line the reason names. |
+| A refused plan never blocked the task | Refusals are not failed plans. Only a traced plan with a failed verdict counts toward the block. |
+
 ## Deployed host capacity
 
 When `AGENTIHOOKS_DEPLOYMENT` is unset or `local`, host room and the host pressure
