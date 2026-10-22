@@ -50,6 +50,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Refused worker startup diagnostics](../swarm-v2/startup-diagnostics.md) | Startup log and exit reason kept before a refused worker Pod is removed, the bounded cleanup log retry, `pods/log` permission, reading the records and troubleshooting |
 | [Worker profile proof](worker-profile-proof.md) | Offline Codex SessionStart replay, first registry write timing, surviving hook child failures, fixed limits and CI evidence |
 | [Browser cache](browser-cache.md) | Verified Chromium preparation, dev push only saving, restore scope, workflow configuration and cache inspection |
+| [Task browser](task-browser.md) | The `playwright-cmd` proxy: which lane homes mount it, start on first tool call, the shared tool list cache, measured memory effect and troubleshooting |
 | [WSL disk reclaim](wsl-disk.md) | Sparse VHDX so space `agentihooks gc` frees returns to Windows; why `/tmp` empties on WSL |
 | [CODEX-COMPAT](CODEX-COMPAT.md) | The `codex` install target: hook contract, surface map, divergences |
 | [Profile launch home](profile-launch-home.md) | How `init-agent --profile` renders one home, records it and mounts it through `select-profile --home`; home checks, refusals, limits and troubleshooting |
