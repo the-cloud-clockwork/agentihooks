@@ -128,6 +128,7 @@ def test_block_on_a_hive_reads_the_launch_checkout_for_a_repository_missing_here
     ledger.rows["t1"]["repositories"] = [str(tmp_path / "workstation" / "antoncore")]
     _git(top, "commit", "--allow-empty", "-m", "Task work")
     _git(top, "push", "-u", "origin", BRANCH)
+    monkeypatch.chdir(tmp_path)
     assert block() == 0
     row = ledger.rows["t1"]
     assert (row["state"], row["branch"], row["branch_repo"]) == ("blocked", BRANCH, str(origin))
@@ -148,7 +149,7 @@ def test_block_records_the_pushed_branch_of_a_repository_recorded_on_another_hos
     ledger = worktree[0]
     monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
     other_origin, other, other_top = _repository(tmp_path, "antoncore")
-    ledger.rows["t1"]["repositories"] = ["/srv/workstation/dev/antoncore"]
+    ledger.rows["t1"]["repositories"] = ["/srv/workstation/dev/agentibrain-kernel", "/srv/workstation/dev/antoncore"]
     _git(other_top, "commit", "--allow-empty", "-m", "Antoncore work")
     _git(other_top, "push", "-u", "origin", BRANCH)
     assert block() == 0
