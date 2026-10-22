@@ -275,8 +275,16 @@ def test_a_stopping_hive_gives_up_on_its_agents_at_the_deadline(store, tmp_path)
 
     settled = remove.settle(store, member, 30, _host(clock, Run(), tmp_path))
 
-    assert settled == f"hive {member} stops with 1 agents still running after 30 seconds"
+    assert settled == f"hive {member} stops after 30 seconds with engineer@1 still running"
     assert (clock.now, clock.slept) == (30, 2)
+
+
+def test_a_stopping_hive_with_no_record_is_refused_and_never_recorded(store, tmp_path):
+    with pytest.raises(auth.HiveError) as refused:
+        remove.settle(store, "pod-name", 30, _host(Clock(store, "pod-name", 1), Run(), tmp_path))
+
+    assert str(refused.value) == "hive pod-name has no record to drain"
+    assert registry.show(store.redis, "pod-name") is None
 
 
 def test_the_drain_command_settles_this_hive_with_its_wait(store, monkeypatch, capsys):

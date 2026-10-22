@@ -89,11 +89,14 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
 
 
 def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
+    if registry.show(store.redis, hive) is None:
+        raise auth.HiveError(f"hive {hive} has no record to drain")
     registry.update(store.redis, hive, ["draining=yes"])
     deadline = host.clock() + wait_s
     while remaining := hosted(store, hive):
         if host.clock() >= deadline:
-            return f"hive {hive} stops with {len(remaining)} agents still running after {wait_s} seconds"
+            names = ", ".join(agent.name for _, agent in remaining)
+            return f"hive {hive} stops after {wait_s} seconds with {names} still running"
         host.sleep(POLL_S)
     return f"hive {hive} drained: no agents running"
 

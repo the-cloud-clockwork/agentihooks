@@ -11,6 +11,7 @@ HOST = {
         "nodeSelector": {"kubernetes.io/hostname": "data-node"},
         "tolerations": [{"key": "dedicated", "operator": "Exists", "effect": "NoSchedule"}],
         "maxAgents": 1,
+        "drainSeconds": 120,
         "worktreeMinFreeGb": 70,
         "worktreeMaxPerRepo": 40,
         "worktreeStaleDays": 3,
@@ -67,9 +68,9 @@ def problems(deployment: dict, workers: dict | None) -> list[str]:
     if strategy != "Recreate":
         found.append(f"a hive with a host home rolls out by {strategy}, expected Recreate")
     drain = spec["containers"][0].get("lifecycle", {}).get("preStop", {}).get("exec", {}).get("command")
-    if drain != ["agentihooks", "hive", "drain", "--wait", "3600"]:
+    if drain != ["agentihooks", "hive", "drain", "--wait", str(workers["drainSeconds"])]:
         found.append(f"a Recreate hive stops with preStop {drain}, expected a drain of its agents")
-    if spec.get("terminationGracePeriodSeconds") != 3630:
+    if spec.get("terminationGracePeriodSeconds") != workers["drainSeconds"] + 30:
         found.append(f"the hive grace period {spec.get('terminationGracePeriodSeconds')} does not cover its drain")
     if spec.get("nodeSelector") != workers["nodeSelector"]:
         found.append("the hive does not take workers.nodeSelector")

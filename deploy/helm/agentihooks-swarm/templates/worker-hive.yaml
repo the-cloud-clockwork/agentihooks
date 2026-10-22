@@ -86,7 +86,7 @@ spec:
           lifecycle:
             preStop:
               exec:
-                command: ["agentihooks", "hive", "drain", "--wait", {{ $workers.drainSeconds | quote }}]
+                command: ["agentihooks", "hive", "drain", "--wait", {{ $workers.drainSeconds | int | quote }}]
           {{- include "swarm.containerSecurity" $root | nindent 10 }}
           env:
             {{- if $github.secretName }}

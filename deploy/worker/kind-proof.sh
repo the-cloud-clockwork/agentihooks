@@ -167,6 +167,11 @@ kubectl logs "$pod" > "$out/worker.log"
 restarts="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
 [[ "$restarts" == 0 ]]
 kubectl delete pod "$pod" --wait --timeout=60s
+hook_failures="$(kubectl get events --field-selector "involvedObject.name=$pod,reason=FailedPreStopHook" -o name)"
+if [[ -n "$hook_failures" ]]; then
+  echo "the hive drain preStop failed on $pod" >&2
+  exit 1
+fi
 kubectl rollout status "deployment/$deployment" --timeout=120s
 replacement="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
 [[ "$replacement" != "$pod" ]]
