@@ -48,7 +48,8 @@ def rig():
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 
     policy = QueuePolicy(max_deliver=3, backoff_ms=(10, 20))
-    bus = open_bus(BusConfig())
+    clock = SimpleNamespace(now=0)
+    bus = open_bus(BusConfig(), clock=lambda: clock.now)
     config = SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a", policy)
     tasks, runtime = Mock(), Mock()
     request = SpawnRequest(config.swarm, "eng", "agent-a", {"id": "task-a"})
@@ -63,7 +64,15 @@ def rig():
     queue.offer(event)
     spoke = Spoke(config, bus, runtime, tasks, reading)
     yield SimpleNamespace(
-        bus=bus, queue=queue, config=config, tasks=tasks, runtime=runtime, event=event, spoke=spoke, request=request
+        bus=bus,
+        queue=queue,
+        config=config,
+        tasks=tasks,
+        runtime=runtime,
+        event=event,
+        spoke=spoke,
+        request=request,
+        clock=clock,
     )
     bus.close()
 
@@ -149,3 +158,51 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
     }
     assert observed[2:] == ["ack"]
     assert real_take(0) is None
+
+
+@pytest.mark.parametrize("failure", ["request", "spawn", "outcome"])
+def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, failure):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    if failure == "request":
+        rig.tasks.request.side_effect = [RuntimeError("unavailable"), rig.request]
+    elif failure == "spawn":
+        rig.runtime.spawn.side_effect = [RuntimeError("unavailable"), rig.runtime.spawn.return_value]
+    else:
+        rig.runtime.spawn.side_effect = [
+            Outcome("spawn", Status.FAILED, "local", detail="no room"),
+            rig.runtime.spawn.return_value,
+        ]
+    assert rig.spoke.poll() == "retry"
+    assert rig.queue.take(0) is None
+    rig.tasks.reopen.assert_not_called()
+    rig.clock.now = 9
+    assert rig.spoke.poll() == "empty"
+    rig.clock.now = 10
+    assert rig.spoke.poll() == "started"
+    assert rig.runtime.spawn.call_count == (1 if failure == "request" else 2)
+
+
+def test_a_publication_retry_reuses_the_started_execution_after_a_spoke_restart(rig):
+    from scripts.hive.spoke import Spoke
+
+    published = []
+    real_publish = rig.bus.events.publish
+
+    def publish(subject, event):
+        published.append((subject, event))
+        if len(published) == 1:
+            raise RuntimeError("publish unavailable")
+        return real_publish(subject, event)
+
+    rig.bus.events.publish = publish
+    assert rig.spoke.poll() == "retry"
+    assert rig.queue.take(0) is None
+    rig.clock.now = 10
+    restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, reading)
+    assert restarted.poll() == "started"
+    rig.runtime.spawn.assert_called_once_with(rig.request)
+    rig.tasks.request.assert_called_once_with(rig.event)
+    rig.tasks.reopen.assert_not_called()
+    assert published[0] == published[1]
+    assert rig.queue.take(0) is None
