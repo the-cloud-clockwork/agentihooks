@@ -245,8 +245,8 @@ def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[st
 
 def _shallow(preflight: dict) -> dict:
     shallow = deepcopy(preflight)
-    steps = shallow["jobs"]["grade"]["steps"]
-    steps[0]["with"].update(SHALLOW_PREFLIGHT_CHECKOUT)
+    steps = ((shallow.get("jobs") or {}).get("grade") or {}).get("steps") or [{}]
+    steps[0].setdefault("with", {}).update(SHALLOW_PREFLIGHT_CHECKOUT)
     for step in steps:
         if step.get("run") == PREFLIGHT_FETCH:
             step["run"] = SHALLOW_PREFLIGHT_FETCH
