@@ -46,17 +46,29 @@ class FetchFailed(Exception):
     pass
 
 
+def backing_off():
+    return _held_until() > _now()
+
+
+def rate_limited(text):
+    return "rate limit" in text.lower()
+
+
+def admitted_pending(target):
+    _record({"at": _now(), "admitted_pending": target})
+
+
 def _api(endpoint, binary=False):
-    if (until := _held_until()) > _now():
-        raise RateLimited(f"gh api {endpoint}: GitHub API rate limited until {_stamp(until)}")
+    if backing_off():
+        raise RateLimited(f"gh api {endpoint}: GitHub API rate limited until {_stamp(_held_until())}")
     try:
         done = subprocess.run(["gh", "api", endpoint], capture_output=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as error:
         raise Unreachable(f"gh api {endpoint}: {error}") from error
     if done.returncode:
         stderr = (done.stderr or b"").decode(errors="replace").strip()
-        if "rate limit" in stderr.lower():
-            until = _hold(endpoint)
+        if rate_limited(stderr):
+            until = hold(endpoint)
             raise RateLimited(f"gh api {endpoint}: GitHub API rate limited until {_stamp(until)}")
         raise Unreachable(f"gh api {endpoint}: {stderr or f'exited {done.returncode}'}")
     if binary:
@@ -98,7 +110,7 @@ def _core_reset(now):
     return now + SECONDARY_BACKOFF_S
 
 
-def _hold(endpoint):
+def hold(endpoint):
     now = _now()
     until = max(_core_reset(now), _held_until())
     home = _backoff_home()
@@ -138,7 +150,7 @@ def bind(target: str) -> str | None:
     try:
         return _bind(target)
     except RateLimited:
-        _record({"at": _now(), "admitted_pending": target})
+        admitted_pending(target)
         return None
 
 

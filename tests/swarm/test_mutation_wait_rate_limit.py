@@ -157,7 +157,7 @@ def test_a_secondary_limit_backs_off_one_minute_while_core_reports_quota(github)
 def test_a_secondary_limit_never_shortens_a_longer_core_backoff(github):
     mutation_wait.run_resolution(URL)
     github.core = {"remaining": 4000, "reset": RESET}
-    assert mutation_wait._hold(RUN) == RESET
+    assert mutation_wait.hold(RUN) == RESET
     github.limited = False
     github.now = NOW + 61
     assert mutation_wait.run_resolution(URL) == ""
