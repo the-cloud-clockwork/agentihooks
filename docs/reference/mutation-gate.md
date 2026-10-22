@@ -263,3 +263,104 @@ A Standards reader clears an exact survivor with one JSON file under `mutation-c
 ```
 
 Write an independently reviewed ruling with `scripts.ci_mutation.clearances.write_clearance(root, key, ruling)`; `clearance_path(root, key)` returns its deterministic filename. Run `python -m scripts.ci_mutation.clearances` from the repository root to migrate legacy rulings without changing their reader or reason. The migration leaves an empty legacy object for compatible older readers. Trace plans and the build scope gate accept both clearance locations as supporting proof.
+
+## Clean baseline failures
+
+Before it mutates anything, mutmut runs the selected tests against the unmutated copy. When that clean baseline fails, no mutant is graded: every file in the group is reported as not mutated and the gate fails. The run names each failing test with its first error line in three places, so the cause is readable without downloading the run log:
+
+| Where | What it shows |
+|---|---|
+| Step log, the gate's red message | One `not mutated` line per file in the group, its reason listing every failing test |
+| `report.json` | `failing_tests`, a list of failing test ids with their first error line, in the order they first appear |
+| Job summary | A `Mutation clean baseline failed` heading followed by one bullet per failing test |
+
+This applies to every job that runs `python -m scripts.ci_mutation`: in the pull request Tests run, each `mutation-stats` part, the inline mutation step of a single shard `mutation-stats` job, and each `mutation` shard. The push preflight follows the same split, a statistics job and then a `mutation-shard` job, with no inline step. Which tests run and how mutants are graded are unchanged.
+
+### How failing tests are read
+
+The runner reads the group's `run.log`, the output of the mutmut selection step, after that step exits nonzero. It keeps every line that starts with `FAILED` or `ERROR` and names a `.py` test id, which is pytest's short test summary format:
+
+```text
+FAILED tests/test_sample.py::test_gate[ops0-True] - AssertionError: assert 'a' == 'b'
+ERROR tests/test_sample.py::test_setup - RuntimeError: no server
+FAILED tests/test_sample.py::test_bare
+```
+
+- The entry is the test id and, when pytest printed one, the text after ` - `: the first error line.
+- A test named more than once keeps its first line; a later teardown `ERROR` for the same test is dropped.
+- `RERUN` lines and other output are ignored, and undecodable bytes in the log are replaced rather than failing the read.
+- With two test groups in one job, `failing_tests` joins both groups' entries and drops exact repeats; each file's reason lists only its own group's tests.
+
+When the log holds no such line, for example an import error before collection, the reason keeps its plain form and the report carries no `failing_tests` key. A selection step that runs out of budget is reported as `over budget`, and a failed report step as `report failed`; neither reads failing tests.
+
+### What a failed baseline shows
+
+The step log of the failing job prints the reason for each file in the group:
+
+```text
+hooks/sample.py: not mutated, mutmut failed with exit 1; failing tests: tests/test_sample.py::test_gate[ops0-True] - AssertionError: assert 'a' == 'b'; tests/test_sample.py::test_setup - RuntimeError: no server; tests/test_sample.py::test_bare; see WORKSPACE/.mutation-gate/0-abc123/run.log
+```
+
+The same reason is the file's `reason` under `not_mutated` in `report.json`, beside the `failing_tests` list:
+
+```json
+{
+  "files": [],
+  "not_mutated": [
+    {
+      "path": "hooks/sample.py",
+      "reason": "mutmut failed with exit 1; failing tests: tests/test_sample.py::test_gate[ops0-True] - AssertionError: assert 'a' == 'b'; tests/test_sample.py::test_setup - RuntimeError: no server; tests/test_sample.py::test_bare; see WORKSPACE/.mutation-gate/0-abc123/run.log"
+    }
+  ],
+  "failed": true,
+  "failing_tests": [
+    "tests/test_sample.py::test_gate[ops0-True] - AssertionError: assert 'a' == 'b'",
+    "tests/test_sample.py::test_setup - RuntimeError: no server",
+    "tests/test_sample.py::test_bare"
+  ]
+}
+```
+
+When `GITHUB_STEP_SUMMARY` is set, as on every GitHub Actions step, the gate appends this to the job summary on the run page:
+
+```markdown
+### Mutation clean baseline failed
+
+- `tests/test_sample.py::test_gate[ops0-True] - AssertionError: assert 'a' == 'b'`
+- `tests/test_sample.py::test_setup - RuntimeError: no server`
+- `tests/test_sample.py::test_bare`
+```
+
+Nothing is appended when `failing_tests` is absent or empty, so a run with no clean baseline failure leaves the summary unchanged. Outside Actions, with the variable unset, only the step log and `report.json` carry the names.
+
+### Reading the names from a run
+
+Open the run page to read the job summary, or download the evidence. Every artifact below holds the complete `.mutation-gate/` folder on failure, including each group's `run.log`:
+
+| Workflow | Failed job | Artifact |
+|---|---|---|
+| Tests, on a pull request | `mutation-stats` part | `mutation-evidence-stats-<part>` |
+| Tests, on a pull request | `mutation` shard, or the inline step of a single shard `mutation-stats` job | `mutation-report-<shard>` |
+| Mutation preflight, on a branch push | statistics part | `mutation-evidence-stats-<part>` |
+| Mutation preflight, on a branch push | `mutation-shard` | `mutation-preflight-shard-<shard>` |
+
+For example, for a failed statistics part:
+
+```bash
+gh run download <run id> -n mutation-evidence-stats-0 -D mutation-evidence
+jq -r '.failing_tests[]?' mutation-evidence/report.json
+jq -r '.not_mutated[] | "\(.path): \(.reason)"' mutation-evidence/report.json
+```
+
+The `see` path at the end of the reason is the absolute path on the runner, shown above with `WORKSPACE` for the job checkout; its last two parts, the group folder and `run.log`, locate the log inside the artifact. Read it for the full traceback.
+
+### Clean baseline troubleshooting
+
+| Symptom | Cause | What to do |
+|---|---|---|
+| A file is not mutated with `mutmut failed with exit N; failing tests: ...` | A selected test fails on the unmutated code inside the mutation workspace | Fix that test or the code it exercises; when the test passes in the unit shards, compare the isolated copy with the checkout, such as a fixture file the workspace does not copy, and remember the baseline runs serially |
+| The reason ends `mutmut failed with exit N; see .../run.log` with no test named | The log has no `FAILED` or `ERROR` summary line, for example a collection or import error, or a crash before pytest's summary | Read `run.log` from the evidence artifact |
+| The job summary has no `Mutation clean baseline failed` heading on a red mutation job | The job failed for another reason: survivors, `over budget`, `report failed`, or a missing statistics part | Read the step log and `report.json` |
+| The same failing test is listed for several files | All files in one mutation group share one clean baseline run | Expected; one fix clears every file in the group |
+
+The behavior is pinned by `tests/test_ci_mutation_runner.py`, which feeds a planted pytest summary through `run_gate` and checks the reason, the printed red message and `report.json`, and by `tests/test_ci_mutation_main.py`, which checks the job summary block and that a run without failing tests leaves the summary untouched.

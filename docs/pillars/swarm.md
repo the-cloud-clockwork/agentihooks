@@ -2295,6 +2295,62 @@ a tick returns because its ledger is gone, fails partway through, or fails its l
 branch that removed the dead holder check and reproduced the observed `another tick is running` loop
 ([red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39042891977)).
 
+`tests/swarm/test_tick_lock.py` pins the holder record itself: a killed holder is replaced without waiting for
+expiry, a live holder keeps its lock, a newer epoch leaves a live holder's lock alone, and a lock without a verifiable
+holder is never taken. The record and the dead holder check came with
+[pull request 3575](https://github.com/the-cloud-clockwork/agentihooks/pull/3575), after a timer process killed inside
+a launch held every tick of the watched swarm for ten minutes.
+
+### Intent verdict timing
+
+Each tick judges ready pull requests before it launches agents. After the phase steps, the tick runs the
+[intent check](#commands) over every task in `pr`, then the reconcile pass that retires, reclaims and spawns agents.
+A launch that takes minutes no longer delays a verdict: the verdict is already written when the first launch
+starts. Before this order, recovering ticks spent about 290 seconds spawning ahead of an 8 to 9 second intent pass.
+
+The verdict for a task is a JSON file at `~/.agentihooks/swarm/<swarm>/gates/intent/<task>`. Two fields carry its
+timing:
+
+| Field | Meaning |
+|---|---|
+| `at` | Start of the tick pass that judged it, in epoch milliseconds |
+| `persisted_at` | Wall time the judged verdict was written, in epoch milliseconds |
+
+A pass that finds the pull request, its text and the task inputs unchanged since the last verdict rewrites the
+record with its old `at` and `persisted_at`, so both keep naming the judgment that produced the verdict. A draft
+pull request gets a `pending` record with the reason `draft pull request, judged once ready for review` and no
+`persisted_at`; it is judged on the first tick after it leaves draft. Records written before pull request 3575, and
+records kept from them, have no `persisted_at` or a `null` one.
+
+Measure ready to delivered verdict from the task's move to `pr` to `persisted_at`, not to `at`. The pass start
+is earlier than the write by the classifier time for every task judged ahead of it in the same pass:
+
+```bash
+jq '{verdict, reason, at, persisted_at, judging_s: ((.persisted_at - .at) / 1000)}' \
+  ~/.agentihooks/swarm/<swarm>/gates/intent/<task>
+```
+
+```json
+{"verdict": "pass", "reason": "the phase can use it", "at": 1792650000000, "persisted_at": 1792650008400, "judging_s": 8.4}
+```
+
+The measurement that drove the change: 19 watched tasks over six hours waited a median 85 seconds and a 90th
+percentile 703 seconds from ready to a delivered verdict
+([issue 3203](https://github.com/the-cloud-clockwork/agentihooks/issues/3203)).
+
+| Refusal or symptom | Cause and action |
+|---|---|
+| `intent for task <task> is judged once its pull request is ready for review.` | The pull request is a draft. Mark it ready; the next tick judges it. |
+| `intent check running for task <task>, started <n> s ago; it passes unchecked at 120 s.` | No verdict yet for the ready pull request. Wait for the tick; after two minutes the gate lets the call through unchecked and counts it in the gate log. |
+| Ticks print no intent action while the swarm journal shows `another tick is running` | A tick lock holds every pass; see [Troubleshooting a held tick lock](#troubleshooting-a-held-tick-lock). |
+| The verdict file has no `persisted_at` | A draft `pending` record, or a verdict written before pull request 3575. Use the next judged verdict. |
+
+`tests/swarm/test_intent_pass.py` pins the order:
+`test_ready_intent_is_delivered_before_a_slow_runtime_launch` runs a tick whose launch takes 780 seconds and asserts the
+verdict was on disk at launch and the ready to verdict wait was zero. `tests/gates/test_intent_timing.py` pins
+`persisted_at`: a slow classifier leaves `at` at the pass start and `persisted_at` after the delay, and a kept verdict
+keeps its `persisted_at`.
+
 ### Tick heartbeat and stale watcher
 
 Every tick pass that runs to its end writes the swarm's heartbeat to Redis: when the pass ended, and when each
@@ -2373,6 +2429,115 @@ with lease.kept(store, slug, held):
 
 The next pass acquires a new lease with a higher epoch when no other controller holds it, so one stale pass loses
 only the rest of that pass's work.
+
+### Doctor timer pass
+
+A `doctor` swarm runs the Doctor timer, `scripts.doctor.cli.timer`, as one step of its own tick pass, inside the
+lease heartbeat above. The step counts against the same limits as every other step of that pass: the 450 second pass
+deadline and the scheduler holder's nine minute stop. When the tick still ran as the `agentihooks-swarm` systemd
+service, a Doctor step of 216 to 291 seconds pushed the whole tick past the service start timeout, so the service
+killed it and both swarms on the machine got about one pass every ten minutes. The step has to finish well inside a
+minute so the tick of the watched swarm and of the Doctor keep their minute cadence.
+
+#### What one timer step does
+
+Every tick the step reads the watched swarm's CI speed and updates the Doctor's timer record. A detection pass runs
+only when the detection interval has passed since the last one, counting any gap between ticks, so most steps take a
+few seconds and one step in ten (with the default interval) runs every detector.
+
+A detection pass reads:
+
+- **The inbox, in batches.** Address listings, item hashes and item histories are read in Redis pipelines of 1,000
+  commands each (`BATCH` in `scripts.doctor.read`). Every distinct address and sender is resolved to its swarm with
+  one `NameRegistry.slugs_of` call: one `MGET` for aliases and one `HMGET` for agent codes. The pass keeps the same
+  items, in the same order, as the old one key at a time loop. The inbox detector and the handoff detector share
+  this one read.
+- **The watched tasks, once.** The CI detector and the trace detector share one read of the watched ledger's tasks.
+- **Every detector side by side.** Each detector runs in its own thread and is still timed as its own
+  `doctor.<name>` step: `runtime storage`, `scheduled tick`, `health`, `inbox`, `handoff`, `spawn`,
+  `master launch`, `startup`, `context overrun`, `ci`, `dev workflow` and, with telemetry on, `trace`. A detector
+  that raises is reported as `the <name> detector failed: <error type>: <message>` while the others still report.
+- **Pull requests side by side.** The CI detector reads each open pull request of the watched tasks in a thread pool.
+- **Traces inside their budgets.** The trace detector reads active bindings and the historical backfill side by side,
+  each inside its own existing budget (15 seconds for active bindings, 45 seconds for the backfill, 55 seconds for
+  the whole step; see [How the Doctor reads traces](../reference/observability-langfuse.md#how-the-doctor-reads-traces)).
+
+No detector, finding or threshold changed with this work: a pass raises the same findings it raised before.
+
+#### Configuration
+
+| Setting | Default | Effect |
+|---|---|---|
+| `AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES` | `10` | Minutes between detection passes. Steps between passes skip the detectors. |
+
+The batch size of 1,000 and the detector list are fixed in code.
+
+#### Measure the timer step
+
+Every step writes a `swarm_tick_step` record to the user journal when it finishes, with `wall_s`, `own_cpu_s` and
+`reaped_child_cpu_s`. The timer step and each detector step carry the Doctor swarm's id in `slug`:
+
+```bash
+D=rig-grade-swarm-doctor
+journalctl --user -t agentihooks-swarm --since "-6h" \
+  | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
+  | grep "\"slug\": \"$D\"" | grep '"step": "scripts.doctor.cli.timer"' \
+  | sed 's/^[^{]*//' \
+  | python3 -c 'import sys, json
+w = sorted(json.loads(l)["wall_s"] for l in sys.stdin)
+print(len(w), "steps; median", round(w[len(w) // 2], 1), "max", round(w[-1], 1), "over 60 s", sum(x > 60 for x in w))'
+```
+
+Read the detector steps of one pass by its `pid`; they finish before their timer step:
+
+```bash
+journalctl --user -t agentihooks-swarm --since "-30 min" \
+  | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
+  | grep "\"slug\": \"$D\"" | grep -E '"step": "(scripts.doctor.cli.timer|doctor\.[a-z ]+)"' \
+  | sed 's/^[^{]*//'
+```
+
+A full pass captured on 22 October 2026 (fields trimmed):
+
+```text
+{"pid": 389200, "slug": "rig-grade-swarm-doctor", "step": "doctor.inbox", "outcome": "success", "wall_s": 13.08, ...}
+{"pid": 389200, "slug": "rig-grade-swarm-doctor", "step": "doctor.trace", "outcome": "success", "wall_s": 22.68, ...}
+{"pid": 389200, "slug": "rig-grade-swarm-doctor", "step": "doctor.handoff", "outcome": "success", "wall_s": 85.95, ...}
+{"pid": 389200, "slug": "rig-grade-swarm-doctor", "step": "scripts.doctor.cli.timer", "outcome": "success", "wall_s": 98.25, ...}
+```
+
+The detectors overlap, so the timer step's wall time is close to its slowest detector, never their sum. Compare wall
+seconds before and after a change, never CPU: `reaped_child_cpu_s` reads the process wide child counter, so one
+detector's figure can include children another detector reaped, and `own_cpu_s` leaves out CPU spent in the thread
+pools a detector starts.
+
+Count tick timeouts from the systemd service on an install that still runs it (the journal prints local time):
+
+```bash
+journalctl --user -u agentihooks-swarm.service --since "-3h" -o short-iso | grep -c "Failed with result 'timeout'"
+```
+
+#### Measured result
+
+| Window | Timer step wall seconds | Inbox detector | Tick timeouts |
+|---|---|---|---|
+| Before, 17 October 2026, 21:09 to 21:50 UTC | 228, 229, 276, 291 per full pass | 121 to 185 s | five in a row, 21 since 16:00 UTC |
+| After, 18 October 2026, 09:44:01 to 09:58:25 UTC | 74.6 and 51.2 on the two full passes; 5.7 to 12.1 between | 63.5 and 43.9 s | none |
+| Six hours to 22 October 2026, 07:45 UTC | median 8.5, max 113.4; 43 of 190 steps over 60 | 13.1 s on the sample pass | none |
+
+The before profile against the live store counted 130,451 sequential Redis round trips in one inbox read. The fix
+merged in [pull request 4377](https://github.com/the-cloud-clockwork/agentihooks/pull/4377), and the Doctor applied it
+by fast forwarding the main checkout at 09:37:59 UTC on 18 October 2026. On 22 October the slowest detector is
+`doctor.handoff`, not the inbox.
+
+#### Troubleshooting
+
+| Symptom | Read | Meaning |
+|---|---|---|
+| A timer step over 60 seconds | The detector steps with the same `pid` | The slowest `doctor.<name>` step sets the pass time; that detector is the one to bound |
+| A `doctor.<name>` record with `"outcome": "error"` | Its `error` field, and the Doctor tick's action line `the <name> detector failed: ...` | That detector raised; the other detectors of the pass still reported |
+| `controller lease is stale` after a Doctor step | [Controller lease during long steps](#controller-lease-during-long-steps) | The heartbeat lost the lease to a higher epoch; the next pass takes a new one |
+| Tick runs killed by the service start timeout | The timeout count above and the timer step walls in the same window | A step past the timeout ends the whole tick; bound the slowest step |
 
 ### Worker execution lease through a controller rollout
 
