@@ -6,7 +6,7 @@ import pytest
 from hooks.classifier import Answer, DecisionResult
 from scripts.swarm import cli, trace_plan
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm_ledger import ledger, ledger_authority, ledger_server, ledger_workspace
+from scripts.swarm_ledger import ledger, ledger_authority, ledger_server, ledger_workspace, storage
 from tests.swarm_ledger.test_ledger_authority import SLUG
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
@@ -56,6 +56,6 @@ def test_trace_plan_on_a_hosted_ledger_files_the_cut_piece_as_the_pinned_agent(h
     assert json.loads((folder / "plan-verdict.json").read_text())["verdict"] == "pass"
     filed = [item for item in ledger.request(SLUG)["followups"] if item["text"] == CUT]
     assert len(filed) == 1
-    events = ledger.resource(SLUG, "events", collection=True)
+    events = storage.default().events_since(SLUG, 0)
     added = [event for event in events if event["target"] == f"followups/{filed[0]['id']}"]
     assert [(event["by"], event["kind"]) for event in added] == [(name, "added")]
