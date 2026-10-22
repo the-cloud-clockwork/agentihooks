@@ -332,10 +332,7 @@ def on_session_start(payload: dict) -> None:
     """Handle SessionStart event."""
     session_id = payload.get("session_id", "")
     log("Session started", {"session_id": session_id})
-    if payload.get("source") == "compact":
-        _inject_refocus(session_id, "compact")
-    else:
-        _close_master_coding(session_id)
+    _handle_session_source(payload, session_id)
     from hooks.lifecycle.guard import session_event
 
     session_event()
@@ -1230,6 +1227,13 @@ def _master_coding(payload: dict, typed: bool) -> None:
             inject_context(master_coding.NOTICES[state], also_log=False, skip_compression=True, kind="alert")
     except Exception as e:
         log("master coding window failed", {"error": str(e)})
+
+
+def _handle_session_source(payload: dict, session_id: str) -> None:
+    if payload.get("source") == "compact":
+        _inject_refocus(session_id, "compact")
+    else:
+        _close_master_coding(session_id)
 
 
 def _close_master_coding(session_id: str) -> None:
