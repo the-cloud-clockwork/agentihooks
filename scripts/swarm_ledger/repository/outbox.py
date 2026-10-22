@@ -6,7 +6,7 @@ ENTITIES = {"tasks": "task", "phases": "phase"}
 INSERT = "INSERT INTO outbox VALUES (?, ?, ?, ?, ?)"
 PENDING = (
     "SELECT id, subject, value FROM outbox WHERE id NOT IN (SELECT id FROM outbox_sent)"
-    " ORDER BY revision, subject, id LIMIT ?"
+    " ORDER BY revision, subject LIMIT ?"
 )
 SENT = "INSERT OR IGNORE INTO outbox_sent VALUES (?)"
 BATCH = 100

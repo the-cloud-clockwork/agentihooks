@@ -99,5 +99,13 @@ def test_a_crash_between_publish_and_mark_never_duplicates_the_event(repo, bus):
     assert sent(repo) == sorted(row_id for row_id, *_ in rows(repo))
 
 
-def test_the_sent_table_is_part_of_the_ledger_schema():
-    assert "CREATE TABLE IF NOT EXISTS outbox_sent (id TEXT PRIMARY KEY);" in sqlite.SCHEMA
+def test_a_row_another_relay_marked_while_this_one_published_stays_sent_once(repo, bus):
+    class RacingRelay:
+        def publish(self, subject, event):
+            outbox.relay(repo, bus.events)
+            return bus.events.publish(subject, event)
+
+    created = rows(repo)
+    assert outbox.relay(repo, RacingRelay(), batch=1) == 1
+    assert [event.id for _, event in bus.events.entries] == [row_id for row_id, *_ in created]
+    assert sent(repo) == sorted(row_id for row_id, *_ in created)

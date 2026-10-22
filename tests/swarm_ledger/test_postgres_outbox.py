@@ -69,8 +69,8 @@ def test_the_relay_publishes_postgres_outbox_rows_once_and_marks_them_sent(ledge
     repository, slug = ledger
     bus = memory.open_bus(BusConfig(), clock=lambda: 1_000)
     pending = [subject for subject, _ in subjects(slug)]
-    while outbox.relay(repository, bus.events):
-        pass
+    drained = [outbox.relay(repository, bus.events, batch=1000) for _ in range(20)]
+    assert drained[-1] == 0
     assert [subject for subject, _ in bus.events.entries if subject.startswith(f"swarm.{slug}.")] == pending
     with closing(psycopg2.connect(URL)) as reader, reader.cursor() as cursor:
         cursor.execute(
