@@ -274,7 +274,7 @@ Before it mutates anything, mutmut runs the selected tests against the unmutated
 | `report.json` | `failing_tests`, a list of failing test ids with their first error line, in the order they first appear |
 | Job summary | A `Mutation clean baseline failed` heading followed by one bullet per failing test |
 
-This applies to every job that runs `python -m scripts.ci_mutation`: the statistics parts, the inline mutation step of a single shard statistics job, the mutation shards and the push preflight. Which tests run and how mutants are graded are unchanged.
+This applies to every job that runs `python -m scripts.ci_mutation`. In the pull request Tests run that is each `mutation-stats` part, the inline mutation step of a single shard `mutation-stats` job and each `mutation` shard. The push preflight follows the same split, a statistics job and then a `mutation-shard` job, with no inline step. Which tests run and how mutants are graded are unchanged.
 
 ### How failing tests are read
 
@@ -335,7 +335,16 @@ Nothing is appended when `failing_tests` is absent or empty, so a run with no cl
 
 ### Reading the names from a run
 
-Open the run page to read the job summary, or download the evidence. A failed statistics part uploads `mutation-evidence-stats-<part>`; a failed mutation shard or single shard statistics job uploads `mutation-report-<shard>`. Both hold the complete `.mutation-gate/` folder, including each group's `run.log`:
+Open the run page to read the job summary, or download the evidence. Every artifact below holds the complete `.mutation-gate/` folder on failure, including each group's `run.log`:
+
+| Workflow | Failed job | Artifact |
+|---|---|---|
+| Tests, on a pull request | `mutation-stats` part | `mutation-evidence-stats-<part>` |
+| Tests, on a pull request | `mutation` shard, or the inline step of a single shard `mutation-stats` job | `mutation-report-<shard>` |
+| Mutation preflight, on a branch push | statistics part | `mutation-evidence-stats-<part>` |
+| Mutation preflight, on a branch push | `mutation-shard` | `mutation-preflight-shard-<shard>` |
+
+For example, for a failed statistics part:
 
 ```bash
 gh run download <run id> -n mutation-evidence-stats-0 -D mutation-evidence
