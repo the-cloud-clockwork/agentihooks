@@ -144,13 +144,15 @@ needs_proc = pytest.mark.skipif(not Path("/proc/self/stat").is_file(), reason="p
 
 
 @needs_proc
-def test_shell_startup_agent_is_stopped_before_the_cli(monkeypatch, tmp_path, earlier_agent):
-    _shell_home(monkeypatch, tmp_path, STARTS_AGENT)
+@pytest.mark.parametrize("delayed", [False, True])
+def test_shell_startup_agent_is_stopped_before_the_cli(monkeypatch, tmp_path, earlier_agent, delayed):
+    startup = 'ssh-agent() { sleep 0.2; exec "$HOME/ssh-agent" "$@"; }\n' if delayed else ""
+    _shell_home(monkeypatch, tmp_path, startup + STARTS_AGENT)
     monkeypatch.setenv("SSH_AGENT_PID", str(earlier_agent.pid))
     assert fallbacks.ClaudeCliBackend().decide(REQUEST).source == "haiku"
     pid = int((tmp_path / "agent.pid").read_text())
     try:
-        assert _gone(pid)
+        assert _gone(pid), Path(f"/proc/{pid}/comm").read_text()
     finally:
         if not _gone(pid, wait=0):
             os.kill(pid, signal.SIGKILL)
