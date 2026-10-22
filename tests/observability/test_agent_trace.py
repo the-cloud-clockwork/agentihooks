@@ -441,3 +441,31 @@ def test_exporter_exception_is_logged_not_raised(monkeypatch, tmp_path, capsys):
         capsys.readouterr().err,
         re.M,
     )
+
+
+def _wake(uuid, ts, kind="channel"):
+    return {
+        "type": "user",
+        "uuid": uuid,
+        "isMeta": True,
+        "origin": {"kind": kind, "server": "inbox"},
+        "timestamp": ts,
+        "message": {"role": "user", "content": '<channel source="inbox" item_id="i1">checks green</channel>'},
+    }
+
+
+def test_inbox_wake_after_idle_wait_opens_a_new_turn():
+    from hooks.observability import agent_trace
+
+    entries = [
+        _prompt("u1", "2026-10-04T10:00:00.000Z", "fix the bug"),
+        _assistant("a1", "2026-10-04T10:00:05.000Z", "m1", [{"type": "text", "text": "waiting"}], _usage(1, 2)),
+        _wake("w1", "2026-10-04T10:40:05.000Z"),
+        _assistant("a2", "2026-10-04T10:40:09.000Z", "m2", [{"type": "text", "text": "merged"}], _usage(1, 2)),
+        _wake("w2", "2026-10-04T10:40:10.000Z", kind="hook"),
+    ]
+    turns = _by_kind(agent_trace.session_spans(entries, _identity()), "span")
+    assert [t.name for t in turns] == ["turn 1", "turn 2"]
+    assert turns[0].end_ns - turns[0].start_ns == 5_000_000_000
+    assert turns[1].end_ns - turns[1].start_ns == 5_000_000_000
+    assert turns[1].attributes["langfuse.observation.input"].startswith('<channel source="inbox"')
