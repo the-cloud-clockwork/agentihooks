@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from scripts.swarm_ledger.repository import sqlite
+from scripts.swarm_ledger.repository import refresh, sqlite
 from tests.swarm_ledger.test_sqlite import CONTENT, chat, store
 
 CLAIM = {"op": "task_update", "id": "u1", "by": "eng", "item": "tasks/t2", "fields": {"state": "claimed"}}
@@ -92,7 +92,7 @@ def test_change_records_keep_only_recent_generations(tmp_path, monkeypatch):
 
 
 def test_a_write_past_the_recorded_path_limit_falls_back_to_the_whole_rebuild(tmp_path, monkeypatch):
-    monkeypatch.setattr(sqlite.refresh, "PATHS_KEPT", 1)
+    monkeypatch.setattr(refresh, "PATHS_KEPT", 1)
     reader, writer = store(tmp_path), store(tmp_path)
     reader.create("ledger", CONTENT)
     reader.current("ledger")
@@ -103,3 +103,42 @@ def test_a_write_past_the_recorded_path_limit_falls_back_to_the_whole_rebuild(tm
     served = reader.current("ledger")
     assert len(rebuilds) == 1
     assert served.text == whole(tmp_path).text
+
+
+@pytest.mark.parametrize(("kept", "whole_rebuilds"), [(2, 0), (1, 1)])
+def test_a_reader_refreshes_only_while_its_gap_fits_the_kept_generations(tmp_path, monkeypatch, kept, whole_rebuilds):
+    monkeypatch.setattr(sqlite, "CHANGES_KEPT", kept)
+    reader, writer = store(tmp_path), store(tmp_path)
+    reader.create("ledger", CONTENT)
+    reader.current("ledger")
+    writer.apply_ops("ledger", ops=[chat(1)])
+    writer.apply_ops("ledger", ops=[CLAIM])
+    rebuilds = []
+    original = sqlite.read_rows
+    monkeypatch.setattr(sqlite, "read_rows", lambda *a: rebuilds.append(a) or original(*a))
+    served = reader.current("ledger")
+    assert len(rebuilds) == whole_rebuilds
+    assert served.text == whole(tmp_path).text
+
+
+def test_changed_paths_unite_every_recorded_generation_in_the_gap(tmp_path):
+    repo = store(tmp_path)
+    repo.create("ledger", CONTENT)
+    with repo.connect() as connection, connection:
+        refresh.record(connection, "ledger", 11, ['["b"]', '["a"]'], 8)
+        refresh.record(connection, "ledger", 12, ['["c"]'], 8)
+        assert refresh.changed_paths(connection, "ledger", 10, 12, 8) == {'["a"]', '["b"]', '["c"]'}
+        assert refresh.changed_paths(connection, "ledger", 11, 12, 8) == {'["c"]'}
+        assert refresh.changed_paths(connection, "ledger", 9, 12, 8) is None
+        assert refresh.changed_paths(connection, "ledger", 10, 12, 1) is None
+        stored = connection.execute("SELECT paths FROM row_changes WHERE generation=11").fetchone()[0]
+    assert stored == '["[\\"a\\"]","[\\"b\\"]"]'
+
+
+def test_touched_names_each_changed_path_and_every_container_above_it():
+    assert refresh.touched({'["tasks",["id","t1",0],"state"]'}) == {
+        "[]",
+        '["tasks"]',
+        '["tasks",["id","t1",0]]',
+        '["tasks",["id","t1",0],"state"]',
+    }
