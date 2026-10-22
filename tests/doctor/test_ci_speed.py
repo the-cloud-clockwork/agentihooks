@@ -166,6 +166,21 @@ def test_run_timing_is_judged_only_after_completion(event, status, conclusion):
         assert ci_speed.findings([run], NOW + 409000, NOW + 900000) == found
 
 
+def test_runner_wait_is_finalized_after_all_jobs_have_started():
+    first = job(307, created=-320)
+    run = record([first])
+    assert ci_speed.findings([run], NOW - 60000, NOW) == []
+    run["jobs"].append(job(329, created=-330, identity=12))
+    assert ci_speed.findings([run], NOW, NOW + 60000) == []
+    run.update(status="completed", conclusion="success")
+    [finding] = ci_speed.findings([run], NOW + 60000, NOW + 120000)
+    assert finding.kind == "ci runner wait"
+    assert finding.measure == 329
+    assert "2 jobs" in finding.summary
+    assert "median 318.0 seconds" in finding.evidence[0]
+    assert ci_speed.findings([run], NOW + 120000, NOW + 180000) == [finding]
+
+
 def test_every_crossing_is_reported_without_a_display_limit():
     records = [finished([job(301)], identity=n) for n in range(150)]
     assert len(ci_speed.findings(records, NOW - 2000000, NOW)) == 150

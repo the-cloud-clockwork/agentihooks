@@ -50,7 +50,7 @@ def _wait(run, jobs, since_ms, now_ms):
         kind = "ci runner wait" if started(job) else "ci queue age unconfirmed"
         key = (kind, tuple(sorted(set(job["labels"]))))
         groups.setdefault(key, []).append(elapsed)
-        if not started(job) or began >= since_ms:
+        if not started(job) or (run["status"] == "completed" and run.get("conclusion") in COUNTED):
             active.add(key)
     found = []
     for (kind, labels), waits in groups.items():
@@ -94,7 +94,7 @@ def wall_ms(run: dict, now_ms: int) -> int | None:
     jobs = run["jobs"]
     if event not in TIERS or not jobs:
         return None
-    if run["status"] == "completed" and run.get("conclusion") not in COUNTED:
+    if run["status"] != "completed" or run.get("conclusion") not in COUNTED:
         return None
     gates = [job for job in jobs if job["name"] == GATE]
     if event == "pull_request" and not gates and run.get("path") != ".github/workflows/test.yml":
