@@ -4,6 +4,7 @@ from dataclasses import replace
 import pytest
 
 from hooks.context import context_recycle
+from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import commands, reboot, resume, snapshot
 from scripts.swarm import tick as tick_module
@@ -151,13 +152,20 @@ def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_ac
 def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, rebooted):
     ledger, runtime = rebooted
     eng = next(a for a in _local(store).values() if a.lane == "eng")
+    store.put_agent("sw", replace(eng, account="spent"))
     store.put_handoff("sw", eng.task, "carry on from the parser", seat=eng.seat)
 
-    actions, _ = _booted(store, ledger, runtime)
+    actions, _ = _booted(store, ledger, runtime, quota=lambda harness, account: account != "spent")
 
-    assert f"{eng.name} awaits a resume or fresh decision after the workstation rebooted" in actions
+    action = f"{eng.name} awaits a resume or fresh decision after the workstation rebooted"
+    assert action in actions
     held = _local(store)[eng.name]
-    assert (held.state, held.conversation_id, held.seat) == (resume.AWAITING, eng.conversation_id, eng.seat)
+    assert (held.state, held.conversation_id, held.seat, held.account) == (
+        resume.AWAITING,
+        eng.conversation_id,
+        eng.seat,
+        "spent",
+    )
     assert eng.name not in {a.name for a in runtime.resumed}
     (outcome,) = [r for r in store.restored("sw") if r["name"] == eng.name]
     assert (outcome["outcome"], outcome["task"], outcome["conversation_id"]) == (
@@ -165,8 +173,30 @@ def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, re
         eng.task,
         eng.conversation_id,
     )
-    assert outcome["transfer"]
+    assert transfers.get(store, "sw", outcome["transfer"])["handoff"] == "carry on from the parser"
     assert ledger.rows[eng.task]["claimed_by"] == eng.name
+    assert f"{action}; nothing was started in its place." in ledger.notes
+    assert not any(note.startswith("Starting a fresh agent") for note in ledger.notes)
+
+
+def test_a_master_that_cannot_reopen_carries_its_shutdown_handoff(store, rebooted):
+    ledger, runtime = rebooted
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    store.put_agent("sw", replace(master, conversation_id=""))
+    reboot.handoff_path("sw").write_text("## Intent\nKeep the swarm running\n")
+
+    _booted(store, ledger, runtime)
+
+    (outcome,) = [r for r in store.restored("sw") if r["name"] == master.name]
+    assert transfers.get(store, "sw", outcome["transfer"])["handoff"] == "## Intent\nKeep the swarm running\n"
+
+
+def test_a_boot_with_every_recorded_agent_live_starts_nothing(store, rebooted):
+    ledger, runtime = rebooted
+    runtime.live.update(_local(store))
+
+    assert _booted(store, ledger, runtime) == ([], [])
+    assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-2"
 
 
 @pytest.mark.parametrize("reading", [False, None])
@@ -215,7 +245,7 @@ def test_a_planned_record_from_an_older_boot_names_no_agent(store, rebooted):
     store.redis.set(store.key("sw", "boot", "workstation"), "boot-0")
 
     assert reboot.recorded(store, "sw", "boot-0") == set()
-    assert _booted(store, ledger, runtime) == ([], [1])
+    assert _booted(store, ledger, runtime) == ([], [])
     assert runtime.resumed == []
 
 

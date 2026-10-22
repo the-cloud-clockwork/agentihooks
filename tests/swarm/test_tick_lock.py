@@ -173,14 +173,23 @@ def test_only_a_local_holder_whose_process_is_gone_is_dead(monkeypatch, host, lo
     )
 
 
-def test_the_machine_names_its_id_hostname_and_boot(monkeypatch):
+def test_the_machine_names_its_id_hostname_and_boot(monkeypatch, tmp_path):
     files = {"/etc/machine-id": "m", "/proc/sys/kernel/random/boot_id": "b"}
     monkeypatch.setattr(controller, "_read", lambda path: files.get(path, ""))
     monkeypatch.setattr(controller.socket, "gethostname", lambda: "ws")
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
+    mark = tmp_path / "dockerenv"
+    monkeypatch.setattr(controller, "CONTAINER_MARKS", (str(mark),))
     assert controller._machine() == {"machine": "m:ws", "boot": "b"}
     files["/etc/machine-id"] = ""
     assert controller._machine() == {}
     files.update({"/etc/machine-id": "m", "/proc/sys/kernel/random/boot_id": ""})
+    assert controller._machine() == {}
+    files["/proc/sys/kernel/random/boot_id"] = "b"
+    mark.write_text("")
+    assert controller._machine() == {}
+    mark.unlink()
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
     assert controller._machine() == {}
 
 

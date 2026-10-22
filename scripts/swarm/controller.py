@@ -270,10 +270,15 @@ def _stat(pid) -> list[str]:
     return _read(f"/proc/{pid}/stat").rsplit(")", 1)[-1].split()
 
 
+CONTAINER_MARKS = ("/.dockerenv", "/run/.containerenv")
+
+
 def _machine() -> dict:
     """The machine and its boot; a holder recorded on this machine in an earlier boot cannot still be running.
 
-    The hostname joins the machine id because pods built from one image share their machine id."""
+    Containers name no machine: pods built from one image share a machine id and a hostname across nodes."""
+    if os.environ.get("KUBERNETES_SERVICE_HOST") or any(Path(p).exists() for p in CONTAINER_MARKS):
+        return {}
     machine, boot = _read("/etc/machine-id"), _read("/proc/sys/kernel/random/boot_id")
     return {"machine": f"{machine}:{socket.gethostname()}", "boot": boot} if machine and boot else {}
 

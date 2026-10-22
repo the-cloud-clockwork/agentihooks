@@ -93,10 +93,10 @@ def recorded(store, slug, ended):
     last = snapshot.last_auto(slug)
     if planned is not None and planned.get("boot") == ended and (last is None or planned["taken_at"] >= last):
         return {a["name"] for a in planned["agents"]}
-    if not autos:
+    newest = _read(autos[-1]) if autos else None
+    if newest is None:
         return set()
-    state = json.loads(autos[-1].read_text(encoding="utf-8"))["state"]
-    return set(state["keys"].get(store.key(slug, "agents"), {}).get("value", {}))
+    return set(newest["state"]["keys"].get(store.key(slug, "agents"), {}).get("value", {}))
 
 
 def boot_id():
@@ -140,30 +140,36 @@ def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
     seen = store.redis.get(key)
     if seen == current:
         return []
-    if seen is None or store.config(slug).state in {"stopped", "stopping"}:
+    wanted, live = recorded(store, slug, seen), runtime.live_names()
+    lost = [
+        a for a in store.agents(slug) if a.name in wanted and a.name not in live and a.state != "finished" and local(a)
+    ]
+    if seen is None or not lost or store.config(slug).state in {"stopped", "stopping"}:
         store.redis.set(key, current)
         return []
     actions = start_server()
     if actions:
         return actions
     store.redis.set(key, current)
-    wanted, live = recorded(store, slug, seen), runtime.live_names()
-    for agent in store.agents(slug):
-        if agent.name not in wanted or agent.name in live or agent.state == "finished" or not local(agent):
-            continue
+    for agent in lost:
+        routed = agent
         if agent.account and last_quota(agent.harness, agent.account) is not True:
-            agent = replace(agent, account="")
-            store.put_agent(slug, agent)
-        if dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
+            routed = replace(agent, account="")
+            store.put_agent(slug, routed)
+        if not dead_resume._reason(store, slug, routed) and dead_resume.reopen(
+            slug, store, ledger, runtime, routed, now_ms
+        ):
             actions.append(f"resumed {agent.name} after the workstation rebooted")
-        elif dead_resume._owns(store, slug, agent, ledger):
-            actions.append(_await_decision(store, slug, agent, now_ms))
+        elif dead_resume._owns(store, slug, routed, ledger):
+            actions.append(_await_decision(slug, store, ledger, agent, now_ms))
     return actions
 
 
-def _await_decision(store, slug, agent, now_ms):
-    """A failed reboot resume waits for the master or operator to choose resume or fresh, never a silent fresh start."""
-    text = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
+def _await_decision(slug, store, ledger, agent, now_ms):
+    """A failed reboot resume waits for the master or operator to choose resume or fresh, never a silent fresh start;
+    the agent keeps its recorded account for that choice."""
+    shutdown = _shutdown_handoff(slug) if agent.lane == MASTER else ""
+    text = store.handoff(slug, agent.task) or shutdown or transfers.last_handoff(store, slug, agent.task)
     transfer = transfers.record(store, slug, agent, "restore", text, now_ms)
     store.put_agent(slug, replace(agent, state=resume.AWAITING))
     outcome = resume.Outcome(
@@ -178,4 +184,13 @@ def _await_decision(store, slug, agent, now_ms):
     )
     kept = [r for r in store.restored(slug) if r["name"] != agent.name]
     store.put_restored(slug, [*kept, asdict(outcome)])
-    return f"{agent.name} awaits a resume or fresh decision after the workstation rebooted"
+    action = f"{agent.name} awaits a resume or fresh decision after the workstation rebooted"
+    ledger.notify(slug, f"{action}; nothing was started in its place.")
+    return action
+
+
+def _shutdown_handoff(slug):
+    try:
+        return handoff_path(slug).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
