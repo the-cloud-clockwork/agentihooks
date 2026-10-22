@@ -1361,7 +1361,6 @@ def test_runtime_reaps_every_session_holding_a_stray_name(tmp_path, monkeypatch)
     assert rt.reap_name("x@a") is False
 
 
-
 HANDOFF = """# Handoff v2
 ## Intent
 {intent}
