@@ -240,7 +240,7 @@ class LaunchSlots:
         return self._call("reserve", slot, execution, cap, ttl_ms, previous)
 
     def acknowledge(self, execution: str, slot: str = "") -> bool:
-        """A slot names the row to record live again when the reservation expired before the acknowledgement was read."""
+        """A named slot records a row that expired before its acknowledgement was read as live again."""
         return self._call("ack", slot, execution, 0, 45000)
 
     def release(self, execution: str) -> bool:

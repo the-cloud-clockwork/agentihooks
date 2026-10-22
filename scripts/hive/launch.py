@@ -339,7 +339,12 @@ class HiveLaunch:
     def expire(self, request: SpawnRequest) -> None:
         order = self.orders_for(request.task["id"])
         previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
-        if previous and previous.name == request.name and previous.state not in ("ended", "finished"):
+        if (
+            previous
+            and previous.name == request.name
+            and previous.state not in ("ended", "finished")
+            and self.orders.ack(order) is None
+        ):
             self.retire(order, previous)
 
     def reserve_room(self, request: SpawnRequest, selected: Selection) -> str:

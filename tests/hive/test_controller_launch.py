@@ -920,10 +920,21 @@ def test_a_pass_longer_than_the_reservation_still_lands_a_launch_the_hive_acknow
     assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
 
 
+def test_expiring_a_launch_the_hive_acknowledged_leaves_it_running(setup):
+    from scripts.swarm.tick import ACK_LATER
+
+    request, order, _ = live_order(setup)
+    setup.launcher.expire(replace(request, task={**request.task, ACK_LATER: True}))
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
+    assert setup.launcher.orders_for("task") == order
+    assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
+
+
 def test_an_acknowledgement_records_an_expired_slot_live_only_for_a_named_slot_and_never_after_a_release(setup):
     slots = setup.launcher.slots
     assert not slots.acknowledge("unnamed")
     assert slots.counts() == {}
+    assert slots.acknowledge("expired", "claude:account")
     assert slots.acknowledge("expired", "claude:account")
     assert slots.counts() == {"claude:account": 1}
     assert slots.reserve("claude:account", "released", 6, 300000)
@@ -1412,6 +1423,7 @@ def test_expire_reaps_and_ends_the_live_execution_of_its_own_claimant(setup, sta
     request, order, _ = live_order(setup)
     agent = setup.store.execution_registry.get("fixture", order.execution_id)
     setup.store.execution_registry.update("fixture", replace(agent, state=state))
+    setup.store.redis.delete(setup.launcher.orders.receipt(order))
     assert setup.launcher.expire(request) is None
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
     assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id)) == {
