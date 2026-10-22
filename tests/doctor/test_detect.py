@@ -163,12 +163,11 @@ def test_the_startup_reader_judges_hive_agents_from_their_heartbeat_after_the_ac
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     acked, timings = 50_000, {"returned_at": 50_000}
     hive = {"started_at": 1_000, "hive": "h1", "launch_timings": timings}
-    running = AgentRecord("sw-eng-1", "eng", "t1", seat="eng-1@sw", **hive)
-    silent = AgentRecord("sw-eng-2", "eng", "t2", seat="eng-2@sw", **hive)
-    waiting = AgentRecord("sw-eng-3", "eng", "t3", started_at=1_000, state="starting", seat="eng-3@sw")
-    local = AgentRecord("sw-eng-4", "eng", "t4", started_at=1_000, seat="eng-4@sw")
-    for record in (running, silent, waiting, local):
-        store.put_agent("sw", record)
+    running = AgentRecord("sw-eng-1", "eng", "t1", **hive)
+    silent = AgentRecord("sw-eng-2", "eng", "t2", **hive)
+    waiting = AgentRecord("sw-eng-3", "eng", "t3", started_at=1_000, state="starting")
+    local = AgentRecord("sw-eng-4", "eng", "t4", started_at=1_000)
+    store.agents = lambda slug: [running, silent, waiting, local] if slug == "sw" else []
     store.record_launch("sw", waiting, ACKNOWLEDGING)
     store.record_launch("sw", running, "started")
     idle.beat(store.redis, "sw", running.name, idle.WORKING, acked + 1)
