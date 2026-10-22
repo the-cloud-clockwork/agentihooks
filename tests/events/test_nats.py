@@ -187,27 +187,48 @@ class _Idle:
     def start(self):
         self.started = True
 
-    def is_alive(self):
+
+class _Unset:
+    timeouts = []
+
+    def set(self):
+        pass
+
+    def wait(self, timeout):
+        self.timeouts.append(timeout)
         return False
 
 
+class _Stuck:
+    def __init__(self):
+        self.timeouts = []
+
+    def join(self, timeout):
+        self.timeouts.append(timeout)
+
+    def is_alive(self):
+        return True
+
+
 def test_a_loop_that_never_runs_is_refused_at_its_start_bound(monkeypatch):
-    monkeypatch.setattr(nats, "LOOP_START_S", 0.05)
+    monkeypatch.setattr(_Unset, "timeouts", [])
     monkeypatch.setattr(nats.threading, "Thread", _Idle)
+    monkeypatch.setattr(nats.threading, "Event", _Unset)
     with pytest.raises(RuntimeError, match="^bus loop did not start$"):
         nats._Loop()
+    assert _Unset.timeouts == [nats.LOOP_START_S]
 
 
-def test_a_loop_that_never_stops_is_refused_at_its_stop_bound(monkeypatch):
+def test_a_loop_that_never_stops_is_refused_at_its_stop_bound():
     loop = nats._Loop()
-    stop = loop._loop.stop
-    monkeypatch.setattr(nats, "LOOP_STOP_S", 0.05)
-    monkeypatch.setattr(loop._loop, "stop", lambda: None)
+    thread, stuck = loop.thread, _Stuck()
+    loop.thread = stuck
     with pytest.raises(RuntimeError, match="^bus loop did not stop$"):
         loop.close()
-    loop._loop.call_soon_threadsafe(stop)
-    loop.thread.join(5)
-    assert not loop.thread.is_alive()
+    assert stuck.timeouts == [nats.LOOP_STOP_S]
+    thread.join(5)
+    assert not thread.is_alive()
+    loop._loop.close()
 
 
 def test_the_consumer_config_asks_for_explicit_acks():

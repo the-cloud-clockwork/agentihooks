@@ -65,7 +65,6 @@ def _consumer_config(durable: str, subject: str, policy: QueuePolicy) -> api.Con
     return api.ConsumerConfig(
         durable_name=durable,
         filter_subject=subject,
-        ack_policy=api.AckPolicy.EXPLICIT,
         max_deliver=policy.max_deliver,
         ack_wait=_seconds(policy.ack_wait_ms),
         backoff=backoff or None,
