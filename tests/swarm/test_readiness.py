@@ -196,6 +196,21 @@ def test_an_offer_is_withdrawn_once_its_task_is_frozen_claimed_moved_or_gone():
     assert readiness.withdrawal(event, held) == "a release or apply wait holds it"
 
 
+def test_withdrawal_judges_readiness_holds_and_admission_on_the_snapshot(monkeypatch):
+    seen = []
+    view = snapshot(doc([task("a")]), fix="f", admits=lambda t: seen.append(("admits", t)) or True)
+    event = readiness.offer(view.rows["a"], view, NOW)
+    monkeypatch.setattr(readiness, "ready", lambda *args: seen.append(("ready", args)) or False)
+    monkeypatch.setattr(readiness.claim_hold, "hold", lambda *args: seen.append(("hold", args)) or "held")
+    assert readiness.withdrawal(event, view) == "held"
+    expected = (view.rows["a"], view.rows, view.doc, view.graph, "f")
+    assert seen == [("ready", expected), ("hold", expected)]
+    seen.clear()
+    monkeypatch.setattr(readiness, "ready", lambda *args: True)
+    assert readiness.withdrawal(event, view) == ""
+    assert seen == [("admits", view.rows["a"])]
+
+
 def test_take_terminates_withdrawn_offers_and_returns_the_first_live_one(bus, clock):
     found = doc([task("a"), task("b"), task("c")])
     readiness.publish(bus, snapshot(found), NOW)
