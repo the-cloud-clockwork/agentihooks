@@ -1,9 +1,10 @@
+import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from scripts.events.bus import Bus
+from scripts.events.bus import Bus, StateConflict
 from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.hive import admission, headroom
@@ -44,6 +45,21 @@ class Spoke:
         if admission.room(self.measure()).room < 1:
             return "held"
         queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
-        if queue.take(timeout_ms) is None:
+        delivery = queue.take(timeout_ms)
+        if delivery is None:
             return "empty"
-        return "taken"
+        event = delivery.event
+        claims = self.bus.state("spoke-work")
+        key = f"{event.swarm}:{event.key}:{event.version}"
+        value = json.dumps({"owner": self.config.hive, "state": "claimed"}).encode()
+        try:
+            revision = claims.create(key, value)
+        except StateConflict:
+            delivery.nak(self.config.policy.ack_wait_ms)
+            return "busy"
+        request = self.tasks.request(event)
+        if request is None:
+            claims.update(key, json.dumps({"state": "withdrawn"}).encode(), revision)
+            delivery.term()
+            return "withdrawn"
+        return "claimed"
