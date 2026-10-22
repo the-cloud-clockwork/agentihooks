@@ -267,7 +267,8 @@ def _list() -> None:
             f"{record['id']}\t{state}\tui={record['ui']}\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}"
         )
         for report in join_report.listing(redis, record["id"]):
-            print("  " + join_report.summary(report))
+            if "ended_at" not in report:
+                print("  " + join_report.summary(report))
 
 
 def _registry(args: argparse.Namespace) -> None:

@@ -67,8 +67,12 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
             max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
-        found = admission.room(
-            headroom.read(store.redis, hive["id"], now), pending=admission.pending(store.redis, hive["id"])
+        found = admission.capped(
+            admission.room(
+                headroom.read(store.redis, hive["id"], now), pending=admission.pending(store.redis, hive["id"])
+            ),
+            hive["agents"],
+            hive["max_agents"],
         )
         hive["room"] = found.room
         hive["refusal"] = admission.refusal(found)
