@@ -326,6 +326,31 @@ def test_names_batches_alias_and_record_reads_without_changing_rows(store, redis
     pipeline.assert_called_once_with(transaction=False)
 
 
+def test_names_reads_records_one_page_per_pipeline_and_keeps_the_rows(store, redis, monkeypatch):
+    names = [store.next_name("sw", "eng", at=at) for at in range(5)]
+    expected = store.names.names("sw")
+    sizes = []
+    pipeline = redis.pipeline
+
+    def counted(**kwargs):
+        pipe = pipeline(**kwargs)
+        execute = pipe.execute
+
+        def sized():
+            sizes.append(len(pipe.command_stack))
+            return execute()
+
+        pipe.execute = sized
+        return pipe
+
+    monkeypatch.setattr(naming, "NAMES_PAGE", 2)
+    monkeypatch.setattr(redis, "pipeline", counted)
+
+    assert store.names.names("sw") == expected
+    assert [row["name"] for row in expected] == names
+    assert sizes == [2, 2, 1]
+
+
 def test_names_without_a_code_reads_no_records(store, redis, monkeypatch):
     from unittest.mock import Mock
 
