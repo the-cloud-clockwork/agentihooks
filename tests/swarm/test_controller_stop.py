@@ -61,3 +61,5 @@ def test_controller_run_releases_held_tick_locks_on_sigterm_before_exiting(monke
     assert stopped.value.code == 143
     assert released == ["token"]
     assert tick_stop._HELD == {}
+    with pytest.raises(tick_stop.Stopped):
+        tick_stop.check()
