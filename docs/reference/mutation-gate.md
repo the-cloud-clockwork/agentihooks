@@ -88,7 +88,8 @@ A successful lookup prints
 Read the returned entries for the expected helper caller, then inspect the
 mutation report to establish whether those tests killed the mutant. A reused
 report can skip planning and have no new selection artifact; follow its
-`reuse.json` to the source run. Artifacts expire after seven days.
+`reuse.json` to the source run. The selection artifact is retained for one day;
+mutation reports are retained for seven days.
 
 ### Selection limits and troubleshooting
 
