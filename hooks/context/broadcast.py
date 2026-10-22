@@ -776,6 +776,7 @@ def acknowledge_broadcast(session_id: str, message_id: str) -> bool:
 
 SESSION_MAX_AGE_SECONDS = 86400  # 24h retention for crash recovery
 SESSION_SUSPECT_SECONDS = 300
+LAUNCHER = "launcher"
 
 
 def _now_iso() -> str:
@@ -793,6 +794,14 @@ def encode_cwd(cwd: str) -> str:
       → -home-iamroot-dev-antoncore--claude-worktrees-foo
     """
     return cwd.replace("/", "-").replace(".", "-")
+
+
+def _named(records: list[dict], name: str) -> dict:
+    """A launcher's name from this session or the live session it supersedes wins over the given name."""
+    for info in records:
+        if info.get("named_by") == LAUNCHER and info.get("name"):
+            return {"name": info["name"], "named_by": LAUNCHER}
+    return {"name": name} if name else {}
 
 
 def register_session(
@@ -818,21 +827,25 @@ def register_session(
         # previously-alive entries for that pid (they're from an earlier
         # session lifecycle — /resume or /clear). Subagents share their
         # parent's pid and pass supersede=False.
-        if pid and supersede and not is_codex_memory_thread(cwd):
-            for existing_sid, existing_info in sessions.items():
-                if existing_sid == session_id:
-                    continue
-                if existing_info.get("pid") == pid and existing_info.get("status") == "alive":
-                    existing_info["status"] = "superseded"
-                    existing_info["superseded_at"] = now
-                    existing_info["superseded_by"] = session_id
+        rivals = (
+            [
+                info
+                for sid, info in sessions.items()
+                if sid != session_id and info.get("pid") == pid and info.get("status") == "alive"
+            ]
+            if pid and supersede and not is_codex_memory_thread(cwd)
+            else []
+        )
+        existing = sessions.get(session_id)
+        named = _named([existing or {}, *rivals], name)
+        for info in rivals:
+            info["status"] = "superseded"
+            info["superseded_at"] = now
+            info["superseded_by"] = session_id
         # Preserve started_at across re-registrations (SessionStart can fire
         # multiple times per session — resume, reconnect — and we want the
         # age to reflect the true session start, not the last event).
-        existing = sessions.get(session_id)
         started_at = existing.get("started_at", now) if existing else now
-        name = (existing or {}).get("name") or name
-        named = {"name": name} if name else {}
         sessions[session_id] = {
             **named,
             "started_at": started_at,
@@ -856,12 +869,12 @@ def deregister_session(session_id: str) -> None:
         _save_sessions(sessions)
 
 
-def _mark_session(pid: int, key: str, value: str) -> int:
+def _mark_session(pid: int, fields: dict[str, str]) -> int:
     with _file_lock(_sessions_path()):
         sessions = _load_sessions()
         live = [info for info in sessions.values() if info.get("pid") == pid and info.get("status") == "alive"]
         for info in live:
-            info[key] = value
+            info.update(fields)
         if live:
             _save_sessions(sessions)
     return len(live)
@@ -880,7 +893,7 @@ def _session_mark(pid: int, key: str) -> str:
 
 def name_session(pid: int, name: str) -> int:
     """Give every live session of ``pid`` an agent name; returns how many records carry it."""
-    return _mark_session(pid, "name", name)
+    return _mark_session(pid, {"name": name, "named_by": LAUNCHER})
 
 
 def session_name(pid: int) -> str:
@@ -888,7 +901,7 @@ def session_name(pid: int) -> str:
 
 
 def pin_session(pid: int, swarm: str) -> int:
-    return _mark_session(pid, "swarm", swarm)
+    return _mark_session(pid, {"swarm": swarm})
 
 
 def session_swarm(pid: int) -> str:

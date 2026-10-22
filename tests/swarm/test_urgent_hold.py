@@ -111,13 +111,13 @@ def test_a_task_with_an_open_dependency_names_it():
 
 
 def test_the_tick_ready_check_agrees_with_the_hold():
-    from scripts.swarm import tick
+    from scripts.swarm import readiness
     from scripts.swarm_ledger.repository import hierarchy
 
     found = doc([task("a"), task("b", phase="p2"), task("c", state="claimed"), task("d", out_of_scope=True)])
     rows = {t["id"]: t for t in found["tasks"]}
     graph = hierarchy.project(found)[0]
-    assert [t for t in rows if tick.ready(rows[t], rows, found, graph, "")] == ["a"]
+    assert [t for t in rows if readiness.ready(rows[t], rows, found, graph, "")] == ["a"]
 
 
 def test_an_urgent_claimable_task_unclaimed_ten_minutes_raises_a_finding(store):

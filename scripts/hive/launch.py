@@ -282,6 +282,19 @@ class HiveLaunch:
     def reap(self, order: LaunchOrder, agent: AgentRecord) -> None:
         self.orders.command(order.hive, CommandOrder(f"reap:{agent.name}", "reap", name=agent.name))
 
+    def reap_execution(self, order: LaunchOrder) -> None:
+        lease.require_epoch(self.store, self.slug, self.held.epoch)
+        self.orders.command(
+            order.hive,
+            CommandOrder(
+                f"reap:{order.slug}:{order.execution_id}:{order.generation}",
+                "reap_execution",
+                slug=order.slug,
+                execution_id=order.execution_id,
+                generation=order.generation,
+            ),
+        )
+
     def spawn(self, request: SpawnRequest) -> Outcome:
         lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
         if order := self.orders_for(request.task["id"]):
@@ -438,14 +451,18 @@ class HiveLaunch:
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             status = Status.AMBIGUOUS if ack.failure == "ambiguous" else Status.REFUSED
             return Outcome("spawn", status, HIVE, detail=f"hive launch failed: {ack.failure}")
-        current = self.store.execution_occupants(self.slug).get(agent.seat)
-        _match("seat occupant", order.execution_id, current.execution_id if current else None)
-        _match("generation", order.generation, agent.generation)
-        if agent.state == "launching":
-            agent = self.record(agent, order, ack)
-        _match("runtime target", agent.runtime_target, ack.target)
-        _match("pane", agent.pane_id, ack.execution.get("pane_id", agent.pane_id))
-        _match("state", "working", agent.state)
+        try:
+            current = self.store.execution_occupants(self.slug).get(agent.seat)
+            _match("seat occupant", order.execution_id, current.execution_id if current else None)
+            _match("generation", order.generation, agent.generation)
+            if agent.state == "launching":
+                agent = self.record(agent, order, ack)
+            _match("runtime target", agent.runtime_target, ack.target)
+            _match("pane", agent.pane_id, ack.execution.get("pane_id", agent.pane_id))
+            _match("state", "working", agent.state)
+        except SwarmError:
+            self.reap_execution(order)
+            raise
         if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(agent.execution_id):
             self.reap(order, agent)
             self.end(agent, LATE)
