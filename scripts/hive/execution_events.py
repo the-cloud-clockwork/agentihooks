@@ -16,6 +16,10 @@ ENDED = frozenset({"exited", "dead"})
 _LOG = logging.getLogger(__name__)
 
 
+SENT = b"sent"
+PREFIX = "execution."
+
+
 def identity(swarm: str, name: str, generation: int) -> str:
     return hashlib.sha256(json.dumps([swarm, name, generation]).encode()).hexdigest()
 
@@ -25,8 +29,8 @@ def emit(bus: Bus, event: Envelope) -> None:
     key = hashlib.sha256(event.id.encode()).hexdigest()
     if states.get(key) is not None:
         return
-    bus.events.publish(subject(event.swarm, "execution", event.type.split(".")[-1]), event)
-    states.create(key, b"sent")
+    bus.events.publish(subject(event.swarm, "execution", event.type.removeprefix(PREFIX)), event)
+    states.create(key, SENT)
 
 
 def prepare(bus: Bus, swarm: str, name: str, generation: int) -> None:

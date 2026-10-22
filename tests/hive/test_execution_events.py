@@ -134,3 +134,96 @@ def test_a_reused_agent_name_never_inherits_an_older_generation_envelope():
     assert [(item.event.key, item.event.version) for item in events] == [("first-execution", 6), ("execution-a", 7)]
     assert "claim_key" not in events[1].event.data
     bus.close()
+
+
+def test_registered_start_is_reused_and_updated_without_a_pending_marker():
+    from dataclasses import replace
+
+    from scripts.hive.execution_events import initial, started
+
+    bus = open_bus(BusConfig())
+    record = report("working")["executions"]["execution-a"]
+    event = initial(bus, "hive-a", "execution-a", record, 111)
+    started(bus, event)
+    assert initial(bus, "hive-a", "execution-a", record, 222) == event
+    updated = replace(event, time=333)
+    started(bus, updated)
+    started(bus, updated)
+    assert initial(bus, "hive-a", "execution-a", record, 444) == updated
+    assert len(bus.events.consumer("audit", "swarm.rig.execution.started").fetch(10, 0)) == 1
+    bus.close()
+
+
+def test_initial_identity_and_exit_time_follow_each_report():
+    import hashlib
+    import json
+
+    from scripts.hive.execution_events import STATE, initial, publish, started
+
+    bus = open_bus(BusConfig())
+    live = report("working")
+    event = initial(bus, "hive-a", "execution-a", live["executions"]["execution-a"], live["observed_at"])
+    started(bus, event)
+    receipt = bus.state(STATE).get(hashlib.sha256(event.id.encode()).hexdigest())
+    assert receipt.value == b"sent"
+    ended = report("exited")
+    ended["observed_at"] = 4321
+    publish(bus, "hive-a", ended)
+    events = [item.event for item in bus.events.consumer("audit", "swarm.rig.execution.*").fetch(10, 0)]
+    key = hashlib.sha256(json.dumps(["hive-a", "execution-a", 7]).encode()).hexdigest()
+    assert events[0].id == f"started:{key}:7"
+    assert events[0].entity == "execution"
+    assert events[1].time == 4321
+    bus.close()
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_one_unready_execution_does_not_hide_other_execution_events(pending):
+    from scripts.hive.execution_events import prepare, publish
+
+    bus = open_bus(BusConfig())
+    first = report("working" if pending else "unknown")
+    if pending:
+        prepare(bus, "rig", "agent-a", 7)
+    first["executions"]["execution-b"] = {
+        "slug": "rig",
+        "name": "agent-b",
+        "generation": 8,
+        "pane": {"state": "working"},
+    }
+    publish(bus, "hive-a", first)
+    events = bus.events.consumer("audit", "swarm.rig.execution.started").fetch(10, 0)
+    assert [item.event.key for item in events] == ["execution-b"]
+    bus.close()
+
+
+@pytest.mark.parametrize("backend,executions", [("memory", True), ("nats", False)])
+def test_observation_skips_unconfigured_bus_and_empty_reports(monkeypatch, backend, executions):
+    from scripts.hive import execution_events
+
+    monkeypatch.setenv("AGENTIHOOKS_BUS", backend)
+    sample = report("working") if executions else {"executions": {}}
+    with patch.object(execution_events, "open_bus") as connect:
+        execution_events.observe("hive-a", sample)
+    connect.assert_not_called()
+
+
+def test_observation_uses_configured_authority_and_preserves_failure_diagnostics(monkeypatch, caplog):
+    from scripts.hive import execution_events
+
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    monkeypatch.setenv("AGENTIHOOKS_BUS_URL", "nats://hive.invalid:4222")
+    config = BusConfig.from_environ()
+    bus = open_bus(BusConfig())
+    sample = report("working")
+    with (
+        patch.object(execution_events, "open_bus", return_value=bus) as connect,
+        patch.object(execution_events, "publish", side_effect=RuntimeError("offline")) as publish,
+        patch.object(bus, "close") as close,
+    ):
+        execution_events.observe("hive-a", sample)
+    connect.assert_called_once_with(config)
+    publish.assert_called_once_with(bus, "hive-a", sample)
+    close.assert_called_once_with()
+    assert caplog.messages == ["Execution events deferred: RuntimeError"]
+    bus.close()
