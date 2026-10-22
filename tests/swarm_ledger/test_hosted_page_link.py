@@ -82,6 +82,15 @@ def test_a_hosted_server_dropping_the_read_is_not_answering(hosted, monkeypatch)
     assert ledger_link.page_line(SLUG) == f"No ledger page link: the hosted ledger server {HOSTED} is not answering"
 
 
+def test_a_hosted_link_probes_its_own_ledger_while_another_ledger_is_routed(hosted):
+    probed, read = hosted
+    with ledger_route.scoped("another-plan", "https://another.example"):
+        line = ledger_link.page_line(SLUG)
+    assert line == f"Ledger page: {HOSTED}/{SLUG} (open it to follow and steer the work)"
+    assert probed == [HOSTED]
+    assert read == [(SLUG, "metadata")]
+
+
 def test_a_local_server_serving_another_folder_is_still_refused(monkeypatch, tmp_path):
     monkeypatch.delenv(hosted_probe.HOSTED_ENV, raising=False)
     monkeypatch.delenv("SWARM_URL", raising=False)
