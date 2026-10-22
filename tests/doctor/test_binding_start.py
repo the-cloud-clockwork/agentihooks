@@ -56,3 +56,27 @@ def test_a_launch_fallback_preserves_the_correlation_life():
     [binding] = registry.bindings([_agent()])
     assert binding["started_at"] == NOW - 60_000
     assert binding["life"] == "engineer@hive-1#0"
+
+
+@pytest.mark.parametrize("start", [0, None, -1])
+def test_a_raw_binding_with_an_unknown_start_cannot_bypass_grace(start):
+    [binding] = registry.bindings([_agent(started_at=NOW - 600_000)])
+    binding.update(started_at=start, read=True, traces=[], remote=None, local=None)
+    [found] = traces.active({"slug": "s", "now_ms": NOW, "active": [binding]}, traces.Limits())
+    assert found.kind == "telemetry start unknown"
+    assert found.measure == 1
+
+
+def test_a_raw_binding_with_a_missing_start_reports_an_evidence_gap():
+    [binding] = registry.bindings([_agent()])
+    del binding["started_at"]
+    binding.update(read=True, traces=[], remote=None, local=None)
+    [found] = traces.active({"slug": "s", "now_ms": NOW, "active": [binding]}, traces.Limits())
+    assert found.kind == "telemetry start unknown"
+
+
+def test_a_missing_spawn_and_launch_start_reports_an_evidence_gap():
+    agent = _agent()
+    del agent["started_at"], agent["launched_at"]
+    [found] = _findings(agent)
+    assert found.kind == "telemetry start unknown"

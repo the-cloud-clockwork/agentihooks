@@ -386,6 +386,7 @@ def _start_unknown(binding):
         1,
     )
 
+
 def _active_binding(binding, record, limits):
     if (binding.get("started_at") or 0) <= 0:
         return [_start_unknown(binding)]

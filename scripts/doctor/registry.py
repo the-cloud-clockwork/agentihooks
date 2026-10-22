@@ -61,6 +61,7 @@ def save(path: Path, state: dict) -> None:
 def _started_at(agent):
     return next((agent[key] for key in ("started_at", "launched_at") if (agent.get(key) or 0) > 0), 0)
 
+
 def bindings(agents: list[dict]) -> list[dict]:
     return [
         {
