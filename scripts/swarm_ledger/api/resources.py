@@ -82,7 +82,7 @@ def read(doc: dict, path: str, query: dict | None = None, cache: dict | None = N
     raw = value(doc, path)
     if isinstance(raw, list):
         hash_page = path == "tasks"
-        if cache is None:
+        if cache is None or hash_page:
             return page(raw, resource_revision(doc, path), query or {}, hash_page=hash_page)
         key = (collection_revisions, path)
         if key not in cache:

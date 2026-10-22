@@ -34,13 +34,13 @@ def test_thousand_task_collection_bounds_page_encodes(tmp_path, monkeypatch):
     host = SimpleNamespace(repository=repository)
     ledger_read(host, "cpu", "tasks", {"limit": 100})
     dumps = json.dumps
-    encodes, row_encodes = [], []
+    encodes, row_encodes, projections = [], [], []
 
     def counted(value, *args, **kwargs):
         if isinstance(value, dict) and isinstance(value.get("data"), list):
             encodes.append(len(value["data"]))
         if isinstance(value, dict) and "id" in value:
-            row_encodes.append(value["id"])
+            (row_encodes if "comments" in value else projections).append(value["id"])
         return dumps(value, *args, **kwargs)
 
     monkeypatch.setattr(resources.json, "dumps", counted)
@@ -66,6 +66,7 @@ def test_thousand_task_collection_bounds_page_encodes(tmp_path, monkeypatch):
     assert pages >= 10
     assert len(encodes) <= pages, report
     assert len(row_encodes) <= len(rows) + pages, report
+    assert len(projections) <= len(rows) + pages, report
 
 
 @pytest.mark.parametrize("path", ["tasks", "sources", "events"])
