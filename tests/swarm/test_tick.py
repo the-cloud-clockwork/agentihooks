@@ -637,6 +637,16 @@ class HiveAcks(FakeRuntime):
         super().__init__()
         self.ordered, self.collected, self.acked, self.failing, self.broken = [], [], set(), set(fail), set()
         self.refused, self.collected_slugs, self.conflicted = set(), set(), set()
+        self.expired, self.expire_broken = [], {}
+
+    def expire(self, config, lane, name, task):
+        from scripts.swarm.tick import ACK_LATER
+
+        assert (config.slug, task) == ("sw", {"id": task["id"], "seat": task["seat"], ACK_LATER: True})
+        assert task["seat"].startswith(f"{lane}-")
+        self.expired.append(name)
+        if name in self.expire_broken:
+            raise self.expire_broken[name]
 
     def spawn(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER
@@ -805,21 +815,78 @@ def test_a_swarm_error_during_collect_fails_the_launch_instead_of_waiting_foreve
     assert ledger.rows["t1"]["claimed_by"] == second
 
 
-def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(store):
+@pytest.mark.parametrize("broken", [False, True])
+def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(store, broken):
     from scripts.swarm.tick import ACK_EXPIRED, LEASE_MS
 
     ledger, runtime = tasks(("t1", "eng")), HiveAcks()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     first = runtime.ordered[0]
+    if broken:
+        runtime.broken.add(first)
     tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS - 1)
     assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
+    assert runtime.expired == []
     collected = len(runtime.collected)
     tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
     launches = {row["agent"]: row for row in store.launches("sw")}
     assert (launches[first]["state"], launches[first]["error"]) == ("failed", ACK_EXPIRED)
-    assert len(runtime.collected) == collected
+    assert runtime.collected[collected:] == [first]
+    assert runtime.expired == [first]
     assert first not in {agent.name for agent in store.agents("sw")}
     assert ledger.rows["t1"]["claimed_by"] != first
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ConnectionError("redis went away"), SwarmError("the controller lease is stale"), SpawnError("refused")],
+)
+def test_a_launch_the_hive_cannot_expire_at_the_claim_lease_keeps_waiting(store, capsys, error):
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    runtime.expire_broken[first] = error
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
+    assert runtime.expired == [first]
+    assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
+    assert ledger.rows["t1"]["claimed_by"] == first and store.claimant("sw", "t1") == first
+    assert f'{first} collect for t1 raised RuntimeError("expiring the launch raised {error!r}"), waiting' in (
+        capsys.readouterr().err
+    )
+
+
+def test_an_acknowledgement_collected_at_the_claim_lease_keeps_the_agent_and_its_claim(store):
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    runtime.acked.add(first)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
+    assert [row["state"] for row in store.launches("sw") if row["agent"] == first] == ["started"]
+    assert ledger.rows["t1"]["claimed_by"] == first
+
+
+@pytest.mark.parametrize(
+    ("kind", "reason"),
+    [
+        ("failing", "hive launch failed: prompt"),
+        ("conflicted", "hive launch acknowledgement does not match the live execution"),
+    ],
+)
+def test_a_definitive_collect_failure_at_the_claim_lease_keeps_its_own_reason(store, kind, reason):
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    getattr(runtime, kind).add(first)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    assert (launches[first]["state"], launches[first]["error"]) == ("failed", reason)
+    assert runtime.expired == []
 
 
 def _hive_reservations(store, name):
