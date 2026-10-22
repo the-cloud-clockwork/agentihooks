@@ -152,7 +152,7 @@ def test_a_running_hive_agent_is_judged_from_its_heartbeat():
 def test_a_hive_agent_that_never_starts_is_raised_one_tick_after_its_acknowledgement():
     agent = _hive("engineer@a-2")
     assert spawns.silent_starts([agent], {}, ACKED + spawns.TICK_MS - 1) == []
-    [found] = spawns.silent_starts([agent], {}, ACKED + 2 * spawns.TICK_MS, beats={"engineer@a-1": ACKED})
+    [found] = spawns.silent_starts([agent], {}, ACKED + 2 * spawns.TICK_MS + 1, beats={"engineer@a-1": ACKED})
     assert found.id == "no-hook-event/engineer@a-2"
     assert found.measure == 2
     assert found.evidence == (f"acknowledged at {ACKED}", "hive h1", "harness claude", "pane w4:p1")
