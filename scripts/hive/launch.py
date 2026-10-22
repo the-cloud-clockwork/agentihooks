@@ -395,7 +395,7 @@ class HiveLaunch:
     def complete(self, order: LaunchOrder, ack: Ack) -> Outcome:
         agent = self.store.execution_registry.get(self.slug, order.execution_id)
         if ack.status != "live":
-            if ack.failure == "expired":
+            if ack.failure in ("expired", orders.RESTARTED):
                 self.reap(order, agent)
             if ack.failure != "ambiguous":
                 self.end(agent, ack.failure)

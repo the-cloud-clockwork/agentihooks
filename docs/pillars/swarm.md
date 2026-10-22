@@ -3253,9 +3253,10 @@ minute so the tick of the watched swarm and of the Doctor keep their minute cade
 
 #### What one timer step does
 
-Every tick the step reads the watched swarm's CI speed and updates the Doctor's timer record. A detection pass runs
-only when the detection interval has passed since the last one, counting any gap between ticks, so most steps take a
-few seconds and one step in ten (with the default interval) runs every detector.
+Every tick the step reads the watched swarm's CI speed and updates the Doctor's timer record; a window behind the
+present is read ten minutes per tick, see [Doctor CI speed reads](../ci-timing.md#long-gaps-read-in-bounded-slices).
+A detection pass runs only when the detection interval has passed since the last one, counting any gap between ticks,
+so most steps take a few seconds and one step in ten (with the default interval) runs every detector.
 
 A detection pass reads:
 

@@ -210,6 +210,60 @@ active jobs can consume the budget faster than retry progress accumulates.
 Reuse makes a bounded backlog converge when enough capacity remains; it does
 not guarantee completion for unbounded traffic or an unavailable API.
 
+### Long gaps read in bounded slices
+
+The timer keeps the end of its last complete read as `last` in the Doctor's
+`ci-speed` Redis record. Each tick reads one slice, from `last` to whichever
+comes first: ten minutes after `last` (`SPEED_SLICE_MINUTES`) or the present.
+A Doctor with no saved `last` starts one minute before the present. A long
+gap, such as a tick outage overnight, is therefore never read as one window
+that grows with every pass: each pass discovers at most the runs created in
+one ten minute slice, plus pending runs and, once the slice reaches the
+present, the runs listed by active status.
+
+| Slice read | `last` afterwards | `pending` afterwards | Saved completed jobs | Action line status |
+|---|---|---|---|---|
+| Complete, slice ends before the present | Slice end | Unfinished runs of this slice | Cleared | `catching up` |
+| Complete, slice reaches the present | The present | Unfinished runs of this slice | Cleared | `complete` |
+| Incomplete, any slice | Unchanged | Unchanged | Merged with this pass's completed runs | `incomplete: Actions API read failed: ...` |
+
+A slice that ends before the present lists only its `created` window. The
+active status lists and their settle reads run only on the slice that reaches
+the present, because an earlier slice cannot see runs that are active now.
+Unfinished runs of a complete slice become `pending` and are looked up by id
+on the next pass.
+
+Every pass moves the slice ten minutes while the present moves one tick, so a
+gap of N minutes reaches the present after about N / 9 complete passes at the
+minute cadence. The delivered regression starts 200 minutes behind with five
+runs a minute and 42 active runs: the first pass reports `catching up`, every
+pass discovers at most one slice's 51 runs plus the 42 active runs, and the
+test requires `complete` on every read from a start tick below 35 through the
+last tick, a looser bound than the 22 passes the estimate gives.
+
+A slice whose own runs exceed the call budget still finishes when the budget
+runs out during the jobs requests: the completed jobs already read are saved, as
+described above, and the next pass reuses them. When the budget runs out while
+the slice's run lists or pending lookups are still being read, no jobs were
+read and nothing is saved, so the next pass repeats the same slice from the
+start.
+
+API failures keep their existing text and behavior: the read reports
+`incomplete`, raises the `CI speed API read is incomplete` finding unless a
+GitHub incident holds findings, and retries the same slice. A `catching up`
+line is a successful read and raises no read failure finding. The record
+reports `complete` as true only on a complete read that reaches the present.
+
+Runner wait and tier time crossings are judged on every slice, including
+`catching up` slices. The timer groups them into the detection window that
+contains the present, not the window in which the runs were created, so a
+catch up after an outage can notify both masters of findings about runs
+created hours earlier. Their evidence names the runs, so compare each run's
+creation time with the outage before acting on such a finding.
+
+The ten minute slice is a module constant in the Doctor loop. No flag or
+environment variable changes it; a change goes through a pull request and CI.
+
 ### Active run lists whose count lags
 
 Besides the `created` window list, a read that reaches the present also lists
@@ -282,7 +336,16 @@ Actions report `runs read of ... discovered`, jobs, crossings and API calls.
 Reused jobs count as read jobs even though they consumed no new jobs request.
 Current actions also report retractions and queued jobs not reread. Current
 window slicing can report `catching up`: that snapshot succeeded, but the
-reader has not yet reached the present. It is distinct from an API failure.
+reader has not yet reached the present. It is distinct from an API failure;
+see [Long gaps read in bounded slices](#long-gaps-read-in-bounded-slices).
+For example, on 19 October 2026 at 11:09 UTC, after pull request 4729 merged
+at 09:57 UTC and introduced the `catching up` status, the Doctor logged a
+backlog slice in that day's shorter action line format, before the retraction
+and reread counts were added:
+
+```text
+rig-grade-swarm-doctor: doctor CI speed: catching up; 90 runs read of 90 discovered, 1028 jobs, 3 crossings, 47 API calls
+```
 
 | Symptom | Interpretation and action |
 |---|---|
@@ -292,6 +355,8 @@ reader has not yet reached the present. It is distinct from an API failure.
 | `Actions API pagination ended before the full count: ...; page=2` or higher | A multi page list stayed short after its retry. It is not settled; check whether runs arrived or left during the read and compare the next pass. |
 | Rerun or active workflow fetches jobs again | Expected: reuse requires completed status and the same attempt. |
 | `catching up` | A historical slice completed; later ticks continue toward the present. |
+| `catching up` for more than N / 9 ticks, where N is the gap in minutes | Check the tick cadence first: slices advance one per tick, so a stalled or slow tick stretches the catch up. Then look for incomplete reads between the `catching up` lines; each one retries the same slice. |
+| `runs ... discovered` keeps rising pass after pass while `catching up` | Not expected from slicing, which bounds discovery to one slice. Compare with the number of runs actually created in ten minutes of that period before suspecting the reader. |
 | Backlog never clears | Compare discovery and new or active workload with remaining request capacity; do not infer completion from a large saved count. |
 
 ### Delivered proof and measurement limits
@@ -321,6 +386,23 @@ The source task recorded 13 budget exhausted reads out of 17 during
 18 October 2026, 12:53–13:23 UTC. That is the historical before measurement.
 The regression proves convergence for its controlled backlog; it does not
 supply a comparable live thirty minute after count.
+
+[Pull request 4729](https://github.com/the-cloud-clockwork/agentihooks/pull/4729)
+merged on 19 October 2026 and added the bounded slices. Its
+[red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39224134631)
+failed the 200 minute gap regression on the old code; its
+[green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39225901866)
+passed on the final head. Its source task recorded the live before shape after
+an overnight tick outage from `agentihooks-swarm` journal lines matching
+`doctor CI speed`, 19 October 2026, 05:40–06:15 UTC: 9 of 15 reads
+exhausted the budget and 6 failed pagination, while discovered runs grew
+49, 96, 108, 189, 202, 208, 229, 301 and 305 and runs read rose only from 47
+to 249 per pass. The journal command in
+[Inspect and diagnose a read](#inspect-and-diagnose-a-read), with its
+boundaries set to 22 October 2026, 15:00–15:30 UTC, against the running
+Doctor after the merge, returned 10 reads, all `complete`, none with the budget error, the
+largest discovering 16 runs. That window had no gap to catch up and is not an
+equal-load comparison with the outage window.
 
 ## Delivery tiers
 
