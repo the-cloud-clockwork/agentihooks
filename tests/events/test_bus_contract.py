@@ -121,6 +121,45 @@ def test_an_event_is_never_delivered_past_the_attempt_cap(channel, harness):
     assert channel.take() == []
 
 
+def test_an_exhausted_delivery_is_retained_once_in_the_dead_stream(channel, harness):
+    original = event()
+    channel.offer(original)
+    for attempt in (1, 2, 3):
+        delivery = channel.take()[0]
+        assert (delivery.event, delivery.attempt) == (original, attempt)
+        harness.advance(harness.policy.ack_wait_ms + harness.margin_ms)
+    assert channel.take() == []
+    dead = harness.bus.dead.consumer("dead-reader", "dead.>")
+    letters = dead.fetch(10, harness.poll_ms)
+    assert len(letters) == 1
+    letter = letters[0].event
+    assert letter.type == "dead_lettered"
+    assert letter.cause == original.id
+    assert (letter.swarm, letter.entity, letter.key, letter.version) == ("s", "task", "t1", 1)
+    assert letter.data["event"] == original.to_dict()
+    assert letter.data["attempts"] == 3
+    assert letter.data["source"]
+    assert letter.id != original.id
+    letters[0].ack()
+    harness.advance(2 * harness.policy.ack_wait_ms)
+    assert channel.take() == []
+    assert dead.fetch(10, harness.poll_ms) == []
+
+
+@pytest.mark.parametrize("settlement", ["ack", "term"])
+def test_a_settled_final_attempt_is_not_dead_lettered(channel, harness, settlement):
+    channel.offer(event())
+    for attempt in (1, 2, 3):
+        delivery = channel.take()[0]
+        assert delivery.attempt == attempt
+        if attempt < 3:
+            delivery.nak()
+    getattr(delivery, settlement)()
+    harness.advance(harness.policy.ack_wait_ms + harness.margin_ms)
+    assert channel.take() == []
+    assert harness.bus.dead.consumer("dead-reader", "dead.>").fetch(1, harness.poll_ms) == []
+
+
 def test_a_nak_holds_the_event_until_its_delay_passes(channel, harness):
     delay = 2 * harness.policy.ack_wait_ms
     channel.offer(event())
