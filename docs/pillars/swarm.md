@@ -3054,6 +3054,113 @@ writers above or `task set`.
 - **No label appears.** Check the task's `state`: a `done` task never shows one. Otherwise set the field with
   `task set`, never by writing the ledger database.
 
+## Ledger artifacts
+
+An artifact is a file published on the ledger for the operator to review: markdown, JSON, SVG, or a PNG, JPEG,
+WebP or GIF image, at most 8 MB, with a title of at most 200 characters. The ledger stores it by content hash beside
+the ledger media and lists it in `artifacts`. An artifact is only a file the operator asked for. Test runs, logs,
+review notes and proofs go on the task proof and the pull request.
+
+Two commands publish one:
+
+| Command | What it sends |
+|---|---|
+| `agentihooks ledger --slug <slug> --as <name> artifact <path> "<title>" [--task <id>] [--request <entry id>]` | One artifact. `--task` defaults to the session's swarm task (`AGENTIHOOKS_SWARM_TASK`). `--request` names the operator's chat line or comment that asked for the file. Prints `{"published": true}`. |
+| `agentihooks ledger --slug <slug> --as <name> publish-plan <path> --phase <ids> [--title <t>] [--repo <owner/name>]` | An accepted plan, marked as a plan. It opens or reuses a GitHub issue where the repository has issues, otherwise the ledger artifact is the published plan. It records the plan, links it on each named phase, comments each phase and adds the plan's slices. Prints `{"plan_url": …, "published_to": "issue"\|"artifact", "phases": […]}`. |
+
+### Where the artifact check runs
+
+The ledger checks every artifact twice with the same rule:
+
+1. **Upload.** The file goes to `POST /api/v1/ledgers/<slug>/uploads/artifacts` with the author in
+   `X-Ledger-Agent` and the task, title and optional `request` or `plan` in `X-Artifact-Request`. A refused upload
+   answers `403` with the reason and stores nothing. The command exits with
+   `server refused the file: 403 <reason>`.
+2. **Ledger write.** The `artifact_add` op that lists the stored file. A refused op is rejected and its reason is
+   the command's exit text.
+
+An uploader that has not joined the ledger is refused before the rule runs:
+`403 agent must join this ledger before uploading`.
+
+### The acceptance rule
+
+The rule reads the author, the task the upload names, the author's ledger membership and the two marks:
+`request`, the id of an operator entry, and `plan`, which only `publish-plan` sends and which must be `true`.
+
+| Author and task | Accepted when | Otherwise |
+|---|---|---|
+| Not a ledger member | never | `join the ledger first and name a task it holds` |
+| A master seat: a `master` lane name, joined as `orchestrator`, naming task `master` | the upload is marked as a plan, or `request` names an operator entry | refused with the artifact refusal below |
+| Any author naming a task the ledger does not hold | never | `join the ledger first and name a task it holds` |
+| Any other author, with a held task or no task | the upload is marked as a plan, the task is marked artifact requested, or `request` names an operator entry | refused with the artifact refusal below |
+
+`request` counts only when it names a live entry the operator wrote in any ledger thread: a chat line, a comment
+or a note. A deleted entry or one written by an agent does not count.
+
+The artifact refusal text is:
+
+```text
+an artifact is only a file the operator asked for: mark its task as artifact requested or name his message with request, and proofs go on the task proof and the pull request
+```
+
+A master's artifact is stored with an empty task, so it lists under the ledger's artifacts rather than under a task.
+
+### A master's plan publish
+
+A plan counts as artifact requested for every author, a master seat included. A master that accepts a plan with the
+operator publishes it with `publish-plan`; the plan mark passes both checks without a task marked artifact requested
+and without an operator request. The same master's unmarked upload still needs `--request`.
+
+Before pull request #4316 the master seat's branch returned the operator request check before it reached the plan
+mark, so a master's `publish-plan` exited with `server refused the file: 403 an artifact is only a file the operator
+asked for: …` while a planner's passed. A master then had to open the plan issue by hand.
+
+### Examples
+
+A master publishes an accepted plan for phases `p4` and `p5`:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 publish-plan plan.md --phase p4,p5
+# {"plan_url": "https://github.com/<owner>/<repo>/issues/<n>", "published_to": "issue", "phases": ["p4", "p5"]}
+```
+
+A master publishes a diagram the operator asked for in chat entry `c-1a2b3c4d5e`:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 artifact flow.svg "Inbox flow" --request c-1a2b3c4d5e
+# {"published": true}
+```
+
+An engineer publishes a file for a task the operator marked artifact requested:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 task set t42 artifact=yes
+agentihooks ledger --slug rig-grade-swarm --as engineer@d44a5a-0002 artifact palette.json "Palette" --task t42
+```
+
+The same master without a plan mark or a request is refused:
+
+```bash
+agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 artifact audit.md "Audit summary"
+# server refused the file: 403 an artifact is only a file the operator asked for: …
+```
+
+### Troubleshooting
+
+- **`publish-plan` from a master exits with `403 an artifact is only a file the operator asked for`.** The ledger
+  server runs code from before #4316. Pull dev and restart the ledger server, then publish again; do not open the plan
+  issue by hand.
+- **`403 agent must join this ledger before uploading`.** Run `agentihooks ledger --slug <slug> --as <name> join`
+  first. A master joins as `orchestrator`; a master that joined as a plain member is judged as any other author and
+  needs a plan mark, an artifact requested task or a request.
+- **`join the ledger first and name a task it holds`** after joining. `--task` names a task id the ledger does not
+  hold. Leave `--task` off to use the session's swarm task, or name an existing task.
+- **`--request` is refused.** The entry id must belong to an entry the operator wrote and has not deleted. An agent's
+  own chat line does not count.
+- **The ledger write of `publish-plan` was refused after the issue step.** Unless a plan or phase on the ledger
+  already links that issue, the command comments that the ledger refused the publish and closes the issue. Publishing
+  the same plan again reopens it with a comment.
+
 ## Redis
 
 Redis holds the swarm's runtime state, and the swarm refuses to run without it:
