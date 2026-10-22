@@ -217,9 +217,14 @@ def _hive_lane(lane: str, task: dict) -> bool:
 
 
 def _master_seats(store: RedisStore, slug: str) -> frozenset[str]:
+    from scripts import master_claude_login
+    from scripts.inbox.seats import seat_address
     from scripts.swarm_v2 import masters
 
-    return frozenset(masters.seat(index) for index in range(1, masters.MasterSeats(store.redis).count(slug) + 1))
+    seats = (masters.seat(index) for index in range(1, masters.MasterSeats(store.redis).count(slug) + 1))
+    return frozenset(
+        seat for seat in seats if not master_claude_login.enabled(slug, seat_address(slug, seat), "master", "claude")
+    )
 
 
 def _to_workstation(lane: str, refused: str) -> bool:

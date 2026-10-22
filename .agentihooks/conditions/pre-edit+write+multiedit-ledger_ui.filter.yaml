@@ -9,5 +9,9 @@ finders:
 mode: both
 action: send-back
 intent: >-
+  Judge user-facing text, including accessible names and tooltips. HTML tag
+  names, attribute names, boolean and structural attribute values, CSS
+  selectors, module paths, storage keys and other technical strings are
+  permitted and never violate this intent.
   User-facing text states the value or state its label names. It never explains
   why, how it was computed, or adds detail nobody asked for.
