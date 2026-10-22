@@ -560,6 +560,8 @@ The Worker hive pod workflow (`hive-worker.yml`) runs `deploy/worker/kind-proof.
 
 The hive layer's `WORKER_IMAGE` build argument defaults to the published base, `ghcr.io/the-cloud-clockwork/agentihooks-worker:dev`, which the Swarm worker image workflow (`swarm-node-image.yml`) publishes on pushes to `dev`. The proof reuses that base and builds only the hive layer, unless the base's inputs changed since it was published. Before this change every run rebuilt the base and reinstalled every tool, and the build took 133 to 137 seconds; on the published base it takes 58 to 76 seconds (see [Measurements](#measurements)).
 
+The hive layer builds its wheel from the GitHub ref named by `AGENTIHOOKS_REF`. For the troubleshooting fast lane, `--build-arg AGENTIHOOKS_SOURCE=local` builds it from `pyproject.toml`, `README.md`, `hooks/`, `scripts/` and `profiles/` in the build context instead, so an uncommitted or unpushed fix reaches the image; the default, `git`, is unchanged.
+
 ### How the base is chosen
 
 Before building, the script runs `deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-worker:dev`, which:
