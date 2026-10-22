@@ -722,10 +722,26 @@ def test_time_spent_before_the_first_launch_never_holds_it_back(store, monkeypat
 
 def test_launches_inside_the_budget_keep_filling_the_lanes(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    _slow_launches(monkeypatch, runtime, 19.9)
+    _slow_launches(monkeypatch, runtime, 9.9)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
     assert not any("launch budget" in action for action in actions)
+
+
+def test_a_launch_the_mean_launch_cost_would_carry_past_the_budget_waits_a_pass(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 8)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+    assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
+    assert ledger.rows["t3"]["state"] == "open"
+
+
+def test_one_launch_well_inside_the_budget_lets_the_next_one_start(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 9.99)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
 
 
 def test_a_slow_failed_launch_spends_the_budget_too(store, monkeypatch):
