@@ -311,7 +311,9 @@ def test_handoff_reader_reuses_supplied_empty_mail_snapshot(redis, tmp_path, mon
 
 
 @pytest.mark.parametrize("batch, maximum_scans", [(100, 30), (1000, 5)])
-def test_recorded_pending_handoffs_keep_findings_with_bounded_scan_pages(redis, tmp_path, monkeypatch, batch, maximum_scans):
+def test_recorded_pending_handoffs_keep_findings_with_bounded_scan_pages(
+    redis, tmp_path, monkeypatch, batch, maximum_scans
+):
     from pathlib import Path
 
     recorded = json.loads((Path(__file__).parents[1] / "fixtures/doctor/handoffs.json").read_text())
