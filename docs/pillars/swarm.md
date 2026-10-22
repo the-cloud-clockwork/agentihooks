@@ -2706,8 +2706,8 @@ guard reports it:
 
 #### Retiring the systemd timer
 
-Every path that installs the swarm services (`agentihooks swarm <id> start`, `master up`, `take-master` on a
-stopped swarm, and each tick pass while the timer units are still on disk) reads the delivery record first:
+Every path that installs the swarm services (`agentihooks swarm <id> start`, `master up` or `take-master` on a
+stopped or stopping swarm, and each tick pass while the timer units are still on disk) reads the delivery record first:
 
 - **Not proven.** The `agentihooks-swarm.service` and `agentihooks-swarm.timer` units are kept, or written back
   if an earlier pass deleted them, and the timer is enabled and started. The pass prints
@@ -2742,6 +2742,11 @@ A guard that cannot enable the timer prints
 `the scheduled swarm tick guard failed: <error>`. In both cases the pass goes on and checks the waits. The pass
 refuses to run at all from outside the installed agentihooks:
 `the wait pass refused to run: this run comes from <running>, not the installed agentihooks at <installed>`.
+
+The `agentihooks-tick-watch` service is a second, independent restart path: while a swarm's tick is stale it stops
+the supervisor and registers the tick again from the installed code (see
+[Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher)). The wait pass acts within 15 seconds of a
+dead supervisor; the watcher acts once the tick has been stale for 10 minutes.
 
 #### The Doctor finding
 
