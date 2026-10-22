@@ -167,7 +167,7 @@ kubectl logs "$pod" > "$out/worker.log"
 restarts="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
 [[ "$restarts" == 0 ]]
 hold_agent() {
-kubectl exec -i deployment/hive-join -- env HIVE="$member" STEP="$1" python - <<'PY'
+kubectl exec -i deployment/hive-join -- env HIVE="$member" STEP="$1" NAME="${2:-}" python - <<'PY'
 import os
 from scripts.swarm.store import PREFIX, AgentRecord, RedisStore, redis_client
 
@@ -177,23 +177,30 @@ if os.environ['STEP'] == 'start':
     store.names.adopt('drain-proof', '999999', '', '')
     name = store.names.next('drain-proof', 'eng')
     store.start_execution('drain-proof', AgentRecord(name, 'eng', 't1', seat='eng-1@drain-proof', hive=os.environ['HIVE']))
+    print(name)
+elif os.environ['STEP'] == 'draining':
+    from scripts.hive import registry
+    assert registry.show(store.redis, os.environ['HIVE'])['draining'] == 'yes', 'the preStop did not mark the hive draining'
 else:
-    store.drop_agent('drain-proof', 'engineer@999999-0001')
+    store.drop_agent('drain-proof', os.environ['NAME'])
 PY
 }
-hold_agent start
-kubectl delete pod "$pod" --wait=false
+held="$(hold_agent start)"
+kubectl patch deployment "$deployment" --type merge -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+kubectl rollout restart "deployment/$deployment"
 sleep 25
-[[ -n "$(kubectl get pod "$pod" -o jsonpath='{.metadata.deletionTimestamp}')" ]] || { echo "the hive drain preStop let $pod stop while an agent worked" >&2; exit 1; }
-echo "the hive drain preStop held $pod for 25 seconds while its agent worked" | tee "$out/drain.txt"
-hold_agent finish
+[[ -n "$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" ]] || { echo "the hive drain preStop let $pod stop while an agent worked" >&2; exit 1; }
+[[ "$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o name)" == "pod/$pod" ]] || { echo "a replacement hive pod started while $pod drained" >&2; exit 1; }
+hold_agent draining
+echo "the hive drain preStop kept $pod running and draining for 25 seconds of a roll while its agent worked, with no replacement pod" | tee "$out/drain.txt"
+hold_agent finish "$held"
 kubectl wait --for=delete "pod/$pod" --timeout=25s
-echo "the hive drain preStop released $pod once its agent finished, before the drain deadline" | tee -a "$out/drain.txt"
 hook_failures="$(kubectl get events --field-selector "involvedObject.name=$pod,reason=FailedPreStopHook" -o name)"
 if [[ -n "$hook_failures" ]]; then
   echo "the hive drain preStop failed on $pod" >&2
   exit 1
 fi
+echo "the hive drain preStop released $pod within 25 seconds of its agent finishing" | tee -a "$out/drain.txt"
 kubectl rollout status "deployment/$deployment" --timeout=120s
 replacement="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
 [[ "$replacement" != "$pod" ]]
