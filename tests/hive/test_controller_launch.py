@@ -950,6 +950,52 @@ def test_selected_account_is_frozen_ahead_of_less_used_accounts(setup, pin):
         setup.herdr.planned_account.assert_called_once_with("task", "claude")
 
 
+@pytest.mark.parametrize("pin", ["saved", "planned", "none"])
+def test_hive_sessions_force_a_full_account_to_fall_back_to_one_with_room(setup, monkeypatch, pin):
+    from scripts.hive import registry
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
+    setup.herdr._quota_accounts = [
+        Account("claude", "full_on_hives", "room", 0, 80, 80, 6),
+        Account("claude", "account", "room", 1, 80, 80, 6),
+    ]
+    write_hive(setup, slots=[{"harness": "claude", "account": "full_on_hives", "kind": "subscription"}, *setup.hive["slots"]])
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", '{"claude:full_on_hives": 6}')
+    task = {"id": "task"}
+    if pin == "saved":
+        task["launch_assignment"] = {"harness": "claude", "account": "full_on_hives"}
+    elif pin == "planned":
+        setup.herdr.planned_account.return_value = "full_on_hives"
+
+    assert setup.launcher.select(setup.config, "eng", task).account.name == "account"
+
+
+@pytest.mark.parametrize("account", ["account", ""])
+def test_full_hive_accounts_report_local_and_remote_session_counts(setup, monkeypatch, account):
+    from scripts.hive import placement, registry
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "room", 2, 80, 80, 6),
+        Account("codex", "other", "room", 0, 80, 80, 6),
+    ]
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", '{"claude:account": 4}')
+    setup.herdr.planned_account.return_value = account
+
+    result = setup.launcher.select(setup.config, "eng", {"id": "task"})
+
+    assert isinstance(result, placement.Wait)
+    assert result.reason == (
+        "no Claude account has room after hive sessions: account 2 here and 4 on hives of 6"
+        + ("; pinned to account" if account else "")
+    )
+    assert result.role == "eng"
+
+
 def test_account_selection_orders_room_by_usage_then_name(setup):
     from scripts.swarm.capacity import Account
 
