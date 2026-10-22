@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 from collections.abc import Callable
@@ -6,6 +7,7 @@ from typing import Any, Protocol
 
 from scripts.events.bus import Bus, Delivery, StateConflict
 from scripts.events.config import QueuePolicy
+from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
 from scripts.events.subjects import subject
 from scripts.hive import admission, headroom
@@ -25,6 +27,10 @@ class SpokeConfig:
     lane: str
     hive: str
     policy: QueuePolicy = QueuePolicy()
+
+
+def claim_key(event: Envelope) -> str:
+    return hashlib.sha256(json.dumps([event.swarm, event.key, event.version]).encode()).hexdigest()
 
 
 def measured() -> dict | None:
@@ -52,6 +58,11 @@ class Spoke:
         try:
             return self._apply(delivery)
         except Exception:
+            try:
+                if delivery.attempt >= self.config.policy.max_deliver:
+                    return self._exhaust(delivery)
+            except Exception:
+                pass
             steps = self.config.policy.backoff_ms or (self.config.policy.ack_wait_ms,)
             delivery.nak(steps[min(delivery.attempt - 1, len(steps) - 1)])
             return "retry"
@@ -59,11 +70,16 @@ class Spoke:
     def _apply(self, delivery: Delivery) -> str:
         event = delivery.event
         claims = self.bus.state("spoke-work")
-        key = f"{event.swarm}:{event.key}:{event.version}"
+        key = claim_key(event)
         entry = claims.get(key)
         prior = json.loads(entry.value) if entry else {}
         if prior.get("state") == "started":
             return self._announce(delivery, Envelope.from_dict(prior["event"]))
+        if prior.get("state") == "dead":
+            delivery.term()
+            return "dead"
+        if prior.get("state") == "dead_pending":
+            return self._exhaust(delivery)
         if prior.get("state") == "withdrawn":
             delivery.term()
             return "withdrawn"
@@ -121,3 +137,22 @@ class Spoke:
         self.bus.events.publish(subject(event.swarm, "execution", "started"), event)
         delivery.ack()
         return "started"
+
+    def _exhaust(self, delivery: Delivery) -> str:
+        event = delivery.event
+        claims = self.bus.state("spoke-work")
+        key = claim_key(event)
+        entry = claims.get(key)
+        prior = json.loads(entry.value) if entry else {}
+        if prior.get("state") == "dead_pending":
+            letter = Envelope.from_dict(prior["event"])
+            revision = entry.revision
+        else:
+            letter = dead_letter(event, readiness.queue_name(event.swarm, self.config.lane), delivery.attempt)
+            value = json.dumps({"state": "dead_pending", "event": letter.to_dict()}).encode()
+            revision = claims.update(key, value, entry.revision) if entry else claims.create(key, value)
+        self.bus.dead.publish(f"dead.{event.swarm}", letter)
+        self.tasks.reopen(event)
+        claims.update(key, json.dumps({"state": "dead"}).encode(), revision)
+        delivery.term()
+        return "dead"
