@@ -682,8 +682,11 @@ def test_started_order_of_a_dead_pod_fails_restarted_at_once(setup):
 
 def test_started_order_of_a_live_pod_keeps_waiting(setup):
     from scripts.hive.orders import Consumer, alive
+    from scripts.swarm import lease
 
-    setup.redis.hset(setup.orders.receipt(setup.order), mapping={"started": "1", "pod": "old"})
+    setup.redis.hset(
+        setup.orders.receipt(setup.order), mapping={"started": str(lease.now_ms(setup.store)), "pod": "old"}
+    )
     alive(setup.redis, "host", "old")
     assert setup.redis.get(setup.orders.pod("host", "old")) == "1"
     assert setup.redis.ttl(setup.orders.pod("host", "old")) == 45
@@ -694,8 +697,9 @@ def test_started_order_of_a_live_pod_keeps_waiting(setup):
 
 def test_started_order_without_a_recorded_pod_keeps_waiting(setup):
     from scripts.hive.orders import Consumer
+    from scripts.swarm import lease
 
-    setup.redis.hset(setup.orders.receipt(setup.order), "started", "1")
+    setup.redis.hset(setup.orders.receipt(setup.order), "started", str(lease.now_ms(setup.store)))
     order = replace(setup.order, expires_at=2**62)
     assert Consumer(setup.redis, "host", setup.runtime, pod="new").apply(order) is None
     setup.runtime.spawn.assert_not_called()
@@ -703,8 +707,11 @@ def test_started_order_without_a_recorded_pod_keeps_waiting(setup):
 
 def test_started_order_of_this_pod_keeps_waiting_without_its_liveness_key(setup):
     from scripts.hive.orders import Consumer
+    from scripts.swarm import lease
 
-    setup.redis.hset(setup.orders.receipt(setup.order), mapping={"started": "1", "pod": "new"})
+    setup.redis.hset(
+        setup.orders.receipt(setup.order), mapping={"started": str(lease.now_ms(setup.store)), "pod": "new"}
+    )
     order = replace(setup.order, expires_at=2**62)
     assert Consumer(setup.redis, "host", setup.runtime, pod="new").apply(order) is None
     setup.runtime.spawn.assert_not_called()
