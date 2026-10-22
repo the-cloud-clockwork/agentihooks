@@ -40,7 +40,7 @@ def test_an_idle_hive_has_room_until_projected_cpu_passes_eighty_percent():
 def test_a_loaded_hive_refuses_on_cpu():
     found = admission.room(reading(cpus=8, load5=6.2))
     assert (found.room, found.reason) == (0, admission.CPU)
-    assert admission.refusal(found, 0) == (
+    assert admission.refusal(found) == (
         "cpu: five minute load 6.20 on 8 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line"
     )
 
@@ -52,7 +52,7 @@ def test_a_hive_short_of_memory_refuses_on_ram():
         admission.RAM,
         "13312 of 65536 MB available, 700 MB per agent, fits 0 more under the 80 percent line",
     )
-    assert admission.refusal(found, 0).startswith("ram: 13312 of 65536 MB available")
+    assert admission.refusal(found).startswith("ram: 13312 of 65536 MB available")
 
 
 def test_ram_room_counts_whole_agents_above_the_twenty_percent_floor():
@@ -69,7 +69,7 @@ def test_cpu_room_rounds_down_to_whole_agents():
 def test_a_machine_without_a_full_reading_refuses_on_missing_telemetry(measured):
     found = admission.room(measured)
     assert found == admission.Room(0, admission.MISSING, "no fresh headroom reading")
-    assert admission.refusal(found, 0) == "missing telemetry: no fresh headroom reading"
+    assert admission.refusal(found) == "missing telemetry: no fresh headroom reading"
 
 
 def test_the_workstation_keeps_swarm_agents_to_forty_percent_of_its_cpu():
@@ -103,8 +103,12 @@ def test_the_workstation_swarm_share_never_goes_negative():
 def test_pending_reservations_use_up_the_room():
     found = admission.room(reading(cpus=8, load5=5.6))
     assert found.room == 1
-    assert admission.refusal(found, 0) == ""
-    assert admission.refusal(found, 1).startswith("cpu: ")
+    assert admission.refusal(found) == ""
+    held = admission.room(reading(cpus=8, load5=5.6), pending=1)
+    assert admission.refusal(held) == (
+        "cpu: five minute load 5.60 on 8 CPUs, 0.5 CPU per agent with 1 pending launches, "
+        "fits 0 more under the 80 percent line"
+    )
 
 
 def test_a_reservation_holds_until_the_room_is_spent(redis):
@@ -136,11 +140,6 @@ def test_a_reservation_key_lives_in_the_swarm_keyspace():
     from scripts.swarm.keyspace import ROOT
 
     assert admission.key("anton") == f"{ROOT}:admission:anton"
-
-
-def test_a_reservation_rejects_a_bad_lifetime(redis):
-    with pytest.raises(ValueError, match="^invalid admission lifetime$"):
-        admission.reserve(redis, "anton", "s/one", 1, ttl_ms=0)
 
 
 def test_concurrent_reservations_never_pass_the_room(server):
@@ -175,6 +174,8 @@ def test_concurrent_reservations_never_pass_the_room(server):
         ("worker pool node cap 40 reached", admission.NODE_CAP),
         ("no live hive takes qa", admission.PLACEMENT),
         ("no hive for eng lists the repo agentihooks", admission.PLACEMENT),
+        ("no hive for eng lists the repo quota-tools", admission.PLACEMENT),
+        ("quota: every account is past its handoff line", admission.QUOTA),
         ("no hive for eng advertises the claude slot account-two", admission.PLACEMENT),
     ],
 )

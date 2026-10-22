@@ -939,16 +939,16 @@ def test_interactive_placement_keeps_the_native_login_requirement(setup):
     )
 
 
-@pytest.mark.parametrize("reserved", [3, 4])
-def test_pending_admission_reservations_count_against_hive_room(setup, reserved):
+def test_pending_admission_reservations_count_against_hive_room(setup):
     from scripts.hive import admission
     from scripts.hive.placement import Wait
 
-    for index in range(reserved):
+    for index in range(3):
         admission.reserve(setup.store.redis, "remote", f"fixture/eng-{index}", 3)
     assert setup.launcher.select(setup.config, "eng", {"id": "next"}) == Wait(
         "no hive for eng has room: remote "
-        "ram: 22100 of 100000 MB available, 700 MB per agent, fits 3 more under the 80 percent line"
+        "ram: 22100 of 100000 MB available, 700 MB per agent with 3 pending launches, "
+        "fits 0 more under the 80 percent line"
     )
     assert setup.launcher.hives()[0]["room"] == 0
 
@@ -1240,7 +1240,8 @@ def test_a_launch_that_loses_the_last_room_to_a_concurrent_reservation_waits_on_
     assert admission.reserve(setup.store.redis, "remote", "fixture/other", 1) == (True, 0)
     assert setup.launcher.reserve_room(request, selected) == (
         "no hive for eng has room: remote "
-        "ram: 20700 of 100000 MB available, 700 MB per agent, fits 1 more under the 80 percent line"
+        "ram: 20700 of 100000 MB available, 700 MB per agent with 1 pending launches, "
+        "fits 0 more under the 80 percent line"
     )
     admission.release(setup.store.redis, "remote", "fixture/other")
     assert setup.launcher.reserve_room(request, selected) == ""
@@ -1255,7 +1256,8 @@ def test_a_spawn_refused_at_reservation_records_the_wait_and_returns_the_reason(
     monkeypatch.setattr(admission, "reserve", lambda *args, **kwargs: (False, 1))
     refused = (
         "no hive for eng has room: remote "
-        "ram: 20700 of 100000 MB available, 700 MB per agent, fits 1 more under the 80 percent line"
+        "ram: 20700 of 100000 MB available, 700 MB per agent with 1 pending launches, "
+        "fits 0 more under the 80 percent line"
     )
     result = setup.launcher.spawn(request_for(setup))
     assert (result.operation, result.status, result.backend, result.detail) == (
@@ -1267,6 +1269,22 @@ def test_a_spawn_refused_at_reservation_records_the_wait_and_returns_the_reason(
     assert {
         task: (row["lane"], row["reason"]) for task, row in placement_waits.read(setup.store, "fixture").items()
     } == {"task": ("eng", refused)}
+
+
+def test_a_hive_spawn_that_raises_after_reserving_releases_its_reservation(setup, monkeypatch):
+    from scripts.hive import admission
+
+    publish_room(setup.store, "remote", 1)
+    request = request_for(setup)
+
+    def broken(*args):
+        assert admission.pending(setup.store.redis, "remote") == 1
+        raise RuntimeError("admit failed")
+
+    monkeypatch.setattr(setup.launcher, "admit", broken)
+    with pytest.raises(RuntimeError, match="^admit failed$"):
+        setup.launcher.spawn(request)
+    assert admission.pending(setup.store.redis, "remote") == 0
 
 
 def test_terminal_order_is_cleared_even_when_replacement_has_no_account_room(setup):

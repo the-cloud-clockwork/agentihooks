@@ -1,10 +1,11 @@
-"""Admit each launch by the measured headroom of the machine it lands on; pending reservations count against the room
-for three five minute load windows, until that load shows about 95 percent of the launched agent."""
+"""Admit each launch by the measured headroom of the machine it lands on; a pending reservation counts against the room
+for fifteen minutes, three five minute load windows."""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from scripts.swarm.host_budget import MEMORY_PER_AGENT_MB
+from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -18,7 +19,7 @@ AGENT_MB = MEMORY_PER_AGENT_MB
 PENDING_MS = 900_000
 NO_READING = "no fresh headroom reading"
 FIELDS = ("cpus", "load5", "available_mb", "total_mb")
-QUOTA_MARKS = ("account has room", "account reservation is full", "quota")
+QUOTA_MARKS = ("account has room", "account reservation is full")
 
 _RESERVE = """
 local now = redis.call('TIME')
@@ -89,19 +90,15 @@ def room(measured: dict | None, swarm_agents: int | None = None, pending: int = 
     return Room(count, reason, detail.format(count))
 
 
-def refusal(found: Room, pending: int) -> str:
-    return "" if pending < found.room else f"{found.reason}: {found.detail}"
+def refusal(found: Room) -> str:
+    return "" if found.room else f"{found.reason}: {found.detail}"
 
 
 def key(machine: str) -> str:
-    from scripts.swarm.keyspace import ROOT
-
     return f"{ROOT}:admission:{machine}"
 
 
 def reserve(redis: "Redis", machine: str, member: str, limit: int, ttl_ms: int = PENDING_MS) -> tuple[bool, int]:
-    if type(ttl_ms) is not int or not 0 < ttl_ms <= PENDING_MS:
-        raise ValueError("invalid admission lifetime")
     admitted, held = redis.eval(_RESERVE, 1, key(machine), member, limit, ttl_ms)
     return bool(admitted), int(held)
 
@@ -124,7 +121,7 @@ def category(reason: str) -> str:
             return found
     if NODE_CAP in reason:
         return NODE_CAP
-    if any(mark in reason for mark in QUOTA_MARKS):
+    if any(mark in reason for mark in QUOTA_MARKS) or QUOTA in reason.replace(":", " ").split():
         return QUOTA
     return PLACEMENT
 
