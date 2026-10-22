@@ -162,3 +162,15 @@ def test_an_item_on_an_empty_seat_awaiting_a_successor_is_not_counted_and_a_live
     assert found.id == "inbox-past-window/work1"
     assert found.summary == "unread delivery; sent 10 minutes ago"
     assert inbox.past_window([fyi], 11 * MIN, WINDOW, {}) == []
+
+
+def test_a_quiet_live_reader_of_an_item_on_an_empty_seat_is_still_raised():
+    row = _delivered()
+    row["history"][1]["by"] = "engineer@a-0001"
+    seat = {row["address"]: inbox.Receiver(seat_wait=True)}
+    quiet = {**seat, "engineer@a-0001": inbox.Receiver(live=True, quiet_ms=WINDOW)}
+    assert [f.subject for f in inbox.past_window([row], 20 * MIN, WINDOW, quiet)] == [row["id"]]
+    working = {**seat, "engineer@a-0001": inbox.Receiver(live=True, quiet_ms=WINDOW - 1)}
+    assert inbox.past_window([row], 20 * MIN, WINDOW, working) == []
+    gone = {**seat, "engineer@a-0001": inbox.Receiver()}
+    assert inbox.past_window([row], 20 * MIN, WINDOW, gone) == []

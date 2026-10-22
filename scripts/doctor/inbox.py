@@ -66,10 +66,10 @@ def past_window(items, now_ms, window_ms, receivers=None):
         waited = now_ms - item["created_at"]
         if item.get("fyi") or item["state"] in CLOSED or waited < window_ms:
             continue
-        if receivers.get(item["address"], Receiver()).seat_wait:
-            continue
         receiver = receivers.get(reader(item)) or receivers.get(item["address"], Receiver())
         if not _waiting(item, receiver, window_ms):
+            continue
+        if not receiver.live and receivers.get(item["address"], Receiver()).seat_wait:
             continue
         minutes = waited // MINUTE_MS
         category = "unread delivery" if item["state"] == "pending" else "delivered backlog"

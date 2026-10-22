@@ -6,7 +6,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 
 @pytest.mark.parametrize("slug", ["demo", "demo@partition"])
-def test_empty_successor_seat_is_not_past_window_until_a_live_agent_binds(slug):
+def test_unread_or_taken_items_on_an_empty_successor_seat_are_not_past_window_until_a_live_agent_binds(slug):
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
