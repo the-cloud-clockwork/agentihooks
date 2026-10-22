@@ -819,7 +819,7 @@ def test_the_hive_member_rules_refuse_a_key_outside_the_grant(monkeypatch):
 
     store = swarm()
     hive_member(monkeypatch)
-    assert store.config(SLUG).name == SLUG
+    assert store.config(SLUG).slug == SLUG
     with pytest.raises(NoPermissionError, match="No permissions to access a key"):
         store.redis.delete(store.key(SLUG, "dispatcher-quota-lanes"))
     store.redis.delete(store.key(SLUG, "claim", "t1"))
