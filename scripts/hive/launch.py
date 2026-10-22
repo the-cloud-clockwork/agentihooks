@@ -384,7 +384,8 @@ class HiveLaunch:
             bound = local_slots.maximum(self.store, self.slug, running + admission.room(reading).room)
             taken = local_slots.claim(self.store, selected.hive, self.slug, request.task["id"], request.name, bound)
             if taken >= bound:
-                return f"no hive has room{placement.LOCAL_FULL}{taken} of its {bound} agents"
+                refused = f"no hive has room{placement.LOCAL_FULL}{taken} of its {bound} agents"
+                return refused
         reserved, held = admission.reserve(self.store.redis, selected.hive, member, admission.room(reading).room)
         if reserved:
             return ""
