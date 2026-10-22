@@ -75,7 +75,9 @@ def test_no_advertised_slot_does_not_probe_controller_credentials(setup):
     from scripts.hive.placement import Wait
 
     setup.herdr._quota_accounts = []
-    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait("no advertised Claude account has room")
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        "no Claude account has room after hive sessions: "
+    )
     setup.herdr.choose.assert_not_called()
 
 
@@ -1067,6 +1069,61 @@ def test_selected_account_is_frozen_ahead_of_less_used_accounts(setup, pin):
         setup.herdr.planned_account.assert_called_once_with("task", "claude")
 
 
+@pytest.mark.parametrize("pin", ["saved", "planned", "none"])
+def test_hive_sessions_force_a_full_account_to_fall_back_to_one_with_room(setup, monkeypatch, pin):
+    from scripts.hive import registry
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
+    setup.herdr._quota_accounts = [
+        Account("claude", "full_on_hives", "room", 0, 80, 80, 6),
+        Account("claude", "account", "room", 1, 80, 80, 6),
+    ]
+    write_hive(
+        setup,
+        max_agents=10,
+        slots=[{"harness": "claude", "account": "full_on_hives", "kind": "subscription"}, *setup.hive["slots"]],
+    )
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", '{"claude:full_on_hives": 6}')
+    task = {"id": "task"}
+    if pin == "saved":
+        task["launch_assignment"] = {"harness": "claude", "account": "full_on_hives"}
+    elif pin == "planned":
+        setup.herdr.planned_account.return_value = "full_on_hives"
+
+    assert setup.launcher.select(setup.config, "eng", task).account.name == "account"
+
+
+@pytest.mark.parametrize("account", ["account", ""])
+def test_full_hive_accounts_report_local_and_remote_session_counts(setup, monkeypatch, account):
+    from scripts.hive import placement, registry
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "room", 2, 80, 80, 6),
+        Account("codex", "other", "room", 0, 80, 80, 6),
+        Account("claude", "second", "room", 3, 80, 80, 4),
+        Account("claude", "third", "room", 1, 80, 80, 2),
+    ]
+    setup.store.redis.set(
+        f"{registry.key('remote')}:sessions", '{"claude:account": 4, "claude:second": 1, "claude:third": 1}'
+    )
+    setup.herdr.planned_account.return_value = account
+
+    result = setup.launcher.select(setup.config, "eng", {"id": "task"})
+
+    assert isinstance(result, placement.Wait)
+    assert result.reason == (
+        "no Claude account has room after hive sessions: account 2 here and 4 on hives of 6, "
+        "second 3 here and 1 on hives of 4, third 1 here and 1 on hives of 2"
+        + ("; pinned to account" if account else "")
+    )
+    assert result.role == "eng"
+
+
 def test_account_selection_orders_room_by_usage_then_name(setup):
     from scripts.swarm.capacity import Account
 
@@ -1081,14 +1138,19 @@ def test_account_selection_orders_room_by_usage_then_name(setup):
     assert setup.launcher.select(setup.config, "eng", {"id": "task"}).account.name == "a"
 
 
-@pytest.mark.parametrize("row", [("codex", 0, 6), ("claude", 6, 6)])
-def test_non_claude_and_full_accounts_cannot_place_a_worker(setup, row):
+@pytest.mark.parametrize(
+    ("row", "seats"),
+    [(("codex", 0, 6), ""), (("claude", 6, 6), "account 6 here and 0 on hives of 6")],
+)
+def test_non_claude_and_full_accounts_cannot_place_a_worker(setup, row, seats):
     from scripts.hive.placement import Wait
     from scripts.swarm.capacity import Account
 
     harness, sessions, cap = row
     setup.herdr._quota_accounts = [Account(harness, "account", "room", sessions, 80, 80, cap)]
-    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait("no advertised Claude account has room")
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        f"no Claude account has room after hive sessions: {seats}", "eng"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1704,7 +1766,7 @@ def test_terminal_order_is_cleared_even_when_replacement_has_no_account_room(set
     setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
     setup.herdr._quota_accounts = []
     assert setup.launcher.spawn(request_for(setup)) == Outcome(
-        "spawn", Status.UNAVAILABLE, "hive", detail="no advertised Claude account has room"
+        "spawn", Status.UNAVAILABLE, "hive", detail="no Claude account has room after hive sessions: "
     )
     assert setup.launcher.orders_for("task") is None
 
@@ -1755,7 +1817,7 @@ def test_capacity_wait_is_recorded_without_a_missing_hive_finding(setup):
     setup.herdr._quota_accounts = []
     setup.launcher.select(setup.config, "eng", {"id": "task"})
     record = placement_waits.read(setup.store, setup.config.slug)["task"]
-    assert record["reason"] == "no advertised Claude account has room"
+    assert record["reason"] == "no Claude account has room after hive sessions: "
     assert record["lane"] == "eng"
     assert placement_waits.findings(setup.store, setup.config.slug, record["started_at"] + 1_800_000) == []
 
