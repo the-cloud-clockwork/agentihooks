@@ -501,6 +501,16 @@ def test_a_hold_charges_only_as_many_waiting_tasks_as_spawns_it_held_earliest_re
     assert [charged[task].get(("quota_hold", "codex"), 0.0) for task in ("t2", "t3", "t4")] == [600.0, 300.0, 0.0]
 
 
+def test_a_piece_held_twice_with_a_gap_keeps_the_claim_wait_around_and_between_the_holds():
+    piece = (("k", "t1"), 0, 100, 3, "")
+    assert stages._uncut(piece, [(50, 60), (10, 20), (15, 30)]) == [
+        (("k", "t1"), 0, 10, 3, ""),
+        (("k", "t1"), 30, 50, 3, ""),
+        (("k", "t1"), 60, 100, 3, ""),
+    ]
+    assert stages._uncut(piece, [(0, 100)]) == []
+
+
 def test_a_reopen_at_the_claim_instant_is_the_ready_time():
     found = stages.report(
         rows(

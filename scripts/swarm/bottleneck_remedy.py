@@ -174,7 +174,6 @@ def _move(slug, config, store, stage):
 
 
 def _stuck(stage, lanes):
-    """The one harness the finding names, or for a quota hold naming several, the one a lane is pinned to."""
     if len(stage.harnesses) == 1:
         return stage.harnesses[0]
     if stage.name != "quota_hold":

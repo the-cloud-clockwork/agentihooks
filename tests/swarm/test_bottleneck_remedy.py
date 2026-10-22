@@ -424,7 +424,7 @@ def test_quota_hold_moves_a_hive_only_lane_back_to_claude_only_into_hive_room(
     hive_only(store, monkeypatch)
     loaded = {"id": "h1", "excluded": [], "draining": "no", "heartbeat_at": NOW, **hive}
     monkeypatch.setattr(launch, "loaded_hives", lambda found: [loaded] if found is store else [])
-    monkeypatch.setattr(lease, "now_ms", lambda found: NOW)
+    monkeypatch.setattr(lease, "now_ms", lambda found: NOW if found is store else 0)
     pin(store, "eng", "codex")
     detect(store, "quota_hold", 3.0, 2.0, labels=("codex",))
     text = bottleneck_remedy.MOVED.format(lane="eng", source="codex", target="claude", targeted=HELD)
@@ -452,7 +452,7 @@ def test_quota_hold_naming_no_harness_is_proposed(store, home, shipped):
     assert lane_of(store, "ci") == ("codex", "opus")
 
 
-def test_quota_hold_naming_both_harnesses_moves_the_one_lane_pinned_to_either(store, home, shipped):
+def test_quota_hold_naming_both_harnesses_over_its_window_moves_the_one_lane_pinned_to_either(store, home, shipped):
     pin(store, "eng", "codex")
     detect(store, "quota_hold", 3.0, 2.0, labels=("claude", "codex"))
     text = bottleneck_remedy.MOVED.format(lane="eng", source="codex", target="claude", targeted=HELD)
