@@ -69,7 +69,7 @@ def _host(measured: dict, pending: int) -> list[tuple[int, str, str]]:
             f"five minute load {load5:.2f} on {cpus} CPUs, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {line}",
         )
     ]
-    if RAM_FIELDS <= measured.keys():
+    if all(field in measured for field in RAM_FIELDS):
         available, total = measured["available_mb"], measured["total_mb"]
         ram = (available * 100 - (100 - HOST_PERCENT) * total) // (100 * AGENT_MB) - pending
         limits.append(
@@ -93,7 +93,7 @@ def room(measured: dict | None, swarm_agents: int | None = None, pending: int = 
     if measured is None or any(field not in measured for field in CORE_FIELDS):
         return Room(0, MISSING, NO_READING)
     limits = _host(measured, pending)
-    if swarm_agents is not None and RAM_FIELDS <= measured.keys():
+    if swarm_agents is not None and all(field in measured for field in RAM_FIELDS):
         limits += _swarm(measured, swarm_agents)
     count, reason, detail = min(limits, key=lambda limit: limit[0])
     count = max(0, count)
