@@ -796,6 +796,16 @@ def encode_cwd(cwd: str) -> str:
     return cwd.replace("/", "-").replace(".", "-")
 
 
+def _launcher_name(sessions: dict, session_id: str, pid: int) -> str:
+    """A launcher's name for this session, or for the live session it supersedes on the same process."""
+    held = [sessions.get(session_id) or {}] + [
+        info
+        for sid, info in sessions.items()
+        if pid and sid != session_id and info.get("pid") == pid and info.get("status") == "alive"
+    ]
+    return next((str(info["name"]) for info in held if info.get("named_by") == LAUNCHER and info.get("name")), "")
+
+
 def register_session(
     session_id: str,
     pid: int,
@@ -819,7 +829,9 @@ def register_session(
         # previously-alive entries for that pid (they're from an earlier
         # session lifecycle — /resume or /clear). Subagents share their
         # parent's pid and pass supersede=False.
-        if pid and supersede and not is_codex_memory_thread(cwd):
+        superseding = bool(pid and supersede and not is_codex_memory_thread(cwd))
+        kept = _launcher_name(sessions, session_id, pid if superseding else 0)
+        if superseding:
             for existing_sid, existing_info in sessions.items():
                 if existing_sid == session_id:
                     continue
@@ -832,7 +844,6 @@ def register_session(
         # age to reflect the true session start, not the last event).
         existing = sessions.get(session_id)
         started_at = existing.get("started_at", now) if existing else now
-        kept = existing.get("name", "") if existing and existing.get("named_by") == LAUNCHER else ""
         named = {"name": kept, "named_by": LAUNCHER} if kept else {"name": name} if name else {}
         sessions[session_id] = {
             **named,
