@@ -7,8 +7,8 @@ import time
 import zipfile
 import zlib
 from datetime import datetime, timezone
-from pathlib import Path
 
+from scripts.swarm.lost_runner import home as _backoff_home
 from scripts.swarm.store import SwarmError
 
 RUN_URL = re.compile(r"https://github\.com/([^/]+/[^/]+)/actions/runs/([0-9]+)")
@@ -51,7 +51,7 @@ def backing_off():
 
 
 def rate_limited(text):
-    return "rate limit" in text.lower()
+    return "rate limit" in str(text).lower()
 
 
 def admitted_pending(target):
@@ -80,15 +80,11 @@ def _api(endpoint, binary=False):
 
 
 def _now():
-    return datetime.now(timezone.utc).timestamp()
+    return datetime.now().timestamp()
 
 
 def _stamp(at):
     return datetime.fromtimestamp(at, timezone.utc).strftime("%H:%M:%S UTC")
-
-
-def _backoff_home():
-    return Path(os.environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
 
 
 def _held_until():

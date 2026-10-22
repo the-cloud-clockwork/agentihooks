@@ -1,5 +1,7 @@
 import json
 import subprocess
+import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -261,6 +263,8 @@ def test_rest_reads_are_refused_locally_while_the_backoff_holds(github):
 def test_a_rate_limited_checks_view_holds_the_shared_backoff(github):
     assert pull_view(PR, subprocess.run) is None
     assert github.asked == ["graphql", "rate_limit"]
+    lines = (github.home / "github-backoff.jsonl").read_text().splitlines()
+    assert [json.loads(line) for line in lines] == [{"at": NOW, "endpoint": "graphql", "until": RESET}]
     github.limited = False
     assert mutation_wait.run_resolution(URL) == ""
     assert github.asked == ["graphql", "rate_limit"]
@@ -271,3 +275,50 @@ def test_a_pending_checks_wait_binds_the_head_on_its_first_readable_view(github)
     held = {**waits.on("checks", PR), "head": None}
     assert waits.checks_resolution(held, lambda target: pull) == ""
     assert held["head"] == "first"
+
+
+@pytest.fixture
+def kolkata(monkeypatch):
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_a_rate_limited_read_names_the_utc_reset_in_its_error(github, kolkata):
+    message = f"gh api {RUN}: GitHub API rate limited until 05:46:30 UTC"
+    with pytest.raises(mutation_wait.RateLimited) as limited:
+        mutation_wait._api(RUN)
+    assert str(limited.value) == message
+    with pytest.raises(mutation_wait.RateLimited) as held:
+        mutation_wait._api(RUN)
+    assert str(held.value) == message
+    assert github.asked == [RUN, "rate_limit"]
+
+
+def test_the_backoff_ends_at_its_recorded_time(github):
+    (github.home / "github-backoff.json").write_text(json.dumps({"until": NOW}))
+    assert not mutation_wait.backing_off()
+    github.now = NOW - 1
+    assert mutation_wait.backing_off()
+
+
+def test_a_missing_or_malformed_hold_never_backs_off(github):
+    github.now = 0.5
+    assert not mutation_wait.backing_off()
+    (github.home / "github-backoff.json").write_text(json.dumps({"until": "soon"}))
+    assert not mutation_wait.backing_off()
+
+
+def test_a_core_reset_already_due_backs_off_one_minute(github):
+    github.core = {"remaining": 0, "reset": NOW}
+    assert mutation_wait.hold(RUN) == NOW + 60
+
+
+def test_the_backoff_lives_in_the_agentihooks_home_of_a_new_user_home(github, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_HOME")
+    user = github.home / "user"
+    monkeypatch.setattr(Path, "home", lambda: user)
+    mutation_wait.hold(RUN)
+    assert json.loads((user / ".agentihooks" / "github-backoff.json").read_text()) == {"until": RESET}
