@@ -93,7 +93,7 @@ def test_the_failed_runs_filter_keeps_every_run_that_did_not_succeed():
 
 def test_main_prints_the_count_as_json(monkeypatch, capsys):
     monkeypatch.setattr(drops, "_api", Api(runs=[11], jobs={11: watcher_only(31)}, notes={}))
-    assert drops.main(["2026-10-19", "--repo", REPO]) == 0
+    assert drops.main(["2026-10-19"]) == 0
     assert json.loads(capsys.readouterr().out) == {"day": "2026-10-19", "drops": [11], "rebuilds": []}
 
 

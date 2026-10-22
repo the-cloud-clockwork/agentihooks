@@ -35,9 +35,8 @@ def count(repo: str, day: str, api: Callable[..., str]) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("day")
-    parser.add_argument("--repo", default=REPO)
     args = parser.parse_args(argv)
-    print(json.dumps(count(args.repo, args.day, _api)))
+    print(json.dumps(count(REPO, args.day, _api)))
     return 0
 
 
