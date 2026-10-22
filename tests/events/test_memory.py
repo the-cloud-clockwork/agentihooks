@@ -299,6 +299,29 @@ def test_max_deliver_drops_the_event_after_its_last_wait(bus, clock):
     assert queue.take(0) is None
 
 
+def test_a_failed_dead_letter_publish_leaves_the_delivery_unsettled(bus, clock, monkeypatch):
+    queue = bus.queue("work", QueuePolicy(max_deliver=1, ack_wait_ms=10))
+    queue.offer(event())
+    queue.take(0)
+    clock.now += 10
+    publish = bus.dead.publish
+
+    def refuse(subject, envelope):
+        assert subject == "dead.s"
+        assert envelope.data == {"event": event().to_dict(), "source": "queue.work", "attempts": 1}
+        raise OSError("dead stream unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(bus.dead, "publish", refuse)
+        with pytest.raises(OSError, match="^dead stream unavailable$"):
+            queue.take(0)
+    assert bus.dead.publish == publish
+    assert queue.take(0) is None
+    letters = bus.dead.consumer("dead", "dead.>").fetch(2, 0)
+    assert len(letters) == 1
+    assert letters[0].event.cause == event().id
+
+
 def test_a_stale_delivery_cannot_settle_its_redelivery(bus, clock):
     queue = bus.queue("work", QueuePolicy(ack_wait_ms=10))
     queue.offer(event())

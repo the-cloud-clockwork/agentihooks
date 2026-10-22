@@ -4,8 +4,9 @@ import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 
-from .bus import StateConflict, StateEntry
+from .bus import EventLog, StateConflict, StateEntry
 from .config import BusConfig, QueuePolicy
+from .dead import dead_letter
 from .envelope import Envelope
 
 Clock = Callable[[], int]
@@ -77,10 +78,19 @@ class MemoryDelivery:
 
 
 class _Pending:
-    def __init__(self, runtime: _Runtime, policy: QueuePolicy, source: Callable[[], Iterable[Envelope]] = lambda: ()):
+    def __init__(
+        self,
+        runtime: _Runtime,
+        policy: QueuePolicy,
+        source: Callable[[], Iterable[Envelope]],
+        dead: EventLog | None,
+        identity: str,
+    ):
         self._runtime = runtime
         self._policy = policy
         self._source = source
+        self._dead = dead
+        self._identity = identity
         self._messages: list[_Message] = []
 
     def add(self, event: Envelope) -> None:
@@ -112,9 +122,15 @@ class _Pending:
         for event in self._source():
             self.add(event)
         now = self._runtime.clock()
-        self._messages = [
-            m for m in self._messages if not m.settled and (m.attempt < self._policy.max_deliver or m.ready_at > now)
-        ]
+        for message in self._messages:
+            if not message.settled and message.attempt >= self._policy.max_deliver and message.ready_at <= now:
+                if self._dead is not None:
+                    self._dead.publish(
+                        f"dead.{message.event.swarm}",
+                        dead_letter(message.event, self._identity, message.attempt),
+                    )
+                message.settled = True
+        self._messages = [m for m in self._messages if not m.settled]
         return next((m for m in self._messages if m.ready_at <= now and m not in taken), None)
 
     def _limit_ms(self, timeout_ms: int) -> int:
@@ -127,11 +143,11 @@ class _Pending:
 
 
 class MemoryConsumer:
-    def __init__(self, log: "MemoryEventLog", subject: str, policy: QueuePolicy):
+    def __init__(self, log: "MemoryEventLog", subject: str, policy: QueuePolicy, durable: str):
         self.subject = subject
         self._log = log
         self._cursor = 0
-        self._pending = _Pending(log.runtime, policy, self._pull)
+        self._pending = _Pending(log.runtime, policy, self._pull, log.dead, f"events.{durable}")
 
     def fetch(self, batch: int, timeout_ms: int) -> list[MemoryDelivery]:
         return self._pending.take(batch, timeout_ms)
@@ -143,8 +159,9 @@ class MemoryConsumer:
 
 
 class MemoryEventLog:
-    def __init__(self, runtime: _Runtime, config: BusConfig):
+    def __init__(self, runtime: _Runtime, config: BusConfig, dead: EventLog | None):
         self.runtime = runtime
+        self.dead = dead
         self.entries: list[tuple[str, Envelope]] = []
         self._config = config
         self._dedupe = _Dedupe(config.dedupe_window_ms, runtime.clock)
@@ -163,18 +180,18 @@ class MemoryEventLog:
         with self.runtime.cond:
             existing = self._consumers.get(durable)
             if existing is None:
-                existing = self._consumers[durable] = MemoryConsumer(self, subject, self._config.queue)
+                existing = self._consumers[durable] = MemoryConsumer(self, subject, self._config.queue, durable)
             elif existing.subject != subject:
                 raise ValueError(f"durable consumer {durable!r} filters {existing.subject!r}, not {subject!r}")
             return existing
 
 
 class MemoryWorkQueue:
-    def __init__(self, runtime: _Runtime, policy: QueuePolicy, dedupe_window_ms: int):
+    def __init__(self, runtime: _Runtime, policy: QueuePolicy, dedupe_window_ms: int, dead: EventLog, name: str):
         self.policy = policy
         self._runtime = runtime
         self._dedupe = _Dedupe(dedupe_window_ms, runtime.clock)
-        self._pending = _Pending(runtime, policy)
+        self._pending = _Pending(runtime, policy, lambda: (), dead, f"queue.{name}")
 
     def offer(self, event: Envelope) -> bool:
         with self._runtime.cond:
@@ -236,7 +253,8 @@ class MemoryBus:
     def __init__(self, config: BusConfig, clock: Clock):
         self._config = config
         self._runtime = _Runtime(clock)
-        self.events = MemoryEventLog(self._runtime, config)
+        self.dead = MemoryEventLog(self._runtime, config, None)
+        self.events = MemoryEventLog(self._runtime, config, self.dead)
         self._queues: dict[str, MemoryWorkQueue] = {}
         self._buckets: dict[str, MemoryStateStore] = {}
 
@@ -245,7 +263,9 @@ class MemoryBus:
             self._runtime.require_open()
             queue = self._queues.get(name)
             if queue is None:
-                queue = self._queues[name] = MemoryWorkQueue(self._runtime, policy, self._config.dedupe_window_ms)
+                queue = self._queues[name] = MemoryWorkQueue(
+                    self._runtime, policy, self._config.dedupe_window_ms, self.dead, name
+                )
             elif queue.policy != policy:
                 raise ValueError(f"work queue {name!r} already has another policy")
             return queue

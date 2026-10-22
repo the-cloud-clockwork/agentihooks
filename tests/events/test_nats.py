@@ -120,8 +120,8 @@ def test_a_consumer_carries_the_queue_policy(bus):
     bus.queue("work", POLICY)
     log = _consumer_config(bus, nats.EVENT_STREAM, "watcher")
     work = _consumer_config(bus, nats.queue_stream("work"), "work")
-    assert (log.max_deliver, log.ack_wait, log.backoff) == (3, 1.0, None)
-    assert (work.max_deliver, work.backoff) == (3, [0.2, 0.4])
+    assert (log.max_deliver, log.ack_wait, log.backoff) == (-1, 1.0, None)
+    assert (work.max_deliver, work.backoff) == (-1, [0.2, 0.4])
 
 
 def test_a_durable_consumer_refuses_another_filter(bus):
@@ -264,7 +264,7 @@ def test_the_consumer_config_asks_for_explicit_acks():
     config = nats._consumer_config("d", "swarm.>", POLICY)
     assert (config.durable_name, config.filter_subject) == ("d", "swarm.>")
     assert config.ack_policy == api.AckPolicy.EXPLICIT
-    assert (config.max_deliver, config.ack_wait, config.backoff) == (3, 1.0, [0.2, 0.4])
+    assert (config.max_deliver, config.ack_wait, config.backoff) == (-1, 1.0, [0.2, 0.4])
 
 
 def test_a_work_queue_stream_keeps_work_queue_retention(bus):
@@ -336,6 +336,58 @@ def test_a_nak_without_a_delay_redelivers_at_once():
     finally:
         loop.close()
     assert seen == [0]
+
+
+def test_a_dead_letter_is_published_before_the_original_is_terminated():
+    calls = []
+    message = SimpleNamespace(data=event().encode(), metadata=SimpleNamespace(num_delivered=4))
+
+    async def terminate():
+        calls.append("term")
+
+    async def publish(subject, data, *, stream, headers):
+        letter = Envelope.decode(data)
+        assert subject == "dead.s"
+        assert stream == "AGENTIHOOKS_DEAD"
+        assert headers == {"Nats-Msg-Id": letter.id}
+        assert letter.data == {"event": event().to_dict(), "source": "queue.work", "attempts": 3}
+        assert letter.cause == event().id
+        calls.append("publish")
+        return SimpleNamespace(duplicate=False)
+
+    message.term = terminate
+    subscription = SimpleNamespace(fetch=mock.AsyncMock(return_value=[message]))
+    js = SimpleNamespace(publish=mock.AsyncMock(side_effect=OSError("dead stream unavailable")))
+    loop = nats._Loop()
+    try:
+        consumer = nats.NatsConsumer(loop, subscription, js, QueuePolicy(max_deliver=3), "queue.work")
+        with pytest.raises(OSError, match="^dead stream unavailable$"):
+            consumer.fetch(1, 100)
+        assert calls == []
+        js.publish = publish
+        assert consumer.fetch(1, 100) == []
+        assert calls == ["publish", "term"]
+    finally:
+        loop.close()
+
+
+def test_a_dead_consumer_keeps_a_server_side_attempt_cap(bus):
+    bus.dead.consumer("dead-reader", "dead.>")
+    config = _consumer_config(bus, "AGENTIHOOKS_DEAD", "dead-reader")
+    assert config.max_deliver == 3
+    assert config.filter_subject == "dead.>"
+
+
+def test_reopening_a_capped_consumer_enables_dead_letter_handling(bus):
+    config = api.ConsumerConfig(
+        durable_name="legacy",
+        filter_subject="swarm.>",
+        max_deliver=3,
+        ack_wait=1.0,
+    )
+    bus._loop.run(bus._js.add_consumer(nats.EVENT_STREAM, config=config))
+    bus.events.consumer("legacy", "swarm.>")
+    assert _consumer_config(bus, nats.EVENT_STREAM, "legacy").max_deliver == -1
 
 
 def test_the_state_store_is_shared_per_bucket(bus):
