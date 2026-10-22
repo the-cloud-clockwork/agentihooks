@@ -140,3 +140,5 @@ Recorded in [pull request 4042](https://github.com/the-cloud-clockwork/agentihoo
 | [39032187789](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39032187789) | Proofs dispatch of the verdict unit tests with the check | green: 45 passed |
 
 The verdict logic is unit tested in `tests/ledger_load/test_gate.py`, which runs in the unit suite.
+
+To read write timings on the live server by route, see [Ledger request metrics](ledger-request-metrics.md).
