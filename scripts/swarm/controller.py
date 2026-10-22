@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import signal
 import sys
 import uuid
 from collections.abc import Mapping
@@ -385,6 +386,7 @@ def main(argv: list[str]) -> int:
     operator_env.classifier(os.environ)
     store = connect()
     service = None
+    previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         proof_swarm.run(os.environ, store)
         service = control_service.host(os.environ, store, commands.hive_id())
@@ -404,3 +406,4 @@ def main(argv: list[str]) -> int:
     finally:
         if service is not None:
             service.stop()
+        signal.signal(signal.SIGTERM, previous)

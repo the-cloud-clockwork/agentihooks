@@ -61,12 +61,11 @@ dependency record available before the lookup's UTC cutoff. Omitting it uses
 import selection only. There is no environment switch for the helper coverage
 rule.
 
-Current planning can narrow candidate files to recorded test node ids when the
-manifest and intervening changes permit it. Changed or incompletely recorded
-test files remain whole; unsupported drift prevents narrowing. A saved entry
-can therefore contain file paths, node ids, or both. This later narrowing
-preserves the recorded helper coverage rule; inspect the saved list rather
-than expecting a fixed test count.
+Current planning can narrow candidate files to recorded test node ids. See
+[Individual tests for statistics](#individual-tests-for-statistics) for the
+line coverage rule, compatibility with older function records and whole file
+fallbacks. The saved list preserves helper callers and can mix file paths and
+node ids; inspect it instead of expecting a fixed test count.
 
 ### Inspect the selection
 
@@ -124,6 +123,119 @@ is not an identical-head replay proving all 27 original mutants killed.
 The helper regression fixture and saved-selection refinement regression are
 maintained in `tests/test_ci_mutation_planned_selection.py`.
 
+## Individual tests for statistics
+
+Statistics collect the tests that reach the changed code instead of every test
+in each candidate file. Recorded dev coverage still brings in callers through
+production helpers. Narrowing then chooses test function or method node ids
+within those files, so unrelated tests in a large file need not run during
+statistics preparation.
+
+With a manifest containing per-test `lines`, the planner selects tests whose
+recorded executed source lines intersect the graded lines. It maps current
+lines back to recorded lines, preserving coverage when earlier edits shift
+line numbers. Equal-length replacements map to their old lines; changed lines
+elsewhere since the record are considered too. A test reaching only another
+line in the same function can be excluded when this mapping is available.
+An older manifest without `lines` uses recorded function or method units
+instead: every test reaching a changed function remains eligible.
+
+For example, two tests in one file call different branches of `visible`.
+Changing a line executed only by `test_visible_pending` can produce this saved
+selection when line contexts are complete and drift permits narrowing:
+
+```json
+{
+  "scripts/swarm/health/verdicts.py": [
+    "tests/test_verdicts.py::test_visible_pending",
+    "tests/doctor/test_loop.py::TestLoop::test_visible_verdict",
+    "tests/test_legacy_verdicts.py"
+  ]
+}
+```
+
+These names illustrate the format. The second entry represents an indirect
+helper caller; the last represents a file retained because its contexts are
+incomplete. Selection is at test function or method granularity: parameter
+suffixes are removed for selection, keeping the function's parameter cases.
+Consumers also accept recorded ids carrying xdist `@group` suffixes. Statistics
+partitioning, duration estimates, per-path filtering and cache identity accept
+the mixed list.
+
+### Conservative fallbacks
+
+Missing evidence broadens selection. It never authorizes discarding a covering
+test merely to meet a time target.
+
+| Record or intervening change | Selection behavior |
+|---|---|
+| Candidate test file changed since the manifest, a defined test has no recorded id, a test has no recorded units, or a line manifest lacks that test's line context | Keep that whole candidate test file |
+| A changed function has no recorded unit | Keep candidate files whole for that source path |
+| Manifest has no commit, a shared test helper or conftest changed, dependency inputs or the unit test workflow changed, or a Python module outside the measured roots changed | Disable narrowing; retain candidate files |
+| Inserted or deleted source cannot map directly | Include tests reaching the affected recorded functions; added or removed modules use their recorded units |
+| Import-time source changes or replaced lines outside a function | Include tests reaching recorded units in that module |
+| Changed data file was opened by a recorded test | Retain that test as a covering candidate |
+| Narrowing would leave a source path with no tests | Keep its original candidate list |
+
+Escape-only tests do not supply recorded mutant coverage: their child process
+uses a light bootstrap that does not record trampoline hits. They cannot
+substitute for a test that executes the instrumented function. Missing contexts
+still trigger the conservative file fallback above.
+
+### Configuration and inspection
+
+The existing CI planner command with `--repository "$GITHUB_REPOSITORY"`
+enables recorded selection automatically. There is no separate environment
+switch or time threshold for choosing individual tests. The manifest's
+available coverage and intervening changes determine the granularity. Without
+a usable dev manifest, selection uses matching and importing modules; a
+coverage lookup failure follows the broader fallback described above.
+
+Use the [selection download example](#inspect-the-selection) to inspect one
+source path, or list every source and selected entry:
+
+```bash
+jq -r 'to_entries[] | .key as $source | .value[] | [$source, .] | @tsv' \
+  EVIDENCE_DIR/selection/.mutation-selection.json
+```
+
+A `::` entry selects a test function or method; a bare `.py` entry selects a
+whole file. Check the statistics job and mutation report as well: fewer entries
+alone do not establish equal mutant grading or a shorter job wall time.
+
+| Symptom | Check |
+|---|---|
+| A large test file remains whole | Compare it with the manifest commit, check recorded test ids and contexts, and inspect shared helper or dependency drift |
+| Many ids from the same function remain | Check whether the manifest has `lines`; older records select by function. Current records also broaden when line mapping is unsafe |
+| A helper caller disappears | Check that its recorded context executes the changed line or fallback unit and the test file still exists; preserve the helper inclusion rule |
+| Statistics time differs from the sum of selected durations | Collection, instrumentation, setup, runner contention and cache reuse also affect wall time; compare the same source, record and duration corpus |
+
+### Delivery and measurement limits
+
+[Pull request 4710](https://github.com/the-cloud-clockwork/agentihooks/pull/4710)
+delivered individual test ids using function coverage. Its reported red
+[Tests run 39216973077](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39216973077)
+selected whole files in the narrowing regression. Its green
+[Tests run 39221081659](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39221081659)
+passed selected units, statistics, three mutation shards and the gate. The
+recorded verdict-store replay selected 562 seconds before and 422.5 seconds
+after; 788 recorded tests reached `VerdictStore.visible`. The source request's
+528 seconds and approximately 26-second covering share were investigation
+figures, not the delivered replay's result.
+
+The later [pull request 4809](https://github.com/the-cloud-clockwork/agentihooks/pull/4809)
+delivered the current line coverage selection. Its
+[paired proof 39258204668](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39258204668)
+reported 530 entries / 373.63 stored test seconds before and 115 entries /
+20.33 seconds after, with all 38 mutation verdicts equal. Both sides used the
+same source, tests, contexts and durations. This is a different recorded corpus
+from the earlier replay; the two reductions must not be combined. The later
+[green Tests run 39260211042](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39260211042)
+graded all 187 planned mutants, with 183 killed, four independently cleared and
+zero failures. These proofs establish selection behavior and sample grading;
+they do not establish the requested ten-before versus ten-after statistics
+job wall-time comparison.
+
 ## Continuation publication and preflight runs
 
 When a successor continues an existing pull request, `swarm publish` and the
@@ -160,6 +272,101 @@ manual push of the prepared branch. If ancestry no longer holds after
 restacking, a new prepared branch can be the intended publication target.
 Branch selection does not disable preflight or change its mutation grading
 and report reuse rules.
+
+## Touched test worker sizing
+
+The branch preflight's `touched-tests` job runs the existing test files changed
+between `origin/dev` and `HEAD`. It first collects their test cases without
+starting xdist workers. Parametrized cases count separately. The worker limit
+is `max(1, min(automatic maximum, collected cases))`:
+
+| Collected cases | Automatic maximum | Execution workers |
+|---|---|---|
+| 4 | 16 | 4 |
+| 10 | 2 | 2 |
+| 1 | 16 | 1 |
+
+This avoids starting a full worker pool for a small regression selection. It
+does not change which tests run or how full unit shards choose their workers.
+The current touched run uses `--dist loadgroup`: a group can still keep several
+cases on one worker, so worker count is an upper bound on concurrency.
+
+### Automatic configuration
+
+No new flag enables the limit. `worker_count` in `scripts.ci_touched_tests`
+collects with `--collect-only -q -n 0` and asks the pytest
+`pytest_xdist_auto_num_workers` hook for the existing automatic maximum. This
+preserves custom worker hooks and the default CPU detection. The workflow
+writes the result to its `workers` step output and supplies it only to
+**Run the tests the branch touches**:
+
+{% raw %}
+```yaml
+env:
+  FILES: ${{ steps.touched.outputs.files }}
+  PYTEST_XDIST_AUTO_NUM_WORKERS: ${{ steps.touched.outputs.workers }}
+  PYTHONUNBUFFERED: "1"
+run: |
+  read -ra files <<< "$FILES"
+  python -m pytest "${files[@]}" -n auto --dist loadgroup --tb=short -p no:cacheprovider
+```
+{% endraw %}
+
+This is existing CI configuration. Run tests in CI, not on the shared host.
+Keep the computed value scoped to the execution step; a job wide value would
+also affect the maximum read during collection. Change the existing worker
+policy through a reviewed code change when its maximum needs adjustment.
+
+If no existing test files changed, selection outputs `workers=1` but skips
+execution. If collection exits nonzero, selection exits with that status and
+the job fails before execution workers start. The one worker floor does not
+turn an empty or failed collection into a passing run.
+
+### Inspect a branch run
+
+Push the branch before opening its pull request, then inspect its preflight:
+
+```bash
+gh run list --workflow mutation-preflight.yml --branch <branch> --limit 5
+gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/jobs \
+  --jq '.jobs[] | {id, name, conclusion}'
+gh run view <run-id> --job <touched-tests-job-id> --log
+```
+
+In **Select the tests the branch touches**, check the collected case count and
+the `Touched tests:` file list. In **Run the tests the branch touches**, check
+`PYTEST_XDIST_AUTO_NUM_WORKERS` and xdist's `created: N/N workers` line. Match
+the run's head revision before comparing results. An open pull request makes
+the branch preflight skip; a skipped run provides no startup sample.
+
+| Symptom | Check |
+|---|---|
+| Selection fails before workers start | Read the collection exception; fix the test import, syntax or collection configuration. |
+| More cases than changed files | Parametrization and multiple tests per file increase the collected count. |
+| Fewer workers than cases | The existing automatic maximum can be lower than the selection size. |
+| Several cases run on one worker | `loadgroup` scheduling preserves test groups. |
+| Execution is skipped | Check for existing changed test files, a collection failure or an open pull request. |
+
+### Delivery evidence and timing limits
+
+[Pull request 4717](https://github.com/the-cloud-clockwork/agentihooks/pull/4717)
+merged on 19 October 2026. Its
+[red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39214635133)
+exposed excess workers for four and one cases and workers starting before a
+collection error. The
+[green preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39217754530)
+passed regressions for small selections, the maximum, the floor, default CPU
+detection, custom worker hooks and collection failure; its mutation grade
+killed all 26 mutants.
+
+The delivery reports ten earlier runs starting sixteen workers, with median
+startup of 4.65 seconds. Historical runner CPU seconds were not recorded and
+the ten run after comparison remained unverified. These proofs establish
+worker sizing, not a measured CPU saving or a guaranteed startup duration.
+For a new comparison, retain ten runs on each side with ten or fewer selected
+cases, exact revisions, raw job timestamps and the same startup interval.
+Record CPU seconds separately when available; whole job duration and runner
+queue wait measure different intervals.
 
 ## Suite speed contracts in the branch preflight
 
