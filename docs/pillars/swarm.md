@@ -2295,6 +2295,62 @@ a tick returns because its ledger is gone, fails partway through, or fails its l
 branch that removed the dead holder check and reproduced the observed `another tick is running` loop
 ([red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39042891977)).
 
+`tests/swarm/test_tick_lock.py` pins the holder record itself: a killed holder is replaced without waiting for
+expiry, a live holder keeps its lock, a newer epoch leaves a live holder's lock alone, and a lock without a verifiable
+holder is never taken. The record and the dead holder check came with
+[pull request 3575](https://github.com/the-cloud-clockwork/agentihooks/pull/3575), after a timer process killed inside
+a launch held every tick of the watched swarm for ten minutes.
+
+### Intent verdict timing
+
+Each tick judges ready pull requests before it launches agents. After the phase steps, the tick runs the
+[intent check](#commands) over every task in `pr`, then the reconcile pass that retires, reclaims and spawns agents.
+A launch that takes minutes no longer delays a verdict: the verdict is already written when the first launch
+starts. Before this order, recovering ticks spent about 290 seconds spawning ahead of an 8 to 9 second intent pass.
+
+The verdict for a task is a JSON file at `~/.agentihooks/swarm/<swarm>/gates/intent/<task>`. Two fields carry its
+timing:
+
+| Field | Value |
+|---|---|
+| `at` | Start of the tick pass that judged it, in epoch milliseconds |
+| `persisted_at` | Wall time the judged verdict was written, in epoch milliseconds |
+
+A pass that finds the pull request, its text and the task inputs unchanged since the last verdict rewrites the
+record with its old `at` and `persisted_at`, so both keep naming the judgment that produced the verdict. A draft
+pull request gets a `pending` record with the reason `draft pull request, judged once ready for review` and no
+`persisted_at`; it is judged on the first tick after it leaves draft. Records written before pull request 3575, and
+records kept from them, have no `persisted_at` or a `null` one.
+
+Measure ready to delivered verdict from the task's move to `pr` to `persisted_at`, not to `at`. The pass start
+is earlier than the write by the classifier time for every task judged ahead of it in the same pass:
+
+```bash
+jq '{verdict, reason, at, persisted_at, judging_s: ((.persisted_at - .at) / 1000)}' \
+  ~/.agentihooks/swarm/<swarm>/gates/intent/<task>
+```
+
+```json
+{"verdict": "pass", "reason": "the phase can use it", "at": 1792650000000, "persisted_at": 1792650008400, "judging_s": 8.4}
+```
+
+The measurement that drove the change: 19 watched tasks over six hours waited a median 85 seconds and a 90th
+percentile 703 seconds from ready to a delivered verdict
+([issue 3203](https://github.com/the-cloud-clockwork/agentihooks/issues/3203)).
+
+| Refusal or symptom | Meaning and fix |
+|---|---|
+| `intent for task <task> is judged once its pull request is ready for review.` | The pull request is a draft. Mark it ready; the next tick judges it. |
+| `intent check running for task <task>, started <n> s ago; it passes unchecked at 120 s.` | No verdict yet for the ready pull request. Wait for the tick; after two minutes the gate lets the call through unchecked and counts it in the gate log. |
+| Ticks print no intent action while the swarm journal shows `another tick is running` | A tick lock holds every pass; see [Troubleshooting a held tick lock](#troubleshooting-a-held-tick-lock). |
+| The verdict file has no `persisted_at` | A draft `pending` record, or a verdict written before pull request 3575. Use the next judged verdict. |
+
+`tests/swarm/test_intent_pass.py` pins the order:
+`test_ready_intent_is_delivered_before_a_slow_runtime_launch` runs a tick whose launch takes 780 seconds and asserts the
+verdict was on disk at launch and the ready to verdict wait was zero. `tests/gates/test_intent_timing.py` pins
+`persisted_at`: a slow classifier leaves `at` at the pass start and `persisted_at` after the delay, and a kept verdict
+keeps its `persisted_at`.
+
 ### Tick heartbeat and stale watcher
 
 Every tick pass that runs to its end writes the swarm's heartbeat to Redis: when the pass ended, and when each
