@@ -286,34 +286,46 @@ def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job):
 
 
 def test_a_head_that_predates_the_helper_still_runs_it_from_the_workflow_revision(tmp_path):
+    origin = tmp_path / "origin"
     repo = tmp_path / "repo"
     env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t"}
     env["GIT_COMMITTER_EMAIL"] = "t@t"
 
-    def git(*args):
-        return subprocess.run(["git", *args], cwd=repo, env=env, check=True, capture_output=True, text=True).stdout
+    def git(cwd, *args):
+        command = ["git", "-c", "commit.gpgsign=false", *args]
+        return subprocess.run(command, cwd=cwd, env=env, check=True, capture_output=True, text=True).stdout
 
-    repo.mkdir()
-    git("init", "-q", "-b", "dev")
-    (repo / "README").write_text("old\n")
-    git("add", ".")
-    git("commit", "-qm", "head without the helper")
-    head = git("rev-parse", "HEAD").strip()
-    (repo / ".github/scripts").mkdir(parents=True)
-    shutil.copy(RETRY, repo / ".github/scripts/pypi-retry.sh")
-    git("add", ".")
-    git("commit", "-qm", "workflow revision")
-    workflow_sha = git("rev-parse", "HEAD").strip()
-    git("checkout", "-q", "--detach", head)
-    assert not (repo / ".github/scripts/pypi-retry.sh").exists()
+    origin.mkdir()
+    git(origin, "init", "-q", "-b", "dev")
+    (origin / "README").write_text("old\n")
+    git(origin, "add", ".")
+    git(origin, "commit", "-qm", "head without the helper")
+    head = git(origin, "rev-parse", "HEAD").strip()
+    git(tmp_path, "clone", "-q", str(origin), str(repo))
+    git(repo, "checkout", "-q", "--detach", head)
+    (origin / ".github/scripts").mkdir(parents=True)
+    shutil.copy(RETRY, origin / ".github/scripts/pypi-retry.sh")
+    git(origin, "add", ".")
+    git(origin, "commit", "-qm", "workflow revision")
+    workflow_sha = git(origin, "rev-parse", "HEAD").strip()
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation-plan"]["steps"]
     take = next(s for s in steps if s.get("name") == "Take the helper scripts from the workflow revision")
     install = next(s for s in steps if s.get("name") == "Install dependencies")
     runner_temp = tmp_path / "runner"
     runner_temp.mkdir()
-    script = "\n".join(line for line in take["run"].splitlines() if not line.startswith("git fetch "))
     run_env = {**env, "GITHUB_SHA": workflow_sha, "RUNNER_TEMP": str(runner_temp)}
-    subprocess.run(["bash", "-euo", "pipefail", "-c", script], cwd=repo, env=run_env, check=True)
+
+    legacy = subprocess.run(
+        ["bash", "-c", 'bash .github/scripts/pypi-retry.sh "Install dependencies" -- true'],
+        cwd=repo,
+        env=run_env,
+        capture_output=True,
+        text=True,
+    )
+    assert legacy.returncode == 127, legacy.stderr
+
+    subprocess.run(["bash", "-euo", "pipefail", "-c", take["run"]], cwd=repo, env=run_env, check=True)
+    assert not (repo / ".github/scripts/pypi-retry.sh").exists()
     command = install["run"].split(" -- ", 1)[0] + " -- true"
     result = subprocess.run(["bash", "-c", command], cwd=repo, env=run_env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
