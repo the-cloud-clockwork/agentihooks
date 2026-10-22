@@ -773,15 +773,24 @@ def test_live_acknowledgement_refuses_inconsistent_execution_identity(setup, bad
     )
 
 
-def test_live_process_with_an_expired_reservation_stays_ambiguous(setup):
+def test_live_acknowledgement_after_its_reservation_expired_ends_the_execution_and_reaps_its_pane(setup):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
-    _, order, ack = live_order(setup)
+    request, order, ack = live_order(setup)
     setup.launcher.slots.release(order.execution_id)
     assert setup.launcher.complete(order, ack) == Outcome(
-        "spawn", Status.AMBIGUOUS, "hive", detail="hive launch reservation expired"
+        "spawn", Status.REFUSED, "hive", detail="hive launch reservation expired"
     )
-    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "working"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
+    assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id)) == {
+        "reason": "hive launch reservation expired",
+        "generation": order.generation,
+    }
+    assert setup.launcher.orders_for("task") is None
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [(json.loads(fields["order"])["action"], json.loads(fields["order"])["name"]) for _, fields in commands] == [
+        ("reap", request.name)
+    ]
 
 
 def test_ambiguous_receipt_keeps_the_reservation_and_order(setup):
