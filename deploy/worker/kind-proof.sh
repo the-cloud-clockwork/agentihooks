@@ -110,7 +110,7 @@ print(auth.env_text("https://hive-join:8770", auth.mint(redis_client(), "worker"
 printf '%s' "$member_env" | kubectl create secret generic hive-member --from-file=credential=/dev/stdin >/dev/null
 unset member_env
 helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml \
-  --set workers.replicas=1 --set workers.maxAgents=1 --set workers.drainSeconds=60 --set workers.image.repository=local/agentihooks-hive-worker \
+  --set workers.replicas=1 --set workers.maxAgents=1 --set workers.drainSeconds=120 --set workers.image.repository=local/agentihooks-hive-worker \
   --set workers.image.pullPolicy=Never --set workers.credentialSecret.name=hive-member --set workers.credentialSecret.key=credential \
   --set workers.caSecret.name=hive-tls --set workers.caSecret.key=cert.pem | kubectl apply -f -
 deployment=proof-agentihooks-swarm-worker-hive
@@ -188,11 +188,11 @@ PY
 held="$(hold_agent start)"
 kubectl patch deployment "$deployment" --type merge -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
 kubectl rollout restart "deployment/$deployment"
-sleep 25
+sleep 45
 [[ -n "$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" ]] || { echo "the hive drain preStop let $pod stop while an agent worked" >&2; exit 1; }
 [[ "$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o name)" == "pod/$pod" ]] || { echo "a replacement hive pod started while $pod drained" >&2; exit 1; }
 hold_agent draining
-echo "the hive drain preStop kept $pod running and draining for 25 seconds of a roll while its agent worked, with no replacement pod" | tee "$out/drain.txt"
+echo "the hive drain preStop kept $pod running and draining for 45 seconds of a roll while its agent worked, with no replacement pod" | tee "$out/drain.txt"
 hold_agent finish "$held"
 kubectl wait --for=delete "pod/$pod" --timeout=25s
 hook_failures="$(kubectl get events --field-selector "involvedObject.name=$pod,reason=FailedPreStopHook" -o name)"
