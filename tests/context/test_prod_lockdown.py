@@ -262,3 +262,33 @@ def test_release_signal_cannot_skip_a_blocked_rule_in_any_order(grant, monkeypat
         monkeypatch.setattr(prod_lockdown, "_BLOCKED", rules)
         with pytest.raises(BlockAction):
             _check(f"{authorized}; {_TAG_PUSH}")
+
+
+_ENQUEUE = (
+    "gh api graphql -f query='mutation($id: ID!) { enqueuePullRequest(input: {pullRequestId: $id})"
+    " { mergeQueueEntry { id } } }' -f id=PR_kwDO123"
+)
+
+
+def test_swarm_session_cannot_run_the_raw_enqueue_mutation(monkeypatch):
+    from hooks.hook_manager import BlockAction
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    with pytest.raises(BlockAction, match=r"agentihooks swarm rig merge queue <url>"):
+        _check(_ENQUEUE)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "agentihooks swarm rig merge queue https://github.com/owner/repo/pull/123",
+        "grep -rn enqueuePullRequest scripts/swarm",
+    ],
+)
+def test_swarm_session_keeps_the_swarm_queue_command(monkeypatch, command):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    _check(command)
+
+
+def test_raw_enqueue_mutation_outside_a_swarm_is_unchanged():
+    _check(_ENQUEUE)
