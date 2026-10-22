@@ -356,6 +356,15 @@ def test_records_for_other_commits_are_skipped_across_pages(monkeypatch, capsys)
     )
 
 
+def test_records_only_for_other_commits_report_each_one(monkeypatch, capsys):
+    _github(monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(9), 1: _manifest(8)})
+    assert ci_test_plan.find_record(REPOSITORY, LATER) is None
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "Searched 2 dev push runs in 7 of 100 GitHub requests, no older dev push runs:"
+        " 0 kept no manifest or shard coverage, 0 failed unit shards, 2 recorded another commit"
+    )
+
+
 def test_a_failed_listing_of_an_older_page_stays_red(monkeypatch):
     _github(monkeypatch, [_run(n) for n in range(20, 0, -1)], manifests={1: _manifest(1)})
     api = ci_test_plan._api
@@ -386,7 +395,10 @@ def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
     assert ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)]) == 0
     assert not out.exists()
     assert output.read_text() == "reused=0\nrun=\ncommit=\n"
-    assert "every test runs" in capsys.readouterr().out
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "::notice title=No test record::No dev push run with passed unit shards kept a dependency manifest;"
+        " every test runs."
+    )
 
 
 @pytest.mark.parametrize(
