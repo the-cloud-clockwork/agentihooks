@@ -4,10 +4,11 @@ reopens each recorded agent in its own conversation and seat; hive agents are ne
 import json
 import os
 import subprocess
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from scripts import herdr_host
+from scripts.handoff import transfers
 from scripts.hive import reports
 from scripts.inbox import exits
 from scripts.inbox.store import InboxStore
@@ -123,7 +124,7 @@ def start_server():
 def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
     """On the first tick of a new boot, reopen each recorded local agent that lost its process.
 
-    The boot counts as handled only once the herdr server answered, so a failed start retries on the next tick."""
+    The boot counts as handled once the herdr server answered, so a failed start retries on the next tick."""
     current = boot_id() if current is None else current
     key = store.key(slug, "boot", commands.hive_id())
     seen = store.redis.get(key)
@@ -135,6 +136,7 @@ def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
     actions = start_server()
     if actions:
         return actions
+    store.redis.set(key, current)
     wanted, live = recorded(store, slug, seen), runtime.live_names()
     for agent in store.agents(slug):
         if agent.name not in wanted or agent.name in live or agent.state == "finished" or not local(agent):
@@ -142,7 +144,28 @@ def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
         if agent.account and last_quota(agent.harness, agent.account) is not True:
             agent = replace(agent, account="")
             store.put_agent(slug, agent)
-        reopened = dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms)
-        actions.append(f"{'resumed' if reopened else 'could not resume'} {agent.name} after the workstation rebooted")
-    store.redis.set(key, current)
+        if dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
+            actions.append(f"resumed {agent.name} after the workstation rebooted")
+        elif dead_resume._owns(store, slug, agent, ledger):
+            actions.append(_await_decision(store, slug, agent, now_ms))
     return actions
+
+
+def _await_decision(store, slug, agent, now_ms):
+    """A failed reboot resume waits for the master or operator to choose resume or fresh, never a silent fresh start."""
+    text = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
+    transfer = transfers.record(store, slug, agent, "restore", text, now_ms)
+    store.put_agent(slug, replace(agent, state=resume.AWAITING))
+    outcome = resume.Outcome(
+        agent.name,
+        agent.lane,
+        agent.task,
+        resume.AWAITING,
+        "own conversation did not reopen after the workstation rebooted",
+        agent.conversation_id,
+        now_ms,
+        transfer["id"],
+    )
+    kept = [r for r in store.restored(slug) if r["name"] != agent.name]
+    store.put_restored(slug, [*kept, asdict(outcome)])
+    return f"{agent.name} awaits a resume or fresh decision after the workstation rebooted"

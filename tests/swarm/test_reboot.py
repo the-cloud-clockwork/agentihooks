@@ -5,7 +5,7 @@ import pytest
 
 from hooks.context import context_recycle
 from scripts.inbox.store import InboxStore
-from scripts.swarm import commands, reboot, snapshot
+from scripts.swarm import commands, reboot, resume, snapshot
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import MASTER, AgentRecord
 from tests.swarm.test_dead_resume import ResumingRuntime
@@ -146,6 +146,27 @@ def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_ac
         )
         assert agent.pane_id == "reopened:pane"
     assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-2"
+
+
+def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, rebooted):
+    ledger, runtime = rebooted
+    eng = next(a for a in _local(store).values() if a.lane == "eng")
+    store.put_handoff("sw", eng.task, "carry on from the parser", seat=eng.seat)
+
+    actions, _ = _booted(store, ledger, runtime)
+
+    assert f"{eng.name} awaits a resume or fresh decision after the workstation rebooted" in actions
+    held = _local(store)[eng.name]
+    assert (held.state, held.conversation_id, held.seat) == (resume.AWAITING, eng.conversation_id, eng.seat)
+    assert eng.name not in {a.name for a in runtime.resumed}
+    (outcome,) = [r for r in store.restored("sw") if r["name"] == eng.name]
+    assert (outcome["outcome"], outcome["task"], outcome["conversation_id"]) == (
+        resume.AWAITING,
+        eng.task,
+        eng.conversation_id,
+    )
+    assert outcome["transfer"]
+    assert ledger.rows[eng.task]["claimed_by"] == eng.name
 
 
 @pytest.mark.parametrize("reading", [False, None])
