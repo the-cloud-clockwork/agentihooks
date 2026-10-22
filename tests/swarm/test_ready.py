@@ -346,7 +346,7 @@ def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_reques
     monkeypatch.setattr(stall_watch, "ntfy", lambda *args: "")
     attempts = []
 
-    def queue(action, url):
+    def queue(action, url, journal=None):
         attempts.append(url)
         if pull.queued:
             return {}
@@ -379,7 +379,9 @@ def test_reopening_keeps_a_live_claimant_instead_of_spawning_a_successor(release
         pull = pull_request({"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}})
     attempts = list(runtime.spawned)
     rows = ledger.rows
-    run = ready.Pass(store, "sw", ledger, lambda url: pull, lambda url: pull, NOW, lambda *args: {"queued": False})
+    run = ready.Pass(
+        store, "sw", ledger, lambda url: pull, lambda url: pull, NOW, lambda *args, **kwargs: {"queued": False}
+    )
     ready.merge_pass(run, rows)
     tick.tick("sw", store, ledger, runtime, NOW + 1_000)
     assert runtime.spawned == attempts
@@ -636,8 +638,8 @@ def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging,
             data = {"resource": pull}
         return subprocess.CompletedProcess(command, 0, json.dumps({"data": data}))
 
-    def queue(action, url):
-        return merge_queue.operate(action, url, github)
+    def queue(action, url, journal=None):
+        return merge_queue.operate(action, url, github, journal=journal)
 
     merging.run(queuer=queue)
     assert merged_heads == [f"head={HEAD}"]
@@ -646,7 +648,7 @@ def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging,
     assert ready.record(merging.store, "sw", "t1") is None
 
 
-def refused(action, url):
+def refused(action, url, journal=None):
     raise SwarmError("GraphQL: Pull request is not mergeable")
 
 
@@ -689,7 +691,7 @@ def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
 def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error):
     merging.pulls[URL] = GREEN
 
-    def failed(action, url):
+    def failed(action, url, journal=None):
         raise SwarmError(error)
 
     assert merging.run(queuer=failed) == [
@@ -717,7 +719,7 @@ def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error)
 def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(merging, error):
     merging.pulls[URL] = GREEN
 
-    def down(action, url):
+    def down(action, url, journal=None):
         raise SwarmError(error)
 
     for _ in range(6):
@@ -729,7 +731,7 @@ def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(mergi
 def test_a_pull_request_into_another_base_counts_as_a_refusal(merging):
     merging.pulls[URL] = GREEN
 
-    def elsewhere(action, url):
+    def elsewhere(action, url, journal=None):
         raise SwarmError("swarm merge queue operations require a pull request into dev")
 
     merging.run(queuer=elsewhere)
@@ -1142,7 +1144,7 @@ def test_an_enqueue_github_refuses_reopens_the_task_awaiting_fix(merging):
     merging.pulls[URL] = GREEN
     error = "GitHub refused to enqueue the pull request"
 
-    def refused_enqueue(action, url):
+    def refused_enqueue(action, url, journal=None):
         raise SwarmError(error)
 
     assert merging.run(queuer=refused_enqueue) == [
@@ -1261,7 +1263,7 @@ def test_a_requeue_the_queue_refuses_records_no_requeue_comment(merging):
     left_queue_green(merging)
     merging.exits.failures = []
 
-    def refuse(action, url):
+    def refuse(action, url, journal=None):
         raise SwarmError("timed out")
 
     for minute in range(ready.QUEUE_TRIES + 1):
@@ -1347,6 +1349,37 @@ def test_a_watcher_dequeue_hands_the_queue_a_journal_naming_swarm_task_and_timer
     journal = merging.queue.journals[-1]
     assert journal.url == URL
     assert journal.context == {"swarm": "sw", "task": "t1", "timer": os.getpid(), "by": "merge watcher"}
+
+
+def watcher_journals(merging):
+    import os
+
+    context = {"swarm": "sw", "task": "t1", "timer": os.getpid(), "by": "merge watcher"}
+    return [
+        journal is not None and journal.url == URL and journal.context == context
+        for (action, _), journal in zip(merging.queued, merging.queue.journals, strict=True)
+        if action == "queue"
+    ]
+
+
+def test_a_watcher_queue_on_green_checks_hands_the_queue_its_journal(merging):
+    queued_at_now(merging)
+    assert watcher_journals(merging) == [True]
+
+
+def test_a_watcher_requeue_after_a_green_drop_hands_the_queue_its_journal(merging):
+    left_queue_green(merging)
+    merging.exits.failures = []
+    assert merging.run(NOW + 120_000) == [f"queued {URL} for task t1"]
+    assert watcher_journals(merging) == [True, True]
+
+
+def test_a_watcher_recovery_requeue_hands_the_queue_its_journal(merging):
+    dequeued_transient(merging)
+    merging.pulls[URL] = GREEN
+    assert merging.run(ready.record(merging.store, "sw", "t1")["retry_at"]) == [f"queued {URL} for task t1"]
+    assert merging.queued == [("queue", URL), ("dequeue", URL), ("queue", URL)]
+    assert watcher_journals(merging) == [True, True]
 
 
 def test_a_watcher_dequeue_writes_its_identity_into_the_queue_journal(env, monkeypatch, tmp_path):

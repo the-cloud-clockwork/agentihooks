@@ -276,10 +276,14 @@ def _checks(run, row, found, pull):
     return _queue(run, row, found)
 
 
+def _journal(run, task_id, url):
+    return run.journal(url, context={"swarm": run.slug, "task": task_id, "timer": os.getpid(), "by": "merge watcher"})
+
+
 def _queue(run, row, found):
     task_id, url = row["id"], found["url"]
     try:
-        run.queue("queue", url)
+        run.queue("queue", url, journal=_journal(run, task_id, url))
     except SwarmError as exc:
         if str(exc).startswith(REFUSALS):
             found["refusals"] = found.get("refusals", 0) + 1
@@ -354,11 +358,8 @@ def _unmergeable(run, row, found, pull):
     if fresh is None or not fresh.merge_problem:
         return []
     if fresh.queued:
-        journal = run.journal(
-            url, context={"swarm": run.slug, "task": task_id, "timer": os.getpid(), "by": "merge watcher"}
-        )
         try:
-            result = run.queue("dequeue", url, journal=journal)
+            result = run.queue("dequeue", url, journal=_journal(run, task_id, url))
         except SwarmError as exc:
             return [f"could not dequeue {url} for task {task_id}: {exc}"]
         if result.get("queued") or result.get("state") == "MERGED":
@@ -393,7 +394,7 @@ def _recover(run, row, found):
     if fresh.merge_problem or not fresh.resolved:
         return _retry(run, row, found, f"{url} for task {task_id} is not yet mergeable and green; it retries later")
     try:
-        run.queue("queue", url)
+        run.queue("queue", url, journal=_journal(run, task_id, url))
     except SwarmError as exc:
         run.ledger.raise_alert(run.slug, ALERT_SOURCE, REQUEUE_FAILED.format(url=url, task=task_id, why=exc))
         return _retry(run, row, found, f"could not requeue {url} for task {task_id}: {exc}")
