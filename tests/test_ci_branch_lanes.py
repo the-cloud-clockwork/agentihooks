@@ -353,7 +353,7 @@ def test_a_head_whose_new_workflows_all_queue_on_a_lane_is_allowed(tmp_path, mon
 
 
 def test_a_refused_head_is_red_names_each_reason_and_cancels_its_runs(tmp_path, monkeypatch, capsys):
-    base, head, sha = _repo(tmp_path, {"plant.yml": _workflow(), "laned.yml": _workflow(LANED)})
+    base, head, sha = _repo(tmp_path, {"plant.yml": {**_workflow(), "on": {"push": None}}, "laned.yml": _workflow(LANED)})
     monkeypatch.chdir(base)
     monkeypatch.setenv("GIT_DIR", str(head / ".git"))
     calls = []
@@ -367,6 +367,44 @@ def test_a_refused_head_is_red_names_each_reason_and_cancels_its_runs(tmp_path, 
     calls.clear()
     assert lanes.main(["--head", sha, "--repo", "o/r", "--wait", "3"]) == 1
     assert calls[0][3] == 3.0
+
+
+@pytest.mark.parametrize(
+    "on", [{"release": {"types": ["published"]}}, "workflow_dispatch", ["schedule", "workflow_call"], None]
+)
+def test_a_refused_workflow_the_push_cannot_trigger_is_red_without_waiting_for_its_run(
+    tmp_path, monkeypatch, capsys, on
+):
+    base, head, sha = _repo(tmp_path, {"release.yml": {**_workflow(), "on": on}})
+    monkeypatch.chdir(base)
+    monkeypatch.setenv("GIT_DIR", str(head / ".git"))
+    monkeypatch.setattr(lanes, "cancel", lambda *a: pytest.fail("no push run to wait for"))
+    assert lanes.main(["--head", sha, "--repo", "o/r"]) == 1
+    assert capsys.readouterr().out == (
+        f"Refused {lanes.WORKFLOWS}/release.yml: job replay has no shared hosted lane concurrency group.\n"
+    )
+
+
+@pytest.mark.parametrize("on", ["push", ["release", "pull_request"], {"pull_request_target": None}])
+def test_only_refused_workflows_the_push_can_trigger_are_waited_for(tmp_path, monkeypatch, on):
+    files = {"fired.yml": {**_workflow(), "on": on}, "release.yml": {**_workflow(), "on": "release"}}
+    base, head, sha = _repo(tmp_path, files)
+    monkeypatch.chdir(base)
+    monkeypatch.setenv("GIT_DIR", str(head / ".git"))
+    calls = []
+    monkeypatch.setattr(lanes, "cancel", lambda *args: calls.append(args) or set())
+    assert lanes.main(["--head", sha, "--repo", "o/r"]) == 1
+    assert calls == [("o/r", sha, {f"{lanes.WORKFLOWS}/fired.yml"}, 60.0)]
+
+
+def test_a_refused_workflow_that_does_not_parse_is_still_waited_for(tmp_path, monkeypatch):
+    base, head, sha = _repo(tmp_path, {"broken.yml": "jobs: [\n"})
+    monkeypatch.chdir(base)
+    monkeypatch.setenv("GIT_DIR", str(head / ".git"))
+    calls = []
+    monkeypatch.setattr(lanes, "cancel", lambda *args: calls.append(args) or set())
+    assert lanes.main(["--head", sha, "--repo", "o/r"]) == 1
+    assert calls == [("o/r", sha, {f"{lanes.WORKFLOWS}/broken.yml"}, 60.0)]
 
 
 def test_a_refused_head_without_a_repository_cancels_nothing(tmp_path, monkeypatch, capsys):
