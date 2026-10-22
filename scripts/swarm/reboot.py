@@ -105,8 +105,8 @@ def last_quota(harness, account):
         return resume.account_quota(harness, account)
     from scripts.claude_quota_balancer import account_cap, cached_observations
 
-    seen = [result for _, result in cached_observations() if result.account == account]
-    cap = account_cap(seen[-1]) if seen else None
+    seen = [(at, result) for at, result in cached_observations() if result.account == account]
+    cap = account_cap(max(seen, key=lambda reading: reading[0])[1]) if seen else None
     return None if cap is None else bool(cap)
 
 
@@ -119,20 +119,28 @@ def start_server():
 
 
 def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
-    """On the first tick of a new boot, reopen each recorded local agent that lost its process."""
+    """On the first tick of a new boot, reopen each recorded local agent that lost its process.
+
+    The boot counts as handled only once the herdr server answered, so a failed start retries on the next tick."""
     current = boot_id() if current is None else current
     key = store.key(slug, "boot", commands.hive_id())
     seen = store.redis.get(key)
-    store.redis.set(key, current)
-    if seen is None or seen == current or store.config(slug).state in {"stopped", "stopping"}:
+    if seen == current or store.config(slug).state in {"stopped", "stopping"}:
         return []
-    actions, wanted, live = start_server(), recorded(store, slug), runtime.live_names()
+    if seen is None:
+        store.redis.set(key, current)
+        return []
+    actions = start_server()
+    if actions:
+        return actions
+    wanted, live = recorded(store, slug), runtime.live_names()
     for agent in store.agents(slug):
         if agent.name not in wanted or agent.name in live or agent.state == "finished" or not local(agent):
             continue
-        if agent.account and last_quota(agent.harness, agent.account) is False:
+        if agent.account and last_quota(agent.harness, agent.account) is not True:
             agent = replace(agent, account="")
             store.put_agent(slug, agent)
         reopened = dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms)
         actions.append(f"{'resumed' if reopened else 'could not resume'} {agent.name} after the workstation rebooted")
+    store.redis.set(key, current)
     return actions

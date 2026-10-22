@@ -143,13 +143,14 @@ def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_ac
     assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-2"
 
 
-def test_an_account_out_of_quota_resumes_on_whatever_account_the_router_picks(store, rebooted):
+@pytest.mark.parametrize("reading", [False, None])
+def test_an_account_without_room_resumes_on_whatever_account_the_router_picks(store, rebooted, reading):
     ledger, runtime = rebooted
     local = _local(store)
     for agent in local.values():
         store.put_agent("sw", replace(agent, account="spent" if agent.lane == MASTER else "roomy"))
 
-    _booted(store, runtime, quota=lambda harness, account: account != "spent")
+    _booted(store, runtime, quota=lambda harness, account: True if account == "roomy" else reading)
 
     routed = {a.lane: a.account for a in runtime.resumed}
     assert routed == {MASTER: "", "eng": "roomy"}
@@ -178,6 +179,18 @@ def test_a_live_agent_and_a_stopped_swarm_are_left_alone(store, rebooted):
     runtime.resumed.clear()
     assert _booted(store, runtime) == ([], [])
     assert runtime.resumed == []
+    assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-1"
+
+
+def test_a_herdr_server_that_will_not_start_leaves_the_boot_for_the_next_tick(store, rebooted, monkeypatch):
+    ledger, runtime = rebooted
+    monkeypatch.setattr(reboot, "start_server", lambda: ["herdr server did not start after the reboot: down"])
+
+    actions = reboot.boot_pass("sw", store, ledger, runtime, 900, current="boot-2")
+
+    assert actions == ["herdr server did not start after the reboot: down"]
+    assert runtime.resumed == []
+    assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-1"
 
 
 def test_an_automatic_snapshot_newer_than_the_planned_record_names_the_agents(store, rebooted):
@@ -209,7 +222,7 @@ def test_last_quota_reads_the_newest_reading_however_old(monkeypatch):
     monkeypatch.setattr(
         balancer,
         "cached_observations",
-        lambda: [(1.0, Reading("a", 3)), (2.0, Reading("b", 0)), (3.0, Reading("a", 0))],
+        lambda: [(3.0, Reading("a", 0)), (1.0, Reading("a", 3)), (2.0, Reading("b", 0))],
     )
     monkeypatch.setattr(balancer, "account_cap", lambda result: result.cap)
 
