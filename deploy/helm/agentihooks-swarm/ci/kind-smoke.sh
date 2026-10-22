@@ -45,7 +45,13 @@ finish() {
   if [[ $status -ne 0 ]]; then
     kubectl get pods -o wide || true
     kubectl logs "${controller[@]}" --tail 100 || true
-    kubectl logs "${controller[@]}" --previous --tail 100 || true
+    restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' || true)"
+    if [[ -n $restarts && $restarts != 0 ]]; then
+      kubectl logs "${controller[@]}" --previous --tail 100 || true
+    fi
+    kubectl logs "$release-redis-0" --tail 30 || true
+    kubectl exec "$release-redis-0" -- redis-cli ping || true
+    kubectl exec "$ledger_pod" -- env SLUG="$slug" python -c 'import json, os; from scripts.swarm.store import connect; store = connect(); key = store.key(os.environ["SLUG"], "tick-lock"); raw = store.redis.get(key); held = json.loads(raw) if raw else {}; print(json.dumps({"tick_lock": {field: held.get(field) for field in ("epoch", "host", "pid", "start")}, "ttl_ms": store.redis.pttl(key)}))' || true
     kubectl get pods "${controller[@]}" -o jsonpath='{range .items[*].status.initContainerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}{range .items[*].status.containerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}' || true
     kubectl logs "$ledger_pod" --tail 100 || true
   fi
@@ -390,6 +396,7 @@ kubectl create secret generic swarm-ledger-tls --from-file="$ledger_tls/tls.crt"
 rm -rf "$ledger_tls"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
+bash "$chart/ci/redis-readiness-proof.sh" "$release"
 
 ca_dir="$(mktemp -d)"
 (
@@ -465,22 +472,21 @@ if [[ $restarts != 0 ]]; then
 fi
 printf 'controller restarts: 0\n'
 
-docker exec "$cluster-control-plane" pkill -STOP -f "agentihooks controller run"
 frozen_pod="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].metadata.name}')"
 frozen_container="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
 frozen_holder="$(kubectl exec "$frozen_pod" -c controller -- python -c 'import json; from scripts.swarm import controller; print(json.dumps({"host": controller._host(), "pid": 1, "start": controller._stat(1)[19]}))')"
+docker exec "$cluster-control-plane" pkill -STOP -f "agentihooks controller run"
 frozen_lock="$(kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HOLDER="$frozen_holder" python - <<'FROZEN'
 import json
 import os
 import uuid
 
-from scripts.swarm import lease
 from scripts.swarm.store import connect
 
 store = connect()
 slug = os.environ["SLUG"]
-held = lease.current(store, slug)
-token = json.dumps({"epoch": held.epoch, "token": uuid.uuid4().hex, **json.loads(os.environ["HOLDER"])})
+epoch = int(store.redis.get(store.key(slug, "control-epoch")))
+token = json.dumps({"epoch": epoch, "token": uuid.uuid4().hex, **json.loads(os.environ["HOLDER"])})
 store.redis.set(store.key(slug, "tick-lock"), token, px=600_000, nx=True)
 print(store.redis.get(store.key(slug, "tick-lock")))
 FROZEN
@@ -494,6 +500,24 @@ if [[ $restarts != 1 ]]; then
   exit 1
 fi
 printf 'liveness probe restarted the frozen controller\n'
+terminated="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.containerID}')"
+current="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
+if [[ $terminated != "$frozen_container" || $current == "$frozen_container" ]]; then
+  printf 'the frozen controller container has no confirmed termination record\n' >&2
+  exit 1
+fi
+kubectl exec -i "$ledger_pod" -- env SLUG="$slug" TOKEN="$frozen_lock" python - <<'RELEASE'
+import os
+
+from scripts.swarm import controller
+from scripts.swarm.store import connect
+
+store = connect()
+slug, token = os.environ["SLUG"], os.environ["TOKEN"]
+controller.release_tick_lock(store, slug, token)
+assert store.redis.get(store.key(slug, "tick-lock")) != token
+print("released only the captured tick lock after its frozen container terminated")
+RELEASE
 retaken=""
 for _ in $(seq 180); do
   held="$(read_lease)" || held="{}"
