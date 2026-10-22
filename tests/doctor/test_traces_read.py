@@ -241,16 +241,16 @@ def test_a_trace_with_more_observation_pages_than_the_cap_is_not_covered(tmp_pat
     assert len(row["observations"]) == 2 and coverage["covered"] == 0
 
 
-def test_a_failed_listing_is_a_failure_and_not_an_empty_swarm(tmp_path):
+def test_a_failed_listing_is_a_failure_and_not_an_empty_swarm(tmp_path, read_clock):
     def down(path, params):
         raise TimeoutError("read timed out")
 
     rows, coverage, failures = traces_read.history("s", down, tmp_path, traces_read.Budget())
     assert rows == [] and coverage["listed"] is False
-    assert failures == [f"trace listing failed: TimeoutError: read timed out{_at(down)}"]
+    assert failures == [f"trace listing failed at {read_clock}: TimeoutError: read timed out{_at(down)}"]
 
 
-def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(tmp_path):
+def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(tmp_path, read_clock):
     asked = []
     broken = {"a"}
 
@@ -266,7 +266,9 @@ def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(
     rows, coverage, failures = traces_read.history("s", get, tmp_path, budget, clock=_ticks(1))
     assert failures == []
     assert asked == ["a"]
-    assert coverage["unreadable"] == [f"trace a unreadable: TimeoutError: read timed out{_at(get, 5)}"]
+    assert coverage["unreadable"] == [
+        f"trace a unreadable: observation read failed at {read_clock}: TimeoutError: read timed out{_at(get, 5)}"
+    ]
     assert coverage["covered"] == 0 and [len(r["observations"]) for r in rows] == [0, 0, 0]
     asked.clear()
     rows, coverage, _ = traces_read.history("s", get, tmp_path, budget, clock=_ticks(1))
@@ -411,7 +413,7 @@ def test_a_cache_entry_without_its_whole_history_is_read_again(tmp_path):
     assert row["complete"] is True and coverage["complete"] is True
 
 
-def test_record_carries_active_bindings_coverage_and_a_persistent_outage_start(tmp_path, monkeypatch):
+def test_record_carries_active_bindings_coverage_and_a_persistent_outage_start(tmp_path, monkeypatch, read_clock):
     agents = [{"name": "s-eng-1", "state": "working", "task": "t1", "started_at": 5}]
 
     def down(path, params):
@@ -421,8 +423,8 @@ def test_record_carries_active_bindings_coverage_and_a_persistent_outage_start(t
     assert first["reader"]["down_since"] == 1000
     assert first["reader"]["active"] == {"bindings": 1, "read": 0}
     assert first["reader"]["failures"] == [
-        f"active read of s-eng-1 failed: ConnectionError: refused{_at(down)}",
-        f"trace listing failed: ConnectionError: refused{_at(down)}",
+        f"active read of s-eng-1 failed at {read_clock}: ConnectionError: refused{_at(down)}",
+        f"trace listing failed at {read_clock}: ConnectionError: refused{_at(down)}",
     ]
     assert first["active"][0]["read"] is False
     second = traces_read.record("s", [], agents, 2000, down, home=tmp_path)
@@ -519,7 +521,9 @@ def test_only_the_verified_default_origin_is_sent_to_the_internal_ingress(monkey
 
 
 @pytest.mark.parametrize("failure", ["backend 503", "internal timeout"])
-def test_a_real_backend_failure_on_the_internal_path_still_raises_the_reader_finding(monkeypatch, tmp_path, failure):
+def test_a_real_backend_failure_on_the_internal_path_still_raises_the_reader_finding(
+    monkeypatch, tmp_path, failure, read_clock
+):
     def internal(request):
         if failure == "internal timeout":
             raise httpx.ReadTimeout("timed out", request=request)
@@ -530,7 +534,7 @@ def test_a_real_backend_failure_on_the_internal_path_still_raises_the_reader_fin
     data = traces_read.record("s", [], [], 1000, get, home=tmp_path)
     assert [f.kind for f in traces.findings(data, traces.Limits())] == ["trace reader unavailable"]
     raised = {"backend 503": "HTTPStatusError", "internal timeout": "ReadTimeout"}[failure]
-    assert data["reader"]["failures"][0].startswith(f"trace listing failed: {raised}")
+    assert data["reader"]["failures"][0].startswith(f"trace listing failed at {read_clock}: {raised}")
 
 
 def test_the_listing_keeps_every_page_and_stops_when_the_budget_is_spent(tmp_path):
@@ -551,12 +555,12 @@ def test_the_listing_keeps_every_page_and_stops_when_the_budget_is_spent(tmp_pat
     assert [r["id"] for r in rows] == ["p1"] and coverage["listed"] is False
 
 
-def test_record_passes_its_budget_clock_and_cache_to_both_reads(tmp_path):
+def test_record_passes_its_budget_clock_and_cache_to_both_reads(tmp_path, read_clock):
     agents = [{"name": "s-eng-1", "state": "working", "task": "t1", "started_at": 5}]
     langfuse = Langfuse([_trace_row("a", "u")])
     budget = traces_read.Budget(active_page=3, active_seconds=1, history_seconds=100)
     data = traces_read.record("s", [], agents, 1000, langfuse, home=tmp_path, budget=budget, clock=_ticks(2))
-    assert data["reader"]["failures"] == ["active read budget of 1 seconds spent before s-eng-1"]
+    assert data["reader"]["failures"] == [f"active read budget of 1 seconds spent before s-eng-1 at {read_clock}"]
     assert (tmp_path / "s" / traces_read.CACHE_DIR / "a.json").exists()
     langfuse.calls.clear()
     data = traces_read.record("s", [], agents, 2000, langfuse, home=tmp_path, budget=traces_read.Budget(active_page=3))
@@ -696,7 +700,7 @@ def test_working_agents_without_traces_in_a_project_that_holds_the_swarm_stay_mi
     ]
 
 
-def test_a_failed_listing_with_accepted_exports_is_one_listing_failure(tmp_path, monkeypatch):
+def test_a_failed_listing_with_accepted_exports_is_one_listing_failure(tmp_path, monkeypatch, read_clock):
     from scripts.doctor import registry
 
     monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
@@ -707,7 +711,9 @@ def test_a_failed_listing_with_accepted_exports_is_one_listing_failure(tmp_path,
         return Project("antoncore")(path, params)
 
     data = traces_read.record("s", [], WORKING[:1], 10**9, listing_down, home=tmp_path)
-    assert data["reader"]["failures"] == [f"trace listing failed: ConnectionError: refused{_at(listing_down, 2)}"]
+    assert data["reader"]["failures"] == [
+        f"trace listing failed at {read_clock}: ConnectionError: refused{_at(listing_down, 2)}"
+    ]
 
 
 def test_a_binding_trace_missing_from_an_empty_listing_is_not_an_empty_project(tmp_path, monkeypatch):

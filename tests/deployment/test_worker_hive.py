@@ -104,6 +104,9 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
         "AH_CC_TOKEN_quoted": "it's quoted",
         "AH_CC_TOKEN_escaped": "back\\\\slash",
         "SWARM_SECRET": "fixture tick secret",
+        "LANGFUSE_PUBLIC_KEY": "fixture-langfuse-public",
+        "LANGFUSE_SECRET_KEY": "fixture-langfuse-private",
+        "LANGFUSE_HOST": "https://langfuse.example.test",
         "SSHD_DIES": "yes" if sshd_dies else "no",
     }
     if credential != "mounted":
@@ -149,6 +152,26 @@ def test_mounted_member_clones_repo_and_configures_before_run(tmp_path):
     assert "AH_CC_TOKEN_quoted holds a quote or backslash" in result.stderr
     assert "AH_CC_TOKEN_escaped=" not in container_env.read_text()
     assert "SWARM_SECRET=" not in container_env.read_text()
+
+
+def test_the_container_env_carries_the_langfuse_settings_to_sshd_sessions(tmp_path):
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    sourced = subprocess.run(
+        [
+            "env",
+            "-i",
+            "bash",
+            "-c",
+            'set -a; . "$1"; printf "%s|%s|%s" "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" "$LANGFUSE_HOST"',
+            "_",
+            str(home / "hive-container.env"),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert sourced.stdout == "fixture-langfuse-public|fixture-langfuse-private|https://langfuse.example.test"
 
 
 def test_a_delivered_hive_env_runs_without_waiting(tmp_path):

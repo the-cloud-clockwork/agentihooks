@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from scripts.hive import orders, placement, placement_waits, registry
+from scripts.hive import admission, headroom, orders, placement, placement_waits, registry
 from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
@@ -40,7 +40,7 @@ def loaded_hives(store: RedisStore) -> list[dict]:
 
     A hive counts a running agent in its slot's processes even when it lists no execution for it."""
     agents = [agent for slug in store.slugs() for agent in store.agents(slug)]
-    hives = registry.hives(store.redis)
+    hives, now = registry.hives(store.redis), lease.now_ms(store)
     for hive in hives:
         counts = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
         executions = counts.get("_executions", {})
@@ -66,6 +66,11 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
             max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
+        found = admission.room(
+            headroom.read(store.redis, hive["id"], now), pending=admission.pending(store.redis, hive["id"])
+        )
+        hive["room"] = found.room
+        hive["refusal"] = admission.refusal(found)
     return hives
 
 
@@ -150,6 +155,14 @@ def _first_choice(
         else:
             fallen = fallen or (row, choice)
     return fallen or reason
+
+
+def _match(check: str, expected: object, actual: object) -> None:
+    if expected != actual:
+        raise SwarmError(
+            f"hive launch acknowledgement does not match the live execution: "
+            f"{check} expected {expected!r}, got {actual!r}"
+        )
 
 
 class HiveLaunch:
@@ -288,6 +301,16 @@ class HiveLaunch:
             },
             self.opening(named),
         )
+        if refused := self.reserve_room(request, selected):
+            self._record_wait(request.lane, request.task, placement.Wait(refused))
+            return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
+        try:
+            return self.send_order(request, selected, task)
+        except BaseException:
+            admission.release(self.store.redis, selected.hive, f"{self.slug}/{request.name}")
+            raise
+
+    def send_order(self, request: SpawnRequest, selected: Selection, task: dict) -> Outcome:
         admitted = self.admit(request, selected)
         if selected.route_kind != placement.MASTER_LOGIN and not self.slots.reserve(
             f"claude:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
@@ -326,6 +349,17 @@ class HiveLaunch:
             self.retire(order, previous)
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
         return self.spawn(request)
+
+    def reserve_room(self, request: SpawnRequest, selected: Selection) -> str:
+        if selected.master_placement is not None:
+            return ""
+        reading = headroom.read(self.store.redis, selected.hive, lease.now_ms(self.store))
+        member = f"{self.slug}/{request.name}"
+        reserved, held = admission.reserve(self.store.redis, selected.hive, member, admission.room(reading).room)
+        if reserved:
+            return ""
+        refused = admission.refusal(admission.room(reading, pending=held))
+        return f"no hive for {request.lane} has room: {selected.hive} {refused}"
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
         agent = AgentRecord(
@@ -386,16 +420,13 @@ class HiveLaunch:
             status = Status.AMBIGUOUS if ack.failure == "ambiguous" else Status.REFUSED
             return Outcome("spawn", status, HIVE, detail=f"hive launch failed: {ack.failure}")
         current = self.store.execution_occupants(self.slug).get(agent.seat)
-        if current is None or current.execution_id != order.execution_id or agent.generation != order.generation:
-            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        _match("seat occupant", order.execution_id, current.execution_id if current else None)
+        _match("generation", order.generation, agent.generation)
         if agent.state == "launching":
             agent = self.record(agent, order, ack)
-        if (
-            agent.runtime_target != ack.target
-            or agent.pane_id != ack.execution.get("pane_id", agent.pane_id)
-            or agent.state != "working"
-        ):
-            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        _match("runtime target", agent.runtime_target, ack.target)
+        _match("pane", agent.pane_id, ack.execution.get("pane_id", agent.pane_id))
+        _match("state", "working", agent.state)
         if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(agent.execution_id):
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch reservation expired")
         placed = Placed(
@@ -418,8 +449,8 @@ class HiveLaunch:
     def record(self, agent: AgentRecord, order: LaunchOrder, ack: Ack) -> AgentRecord:
         """A joined hive cannot write the swarm keyspace, so the controller records what it acknowledged."""
         decision = ack.execution.get("profile_decision", {})
-        if ack.target.get("host_id") != order.hive or not isinstance(decision, dict):
-            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        _match("ack host", order.hive, ack.target.get("host_id"))
+        _match("profile decision type", "dict", type(decision).__name__)
         kept = (
             {"master_placement": agent.profile_decision["master_placement"]}
             if "master_placement" in agent.profile_decision
@@ -444,6 +475,7 @@ class HiveLaunch:
     def end(self, agent: AgentRecord, reason: str) -> None:
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         self.slots.release(agent.execution_id)
+        admission.release(self.store.redis, agent.hive, f"{self.slug}/{agent.name}")
         self.store.redis.hset(
             self.store.key(self.slug, ENDINGS),
             agent.execution_id,

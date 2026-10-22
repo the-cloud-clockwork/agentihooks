@@ -34,14 +34,26 @@ def test_measure_reads_the_five_minute_load_and_available_memory(proc, monkeypat
         "cpus": 8,
         "load5": 3.456,
         "available_mb": 8000,
+        "total_mb": 15625,
         "pending": 3,
         "measured_at": 77_000,
     }
 
 
+def test_measure_rounds_the_memory_total_down_to_whole_megabytes(proc):
+    (proc / "meminfo").write_text(MEMINFO.replace("16000000 kB", "16000900 kB"))
+    total = headroom.measure(0, 0, proc)["total_mb"]
+    assert (type(total), total) == (int, 15625)
+
+
 def test_measure_counts_one_cpu_when_the_count_is_unknown(proc, monkeypatch):
     monkeypatch.setattr(headroom.os, "cpu_count", lambda: None)
     assert headroom.measure(0, 1, proc)["cpus"] == 1
+
+
+def test_measure_is_none_without_a_memory_total(proc):
+    (proc / "meminfo").write_text(MEMINFO.replace("MemTotal", "MemFree"))
+    assert headroom.measure(0, 1, proc) is None
 
 
 @pytest.mark.parametrize("missing", ["loadavg", "meminfo"])
@@ -68,6 +80,7 @@ def test_publish_counts_waiting_launch_orders_and_expires_with_the_heartbeat(red
         "cpus": 4,
         "load5": 3.456,
         "available_mb": 8000,
+        "total_mb": 15625,
         "pending": 2,
         "measured_at": 5_000,
     }

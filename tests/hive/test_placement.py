@@ -8,7 +8,7 @@ REPO = "agentihooks"
 
 
 def hive(hive_id: str, **fields) -> dict:
-    return {
+    record = {
         **registry._default(hive_id, "yes"),
         "max_agents": 2,
         "slots": [{"harness": "claude", "account": "acct", "kind": "subscription", "cap": 4}],
@@ -18,6 +18,7 @@ def hive(hive_id: str, **fields) -> dict:
         "agents": 0,
         **fields,
     }
+    return {"room": record["max_agents"] - record["agents"], **record}
 
 
 def fleet(*off: str, **changes: dict) -> list[dict]:
@@ -27,11 +28,14 @@ def fleet(*off: str, **changes: dict) -> list[dict]:
         hive("pods", ui="no", ephemeral="yes", excluded=["master", "qa", "frontend"], max_agents=4),
     ]
     return [
-        {
-            **record,
-            **changes.get(record["id"], {}),
-            **({"heartbeat_at": NOW - registry.LIVE_MS - 1} if record["id"] in off else {}),
-        }
+        hive(
+            record["id"],
+            **{
+                **{key: value for key, value in record.items() if key != "room"},
+                **changes.get(record["id"], {}),
+                **({"heartbeat_at": NOW - registry.LIVE_MS - 1} if record["id"] in off else {}),
+            },
+        )
         for record in hives
     ]
 
@@ -150,6 +154,13 @@ def test_the_master_never_lands_on_a_hive_that_excludes_it():
     hives = [eng("a", agents=4), eng("b", agents=5), hive("vm", heartbeat_at=0)]
     assert place("master", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live hive takes master")
     assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live UI hive takes qa")
+
+
+def test_a_full_fleet_names_every_hive_refusal_in_order():
+    hives = [eng("a", room=0, refusal="cpu: busy"), eng("b", room=0), eng("c", room=0, refusal="ram: low")]
+    assert place("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Wait(
+        "no hive for eng has room: a cpu: busy; c ram: low"
+    )
 
 
 def test_a_full_master_ui_hive_keeps_the_master_without_counting_against_it():

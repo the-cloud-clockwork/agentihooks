@@ -1,8 +1,8 @@
 import pytest
 
 from scripts.hive.placement import Choice, Wait, choose, place
+from tests.hive.test_controller_launch import NO_RAM, publish_room, write_hive
 from tests.hive.test_controller_launch import setup as setup
-from tests.hive.test_controller_launch import write_hive
 from tests.hive.test_placement import NOW, REPO, hive
 
 OFF_HIVE_LANE = "unhived"
@@ -15,7 +15,7 @@ def two_hosts(setup, anton_agents=0):
     setup.store.redis.srem(registry.INDEX, "remote")
     write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=10)
     write_hive(setup, id="anton", ui="no", excluded=["master", "qa", "frontend"], max_agents=2)
-    setup.store.redis.set(f"{registry.key('anton')}:sessions", f'{{"eng": {anton_agents}}}')
+    publish_room(setup.store, "anton", 2 - anton_agents)
 
 
 ROLES = {
@@ -48,10 +48,10 @@ def test_a_full_headless_fleet_falls_back_to_the_workstation_with_the_reason_rec
     task = {"id": "task", "seat": "eng-1@fixture", "controller_epoch": setup.held.epoch}
     selected = setup.launcher.select(setup.config, "eng", task)
     assert selected.hive == "workstation"
-    assert selected.fallback == "no headless hive for eng has room"
+    assert selected.fallback == f"no headless hive for eng has room: anton {NO_RAM}"
     name = setup.store.next_name(setup.config.slug, "eng")
     admitted = setup.launcher.admit(SpawnRequest(setup.config, "eng", name, task), selected)
-    assert admitted.profile_decision["placement_fallback"] == "no headless hive for eng has room"
+    assert admitted.profile_decision["placement_fallback"] == f"no headless hive for eng has room: anton {NO_RAM}"
 
 
 def test_a_task_pinned_to_a_ui_hive_records_the_pin_as_its_reason(setup):
@@ -63,7 +63,6 @@ def test_a_task_pinned_to_a_ui_hive_records_the_pin_as_its_reason(setup):
 
 
 def test_an_account_a_headless_hive_advertises_wins_over_an_earlier_account_that_only_fits_the_workstation(setup):
-    from scripts.hive import registry
     from scripts.swarm.capacity import Account
 
     two_hosts(setup)
@@ -93,10 +92,10 @@ def test_an_account_a_headless_hive_advertises_wins_over_an_earlier_account_that
     ]
     selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
     assert (selected.hive, selected.account.name, selected.fallback) == ("anton", "second", "")
-    setup.store.redis.set(f"{registry.key('anton')}:sessions", '{"eng": 2}')
+    publish_room(setup.store, "anton", 0)
     selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
     assert (selected.hive, selected.account.name) == ("workstation", "first")
-    assert selected.fallback == "no headless hive for eng has room"
+    assert selected.fallback == f"no headless hive for eng has room: anton {NO_RAM}"
 
 
 def test_the_hive_controller_routes_the_plan_lane_through_hive_placement(setup):
@@ -146,7 +145,6 @@ def test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_when_headle
 
 
 def test_a_dispatcher_spawn_lands_on_a_headless_hive_and_takes_the_workstation_only_when_none_has_room(setup):
-    from scripts.hive import registry
     from scripts.swarm import controller
     from scripts.swarm.dispatch_seat import SEAT
     from scripts.swarm.profile_choice import ProfileDecision
@@ -162,12 +160,13 @@ def test_a_dispatcher_spawn_lands_on_a_headless_hive_and_takes_the_workstation_o
     assert fenced.placement_refusal("dispatch", {"id": SEAT}) == ""
     selected = fenced.runtime.hive_launch.select(setup.config, "dispatch", task)
     assert (selected.hive, selected.fallback) == ("anton", "")
-    setup.store.redis.set(f"{registry.key('anton')}:sessions", '{"dispatch": 2}')
+    publish_room(setup.store, "anton", 0)
+    full = f"no headless hive for dispatch has room: anton {NO_RAM}"
     selected = fenced.runtime.hive_launch.select(setup.config, "dispatch", task)
-    assert (selected.hive, selected.fallback) == ("workstation", "no headless hive for dispatch has room")
+    assert (selected.hive, selected.fallback) == ("workstation", full)
     name = setup.store.next_name(setup.config.slug, "dispatch")
     admitted = setup.launcher.admit(SpawnRequest(setup.config, "dispatch", name, task), selected)
-    assert admitted.profile_decision["placement_fallback"] == "no headless hive for dispatch has room"
+    assert admitted.profile_decision["placement_fallback"] == full
 
 
 def hive_controller(setup):

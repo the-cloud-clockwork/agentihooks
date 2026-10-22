@@ -990,7 +990,8 @@ def _spawn_stop(slug, config, store, runtime, now_ms):
 
 
 def _budget_spent(task, begun, tried):
-    if tried and time.monotonic() - begun >= SPAWN_BUDGET_S:
+    spent = time.monotonic() - begun
+    if tried and spent + spent / tried >= SPAWN_BUDGET_S:
         return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
     return None
 
@@ -1022,7 +1023,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
     order, actions = _spawn_order(slug, config, store, agents, rows, doc, runtime)
-    begun, tried = time.monotonic(), False
+    begun, tried = time.monotonic(), 0
     for lane, task in order:
         expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
         if held:
@@ -1086,7 +1087,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.record_launch(slug, record, "pending")
             store.seats.occupy(seat, name, now_ms)
             task["transfer"] = transfers.attach(store, slug, record)
-            tried = True
+            tried += 1
             placed = runtime.spawn(config, lane, name, {**primed(store, slug, seat, task), ACK_LATER: True})
             from scripts.swarm_v2.runtime import codex
 
@@ -1173,10 +1174,13 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
             )
             launched = codex.admit_legacy(store, slug, placed_record(agent, placed), runtime)
         except Exception as exc:
-            if _acknowledging_error(exc) or not isinstance(exc, SpawnError):
+            if _acknowledging_error(exc):
                 store.refresh(slug, agent.task, agent.name, LEASE_MS)
-            else:
+            elif isinstance(exc, SpawnError | SwarmError):
                 actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(agent, task, exc), now_ms)
+            else:
+                print(f"{agent.name} collect for {task['id']} raised {exc!r}, waiting for the hive", file=sys.stderr)
+                store.refresh(slug, agent.task, agent.name, LEASE_MS)
             continue
         actions += _started(slug, config, store, ledger, doc, Started(agent, task, placed, launched), now_ms)
     return actions

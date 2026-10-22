@@ -514,6 +514,32 @@ def test_guarded_task_update_returns_only_the_requested_row(live):
     assert "comments" not in row
 
 
+def test_a_kind_change_succeeds_when_the_work_folder_lives_on_another_host(live, tmp_path):
+    from scripts.swarm.ledger_client import LedgerClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    ledger.request(SLUG, [{"op": "join", "id": "kind-join", "by": "boss", "role": "orchestrator"}], service=True)
+    ledger.request(
+        SLUG,
+        [
+            {
+                "op": "task_add",
+                "id": "kind-create",
+                "by": "boss",
+                "task": "t1",
+                "title": "Kind proof",
+                "lane": "eng",
+                "phase": "p1",
+                "workspace": str(tmp_path / "elsewhere" / "t1"),
+            }
+        ],
+        service=True,
+    )
+    row = LedgerClient(service=True).update_task(SLUG, "t1", {"kind": "ops"}, by="boss")
+    assert row["kind"] == "ops"
+    assert not (tmp_path / "elsewhere").exists()
+
+
 def test_task_collection_token_survives_chat_and_reload_without_hashing(live, monkeypatch):
     from scripts.swarm.ledger_client import LedgerClient
     from tests.swarm_ledger.test_ledger_authority import ledger

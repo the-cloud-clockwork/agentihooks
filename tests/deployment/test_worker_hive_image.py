@@ -185,6 +185,26 @@ def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_p
     assert [step.get("if") for step in kind["steps"] if "ghcr.io" in str(step)] == [dev_push, dev_push]
 
 
+def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_release_only_when_newest():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-node-image.yml").read_text())["jobs"]
+    hive = jobs["hive"]
+    assert hive["if"] == "github.event_name == 'release'"
+    assert hive["needs"] == "image"
+    assert jobs["image"]["outputs"]["latest"] == "${{ steps.main.outputs.latest }}"
+    assert hive["env"]["IMAGE"] == "ghcr.io/the-cloud-clockwork/agentihooks-hive-worker"
+    steps = {step.get("name", step.get("uses")): step for step in hive["steps"]}
+    build = steps["Build the hive worker on the released worker image"]["run"]
+    assert 'WORKER_IMAGE="ghcr.io/the-cloud-clockwork/agentihooks-worker:${RELEASE#v}"' in build
+    assert 'AGENTIHOOKS_REF="$GITHUB_SHA"' in build
+    names = list(steps)
+    assert names.index("Prove the hive worker installs its profile") < names.index(
+        "Publish the release version and move the release tag when it is the newest"
+    )
+    publish = steps["Publish the release version and move the release tag when it is the newest"]
+    assert publish["env"]["LATEST"] == "${{ needs.image.outputs.latest }}"
+    assert 'if [[ "$LATEST" == true ]]; then' in publish["run"]
+
+
 def test_the_proven_image_skips_the_artifact_round_trip():
     assert "docker save" not in PROOF.read_text()
     assert all("image.tar" not in str(step) for job in hive_jobs().values() for step in job["steps"])

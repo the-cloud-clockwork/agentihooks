@@ -25,15 +25,22 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc")) -> dict | Non
     try:
         load5 = float((proc / "loadavg").read_text().split()[1])
         available_mb = host_budget._memory_mb(proc)[0]
-    except (OSError, ValueError, IndexError, KeyError):
+        total_mb = _total_mb(proc)
+    except (OSError, ValueError, IndexError, KeyError, StopIteration):
         return None
     return {
         "cpus": os.cpu_count() or 1,
         "load5": load5,
         "available_mb": available_mb,
+        "total_mb": total_mb,
         "pending": pending,
         "measured_at": now_ms,
     }
+
+
+def _total_mb(proc: Path) -> int:
+    line = next(line for line in (proc / "meminfo").read_text().splitlines() if line.startswith("MemTotal:"))
+    return int(line.split()[1]) // 1024
 
 
 def publish(redis: "Redis", hive: str, now_ms: int, proc: Path = Path("/proc")) -> None:

@@ -52,3 +52,13 @@ def test_followup_flags_the_item_for_the_operator_only_when_asked(sent, flag):
     [(slug, op)] = without_id(sent)
     op.pop("text")
     assert (slug, op) == ("demo", {"op": "add_item", "by": "swarm", "list": "followups", **flag})
+
+
+def test_an_agent_followup_is_written_as_that_agent(sent):
+    ledger_client.LedgerClient().followup("demo", "Cut from the plan: a generator", by="engineer@1-1")
+    assert without_id(sent) == [
+        (
+            "demo",
+            {"op": "add_item", "by": "engineer@1-1", "list": "followups", "text": "Cut from the plan: a generator"},
+        )
+    ]

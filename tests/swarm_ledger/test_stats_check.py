@@ -123,6 +123,7 @@ def test_the_stats_card_has_no_stats_check_row():
         + function_source("statKey")
         + function_source("statGrip")
         + function_source("bottleneckStat")
+        + function_source("withRefusals")
         + function_source("renderStats")
         + "\nconst assert = require('node:assert/strict');\n"
         "renderStats();\n"
@@ -164,6 +165,7 @@ def test_the_stats_card_counts_unfrozen_and_frozen_work_apart():
         + function_source("statKey")
         + function_source("statGrip")
         + function_source("bottleneckStat")
+        + function_source("withRefusals")
         + function_source("renderStats")
         + "\nconst assert = require('node:assert/strict');\n"
         "renderStats();\n"

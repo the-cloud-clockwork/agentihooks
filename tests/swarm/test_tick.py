@@ -636,7 +636,7 @@ class HiveAcks(FakeRuntime):
     def __init__(self, fail=()):
         super().__init__()
         self.ordered, self.collected, self.acked, self.failing, self.broken = [], [], set(), set(fail), set()
-        self.refused, self.collected_slugs = set(), set()
+        self.refused, self.collected_slugs, self.conflicted = set(), set(), set()
 
     def spawn(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER
@@ -658,6 +658,8 @@ class HiveAcks(FakeRuntime):
         self.collected_slugs.add(config.slug)
         if name in self.broken:
             raise ConnectionError("redis went away")
+        if name in self.conflicted:
+            raise SwarmError("hive launch acknowledgement does not match the live execution")
         if name in self.failing:
             raise SpawnError("hive launch failed: prompt", "refused", pane_id=f"pane-{name}")
         if name not in self.acked:
@@ -749,7 +751,7 @@ def test_every_refused_hive_order_in_one_pass_reports_its_failure(store):
     assert runtime.ordered == []
 
 
-def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(store, monkeypatch):
+def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(store, monkeypatch, capsys):
     from scripts.swarm import tick as tick_module
     from scripts.swarm.tick import LEASE_MS
     from scripts.swarm_v2.runtime import codex
@@ -768,6 +770,9 @@ def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(s
     assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
     assert ledger.rows["t1"]["claimed_by"] == first and store.claimant("sw", "t1") == first
     assert ("sw", "t1", first, LEASE_MS) in refreshed
+    assert f"{first} collect for t1 raised ConnectionError('redis went away'), waiting for the hive" in (
+        capsys.readouterr().err
+    )
     runtime.broken.clear()
     runtime.acked.add(first)
     tick("sw", store, ledger, runtime, now_ms=3_000)
@@ -776,6 +781,28 @@ def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(s
     assert [(args[0], args[1], args[3]) for args in admitted if args[2].name == first] == [(store, "sw", runtime)]
     assert [(args[3], args[5].task["lane"]) for args in started if args[5].record.name == first] == [(ledger, "eng")]
     assert runtime.collected_slugs == {"sw"}
+
+
+def test_a_swarm_error_during_collect_fails_the_launch_instead_of_waiting_forever(store):
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    runtime.conflicted.add(first)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS - 1)
+    assert any(action.startswith("spawn failed for t1, task t1 reopened:") for action in actions)
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    assert launches[first]["state"] == "failed"
+    assert "hive launch acknowledgement does not match the live execution" in launches[first]["error"]
+    assert first not in {agent.name for agent in store.agents("sw")}
+    runtime.conflicted.clear()
+    second = runtime.ordered[-1]
+    assert second != first and ledger.rows["t1"]["claimed_by"] == second
+    runtime.acked.add(second)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS + STARTUP_GRACE_MS)
+    assert [row["state"] for row in store.launches("sw") if row["agent"] == second] == ["started"]
+    assert ledger.rows["t1"]["claimed_by"] == second
 
 
 def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(store):
@@ -848,6 +875,7 @@ def _slow_launches(monkeypatch, runtime, seconds):
         return spawn(config, lane, name, task)
 
     runtime.spawn = slow
+    return clock
 
 
 def test_a_launch_that_spends_the_budget_leaves_the_next_task_for_the_next_pass(store, monkeypatch):
@@ -885,10 +913,61 @@ def test_time_spent_before_the_first_launch_never_holds_it_back(store, monkeypat
 
 def test_launches_inside_the_budget_keep_filling_the_lanes(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    _slow_launches(monkeypatch, runtime, 19.9)
+    _slow_launches(monkeypatch, runtime, 9.9)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
     assert not any("launch budget" in action for action in actions)
+
+
+def test_a_launch_the_mean_launch_cost_would_carry_past_the_budget_waits_a_pass(store, monkeypatch):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 7.5)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+    assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
+    assert ledger.rows["t3"]["state"] == "open"
+
+
+def test_launches_whose_mean_cost_fits_the_rest_of_the_budget_all_start(store, monkeypatch):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 6)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2", "t3"]
+    assert not any("launch budget" in action for action in actions)
+
+
+def test_a_launch_whose_mean_cost_lands_exactly_on_the_budget_waits_a_pass(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 10)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
+
+
+def test_a_launch_just_under_half_the_budget_lets_the_next_one_start(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 9.99)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+
+
+def test_pass_work_after_a_launch_counts_toward_the_mean_launch_cost(store, monkeypatch):
+    from scripts.swarm import dispatcher
+
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    clock = _slow_launches(monkeypatch, runtime, 6)
+    chain = dispatcher.chain_claimed
+
+    def slow_chain(*args):
+        clock[0] += 4
+        return chain(*args)
+
+    monkeypatch.setattr(dispatcher, "chain_claimed", slow_chain)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
 
 
 def test_a_slow_failed_launch_spends_the_budget_too(store, monkeypatch):

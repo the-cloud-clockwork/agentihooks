@@ -48,6 +48,7 @@
   "startup-stages.yml/measure": "standard",
   "swarm-image.yml/publish": "standard",
   "swarm-node-base.yml/copy": "standard",
+  "swarm-node-image.yml/hive": "standard",
   "swarm-node-image.yml/image": "standard",
   "swarm-node-smoke.yml/worker-image": "standard",
   "swarm-node-smoke.yml/worker-image-compare": "light",
