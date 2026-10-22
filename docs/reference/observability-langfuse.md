@@ -253,7 +253,7 @@ Each scan joins it with:
 | `telemetry stale` | generated progress unaccepted past the threshold while nothing is queued, even with the exporter process alive; or the exporter recorded more accepted observations than Langfuse holds past the threshold since its last acceptance |
 | `telemetry misattributed` | a trace tagged with the agent carries another life, seat, task, harness or resolved profile, or the session was accepted with no trace under the agent |
 | `trace reader unavailable` | the trace listing or any active read failed or ran out of its budget |
-| `trace coverage partial` | the historical backfill has not read every trace's observations yet |
+| `trace coverage partial` | the historical backfill has not read every listed trace's observations yet; see [Trace coverage](#trace-coverage) |
 | `wait history partial` | the wait history of an agent with a turn gap over the limit was not read inside the 15 second wait budget or the 55 second step deadline it shares with the trace reads; its turn gaps are not judged that scan |
 
 Threshold `AGENTIHOOKS_DOCTOR_ACTIVE_STALE_SECONDS` (60), grace
@@ -352,7 +352,8 @@ at most 20) newest first within 45 seconds per scan. Each trace's observations a
 cached in `<swarm home>/<slug>/doctor-traces/` until the trace's update time
 changes, so the backfill completes over successive scans. A trace whose own read
 fails is a coverage gap retried after every unread trace; the untraced session
-finding is skipped while the listing is incomplete.
+finding is skipped while the listing is incomplete. How coverage is counted is in
+[Trace coverage](#trace-coverage).
 
 `agentihooks doctor <slug> measure <finding>` runs every detector once and prints
 that finding's number. It refuses a finding id it never saw, a gone finding whose
@@ -365,6 +366,104 @@ failed and no finding of the class is current. A `failed-spawn/<task>` id counts
 the spawn journal over its window, so zero there is a real reading for a task
 on the watched ledger or the master; any other task is refused.
 To run one trace pass by hand, see [Read budget](#read-budget).
+
+### Trace coverage
+
+Coverage is judged over the traces the listing returned in that scan, the
+listed window. A swarm with more traces than the listing reaches (20 pages of
+100, or fewer when the 45 second historical budget ends first) can still reach
+full coverage: traces past where the listing stopped are counted on their own
+and never as unread.
+
+Each listed trace falls in one of these groups:
+
+| Group | Meaning | Counted as |
+|---|---|---|
+| covered | every observation page was read, from Langfuse or the cache | read |
+| capped | the read stopped at the observation page cap, 20 pages of 50 (1000 observations) | read in part, apart from unread |
+| failed | its own observation read failed | unread; retried after every unread trace |
+| unread | no settled cache entry for its current update time, and the budget ended before its read | unread |
+
+Traces past the listing are counted as `unlisted`: Langfuse `totalItems` from
+the last listing page read, less the unique trace ids listed. A listing that
+read every page has none.
+
+`trace coverage partial` is raised when a listed trace is failed or unread and
+no Langfuse read failed that scan; a failed listing or active read raises
+`trace reader unavailable` instead. Its number and title count the failed and
+unread traces in the listed window. It clears when every listed trace is covered
+or capped, whatever `unlisted` reads. Its evidence reads:
+
+```text
+observations read for 1975 of 2000 traces
+trace listing stopped at its page cap
+1430 traces past where the listing stopped not counted
+18 traces read up to the observation page cap
+tool error, task cost and turn gap findings cover only the read traces
+each Doctor scan reads more within its read budget
+```
+
+The second line appears whenever the listing stopped early, the third only when
+`unlisted` is above zero and the fourth only when a listed trace is capped. Up to
+50 `trace <id> unreadable: <failure line>` lines follow the cap lines for failed
+traces, as on the reader finding.
+
+A capped trace is cached as capped and not read again while its update time is
+unchanged. Tool error and turn gap findings on a capped or partly read trace add
+`observations read only up to where the read stopped` to their evidence, and a
+task with such a trace is left out of the task cost comparison. While the
+listing stops early, a task cost finding adds `comparison set truncated: trace
+listing incomplete` and the untraced session finding is not judged.
+
+#### Cache entries from older code
+
+Each cache entry in `<swarm home>/<slug>/doctor-traces/` carries a
+`deduplicated` flag: its observations were collected by id, so a page Langfuse
+returns twice adds nothing. An entry written before the flag existed is upgraded
+in place on its next scan, with no Langfuse read, when no two of its
+observations are identical; such an entry equals what the id based read gives.
+An entry holding a repeated observation, or one with neither whole, capped nor
+failed state, is read again within the budget.
+
+The upgrade fixed the cause of the finding on rig-grade-swarm (issue #4663):
+the flag requirement made 1974 of 2000 cached traces read as unread and only
+about 30 were read again per ten minute scan, while the listing stopped at 2000
+of 3430 traces, so the old judgement could never reach full coverage. Measured
+with `agentihooks doctor rig-grade-swarm measure
+trace-coverage-partial/rig-grade-swarm` it showed 1954 traces unread before the change; on a
+copy of the live cache the in place upgrade covered 1975 of 2000 traces in the
+first scan.
+
+#### Reading coverage
+
+```bash
+agentihooks doctor <slug> measure trace-coverage-partial/<slug>
+python -m scripts.doctor.traces_read <slug>
+```
+
+The first prints the finding's number, the unread traces in the listed window.
+The second runs one pass and prints `measures.coverage.historical` with these
+fields:
+
+| Field | Meaning |
+|---|---|
+| `listed` | `true` when the listing read every page |
+| `unlisted` | traces past where the listing stopped |
+| `traces` | unique traces listed |
+| `covered` | traces with every observation read |
+| `capped` | traces read up to the observation page cap |
+| `complete` | no listing failure and `covered` plus `capped` equals `traces` |
+| `unreadable` | one line per listed trace whose own read failed |
+
+Both read with the caller's `LANGFUSE_*` keys; run them where those keys open
+the swarm's project.
+
+| Symptom | Read |
+|---|---|
+| the number falls each scan but stays above zero | the backfill is still reading; each scan reads more within the 45 second budget |
+| the number holds after several scans | read `unreadable`: the same traces fail each scan, or Langfuse answers slower than the request timeout |
+| `unlisted` is large and `complete` is `true` | expected: the swarm has more traces than the listing reaches; the finding stays clear |
+| `capped` rises | sessions with over 1000 observations; their tool error and turn gap findings name the partial read |
 
 ### The Langfuse connector
 

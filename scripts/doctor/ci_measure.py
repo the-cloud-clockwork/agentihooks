@@ -58,6 +58,18 @@ def _scope(labels):
     return ", ".join(labels) or "unassigned"
 
 
+def _labels(job: dict) -> tuple:
+    return tuple(sorted(dict.fromkeys(job["labels"])))
+
+
+def _pools(runs: list[dict]) -> list[str]:
+    return sorted(dict.fromkeys(_scope(_labels(job)) for run in runs for job in run["jobs"]))
+
+
+def _named(runs: list[dict]) -> str:
+    return "; ".join(_pools(runs)) or "none"
+
+
 def waits(run: dict, kind: str, now_ms: int) -> dict[tuple, int]:
     longest = {}
     for job in run["jobs"]:
@@ -65,7 +77,7 @@ def waits(run: dict, kind: str, now_ms: int) -> dict[tuple, int]:
         if started != (kind == RUNNER_WAIT):
             continue
         end = job["started_at"] if started else job.get("completed_at")
-        labels = tuple(sorted(set(job["labels"])))
+        labels = _labels(job)
         elapsed = (iso_ms(end) if end else now_ms) - iso_ms(job["created_at"])
         longest[labels] = max(longest.get(labels, 0), elapsed)
     return longest
@@ -94,7 +106,10 @@ def value(goal: Target, run: dict, now_ms: int) -> tuple[int, str | None]:
     if goal.labels is None and found:
         return max(found.values()) // 1000, None
     if goal.labels not in found:
-        raise SwarmError(f"run {goal.run} attempt {goal.attempt} has no job on runner labels {json.dumps(goal.labels)}")
+        raise SwarmError(
+            f"run {goal.run} attempt {goal.attempt} has no job on runner labels {json.dumps(goal.labels)}; "
+            f"known label sets: {_named([run])}"
+        )
     return found[goal.labels] // 1000, _scope(goal.labels)
 
 
@@ -113,6 +128,11 @@ def line(kind: str, scope: str, values: list[int], window: tuple[int, int]) -> s
     return f"{text}, median {median_low(values) // 1000} seconds, worst {max(values) // 1000} seconds"
 
 
+def _known(scope: str, runs: list[dict]) -> None:
+    if scope not in _pools(runs):
+        raise SwarmError(f"runner labels {scope} match no job in the window; known label sets: {_named(runs)}")
+
+
 def measure(finding: str, goal: Target, window: tuple[int, int], now_ms: int) -> Iterator[str]:
     scope = goal.scope
     if goal.run is not None:
@@ -125,6 +145,8 @@ def measure(finding: str, goal: Target, window: tuple[int, int], now_ms: int) ->
     snapshot = ci_speed_read.read(*window, active=False, budget=WINDOW_BUDGET)
     if not snapshot["complete"]:
         raise SwarmError(snapshot["error"])
+    if goal.run is None and goal.kind != WALL and scope is not None:
+        _known(scope, snapshot["runs"])
     found = samples(goal.kind, snapshot["runs"], now_ms)
     for name in [scope] if scope is not None else (sorted(found) or ["all"]):
         yield line(goal.kind, name, found.get(name, []), window)
