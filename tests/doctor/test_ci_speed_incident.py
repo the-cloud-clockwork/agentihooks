@@ -577,19 +577,18 @@ def wall_run(identity, event, status, gate_completed=None):
 @pytest.mark.parametrize(
     "event,status,gate_completed,expected",
     [
-        ("pull_request", "in_progress", None, True),
+        ("pull_request", "in_progress", None, False),
         ("pull_request", "in_progress", "2026-10-19T16:20:00Z", False),
-        ("merge_group", "completed", None, False),
+        ("merge_group", "completed", None, True),
     ],
 )
-def test_a_wall_crossing_is_open_only_while_its_gate_and_run_run(event, status, gate_completed, expected):
+def test_a_wall_crossing_is_settled_and_exists_only_after_its_run_finishes(event, status, gate_completed, expected):
     since, now = iso_ms("2026-10-19T16:00:00Z"), iso_ms("2026-10-19T16:30:00Z")
     groups = ci_speed.group({}, [wall_run(5, event, status, gate_completed)], since, now, now - 600000, [])
-    if status != "completed":
-        assert groups == {}
-    else:
+    assert bool(groups) is expected
+    if expected:
         [member] = groups[f"ci-tier-wall-time/{event}"]["members"].values()
-        assert member["open"] is expected
+        assert member["open"] is False
 
 
 def test_a_window_start_is_dropped_from_a_dashed_label_set():
