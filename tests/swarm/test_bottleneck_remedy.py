@@ -339,7 +339,7 @@ def test_workstation_only_move_requires_room_for_the_lane(store, home, shipped, 
         (AgentRecord("worker", "eng", "task"), 1, False),
         (AgentRecord("worker", "ci", "task"), 2, False),
         (AgentRecord("worker", "eng", "task", state="finished"), 1, False),
-        (AgentRecord("worker", "eng", "task", hive="remote"), 1, False),
+        (AgentRecord("worker", "eng", "task", hive="remote", seat=f"eng-1@{SLUG}"), 1, False),
     ],
 )
 def test_workstation_only_move_counts_existing_local_lane_workers_once(
@@ -357,6 +357,21 @@ def test_workstation_only_move_counts_existing_local_lane_workers_once(
     text = bottleneck_remedy.MOVED.format(lane="eng", source="claude", target="codex", targeted=FAILED)
     assert run(store) == [text if moves else proposed(FAILED, why)]
     assert lane_of(store, "eng") == (("codex", "auto") if moves else ("claude", "opus"))
+
+
+@pytest.mark.parametrize("task", ["None", "XXXX"])
+def test_workstation_only_move_counts_other_lane_workers_for_any_task_name(store, home, shipped, monkeypatch, task):
+    from scripts.swarm import local_slots
+
+    hive_only(store, monkeypatch, excluded="plan")
+    store.update(SLUG, local_max_agents=2)
+    store.put_agent(SLUG, AgentRecord("worker", "ci", task))
+    monkeypatch.setattr(local_slots.lease, "now_ms", lambda store: NOW)
+    pin(store, "eng", "claude")
+    detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
+    why = bottleneck_remedy.UNPLACEABLE.format(target="codex", lane="eng")
+    assert run(store) == [proposed(FAILED, why)]
+    assert lane_of(store, "eng") == ("claude", "opus")
 
 
 @pytest.mark.parametrize("source_room", [0, 1, 8])
