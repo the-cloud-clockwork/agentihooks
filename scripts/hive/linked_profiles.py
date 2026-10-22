@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -43,13 +44,18 @@ def install(environ: Mapping[str, str]) -> None:
         name = profile["name"]
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
             raise ValueError("linked profile name must be a single directory name")
-        repo = Path(environ["HIVE_REPO_ROOT"]) / ".linked-profiles" / name
+        revision = hashlib.sha256(json.dumps([profile["url"], profile["ref"]]).encode()).hexdigest()
+        repo = Path(environ["HIVE_REPO_ROOT"]) / ".linked-profiles" / name / revision
         path = (repo / profile["path"]).resolve()
         if not path.is_relative_to(repo.resolve()):
             raise ValueError("linked profile path must stay inside its repository")
         if not (repo / ".git").is_dir():
             repo.parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(["git", "clone", "--branch", profile["ref"], "--", profile["url"], str(repo)], check=True)
+        else:
+            subprocess.run(
+                ["git", "-C", str(repo), "pull", "--ff-only", "--", profile["url"], profile["ref"]], check=True
+            )
         if not path.resolve().is_relative_to(repo.resolve()):
             raise ValueError("linked profile symlink must stay inside its repository")
         subprocess.run(

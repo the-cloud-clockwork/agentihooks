@@ -334,7 +334,7 @@ def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path, monkeyp
     worker.mkdir()
     result, commands, home, _ = startup(worker)
     assert result.returncode == 0, result.stderr
-    cloned = worker / "repos/.linked-profiles/memory/profiles/memory"
+    cloned = next((worker / "repos/.linked-profiles/memory").glob("*/profiles/memory"))
     assert (cloned / "profile.yml").read_text() == "name: memory\n"
     registration = f"link-profile link {cloned} --name memory --no-append --no-init"
     assert commands.splitlines().index(registration) < commands.splitlines().index("init")

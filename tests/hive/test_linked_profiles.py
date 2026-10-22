@@ -60,7 +60,7 @@ def test_profile_install_clones_and_registers_the_alias_before_init(tmp_path, mo
 
     monkeypatch.setattr(linked_profiles.subprocess, "run", execute)
     linked_profiles.install({"HIVE_REPO_ROOT": str(root), "HIVE_LINKED_PROFILES": json.dumps([spec])})
-    profile = root / ".linked-profiles" / "recall" / "profiles" / "memory"
+    profile = next((root / ".linked-profiles" / "recall").glob("*/profiles/memory"))
     assert (profile / "profile.yml").read_text() == "name: memory\n"
     assert commands[-1] == [
         "agentihooks",
@@ -72,10 +72,11 @@ def test_profile_install_clones_and_registers_the_alias_before_init(tmp_path, mo
         "--no-append",
         "--no-init",
     ]
-    assert commands[0] == ["git", "clone", "--branch", "dev", "--", str(repo), str(root / ".linked-profiles/recall")]
+    assert commands[0] == ["git", "clone", "--branch", "dev", "--", str(repo), str(profile.parents[1])]
     commands.clear()
     linked_profiles.install({"HIVE_REPO_ROOT": str(root), "HIVE_LINKED_PROFILES": json.dumps([spec])})
-    assert len(commands) == 1
+    assert commands[0] == ["git", "-C", str(profile.parents[1]), "pull", "--ff-only", "--", str(repo), "dev"]
+    assert len(commands) == 2
 
 
 def test_no_linked_profiles_publish_an_empty_list_and_need_no_repository_root(tmp_path):
@@ -126,9 +127,48 @@ def test_a_cloned_profile_symlink_cannot_escape_its_repository(tmp_path):
 
     _, repo = source(tmp_path)
     git(repo, "rm", "profiles/memory/profile.yml")
+    (repo / "profiles").mkdir(exist_ok=True)
     (repo / "profiles/memory").symlink_to(tmp_path, target_is_directory=True)
     git(repo, "add", "profiles/memory")
     git(repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "symlink")
     spec = {"name": "recall", "url": str(repo), "ref": "dev", "path": "profiles/memory"}
     with pytest.raises(ValueError, match="symlink"):
         linked_profiles.install({"HIVE_REPO_ROOT": str(tmp_path), "HIVE_LINKED_PROFILES": json.dumps([spec])})
+
+
+@pytest.mark.parametrize("change", ["advance", "ref", "url"])
+def test_install_honors_updated_sources_on_a_persistent_hive(tmp_path, monkeypatch, change):
+    from scripts.hive import linked_profiles
+
+    _, repo = source(tmp_path)
+    spec = {"name": "recall", "url": str(repo), "ref": "dev", "path": "profiles/memory"}
+    commands = []
+    run = subprocess.run
+
+    def execute(argv, **kwargs):
+        if argv[0] == "agentihooks":
+            commands.append(argv)
+            return subprocess.CompletedProcess(argv, 0)
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(linked_profiles.subprocess, "run", execute)
+    env = {"HIVE_REPO_ROOT": str(tmp_path / "hive"), "HIVE_LINKED_PROFILES": json.dumps([spec])}
+    linked_profiles.install(env)
+    previous = commands[-1][3]
+    if change == "ref":
+        git(repo, "switch", "-c", "other")
+        spec["ref"] = "other"
+    if change == "url":
+        other = tmp_path / "other-origin"
+        run(["git", "clone", str(repo), str(other)], check=True, capture_output=True)
+        repo = other
+        spec["url"] = str(other)
+    (repo / "profiles/memory/profile.yml").write_text("name: changed\n")
+    git(repo, "add", "profiles/memory/profile.yml")
+    git(repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "change")
+    env["HIVE_LINKED_PROFILES"] = json.dumps([spec])
+    linked_profiles.install(env)
+    from pathlib import Path
+
+    assert (Path(commands[-1][3]) / "profile.yml").read_text() == "name: changed\n"
+    assert (commands[-1][3] == previous) is (change == "advance")
