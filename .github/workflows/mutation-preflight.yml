@@ -71,7 +71,7 @@ jobs:
 
       - name: Install dependencies for the suite speed contracts
         if: steps.suite.outputs.changed == 'true'
-        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies for the suite speed contracts" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Run the suite speed contracts
         if: steps.suite.outputs.changed == 'true'
@@ -113,7 +113,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true' && steps.suite.outputs.changed != 'true'
-        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Size mutation shards from stored timings
         id: plan
@@ -157,7 +157,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Select the tests the branch touches
         id: touched
@@ -227,7 +227,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         uses: actions/download-artifact@v4
@@ -336,7 +336,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Restore the tests that killed this branch's earlier mutants
         uses: actions/cache/restore@v4
@@ -402,7 +402,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         uses: actions/download-artifact@v4

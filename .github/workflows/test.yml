@@ -723,7 +723,7 @@ jobs:
               echo "reused=0" >> "$GITHUB_OUTPUT"
               return 0
             fi
-            "$PYTHON_PATH" -m pip install --quiet PyYAML==6.0.3
+            bash .github/scripts/pypi-retry.sh "Install the test planner dependencies" -- uv pip install --python "$PYTHON_PATH" --quiet PyYAML==6.0.3
             before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
             cd "$RUNNER_TEMP/planner"
             "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
@@ -2628,7 +2628,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.reuse.outputs.reused != 'true'
-        run: uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
 
       - name: Size mutation shards from stored timings
         id: plan
@@ -2711,7 +2711,7 @@ jobs:
 
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
@@ -2810,7 +2810,7 @@ jobs:
 
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
