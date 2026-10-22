@@ -389,7 +389,7 @@ Shard pickup is a shard job's `started_at` minus its `created_at`, read for ever
 
 No shard in the after window waited as long as the 799 second case. A push run uses the workflow file on its own branch, so a branch cut before the merge still queued on the old lanes until it took `dev`. The script that produced these rows pages the workflow's push runs in two hour slices, then reads each run's jobs with the shard command above.
 
-### Troubleshooting
+### Mutation shard troubleshooting
 
 | Symptom | Check |
 |---|---|
@@ -399,7 +399,7 @@ No shard in the after window waited as long as the 799 second case. A push run u
 | Gate Protected refuses a pull request that edits a mutation leg | The branch lane grader accepts a trusted stats or shard leg only with its own run and matrix index as the group, an unchanged runner label and no queue policy |
 | The lanes contract test fails after a workflow edit | A leg's group no longer names its own run id, or the leg left `anton-oss-batch`; restore the per run group |
 
-`tests/test_ci_hosted_lanes.py` holds the contract: `test_mutation_legs_of_two_branches_never_share_a_concurrency_lane_and_stay_on_the_batch_pool` resolves both legs for two branches and asserts two distinct groups, none of them a lane, and the `anton-oss-batch` label; `test_a_branch_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait_on` asserts the per run group for ten run ids and three indexes. The red run [39123433688](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39123433688) failed with both branches on `mutation-lane-a`; the green Tests run [39136265932](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39136265932) passed after the branch lane grader accepted per run groups in [#4491](https://github.com/the-cloud-clockwork/agentihooks/pull/4491).
+`tests/test_ci_hosted_lanes.py` holds the contract: `test_mutation_legs_of_two_branches_never_share_a_concurrency_lane_and_stay_on_the_batch_pool` resolves both legs for two branches and asserts two distinct groups, none of them a lane, and the `anton-oss-batch` label; `test_a_branch_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait_on` asserts the per run group for ten run ids and three indexes. In the red Tests run [39123433688](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39123433688), the `unit-selected (3.11, 2)` job failed the new contract test with both branches on `mutation-lane-a`; the green Tests run [39136265932](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39136265932) passed after the branch lane grader accepted per run groups in [#4491](https://github.com/the-cloud-clockwork/agentihooks/pull/4491).
 
 ## Focused proof CPU worker limits
 
