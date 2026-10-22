@@ -27,7 +27,7 @@ LOOP_STOP_S = 5
 
 
 def queue_stream(name: str) -> str:
-    suffix = name if re.fullmatch("[A-Za-z0-9_-]{1,64}", name) else hashlib.sha256(name.encode()).hexdigest()
+    suffix = name if re.fullmatch("[A-Za-z0-9_-]{1,64}", name) else "h" + hashlib.sha256(name.encode()).hexdigest()
     return f"AGENTIHOOKS_QUEUE_{suffix}"
 
 
