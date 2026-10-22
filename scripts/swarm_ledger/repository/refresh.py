@@ -1,4 +1,5 @@
 import json
+from sqlite3 import Connection
 
 from .rows import TABLES, children, encode
 
@@ -12,20 +13,25 @@ CHANGES = (
     "SELECT generation, paths FROM row_changes WHERE slug=? AND generation>? AND generation<=? ORDER BY generation"
 )
 ROOT = "[]"
+PATHS_KEPT = 5000
 
 
-def record(connection, slug: str, generation: int, paths, kept: int) -> None:
-    connection.execute(RECORD, (slug, generation, encode(sorted(paths))))
+def record(connection: Connection, slug: str, generation: int, paths: list, kept: int) -> None:
+    stored = encode(sorted(paths)) if len(paths) <= PATHS_KEPT else "null"
+    connection.execute(RECORD, (slug, generation, stored))
     connection.execute(PRUNE, (slug, generation - kept))
 
 
-def changed_paths(connection, slug: str, since: int, generation: int, kept: int) -> set | None:
+def changed_paths(connection: Connection, slug: str, since: int, generation: int, kept: int) -> set | None:
     if generation - since > kept:
         return None
     rows = connection.execute(CHANGES, (slug, since, generation)).fetchall()
     if [row[0] for row in rows] != list(range(since + 1, generation + 1)):
         return None
-    return {path for _, paths in rows for path in json.loads(paths)}
+    recorded = [json.loads(paths) for _, paths in rows]
+    if None in recorded:
+        return None
+    return {path for paths in recorded for path in paths}
 
 
 def touched(paths: set) -> set:
@@ -36,7 +42,7 @@ def touched(paths: set) -> set:
     return above
 
 
-def child_rows(connection, slug: str, parent: str) -> list:
+def child_rows(connection: Connection, slug: str, parent: str) -> list:
     rows = []
     for table in TABLES:
         rows.extend(
@@ -47,7 +53,7 @@ def child_rows(connection, slug: str, parent: str) -> list:
     return sorted(rows, key=lambda row: row[2])
 
 
-def build(connection, slug: str, path: str, kind: str, old: object, dirty: set) -> object:
+def build(connection: Connection, slug: str, path: str, kind: str, old: object, dirty: set) -> object:
     """The container at path as stored now, reusing each child of its old value that no change reached."""
     known = {encode(parts): child for child, parts, *_ in children(old, json.loads(path), None)}
     items = []
@@ -62,7 +68,7 @@ def build(connection, slug: str, path: str, kind: str, old: object, dirty: set) 
     return [item for _, item in items] if kind == "array" else dict(items)
 
 
-def refreshed(connection, slug: str, state: dict, paths: set) -> dict | None:
+def refreshed(connection: Connection, slug: str, state: dict, paths: set) -> dict | None:
     try:
         return build(connection, slug, ROOT, "object", state, touched(paths))
     except KeyError:

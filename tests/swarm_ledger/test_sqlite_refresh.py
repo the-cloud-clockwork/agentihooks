@@ -89,3 +89,16 @@ def test_change_records_keep_only_recent_generations(tmp_path, monkeypatch):
     with sqlite3.connect(repo.path) as connection:
         kept = [row[0] for row in connection.execute("SELECT generation FROM row_changes ORDER BY generation")]
     assert kept == [generation - 1, generation]
+
+
+def test_a_write_past_the_recorded_path_limit_falls_back_to_the_whole_rebuild(tmp_path, monkeypatch):
+    monkeypatch.setattr(sqlite.refresh, "PATHS_KEPT", 1)
+    reader, writer = store(tmp_path), store(tmp_path)
+    reader.create("ledger", CONTENT)
+    reader.current("ledger")
+    writer.apply_ops("ledger", ops=[chat(1)])
+    rebuilds = []
+    original = sqlite.read_rows
+    monkeypatch.setattr(sqlite, "read_rows", lambda *a: rebuilds.append(a) or original(*a))
+    assert reader.current("ledger").text == whole(tmp_path).text
+    assert len(rebuilds) == 1
