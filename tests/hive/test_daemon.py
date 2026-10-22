@@ -82,9 +82,13 @@ def test_beat_publishes_the_master_login_account(redis, monkeypatch, account):
 
 @pytest.mark.parametrize(("member", "indexed", "ttl"), [("machine", set(), 10), ("other", {"machine"}, 45)])
 def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis, monkeypatch, member, indexed, ttl):
+    import time
+
     from scripts.routing.reservation import LaunchSlots
     from scripts.swarm.keyspace import ROOT
 
+    now = time.time()
+    monkeypatch.setattr(time, "time", lambda: now)
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", member)
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
