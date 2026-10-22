@@ -122,6 +122,28 @@ def test_block_on_a_hive_reads_the_local_checkout_the_launch_named(hive_worktree
     assert row["repository_branches"] == {str(primary): BRANCH}
 
 
+def test_block_on_a_hive_reads_the_launch_checkout_for_a_repository_missing_here(hive_worktree, monkeypatch, tmp_path):
+    ledger, origin, primary, top = hive_worktree
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    ledger.rows["t1"]["repositories"] = [str(tmp_path / "workstation" / "antoncore")]
+    _git(top, "commit", "--allow-empty", "-m", "Task work")
+    _git(top, "push", "-u", "origin", BRANCH)
+    assert block() == 0
+    row = ledger.rows["t1"]
+    assert (row["state"], row["branch"], row["branch_repo"]) == ("blocked", BRANCH, str(origin))
+    assert row["repository_branches"] == {str(primary): BRANCH}
+
+
+def test_block_on_a_hive_without_any_task_repository_here_blocks_without_a_branch(hive_worktree, monkeypatch, tmp_path):
+    ledger = hive_worktree[0]
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REPO")
+    ledger.rows["t1"]["repositories"] = [str(tmp_path / "workstation" / "antoncore")]
+    assert block() == 0
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert "branch" not in ledger.rows["t1"]
+
+
 @pytest.mark.parametrize("hive", [("sw", True, True), ("other", True, False), ("sw", False, False)])
 @pytest.mark.parametrize(
     "command",

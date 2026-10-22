@@ -76,6 +76,8 @@
   "test.yml/test-count": "standard",
   "test.yml/test-summary": "light",
   "test.yml/unit": "standard",
+  "test.yml/unit-lost": "light",
+  "test.yml/unit-rerun": "standard",
   "test.yml/unit-selected": "standard",
   "worker-resources.yml/measure": "batch",
   "writer-lock.yml/inputs": "light",

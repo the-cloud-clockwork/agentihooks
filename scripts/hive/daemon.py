@@ -69,12 +69,14 @@ def beat(redis: "Redis", local_id: str) -> None:
         consumer.poll()
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
-    from scripts.hive import join_report
+    from scripts.hive import headroom, join_report
 
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+    headroom.publish(redis, local_id, int(time.time() * 1000))
     publish_config(redis, local_id, report["repos"])
+    close_dead_tabs(set(hosted["names"]))
 
 
 def adopt_caps(redis: "Redis", report: dict) -> None:
@@ -262,7 +264,11 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
     slots, quota = [], {}
     for account in sorted(claude):
         at, result = observed.get(account, (None, None))
-        cap = balancer.account_cap(result, now) if result and session_bands.fresh(at, now) else None
+        cap = (
+            balancer.account_cap(result, now, ceiling=session_bands.hive_ceiling(environ))
+            if result and session_bands.fresh(at, now)
+            else None
+        )
         kind = "interactive" if account == account_sessions.UNROUTED else "subscription"
         slots.append({"harness": "claude", "account": account, "kind": kind, "cap": cap or 0})
         quota[f"claude:{account}"] = (
@@ -440,3 +446,15 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
             "pane": asdict(herdr.observe(agent)),
         }
     return report
+
+
+def close_dead_tabs(live: set[str]) -> list[str]:
+    from scripts import herdr_gc, herdr_host
+
+    environ = dict(os.environ)
+    if not herdr_host.binary() or not herdr_host.server_running(environ):
+        return []
+    try:
+        return herdr_gc.close_dead_tabs(environ, int(time.time() * 1000), herdr_gc.Herdr(environ), live)
+    except herdr_gc.READ_ERRORS:
+        return []

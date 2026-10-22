@@ -8,14 +8,25 @@ from datetime import datetime, timezone
 from scripts import agent_choice
 from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
-from scripts.swarm import affinity, capacity, effort_range, launch_check, master_start, model_pick
+from scripts.swarm import (
+    affinity,
+    capacity,
+    effort_range,
+    launch_check,
+    master_start,
+    model_pick,
+    seat_spawn,
+    take_master,
+)
 from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_source
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import placed_record, primed
+from scripts.swarm_v2 import master_fill
+from scripts.swarm_v2 import masters as master_seats
 
-LAST, NEW = "last", "new"
+LAST, NEW, REPLACE = "last", "new", "replace"
 ANSWERS = {"1": LAST, LAST: LAST, "2": NEW, NEW: NEW}
 QUESTION = (
     "  1) bring back the last master with its own conversation\n"
@@ -186,8 +197,48 @@ def _new(store, slug, runtime, at):
     return Launched(name, record.pane_id, record.seat, NEW)
 
 
+def _front_doors(store, slug, live):
+    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.name in live]
+
+
+def _free_seat(store, slug, live):
+    taken = master_fill.taken_seats(store, slug, live)
+    return next(
+        index for index in range(2, len(taken) + 3) if seat_address(slug, master_seats.seat(index)) not in taken
+    )
+
+
+def _beside(store, slug, runtime, at, live):
+    """A new master next to a live front door takes the lowest free master seat, so its seat and title are its own."""
+    config = store.ensure_code(slug)
+    index = _free_seat(store, slug, live)
+    seat_name = master_seats.seat(index)
+    seats = max(master_seats.MasterSeats(store.redis).count(slug), index)
+
+    def prepare(record):
+        task = {"id": seat_name, "handoff": store.handoff(slug, seat_name), "masters": seats}
+        return _filled(primed(store, slug, record.seat, task), config)
+
+    try:
+        record = master_fill.place(slug, config, store, runtime, seat_name, at, prepare)
+    except seat_spawn.SeatFailed as failed:
+        raise SwarmError(f"the new master could not start: {failed.error}") from failed.error
+    return Launched(record.name, record.pane_id, record.seat, NEW)
+
+
+def _fresh(store, slug, runtime, at, live, replace_live=False):
+    front = _front_doors(store, slug, live)
+    if front and not replace_live:
+        return _beside(store, slug, runtime, at, live)
+    take_master.retired(store, slug, runtime, front)
+    return _new(store, slug, runtime, at)
+
+
 def up(store, slug, runtime, at, choice, ask, say):
-    """Launch the chosen master; ask last or new when no choice is given. Never refuses because a master is live."""
+    """Launch the chosen master; ask last or new when no choice is given. Never refuses because a master is live:
+    a new master takes its own seat beside a live front door, and a replacing one retires the front door first."""
+    replace_live = choice == REPLACE
+    choice = NEW if replace_live else choice
     live = runtime.live_names()
     previous = _previous(store, slug)
     asked = not choice
@@ -196,8 +247,9 @@ def up(store, slug, runtime, at, choice, ask, say):
         say(QUESTION)
         choice = _choose(ask)
     if choice == NEW:
-        return _new(store, slug, runtime, at)
-    why = _why(previous, store.config(slug), live)
+        return _fresh(store, slug, runtime, at, live, replace_live)
+    front = _front_doors(store, slug, live)
+    why = _why(previous, store.config(slug), live) or (front and f"the front door master {front[0].name} is live")
     if not why:
         try:
             return _resume(store, slug, runtime, at, previous)
@@ -208,4 +260,4 @@ def up(store, slug, runtime, at, choice, ask, say):
     say(f"The last master cannot be resumed: {why}")
     if _answer(ask, OFFER) not in ("y", "yes"):
         raise SwarmError("no master started")
-    return _new(store, slug, runtime, at)
+    return _fresh(store, slug, runtime, at, live)

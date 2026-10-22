@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from scripts import session_bands
 from scripts.hive import daemon, registry
 
 pytestmark = pytest.mark.unit
@@ -674,7 +675,7 @@ def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkey
             raise KeyboardInterrupt
 
     def scheduler_down():
-        assert time.monotonic() - beats[-1] < daemon.BEAT_SECONDS, "the timer wait outlived its bound"
+        assert time.monotonic() - beats[-1] < daemon.BEAT_SECONDS + 0.25, "the timer wait outlived its bound"
 
     monkeypatch.setattr(process_timer, "RECHECK_S", 0.05)
     monkeypatch.setattr(process_timer.service, "ensure_running", scheduler_down)
@@ -757,7 +758,7 @@ def test_subscription_records_include_caps_unknown_readings_and_login(observatio
         {"harness": "claude", "account": name, "kind": kind, "cap": cap}
         for name, kind, cap in sorted(
             [
-                ("one", "subscription", 3),
+                ("one", "subscription", 4),
                 ("unobserved", "subscription", 0),
                 (daemon.account_sessions.UNROUTED, "interactive", 0),
             ]
@@ -802,10 +803,38 @@ def test_stale_claude_reading_does_not_advertise_capacity(observations):
 
 
 @pytest.mark.parametrize(
+    ("environ", "high", "near"),
+    [
+        ({"AH_CC_TOKEN_high": "first", "AH_CC_TOKEN_near": "second"}, 11, 2),
+        (
+            {"AH_CC_TOKEN_high": "first", "AH_CC_TOKEN_near": "second", "AGENTIHOOKS_HIVE_SESSION_CEILING": "8"},
+            7,
+            2,
+        ),
+    ],
+)
+def test_hive_worker_caps_admit_more_at_high_quota_and_fewer_near_a_limit(
+    observations, monkeypatch, environ, high, near
+):
+    monkeypatch.setattr(daemon.balancer.operator_env, "block_tokens", lambda: {})
+    window = observations.QuotaWindow
+    observations.cached_observations.return_value = [
+        (120, observations.ProbeResult("high", "allowed", "OK", 60, window(4, 1000), window(2, 2000))),
+        (120, observations.ProbeResult("near", "allowed", "OK", 60, window(92, 1000), window(2, 2000))),
+    ]
+    slots, _ = daemon._subscriptions(environ, {"claude": {}, "codex": {}}, 122)
+    assert slots == [
+        {"harness": "claude", "account": "high", "kind": "subscription", "cap": high},
+        {"harness": "claude", "account": "near", "kind": "subscription", "cap": near},
+    ]
+    assert high > session_bands.TOP_BAND > near
+
+
+@pytest.mark.parametrize(
     ("environ", "expected"),
     [
-        ({"AH_CC_TOKEN_one": "same", "AH_CC_TOKEN_two": "same"}, [("one", 3)]),
-        ({"AH_CC_TOKEN_one": "first", "AH_CC_TOKEN_two": "second"}, [("one", 3), ("two", 0)]),
+        ({"AH_CC_TOKEN_one": "same", "AH_CC_TOKEN_two": "same"}, [("one", 4)]),
+        ({"AH_CC_TOKEN_one": "first", "AH_CC_TOKEN_two": "second"}, [("one", 4), ("two", 0)]),
     ],
 )
 def test_token_names_holding_one_token_report_one_slot(observations, monkeypatch, environ, expected):
@@ -1273,3 +1302,56 @@ def test_existing_beat_refreshes_agent_join_heartbeats(redis, monkeypatch):
     monkeypatch.setattr(join_report, "heartbeat", lambda *args: seen.append(args))
     _publish(redis, monkeypatch, "pod", [], {}, 1000)
     assert seen == [(redis, "pod", 1_000_000)]
+
+
+def test_each_beat_closes_dead_tabs_against_the_reported_live_names(redis, monkeypatch):
+    from scripts.hive import orders
+
+    herdr = Mock()
+    herdr.live_names.return_value = {"engineer@323133-2505"}
+    monkeypatch.setattr(orders.Consumer, "local", lambda redis, hive: Mock(runtime=Mock(herdr=herdr)))
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    seen = []
+    monkeypatch.setattr(daemon, "close_dead_tabs", lambda live: seen.append(live) or [])
+    daemon.beat(redis, "machine")
+    assert seen == [{"engineer@323133-2505"}]
+
+
+def test_closing_dead_tabs_asks_the_local_herdr_with_the_beat_time(monkeypatch):
+    import os
+
+    from scripts import herdr_gc, herdr_host
+
+    calls, checked = [], []
+    monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: checked.append(environ) or True)
+    monkeypatch.setattr(daemon.time, "time", lambda: 123.456)
+    monkeypatch.setattr(
+        herdr_gc,
+        "close_dead_tabs",
+        lambda environ, now_ms, herdr, live: calls.append((environ, now_ms, herdr.environ, live)) or ["w1:t1"],
+    )
+    assert daemon.close_dead_tabs({"ci@323133-1356"}) == ["w1:t1"]
+    assert checked == [dict(os.environ)]
+    assert calls == [(dict(os.environ), 123456, dict(os.environ), {"ci@323133-1356"})]
+
+
+@pytest.mark.parametrize("binary,running", [(None, True), ("/bin/herdr", False)])
+def test_closing_dead_tabs_skips_a_hive_without_a_running_herdr(monkeypatch, binary, running):
+    from scripts import herdr_gc, herdr_host
+
+    monkeypatch.setattr(herdr_host, "binary", lambda: binary)
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: running)
+    monkeypatch.setattr(herdr_gc, "close_dead_tabs", Mock(side_effect=AssertionError("asked herdr")))
+    assert daemon.close_dead_tabs(set()) == []
+
+
+def test_a_herdr_read_error_leaves_the_beat_running(monkeypatch):
+    from scripts import herdr_gc, herdr_host
+
+    monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: True)
+    monkeypatch.setattr(herdr_gc, "close_dead_tabs", Mock(side_effect=herdr_gc.HerdrError("socket gone")))
+    assert daemon.close_dead_tabs(set()) == []

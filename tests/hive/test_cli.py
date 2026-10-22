@@ -395,9 +395,10 @@ def test_help_names_every_command_and_option(monkeypatch, capsys):
     for text in (
         "Save an SSH machine in herdr and deliver its member credential to it",
         "Delete a member's ledger credential and Redis user",
+        "Drain a hive, then delete it from Redis, herdr, known hosts, OpenBao and antoncore",
         "Write a new controller service credential to a private file, retiring the previous one",
         "Run the hive refresh endpoint",
-        "Set name, ui, ephemeral, excluded, prefer, max-agents as key=value",
+        "Set name, ui, ephemeral, draining, excluded, prefer, max-agents as key=value",
         "Print a hive's record as JSON",
         "One line per hive with its liveness",
     ):

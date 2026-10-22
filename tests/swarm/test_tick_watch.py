@@ -420,6 +420,27 @@ def test_respawn_master_leaves_a_swarm_another_hive_ticks(store, monkeypatch):
     assert runtime.masters == []
 
 
+def test_respawn_master_spawns_nothing_for_a_swarm_stopped_while_it_took_the_tick_lock(store, monkeypatch):
+    from scripts.swarm import controller, tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    runtime = FakeRuntime()
+    agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER)
+    take = controller.take_tick_lock
+
+    def stop_then_take(*args):
+        store.update("sw", state="stopped")
+        return take(*args)
+
+    monkeypatch.setattr(controller, "take_tick_lock", stop_then_take)
+
+    assert tick.respawn_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+    assert [found.name for found in store.agents("sw")] == ["master@a1b2c3-0001"]
+    assert not store.redis.exists(store.key("sw", "tick-lock"))
+
+
 def test_a_swarm_in_a_ledger_outage_is_alerted_but_never_repaired(store, tmp_path, monkeypatch):
     from scripts.swarm import outage
 
@@ -487,7 +508,9 @@ def test_the_watcher_reports_a_failing_swarm_and_goes_on(store, monkeypatch, cap
         ("local", "https://hub.example:8765", True),
     ],
 )
-def test_the_watch_command_respawns_only_on_a_workstation(monkeypatch, deployment, hub, respawns):
+def test_the_watch_command_respawns_on_a_workstation_and_places_the_master_in_a_cluster(
+    monkeypatch, deployment, hub, respawns
+):
     from scripts.swarm import tick
 
     monkeypatch.setenv("LEDGER_URL", hub)
@@ -501,19 +524,21 @@ def test_the_watch_command_respawns_only_on_a_workstation(monkeypatch, deploymen
     monkeypatch.setattr(cli, "HerdrRuntime", lambda: "herdr")
     monkeypatch.setattr(cli, "now_ms", lambda: START)
     monkeypatch.setattr(tick, "respawn_master", lambda *args: asked.append(args) or ["spawned"])
+    monkeypatch.setattr(tick, "place_master", lambda *args: asked.append(("placed", *args)) or ["placed"])
     monkeypatch.setattr(tick_watch, "run", lambda *args: ran.append(args))
 
     cli.cmd_tick_watch("store", None)
 
     (args,) = ran
     assert args[:2] == ("store", cli.now_ms)
+    assert routed_with == ["herdr"]
     if respawns:
-        assert routed_with == ["herdr"]
         assert args[2].restart is scheduled_tick.restart
         assert args[2].respawn("sw") == ["spawned"]
         assert asked == [("sw", "store", runtime, START)]
     else:
-        assert args[2] is None
+        assert args[2]("sw", START + MINUTE) == ["placed"]
+        assert asked == [("placed", "sw", "store", runtime, START + MINUTE)]
 
 
 def test_the_repair_restarts_the_scheduler_once_per_stale_window_and_respawns_every_pass():
@@ -656,3 +681,79 @@ def test_respawn_master_keeps_a_finished_or_starting_master_record(store, monkey
 
     assert "dropped the gone master master@a1b2c3-0001" not in actions
     assert "master@a1b2c3-0001" in {a.name for a in store.agents("sw")}
+
+
+def test_place_master_places_a_front_door_master_into_an_empty_seat_through_the_cluster_deployment(store, monkeypatch):
+    from scripts.swarm import controller, tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER, state="finished")
+    deployments, fenced = [], controller.FencedRuntime
+
+    def recorded(store, slug, held, runtime, deployment):
+        deployments.append(deployment)
+        return fenced(store, slug, held, runtime, controller.LOCAL)
+
+    monkeypatch.setattr(controller, "FencedRuntime", recorded)
+    runtime = FakeRuntime()
+
+    actions = tick.place_master("sw", store, runtime, START)
+
+    assert deployments == ["distributed"]
+    assert len(runtime.masters) == 1
+    assert actions[-1].startswith("spawned master ")
+    assert not store.redis.exists(store.key("sw", "tick-lock"))
+
+
+@pytest.mark.parametrize("state", ["working", "starting"])
+def test_place_master_leaves_a_seat_a_cluster_master_holds(store, monkeypatch, state):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER, state=state)
+    runtime = FakeRuntime()
+
+    assert tick.place_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+    assert "master@a1b2c3-0001" in {a.name for a in store.agents("sw")}
+
+
+def test_place_master_waits_while_a_master_start_is_pending(store, monkeypatch):
+    from scripts.swarm import master_start, tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    master_start.begin(store, "sw", "master@a1b2c3-0002", {"id": MASTER}, START - MINUTE)
+    runtime = FakeRuntime()
+
+    assert tick.place_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+
+
+def test_place_master_leaves_a_swarm_another_hive_ticks(store, monkeypatch):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    assert lease.acquire(store, "sw", "anton") is not None
+    runtime = FakeRuntime()
+
+    assert tick.place_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+
+
+@pytest.mark.parametrize("state", ["stopping", "stopped"])
+def test_place_master_leaves_a_stopping_or_stopped_swarm(store, monkeypatch, state):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    store.update("sw", state=state)
+    runtime = FakeRuntime()
+
+    assert tick.place_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+    assert lease.current(store, "sw") is None

@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x\u01c1InboxStore\u01c1_relocate__mutmut_16:b6634ee55856178810989b7c066a51f04d8ecda7419e417da5dd7ae95b3e0783": {
+    "reader": "standards_reader",
+    "reason": "Without the watch on history or entry the only change is that a history append from another writer between the read and EXEC is dropped when the origin key is deleted, a race reachable only under concurrency, so no single threaded test observes it."
+  }
+}
