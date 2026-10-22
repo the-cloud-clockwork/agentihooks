@@ -796,14 +796,12 @@ def encode_cwd(cwd: str) -> str:
     return cwd.replace("/", "-").replace(".", "-")
 
 
-def _launcher_name(sessions: dict, session_id: str, pid: int) -> str:
-    """A launcher's name for this session, or for the live session it supersedes on the same process."""
-    held = [sessions.get(session_id) or {}] + [
-        info
-        for sid, info in sessions.items()
-        if pid and sid != session_id and info.get("pid") == pid and info.get("status") == "alive"
-    ]
-    return next((str(info["name"]) for info in held if info.get("named_by") == LAUNCHER and info.get("name")), "")
+def _named(records: list[dict], name: str) -> dict:
+    """A launcher's name from this session or the live session it supersedes wins over the given name."""
+    for info in records:
+        if info.get("named_by") == LAUNCHER and info.get("name"):
+            return {"name": info["name"], "named_by": LAUNCHER}
+    return {"name": name} if name else {}
 
 
 def register_session(
@@ -829,22 +827,25 @@ def register_session(
         # previously-alive entries for that pid (they're from an earlier
         # session lifecycle — /resume or /clear). Subagents share their
         # parent's pid and pass supersede=False.
-        superseding = bool(pid and supersede and not is_codex_memory_thread(cwd))
-        kept = _launcher_name(sessions, session_id, pid if superseding else 0)
-        if superseding:
-            for existing_sid, existing_info in sessions.items():
-                if existing_sid == session_id:
-                    continue
-                if existing_info.get("pid") == pid and existing_info.get("status") == "alive":
-                    existing_info["status"] = "superseded"
-                    existing_info["superseded_at"] = now
-                    existing_info["superseded_by"] = session_id
+        rivals = (
+            [
+                info
+                for sid, info in sessions.items()
+                if sid != session_id and info.get("pid") == pid and info.get("status") == "alive"
+            ]
+            if pid and supersede and not is_codex_memory_thread(cwd)
+            else []
+        )
+        existing = sessions.get(session_id)
+        named = _named([existing or {}, *rivals], name)
+        for info in rivals:
+            info["status"] = "superseded"
+            info["superseded_at"] = now
+            info["superseded_by"] = session_id
         # Preserve started_at across re-registrations (SessionStart can fire
         # multiple times per session — resume, reconnect — and we want the
         # age to reflect the true session start, not the last event).
-        existing = sessions.get(session_id)
         started_at = existing.get("started_at", now) if existing else now
-        named = {"name": kept, "named_by": LAUNCHER} if kept else {"name": name} if name else {}
         sessions[session_id] = {
             **named,
             "started_at": started_at,
