@@ -256,6 +256,17 @@ def test_a_same_boot_foreign_pid_namespace_stays_refused(tmp_path, monkeypatch, 
     assert router.rejected == {(LOCAL, Unqualified.FOREIGN_NAMESPACE): 1}
 
 
+@pytest.mark.parametrize("field", ["namespace", "pid", "start"])
+def test_local_retirement_refuses_an_incomplete_process_identity(tmp_path, monkeypatch, field):
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    router = RuntimeRouter([local])
+    assert router.terminate(record(**{field: None})) == Outcome(
+        "terminate", Status.REFUSED, LOCAL, Unqualified.NO_PROCESS, "runtime target names no process"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {(LOCAL, Unqualified.NO_PROCESS): 1}
+
+
 @pytest.mark.parametrize(
     ("recorded", "current", "expected"),
     [
