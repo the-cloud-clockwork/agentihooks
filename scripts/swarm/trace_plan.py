@@ -294,7 +294,7 @@ def _cuts(record):
 
 def _file_cuts(rows, ledger, who, home):
     for row in rows:
-        ledger.followup(who.swarm, followup_text(who.task, row["what"]))
+        ledger.followup(who.swarm, followup_text(who.task, row["what"]), by=who.name)
         gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "count", who, reason=f"cut: {row['what']}"), home)
 
 

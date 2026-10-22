@@ -2607,7 +2607,7 @@ def _traced(env, monkeypatch, tmp_path, plan, *p_yes):
 
     store, ledger, _ = env
     ledger.followups = []
-    ledger.followup = lambda slug, text: ledger.followups.append((slug, text))
+    ledger.followup = lambda slug, text, by: ledger.followups.append((slug, text, by))
     ledger.phases = [{"id": "p1", "title": "Build", "description": "Build the doghouse."}]
     ledger.rows["t1"].update(phase="p1", title="Doghouse", description="A house for the dog.")
     asked = {f"piece_{i}": Answer(type="noul", noul=p) for i, p in enumerate(p_yes)}
@@ -2635,7 +2635,7 @@ def test_trace_plan_traces_the_callers_task_and_files_cut_pieces(env, capsys, mo
     assert (report["task"], report["verdict"], report["cut"]) == ("t1", "pass", ["a generator"])
     assert seen[0]["task intent"] == "A house for the dog." and seen[0]["phase intent"] == "Build the doghouse."
     assert seen[0]["project intent"] == "Project intent"
-    assert ledger.followups == [("sw", "Cut from the plan: a generator")]
+    assert ledger.followups == [("sw", "Cut from the plan: a generator", "engineer@a1b2c3-0001")]
     assert json.loads((folder / "plan-verdict.json").read_text())["verdict"] == "pass"
     assert ledger.rows["t1"]["state"] != "blocked"
 

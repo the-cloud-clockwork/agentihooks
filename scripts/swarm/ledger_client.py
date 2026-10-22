@@ -172,9 +172,9 @@ class LedgerClient:
     def close_alert(self, slug, alert_id, outcome):
         self._call(slug, [_op("alert_close", "swarm", target=alert_id, outcome=outcome)])
 
-    def followup(self, slug, text, needs_operator=False):
+    def followup(self, slug, text, needs_operator=False, by="swarm"):
         flag = {"needs_operator": True} if needs_operator else {}
-        return self._write(slug, _op("add_item", "swarm", list="followups", text=text, **flag), "item")
+        return self._write(slug, _op("add_item", by, list="followups", text=text, **flag), "item")
 
     def priority(self, slug, item, text):
         return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
