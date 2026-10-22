@@ -47,3 +47,5 @@ See [promotion fixer intake](swarm.md#promotion-fixer-intake) for how one swarm 
 See [agent status comments](swarm.md#agent-status-comments) for when an agent's status comment amends its earlier one and when it posts a new comment at the end.
 
 See [ledger artifacts](swarm.md#ledger-artifacts) for what the ledger accepts as an artifact, a master's plan publish, the two checks and refusal troubleshooting.
+
+See [task ownership and master rulings](swarm.md#task-ownership-and-master-rulings) for phase and standalone task owners, ledger write permissions, claimant message refusals and fence configuration.
