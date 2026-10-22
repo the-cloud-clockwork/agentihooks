@@ -238,13 +238,13 @@ gap of N minutes reaches the present after about N / 9 complete passes at the
 minute cadence. The delivered regression starts 200 minutes behind with five
 runs a minute and 42 active runs: the first pass reports `catching up`, every
 pass discovers at most one slice's 51 runs plus the 42 active runs, and the
-test requires every read from some tick before tick 35 onward to report
-`complete`, a looser bound than the 22 passes the estimate gives.
+test requires `complete` on every read from a start tick below 35 through the
+last tick, a looser bound than the 22 passes the estimate gives.
 
 A slice whose own runs exceed the call budget still finishes when the budget
-runs out during jobs requests: the completed jobs already read are saved, as
+runs out during the jobs requests: the completed jobs already read are saved, as
 described above, and the next pass reuses them. When the budget runs out while
-the slice's run lists are still being read, no jobs were read and nothing is
+the slice's run lists or pending lookups are still being read, no jobs were read and nothing is
 saved, so the next pass repeats the same slice from the start.
 
 API failures keep their existing text and behavior: the read reports
@@ -397,9 +397,9 @@ an overnight tick outage from `agentihooks-swarm` journal lines matching
 exhausted the budget and 6 failed pagination, while discovered runs grew
 49, 96, 108, 189, 202, 208, 229, 301 and 305 and runs read rose only from 47
 to 249 per pass. The journal command in
-[Inspect and diagnose a read](#inspect-and-diagnose-a-read), run for
-22 October 2026, 15:00–15:30 UTC, on a primary checkout containing the
-merge, returned 10 reads, all `complete`, none with the budget error, the
+[Inspect and diagnose a read](#inspect-and-diagnose-a-read), with its
+boundaries set to 22 October 2026, 15:00–15:30 UTC, against the running
+Doctor after the merge, returned 10 reads, all `complete`, none with the budget error, the
 largest discovering 16 runs. That window had no gap to catch up and is not an
 equal-load comparison with the outage window.
 
