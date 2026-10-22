@@ -631,8 +631,8 @@ class Ledger:
     def __init__(self, refuse=False):
         self.followups, self.refuse = [], refuse
 
-    def followup(self, slug, text):
-        assert slug == "sw"
+    def followup(self, slug, text, by):
+        assert (slug, by) == ("sw", "engineer@1-1")
         self.followups.append(text)
 
 
@@ -723,7 +723,7 @@ def test_run_saves_the_filed_cut_before_its_follow_up(ask, tmp_path):
     from scripts.swarm.store import SwarmError
 
     class Failing(Ledger):
-        def followup(self, slug, text):
+        def followup(self, slug, text, by):
             raise SwarmError("ledger sw: connection reset")
 
     folder, home = tmp_path / "t1", tmp_path / "home"
@@ -851,9 +851,9 @@ def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, t
     who = Who(name="engineer@1-1", swarm="sw", task=task_id)
 
     class CheckedLedger(Ledger):
-        def followup(self, slug, text):
+        def followup(self, slug, text, by):
             trace_plan.ledger_comments.check(text, "item")
-            super().followup(slug, text)
+            super().followup(slug, text, by)
 
     ledger = CheckedLedger()
     record, block = trace_plan.run(folder, state, ledger, who, "observe", home=tmp_path / "home")
