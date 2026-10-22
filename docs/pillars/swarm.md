@@ -657,7 +657,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. Rounds spent before the task records a pull request, on its first pull request and on each later one, count on separate counters ([Review round counters](#review-round-counters)). |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
 | `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; their swarm owners receive an inbox message. Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. Each reorder, deferral, replay and restore is recorded in the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
-| `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue. Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff and leave the worktree in place; a green ejection with no failed merge group run of its own is queued again instead ([Ready merge pass queue exits](#ready-merge-pass-queue-exits)). Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
+| `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue ([Ready on a task of any kind](#ready-on-a-task-of-any-kind)). Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff and leave the worktree in place; a green ejection with no failed merge group run of its own is queued again instead ([Ready merge pass queue exits](#ready-merge-pass-queue-exits)). Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. A dependency that is not `done` turns the block into a checked wait on that task instead, keeping the claim. Before blocking, refuses while a task worktree holds commits its remote branch lacks, naming the push to run, and records a pushed branch on the task; see [Blocking with unpushed commits](#blocking-with-unpushed-commits). |
 | `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
@@ -2130,6 +2130,63 @@ A split cannot change which pull request a verdict belongs to. Once the task rec
 | `Intent requires a pull request registered on this task.` | The merged pull request is not a single recorded half: it is unrecorded, or its bare number matches more than one half. Record it with `swarm pr <url> --half <n>` and wait for its verdict. |
 | `intent for task <task> was judged on <url>, not this pull request. Record this half first: agentihooks swarm <id> pr <pull request url> --half <n>, then wait for its verdict.` | The merged pull request is not the half the verdict was judged on. Follow the command in the message. |
 | `Intent must be checked on this pull request head and contract before it can merge.` | The half has no verdict for its current head or task contract, or its head could not be read. Wait for the tick to judge it, then merge again. |
+
+### Ready on a task of any kind
+
+`swarm ready` releases the seat of any task that records an open pull request, whatever its kind: code, ci, ops, tune, troubleshoot or research. An engineer whose tune or troubleshoot fix waits deep in the merge queue frees its seat the same way a code engineer does, and the tick keeps tracking the merge. The kind decides only what happens after the merge:
+
+| Kind | After the merge |
+|---|---|
+| code, ci | The task closes like `done`, with its group members, and the worktree is removed. |
+| ops, tune, troubleshoot, research, and any other kind | The task returns to `open` with no claimant. Its `pr_url` and the stored handoff stay, `awaiting` is empty, the worktree is removed and the swarm comments: `The swarm merged <url>. This <kind> task stays open for its proof; the next engineer continues it from the handoff its engineer left.` |
+
+A code or ci task that declares post merge proof which is not yet recorded follows the second row too, with `awaiting` set to `verify`; see [Post merge proof](../reference/post-merge-proof.md).
+
+The same requirements apply to every kind. `ready` refuses:
+
+| Refusal | Meaning |
+|---|---|
+| `this swarm runs at <autonomy> autonomy, where the operator approves each merge` | The swarm runs at `manual` or `assist`; follow the ship steps in your prompt. |
+| `record the pull request with swarm pr before swarm ready` | The task has no recorded pull request. A tune or troubleshoot task with no pull request closes with `done` and its proof. |
+| `pull request <url> is merged; close the task with swarm done` | The merge already happened; close with `done` and the proof the kind needs. |
+| `pull request <url> is <state>; swarm ready carries an open pull request` | The pull request is closed. |
+| `pull request <url> is a draft; mark it ready for review with gh pr ready first` | Take it out of draft first. |
+| `the worktree holds uncommitted changes; commit and push them first` | Commit and push, then run `ready` again. |
+| `the pull request head is not this worktree's head; push your last commit before swarm ready` | Push so the pull request head matches the worktree. |
+
+#### Example: a tune task
+
+A tune engineer has measured the value before, changed the setting through a pull request and wants to free its seat while the pull request waits in the queue:
+
+```bash
+agentihooks swarm example pr https://github.com/o/r/pull/812
+gh pr ready https://github.com/o/r/pull/812
+agentihooks ledger --slug example --as engineer@ab12cd-0042 leave
+agentihooks swarm example ready ~/scratchpad/r/t31/handoff.md
+```
+
+The handoff names the measuring command and the value before, so the next engineer can measure the same way. The task stays `pr` with `awaiting` set to `merge` until the merge pass sees the merge, prints `task t31 awaits its proof, https://github.com/o/r/pull/812 merged` and reopens the task. The tick then offers it to the next engineer, who reads the handoff, measures again once the change runs and closes it with the kind's proof:
+
+```bash
+agentihooks swarm example done --command "<the same command>" --output "<values before and after>"
+```
+
+A troubleshoot task closes the same way with `done --root-cause "<cause>" --evidence "<what shows it>" --fix <pr url>`.
+
+Red checks, a closed pull request or a queue ejection reopen a task of any kind with `awaiting` set to `fix`, as listed in [Ready merge pass queue exits](#ready-merge-pass-queue-exits).
+
+#### Current limits
+
+- The opening prompt for ops, tune, troubleshoot and research tasks does not name `swarm ready`; those steps end with `done` and its proof. An engineer of those kinds that holds a queued pull request runs `ready` as shown above.
+- `swarm done` checks the pull request only on code and ci tasks. A task of another kind closes with its proof even while its recorded pull request is still open, and the merge pass then has nothing left to track.
+
+#### Troubleshooting
+
+- **`swarm ready carries a code or ci pull request; this <kind> task closes with swarm done and its proof`.** This refusal was removed by pull request [4502](https://github.com/the-cloud-clockwork/agentihooks/pull/4502). Seeing it means the `agentihooks` that ran predates that change; update the install and run `ready` again.
+- **The pull request merged but the task still reads `pr` with `MERGE`.** The merge pass leaves the task alone while an agent that owns it is still live, and keeps its ready record when another agent holds the task's claim. It retries on each tick once the owner has ended.
+- **A tune task reopened with no `FIX` label after its pull request merged.** That is the expected outcome: the task waits for its proof. Read the swarm's comment on the task and the handoff, then close it with `done` and the proof.
+
+`tests/swarm/test_ready.py` pins this behavior: `test_ready_records_the_pull_request_and_head_and_ends_the_agent` runs for code, ci, tune, troubleshoot and ops tasks; `test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof` covers the reopen; `test_a_merged_pull_request_of_another_kind_waits_while_its_owner_is_live` and `test_a_merged_pull_request_of_another_kind_keeps_its_record_when_the_claim_release_is_refused` cover the two cases where the task is left unchanged. The tests failed first on [run 39126290206](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39126290206) (seven expected failures) and passed on [run 39126356416](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39126356416).
 
 ### Ready merge pass queue exits
 
