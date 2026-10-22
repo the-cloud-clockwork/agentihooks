@@ -78,10 +78,15 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      terminationGracePeriodSeconds: {{ add $workers.drainSeconds 30 }}
       containers:
         - name: worker-hive
           image: {{ include "swarm.image" (dict "Values" (dict "image" $workers.image)) }}
           imagePullPolicy: {{ $workers.image.pullPolicy }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["agentihooks", "hive", "drain", "--wait", {{ $workers.drainSeconds | quote }}]
           {{- include "swarm.containerSecurity" $root | nindent 10 }}
           env:
             {{- if $github.secretName }}

@@ -110,7 +110,7 @@ print(auth.env_text("https://hive-join:8770", auth.mint(redis_client(), "worker"
 printf '%s' "$member_env" | kubectl create secret generic hive-member --from-file=credential=/dev/stdin >/dev/null
 unset member_env
 helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml \
-  --set workers.replicas=1 --set workers.maxAgents=1 --set workers.image.repository=local/agentihooks-hive-worker \
+  --set workers.replicas=1 --set workers.maxAgents=1 --set workers.drainSeconds=20 --set workers.image.repository=local/agentihooks-hive-worker \
   --set workers.image.pullPolicy=Never --set workers.credentialSecret.name=hive-member --set workers.credentialSecret.key=credential \
   --set workers.caSecret.name=hive-tls --set workers.caSecret.key=cert.pem | kubectl apply -f -
 deployment=proof-agentihooks-swarm-worker-hive

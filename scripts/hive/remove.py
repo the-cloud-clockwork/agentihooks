@@ -88,6 +88,16 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
     return [f"drained {plan.hive}: {len(ordered)} agents handed off"]
 
 
+def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
+    registry.update(store.redis, hive, ["draining=yes"])
+    deadline = host.clock() + wait_s
+    while remaining := hosted(store, hive):
+        if host.clock() >= deadline:
+            return f"hive {hive} stops with {len(remaining)} agents still running after {wait_s} seconds"
+        host.sleep(POLL_S)
+    return f"hive {hive} drained: no agents running"
+
+
 def revoke(redis: "Redis", hive: str) -> list[str]:
     if not redis.exists(member_key(hive)):
         return [f"{hive} holds no member credential"]

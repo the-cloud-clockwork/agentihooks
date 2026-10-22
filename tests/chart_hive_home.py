@@ -66,6 +66,11 @@ def problems(deployment: dict, workers: dict | None) -> list[str]:
         found.append(f"the home volume is {home}, expected the hostPath of workers.homeVolume")
     if strategy != "Recreate":
         found.append(f"a hive with a host home rolls out by {strategy}, expected Recreate")
+    drain = spec["containers"][0].get("lifecycle", {}).get("preStop", {}).get("exec", {}).get("command")
+    if drain != ["agentihooks", "hive", "drain", "--wait", "3600"]:
+        found.append(f"a Recreate hive stops with preStop {drain}, expected a drain of its agents")
+    if spec.get("terminationGracePeriodSeconds") != 3630:
+        found.append(f"the hive grace period {spec.get('terminationGracePeriodSeconds')} does not cover its drain")
     if spec.get("nodeSelector") != workers["nodeSelector"]:
         found.append("the hive does not take workers.nodeSelector")
     if spec.get("tolerations") != workers["tolerations"]:
@@ -283,6 +288,10 @@ def main(chart: str) -> list[str]:
     planted["spec"].pop("strategy", None)
     if not problems(planted, HOST["workers"]):
         found.append("the check passed a hive with no Recreate rollout")
+    undrained = yaml.safe_load(yaml.safe_dump(pinned))
+    undrained["spec"]["template"]["spec"]["containers"][0].pop("lifecycle", None)
+    if not problems(undrained, HOST["workers"]):
+        found.append("the check passed a hive that stops without draining its agents")
     planted["spec"]["template"]["spec"]["containers"][0].pop("envFrom", None)
     if not worktree_problems(planted, HOST["workers"]):
         found.append("the check passed a hive that ignores the worktrees ConfigMap")
