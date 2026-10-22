@@ -186,6 +186,7 @@ def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch,
     from scripts.swarm.store import SwarmConfig
 
     fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
     workstation(monkeypatch, 40)
     setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
     local_agents(setup, 8, slug="other-swarm", harness="codex")
