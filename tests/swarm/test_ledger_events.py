@@ -1138,7 +1138,7 @@ def test_a_pull_request_reports_whether_checks_still_run(rollup, suites, running
         ([], [], False),
     ],
 )
-def test_a_pull_request_reports_whether_a_run_actually_started(rollup, suites, started):
+def test_a_pull_request_reports_whether_a_run_or_a_reported_check_started(rollup, suites, started):
     raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": suites}
     assert ledger_events.pull_request(raw).started is started
 
