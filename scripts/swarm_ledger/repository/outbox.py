@@ -1,8 +1,15 @@
+import re
+
 from scripts.events import envelope, subjects
 
 ENTITIES = {"tasks": "task", "phases": "phase"}
 INSERT = "INSERT INTO outbox VALUES (?, ?, ?, ?, ?)"
 AUTHOR = "ledger"
+RESERVED = re.compile(r"[%.*>\s]")
+
+
+def token(key: str) -> str:
+    return RESERVED.sub(lambda match: f"%{ord(match.group()):02X}", key)
 
 
 def changed(before: dict, after: dict) -> list:
@@ -29,5 +36,5 @@ def write(connection, slug: str, revision: int, before: dict, after: dict) -> No
             data=item or {},
         )
         connection.execute(
-            INSERT, (event.id, slug, revision, subjects.subject(slug, entity, key), event.encode().decode())
+            INSERT, (event.id, slug, revision, subjects.subject(slug, entity, token(key)), event.encode().decode())
         )
