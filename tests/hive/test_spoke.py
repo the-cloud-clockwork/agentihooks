@@ -170,7 +170,7 @@ def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, fai
         rig.runtime.spawn.side_effect = [RuntimeError("unavailable"), rig.runtime.spawn.return_value]
     else:
         rig.runtime.spawn.side_effect = [
-            Outcome("spawn", Status.FAILED, "local", detail="no room"),
+            Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room"),
             rig.runtime.spawn.return_value,
         ]
     assert rig.spoke.poll() == "retry"
