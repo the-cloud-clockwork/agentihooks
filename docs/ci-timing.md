@@ -210,6 +210,56 @@ active jobs can consume the budget faster than retry progress accumulates.
 Reuse makes a bounded backlog converge when enough capacity remains; it does
 not guarantee completion for unbounded traffic or an unavailable API.
 
+### Active run lists whose count lags
+
+Besides the `created` window list, a read that reaches the present also lists
+runs by each active status: `queued`, `in_progress`, `waiting`, `pending` and
+`requested`. GitHub's status filtered `total_count` can lag the list rows by a
+few seconds. It still counts a run that already left the status, for example a
+Tests run that moved from `queued` to `completed`, while the rows no longer
+return it. Read only probes on 19 October 2026 showed the count matching the
+rows again within one to five seconds of re-reading.
+
+The reader therefore re-reads a short active status list before it reports
+incomplete:
+
+1. The first read returns fewer rows than `total_count` on a single page.
+2. The reader retries at once from page 1.
+3. If the list is still short, it makes up to `SETTLE_READS` (4) more reads,
+   pausing one second before each.
+4. The read completes as soon as one read returns as many rows as its count.
+   A list still short after the last read raises the pagination error with
+   the endpoint, page, rows and total of that last read.
+
+A single short status list therefore costs at most six API calls and four
+seconds of waiting, both counted against the read's call and time budget.
+Settle reads apply only where the count is known to lag:
+
+| List | Retries when short |
+|---|---|
+| Active status list, single page | One immediate retry, then up to four reads one second apart |
+| Active status list, more than one page | One immediate retry, no settle reads |
+| `created` window list | One immediate retry, no settle reads |
+| Jobs of a run (`filter=latest`) and one run attempt's jobs | One immediate retry, no settle reads |
+
+A settle read is skipped when two seconds or less of the read's deadline
+remain; the read then reports incomplete instead of exhausting its budget on
+pauses. Historical slices, the windows the timer reads while `catching up`,
+and Doctor measure windows do not list active statuses, so they make no settle
+reads.
+
+An earlier rule from
+[pull request 4448](https://github.com/the-cloud-clockwork/agentihooks/pull/4448)
+still applies inside every read: when `total_count` changes between pages of
+one read, the list is accepted once its last page is short, and rows are
+deduplicated by id.
+
+`SETTLE_READS`, the one second pause and the two second margin are module
+constants in the Doctor CI speed reader. No flag or environment variable
+changes them; a change goes through a pull request and CI. A lagging count
+that settles leaves no trace in the action line: the read reports
+`complete` with the same counts as any other complete read.
+
 ### Inspect and diagnose a read
 
 Read the existing timer actions without starting another timer:
@@ -238,6 +288,8 @@ reader has not yet reached the present. It is distinct from an API failure.
 |---|---|
 | `incomplete: Actions API read failed: RuntimeError: Actions API request or time budget exhausted` | The call or time budget was reached. Compare successive run counts; completed successes remain available for retry. |
 | Another `Actions API read failed: ...` error | Inspect the named request, authentication, timeout or pagination failure. Successful completed jobs remain saved; the read still reports incomplete. |
+| `pagination ended before the full count: endpoint=...?status=...; page=1; rows=N; total=N+1` | A single page active list stayed one or more runs short through all six reads, or the deadline left no room for a settle read. Re-read that endpoint by hand and compare `total_count` with the rows; a count that never settles points at the Actions API, not the reader. |
+| `pagination ended before the full count: ...; page=2` or higher | A multi page list stayed short after its retry. It is not settled; check whether runs arrived or left during the read and compare the next pass. |
 | Rerun or active workflow fetches jobs again | Expected: reuse requires completed status and the same attempt. |
 | `catching up` | A historical slice completed; later ticks continue toward the present. |
 | Backlog never clears | Compare discovery and new or active workload with remaining request capacity; do not infer completion from a large saved count. |
@@ -251,6 +303,19 @@ showed that a second pass over 100 completed runs remained incomplete; its
 [green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39139392387)
 passed with carryover. The regression checks also cover changed attempts,
 active runs and preservation of successful jobs when another request fails.
+
+[Pull request 4640](https://github.com/the-cloud-clockwork/agentihooks/pull/4640)
+merged on 19 October 2026 and added the settle reads. Its
+[red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39204844366)
+failed the observed shape, a `status=queued` list of six rows with a count of
+seven, on the old code; its
+[green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39208181014)
+passed on the merged head. The regression checks cover counts that settle
+after one, two and five stale reads, a count still stale after six reads,
+the deadline margin, and short multi page and job lists that are not settled.
+Its source task recorded 4 pagination incomplete reads out of 17 during
+18 October 2026, 12:53–13:23 UTC, after pull request 4448 applied. That is
+the historical before measurement for the settle reads.
 
 The source task recorded 13 budget exhausted reads out of 17 during
 18 October 2026, 12:53–13:23 UTC. That is the historical before measurement.
