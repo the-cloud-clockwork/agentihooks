@@ -1,3 +1,4 @@
+import itertools
 import threading
 
 import pytest
@@ -51,7 +52,7 @@ def test_every_part_satisfies_its_bus_protocol(bus):
 
 
 def test_open_bus_defaults_to_the_monotonic_millisecond_clock(monkeypatch):
-    monkeypatch.setattr(memory.time, "monotonic_ns", lambda: 7_000_000_000)
+    monkeypatch.setattr(memory.time, "monotonic_ns", lambda: 7_000_500_000)
     queue = memory.open_bus(BusConfig()).queue("work", QueuePolicy(ack_wait_ms=1))
     queue.offer(event())
     queue.take(0)
@@ -203,16 +204,22 @@ def test_a_zero_backoff_step_delivers_an_event_once_per_fetch(clock):
     assert [d.attempt for d in consumer.fetch(10, 0)] == [2]
 
 
-@pytest.fixture
-def waits(monkeypatch):
+@pytest.fixture(autouse=True)
+def waits(monkeypatch, request):
     seen = []
 
     def wait(self, timeout=None):
         seen.append(timeout)
         return False
 
-    monkeypatch.setattr(threading.Condition, "wait", wait)
+    if "blocking" not in request.fixturenames:
+        monkeypatch.setattr(threading.Condition, "wait", wait)
     return seen
+
+
+@pytest.fixture
+def blocking():
+    pass
 
 
 @pytest.fixture
@@ -238,6 +245,15 @@ def test_take_skips_the_wait_once_closed(bus, waits):
     bus.close()
     assert queue.take(60_000) is None
     assert waits == []
+
+
+def test_take_never_waits_past_a_redelivery_due_between_clock_reads(waits):
+    reads = itertools.chain([0, 0, 0, 0, 49], itertools.repeat(51))
+    queue = memory.open_bus(BusConfig(), clock=lambda: next(reads)).queue("work", QueuePolicy(ack_wait_ms=50))
+    queue.offer(event())
+    queue.take(60_000)
+    assert queue.take(60_000).attempt == 2
+    assert waits == [0.0]
 
 
 def test_every_change_a_taker_waits_on_wakes_it(bus, wakes):
@@ -305,7 +321,7 @@ def test_settled_delivery_ignores_a_later_nak(bus):
     assert queue.take(0) is None
 
 
-def test_take_waits_for_an_offer(bus):
+def test_take_waits_for_an_offer(bus, blocking):
     queue = bus.queue("work", QueuePolicy())
     taken = []
     taker = threading.Thread(target=lambda: taken.append(queue.take(5_000)), daemon=True)
@@ -315,7 +331,7 @@ def test_take_waits_for_an_offer(bus):
     assert [d.event.id for d in taken] == ["e1"]
 
 
-def test_fetch_waits_for_a_publish(bus):
+def test_fetch_waits_for_a_publish(bus, blocking):
     consumer = bus.events.consumer("d", "swarm.>")
     fetched = []
     fetcher = threading.Thread(target=lambda: fetched.append(consumer.fetch(1, 5_000)), daemon=True)
@@ -325,7 +341,7 @@ def test_fetch_waits_for_a_publish(bus):
     assert [[d.event.id for d in batch] for batch in fetched] == [["e1"]]
 
 
-def test_close_wakes_a_blocked_taker(bus):
+def test_close_wakes_a_blocked_taker(bus, blocking):
     queue = bus.queue("work", QueuePolicy())
     taken = []
     taker = threading.Thread(target=lambda: taken.append(queue.take(5_000)), daemon=True)

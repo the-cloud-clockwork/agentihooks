@@ -1,3 +1,4 @@
+import itertools
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -117,9 +118,8 @@ class _Pending:
         return next((m for m in self._messages if m.ready_at <= now and m not in taken), None)
 
     def _limit_ms(self, timeout_ms: int) -> int:
-        self._ready()
         now = self._runtime.clock()
-        return min([timeout_ms, *(m.ready_at - now for m in self._messages if m.ready_at > now)])
+        return max(0, min([timeout_ms, *(m.ready_at - now for m in self._messages)]))
 
     def _wait_ms(self, attempt: int) -> int:
         backoff = self._policy.backoff_ms
@@ -217,13 +217,11 @@ class MemoryStateStore:
             return self._put(key, value)
 
     def watch(self, key: str, from_revision: int = 0) -> Iterator[StateEntry]:
-        index = 0
-        while True:
+        for index in itertools.count():
             with self._runtime.cond:
                 if index == len(self._history):
                     return
                 entry = self._history[index]
-            index += 1
             if entry.key == key and entry.revision >= from_revision:
                 yield entry
 
