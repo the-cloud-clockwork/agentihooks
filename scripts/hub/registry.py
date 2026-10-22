@@ -36,9 +36,6 @@ class Registry:
     def __iter__(self) -> Iterator[Reactor]:
         return iter(self._reactors.values())
 
-    def __len__(self) -> int:
-        return len(self._reactors)
-
 
 def durable(reactor: Reactor) -> str:
     return f"hub-{reactor.name}"

@@ -178,6 +178,23 @@ def test_a_lost_singleton_lease_is_taken_over_after_its_expiry(bus, clock):
     assert one.run_once(batch=10, timeout_ms=0) == {"timers": ["standby"]}
 
 
+def test_a_singleton_lease_lost_inside_a_batch_hands_the_rest_back(bus, clock):
+    handler = Recorder()
+
+    def slow(event: Envelope) -> None:
+        handler(event)
+        clock.now += 100
+        lease.Lease(bus.state(lease.BUCKET), "reactor.timers", "b", ttl_ms=100, clock=clock).acquire()
+
+    one = hub(bus, [registry.Reactor("timers", "swarm.*.task.>", slow, singleton=True)], "a", clock)
+    two = hub(bus, [registry.Reactor("timers", "swarm.*.task.>", handler, singleton=True)], "b", clock)
+    bus.events.publish(SUBJECT, event("e1", 1))
+    bus.events.publish(SUBJECT, event("e2", 2))
+    assert one.run_once(batch=10, timeout_ms=0) == {"timers": ["handled", "standby"]}
+    assert two.run_once(batch=10, timeout_ms=0) == {"timers": ["handled"]}
+    assert handler.seen == [("e1", 1), ("e2", 2)]
+
+
 def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatch, capsys):
     handler = Recorder()
     declared = registry.Registry([registry.Reactor("lifecycle", "swarm.*.task.>", handler)])

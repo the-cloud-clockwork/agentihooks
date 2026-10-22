@@ -69,7 +69,14 @@ class HubRunner:
         held = self._leases.get(reactor.name)
         if held is not None and not held.acquire():
             return ["standby"]
-        return [self._deliver(reactor, d) for d in self._consumers[reactor.name].fetch(batch, timeout_ms)]
+        outcomes = []
+        for delivery in self._consumers[reactor.name].fetch(batch, timeout_ms):
+            if held is not None and outcomes and not held.acquire():
+                delivery.nak()
+                outcomes.append("standby")
+                continue
+            outcomes.append(self._deliver(reactor, delivery))
+        return outcomes
 
     def _deliver(self, reactor: Reactor, delivery: Delivery) -> str:
         event = delivery.event
