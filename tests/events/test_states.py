@@ -89,8 +89,17 @@ def test_transition_refuses_an_empty_state():
     assert str(refusal("task", "", "open")) == "task has no state ''"
 
 
-def test_transition_refuses_leaving_a_terminal_state():
-    assert str(refusal("execution", "ended", "working")) == "execution state 'ended' is terminal"
+@pytest.mark.parametrize(
+    ("machine", "terminal", "other"),
+    [
+        ("task", "done", "open"),
+        ("execution", "ended", "working"),
+        ("hive", "removed", "live"),
+        ("slot", "ended", "reserved"),
+    ],
+)
+def test_transition_refuses_leaving_a_terminal_state(machine, terminal, other):
+    assert str(refusal(machine, terminal, other)) == f"{machine} state '{terminal}' is terminal"
 
 
 def test_transition_refuses_an_edge_the_table_lacks():
