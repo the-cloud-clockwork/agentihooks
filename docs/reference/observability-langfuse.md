@@ -266,10 +266,76 @@ Langfuse event, the agent's start or the outage start), so the Doctor master get
 it once while it lasts, it clears on recovery and a new fault raises a new one.
 An agent Langfuse could not be read for is judged only on its local exporter.
 
-The read budget is 15 seconds for active bindings, read all at once, one retry
-per binding, and 7 seconds per request. Each read failure names the file and
-line that raised it. Watermarks and the outage start live in
+Watermarks and the outage start live in
 `<swarm home>/<slug>/doctor-telemetry.json`.
+
+### Read budget
+
+Each scan reads every active binding in one round: the read pool has one worker
+per binding. A binding takes up to three requests in sequence (its trace
+listing, its observations since the watermark and its observation count) and
+gets two attempts. The active reads run beside the historical listing and
+backfill, which keep their own budget.
+
+| Limit | Value | Applies to |
+|---|---|---|
+| Active read budget | 15 seconds | every active binding together, from the start of the scan |
+| Attempts per binding | 2 | a failed binding read is retried once while the budget lasts |
+| Request timeout | 7 seconds | every Langfuse request the Doctor sends |
+| Historical budget | 45 seconds | the trace listing and observation backfill |
+| Wait history budget | 15 seconds | the wait history of an agent with a turn gap over the limit, also inside the step deadline |
+| Trace listing pages | 20 pages | the trace listing, 100 traces per page |
+| Backfill pages | 20 pages | each trace's observation backfill, 50 observations per page |
+| Active freshness rows | 10 observations | the first page of each binding's observations since its watermark |
+| Step deadline | 55 seconds | the trace reads and the wait history together |
+
+The request timeout stays under half the active budget, so one stalled request
+leaves room for its retry. When the budget ends, no new attempt starts and every
+binding still being read is marked unread. A binding read already in flight
+issues no retry, but its remaining requests still run, each up to the 7 second
+timeout, and their answers are discarded. These limits are
+fixed in the `Budget` defaults of `scripts/doctor/traces_read.py`; no
+environment variable changes them.
+
+Every failed read is listed on the `trace reader unavailable` finding as one line
+naming the read, its time, the error and the file and line that raised it:
+
+```text
+active read of eng-3 failed at 2026-10-18T22:30:04.512Z: ReadTimeout: timed out at <site-packages>/httpx/_transports/default.py:<line>
+trace listing failed at 2026-10-18T22:30:09.031Z: HTTPStatusError: Server error '502 Bad Gateway' for url '…' at <site-packages>/httpx/_models.py:<line>
+active read budget of 15 seconds spent before eng-7 at 2026-10-18T22:30:15.004Z
+```
+
+The reads named are `active read of <agent>`, `exporter progress read of
+<agent>`, `trace listing` and `observation read`. The frame is the innermost one
+in the traceback, so an error raised while reading the local exporter files
+points at this host's file system, while one raised by `httpx` points at the
+Langfuse request. A binding that ran out of budget without its own error carries
+the budget line instead. A finding shows at most 50 failure lines and counts the
+rest in one more line. Its evidence also reads `active bindings read <n> of
+<total>`; unread bindings are judged only on their local exporter.
+
+To see one pass by hand, run it where the keys open the swarm's project. It
+reads with the caller's `LANGFUSE_*` keys and does not check which project they
+serve, and it writes the same state as a scheduled pass: the watermarks and
+outage start in `doctor-telemetry.json` and the trace cache.
+
+```bash
+python -m scripts.doctor.traces_read <slug>
+```
+
+It prints `measures` and `findings` as JSON. `measures.coverage.active` holds
+`bindings` and `read`, each entry of `measures.active` carries its own `read`,
+and the failure lines sit in the evidence of the `trace reader unavailable`
+finding. A healthy pass reads every binding: `read` equals `bindings` and that
+finding is absent.
+
+| Symptom | Read |
+|---|---|
+| `read` below `bindings` with only budget lines | the Langfuse requests are slow; check the response time of the trace listing with the same keys, and the Langfuse server load, before calling it an outage |
+| one binding's line ends at an `httpx` frame | that request failed or timed out against Langfuse; the line's error names the status or timeout |
+| a line ends at a file system or JSON frame | the exporter cursor or transcript of that session could not be read on this host |
+| every read fails with the same error | the keys, host or ingress route are wrong; `LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set` means the keys the reader was given are missing or empty |
 
 ### Historical findings
 
@@ -298,8 +364,7 @@ unaccepted seconds; any other class name prints its current findings, with
 failed and no finding of the class is current. A `failed-spawn/<task>` id counts
 the spawn journal over its window, so zero there is a real reading for a task
 on the watched ledger or the master; any other task is refused.
-`python -m scripts.doctor.traces_read <slug>` prints
-the measures (active bindings, coverage) and findings for one swarm.
+To run one trace pass by hand, see [Read budget](#read-budget).
 
 ### The Langfuse connector
 
