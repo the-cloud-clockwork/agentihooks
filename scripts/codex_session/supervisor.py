@@ -155,7 +155,9 @@ def admit(store: RedisStore, launch: Launch, deps: Deps) -> AgentRecord:
         raise LaunchFailure("transport", OTHER_TRANSPORT.format(launch.slug, chosen))
     pid_start = deps.start_identity(os.getpid())
     target = {"pid": os.getpid(), "pid_start": pid_start} if pid_start else {}
-    agent = replace(launch.agent, harness="codex", transport=chosen, runtime_target=target)
+    from scripts.swarm.commands import hive_id
+
+    agent = replace(launch.agent, harness="codex", transport=chosen, hive=hive_id(), runtime_target=target)
     return store.start_execution(launch.slug, agent, launch.previous_execution_id)
 
 
