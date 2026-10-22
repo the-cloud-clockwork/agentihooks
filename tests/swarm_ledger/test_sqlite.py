@@ -231,7 +231,6 @@ def test_only_a_whole_rebuild_hands_its_freed_heap_back(tmp_path, monkeypatch):
     released = []
     monkeypatch.setattr(sqlite.heap, "release", lambda: released.append(True))
     assert [m["id"] for m in first.current("ledger").state["chat"]] == ["m1"]
-    first.current("ledger")
     first.apply_ops("ledger", ops=[chat(2)])
     first.current("ledger")
     assert released == [True]

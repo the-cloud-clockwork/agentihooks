@@ -3,7 +3,6 @@ import ctypes
 TRIM = getattr(ctypes.CDLL(None), "malloc_trim", None)
 
 
-def release() -> bool:
-    if TRIM is None:
-        return False
-    return bool(TRIM(0))
+def release() -> None:
+    if TRIM is not None:
+        TRIM(0)

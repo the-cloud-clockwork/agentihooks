@@ -466,7 +466,7 @@ class SQLiteLedgerRepository:
             fragments = document(state)
             entry = Entry(row[0], None, fragments.value, fragments)
             self._remember(slug, entry)
-            heap.release()
+        heap.release()
         return entry
 
     def _remember(self, slug: str, entry: Entry) -> None:
