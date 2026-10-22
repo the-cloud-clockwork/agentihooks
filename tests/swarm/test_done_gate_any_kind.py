@@ -2,15 +2,17 @@ import pytest
 
 from scripts.swarm import done_gate, prompt
 from scripts.swarm.ledger_events import PullRequest
+from scripts.swarm.store import ASSIST, DELEGATE, MANUAL
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 URL = "https://github.com/o/r/pull/9"
 NAME = "engineer@a1b2c3-0001"
 PROOF = ("--command", "probe", "--output", "before 3 after 0")
-REFUSED = (
-    f"pull request {URL} is open, not merged; release the seat with swarm ready <handoff doc> so the swarm "
-    "merges it, or give --filed when the fix is proposed instead of made"
+THEN = (
+    "release the seat with swarm ready <handoff doc> so the swarm merges it, or at manual or assist autonomy run "
+    "swarm done again once the operator merges it; give --filed when the fix is proposed instead of made"
 )
+REFUSED = f"pull request {URL} is open, not merged; {THEN}"
 READY = (
     "If this work opens a pull request, record it with agentihooks swarm sw pr <pr url>. Once its review closed "
     "and it is out of draft, write a Handoff v2 document, leave the crew with "
@@ -35,12 +37,12 @@ def reader(state):
 @pytest.mark.parametrize("state", ["OPEN", "CLOSED"])
 def test_a_non_code_task_with_an_unmerged_recorded_pull_request_is_refused(kind, state):
     read = reader(state)
-    assert done_gate.refusal({"kind": kind}, URL, read) == REFUSED.replace("open,", f"{state.lower()},")
+    assert done_gate.refusal({"kind": kind}, URL, read) == f"pull request {URL} is {state.lower()}, not merged; {THEN}"
     assert read.seen == [URL]
 
 
 @pytest.mark.parametrize("kind", ["ops", "tune", "troubleshoot", "research"])
-def test_a_non_code_task_that_files_its_fix_never_reads_github(kind):
+def test_a_non_code_task_is_refused_only_while_its_fix_is_not_filed(kind):
     read = reader("OPEN")
     assert done_gate.refusal({"kind": kind, "proof": {"filed": "f1"}}, URL, read) == ""
     assert done_gate.refusal({"kind": kind, "proof": {"filed": " "}}, URL, read) == REFUSED
@@ -93,8 +95,10 @@ def test_swarm_done_closes_a_tune_task_whose_pull_request_merged(env, monkeypatc
     assert ledger.rows["t1"]["state"] == "done"
 
 
-def build(**task):
-    return prompt.build("sw", "/repo", "eng", NAME, {"id": "t1", "title": "x", "phase": "p1", **task})
+def build(autonomy=DELEGATE, **task):
+    return prompt.build(
+        "sw", "/repo", "eng", NAME, {"id": "t1", "title": "x", "phase": "p1", **task}, autonomy=autonomy
+    )
 
 
 @pytest.mark.parametrize("kind", ["ops", "tune", "troubleshoot", "research"])
@@ -107,3 +111,14 @@ def test_a_non_code_prompt_names_ready_for_a_pull_request_before_the_closing_ste
 @pytest.mark.parametrize("kind", ["code", "ci", "plan"])
 def test_code_and_plan_prompts_are_unchanged(kind):
     assert READY not in build(kind=kind)
+
+
+@pytest.mark.parametrize("autonomy", [MANUAL, ASSIST])
+@pytest.mark.parametrize("kind", ["ops", "tune", "troubleshoot", "research"])
+def test_a_non_code_prompt_leaves_the_merge_to_the_operator_where_ready_is_refused(kind, autonomy):
+    text = build(autonomy, kind=kind, pr_url=URL)
+    assert READY not in text
+    assert (
+        "If this work opens a pull request, record it with agentihooks swarm sw pr <pr url>. This swarm's autonomy "
+        "leaves the merge to the operator: ask for it on the ledger task, wait for the merge, then close the task."
+    ) in text

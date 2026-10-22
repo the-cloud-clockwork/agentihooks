@@ -13,8 +13,8 @@ WORKERS = ("eng", "ci")
 MERGED = "MERGED"
 MERGE = "merge it, then run swarm done again"
 READY = (
-    "release the seat with swarm ready <handoff doc> so the swarm merges it, "
-    "or give --filed when the fix is proposed instead of made"
+    "release the seat with swarm ready <handoff doc> so the swarm merges it, or at manual or assist autonomy run "
+    "swarm done again once the operator merges it; give --filed when the fix is proposed instead of made"
 )
 RECHECK_MS = 24 * 60 * 60_000
 SEEN_TTL_S = 2 * 24 * 3600

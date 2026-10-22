@@ -29,6 +29,11 @@ READY_PULL = (
     "<handoff doc> instead of done: the swarm merges it and reopens the task for its proof. Done refuses while a "
     "recorded pull request is open, unless the proof gives --filed for a fix proposed instead of made."
 )
+OPERATOR_PULL = (
+    "If this work opens a pull request, record it with {me} pr <pr url>. This swarm's autonomy leaves the merge "
+    "to the operator: ask for it on the ledger task, wait for the merge, then close the task. Done refuses while a "
+    "recorded pull request is open, unless the proof gives --filed for a fix proposed instead of made."
+)
 THROUGH_CODE = (
     "Reach that state through code: any change to what runs goes through a worktree (wt.sh new {name}), a pull "
     "request into dev and CI, never a live patch."
@@ -746,7 +751,8 @@ GATED_SHIP = {MANUAL: manual_ship, ASSIST: assist_ship}
 def kind_steps(kind, me, led, name, phase, autonomy, task_id):
     steps = STEPS[kind](me, led, naming.plain(name), phase)
     if kind in PULLED_KINDS:
-        return [*steps[:-1], READY_PULL.format(me=me, led=led), steps[-1]]
+        pulled = OPERATOR_PULL if autonomy in GATED_SHIP else READY_PULL
+        return [*steps[:-1], pulled.format(me=me, led=led), steps[-1]]
     if kind not in ("code", "ci") or autonomy not in GATED_SHIP:
         return steps
     return steps[:5] + GATED_SHIP[autonomy](me, led, task_id)
