@@ -379,3 +379,47 @@ def test_a_malformed_detector_id_fails_at_the_measure_entry_point(actions, capsy
     assert doctor.main([WATCHED, "measure", "ci-tier-wall-time/1792617600000-push"]) == 1
     assert "names no run attempt" in capsys.readouterr().err
     assert actions == []
+
+
+def test_a_known_label_set_still_counts_its_window_runs(actions, capsys):
+    capsys.readouterr()
+    assert doctor.main([WATCHED, "measure", 'ci-runner-wait/["anton-batch"]']) == 0
+    assert lines(capsys) == [
+        "ci-runner-wait anton-batch, window 2026-10-17T21:00:00Z to 2026-10-17T22:00:00Z: "
+        "0 of 1 runs over 300 seconds, median 10 seconds, worst 10 seconds"
+    ]
+
+
+@pytest.mark.parametrize("kind", ["ci-runner-wait", "ci-queue-age-unconfirmed"])
+def test_an_unknown_label_set_is_refused_with_the_known_sets_never_zero(actions, capsys, kind):
+    capsys.readouterr()
+    assert doctor.main([WATCHED, "measure", f'{kind}/["anton-osx"]']) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == (
+        "doctor: runner labels anton-osx match no job in the window; "
+        "known label sets: anton-batch; anton-oss; anton-oss-light\n"
+    )
+
+
+def test_an_unknown_label_set_in_an_empty_window_names_no_known_sets(monkeypatch):
+    monkeypatch.setattr(ci_measure.ci_speed_read, "read", lambda *args, **kwargs: {"complete": True, "runs": []})
+    goal = ci_measure.target('ci-runner-wait/["anton-oss"]')
+    with pytest.raises(
+        SwarmError, match="^runner labels anton-oss match no job in the window; known label sets: none$"
+    ):
+        list(ci_measure.measure("ci-runner-wait", goal, (NOW - HOUR_MS, NOW), NOW))
+
+
+def test_a_run_finding_keeps_its_scope_when_the_window_lacks_it(actions, monkeypatch, capsys):
+    capsys.readouterr()
+    monkeypatch.setattr(
+        "scripts.doctor.ci_speed_read.read",
+        lambda *args, **kwargs: {"complete": True, "runs": [wall(13, 2000, "merge_group")]},
+    )
+    assert doctor.main([WATCHED, "measure", 'ci-runner-wait/20-1-["anton-oss-light"]']) == 0
+    assert lines(capsys) == [
+        'ci-runner-wait/20-1-["anton-oss-light"] 440',
+        "ci-runner-wait anton-oss-light, window 2026-10-17T21:00:00Z to 2026-10-17T22:00:00Z: "
+        "0 of 0 runs over 300 seconds",
+    ]
