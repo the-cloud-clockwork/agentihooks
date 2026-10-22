@@ -731,11 +731,28 @@ def test_launches_inside_the_budget_keep_filling_the_lanes(store, monkeypatch):
 def test_a_launch_the_mean_launch_cost_would_carry_past_the_budget_waits_a_pass(store, monkeypatch):
     store.update("sw", max_eng=3)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
-    _slow_launches(monkeypatch, runtime, 8)
+    _slow_launches(monkeypatch, runtime, 7.5)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
     assert ledger.rows["t3"]["state"] == "open"
+
+
+def test_launches_whose_mean_cost_fits_the_rest_of_the_budget_all_start(store, monkeypatch):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 6)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2", "t3"]
+    assert not any("launch budget" in action for action in actions)
+
+
+def test_a_launch_whose_mean_cost_lands_exactly_on_the_budget_waits_a_pass(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 10)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
 
 
 def test_one_launch_well_inside_the_budget_lets_the_next_one_start(store, monkeypatch):
