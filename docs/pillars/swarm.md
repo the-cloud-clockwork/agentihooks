@@ -1617,13 +1617,13 @@ agentihooks swarm example-swarm trace-plan
 
 The command resolves the agent and claimed task from the session. Before any
 classifier call it checks each piece's follow-up text,
-`Cut from the plan of task <task id>: <what>`, against the ledger's plain words
+`Cut from the plan: <what>`, against the ledger's plain words
 rules. Its report names the verdict, kept pieces and cut pieces. If the
 classifier cuts the unrelated piece and the plan passes, the filed follow-up
 reads:
 
 ```text
-Cut from the plan of task promo-38842603017-0: Add an unrelated feature
+Cut from the plan: Add an unrelated feature
 ```
 
 Classifier scope and size judgments still apply; accepting the identifier does
