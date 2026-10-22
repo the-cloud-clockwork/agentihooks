@@ -76,7 +76,7 @@ def _checks(
 def _order(role: str) -> Callable[[dict], tuple]:
     return lambda hive: (
         hive["prefer"].get(role, UNRANKED),
-        -_room(hive),
+        hive["agents"] / max(hive["max_agents"], 1),
         hive["ephemeral"] == YES,
         hive["id"],
     )
@@ -100,6 +100,8 @@ def choose(
     if not candidates:
         return Wait(f"no live hive takes {role}")
     ui_first = role in UI_ROLES
+    if not ui_first:
+        return _pick(role, harness, slot, route_kind, repo, candidates)
     first = [hive for hive in candidates if (hive["ui"] == YES) == ui_first]
     rest = [hive for hive in candidates if (hive["ui"] == YES) != ui_first]
     if not rest:
