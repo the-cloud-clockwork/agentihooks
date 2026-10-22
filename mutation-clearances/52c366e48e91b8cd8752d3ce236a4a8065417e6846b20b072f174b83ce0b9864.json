@@ -1,6 +1,0 @@
-{
-  "scripts/swarm_v2/runtime/local.py:scripts.swarm_v2.runtime.local.xǁLocalHerdrRuntimeǁterminate__mutmut_13:050706d3e4dfb757e3c4deabc4720ea7a5f32799107f30d8c22904d76e3aedc4": {
-    "reader": "standards_reader",
-    "reason": "The default is used only when process_namespace is absent. Both empty string and XXXX have no slash, so previous_boot returns false and process.resolve refuses with NO_PROCESS. Present namespace values and every retirement outcome are unchanged."
-  }
-}
