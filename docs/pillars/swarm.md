@@ -383,19 +383,24 @@ A follow up's routing owner is chosen in this order:
 | Neither | The front door |
 
 An owner that is not a live master seat falls back to the front door. The owner receives the follow up's added
-event notice and, after 15 minutes undecided, its raised notice. Master writes on the follow up (`done`,
-`needs_operator`, comments) follow the same ownership check as task rulings: the owner and any other live master
-pass, with a cross owner write recorded, and a former master is refused with the owner named.
+event notice and, after 15 minutes undecided, its raised notice. Master `set` writes on the follow up's `done`
+and `needs_operator` follow the same ownership check as task rulings: the owner and any other live master pass,
+with a cross owner write recorded, and a former master is refused with the owner named. Comments on a follow up
+are not ownership checked.
 
-Both checks on the server accept the field only on a follow up:
+The operation schema accepts `task` on any `add_item`; the domain check then accepts it only on a follow up:
 
 | Check | Accepts | Refusal |
 |---|---|---|
 | Operation schema (`scripts.swarm_ledger.api.schemas`) | `add_item` fields `by`, `list`, `text`, `needs_operator`, `hive`, `task`; `task` must be a string | `schema_invalid` with `Operation add_item does not match its schema at field task` |
 | Domain check | `task` only when `list` is `followups`, as an id of 1 to 128 letters, digits, dots, underscores or hyphens starting with a letter or digit | `schema_invalid` with `Operation does not match its domain schema: task needs a task id of up to 128 letters, digits, dots, underscores or hyphens` |
 
-So `t2` and `fx-f517f382.code_1` pass, while an empty id, `a/b`, an id with a newline, a number, `null` or an
-id of 129 characters is refused, and so is a `task` on a question.
+| `task` value | Result |
+|---|---|
+| `t2`, `fx-f517f382.code_1`, an id of 128 characters | Accepted |
+| A number or `null` | Refused by the operation schema |
+| An empty id, `a/b`, an id with a newline, an id of 129 characters | Refused by the domain check |
+| Any value on a question | Refused by the domain check |
 
 List the follow ups that carry a task, with their task and state:
 
@@ -409,8 +414,7 @@ The [schema change](https://github.com/the-cloud-clockwork/agentihooks/pull/4696
 send `task` and the domain check accept it, but the operation schema still listed `add_item` without `task`, so
 from the ledger server restart at 06:53 UTC on 19 October every follow up add from a task session was refused at
 field `task`. Its tests used fake ledgers that skip the schema; the delivered tests send each CLI item add through
-`schemas.check_operations` with the real ledger core. On 22 October the Doctor ledger held 263 follow ups
-carrying a task.
+`schemas.check_operations` with the real ledger core.
 
 | Symptom | Action |
 |---|---|
