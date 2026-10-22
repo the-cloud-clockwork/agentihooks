@@ -1172,6 +1172,14 @@ def _acknowledging(slug, store, agent):
     return bool(raw) and json.loads(raw).get("state") == ACKNOWLEDGING
 
 
+def _expire_launch(config, runtime, agent):
+    try:
+        runtime.expire(config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True})
+    except Exception as exc:
+        return RuntimeError(f"expiring the launch raised {exc!r}")
+    return SpawnError(ACK_EXPIRED)
+
+
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     from scripts.swarm_v2.runtime import codex
 
@@ -1179,19 +1187,21 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
         try:
-            if now_ms - agent.started_at >= LEASE_MS:
-                raise SpawnError(ACK_EXPIRED)
             placed = runtime.collect(
                 config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True}
             )
             launched = codex.admit_legacy(store, slug, placed_record(agent, placed), runtime)
         except Exception as exc:
-            if _acknowledging_error(exc):
+            error = exc
+            transient = _acknowledging_error(exc) or not isinstance(exc, SpawnError | SwarmError)
+            if transient and now_ms - agent.started_at >= LEASE_MS:
+                error = _expire_launch(config, runtime, agent)
+            if _acknowledging_error(error):
                 store.refresh(slug, agent.task, agent.name, LEASE_MS)
-            elif isinstance(exc, SpawnError | SwarmError):
-                actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(agent, task, exc), now_ms)
+            elif isinstance(error, SpawnError | SwarmError):
+                actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(agent, task, error), now_ms)
             else:
-                print(f"{agent.name} collect for {task['id']} raised {exc!r}, waiting for the hive", file=sys.stderr)
+                print(f"{agent.name} collect for {task['id']} raised {error!r}, waiting for the hive", file=sys.stderr)
                 store.refresh(slug, agent.task, agent.name, LEASE_MS)
             continue
         actions += _started(slug, config, store, ledger, doc, Started(agent, task, placed, launched), now_ms)
