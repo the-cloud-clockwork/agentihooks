@@ -128,6 +128,7 @@ def test_block_on_a_hive_reads_the_launch_checkout_for_a_repository_missing_here
     ledger.rows["t1"]["repositories"] = [str(tmp_path / "workstation" / "antoncore")]
     _git(top, "commit", "--allow-empty", "-m", "Task work")
     _git(top, "push", "-u", "origin", BRANCH)
+    monkeypatch.chdir(tmp_path)
     assert block() == 0
     row = ledger.rows["t1"]
     assert (row["state"], row["branch"], row["branch_repo"]) == ("blocked", BRANCH, str(origin))
@@ -142,6 +143,34 @@ def test_block_on_a_hive_without_any_task_repository_here_blocks_without_a_branc
     assert block() == 0
     assert ledger.rows["t1"]["state"] == "blocked"
     assert "branch" not in ledger.rows["t1"]
+
+
+def test_block_records_the_pushed_branch_of_a_repository_recorded_on_another_host(worktree, monkeypatch, tmp_path):
+    ledger = worktree[0]
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
+    other_origin, other, other_top = _repository(tmp_path, "antoncore")
+    ledger.rows["t1"]["repositories"] = ["/srv/workstation/dev/agentibrain-kernel", "/srv/workstation/dev/antoncore"]
+    _git(other_top, "commit", "--allow-empty", "-m", "Antoncore work")
+    _git(other_top, "push", "-u", "origin", BRANCH)
+    assert block() == 0
+    row = ledger.rows["t1"]
+    assert (row["state"], row["branch"], row["branch_repo"]) == ("blocked", BRANCH, str(other_origin))
+    assert row["repository_branches"] == {str(other): BRANCH}
+
+
+def test_block_skips_a_repository_with_two_checkouts_here_and_one_missing_here(worktree, monkeypatch, tmp_path):
+    ledger = worktree[0]
+    hive = tmp_path / "hive"
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(hive))
+    _, _, other_top = _repository(tmp_path, "antoncore")
+    _git(tmp_path, "clone", "-q", str(tmp_path / "antoncore.git"), str(hive / "antoncore"))
+    _git(other_top, "commit", "--allow-empty", "-m", "Antoncore work")
+    _git(other_top, "push", "-u", "origin", BRANCH)
+    ledger.rows["t1"]["repositories"] = ["/srv/workstation/dev/antoncore", "/srv/workstation/dev/agentibrain-kernel"]
+    assert block() == 0
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert "branch" not in ledger.rows["t1"]
+    assert "repository_branches" not in ledger.rows["t1"]
 
 
 @pytest.mark.parametrize("hive", [("sw", True, True), ("other", True, False), ("sw", False, False)])

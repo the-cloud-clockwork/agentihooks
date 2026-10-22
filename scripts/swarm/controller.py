@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import lease, local_slots
+from scripts.swarm import lease, local_slots, tick_stop
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
 from scripts.swarm_ledger import ledger_link
@@ -291,6 +291,14 @@ def _stat(pid) -> list[str]:
     return _read(f"/proc/{pid}/stat").rsplit(")", 1)[-1].split()
 
 
+CONTAINER_MARKS = ("/.dockerenv", "/run/.containerenv")
+
+
+def _contained() -> bool:
+    # Pods built from one image share a machine id across nodes.
+    return bool(os.environ.get("KUBERNETES_SERVICE_HOST")) or any(Path(p).exists() for p in CONTAINER_MARKS)
+
+
 def _holder() -> dict:
     host, fields, machine = _host(), _stat(os.getpid()), _read("/etc/machine-id")
     if not host or len(fields) <= 19:
@@ -320,7 +328,7 @@ def _dead(raw: str) -> bool:
 
 
 def _ended_boot(held: dict, host: str) -> bool:
-    machine = _read("/etc/machine-id")
+    machine = "" if _contained() else _read("/etc/machine-id")
     boot = str(held.get("host", "")).partition(":")[0]
     return bool(machine) and held.get("machine") == machine and bool(boot) and boot != host.partition(":")[0]
 
@@ -396,6 +404,13 @@ def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
     return run_once(store, runtimes={service.controller.slug: service.runtime})
 
 
+def _stopped(*_) -> None:
+    # The pod grace period can end before the tick's finally reaches its release.
+    tick_stop.STOP.set()
+    tick_stop.release_all()
+    sys.exit(143)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks controller")
     parser.add_argument("action", choices=("run", "live", "ready"))
@@ -418,7 +433,7 @@ def main(argv: list[str]) -> int:
     operator_env.classifier(os.environ)
     store = connect()
     service = None
-    previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    previous = signal.signal(signal.SIGTERM, _stopped)
     try:
         proof_swarm.run(os.environ, store)
         service = control_service.host(os.environ, store, commands.hive_id())

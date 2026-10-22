@@ -228,6 +228,21 @@ def test_release_all_releases_each_held_tick_lock_once():
     assert tick_stop.release_all() == 0
 
 
+def test_a_signal_that_lands_while_the_thread_holds_the_guard_still_releases():
+    released = []
+    tick_stop.hold("token", lambda: released.append("token"))
+
+    def interrupted():
+        with tick_stop._GUARD:
+            tick_stop.release_all()
+
+    worker = threading.Thread(target=interrupted, daemon=True)
+    worker.start()
+    worker.join(5)
+    assert not worker.is_alive()
+    assert released == ["token"]
+
+
 def test_a_tick_drops_a_lock_the_stop_already_released():
     tick_stop.hold("t", lambda: None)
     assert tick_stop.release_all() == 1

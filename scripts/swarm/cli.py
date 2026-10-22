@@ -115,6 +115,7 @@ from scripts.swarm import (
     queue_record,
     ready,
     reaper,
+    reboot,
     release_wait,
     remote_control,
     review_rounds,
@@ -359,6 +360,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 ).run,
                 doc,
             )
+            actions += skip_refused(reboot.boot_pass, slug, store, ledger, runtime, now_ms())
             actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
             if store.config(slug).template == "doctor":
                 from scripts.doctor import cli as doctor
@@ -1114,6 +1116,12 @@ def _snapshot(store, slug):
 
 def cmd_snapshot(store, args):
     print(json.dumps(_snapshot(store, args.slug)))
+
+
+def cmd_shutdown(store, args):
+    doc = reboot.prepare(store, args.slug, now_ms())
+    names = [a["name"] for a in doc["agents"]]
+    print(json.dumps({"swarm": args.slug, "record": str(reboot.record_path(args.slug)), "local_agents": names}))
 
 
 def cmd_restore(store, args):
@@ -2097,7 +2105,7 @@ def build_parser():
     create.add_argument("--max-ci-agents", type=int, default=None)
     create.add_argument("--max-plan-agents", type=int, default=None)
     create.add_argument("--operator-asked")
-    for plain in ("start", "pause", "remove", "snapshot", "url", "reopen", "rename"):
+    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename"):
         sub.add_parser(plain)
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")

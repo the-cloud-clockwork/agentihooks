@@ -82,9 +82,13 @@ def test_beat_publishes_the_master_login_account(redis, monkeypatch, account):
 
 @pytest.mark.parametrize(("member", "indexed", "ttl"), [("machine", set(), 10), ("other", {"machine"}, 45)])
 def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis, monkeypatch, member, indexed, ttl):
+    import time
+
     from scripts.routing.reservation import LaunchSlots
     from scripts.swarm.keyspace import ROOT
 
+    now = time.time()
+    monkeypatch.setattr(time, "time", lambda: now)
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", member)
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
@@ -811,30 +815,44 @@ def test_a_stalled_wait_socket_reconnects_and_beats_within_one_beat_interval(mon
     assert capsys.readouterr().err.endswith("); reconnecting in 1s\n")
 
 
-@pytest.mark.wall_clock
 def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkeypatch, capsys):
     import time
+    from types import SimpleNamespace
 
     import fakeredis
 
     from scripts.scheduler import process_timer
 
     silent = fakeredis.FakeRedis(decode_responses=True)
-    beats = []
+    clock, beats, waits = [0.0], [], []
+
+    def monotonic():
+        return clock[0]
+
+    def never_wakes(key, timeout):
+        assert 0 < timeout <= process_timer.RECHECK_S
+        waits.append(timeout)
+        clock[0] += timeout
+        return None
 
     def beat(redis, hive):
-        beats.append(time.monotonic())
+        beats.append(monotonic())
         if len(beats) == 2:
             raise KeyboardInterrupt
 
     def scheduler_down():
-        assert time.monotonic() - beats[-1] < daemon.BEAT_SECONDS + 0.25, "the timer wait outlived its bound"
+        assert monotonic() - beats[-1] < daemon.BEAT_SECONDS + 0.25, "the timer wait outlived its bound"
 
+    monkeypatch.setattr(daemon, "time", SimpleNamespace(monotonic=monotonic, time=time.time, sleep=Mock()))
+    monkeypatch.setattr(daemon, "publish_headroom", Mock())
+    monkeypatch.setattr(process_timer, "time", SimpleNamespace(monotonic=monotonic))
+    monkeypatch.setattr(silent, "blpop", never_wakes)
     monkeypatch.setattr(process_timer, "RECHECK_S", 0.05)
     monkeypatch.setattr(process_timer.service, "ensure_running", scheduler_down)
     connects = []
     _stall_run(monkeypatch, lambda: connects.append(silent) or (silent, silent), beat)
     assert len(connects) == 1
+    assert waits
     assert beats[1] - beats[0] < daemon.BEAT_SECONDS
     assert capsys.readouterr().err == ""
 
