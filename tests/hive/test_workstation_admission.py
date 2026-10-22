@@ -17,7 +17,7 @@ def test_successful_root_selection_still_obeys_the_swarm_limit(setup, monkeypatc
     local_agents(setup, 2)
     selected = setup.launcher.select(config, "eng", {"id": "task", "hive": "workstation"})
     assert isinstance(selected, Wait)
-    assert "2 of 2" in selected.reason
+    setup.herdr.spawn.assert_not_called()
 
 
 def test_preselected_root_requests_share_the_last_configured_slot(setup, monkeypatch):
