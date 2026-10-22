@@ -320,9 +320,10 @@ gh api --method GET \
   -f created='2026-10-13T13:10:34Z..2026-10-14T01:10:34Z' \
   -f per_page=100 --paginate \
   --jq '.workflow_runs[] | {id,event,created_at,run_started_at,run_attempt}'
-gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/attempts/1
+run_id=38417922463
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run_id/attempts/1"
 gh api --paginate \
-  repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/attempts/1/jobs \
+  "repos/the-cloud-clockwork/agentihooks/actions/runs/$run_id/attempts/1/jobs" \
   --jq '.jobs[] | {name,conclusion,created_at,started_at,completed_at,runner_name,labels}'
 ```
 
