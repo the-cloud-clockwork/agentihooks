@@ -626,7 +626,7 @@ def cmd_tick_watch(store, args):
     from scripts.swarm.tick import respawn_master
 
     repair = None
-    if os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL) == controller.LOCAL:
+    if not ledger_link.deployed(os.environ):
         runtime = routed(herdr=HerdrRuntime())
 
         def respawn(slug):
