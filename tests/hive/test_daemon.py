@@ -560,7 +560,8 @@ def test_a_beat_moves_a_legacy_roles_record_and_seeds_its_own_key(redis, monkeyp
     daemon.beat(redis, "machine")
     stored = redis.hgetall(registry.key("machine"))
     assert "roles" not in stored and "max_agents" not in stored
-    assert (stored["name"], stored["ephemeral"]) == ("machine", "no")
+    assert stored["name"] == "machine"
+    assert "ephemeral" not in stored
 
 
 def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
