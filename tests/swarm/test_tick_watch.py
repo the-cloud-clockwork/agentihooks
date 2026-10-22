@@ -351,7 +351,7 @@ def test_the_pause_between_passes_ends_on_its_own_clock_never_on_the_scheduler_i
     slept = []
     monkeypatch.setattr(tick_watch.time, "sleep", slept.append)
 
-    tick_watch.run(store, lambda: START, None, passes=2, beat=lambda: None)
+    tick_watch.run(store, lambda: START, None, passes=2, beat=capped([], 200))
 
     assert slept == [tick_watch.PASS_S, tick_watch.PASS_S]
 
@@ -364,6 +364,14 @@ def test_the_watch_beat_slice_sits_well_inside_the_systemd_watchdog():
     assert "WatchdogSec=600\n" in unit
     assert (tick_watch.PASS_S, tick_watch.SLUG_PASS_S, tick_watch.BEAT_S, tick_watch.BLOCKED_LIMIT) == (60, 120, 30, 5)
     assert tick_watch.BEAT_S * 4 <= 600
+
+
+def capped(events, limit):
+    def beat():
+        events.append("beat")
+        assert events.count("beat") <= limit, "the watch spun on its beat"
+
+    return beat
 
 
 def blocking(store, monkeypatch, healthy=None):
@@ -404,7 +412,7 @@ def test_a_blocked_call_in_one_swarm_pass_keeps_the_watchdog_beating_and_the_sta
             None,
             lambda seconds: events.append("wait"),
             passes=2,
-            beat=lambda: events.append("beat"),
+            beat=capped(events, 200),
         )
     finally:
         release()
@@ -424,7 +432,7 @@ def test_a_pass_blocked_through_the_limit_of_passes_exits_the_watcher_so_systemd
     waits = []
     try:
         with pytest.raises(RuntimeError) as raised:
-            tick_watch.run(store, lambda: START, None, waits.append, passes=5, beat=lambda: None)
+            tick_watch.run(store, lambda: START, None, waits.append, passes=5, beat=capped([], 200))
     finally:
         release()
 
@@ -437,7 +445,7 @@ def test_a_blocked_pass_that_ends_lets_the_next_pass_start_its_count_afresh(stor
     release, threads = blocking(store, monkeypatch, healthy=lambda *args: [])
     monkeypatch.setattr(tick_watch, "BLOCKED_LIMIT", 2)
     try:
-        tick_watch.run(store, lambda: START, None, lambda seconds: release(), passes=3, beat=lambda: None)
+        tick_watch.run(store, lambda: START, None, lambda seconds: release(), passes=3, beat=capped([], 200))
     finally:
         release()
 
@@ -450,6 +458,7 @@ class Stuck:
         self.clock, self.joins, self.ends_after = clock, joins, ends_after
 
     def join(self, timeout):
+        assert len(self.joins) < 10, "the await spun past its deadline"
         self.joins.append(timeout)
         self.clock[0] += timeout
 
