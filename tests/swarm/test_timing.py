@@ -88,15 +88,52 @@ def test_failure_records_cost_and_reraises_the_same_exception(monkeypatch, capsy
                 raise error
     assert caught.value is error
     rows = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    here = test_failure_records_cost_and_reraises_the_same_exception
     assert rows[-1] == {
         **rows[0],
         "phase": "finished",
         "outcome": "error",
+        "error": "builtins.KeyboardInterrupt",
+        "raised_at": f"tests/swarm/test_timing.py:{here.__code__.co_firstlineno + 8} {here.__name__}",
         "wall_s": 2.0,
         "own_cpu_s": 0.0,
         "reaped_child_cpu_s": 0.0,
     }
     assert timing.SWARM.get() is None
+
+
+def _drop():
+    raise ConnectionError("Connection closed by server.")
+
+
+def test_failure_names_the_innermost_repository_frame_and_leaves_out_the_message(capsys):
+    with pytest.raises(ConnectionError), timing.tick("sw"), timing.step("sweep"):
+        _drop()
+    finished = json.loads(capsys.readouterr().err.splitlines()[-1])
+    assert finished["error"] == "builtins.ConnectionError"
+    assert finished["raised_at"] == f"tests/swarm/test_timing.py:{_drop.__code__.co_firstlineno + 1} _drop"
+    assert "closed by server" not in json.dumps(finished)
+
+
+def test_failure_outside_the_repository_names_its_caller_here(capsys):
+    with pytest.raises(json.JSONDecodeError), timing.tick("sw"), timing.step("parse"):
+        json.loads("{")
+    finished = json.loads(capsys.readouterr().err.splitlines()[-1])
+    here = test_failure_outside_the_repository_names_its_caller_here
+    assert finished["error"] == "json.decoder.JSONDecodeError"
+    assert finished["raised_at"] == f"tests/swarm/test_timing.py:{here.__code__.co_firstlineno + 2} {here.__name__}"
+
+
+def test_an_exception_that_never_ran_here_has_no_frame():
+    assert timing.raised_at(ValueError()) == ""
+
+
+def test_success_and_stop_records_carry_no_error_fields(capsys):
+    with timing.tick("sw"), timing.step("fine"):
+        pass
+    finished = json.loads(capsys.readouterr().err.splitlines()[-1])
+    assert "error" not in finished
+    assert "raised_at" not in finished
 
 
 def test_nested_scopes_restore_the_parent_and_unscoped_steps_are_silent(capsys):
