@@ -2,7 +2,7 @@ import json
 import subprocess
 from collections.abc import Callable
 
-from scripts.swarm import ledger_events, staged_compatibility
+from scripts.swarm import ledger_events, mutation_wait, staged_compatibility
 from scripts.swarm.store import SwarmError
 
 FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
@@ -47,10 +47,14 @@ def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
 
 
 def rest(path: str, run) -> dict | list | str:
+    if mutation_wait.backing_off():
+        raise SwarmError(f"GitHub API rate limit backoff holds {path}")
     command = ["gh", "api", path]
     try:
         done = run(command, capture_output=True, text=True, timeout=20)
         if done.returncode:
+            if mutation_wait.rate_limited(done.stderr):
+                mutation_wait.hold(path)
             raise SwarmError(done.stderr.strip() or "GitHub API failed")
         return done.stdout if path.endswith("/logs") else json.loads(done.stdout)
     except (OSError, subprocess.SubprocessError, ValueError) as exc:

@@ -245,6 +245,17 @@ def test_pull_request_reads_back_off_until_the_quota_reset(github):
     assert ledger_events.head(PR, subprocess.run) == "first"
 
 
+def test_rest_reads_are_refused_locally_while_the_backoff_holds(github):
+    from scripts.swarm import merge_queue
+    from scripts.swarm.store import SwarmError
+
+    mutation_wait.run_resolution(URL)
+    github.limited = False
+    with pytest.raises(SwarmError, match="rate limit backoff holds repos/org/repo/pulls/7"):
+        merge_queue.rest(PULL, subprocess.run)
+    assert github.asked == [RUN, "rate_limit"]
+
+
 def test_a_rate_limited_checks_view_holds_the_shared_backoff(github):
     assert ledger_events.view(PR, subprocess.run) is None
     assert github.asked == ["graphql", "rate_limit"]
