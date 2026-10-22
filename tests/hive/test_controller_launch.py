@@ -799,6 +799,21 @@ def test_live_acknowledgement_failing_its_identity_reaps_that_execution_never_th
     ]
 
 
+def test_rejected_executions_have_separate_idempotent_reap_commands(setup):
+    _, order, _ = live_order(setup)
+    replacement = replace(order, execution_id="replacement", generation=order.generation + 1)
+    setup.launcher.reap_execution(order)
+    setup.launcher.reap_execution(order)
+    setup.launcher.reap_execution(replacement)
+    sent = [
+        json.loads(fields["order"]) for _, fields in setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    ]
+    assert [(row["execution_id"], row["generation"]) for row in sent] == [
+        (order.execution_id, order.generation),
+        (replacement.execution_id, replacement.generation),
+    ]
+
+
 def test_hive_reaps_the_process_it_acknowledged_for_the_named_execution(setup):
     from scripts.hive.orders import Ack, CommandOrder, Consumer
     from scripts.swarm_v2.runtime.base import Outcome, Status
