@@ -139,7 +139,8 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                 worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
                 renewed = github_app_cli.renew(renewed, time.time())
                 beat(redis, local_id)
-                scheduled_wait(max(0, BEAT_SECONDS - max(WAKE_SLACK_S, time.monotonic() - started)), redis=waiter)
+                delay = max(0, BEAT_SECONDS - max(WAKE_SLACK_S, time.monotonic() - started))
+                scheduled_wait(delay, redis=waiter, timeout=delay + WAKE_SLACK_S / 2)
                 failures = 0
         except lost as exc:
             _back_off(exc, failures)
