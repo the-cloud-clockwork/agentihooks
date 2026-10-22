@@ -69,6 +69,35 @@ def test_a_rate_limited_run_read_admits_the_mutation_wait_pending(env, github): 
     held = idle.wait(store.redis, "sw", ME)["on"]
     assert held == {"kind": "mutation", "target": URL, "head": None}
     assert github.asked == [RUN, "rate_limit"]
+    lines = (github.home / "github-backoff.jsonl").read_text().splitlines()
+    assert [json.loads(line) for line in lines] == [
+        {"at": NOW, "endpoint": RUN, "until": RESET},
+        {"at": NOW, "admitted_pending": URL},
+    ]
+
+
+def test_an_unreadable_first_pass_keeps_a_pending_admission_open(github, monkeypatch):
+    github.limited = False
+    monkeypatch.setattr(
+        subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(args, 1, b"", b"HTTP 502")
+    )
+    held = {**waits.on("mutation", URL), "head": None}
+    assert waits.resolution(held, {}, None, None, None, False) == ""
+    assert held["head"] is None
+
+
+def test_an_unreadable_quota_endpoint_backs_off_one_minute(github, monkeypatch):
+    real = subprocess.run
+
+    def api(args, **kwargs):
+        if args[2] == "rate_limit":
+            github.asked.append("rate_limit")
+            return subprocess.CompletedProcess(args, 1, b"", b"HTTP 502")
+        return real(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    assert mutation_wait.run_resolution(URL) == ""
+    assert mutation_wait._held_until() == NOW + 60
 
 
 def test_reads_back_off_until_the_core_quota_reset(github):

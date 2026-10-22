@@ -103,11 +103,18 @@ def _hold(endpoint):
         staged = home / f"github-backoff.json.{os.getpid()}"
         staged.write_text(json.dumps({"until": until}))
         staged.replace(home / "github-backoff.json")
-        with (home / "github-backoff.jsonl").open("a") as log:
-            log.write(json.dumps({"at": now, "endpoint": endpoint, "until": until}) + "\n")
     except OSError:
         pass
+    _record({"at": now, "endpoint": endpoint, "until": until})
     return until
+
+
+def _record(entry):
+    try:
+        with (_backoff_home() / "github-backoff.jsonl").open("a") as log:
+            log.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass
 
 
 def read(target: str) -> dict | None:
@@ -127,11 +134,15 @@ def bind(target: str) -> str | None:
     try:
         return _bind(target)
     except RateLimited:
+        _record({"at": _now(), "admitted_pending": target})
         return None
 
 
 def _bind(target):
-    run = read(target)
+    return _bound(target, read(target))
+
+
+def _bound(target, run):
     if not run or not _graded(run):
         raise SwarmError(
             "wait on mutation needs a readable branch Mutation preflight or focused mutation proof run url"
@@ -245,8 +256,11 @@ def _unfetched(outcome, conclusion, error):
 def resolution(held: dict) -> str:
     try:
         if not held.get("head"):
+            run = read(held["target"])
+            if run is None:
+                return ""
             try:
-                held["head"] = _bind(held["target"])
+                held["head"] = _bound(held["target"], run)
             except SwarmError as error:
                 return f"mutation preflight {held['target']}, now red; {error}"
         return _resolve(held)
