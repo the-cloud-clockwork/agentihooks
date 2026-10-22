@@ -117,6 +117,26 @@ def test_the_master_seat_waits_for_host_room(store):
     assert store.redis.zrange(tick.HOST_SPENDS, 0, -1, withscores=True) == [("master@a1b2c3-0001", 61_000.0)]
 
 
+def test_hive_launches_never_spend_the_workstation_host_room(store):
+    from dataclasses import replace
+
+    from tests.swarm.test_tick import HiveAcks
+
+    _decide(store, 2)
+    ledger, runtime = _ledger(), HiveAcks()
+    tick.tick("sw", store, ledger, runtime, now_ms=1_000)
+    ordered = list(runtime.ordered)
+    assert len(ordered) == 3
+    for agent in [a for a in store.agents("sw") if a.name in ordered]:
+        hive = replace(agent, hive="remote", runtime_target={"host_id": "remote"}, state="launching")
+        store.start_execution("sw", hive, "")
+    runtime.acked.update(ordered)
+    actions = tick.tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert sum(action.startswith("spawned ") for action in actions) == 3
+    assert store.redis.zrange(tick.HOST_SPENDS, 0, -1) == ["master@a1b2c3-0001"]
+    assert tick._host_full("sw", store, 2_000) == ""
+
+
 def test_only_the_newest_thousand_spawns_are_kept(store):
     for n in range(tick.HOST_SPENDS_KEPT + 1):
         tick._spend_host(store, f"agent-{n}", 1_000 + n)

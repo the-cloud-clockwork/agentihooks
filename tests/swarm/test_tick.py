@@ -822,6 +822,38 @@ def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(s
     assert ledger.rows["t1"]["claimed_by"] != first
 
 
+def _hive_reservations(store, name):
+    from scripts.hive import admission
+    from scripts.routing.reservation import LaunchSlots
+
+    agent = next(a for a in store.agents("sw") if a.name == name)
+    started = store.start_execution(
+        "sw", replace(agent, hive="remote", runtime_target={"host_id": "remote"}, state="launching"), ""
+    )
+    slots = LaunchSlots(store.redis)
+    assert slots.reserve("claude:acct", started.execution_id, 6, 300_000)
+    assert admission.reserve(store.redis, "remote", f"sw/{name}", 3) == (True, 0)
+    return slots
+
+
+@pytest.mark.parametrize("ending", ["refused", "expired"])
+def test_a_failed_hive_launch_releases_its_hive_room_and_launch_slot(store, ending):
+    from scripts.hive import admission
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    (name,) = runtime.ordered
+    slots = _hive_reservations(store, name)
+    if ending == "refused":
+        runtime.failing.add(name)
+    tick("sw", store, ledger, runtime, now_ms=2_000 if ending == "refused" else 1_000 + LEASE_MS)
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    assert launches[name]["state"] == "failed"
+    assert admission.pending(store.redis, "remote") == 0
+    assert slots.counts() == {}
+
+
 def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)
