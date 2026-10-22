@@ -652,7 +652,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
 | `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
-| `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
+| `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. When no listed file changed and the selected remote branch already matches `HEAD`, it skips the commit, gate and push; see [publishing unchanged files](#publishing-unchanged-files). Otherwise the result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the published branch and its repository (`branch_repo`, the origin remote without credentials). When the local branch tracks `origin/<task branch>`, retain that recorded task branch even when the local name differs; otherwise use the local branch. The selected branch must exist on origin. See [recording a published upstream branch](#recording-a-published-upstream-branch). |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. Rounds spent before the task records a pull request, on its first pull request and on each later one, count on separate counters ([Review round counters](#review-round-counters)). |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. A code or ci task needs its pull request merged. A task of any other kind with a recorded pull request is refused until that pull request merges, unless its proof gives `--filed` for a fix proposed instead of made; its prompt tells it to release the seat with `ready` instead, or at manual or assist autonomy to wait for the operator's merge. A `plan` task records no pull request. |
@@ -1196,10 +1196,12 @@ resolve a sole task repository, but refuses an ambiguous selection when the
 task declares several repositories. Without a `repositories` list, the swarm
 repository is the default.
 
-Publication stages only the named files, commits if needed, runs the selected
-repository's prepush gate, then pushes. A failure reports a `Next:` command;
+Publication stages only the named files and commits if needed. Unless the
+[unchanged publication check](#publishing-unchanged-files) skips the gate and
+push, it runs the selected repository's prepush gate, then pushes. A failure reports a `Next:` command;
 fix the reported cause and repeat that command. An already committed head is
-graded again without an empty commit. Missing worktrees require `prepare`;
+graded again without an empty commit when the selected remote branch does not
+already match it. Missing worktrees require `prepare`;
 unrelated tracked changes must be dealt with before publication. Tests run in
 CI. A push rejected because the remote changed remains a failure to reconcile;
 branch selection does not resolve concurrent remote updates.
@@ -1210,9 +1212,69 @@ fix ([red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs
 the corrected publication and continuation cases passed afterward
 ([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38725568065)).
 
+### Publishing unchanged files
+
+Repeating `swarm publish` after a successful publication avoids an unnecessary
+push when there is nothing new to deliver. After staging the explicit file
+list, publish checks the selected branch on `origin` with `git ls-remote`.
+If the index has no changes and that remote branch already points at local
+`HEAD`, it makes no commit, runs no prepush gate and makes no push. This repeat
+publication starts no push-triggered mutation preflight.
+
+Run from the task worktree, using repository relative file names after `--`:
+
+```bash
+agentihooks swarm <id> publish \
+  --message "Document publication behavior" -- docs/pillars/swarm.md
+```
+
+Repeat the same command when that file is unchanged. The result includes the
+current `head`, the selected `branch` and this `unchanged` field; it has no
+`gate` field:
+
+```json
+{
+  "unchanged": "no changes in the listed files and the remote branch already points at this head; nothing pushed"
+}
+```
+
+An empty file list also supports publishing a head that is already committed,
+without making an empty commit:
+
+```bash
+agentihooks swarm <id> publish --message "Publish the committed head" --
+```
+
+| Listed files and selected remote branch | Result |
+|---|---|
+| No staged changes; remote equals local `HEAD` | Skip commit, gate and push; return `unchanged`. |
+| No staged changes; remote branch is missing or behind local `HEAD` | Grade the committed head and push it; no new commit or `unchanged` field. |
+| Listed files produce staged changes | Commit, grade and push normally. |
+
+No flag, environment variable or additional configuration enables this check;
+it is automatic. Repository and delivery branch selection still follow the
+[successor publication rules](#publishing-after-a-successor-prepares-a-branch).
+For a task with several repositories, use the appropriate prepared worktree;
+the comparison applies to that repository's selected delivery branch.
+
+A clean file list alone does not mean nothing needs publishing: a local commit
+may still be absent from origin. A different remote head takes the normal gate
+and push path, including when histories diverge; the check does not repair a
+rejected push. A failed remote lookup is a publication failure, not proof that
+the remote matches. Follow its reported `Next:` command after resolving access
+or connectivity. Unrelated tracked changes are still refused before staging;
+resolve them before retrying, including when passing an empty file list.
+
+Delivered in [pull request 4549](https://github.com/the-cloud-clockwork/agentihooks/pull/4549).
+The [red CI proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39139111507)
+observed the unnecessary push; the
+[green CI proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39139298958)
+covered unchanged and empty lists, matching remotes, and missing or behind branches.
+
 ### Fallback gate for repositories without their own
 
-`publish` runs the repository's own gate when the worktree holds
+When publication requires a push, `publish` runs the repository's own gate
+when the worktree holds
 `scripts/ci_prepush.py` or `scripts/ci_prepush/__main__.py`. Otherwise it runs
 the AgentiHooks touched Python fallback, and the publish result names it in
 its `gate` field:
@@ -2625,6 +2687,9 @@ A detection pass reads:
   one `NameRegistry.slugs_of` call: one `MGET` for aliases and one `HMGET` for agent codes. The pass keeps the same
   items, in the same order, as the old one key at a time loop. The inbox detector and the handoff detector share
   this one read.
+- **The inbox receivers, in a fixed number of reads.** The inbox detector then resolves who each address reaches
+  in a fixed number of round trips however many addresses the inbox holds, seven against the live store; see
+  [Inbox receiver read](#inbox-receiver-read).
 - **The watched tasks, once.** The CI detector and the trace detector share one read of the watched ledger's tasks.
 - **Every detector side by side.** Each detector runs in its own thread and is still timed as its own
   `doctor.<name>` step: `runtime storage`, `scheduled tick`, `health`, `inbox`, `handoff`, `spawn`,
@@ -2636,6 +2701,96 @@ A detection pass reads:
   the whole step; see [How the Doctor reads traces](../reference/observability-langfuse.md#how-the-doctor-reads-traces)).
 
 No detector, finding or threshold changed with this work: a pass raises the same findings it raised before.
+
+#### Inbox receiver read
+
+The `inbox past window` finding asks, for every item it reads, whether the item's receiver can still act on it.
+`inbox_receivers` in `scripts.doctor.read` answers that once per detection pass, for every address the items reach
+and every agent that took delivery of an item (the last `delivered` or `read` entry in its history). The detector
+passes the result to `inbox.findings`.
+
+It reads the whole pass in a fixed set of batched reads:
+
+| Read | Redis commands | Round trips |
+|---|---|---|
+| Live agents of the watched swarm and of its Doctor | the agent registry of each swarm | one pipeline per swarm against the live store |
+| Which swarm each address belongs to | `NameRegistry.slugs_of`: one `MGET` of aliases, one `HMGET` of agent codes | two |
+| Seat occupancies and the swarm configuration behind every seat | one pipeline of `HGETALL` per seat and per seat's swarm | one |
+| The current name of every seat occupant and delivery taker | `NameRegistry.resolve_many`: one `MGET` of aliases | one |
+| The recorded exit of every live agent | `SeatStore.exits`: one `MGET` | one |
+
+The number of round trips depends on how many reads the agent registry makes, never on the number of addresses.
+CI holds it at sixteen or fewer for both ten and two hundred agents, each with an alias, a seat, a delivery taker
+in a foreign swarm and a foreign swarm configuration.
+
+Each address gets one `Receiver`:
+
+| Address | Receiver |
+|---|---|
+| `operator` | In scope, not live, no seat wait |
+| An address whose swarm is neither the watched swarm nor its Doctor | Out of scope: `scoped` false, so its items never count as waiting |
+| A name, or a seat whose occupant is a live agent that has not exited this occupancy | Live, with `quiet_ms` from the agent's idle ticks (one minute each), its `occupant` and `harness` |
+| A seat whose occupant exited, or is not live | Not live; `seat_wait` true unless the seat's swarm is `stopped` or the seat number is above its lane cap (`max_eng`, `max_ci`, `max_plan`; a configuration without `max_plan` counts as a cap of one). Only `eng`, `ci` and `plan` seats have a cap; any other seat, such as `master@<id>`, waits until its swarm stops. A seat whose swarm has no configuration waits |
+| Any other name | In scope, not live |
+
+A delivery taker is looked up in its own swarm, so mail delivered to a seat of another swarm is judged by that
+swarm's state and caps. An item to a seat with `seat_wait` set and no live receiver is skipped: it waits for the
+seat's next occupant, not for a gone one.
+
+Nothing about the read is configurable: the batched reads, the sixteen trip bound in CI and the one minute per idle
+tick are fixed in code.
+
+##### Check the receiver read
+
+The read uses only the store and inbox clients, so it can be called read only against the live Redis from a
+checkout. A count of the receivers the watched swarm's current inbox resolves to:
+
+```bash
+cd ~/dev/tcc-ecosystem/agentihooks
+~/dev/tcc-ecosystem/.venv/bin/python - rig-grade-swarm <<'PY'
+import sys, time
+from scripts.doctor import read
+from scripts.inbox.store import InboxStore
+from scripts.swarm.store import RedisStore, redis_client
+
+slug = sys.argv[1]
+redis = redis_client()
+store, box = RedisStore(redis), InboxStore(redis)
+items = read.inbox_items(box, slug)
+started = time.monotonic()
+found = read.inbox_receivers(store, box, slug, items)
+print(len(items), "items;", len(found), "receivers;",
+      sum(r.live for r in found.values()), "live;",
+      sum(r.seat_wait for r in found.values()), "seats waiting;",
+      round(time.monotonic() - started, 3), "s")
+PY
+```
+
+Output on 22 October 2026:
+
+```text
+43569 items; 3294 receivers; 10 live; 2 seats waiting; 0.329 s
+```
+
+Pass the watched swarm's id, not the Doctor's: the read covers the watched swarm and its Doctor together. Run it
+from a worktree with `PYTHONPATH` set to that worktree, or the editable install loads the main checkout's code.
+
+##### Measured result of the receiver read
+
+Pull request [4474](https://github.com/the-cloud-clockwork/agentihooks/pull/4474) merged into `dev` on 18 October
+2026 at 19:15 UTC.
+
+| Measure | Before | After |
+|---|---|---|
+| Fixed live snapshot: 34,444 items, 2,301 addresses, 2,808 receivers | 53,062 round trips, 25.05 s | 7 round trips (3 pipelines, 3 `MGET`, 1 `HMGET`), 0.25 s, on the branch head |
+| CI round trips, ten and two hundred agents | 75 and 1,405 (red run [39118414817](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39118414817)) | sixteen or fewer (green run [39119319483](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39119319483)) |
+| `doctor.inbox` step, thirty minute window | 4 passes, 31.2 to 63.5 s (18 October, 09:44 to 10:14 UTC) | 4 passes, 6.8 to 7.6 s (22 October, 09:30 to 10:00 UTC) |
+| Timer step, same windows | 15 steps, 5.7 to 74.6 s | 15 steps, 5.9 to 74.0 s |
+
+Both windows were read with the journal commands under [Measure the timer step](#measure-the-timer-step). The after
+window also runs the later handoff scan batching, [pull request 5785](https://github.com/the-cloud-clockwork/agentihooks/pull/5785),
+which changes the handoff detector. The timer step's maximum is still set by `doctor.handoff`: in the after window's
+74.0 second pass it took 62.8 seconds, against 7.6 for `doctor.inbox`.
 
 #### Configuration
 
@@ -2709,6 +2864,8 @@ by fast forwarding the main checkout at 09:37:59 UTC on 18 October 2026. On 22 O
 |---|---|---|
 | A timer step over 60 seconds | The detector steps with the same `pid` | The slowest `doctor.<name>` step sets the pass time; that detector is the one to bound |
 | A `doctor.<name>` record with `"outcome": "error"` | Its `error` field, and the Doctor tick's action line `the <name> detector failed: ...` | That detector raised; the other detectors of the pass still reported |
+| `doctor.inbox` takes tens of seconds again | The receiver check under [Inbox receiver read](#inbox-receiver-read) and the inbox size it prints | Under a second for the receivers means the time is spent elsewhere in the inbox step; seconds there means a per address read came back |
+| An `inbox past window` finding on mail to an empty seat | The seat swarm's `state`, `max_eng`, `max_ci` and `max_plan` in its stored configuration | A seat waits for its next occupant unless its swarm is stopped or the seat number is above the lane cap |
 | `controller lease is stale` after a Doctor step | [Controller lease during long steps](#controller-lease-during-long-steps) | The heartbeat lost the lease to a higher epoch; the next pass takes a new one |
 | Tick runs killed by the service start timeout | The timeout count above and the timer step walls in the same window | A step past the timeout ends the whole tick; bound the slowest step |
 
