@@ -1524,7 +1524,7 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
             "./.workflow-revision/.github/actions/browser-cache",
         }
         assert all(steps.index(take) < steps.index(step) for step in local[name])
-        assert all("hashFiles" not in step["if"] for step in local[name])
+        assert all("hashFiles" not in step.get("if", "") for step in local[name])
 
 
 def test_a_head_that_predates_the_local_actions_gets_them_from_the_workflow_revision(tmp_path):

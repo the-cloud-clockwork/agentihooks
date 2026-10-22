@@ -154,7 +154,7 @@ def _retries(job):
 
 
 def _step_retries(step):
-    action = step.get("uses", "")
+    action = step.get("uses", "").replace("./.workflow-revision/", "./", 1)
     if action.rstrip("/") == _RETRY:
         return True
     if not action.startswith("./.github/actions/"):

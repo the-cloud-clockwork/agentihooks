@@ -2780,6 +2780,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"
 
+      - name: Take the local actions from the workflow revision
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          mkdir -p .workflow-revision
+          git archive "$GITHUB_SHA" .github/actions | tar -x -C .workflow-revision
+
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
         run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
@@ -2791,15 +2797,15 @@ jobs:
           name: mutation-selection
 
       - name: Install the pinned nats server for the bus backend tests
-        if: needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.github/actions/nats-server/action.yml') != ''
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         timeout-minutes: 3
-        uses: ./.github/actions/nats-server
+        uses: ./.workflow-revision/.github/actions/nats-server
 
       - name: Install the browser that page tests drive
         id: browser
         if: needs.mutation-plan.outputs.browser == 'true'
         timeout-minutes: 6
-        uses: ./.github/actions/browser-cache
+        uses: ./.workflow-revision/.github/actions/browser-cache
 
       - name: Report browser setup failure
         if: failure() && steps.browser.outcome == 'failure'
@@ -2891,6 +2897,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"
 
+      - name: Take the local actions from the workflow revision
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          mkdir -p .workflow-revision
+          git archive "$GITHUB_SHA" .github/actions | tar -x -C .workflow-revision
+
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
         run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
@@ -2902,15 +2914,15 @@ jobs:
           name: mutation-selection
 
       - name: Install the pinned nats server for the bus backend tests
-        if: needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.github/actions/nats-server/action.yml') != ''
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         timeout-minutes: 3
-        uses: ./.github/actions/nats-server
+        uses: ./.workflow-revision/.github/actions/nats-server
 
       - name: Install the browser that page tests drive
         id: browser
         if: needs.mutation-plan.outputs.browser == 'true'
         timeout-minutes: 6
-        uses: ./.github/actions/browser-cache
+        uses: ./.workflow-revision/.github/actions/browser-cache
 
       - name: Report browser setup failure
         if: failure() && steps.browser.outcome == 'failure'
