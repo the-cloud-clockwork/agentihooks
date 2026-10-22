@@ -867,15 +867,16 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
     return clear + overlapping
 
 
-def _launch_order(slug, store, tasks, dispatched=None):
-    return sorted(
-        tasks,
-        key=lambda task: (
-            dispatched(task)[0] if dispatched else ledger_rank.order(task),
-            bool(store.launch_failure(slug, task["id"])),
-            not claim_order.resumed(task),
-        ),
+def _launch_key(slug, store, dispatched=None):
+    return lambda task: (
+        dispatched(task)[0] if dispatched else ledger_rank.order(task),
+        bool(store.launch_failure(slug, task["id"])),
+        not claim_order.resumed(task),
     )
+
+
+def _launch_order(slug, store, tasks, dispatched=None):
+    return sorted(tasks, key=_launch_key(slug, store, dispatched))
 
 
 def _parked(task, rows):
@@ -1233,6 +1234,7 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     decision = capacity.read(store, slug)
     caps = capacity.caps(decision, config)
     dispatched = dispatcher.claim_key(config, doc)
+    key = _launch_key(slug, store, dispatched)
     queue, waits = [], []
     for lane, cap in caps.items():
         busy = sum(
@@ -1242,9 +1244,9 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
         ready, refused = profile_first.placeable(slug, config, store, runtime, lane, ready, max(cap - busy, 0))
-        queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
+        queue += [(key(task), busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
-    return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])], waits
+    return [(lane, task) for *_, lane, task in sorted(queue, key=lambda entry: entry[:2])], waits
 
 
 def _room_wait(runtime, lane, task):
