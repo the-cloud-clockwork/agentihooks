@@ -1,5 +1,6 @@
 import pytest
 
+from scripts import cli_delegates
 from scripts.events import memory
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
@@ -188,3 +189,7 @@ def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatc
     assert runner.main(["run", "--once"]) == 0
     assert handler.seen == [("e1", 1)]
     assert "lifecycle: handled" in capsys.readouterr().out
+
+
+def test_the_hub_command_is_a_delegated_cli():
+    assert cli_delegates.delegated_cli(["hub", "run"]) is runner.main
