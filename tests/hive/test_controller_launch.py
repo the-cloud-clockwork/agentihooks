@@ -813,11 +813,39 @@ def test_hive_reaps_the_process_it_acknowledged_for_the_named_execution(setup):
     runtime.herdr.reap_name.assert_not_called()
 
 
-@pytest.mark.parametrize("bad", ["generation", "execution", "hive"])
+@pytest.mark.parametrize("status,detail", [("ok", ""), ("refused", "process identity changed")])
+def test_execution_reap_uses_the_receipt_even_when_the_registry_pane_changed(setup, status, detail):
+    from scripts.hive.orders import Ack, CommandOrder, Consumer
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    _, order, ack = live_order(setup)
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update(
+        "fixture", replace(agent, pane_id="replacement", runtime_target={"host_id": "remote", "pid": 999})
+    )
+    runtime = Mock()
+    runtime.terminate.return_value = Outcome("terminate", Status(status), "local", detail=detail)
+    reap = CommandOrder("reap", "reap_execution", "fixture", "", order.execution_id, order.generation)
+    expected = Ack("done" if status == "ok" else "failed", ack.target, detail)
+    assert Consumer(setup.store.redis, "remote", runtime).command(reap) == expected
+    (reaped,), _ = runtime.terminate.call_args
+    assert (reaped.execution_id, reaped.runtime_target, reaped.pane_id) == (order.execution_id, ack.target, "pane")
+    runtime.herdr.reap_name.assert_not_called()
+
+
+@pytest.mark.parametrize("bad", ["generation", "execution", "hive", "missing", "failed", "foreign target"])
 def test_hive_never_reaps_an_execution_it_did_not_acknowledge(setup, bad):
     from scripts.hive.orders import FOREIGN, CommandOrder, Consumer
 
-    _, order, _ = live_order(setup)
+    _, order, ack = live_order(setup)
+    if bad == "missing":
+        setup.store.redis.hdel(setup.launcher.orders.receipt(order), "ack")
+    elif bad == "failed":
+        setup.store.redis.hset(setup.launcher.orders.receipt(order), "ack", replace(ack, status="failed").encode())
+    elif bad == "foreign target":
+        setup.store.redis.hset(
+            setup.launcher.orders.receipt(order), "ack", replace(ack, target={"host_id": "elsewhere"}).encode()
+        )
     runtime = Mock()
     generation = order.generation + (bad == "generation")
     execution = "other" if bad == "execution" else order.execution_id
