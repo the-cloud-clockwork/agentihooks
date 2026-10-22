@@ -279,4 +279,4 @@ def sweep(slug, doc, ctx):
         used = in_use(doc)
         for file_id in dropped - used:
             (media.folder(slug) / file_id).unlink(missing_ok=True)
-        ctx.unstored |= dropped - used
+        ctx.unstored = dropped - used

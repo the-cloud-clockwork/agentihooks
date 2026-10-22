@@ -15,7 +15,7 @@ def _repository():
 
 def save(slug: str, file_id: str, data: bytes) -> None:
     with _repository().connect() as connection, connection:
-        connection.execute(SAVE, (slug, file_id, base64.b64encode(data).decode("ascii")))
+        connection.execute(SAVE, (slug, file_id, base64.b64encode(data).decode()))
 
 
 def load(slug: str, file_id: str) -> bytes | None:
