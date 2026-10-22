@@ -171,7 +171,17 @@ def _retire(args: argparse.Namespace) -> str:
     if args.command == "revoke":
         auth.revoke(redis_client(), args.id)
         return f"revoked {args.id}"
+    if args.command == "drain":
+        return _drain(args.wait)
     return "\n".join(_remove(args))
+
+
+def _drain(wait_s: int) -> str:
+    from scripts.hive import remove
+    from scripts.swarm.commands import hive_id
+    from scripts.swarm.store import RedisStore
+
+    return remove.settle(RedisStore(redis_client()), hive_id(), wait_s, remove.Host())
 
 
 def _serve(args: argparse.Namespace) -> int:
@@ -223,6 +233,8 @@ def _parser() -> argparse.ArgumentParser:
     removed.add_argument("--path", help="OpenBao record under the secret mount; defaults to k8s/agentihooks-hive-LABEL")
     removed.add_argument("--antoncore", type=Path, help="antoncore checkout to remove the hive's manifests from")
     removed.add_argument("--wait", type=int, default=3600, help="seconds to wait for its agents to hand off")
+    drained = sub.add_parser("drain", help="Take no new agents on this hive and wait until its agents finish")
+    drained.add_argument("--wait", type=int, default=3600, help="seconds to wait for its agents to finish")
     sub.add_parser(
         "controller", help="Write a new controller service credential to a private file, retiring the previous one"
     )
@@ -233,6 +245,7 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--tls-cert", help="PEM certificate; required off loopback")
     serve.add_argument("--tls-key", help="PEM private key for --tls-cert")
     settings = sub.add_parser("set", help=f"Set {', '.join(registry.SETTINGS)} as key=value")
+    settings.add_argument("--keep", action="store_true", help="Leave max-agents, excluded, ui and ephemeral as stored")
     settings.add_argument("id")
     settings.add_argument("settings", nargs="*", metavar="key=value")
     sub.add_parser("show", help="Print a hive's record as JSON").add_argument("id")
@@ -274,7 +287,7 @@ def _list() -> None:
 
 def _registry(args: argparse.Namespace) -> None:
     if args.command == "set":
-        print(json.dumps(registry.update(redis_client(), args.id, args.settings)))
+        print(json.dumps(registry.update(redis_client(), args.id, args.settings, keep=args.keep)))
     elif args.command == "show":
         record = registry.show(redis_client(), args.id)
         if record is None:
@@ -343,7 +356,7 @@ def main(argv: list[str]) -> int:
             print(
                 f"refreshed the Redis credential of hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}"
             )
-        elif args.command in ("revoke", "remove"):
+        elif args.command in ("revoke", "remove", "drain"):
             print(_retire(args))
         elif args.command in ("run", "install"):
             return _daemon(args.command)

@@ -2,7 +2,6 @@ import argparse
 import json
 import os
 import signal
-import socket
 import sys
 import uuid
 from collections.abc import Mapping
@@ -12,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import lease, local_slots
+from scripts.swarm import lease, local_slots, tick_stop
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
 from scripts.swarm_ledger import ledger_link
@@ -273,19 +272,16 @@ def _stat(pid) -> list[str]:
 CONTAINER_MARKS = ("/.dockerenv", "/run/.containerenv")
 
 
-def _machine() -> dict:
-    """The machine and its boot; a holder recorded on this machine in an earlier boot cannot still be running.
-
-    Containers name no machine: pods built from one image share a machine id and a hostname across nodes."""
-    if os.environ.get("KUBERNETES_SERVICE_HOST") or any(Path(p).exists() for p in CONTAINER_MARKS):
-        return {}
-    machine, boot = _read("/etc/machine-id"), _read("/proc/sys/kernel/random/boot_id")
-    return {"machine": f"{machine}:{socket.gethostname()}", "boot": boot} if machine and boot else {}
+def _contained() -> bool:
+    # Pods built from one image share a machine id across nodes.
+    return bool(os.environ.get("KUBERNETES_SERVICE_HOST")) or any(Path(p).exists() for p in CONTAINER_MARKS)
 
 
 def _holder() -> dict:
-    host, fields = _host(), _stat(os.getpid())
-    return {"host": host, "pid": os.getpid(), "start": fields[19], **_machine()} if host and len(fields) > 19 else {}
+    host, fields, machine = _host(), _stat(os.getpid()), _read("/etc/machine-id")
+    if not host or len(fields) <= 19:
+        return {}
+    return {"host": host, "pid": os.getpid(), "start": fields[19], **({"machine": machine} if machine else {})}
 
 
 def _gone(pid: int, start: str) -> bool:
@@ -301,13 +297,18 @@ def _gone(pid: int, start: str) -> bool:
 
 def _dead(raw: str) -> bool:
     held = json.loads(raw) if raw.startswith("{") else {}
-    machine = _machine()
-    if machine and held.get("machine") == machine["machine"] and held.get("boot") not in (None, machine["boot"]):
-        return True
     host = _host()
+    if host and _ended_boot(held, host):
+        return True
     if not host or held.get("host") != host or not {"pid", "start"} <= held.keys():
         return False
     return _gone(held["pid"], held["start"])
+
+
+def _ended_boot(held: dict, host: str) -> bool:
+    machine = "" if _contained() else _read("/etc/machine-id")
+    boot = str(held.get("host", "")).partition(":")[0]
+    return bool(machine) and held.get("machine") == machine and bool(boot) and boot != host.partition(":")[0]
 
 
 def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int) -> str | None:
@@ -381,6 +382,13 @@ def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
     return run_once(store, runtimes={service.controller.slug: service.runtime})
 
 
+def _stopped(*_) -> None:
+    # The pod grace period can end before the tick's finally reaches its release.
+    tick_stop.STOP.set()
+    tick_stop.release_all()
+    sys.exit(143)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks controller")
     parser.add_argument("action", choices=("run", "live", "ready"))
@@ -403,7 +411,7 @@ def main(argv: list[str]) -> int:
     operator_env.classifier(os.environ)
     store = connect()
     service = None
-    previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    previous = signal.signal(signal.SIGTERM, _stopped)
     try:
         proof_swarm.run(os.environ, store)
         service = control_service.host(os.environ, store, commands.hive_id())

@@ -31,7 +31,8 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario():
     assert scenario["services"]["postgres"]["image"] == "public.ecr.aws/docker/library/postgres:16"
     steps = scenario["steps"]
     assert "tests/swarm_ledger/test_postgres_writer_lock.py" in steps[-2]["run"]
-    assert "grep -q ' 1 passed'" in steps[-2]["run"]
+    assert "tests/swarm_ledger/test_postgres_outbox.py" in steps[-2]["run"]
+    assert "grep -q ' 4 passed'" in steps[-2]["run"]
     assert steps[-1]["uses"] == "./.github/actions/input-key/save"
     assert steps[-1]["if"] == "github.event_name == 'push' || github.event_name == 'workflow_dispatch'"
     assert steps[-1]["with"] == {"key": "${{ needs.inputs.outputs.key }}"}

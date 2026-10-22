@@ -665,3 +665,68 @@ def test_a_serena_router_that_does_not_come_up_fails_the_order_before_spawn(setu
     monkeypatch.setattr(serena_router_daemon, "ensure", lambda: False)
     assert setup.consumer.apply(setup.order) == Ack("failed", {}, "serena")
     setup.runtime.spawn.assert_not_called()
+
+
+def test_started_order_of_a_dead_pod_fails_restarted_at_once(setup):
+    from scripts.hive.orders import Ack, Consumer
+
+    setup.runtime.spawn.side_effect = KeyboardInterrupt
+    setup.orders.send("host", setup.order)
+    with pytest.raises(KeyboardInterrupt):
+        Consumer(setup.redis, "host", setup.runtime, pod="old").poll()
+    assert setup.redis.hget(setup.orders.receipt(setup.order), "pod") == "old"
+    Consumer(setup.redis, "host", setup.runtime, pod="new").poll()
+    assert setup.orders.ack(setup.order) == Ack("failed", {}, "restarted")
+    setup.runtime.spawn.assert_called_once()
+
+
+def test_started_order_of_a_live_pod_keeps_waiting(setup):
+    from scripts.hive.orders import Consumer, alive
+    from scripts.swarm import lease
+
+    setup.redis.hset(
+        setup.orders.receipt(setup.order), mapping={"started": str(lease.now_ms(setup.store)), "pod": "old"}
+    )
+    alive(setup.redis, "host", "old")
+    assert setup.redis.get(setup.orders.pod("host", "old")) == "1"
+    assert setup.redis.ttl(setup.orders.pod("host", "old")) == 45
+    order = replace(setup.order, expires_at=2**62)
+    assert Consumer(setup.redis, "host", setup.runtime, pod="new").apply(order) is None
+    setup.runtime.spawn.assert_not_called()
+
+
+def test_started_order_without_a_recorded_pod_keeps_waiting(setup):
+    from scripts.hive.orders import Consumer
+    from scripts.swarm import lease
+
+    setup.redis.hset(setup.orders.receipt(setup.order), "started", str(lease.now_ms(setup.store)))
+    order = replace(setup.order, expires_at=2**62)
+    assert Consumer(setup.redis, "host", setup.runtime, pod="new").apply(order) is None
+    setup.runtime.spawn.assert_not_called()
+
+
+def test_started_order_of_this_pod_keeps_waiting_without_its_liveness_key(setup):
+    from scripts.hive.orders import Consumer
+    from scripts.swarm import lease
+
+    setup.redis.hset(
+        setup.orders.receipt(setup.order), mapping={"started": str(lease.now_ms(setup.store)), "pod": "new"}
+    )
+    order = replace(setup.order, expires_at=2**62)
+    assert Consumer(setup.redis, "host", setup.runtime, pod="new").apply(order) is None
+    setup.runtime.spawn.assert_not_called()
+
+
+def test_the_start_mark_alone_claims_an_order(setup):
+    from scripts.hive.orders import Consumer
+
+    setup.redis.hset(setup.orders.receipt(setup.order), "pod", "old")
+    assert Consumer(setup.redis, "host", setup.runtime, pod="new").apply(setup.order).status == "live"
+    assert setup.redis.hget(setup.orders.receipt(setup.order), "pod") == "old"
+    setup.runtime.spawn.assert_called_once()
+
+
+def test_pod_liveness_key_lives_under_the_hive(setup):
+    from scripts.hive import registry
+
+    assert setup.orders.pod("host", "abc") == f"{registry.key('host')}:pod:abc"

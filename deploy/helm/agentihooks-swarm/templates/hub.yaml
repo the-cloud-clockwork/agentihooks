@@ -1,0 +1,52 @@
+{{- if and .Values.hub.enabled (not .Values.hiveOnly) }}
+{{- $hub := .Values.hub }}
+{{- if and (eq (toString $hub.bus.backend) "nats") (not $hub.bus.url) }}
+{{- fail "hub.bus.url is required with the nats backend: the hub reads every reactor's events from that address" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "swarm.fullname" . }}-hub
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hub
+spec:
+  replicas: {{ int $hub.replicas }}
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "hub") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: hub
+    spec:
+      {{- include "swarm.podSecurity" . | nindent 6 }}
+      terminationGracePeriodSeconds: {{ $hub.terminationGracePeriodSeconds }}
+      {{- with $hub.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $hub.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: hub
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command: [agentihooks, hub, run]
+          env:
+            {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
+            - name: AGENTIHOOKS_BUS
+              value: {{ $hub.bus.backend | quote }}
+            {{- with $hub.bus.url }}
+            - name: AGENTIHOOKS_BUS_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- include "swarm.extraEnv" $hub.env | nindent 12 }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          resources:
+            {{- toYaml $hub.resources | nindent 12 }}
+{{- end }}

@@ -337,6 +337,54 @@ live masters it returns without reading the ledger. A live master of a mutually 
 message a live watched master seat for coordination; that exception does not permit instructions to an engineer
 claiming another master's task.
 
+##### Follow ups on a task
+
+A follow up an agent adds while it works a task belongs to the master that owns that task. `agentihooks ledger
+followup add` reads `AGENTIHOOKS_SWARM_TASK`, which the tick sets for every agent it spawns
+on a task, and stores that task id on the new follow up as `task`. The owner is resolved in this order:
+
+| The follow up carries | Owning master |
+|---|---|
+| `hive` (from `--hive ID`) | The seat set for that hive with `swarm <id> set hive.ID=SEAT` |
+| `task`, no `hive` | The owner of that task: its phase's owning master seat, or the front door for a task without a phase |
+| Neither | The front door |
+
+An owner seat with no live master falls back to the front door. The follow up's added notice reaches the owning
+master. Still undecided after 15 minutes, it gets a raise notice to the same owner; after 30 minutes it is raised to
+the operator's Priorities, and that priority notice also goes to the owner.
+
+The [master fence](#configuration-and-failure-handling) checks `followup done`, `followup open`, `followup flag` and
+`followup unflag` by a master: the owner passes, any other live master seat passes as a recorded cross owner write,
+and a master holding no live seat is refused. A comment on a follow up is not fenced. Once a master decides a follow
+up, the owner recorded with that decision stays its owner for later master writes, until a writer outside the master
+lane changes the follow up.
+
+```bash
+# In an engineer session on task t42, which sits in a phase master-2@my-swarm owns.
+# The tick exported AGENTIHOOKS_SWARM_TASK=t42 at spawn; no flag is needed.
+agentihooks ledger --slug my-swarm followup add "Retry the notes build once the cache rebuild lands"
+
+# The added notice reaches master-2@my-swarm, which decides it directly.
+agentihooks ledger --slug my-swarm followup done <followup id>
+agentihooks ledger --slug my-swarm followup flag <followup id>
+
+# Outside a task (AGENTIHOOKS_SWARM_TASK empty or unset) the follow up stays with the front door.
+AGENTIHOOKS_SWARM_TASK= agentihooks ledger --slug my-swarm followup add "Rename the notes cache key"
+```
+
+The ledger accepts `task` only on an added follow up, holding a task id of 1 to 128 letters, digits, dots,
+underscores or hyphens that starts with a letter or digit. Anything else is refused with `task needs a task id of up
+to 128 letters, digits, dots, underscores or hyphens`. The task id is not checked against the ledger's tasks; a
+follow up naming a task the ledger does not hold has no phase owner and routes to the front door. Follow ups added
+before this change carry no `task` and keep front door routing.
+
+| Symptom | Action |
+|---|---|
+| An agent's follow up reaches the front door instead of its task's master. | Check that the agent's session had `AGENTIHOOKS_SWARM_TASK` set, that the follow up has no `hive`, and that the owning phase seat has a live master. |
+| A master's `followup done` is refused with `followups/<id> belongs to <seat>`. | The writer holds no live master seat; ask the named seat with `masters-channel say`. |
+| A live master's decision on another master's follow up passes. | This is expected: the ledger records it as a cross owner write and keeps the owner. |
+| A ledger write from a script is refused with `task needs a task id ...`. | `task` is an `add_item` op field, not a CLI flag. Set it only on an `add_item` op for `followups`, as a plain task id, or leave it out. |
+
 ##### Configuration and failure handling
 
 `AGENTIHOOKS_MASTER_FENCE` enables the ownership check by default. The exact value `off` disables it in the process
@@ -359,6 +407,68 @@ with `ledger` or `inbox` as the target and the exception as its reason. A refusa
 | A master took the inbox item but its message is refused. | Pool delivery and task ownership are separate. Read the current phase owners and ask the task owner to deliver the instruction. |
 | Another live master successfully comments on an owned task. | This is the later live master write policy. The ledger records cross owner writes; claimant messages remain owner checked. |
 | A message passes despite an unexpected owner. | Check the sender's fence setting, the live master count, the recipient's claimed task and `fail-open` gate log rows. A linked Doctor master message to a watched master is also allowed. |
+
+#### Follow ups an agent adds on its task
+
+`ledger followup add` run inside a swarm task session records that task on the follow up. The CLI reads
+`AGENTIHOOKS_SWARM_TASK`; when it is set and not empty, the `add_item` operation carries `task` with that id, and
+the stored follow up row keeps it. There is no `--task` flag on `followup add`, and `question add` never sends a
+task. Outside a task session, or with the variable empty, the follow up has no task.
+
+```bash
+# Inside a swarm task session the tick has already set AGENTIHOOKS_SWARM_TASK=t42.
+agentihooks ledger --slug my-swarm --as engineer@my-swarm-0012 followup add "Retry the notes build"
+agentihooks ledger --slug my-swarm --as engineer@my-swarm-0012 followup add "Decide the port" --needs-operator
+# {"followup": "add"}
+```
+
+A follow up's routing owner is chosen in this order:
+
+| Follow up carries | Routing owner |
+|---|---|
+| `hive` | The live master owning that hive |
+| `task`, no `hive` | The owner of the task, read as in [Task ownership and master rulings](#task-ownership-and-master-rulings) |
+| Neither | The front door |
+
+An owner that is not a live master seat falls back to the front door. The owner receives the follow up's added
+event notice and, after 15 minutes undecided, its raised notice. Master `set` writes on the follow up's `done`
+and `needs_operator` follow the same ownership check as task rulings: the owner and any other live master pass,
+with a cross owner write recorded, and a former master is refused with the owner named. Comments on a follow up
+are not ownership checked.
+
+The operation schema accepts `task` on any `add_item`; the domain check then accepts it only on a follow up:
+
+| Check | Accepts | Refusal |
+|---|---|---|
+| Operation schema (`scripts.swarm_ledger.api.schemas`) | `add_item` fields `by`, `list`, `text`, `needs_operator`, `hive`, `task`; `task` must be a string | `schema_invalid` with `Operation add_item does not match its schema at field task` |
+| Domain check | `task` only when `list` is `followups`, as an id of 1 to 128 letters, digits, dots, underscores or hyphens starting with a letter or digit | `schema_invalid` with `Operation does not match its domain schema: task needs a task id of up to 128 letters, digits, dots, underscores or hyphens` |
+
+| `task` value | Result |
+|---|---|
+| `t2`, `fx-f517f382.code_1`, an id of 128 characters | Accepted |
+| A number or `null` | Refused by the operation schema |
+| An empty id, `a/b`, an id with a newline, an id of 129 characters | Refused by the domain check |
+| A valid id on a question | Refused by the domain check |
+
+List the follow ups that carry a task, with their task and state:
+
+```bash
+agentihooks ledger --slug my-swarm show \
+  | jq -r '.followups[] | select(.task) | [.id, .task, .done, (.needs_operator // false)] | @tsv'
+```
+
+The [schema change](https://github.com/the-cloud-clockwork/agentihooks/pull/4696) fixed a regression from the
+[task routing change](https://github.com/the-cloud-clockwork/agentihooks/pull/4636). That change made the CLI
+send `task` and the domain check accept it, but the operation schema still listed `add_item` without `task`, so
+from the ledger server restart on 19 October every follow up add from a task session was refused at
+field `task`. Its tests used fake ledgers that skip the schema; the delivered tests send each CLI item add through
+`schemas.check_operations` with the real ledger core.
+
+| Symptom | Action |
+|---|---|
+| `followup add` from a task session fails with `schema_invalid` at field `task`. | The ledger server runs code older than the schema change. Pull dev into the server's checkout and restart the ledger server. |
+| A follow up reaches the front door instead of the task's master. | Check that the row has `task` with the jq command above and that the session had `AGENTIHOOKS_SWARM_TASK` set. A `hive` on the row takes precedence; an owner without a live seat falls back to the front door. |
+| A follow up add is refused at the domain check. | The task id fails the id rule, or `task` was sent on a list other than `followups`. |
 
 #### Sizing settings
 
@@ -1801,6 +1911,118 @@ independent repositories, worktree aliases, handover after a refused write and o
 reconciliation across owners. A live count of fixer records per failed check, before and after the change over equal
 windows, is not recorded yet.
 
+## Red dev workflows outside the promotion gate
+
+Promotion fixer intake files tasks only for the Tests workflow, the promotion gate. Every other workflow that runs on a
+`dev` push, such as an image build or a smoke test, can stay red with no task owning it. The Doctor's `dev workflow`
+detector covers that gap: it raises one `red dev workflow` finding per workflow whose latest five finished `dev` push
+runs all failed.
+
+This detector exists because the Worker hive pod workflow failed 93 of its last 100 `dev` push runs, last green on
+17 October 15:29 UTC, and no task owned it until the Doctor master asked the watched swarm's master on 18 October
+05:12 UTC.
+
+### What the detector reads
+
+The detector runs with the other detectors on every Doctor detection pass, against the watched swarm's repository.
+It calls `gh api` from that swarm's `repo` checkout, so `gh` resolves the owner and repository from that checkout's
+remote. Each call has a 60 second timeout. A pass makes these reads:
+
+1. The newest 100 completed `dev` push runs of every workflow:
+   `repos/{owner}/{repo}/actions/runs?branch=dev&event=push&status=completed&per_page=100`.
+2. For each workflow with a red streak only: its newest successful `dev` push run, through
+   `actions/workflows/<file>/runs?branch=dev&event=push&status=success&per_page=1`. This read is not limited to the
+   100 runs of the first read, so it finds a green run older than that window.
+3. For each workflow with a red streak only: the jobs of the newest run in the streak, through
+   `actions/runs/<run id>/jobs?per_page=100`.
+
+A pass where no workflow has a red streak makes only the first read.
+
+### When a finding is raised
+
+Runs are grouped by workflow file and ordered newest first by run id. Within each workflow:
+
+| Run conclusion | Effect on the streak |
+|---|---|
+| `failure`, `timed_out`, `startup_failure` | Counts as a failed run and extends the streak |
+| `success` | Ends the streak; runs older than it are not counted |
+| Any other, such as `cancelled`, `skipped`, `neutral` or `action_required` | Ignored: it neither ends nor extends the streak |
+
+The streak is the run of failed runs counted from the newest finished run. A workflow whose streak is five or longer
+raises one finding. A workflow whose newest finished run passed raises none, however many runs failed before it.
+Runs of the promotion gate, the workflow file `test.yml`, are skipped, because promotion fixer intake already owns
+them. The file name is matched, not the workflow's display name.
+
+The detector does not check whether a ledger task already owns the workflow. The Doctor judges each finding like any
+other: an owned repair gets a verdict instead of a second task.
+
+### The finding
+
+| Field | Value |
+|---|---|
+| id | `red-dev-workflow/<workflow file>`, for example `red-dev-workflow/hive-worker.yml` |
+| summary | `<workflow name> failed its last <n> dev push runs`, using the name of the newest run |
+| evidence, first line | `last green <created at> <run url>`, or `no green dev push run found` |
+| evidence, second line | `failing jobs in run <run id>: <jobs>`: the newest run's jobs whose conclusion is `failure`, `timed_out` or `startup_failure`, sorted by name, or `none read` when none qualify |
+| evidence, remaining lines | The URL of every run in the streak, newest first |
+| threshold | `5 consecutive failed dev push runs outside the promotion gate` |
+| number | The streak length |
+
+Workflows are reported apart, so two red workflows raise two findings. The streak length is fixed at five; no
+setting or environment variable changes it.
+
+### Usage
+
+Measure a finding before and after its fix. Pass the watched swarm's id:
+
+```bash
+agentihooks doctor rig-grade-swarm measure red-dev-workflow/hive-worker.yml
+```
+
+It prints the finding id and the streak length, for example `red-dev-workflow/hive-worker.yml 7`. After a green
+`dev` push run of that workflow it prints 0, provided the Doctor saw the finding earlier. An id the Doctor never saw
+is refused with `no finding red-dev-workflow/<file> has been seen`.
+
+Judge it and file a fix task:
+
+```bash
+agentihooks doctor rig-grade-swarm verdict red-dev-workflow/hive-worker.yml established \
+  --note "Worker hive pod red on dev since 17 October, no task owns it"
+agentihooks doctor rig-grade-swarm task red-dev-workflow/hive-worker.yml --fix code
+```
+
+Use `false-positive` or `resolved` instead when the workflow already has an owning task, or when a later green run
+broke the streak.
+
+Read the same runs by hand from the watched repository's checkout:
+
+```bash
+cd ~/dev/tcc-ecosystem/agentihooks
+gh api 'repos/{owner}/{repo}/actions/runs?branch=dev&event=push&status=completed&per_page=100' \
+  --jq '.workflow_runs[] | [.id, .path, .conclusion, .created_at] | @tsv' \
+  | grep -v '/test.yml' | sort -k2,2 -k1,1nr
+gh api 'repos/{owner}/{repo}/actions/workflows/hive-worker.yml/runs?branch=dev&event=push&status=success&per_page=1' \
+  --jq '.workflow_runs[] | [.id, .created_at, .html_url] | @tsv'
+gh api 'repos/{owner}/{repo}/actions/runs/<run id>/jobs?per_page=100' --jq '.jobs[] | [.name, .conclusion] | @tsv'
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Action |
+|---|---|---|
+| A workflow is red on `dev` and no finding appears | Fewer than five failed runs follow its newest green run, or fewer than five of its runs fall within the newest 100 completed `dev` push runs | Count its runs with the first `gh api` command above. A workflow that runs rarely may have fewer than five runs in that window |
+| A red workflow with cancelled runs between failures | Cancelled and skipped runs are ignored | Expected: the failures on either side still form one streak |
+| The Tests workflow is red and no finding appears | `test.yml` is the promotion gate and is skipped | Expected: promotion fixer intake files its tasks |
+| `failing jobs in run <id>: none read` | No job of the newest run ended `failure`, `timed_out` or `startup_failure`, for example a run that failed before any job started | Open the run URL in the evidence |
+| `no green dev push run found` | The workflow has no successful `dev` push run in its whole history on GitHub | Expected for a new workflow that never passed |
+| The Doctor tick prints `the dev workflow detector failed: CalledProcessError: ...` | A `gh api` call failed or timed out | Check `gh auth status` in the watched swarm's checkout. The other detectors of the pass still report |
+
+Delivered in [pull request 4679](https://github.com/the-cloud-clockwork/agentihooks/pull/4679), with
+[issue 4678](https://github.com/the-cloud-clockwork/agentihooks/issues/4678) as the spec. Its tests cover five
+consecutive failures raising one finding, a longer streak with no green run, no finding when the newest run passed,
+with four failures or with only four runs, the promotion gate skipped, cancelled and skipped runs ignored, and
+workflows judged apart.
+
 ## Plan tracing for promotion fixer tasks
 
 Promotion failures create fixer tasks whose identifiers include the Actions run
@@ -3032,9 +3254,10 @@ minute so the tick of the watched swarm and of the Doctor keep their minute cade
 
 #### What one timer step does
 
-Every tick the step reads the watched swarm's CI speed and updates the Doctor's timer record. A detection pass runs
-only when the detection interval has passed since the last one, counting any gap between ticks, so most steps take a
-few seconds and one step in ten (with the default interval) runs every detector.
+Every tick the step reads the watched swarm's CI speed and updates the Doctor's timer record; a window behind the
+present is read ten minutes per tick, see [Doctor CI speed reads](../ci-timing.md#long-gaps-read-in-bounded-slices).
+A detection pass runs only when the detection interval has passed since the last one, counting any gap between ticks,
+so most steps take a few seconds and one step in ten (with the default interval) runs every detector.
 
 A detection pass reads:
 

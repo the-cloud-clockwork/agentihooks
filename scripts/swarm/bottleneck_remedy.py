@@ -3,6 +3,7 @@ one task to the master: one action per stage per window, logged with the hours i
 stage's last action.
 """
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -21,6 +22,7 @@ URGENT = "urgent"
 SEATS = {"seat_wait": ("ci", "eng")}
 HARNESS = ("launch_failure", "quota_hold")
 PINNABLE = ("eng", "ci")
+HIVE_HARNESS = "claude"
 FIX = "Bottleneck fix for the {label} stage"
 SHIFTED = "Moved one seat from the {giver} lane to the {taker} lane after {targeted}: engineers {eng}, CI {ci}."
 MOVED = "Moved the {lane} lane from {source} to {target} after {targeted}."
@@ -33,6 +35,7 @@ UNMECHANICAL = "the stage has no mechanical remedy"
 BELOW = "autonomy {autonomy} leaves remedies to the master"
 UNKNOWN = "the finding names no single stuck harness"
 UNPINNED = "no lane is pinned to {harness}"
+UNPLACEABLE = "no eligible host places {target} for the {lane} lane"
 REFUSED = "the swarm refused the change: {error}"
 
 
@@ -159,11 +162,30 @@ def _move(slug, config, store, stage):
     lane = next((key for key in PINNABLE if lanes.get(key, {}).get("agent") == stuck), None)
     if lane is None:
         return UNPINNED.format(harness=stuck)
+    if not _placeable(store, config, lane, target):
+        return UNPLACEABLE.format(target=target, lane=lane)
     source = lanes[lane]["agent"]
     lanes[lane].update(agent=target, model=templates.AUTO)
     store.update(slug, lanes=templates.lane_map(templates.parse({"name": "remedy", "lanes": lanes})))
     text = MOVED.format(lane=lane, source=source, target=target, targeted=stage.targeted)
     return dispatcher.Action(RULE, "apply", text, {})
+
+
+def _placeable(store, config, lane, harness):
+    if not config.hive_placement or harness == HIVE_HARNESS:
+        return True
+    from scripts import herdr_host
+    from scripts.hive import placement, registry
+    from scripts.hive.launch import ROLE_PROFILES
+    from scripts.swarm import controller
+    from scripts.swarm.commands import hive_id
+
+    environ = dict(os.environ)
+    if controller.deployment_for(config, environ) != controller.HYBRID or not herdr_host.server_running(environ):
+        return False
+    local = registry.show(store.redis, hive_id())
+    profiles = tuple(profile for profile, role in ROLE_PROFILES.items() if role == lane)
+    return local is None or placement.hosts(lane, local, profiles)
 
 
 def _propose(slug, store, stage, why, fixer):
