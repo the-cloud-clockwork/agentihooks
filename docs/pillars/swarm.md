@@ -2428,8 +2428,8 @@ started life counts unless its recorded `after` cause excludes it:
 The controller records these causes at launch; operators do not need to edit
 launch history. A failed launch that never reached `started` does not count.
 Exclusions apply to the marked start, so a later ordinary restart still counts.
-The current health pass also excludes a later start when its recorded pull
-request head differs from the preceding start and both heads are known.
+A start whose pull request head moved is also excluded; see
+[pull request head changes](#pull-request-head-changes).
 
 With no review counter over its cap and no change of recorded head:
 
@@ -2446,6 +2446,48 @@ not their sum. For example, three rounds before the pull request and one on
 its first pull request give a review count of three. Four in one counter
 exceed the default cap. See [review round counters](#review-round-counters)
 for how those counters are separated and for the review gate's own limits.
+
+#### Pull request head changes
+
+A life that pushes a new pull request head made progress, so the next start is
+not a rerun. When the tick starts a life, it records in the started launch row
+the head commit of the task's pull request at that moment. That one value is
+the head the new life starts on, which is where the previous life left it:
+
+| Recorded `head` | When | Comparable? |
+|---|---|---|
+| Commit SHA | The task has a pull request and GitHub returned its head | Yes |
+| Empty string | The task has no pull request yet | Yes |
+| `null` | The head read failed, including a GitHub rate limit, or the row predates head recording | No |
+
+The health pass compares each started life with the previous started life of
+the same task. The later start is excluded from the rerun count when both
+recorded heads are comparable and differ. An empty head followed by a SHA is a
+change, because a pull request appeared between the two starts; a SHA followed
+by an empty head is a change as well. Two equal heads, two empty heads, or a
+`null` head on either side leave the start counted, unless its `after` cause
+excludes it. An `after` exclusion and a head change are independent; either one
+excludes the start.
+
+| Recorded heads of started lives in order | Counted reruns | Default finding? |
+|---|---|---|
+| empty, `a`, `b`, `c`, `d` | 0 | No |
+| `a`, `a`, `b`, `b`, `b`, `c`, `c` | 4 | Yes |
+| empty, empty, empty, empty | 3 | Yes |
+| `null`, `a`, `null`, `b` | 3 | Yes |
+| `a`, empty, empty, empty | 2 | No |
+
+In the second row the starts that keep `a`, keep `b` twice and keep `c` count;
+the moves to `b` and to `c` do not. A task whose agents keep restarting after
+merge queue ejections or dev breaks, and push a fix each life, therefore raises
+no rerun based proof loop finding; review rounds over their cap still raise
+one. A task whose lives end on the head they started on still does. Review
+round counting does not use heads.
+
+Launch rows recorded before head recording shipped have no `head` and read as
+`null`, so they count as before. A head read that fails at one start makes
+that start incomparable with both the previous and the next start, so both
+can count; later pairs are compared normally.
 
 #### Configure the caps
 
@@ -2504,6 +2546,20 @@ chain consisting only of parks. Its
 validates the implementation; it does not establish a live reduction in false
 findings. Comparing before and after rates requires equal windows after the
 running controller has loaded the correction.
+
+If a restart that pushed a new head is still counted, read the `head` of that
+started row and of the previous one. A `null` on either side means the head
+read failed or the row predates head recording; the start counts and the
+retained history cannot show the move. Equal recorded heads mean the head did
+not move between the two starts, whatever else the previous life did. Only the
+head at each start is recorded, so a life that pushed and then force pushed
+back to the head it started on reads as unchanged.
+
+[Pull request #4344](https://github.com/the-cloud-clockwork/agentihooks/pull/4344)
+records the head comparison and its regression proofs for moving heads,
+repeated heads, tasks without a pull request and rows without a recorded head.
+It addresses proof loop findings judged false positive because every extra
+life followed a dev break or a merge queue ejection and pushed a new head.
 
 ### Stalled activity findings
 
