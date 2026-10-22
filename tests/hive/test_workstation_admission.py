@@ -26,8 +26,8 @@ def test_preselected_root_requests_share_the_last_configured_slot(setup, monkeyp
     setup.store.update(setup.config.slug, local_max_agents=2)
     local_agents(setup, 1)
     selected = SimpleNamespace(hive="workstation", master_placement=None)
-    first = SimpleNamespace(name="first", task={"id": "first"})
-    second = SimpleNamespace(name="second", task={"id": "second"})
+    first = SimpleNamespace(name="first", lane="eng", task={"id": "first"})
+    second = SimpleNamespace(name="second", lane="eng", task={"id": "second"})
     assert setup.launcher.reserve_room(first, selected) == ""
     assert "2 of its 2" in setup.launcher.reserve_room(second, selected)
 
@@ -38,7 +38,7 @@ def test_a_root_reservation_consumes_the_same_slot_as_overflow(setup, monkeypatc
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=1)
     selected = SimpleNamespace(hive="workstation", master_placement=None)
-    request = SimpleNamespace(name="first", task={"id": "first"})
+    request = SimpleNamespace(name="first", lane="eng", task={"id": "first"})
     assert setup.launcher.reserve_room(request, selected) == ""
     setup.herdr._quota_accounts = []
     with pytest.raises(SpawnError, match="the local machine runs"):
@@ -151,7 +151,7 @@ def test_an_existing_task_cannot_inflate_resource_room_during_a_pending_launch(s
     setup.store.put_agent(setup.config.slug, AgentRecord("self", "eng", "task"))
     local_slots.claim(setup.store, "workstation", setup.config.slug, "other", "pending", 8)
     selected = SimpleNamespace(hive="workstation", master_placement=None)
-    request = SimpleNamespace(name="self", task={"id": "task"})
+    request = SimpleNamespace(name="self", lane="eng", task={"id": "task"})
     assert "1 of its 1" in setup.launcher.reserve_room(request, selected)
 
 
@@ -192,3 +192,25 @@ def test_a_local_spawn_reserves_its_own_machine_and_task_once(setup, monkeypatch
     assert set(setup.store.redis.hgetall(local_slots.key("workstation"))) == {f"{setup.config.slug}/self"}
     assert admission.pending(setup.store.redis, "workstation") == 1
     assert local_slots.held(setup.store, "workstation", setup.config.slug, "other") == 1
+
+
+@pytest.mark.parametrize("route", ["subscription", "api"])
+@pytest.mark.parametrize("hive_limit", [1, 8])
+def test_an_explicit_route_master_ignores_worker_caps_but_reserves_resources(setup, monkeypatch, route, hive_limit):
+    from scripts.hive import admission
+    from scripts.hive.launch import Selection
+    from scripts.swarm import local_slots
+    from scripts.swarm.profile_choice import ProfileDecision
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=hive_limit)
+    config = setup.store.update(setup.config.slug, local_max_agents=1)
+    local_agents(setup, 1)
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "task", "master")
+    task = {"id": "master", "hive": "workstation", "route_kind": route}
+    selected = setup.launcher.select(config, "master", task)
+    assert isinstance(selected, Selection)
+    assert selected.master_placement is None
+    assert setup.launcher.reserve_room(SimpleNamespace(name="master", lane="master", task=task), selected) == ""
+    assert setup.store.redis.hgetall(local_slots.key("workstation")) == {}
+    assert admission.pending(setup.store.redis, "workstation") == 1

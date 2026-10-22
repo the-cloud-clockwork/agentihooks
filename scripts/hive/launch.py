@@ -200,13 +200,14 @@ class HiveLaunch:
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
 
-        for hive in hives:
-            if hive["id"] == hive_id():
-                bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
-                taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
-                limited = admission.capped(admission.Room(hive["room"], **ROOM_DETAILS), taken, bound)
-                if limited.room < hive["room"]:
-                    hive["room"], hive["refusal"] = limited.room, admission.refusal(limited)
+        if lane != placement.MASTER:
+            for hive in hives:
+                if hive["id"] == hive_id():
+                    bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
+                    taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
+                    limited = admission.capped(admission.Room(hive["room"], **ROOM_DETAILS), taken, bound)
+                    if limited.room < hive["room"]:
+                        hive["room"], hive["refusal"] = limited.room, admission.refusal(limited)
         account = saved.get("account") or self.herdr.planned_account(task["id"], "claude")
         candidates = [
             row
@@ -364,7 +365,7 @@ class HiveLaunch:
 
         reading = headroom.read(self.store.redis, selected.hive, lease.now_ms(self.store))
         member = f"{self.slug}/{request.name}"
-        local = selected.hive == hive_id()
+        local = selected.hive == hive_id() and request.lane != placement.MASTER
         if local:
             running = local_slots.running(self.store, self.slug, request.task["id"])
             bound = local_slots.maximum(self.store, self.slug, running + admission.room(reading).room)
