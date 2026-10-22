@@ -124,6 +124,14 @@ def test_failure_outside_the_repository_names_its_caller_here(capsys):
     assert finished["raised_at"] == f"tests/swarm/test_timing.py:{here.__code__.co_firstlineno + 2} {here.__name__}"
 
 
+def test_a_failure_inside_a_timed_call_names_the_call_frame(capsys):
+    with pytest.raises(json.JSONDecodeError), timing.tick("sw"):
+        timing.call(json.loads, "{")
+    finished = json.loads(capsys.readouterr().err.splitlines()[-1])
+    line = timing.call.__code__.co_firstlineno + 3
+    assert finished["raised_at"] == f"scripts/swarm/timing.py:{line} call"
+
+
 def test_an_exception_that_never_ran_here_has_no_frame():
     assert timing.raised_at(ValueError()) == ""
 

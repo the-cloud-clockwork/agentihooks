@@ -3,10 +3,12 @@ import os
 import resource
 import sys
 import time
+import traceback
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
+from pathlib import Path
 from typing import Any
 
 from scripts.swarm import tick_stop
@@ -14,6 +16,17 @@ from scripts.swarm import tick_stop
 SWARM = ContextVar("tick_swarm", default=None)
 BEFORE_STEP = ContextVar("tick_before_step", default=None)
 ON_FAILURE = ContextVar("tick_failure", default=None)
+ROOT = Path(__file__).resolve().parents[2]
+PACKAGES = ("scripts", "tests")
+
+
+def raised_at(exc: BaseException) -> str:
+    here = []
+    for frame in traceback.extract_tb(exc.__traceback__):
+        path = Path(frame.filename).resolve()
+        if path.is_relative_to(ROOT) and path.relative_to(ROOT).parts[0] in PACKAGES:
+            here.append(f"{path.relative_to(ROOT).as_posix()}:{frame.lineno} {frame.name}")
+    return here[-1] if here else ""
 
 
 def emit(stream, line: str) -> None:
@@ -56,6 +69,7 @@ def step(name: str) -> Iterator[None]:
         raise
     except BaseException as exc:
         outcome = "error"
+        record.update(error=f"{type(exc).__module__}.{type(exc).__qualname__}", raised_at=raised_at(exc))
         if record_failure := ON_FAILURE.get():
             record_failure(name, exc)
         raise
