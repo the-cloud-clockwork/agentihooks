@@ -685,6 +685,7 @@ def _slow_launches(monkeypatch, runtime, seconds):
         return spawn(config, lane, name, task)
 
     runtime.spawn = slow
+    return clock
 
 
 def test_a_launch_that_spends_the_budget_leaves_the_next_task_for_the_next_pass(store, monkeypatch):
@@ -760,6 +761,23 @@ def test_a_launch_just_under_half_the_budget_lets_the_next_one_start(store, monk
     _slow_launches(monkeypatch, runtime, 9.99)
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+
+
+def test_pass_work_after_a_launch_counts_toward_the_mean_launch_cost(store, monkeypatch):
+    from scripts.swarm import dispatcher
+
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    clock = _slow_launches(monkeypatch, runtime, 6)
+    chain = dispatcher.chain_claimed
+
+    def slow_chain(*args):
+        clock[0] += 4
+        return chain(*args)
+
+    monkeypatch.setattr(dispatcher, "chain_claimed", slow_chain)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
 
 
 def test_a_slow_failed_launch_spends_the_budget_too(store, monkeypatch):
