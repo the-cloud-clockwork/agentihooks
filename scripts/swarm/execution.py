@@ -87,7 +87,7 @@ local rows = redis.call('HGETALL', KEYS[1])
 local head, decoded = {}, {}
 for i = 1, #rows, 2 do
     local row = cjson.decode(rows[i + 1])
-    if type(row.seat) == 'string' and type(row.generation) == 'number' then
+    if type(row.name) == 'string' and type(row.seat) == 'string' and type(row.generation) == 'number' then
         decoded[i] = row
         if not head[row.seat] or row.generation > head[row.seat] then
             head[row.seat] = row.generation
@@ -136,9 +136,17 @@ class ExecutionRegistry:
     def records(self, slug: str, reader: Redis | Pipeline | None = None) -> list[AgentRecord]:
         from scripts.swarm.store import AgentRecord
 
-        source = reader if reader is not None else self.redis
-        rows = [*source.hvals(self.store.key(slug, "executions")), *source.hvals(self.store.key(slug, ARCHIVE))]
-        return sorted((AgentRecord(**json.loads(row)) for row in rows), key=lambda a: (a.seat, a.generation))
+        keys = (self.store.key(slug, "executions"), self.store.key(slug, ARCHIVE))
+        if reader is None:
+            with self.redis.pipeline() as pipe:
+                for key in keys:
+                    pipe.hvals(key)
+                live, archived = pipe.execute()
+        else:
+            live, archived = (reader.hvals(key) for key in keys)
+        return sorted(
+            (AgentRecord(**json.loads(row)) for row in (*live, *archived)), key=lambda a: (a.seat, a.generation)
+        )
 
     def occupants(self, slug: str, reader: Redis | Pipeline | None = None) -> dict[str, AgentRecord]:
         from scripts.swarm.store import AgentRecord
@@ -360,13 +368,17 @@ class ExecutionRegistry:
         for _ in range(WRITE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(key)
-                    raw = pipe.hget(key, execution_id) or pipe.hget(self.store.key(slug, ARCHIVE), execution_id)
+                    archived = self.store.key(slug, ARCHIVE)
+                    pipe.watch(key, archived)
+                    live = pipe.hget(key, execution_id)
+                    raw = live or pipe.hget(archived, execution_id)
                     if not raw:
                         pipe.unwatch()
                         self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
                     current = AgentRecord(**json.loads(raw))
                     pipe.multi()
+                    if not live:
+                        pipe.hdel(archived, execution_id)
                     self.write(pipe, slug, replace(current, pane_id=pane_id), current)
                     pipe.execute()
                     return

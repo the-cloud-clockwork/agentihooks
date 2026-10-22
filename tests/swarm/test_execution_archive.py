@@ -59,16 +59,43 @@ def test_set_pane_still_finds_an_archived_attempt(store):
     store.execution_registry.set_pane("fixture", first.execution_id, "pane-9")
 
     assert store.execution("fixture", first.execution_id).pane_id == "pane-9"
+    assert [a.execution_id for a in store.execution_registry.records("fixture")].count(first.execution_id) == 1
+
+
+def test_archive_keeps_every_row_of_a_live_name_and_seat_head_ties(store):
+    agent = AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-3@fixture")
+    one = store.start_execution("fixture", agent)
+    two = store.start_execution("fixture", agent, one.execution_id)
+    three = store.start_execution("fixture", agent, two.execution_id)
+    tie = {**json.loads(store.redis.hget(store.key("fixture", "executions"), three.execution_id))}
+    tie.update(name="gone@fixture", execution_id="exe-tie")
+    store.redis.hset(store.key("fixture", "executions"), "exe-tie", json.dumps(tie))
+    registry = store.execution_registry
+    agents, occupants = registry.agents("fixture"), registry.occupants("fixture")
+    assert [a.name for a in agents] == [agent.name]
+
+    assert registry.archive("fixture") == 0
+
+    assert set(store.redis.hkeys(store.key("fixture", "executions"))) == {
+        one.execution_id,
+        two.execution_id,
+        three.execution_id,
+        "exe-tie",
+    }
+    assert registry.agents("fixture") == agents
+    assert registry.occupants("fixture") == occupants
 
 
 def test_archive_keeps_rows_without_a_seat_or_generation(store):
     history(store)
     key = store.key("fixture", "executions")
     store.redis.hset(key, "legacy", json.dumps({"name": "old@fixture"}))
+    store.redis.hset(key, "nameless", json.dumps({"seat": "eng-1@fixture", "generation": 0}))
 
     store.execution_registry.archive("fixture")
 
     assert store.redis.hexists(key, "legacy")
+    assert store.redis.hexists(key, "nameless")
 
 
 def test_reconcile_archives_dead_rows(store):
