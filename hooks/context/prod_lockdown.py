@@ -323,15 +323,30 @@ def _check_pr_merge(line: str, cwd: str, bypass: bool) -> None:
         )
 
 
-def _check_swarm_enqueue(command: str, check_text: str) -> None:
+def _check_swarm_enqueue(command: str) -> None:
     slug = os.environ.get("AGENTIHOOKS_SWARM")
-    if not slug or not re.search(r"\benqueuePullRequest\b", command):
+    if not slug or "enqueuePullRequest" not in command:
         return
-    if re.search(r"\bgh\b[^|&;\n]*\bapi\b|\bcurl\b", check_text):
+    tree = Parser(Language(tree_sitter_bash.language())).parse(command.encode())
+    if tree.root_node.has_error or _runs_enqueue(tree.root_node):
         raise BlockAction(
             "BLOCKED [raw enqueuePullRequest in a swarm]: the swarm queue command records every merge queue "
             f"entry in its journal. Queue it with `agentihooks swarm {slug} merge queue <url>`."
         )
+
+
+def _runs_enqueue(node: Node) -> bool:
+    if node.type == "command" and b"enqueuePullRequest" in node.text:
+        name = node.child_by_field_name("name")
+        program = Path(name.text.decode()).name if name else ""
+        arguments = [
+            child.text.decode()
+            for index, child in enumerate(node.named_children)
+            if node.field_name_for_named_child(index) == "argument"
+        ]
+        if program == "curl" or (program == "gh" and arguments[:1] == ["api"]):
+            return True
+    return any(_runs_enqueue(child) for child in node.named_children)
 
 
 def check_prod_lockdown(payload: dict) -> None:
@@ -366,7 +381,7 @@ def check_prod_lockdown(payload: dict) -> None:
         raise BlockAction(
             f"BLOCKED [{name}]: {reason}\nAdd --emergency-prod / 'prod override' / 'emergency' to your message."
         )
-    _check_swarm_enqueue(command, check_text)
+    _check_swarm_enqueue(command)
     from hooks.context.branch_guard import _resolve_cwd
 
     cwd = _resolve_cwd(command, payload.get("cwd", ""))

@@ -270,12 +270,21 @@ _ENQUEUE = (
 )
 
 
-def test_swarm_session_cannot_run_the_raw_enqueue_mutation(monkeypatch):
+@pytest.mark.parametrize(
+    "command",
+    [
+        _ENQUEUE,
+        f"git status && GH_TOKEN=$T {_ENQUEUE}",
+        "gh api graphql -f query=\"$(cat <<'EOF'\nmutation { enqueuePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }\nEOF\n)\"",
+        "curl -s https://api.github.com/graphql -d '{\"query\": \"mutation { enqueuePullRequest(input: {}) { clientMutationId } }\"}'",
+    ],
+)
+def test_swarm_session_cannot_run_the_raw_enqueue_mutation(monkeypatch, command):
     from hooks.hook_manager import BlockAction
 
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
     with pytest.raises(BlockAction, match=r"agentihooks swarm rig merge queue <url>"):
-        _check(_ENQUEUE)
+        _check(command)
 
 
 @pytest.mark.parametrize(
@@ -283,6 +292,8 @@ def test_swarm_session_cannot_run_the_raw_enqueue_mutation(monkeypatch):
     [
         "agentihooks swarm rig merge queue https://github.com/owner/repo/pull/123",
         "grep -rn enqueuePullRequest scripts/swarm",
+        "gh api repos/owner/repo/pulls/12 --jq .title; grep -rn enqueuePullRequest scripts/swarm",
+        "curl -s https://example.com/merge_queue.py | grep enqueuePullRequest",
     ],
 )
 def test_swarm_session_keeps_the_swarm_queue_command(monkeypatch, command):
