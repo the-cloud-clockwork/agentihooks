@@ -16,6 +16,7 @@ SHALLOW_PREFLIGHT_CHECKOUT = {
     "sparse-checkout": "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n",
     "sparse-checkout-cone-mode": False,
 }
+FULL_PREFLIGHT_CHECKOUT = {"fetch-depth": 0}
 PREFLIGHT_FETCH = 'git fetch --no-tags origin "$GITHUB_SHA"'
 SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
 
@@ -238,19 +239,33 @@ def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[st
     ignored = (events.get("push") or {}).get("branches-ignore", [])
     if "diffcheck/**" in ignored:
         ignored.remove("diffcheck/**")
-    if head_workflows.get("branch-lanes.yml") in (baseline, expanded, _shallow(baseline), _shallow(expanded)):
+    if head_workflows.get("branch-lanes.yml") in (
+        baseline,
+        expanded,
+        *_checkout_forms(baseline),
+        *_checkout_forms(expanded),
+    ):
         return []
     return ["The head changes or removes the trusted branch lane preflight."]
 
 
-def _shallow(preflight: dict) -> dict:
-    shallow = deepcopy(preflight)
-    steps = ((shallow.get("jobs") or {}).get("grade") or {}).get("steps") or [{}]
-    steps[0].setdefault("with", {}).update(SHALLOW_PREFLIGHT_CHECKOUT)
-    for step in steps:
-        if step.get("run") == PREFLIGHT_FETCH:
-            step["run"] = SHALLOW_PREFLIGHT_FETCH
-    return shallow
+def _checkout_forms(preflight: dict) -> list[dict]:
+    forms = []
+    for checkout, fetch in (
+        (SHALLOW_PREFLIGHT_CHECKOUT, SHALLOW_PREFLIGHT_FETCH),
+        (FULL_PREFLIGHT_CHECKOUT, PREFLIGHT_FETCH),
+    ):
+        form = deepcopy(preflight)
+        steps = ((form.get("jobs") or {}).get("grade") or {}).get("steps") or [{}]
+        settings = steps[0].setdefault("with", {})
+        for key in SHALLOW_PREFLIGHT_CHECKOUT:
+            settings.pop(key, None)
+        settings.update(checkout)
+        for step in steps:
+            if step.get("run") in (PREFLIGHT_FETCH, SHALLOW_PREFLIGHT_FETCH):
+                step["run"] = fetch
+        forms.append(form)
+    return forms
 
 
 def main(argv: list[str] | None = None) -> int:

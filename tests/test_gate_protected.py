@@ -361,22 +361,39 @@ def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, faul
     assert ("shared hosted lane concurrency group" in out) is (fault == "proofs")
 
 
+_SPARSE = "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
+_SHALLOW_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
+_FULL_FETCH = 'git fetch --no-tags origin "$GITHUB_SHA"'
+
+
+def _fetch_step(preflight):
+    return next(step for step in preflight["jobs"]["grade"]["steps"] if step.get("run", "").startswith("git fetch"))
+
+
 def _shallow_preflight(preflight):
     shallow = copy.deepcopy(preflight)
-    steps = shallow["jobs"]["grade"]["steps"]
-    steps[0]["with"]["fetch-depth"] = 1
-    steps[0]["with"]["sparse-checkout"] = (
-        "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
-    )
-    steps[0]["with"]["sparse-checkout-cone-mode"] = False
-    fetch = next(step for step in steps if step.get("run", "").startswith("git fetch"))
-    fetch["run"] = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
+    checkout = shallow["jobs"]["grade"]["steps"][0]["with"]
+    checkout.update({"fetch-depth": 1, "sparse-checkout": _SPARSE, "sparse-checkout-cone-mode": False})
+    _fetch_step(shallow)["run"] = _SHALLOW_FETCH
     return shallow
 
 
-@pytest.mark.parametrize("fault", [None, "wider", "cone", "history", "fetch", "proofs"])
-def test_the_required_grader_accepts_only_the_exact_shallow_sparse_preflight(repo, fault, capsys):
-    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+def _full_preflight(preflight):
+    full = copy.deepcopy(preflight)
+    checkout = full["jobs"]["grade"]["steps"][0]["with"]
+    checkout.pop("sparse-checkout", None)
+    checkout.pop("sparse-checkout-cone-mode", None)
+    checkout["fetch-depth"] = 0
+    _fetch_step(full)["run"] = _FULL_FETCH
+    return full
+
+
+@pytest.mark.parametrize(
+    "fault", [None, "wider", "cone", "history", "fetch", "proofs", "fetch_full", "no_sparse", "no_depth"]
+)
+@pytest.mark.parametrize("base_form", [_full_preflight, _shallow_preflight])
+def test_the_required_grader_accepts_only_the_exact_shallow_sparse_preflight(repo, base_form, fault, capsys):
+    preflight = base_form(yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text()))
     _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trusted preflight")
     _git(repo, "checkout", "-q", "-b", "pr")
     shallow = _shallow_preflight(preflight)
@@ -388,9 +405,16 @@ def test_the_required_grader_accepts_only_the_exact_shallow_sparse_preflight(rep
     elif fault == "history":
         checkout["fetch-depth"] = 0
     elif fault == "fetch":
-        shallow["jobs"]["grade"]["steps"][-2]["run"] = "git fetch --no-tags origin dev"
+        _fetch_step(shallow)["run"] = "git fetch --no-tags origin dev"
     elif fault == "proofs":
         shallow[True]["push"]["branches-ignore"].append("diffcheck/**")
+    elif fault == "fetch_full":
+        _fetch_step(shallow)["run"] = _FULL_FETCH
+    elif fault == "no_sparse":
+        checkout.pop("sparse-checkout")
+        checkout.pop("sparse-checkout-cone-mode")
+    elif fault == "no_depth":
+        checkout.pop("fetch-depth")
     planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": shallow}, {}, "shallow preflight")
     _git(repo, "checkout", "-q", "dev")
     assert gate_protected.main(["--root", str(repo), "--head", planted]) == (0 if fault is None else 1)
@@ -398,16 +422,35 @@ def test_the_required_grader_accepts_only_the_exact_shallow_sparse_preflight(rep
     assert refused is (fault is not None)
 
 
-def test_the_shallow_preflight_covers_proof_branches_from_a_preflight_that_ignored_them(repo):
+@pytest.mark.parametrize("fault", [None, "history", "sparse", "fetch"])
+def test_a_branch_still_carrying_the_full_preflight_passes_a_shallow_base(repo, fault):
     preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
-    old = copy.deepcopy(preflight)
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": _shallow_preflight(preflight)}, {}, "shallow base")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    full = _full_preflight(preflight)
+    checkout = full["jobs"]["grade"]["steps"][0]["with"]
+    if fault == "history":
+        checkout["fetch-depth"] = 1
+    elif fault == "sparse":
+        checkout["sparse-checkout"] = _SPARSE
+    elif fault == "fetch":
+        _fetch_step(full)["run"] = _SHALLOW_FETCH
+    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": full}, {}, "full preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == (0 if fault is None else 1)
+
+
+@pytest.mark.parametrize("form", [_full_preflight, _shallow_preflight])
+def test_either_checkout_form_covers_proof_branches_from_a_preflight_that_ignored_them(repo, form):
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    old = _full_preflight(preflight)
     if "diffcheck/**" not in old[True]["push"]["branches-ignore"]:
         old[True]["push"]["branches-ignore"].append("diffcheck/**")
     _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": old}, {}, "old preflight")
     _git(repo, "checkout", "-q", "-b", "pr")
-    head = _shallow_preflight(old)
+    head = form(old)
     head[True]["push"]["branches-ignore"].remove("diffcheck/**")
-    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": head}, {}, "shallow preflight")
+    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": head}, {}, "covering preflight")
     _git(repo, "checkout", "-q", "dev")
     assert gate_protected.main(["--root", str(repo), "--head", planted]) == 0
 
