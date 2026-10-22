@@ -274,6 +274,33 @@ def test_previous_boot_retirement_does_not_signal_another_conversation_process(t
     assert (ended, calls) == ([], [])
 
 
+def test_previous_boot_retirement_without_a_conversation_never_selects_a_named_process(tmp_path, monkeypatch):
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: pytest.fail("no recorded conversation to recover"))
+    assert RuntimeRouter([local]).terminate(record(namespace=WORKER)) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
+    )
+    assert (ended, calls) == ([], [])
+
+
+def test_reopened_process_retirement_keeps_the_reaper_refusal(tmp_path, monkeypatch):
+    from scripts.terminate_agent import Session
+
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = replace(record(namespace=WORKER), harness="codex", conversation_id="restored")
+    reopened = Session("restored", "codex", NAME, proc(pid=PID + 1), "", "alive")
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [reopened])
+    local.herdr.end = lambda *args: reaper.Outcome(process=PID + 1, refusal="process identity changed")
+    assert RuntimeRouter([local]).terminate(agent) == Outcome(
+        "terminate",
+        Status.REFUSED,
+        LOCAL,
+        {"process": PID + 1, "refusal": "process identity changed"},
+        "process identity changed",
+    )
+    assert (ended, calls) == ([], [])
+
+
 @pytest.mark.parametrize("host_id", ["", "hive-a"])
 def test_a_same_boot_foreign_pid_namespace_stays_refused(tmp_path, monkeypatch, host_id):
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
