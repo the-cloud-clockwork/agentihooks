@@ -167,21 +167,24 @@ kubectl logs "$pod" > "$out/worker.log"
 restarts="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
 [[ "$restarts" == 0 ]]
 hold_agent() {
-kubectl exec -i deployment/hive-join -- env HIVE="$member" STATE="$1" python - <<'PY'
+kubectl exec -i deployment/hive-join -- env HIVE="$member" STEP="$1" python - <<'PY'
 import os
 from scripts.swarm.store import PREFIX, AgentRecord, RedisStore, redis_client
 
 store = RedisStore(redis_client())
-store.redis.sadd(f'{PREFIX}:index', 'drain-proof')
-store.put_agent('drain-proof', AgentRecord('engineer@drain', 'eng', 't1', seat='eng-1@drain-proof', hive=os.environ['HIVE'], state=os.environ['STATE']))
+if os.environ['STEP'] == 'start':
+    store.redis.sadd(f'{PREFIX}:index', 'drain-proof')
+    store.start_execution('drain-proof', AgentRecord('engineer@drain', 'eng', 't1', seat='eng-1@drain-proof', hive=os.environ['HIVE']))
+else:
+    store.drop_agent('drain-proof', 'engineer@drain')
 PY
 }
-hold_agent working
+hold_agent start
 kubectl delete pod "$pod" --wait=false
 sleep 25
 [[ -n "$(kubectl get pod "$pod" -o jsonpath='{.metadata.deletionTimestamp}')" ]] || { echo "the hive drain preStop let $pod stop while an agent worked" >&2; exit 1; }
 echo "the hive drain preStop held $pod for 25 seconds while its agent worked" | tee "$out/drain.txt"
-hold_agent finished
+hold_agent finish
 kubectl wait --for=delete "pod/$pod" --timeout=25s
 echo "the hive drain preStop released $pod once its agent finished, before the drain deadline" | tee -a "$out/drain.txt"
 hook_failures="$(kubectl get events --field-selector "involvedObject.name=$pod,reason=FailedPreStopHook" -o name)"
