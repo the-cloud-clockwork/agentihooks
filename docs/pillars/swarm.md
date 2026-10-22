@@ -2036,7 +2036,9 @@ The ledger reads the halves as labels when any one of them is not a plan line ra
 | Two to four halves | `halves: 2 to 4` |
 | Every half is a non-empty label, or every half is a plan line range; labels and ranges never mix | `halves: plan line ranges` |
 | Labels are distinct | `halves: distinct labels` |
-| The task has neither `plan_lines` nor `plan_slice` | `tasks/<task>: halves: plan line ranges` |
+| Labels only on a task with neither `plan_lines` nor a `plan_slice`; a planned task with labels is refused | `halves: plan line ranges` |
+
+The first three rules are checked when the ledger receives the split. The last is checked against the task when the split is applied, and its refusal is recorded as a ledger warning that names the task, such as `tasks/t7: halves: plan line ranges`.
 
 A planned task still needs plan line ranges: labelled halves on a task with `plan_lines` or a `plan_slice` are refused, and its ranges must still cover its plan lines. The other split refusals in the [table below](#split-refusals-and-stop-messages) apply to labelled halves unchanged.
 
