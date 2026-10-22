@@ -1,13 +1,14 @@
 """Every task second in the window lands in exactly one named stage.
 
 Base phases run claim wait, build, ci run and review; overlays take an instant from its base in a fixed priority,
-and an instant of claim wait while host samples hold spawns is that holder's hold. Claim wait starts when the task
+and an instant of claim wait while host samples hold spawns is that holder's hold for as many waiting tasks as it
+held spawns, earliest ready first. Claim wait starts when the task
 became claimable and is reported as seat wait or queue wait.
 """
 
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from scripts.swarm import bottleneck, freeze, metrics_outbox
 from scripts.swarm.store import RedisStore
@@ -39,6 +40,7 @@ class Span:
     start: float
     end: float
     label: str = ""
+    count: int = 0
 
     def covers(self, at: float) -> bool:
         return self.start <= at < self.end
@@ -277,19 +279,19 @@ def timelines(rows: dict, tasks: list, now_ms: int, ready: Claim | None = None) 
 
 def holds(samples: list, now_ms: int) -> list[Span]:
     held = [
-        Span(f"{share}_hold", start, end, harness)
+        Span(f"{share}_hold", start, end, harness, count)
         for share, start, end, count, harness in bottleneck.held_spans(samples, now_ms)
         if count > 0
     ]
     merged = []
     for span in held:
-        if (
-            merged
-            and merged[-1].stage == span.stage
-            and merged[-1].label == span.label
-            and merged[-1].end == span.start
+        if merged and (merged[-1].stage, merged[-1].label, merged[-1].count, merged[-1].end) == (
+            span.stage,
+            span.label,
+            span.count,
+            span.start,
         ):
-            merged[-1] = Span(span.stage, merged[-1].start, span.end, span.label)
+            merged[-1] = replace(merged[-1], end=span.end)
         else:
             merged.append(span)
     return merged
@@ -335,23 +337,51 @@ def _split(pieces: list, lives: list, cap: int | None) -> list[tuple]:
     return found
 
 
+def _held_pieces(pieces: list, held: list[Span]) -> tuple[list, dict]:
+    """Charge each hold to at most its held spawns of the claim wait pieces under it, earliest ready first."""
+    charged, cut = [], {}
+    for hold in held:
+        under = [piece for _, piece in pieces if piece[1] < hold.end and hold.start < piece[2]]
+        edges = {min(max(edge, hold.start), hold.end) for piece in under for edge in piece[1:3]}
+        points = sorted(edges | {hold.start, hold.end})
+        for low, high in zip(points, points[1:]):
+            for piece in sorted(piece for piece in under if piece[1] <= low and high <= piece[2])[: hold.count]:
+                charged.append((piece[3], hold.stage, hold.label, (high - low) / 1000))
+                cut.setdefault(piece, []).append((low, high))
+    waiting = {}
+    for lane, piece in pieces:
+        waiting.setdefault(lane, []).extend(_uncut(piece, cut.get(piece, [])))
+    return charged, waiting
+
+
+def _uncut(piece: tuple, taken: list) -> list[tuple]:
+    found, cursor = [], piece[1]
+    for low, high in sorted(taken):
+        if cursor < low:
+            found.append((piece[0], cursor, low, *piece[3:]))
+        cursor = max(cursor, high)
+    return found + ([(piece[0], cursor, piece[2], *piece[3:])] if cursor < piece[2] else [])
+
+
 def _charged(rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Claim | None) -> list[tuple]:
     window = bottleneck.Window(now_ms - window_ms, now_ms)
     held = holds(rows["host_samples"], now_ms)
     found = timelines(rows, tasks, now_ms, ready)
     seats = ready.seats if ready else None
-    lives, pieces, seconds = {}, {}, [{} for _ in found]
+    lives, pieces, seconds = {}, [], [{} for _ in found]
     for index, timeline in enumerate(found):
         lives.setdefault(timeline.lane, []).extend(timeline.seats)
-        for start, end, stage, label in _segments(timeline, held, window):
+        for start, end, stage, label in _segments(timeline, [], window):
             if stage == CLAIM_WAIT:
-                pieces.setdefault(timeline.lane, []).append(((timeline.start, timeline.task), start, end, index, label))
+                pieces.append((timeline.lane, ((timeline.start, timeline.task), start, end, index, label)))
             else:
                 seconds[index][stage, label] = seconds[index].get((stage, label), 0.0) + (end - start) / 1000
-    for lane, waiting in pieces.items():
+    taken, waiting = _held_pieces(pieces, held)
+    for lane, rest in waiting.items():
         cap = None if seats is None else seats.get(lane, 0)
-        for index, stage, label, value in _split(waiting, lives[lane], cap):
-            seconds[index][stage, label] = seconds[index].get((stage, label), 0.0) + value
+        taken += _split(rest, lives[lane], cap)
+    for index, stage, label, value in taken:
+        seconds[index][stage, label] = seconds[index].get((stage, label), 0.0) + value
     return list(zip(found, seconds))
 
 

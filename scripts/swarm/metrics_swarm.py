@@ -454,6 +454,14 @@ def held_harness(lanes: dict, held: dict) -> str:
     return agents.pop() if len(agents) == 1 and agents.issubset(agent_choice.AGENTS) else ""
 
 
+def held_pins(lanes: dict, held: dict) -> str:
+    return "".join(
+        f"; {count} {lane} {'spawn' if count == 1 else 'spawns'} held on the {lane} lane pinned to {agent}"
+        for lane, count in sorted(held.items())
+        if count and (agent := lanes.get(lane, {}).get("agent")) in agent_choice.AGENTS
+    )
+
+
 def record_pass(
     box: metrics_outbox.Outbox, slug: str, now_ms: int, store: RedisStore, doc: dict, found: list, pulls: dict
 ) -> None:
@@ -468,7 +476,7 @@ def record_pass(
     quota["held_spawns"] = sum(held.values())
     quota["held_by"] = ("host" if hold else "quota") if quota["held_spawns"] else ""
     quota["held_harness"] = "" if hold else held_harness(store.config(slug).lanes, held)
-    quota["reason"] = hold or quota.get("reason", "")
+    quota["reason"] = hold or quota.get("reason", "") + held_pins(store.config(slug).lanes, held)
     quota.update(placement_counts(live))
     reviews, classifiers = read_review_events(slug, box), read_classifier_calls(box)
     rounds = read_review_rounds(slug, box)
