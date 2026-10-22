@@ -166,11 +166,11 @@ level `import fakeredis` on both sides:
 | Side | Run | Result |
 |---|---|---|
 | Plant on `dev` before the change | [39098955827](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39098955827) | Preflight `success`; no contract step, break not caught |
-| Plant on the change | [39099046126](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099046126) | `plan` failed at **Run the suite speed contracts** 74 seconds after the run started; both fake Redis contracts failed; statistics and shards skipped |
+| Plant on the change | [39099046126](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099046126) | `plan` failed at **Run the suite speed contracts** 32 seconds after the run started; both fake Redis contracts failed; statistics and shards skipped; the whole run ended after 74 seconds |
 
 On a clean head, [run 39098970804](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39098970804)
 ran the contracts in about ten seconds and passed; the whole `plan` job took
-47 seconds against its ten minute timeout. The contract names in these runs
+54 seconds against its ten minute timeout. The contract names in these runs
 predate the current worker group rule, which now refuses the mark instead of
 requiring one.
 
