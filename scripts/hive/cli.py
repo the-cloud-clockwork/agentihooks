@@ -171,6 +171,8 @@ def _retire(args: argparse.Namespace) -> str:
     if args.command == "revoke":
         auth.revoke(redis_client(), args.id)
         return f"revoked {args.id}"
+    if args.command == "drain":
+        return _drain(args.wait)
     return "\n".join(_remove(args))
 
 
@@ -353,10 +355,8 @@ def main(argv: list[str]) -> int:
             print(
                 f"refreshed the Redis credential of hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}"
             )
-        elif args.command in ("revoke", "remove"):
+        elif args.command in ("revoke", "remove", "drain"):
             print(_retire(args))
-        elif args.command == "drain":
-            print(_drain(args.wait))
         elif args.command in ("run", "install"):
             return _daemon(args.command)
         elif args.command == "compare":
