@@ -315,6 +315,34 @@ def test_launch_failure_moves_a_lane_the_workstation_excludes_without_hive_place
     assert run(store) == [text]
 
 
+@pytest.mark.parametrize(("limit", "occupied", "moves"), [(1, 0, False), (2, 0, True), (3, 1, True), (3, 2, False)])
+def test_workstation_only_move_requires_room_for_the_lane(store, home, shipped, monkeypatch, limit, occupied, moves):
+    from scripts.swarm import local_slots
+
+    hive_only(store, monkeypatch, excluded="plan")
+    store.update(SLUG, local_max_agents=limit)
+    calls = []
+    monkeypatch.setattr(local_slots, "held", lambda *args: calls.append(args) or occupied)
+    pin(store, "eng", "claude")
+    detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
+    why = bottleneck_remedy.UNPLACEABLE.format(target="codex", lane="eng")
+    text = bottleneck_remedy.MOVED.format(lane="eng", source="claude", target="codex", targeted=FAILED)
+    assert run(store) == [text if moves else proposed(FAILED, why)]
+    assert lane_of(store, "eng") == (("codex", "auto") if moves else ("claude", "opus"))
+    assert calls == [(store, "ws", SLUG, "")]
+
+
+@pytest.mark.parametrize("source_room", [0, 1, 8])
+def test_quota_hold_keeps_a_lane_on_a_harness_with_available_accounts(store, home, shipped, source_room):
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"placeable": {"claude": source_room, "codex": 9}}))
+    pin(store, "eng", "claude")
+    detect(store, "quota_hold", 3.0, 2.0, labels=("claude",))
+    text = bottleneck_remedy.MOVED.format(lane="eng", source="claude", target="codex", targeted=HELD)
+    why = "claude accounts still have room"
+    assert run(store) == [proposed(HELD, why) if source_room else text]
+    assert lane_of(store, "eng") == (("claude", "opus") if source_room else ("codex", "auto"))
+
+
 def test_quota_hold_moves_a_hive_only_lane_back_to_claude(store, home, shipped, monkeypatch):
     hive_only(store, monkeypatch)
     pin(store, "eng", "codex")
