@@ -60,6 +60,7 @@ jobs:
         run: |
           if command -v redis-server >/dev/null; then
             echo "redis-server comes from the runner image; no package fetch"
+            redis-server --version
           else
             archive=/etc/apt/sources.list.d/ubuntu.sources
             [[ -f "$archive" ]] || archive=/etc/apt/sources.list
@@ -138,6 +139,7 @@ jobs:
         run: |
           if command -v redis-server >/dev/null; then
             echo "redis-server comes from the runner image; no package fetch"
+            redis-server --version
           else
             archive=/etc/apt/sources.list.d/ubuntu.sources
             [[ -f "$archive" ]] || archive=/etc/apt/sources.list
