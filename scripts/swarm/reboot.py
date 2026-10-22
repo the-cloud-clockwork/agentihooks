@@ -61,6 +61,7 @@ def prepare(store, slug, now_ms, run=subprocess.run):
         "slug": slug,
         "taken_at": now_ms,
         "hive": commands.hive_id(),
+        "boot": boot_id(),
         "snapshot": str(snapshot.path(slug)),
         "agents": [entry(a) for a in agents if local(a)],
     }
@@ -70,7 +71,7 @@ def prepare(store, slug, now_ms, run=subprocess.run):
     partial.write_text(json.dumps(doc), encoding="utf-8")
     partial.replace(target)
     inbox = InboxStore(store.redis)
-    for master in (a for a in agents if a.lane == MASTER):
+    for master in (a for a in agents if a.lane == MASTER and local(a)):
         inbox.send(exits.BY, master.name, ASK.format(path=handoff_path(slug)))
     snapshot.take(store, slug, now_ms, run)
     return doc
@@ -83,11 +84,12 @@ def _read(file):
         return None
 
 
-def recorded(store, slug):
-    """Agent names held by the newest of the planned record and the automatic snapshots; empty when neither exists."""
+def recorded(store, slug, ended):
+    """Agent names held by the newest of the automatic snapshots and the planned record taken in the boot that ended;
+    empty when neither exists."""
     planned, autos = _read(record_path(slug)), snapshot.automatic(slug)
     last = snapshot.last_auto(slug)
-    if planned is not None and (last is None or planned["taken_at"] >= last):
+    if planned is not None and planned.get("boot") == ended and (last is None or planned["taken_at"] >= last):
         return {a["name"] for a in planned["agents"]}
     if not autos:
         return set()
@@ -125,15 +127,15 @@ def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
     current = boot_id() if current is None else current
     key = store.key(slug, "boot", commands.hive_id())
     seen = store.redis.get(key)
-    if seen == current or store.config(slug).state in {"stopped", "stopping"}:
+    if seen == current:
         return []
-    if seen is None:
+    if seen is None or store.config(slug).state in {"stopped", "stopping"}:
         store.redis.set(key, current)
         return []
     actions = start_server()
     if actions:
         return actions
-    wanted, live = recorded(store, slug), runtime.live_names()
+    wanted, live = recorded(store, slug, seen), runtime.live_names()
     for agent in store.agents(slug):
         if agent.name not in wanted or agent.name in live or agent.state == "finished" or not local(agent):
             continue
