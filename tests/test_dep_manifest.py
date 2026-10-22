@@ -516,7 +516,10 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
                     calls.add((name, step["name"]))
                     earlier = [s.get("run", "") for s in steps[:index]]
                     lines = "\n".join([*earlier, run[: run.index(call)]]).splitlines()
-                    assert any("-m pip install" in line and "PyYAML==6.0.3" in line for line in lines), (
+                    assert any(
+                        ("-m pip install" in line or "uv pip install" in line) and "PyYAML==6.0.3" in line
+                        for line in lines
+                    ), (
                         name,
                         step["name"],
                     )
