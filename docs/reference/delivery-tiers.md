@@ -252,7 +252,7 @@ Each record carries:
 | `action` | One of the actions above |
 | `token_actor` | The GitHub login of the token that read the queue, which is the actor GitHub records for the mutation; `null` when no queue read succeeded |
 | `agent` | `AGENTIHOOKS_AGENT_NAME` of the calling session; `null` outside a swarm session |
-| `pull`, `expected_head` | The pull request URL and the head it was queued or dequeued at; empty for `priority-deferred`, `priority-lift`, `priority-applied`, `priority-failed` and `priority-dropped` |
+| `pull`, `expected_head` | The pull request URL, always set, and the head it was queued or dequeued at; `expected_head` is empty for `priority-deferred`, `priority-lift`, `priority-applied`, `priority-failed` and `priority-dropped` |
 | `old_groups`, `new_groups` | Every `dev` queue entry, all pages, in queue order, read just before and just after the mutation; `null` when not read or unreadable |
 | `observed_between` | The times of the first and last queue reads |
 | `rebuilt` | Each pull request in both reads whose group head changed, with `old_head`, `new_head`, `old_base` and `new_base` |
