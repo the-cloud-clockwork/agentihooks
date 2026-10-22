@@ -46,7 +46,12 @@ def remote(monkeypatch, request):
             started_at=params.get("started_at", 0),
             launched_at=params.get("launched_at", 0),
             hive=HIVE,
-            runtime_target={"host_id": HIVE, "process_namespace": "theirs", "pid": 12, "pid_start": 34},
+            runtime_target={
+                "host_id": HIVE,
+                "process_namespace": params.get("namespace", "theirs"),
+                "pid": 12,
+                "pid_start": 34,
+            },
             profile_decision={"validation": {"pid": 12}},
         ),
     )
@@ -632,13 +637,14 @@ def test_the_hive_retires_the_recorded_process_identity(remote, monkeypatch):
     assert runtime.retire(agent) is True
 
 
+@pytest.mark.parametrize("remote", [{"namespace": "old-boot/pid:[1]"}], indirect=True)
 def test_a_hive_restarted_since_launch_retires_without_signalling(remote, monkeypatch):
     from scripts.hive.orders import Ack, Consumer, Orders
 
     _publish(remote)
     runtime, agent = remote.runtime, remote.agent
     assert runtime.retire(agent) is False
-    hive, ended = _hive_side(monkeypatch, "another", {12: SimpleNamespace(pid=12, start_time=34)})
+    hive, ended = _hive_side(monkeypatch, "new-boot/pid:[1]", {12: SimpleNamespace(pid=12, start_time=34)})
     Consumer(remote.redis, HIVE, hive).poll_commands()
     assert ended == []
     monkeypatch.setenv("SWARM_HIVE_ID", "controller")

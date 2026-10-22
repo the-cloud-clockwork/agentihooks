@@ -777,6 +777,112 @@ def test_live_acknowledgement_refuses_inconsistent_execution_identity(setup, bad
     )
 
 
+@pytest.mark.parametrize("bad", ["generation", "missing occupant", "replaced occupant"])
+def test_live_acknowledgement_failing_its_identity_reaps_that_execution_never_the_seat_occupant(setup, bad):
+    from unittest.mock import patch
+
+    from scripts.swarm.store import SwarmError
+
+    _, order, ack = live_order(setup)
+    live = setup.store.execution_registry.get("fixture", order.execution_id)
+    current = {live.seat: replace(live, execution_id="occupant")} if bad == "replaced occupant" else {}
+    if bad == "generation":
+        current, order = {live.seat: live}, replace(order, generation=order.generation + 1)
+    with patch.object(setup.store.execution_registry, "occupants", return_value=current):
+        with pytest.raises(SwarmError):
+            setup.launcher.complete(order, ack)
+    sent = [
+        json.loads(fields["order"]) for _, fields in setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    ]
+    assert [(o["action"], o["slug"], o["name"], o["execution_id"], o["generation"]) for o in sent] == [
+        ("reap_execution", "fixture", "", order.execution_id, order.generation)
+    ]
+
+
+def test_rejected_executions_have_separate_idempotent_reap_commands(setup):
+    _, order, _ = live_order(setup)
+    replacement = replace(order, execution_id="replacement", generation=order.generation + 1)
+    setup.launcher.reap_execution(order)
+    setup.launcher.reap_execution(order)
+    setup.launcher.reap_execution(replacement)
+    sent = [
+        json.loads(fields["order"]) for _, fields in setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    ]
+    assert [(row["execution_id"], row["generation"]) for row in sent] == [
+        (order.execution_id, order.generation),
+        (replacement.execution_id, replacement.generation),
+    ]
+
+
+def test_hive_reaps_the_process_it_acknowledged_for_the_named_execution(setup):
+    from scripts.hive.orders import Ack, CommandOrder, Consumer
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    _, order, ack = live_order(setup)
+    runtime = Mock()
+    runtime.terminate.return_value = Outcome("terminate", Status.OK, "local")
+    reap = CommandOrder("reap", "reap_execution", "fixture", "", order.execution_id, order.generation)
+    assert Consumer(setup.store.redis, "remote", runtime).command(reap) == Ack("done", ack.target)
+    (reaped,), _ = runtime.terminate.call_args
+    assert (reaped.execution_id, reaped.runtime_target, reaped.pane_id) == (order.execution_id, ack.target, "pane")
+    runtime.herdr.reap_name.assert_not_called()
+
+
+@pytest.mark.parametrize("status,detail", [("ok", ""), ("refused", "process identity changed")])
+def test_execution_reap_uses_the_receipt_even_when_the_registry_pane_changed(setup, status, detail):
+    from unittest.mock import patch
+
+    from scripts.hive.orders import Ack, CommandOrder, Consumer
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    _, order, ack = live_order(setup)
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    changed = replace(
+        agent,
+        generation=agent.generation + 1,
+        pane_id="replacement",
+        runtime_target={"host_id": "elsewhere", "pid": 999},
+    )
+    runtime = Mock()
+    runtime.terminate.return_value = Outcome("terminate", Status(status), "local", detail=detail)
+    reap = CommandOrder("reap", "reap_execution", "fixture", "", order.execution_id, order.generation)
+    expected = Ack("done" if status == "ok" else "failed", ack.target, detail)
+    consumer = Consumer(setup.store.redis, "remote", runtime)
+    with patch.object(consumer.store.execution_registry, "get", return_value=changed):
+        assert consumer.command(reap) == expected
+    (reaped,), _ = runtime.terminate.call_args
+    assert (reaped.execution_id, reaped.generation, reaped.runtime_target, reaped.pane_id) == (
+        order.execution_id,
+        order.generation,
+        ack.target,
+        "pane",
+    )
+    runtime.herdr.reap_name.assert_not_called()
+
+
+@pytest.mark.parametrize("bad", ["generation", "execution", "hive", "missing", "failed", "foreign target"])
+def test_hive_never_reaps_an_execution_it_did_not_acknowledge(setup, bad):
+    from scripts.hive.orders import FOREIGN, CommandOrder, Consumer
+
+    _, order, ack = live_order(setup)
+    if bad == "missing":
+        setup.store.redis.hdel(setup.launcher.orders.receipt(order), "ack")
+    elif bad == "failed":
+        setup.store.redis.hset(setup.launcher.orders.receipt(order), "ack", replace(ack, status="failed").encode())
+    elif bad == "foreign target":
+        setup.store.redis.hset(
+            setup.launcher.orders.receipt(order), "ack", replace(ack, target={"host_id": "elsewhere"}).encode()
+        )
+    runtime = Mock()
+    generation = order.generation + (bad == "generation")
+    execution = "other" if bad == "execution" else order.execution_id
+    reap = CommandOrder("reap", "reap_execution", "fixture", "", execution, generation)
+    hive = "elsewhere" if bad == "hive" else "remote"
+    assert Consumer(setup.store.redis, hive, runtime).command(reap) == FOREIGN
+    runtime.terminate.assert_not_called()
+    runtime.herdr.reap_name.assert_not_called()
+
+
 def test_live_acknowledgement_after_its_reservation_expired_ends_the_execution_and_reaps_its_pane(setup):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
