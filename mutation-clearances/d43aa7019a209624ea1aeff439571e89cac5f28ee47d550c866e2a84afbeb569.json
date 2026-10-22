@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/master_launch.py:scripts.swarm.master_launch.x__free_seat__mutmut_15:78acd7a3ea5160050020b2b6643361b6f4a140ced9a5a70b87fa749aab68ccce\nreader": {
+    "reader": "standards_reader",
+    "reason": "equivalent: the candidate range 2 to len(taken)+2 has len(taken)+1 indices and at most len(taken) of them are in taken, a set of distinct addresses, so next always returns within that range and the index len(taken)+3 added by the +4 mutant is never reached."
+  }
+}

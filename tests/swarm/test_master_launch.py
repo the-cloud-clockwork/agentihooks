@@ -405,7 +405,7 @@ def test_a_new_master_beside_a_live_front_door_reads_its_own_seat_handoff_and_la
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
     launched = printed(capsys)
-    assert (launched["seat"], launched["choice"]) == ("master-3@sw", "new")
+    assert (launched["seat"], launched["choice"], launched["pane"]) == ("master-3@sw", "new", "w1:m1")
     [(_, task)] = rt.masters
     assert (task["handoff"], task["masters"]) == ("seat three handoff", 4)
     assert task["launch_assignment"]["profile"] == "master"
