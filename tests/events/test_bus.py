@@ -1,8 +1,8 @@
 import pytest
-from scripts.events.bus import Bus, Consumer, Delivery, EventLog, StateConflict, StateEntry, StateStore, WorkQueue
-from scripts.events.config import QueuePolicy
 
 from scripts.events import bus
+from scripts.events.bus import Bus, Consumer, Delivery, EventLog, StateConflict, StateEntry, StateStore, WorkQueue
+from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
 
 pytestmark = pytest.mark.unit

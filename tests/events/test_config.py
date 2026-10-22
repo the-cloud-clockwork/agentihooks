@@ -1,7 +1,7 @@
 import pytest
-from scripts.events.config import BusConfig, QueuePolicy
 
 from scripts.events import config
+from scripts.events.config import BusConfig, QueuePolicy
 
 pytestmark = pytest.mark.unit
 
