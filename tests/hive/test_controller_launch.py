@@ -821,7 +821,13 @@ def test_execution_reap_uses_the_receipt_even_when_the_registry_pane_changed(set
     _, order, ack = live_order(setup)
     agent = setup.store.execution_registry.get("fixture", order.execution_id)
     setup.store.execution_registry.update(
-        "fixture", replace(agent, pane_id="replacement", runtime_target={"host_id": "remote", "pid": 999})
+        "fixture",
+        replace(
+            agent,
+            generation=agent.generation + 1,
+            pane_id="replacement",
+            runtime_target={"host_id": "elsewhere", "pid": 999},
+        ),
     )
     runtime = Mock()
     runtime.terminate.return_value = Outcome("terminate", Status(status), "local", detail=detail)

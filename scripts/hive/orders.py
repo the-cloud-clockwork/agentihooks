@@ -227,10 +227,10 @@ class Consumer:
             agent = self.store.execution_registry.get(order.slug, order.execution_id)
         except SwarmError:
             return FOREIGN
-        if agent.generation != order.generation or agent.runtime_target.get("host_id") != self.hive:
-            return FOREIGN
         if order.action == "reap_execution":
             return self.reap_execution(order, agent)
+        if agent.generation != order.generation or agent.runtime_target.get("host_id") != self.hive:
+            return FOREIGN
         if order.action == "name":
             return _done(self.runtime.herdr.name_pane(agent))
         if order.action == "retire":
@@ -251,7 +251,7 @@ class Consumer:
         ack = Ack(**json.loads(raw))
         if ack.status != "live" or ack.target.get("host_id") != self.hive:
             return FOREIGN
-        live = replace(agent, runtime_target=ack.target, pane_id=ack.execution["pane_id"])
+        live = replace(agent, generation=order.generation, runtime_target=ack.target, pane_id=ack.execution["pane_id"])
         outcome = self.runtime.terminate(live)
         return Ack(DONE if outcome.ok else FAILED, ack.target, "" if outcome.ok else outcome.detail)
 
