@@ -195,6 +195,64 @@ def test_nak_without_delay_redelivers_at_once(bus):
     assert queue.take(0).attempt == 2
 
 
+def test_a_zero_backoff_step_delivers_an_event_once_per_fetch(clock):
+    bus = memory.open_bus(BusConfig(queue=QueuePolicy(max_deliver=3, backoff_ms=(0,))), clock=clock)
+    bus.events.publish("swarm.s.task", event())
+    consumer = bus.events.consumer("d", "swarm.>")
+    assert [d.attempt for d in consumer.fetch(10, 0)] == [1]
+    assert [d.attempt for d in consumer.fetch(10, 0)] == [2]
+
+
+def waits(monkeypatch):
+    seen = []
+
+    def wait(self, timeout=None):
+        seen.append(timeout)
+        return False
+
+    monkeypatch.setattr(threading.Condition, "wait", wait)
+    return seen
+
+
+@pytest.fixture
+def wakes(monkeypatch):
+    seen = []
+    monkeypatch.setattr(threading.Condition, "notify_all", lambda self: seen.append(self))
+    return seen
+
+
+def test_take_waits_no_longer_than_the_next_redelivery(bus, clock, waits):
+    queue = bus.queue("work", QueuePolicy(ack_wait_ms=50))
+    assert queue.take(60_000) is None
+    queue.offer(event())
+    queue.take(60_000)
+    clock.now += 10
+    queue.take(60_000)
+    queue.take(30)
+    assert waits == [60.0, 0.04, 0.03]
+
+
+def test_take_skips_the_wait_once_closed(bus, waits):
+    queue = bus.queue("work", QueuePolicy())
+    bus.close()
+    assert queue.take(60_000) is None
+    assert waits == []
+
+
+def test_every_change_a_taker_waits_on_wakes_it(bus, wakes):
+    queue = bus.queue("work", QueuePolicy())
+    bus.events.publish("swarm.s.task", event())
+    bus.events.publish("swarm.s.task", event())
+    queue.offer(event())
+    queue.offer(event())
+    delivery = queue.take(0)
+    delivery.nak()
+    delivery.ack()
+    delivery.nak()
+    bus.close()
+    assert len(wakes) == 4
+
+
 def test_expiry_follows_the_backoff_then_repeats_its_last_step(bus, clock):
     queue = bus.queue("work", QueuePolicy(max_deliver=4, ack_wait_ms=1_000, backoff_ms=(10, 30)))
     queue.offer(event())
@@ -249,30 +307,30 @@ def test_settled_delivery_ignores_a_later_nak(bus):
 def test_take_waits_for_an_offer(bus):
     queue = bus.queue("work", QueuePolicy())
     taken = []
-    taker = threading.Thread(target=lambda: taken.append(queue.take(60_000)))
+    taker = threading.Thread(target=lambda: taken.append(queue.take(5_000)), daemon=True)
     taker.start()
     queue.offer(event())
-    taker.join(60)
+    taker.join(10)
     assert [d.event.id for d in taken] == ["e1"]
 
 
 def test_fetch_waits_for_a_publish(bus):
     consumer = bus.events.consumer("d", "swarm.>")
     fetched = []
-    fetcher = threading.Thread(target=lambda: fetched.append(consumer.fetch(1, 60_000)))
+    fetcher = threading.Thread(target=lambda: fetched.append(consumer.fetch(1, 5_000)), daemon=True)
     fetcher.start()
     bus.events.publish("swarm.s.task", event())
-    fetcher.join(60)
+    fetcher.join(10)
     assert [[d.event.id for d in batch] for batch in fetched] == [["e1"]]
 
 
 def test_close_wakes_a_blocked_taker(bus):
     queue = bus.queue("work", QueuePolicy())
     taken = []
-    taker = threading.Thread(target=lambda: taken.append(queue.take(60_000)))
+    taker = threading.Thread(target=lambda: taken.append(queue.take(5_000)), daemon=True)
     taker.start()
     bus.close()
-    taker.join(60)
+    taker.join(10)
     assert taken == [None]
 
 

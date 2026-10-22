@@ -50,7 +50,7 @@ class _Dedupe:
         return True
 
 
-@dataclass
+@dataclass(eq=False)
 class _Message:
     event: Envelope
     attempt: int = 0
@@ -76,7 +76,7 @@ class MemoryDelivery:
 
 
 class _Pending:
-    def __init__(self, runtime: _Runtime, policy: QueuePolicy, source: Callable[[], Iterable[Envelope]] = tuple):
+    def __init__(self, runtime: _Runtime, policy: QueuePolicy, source: Callable[[], Iterable[Envelope]] = lambda: ()):
         self._runtime = runtime
         self._policy = policy
         self._source = source
@@ -87,13 +87,14 @@ class _Pending:
 
     def take(self, batch: int, timeout_ms: int) -> list[MemoryDelivery]:
         with self._runtime.cond:
-            self._runtime.cond.wait_for(lambda: self._runtime.closed or self._ready() is not None, timeout_ms / 1000)
-            deliveries = []
-            while len(deliveries) < batch and (message := self._ready()) is not None:
+            if not self._runtime.closed and self._ready() is None:
+                self._runtime.cond.wait(self._limit_ms(timeout_ms) / 1000)
+            taken: list[_Message] = []
+            while len(taken) < batch and (message := self._ready(taken)) is not None:
                 message.attempt += 1
                 message.ready_at = self._runtime.clock() + self._wait_ms(message.attempt)
-                deliveries.append(MemoryDelivery(self, message))
-            return deliveries
+                taken.append(message)
+            return [MemoryDelivery(self, message) for message in taken]
 
     def settle(self, message: _Message, attempt: int) -> None:
         with self._runtime.cond:
@@ -106,14 +107,19 @@ class _Pending:
                 message.ready_at = self._runtime.clock() + delay_ms
                 self._runtime.cond.notify_all()
 
-    def _ready(self) -> _Message | None:
+    def _ready(self, taken: list[_Message] = ()) -> _Message | None:
         for event in self._source():
             self.add(event)
         now = self._runtime.clock()
         self._messages = [
             m for m in self._messages if not m.settled and (m.attempt < self._policy.max_deliver or m.ready_at > now)
         ]
-        return next((m for m in self._messages if m.ready_at <= now), None)
+        return next((m for m in self._messages if m.ready_at <= now and m not in taken), None)
+
+    def _limit_ms(self, timeout_ms: int) -> int:
+        self._ready()
+        now = self._runtime.clock()
+        return min([timeout_ms, *(m.ready_at - now for m in self._messages if m.ready_at > now)])
 
     def _wait_ms(self, attempt: int) -> int:
         backoff = self._policy.backoff_ms
@@ -205,8 +211,9 @@ class MemoryStateStore:
         with self._runtime.cond:
             self._runtime.require_open()
             entry = self._current.get(key)
-            if entry is None or entry.revision != revision:
-                raise StateConflict(f"state key {key!r} is at revision {entry and entry.revision}, not {revision}")
+            current = None if entry is None else entry.revision
+            if current != revision:
+                raise StateConflict(f"state key {key!r} is at revision {current}, not {revision}")
             return self._put(key, value)
 
     def watch(self, key: str, from_revision: int = 0) -> Iterator[StateEntry]:
