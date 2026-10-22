@@ -787,3 +787,84 @@ def test_every_trigger_kind_wakes_the_live_seat_once_and_closes_with_its_signal(
     assert run(store, runtime, found, NOW + 2 * MINUTE) == []
     store.update(SLUG, autonomy="delegate")
     assert run(store, runtime, found, NOW + 3 * MINUTE) == [f"ended dispatcher {NAME}: its triggers closed"]
+
+
+def hive_member(monkeypatch):
+    from fnmatch import fnmatchcase
+
+    from fakeredis._helpers import SimpleError
+    from fakeredis._msgs import NO_PERMISSION_KEY_ERROR
+    from fakeredis.model._acl import AccessControlList, UserAccessControlList
+
+    from scripts.hive import auth
+
+    grant = auth._acl_keys("m1")
+    readable = [pattern[3:] for pattern in grant if pattern.startswith("%R~")]
+    writable = [pattern[1:] for pattern in grant if pattern.startswith("~")]
+
+    def validate(_acl, _username, _client, fields):
+        info = UserAccessControlList._get_command_info(fields)
+        allowed = writable if info and b"write" in info[2] else readable + writable
+        for key in UserAccessControlList()._get_keys(info, fields):
+            if not any(fnmatchcase(key.decode(), pattern) for pattern in allowed):
+                raise SimpleError(NO_PERMISSION_KEY_ERROR)
+
+    monkeypatch.setattr(AccessControlList, "validate_command", validate)
+
+
+def test_the_hive_member_rules_refuse_a_key_outside_the_grant(monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    store = swarm()
+    hive_member(monkeypatch)
+    assert store.config(SLUG).name == SLUG
+    with pytest.raises(NoPermissionError, match="No permissions to access a key"):
+        store.redis.delete(store.key(SLUG, "dispatcher-quota-lanes"))
+    store.redis.delete(store.key(SLUG, "claim", "t1"))
+
+
+def test_the_refusal_a_hive_seat_reads_leaves_the_tick_bookkeeping_to_the_tick(monkeypatch):
+    from scripts.swarm import stage_cover
+
+    store = swarm()
+    held(store)
+    lanes, covers, retired = (
+        store.key(SLUG, "dispatcher-quota-lanes"),
+        store.key(SLUG, stage_cover.KEY),
+        store.key(SLUG, "master-retired-tasks"),
+    )
+    opened = {**doc(), "tasks": [{"id": "t7", "state": "open"}]}
+    stage_cover.cover(store, SLUG, opened, stage_cover.Request("review", "tasks/t7", "owned", NAME), NOW)
+    store.redis.set(lanes, json.dumps({"eng": 2}))
+    store.redis.set(retired, json.dumps(["t1"]))
+    hive_member(monkeypatch)
+    closed = {**doc(), "tasks": [{"id": "t7", "state": "done"}]}
+    assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, closed, NOW).splitlines()[1].startswith(
+        "- The bottleneck report named the same share 3 ticks running"
+    )
+    assert store.redis.get(lanes) == json.dumps({"eng": 2})
+    assert list(store.redis.hgetall(covers)) == ["review"]
+    assert store.redis.get(retired) == json.dumps(["t1"])
+
+
+def test_done_from_a_hive_dispatcher_seat_writes_only_keys_the_hive_member_may_write(monkeypatch, capsys):
+    from scripts.swarm import cli
+
+    store, runtime = swarm(), FakeRuntime()
+    run(store, runtime, doc(priority()))
+    [seat] = seats(store)
+
+    class Ledger:
+        def state(self, slug):
+            assert slug == SLUG
+            return doc()
+
+    monkeypatch.setattr(cli, "LedgerClient", Ledger)
+    hive_member(monkeypatch)
+    cli._dispatcher_done(store, SLUG, seat)
+    assert [a.state for a in seats(store)] == ["finished"]
+    assert json.loads(capsys.readouterr().out) == {
+        "seat": seat.name,
+        "state": "finished",
+        "next": "stop now; the swarm closes this session",
+    }
