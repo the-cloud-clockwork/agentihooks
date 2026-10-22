@@ -94,14 +94,16 @@ RUN_ID=39060292125
 gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$RUN_ID/jobs" \
   --paginate \
   --jq '.jobs[] | select(.name == "sonar") | {id, started_at, conclusion, html_url}'
-gh run view "$RUN_ID" \
-  --repo the-cloud-clockwork/agentihooks \
-  --job 117479092946 --log
+JOB_ID=117479092946
+gh api "repos/the-cloud-clockwork/agentihooks/actions/jobs/$JOB_ID/logs"
 ```
 
-Replace the job id with the `id` returned for that run. In its timestamped log,
-subtract the job's `started_at` from the first `INFO` sensor line in
-`SonarQube Scan`. Retain the run URL, revision, attempt, scope and interval.
+Replace the job id with the `id` returned for that run. Subtract the job's UTC
+`started_at` from the scanner's embedded timestamp on the first `INFO` sensor
+line in `SonarQube Scan`. The outer Actions timestamp can reflect buffered log
+delivery. For this example, `19:09:06.044` minus `19:08:04Z` is 62.0 seconds;
+the outer line timestamp is `19:10:28.3286316Z`. Retain the run URL, revision,
+attempt, scope and interval.
 Compare successful first Sonar attempts on dev push runs with the same scope;
 report sample counts and medians. Queue delay, the scanner step duration and
 whole job duration are separate measurements. A skipped or superseded analysis
