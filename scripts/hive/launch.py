@@ -362,12 +362,15 @@ class HiveLaunch:
         return f"no hive for {request.lane} has room: {selected.hive} {refused}"
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
+        raw = self.store.redis.hget(self.store.key(self.slug, "agents"), request.name)
+        started_at = json.loads(raw)["started_at"] if raw else lease.now_ms(self.store)
         agent = AgentRecord(
             request.name,
             request.lane,
             request.task["id"],
             seat=request.task["seat"],
             state="launching",
+            started_at=started_at,
             profile=selected.profile.profile,
             profile_decision={
                 **selected.profile.record(),

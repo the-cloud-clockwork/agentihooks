@@ -103,7 +103,7 @@ def retract(store, doctor, watched, cleared, now_ms):
     mail = InboxStore(store.redis)
     for slug in (watched, doctor):
         store.redis.srem(store.key(doctor, "ci-speed-notified", slug), *gone)
-        mail.send(SENDER, seat_address(slug, MASTER), text)
+        mail.send(SENDER, seat_address(slug, MASTER), text, fyi=True)
     return gone
 
 
@@ -128,6 +128,7 @@ def _crossings(state, runs, span, incidents, held):
         ci_speed.group(groups, runs, since, now_ms, window, github_status.windows(incidents, now_ms))
     state["groups"] = groups
     current = {identity: entry for identity, entry in groups.items() if entry["window"] == window}
+    gone = [identity for identity in gone if identity not in current]
     found = []
     if not held:
         found.extend(ci_speed.grouped(current))
@@ -147,7 +148,7 @@ def _hold(mail, watched, doctor, held):
             "during it are labelled."
         )
         for slug in (watched, doctor):
-            mail.send(SENDER, seat_address(slug, MASTER), text)
+            mail.send(SENDER, seat_address(slug, MASTER), text, fyi=True)
         incident["noticed"] = True
 
 

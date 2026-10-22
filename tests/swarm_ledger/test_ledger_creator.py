@@ -42,7 +42,7 @@ def content_file(tmp_path, phases):
 def new(monkeypatch, tmp_path, folder, content, *extra, size="small"):
     monkeypatch.setenv("LEDGER_DIR", str(folder))
     monkeypatch.setattr(importlib.import_module("ledger_core"), "LEDGER_DIR", folder)
-    monkeypatch.setattr(new_ledger.ledger_link, "serving", lambda: str(folder))
+    monkeypatch.setattr(new_ledger.ledger_link, "serving", lambda **kw: str(folder))
     plan = tmp_path / "creator-plan.md"
     plan.write_text("plan")
     if isinstance(content, int):

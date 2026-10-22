@@ -1,6 +1,7 @@
 """Production workflow and image guards; CI alone owns protected promotion."""
 
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -26,6 +27,8 @@ _MERGE_QUEUE = (
     "query($url: URI!, $branch: String!) { resource(url: $url) { ... on PullRequest {"
     " repository { mergeQueue(branch: $branch) { id } } } } }"
 )
+
+_ENQUEUE_READERS = frozenset({"agentihooks", "cat", "echo", "grep", "head", "jq", "ls", "printf", "tail", "wc"})
 
 _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
@@ -322,6 +325,48 @@ def _check_pr_merge(line: str, cwd: str, bypass: bool) -> None:
         )
 
 
+def _check_swarm_enqueue(command: str) -> None:
+    slug = os.environ.get("AGENTIHOOKS_SWARM")
+    if not slug or "enqueuePullRequest" not in command:
+        return
+    tree = Parser(Language(tree_sitter_bash.language())).parse(command.encode())
+    if tree.root_node.has_error or _runs_enqueue(tree.root_node):
+        raise BlockAction(
+            "BLOCKED [raw enqueuePullRequest in a swarm]: the swarm queue command records every merge queue "
+            f"entry in its journal. Queue it with `agentihooks swarm {slug} merge queue <url>`."
+        )
+
+
+def _runs_enqueue(node: Node) -> bool:
+    if b"enqueuePullRequest" in node.text:
+        command = node.child_by_field_name("body") if node.type == "redirected_statement" else node
+        if command and command.type == "command" and _sends_enqueue(command):
+            return True
+        if node.type == "pipeline" and _feeds_enqueue(node.named_children):
+            return True
+    return any(_runs_enqueue(child) for child in node.named_children)
+
+
+def _program(node: Node) -> str | None:
+    if node.type == "command":
+        return Path(shlex.split(node.child_by_field_name("name").text.decode())[0]).name
+
+
+def _sends_enqueue(command: Node) -> bool:
+    arguments = [
+        child.text.decode()
+        for index, child in enumerate(command.named_children)
+        if command.field_name_for_named_child(index) == "argument"
+    ]
+    program = _program(command)
+    return program not in _ENQUEUE_READERS and (program != "gh" or "api" in arguments)
+
+
+def _feeds_enqueue(stages: list[Node]) -> bool:
+    first = next(index for index, stage in enumerate(stages) if b"enqueuePullRequest" in stage.text)
+    return any(_program(stage) not in _ENQUEUE_READERS for stage in stages[first + 1 :])
+
+
 def check_prod_lockdown(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     try:
@@ -354,6 +399,7 @@ def check_prod_lockdown(payload: dict) -> None:
         raise BlockAction(
             f"BLOCKED [{name}]: {reason}\nAdd --emergency-prod / 'prod override' / 'emergency' to your message."
         )
+    _check_swarm_enqueue(command)
     from hooks.context.branch_guard import _resolve_cwd
 
     cwd = _resolve_cwd(command, payload.get("cwd", ""))

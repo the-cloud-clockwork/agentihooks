@@ -1781,8 +1781,10 @@ def cmd_wait(store, args):
             raise SwarmError(problem)
         if held["kind"] == "checks" and waits.PULL_URL.fullmatch(held["target"]):
             head = ledger_events.head(held["target"])
-            if not head:
+            if head == "":
                 raise SwarmError("cannot read the pull request head; retry the checks wait")
+            if head is None:
+                waits.mutation_wait.admitted_pending(held["target"])
             held["head"] = head
         if held["kind"] == "mutation":
             held["head"] = waits.mutation_wait.bind(held["target"])

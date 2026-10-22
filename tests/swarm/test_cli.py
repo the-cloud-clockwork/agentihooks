@@ -2571,7 +2571,7 @@ def test_restore_decision_hands_resume_the_routed_runtime_the_clock_and_the_ledg
 
 @pytest.mark.parametrize("command", ["create", "start", "url"])
 def test_create_start_and_url_end_with_the_ledger_page_line(env, capsys, monkeypatch, command):
-    monkeypatch.setattr(cli.ledger_link, "serving", lambda: str(cli.ledger_link.folder()))
+    monkeypatch.setattr(cli.ledger_link, "serving", lambda **kw: str(cli.ledger_link.folder()))
     if command != "create":
         run("sw", "create", "--repo", "/repo")
         capsys.readouterr()
@@ -2607,7 +2607,7 @@ def _traced(env, monkeypatch, tmp_path, plan, *p_yes):
 
     store, ledger, _ = env
     ledger.followups = []
-    ledger.followup = lambda slug, text, by: ledger.followups.append((slug, text, by))
+    ledger.followup_once = lambda slug, text, by, op_id: ledger.followups.append((slug, text, by)) or True
     ledger.phases = [{"id": "p1", "title": "Build", "description": "Build the doghouse."}]
     ledger.rows["t1"].update(phase="p1", title="Doghouse", description="A house for the dog.")
     asked = {f"piece_{i}": Answer(type="noul", noul=p) for i, p in enumerate(p_yes)}

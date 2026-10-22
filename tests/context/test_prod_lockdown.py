@@ -262,3 +262,68 @@ def test_release_signal_cannot_skip_a_blocked_rule_in_any_order(grant, monkeypat
         monkeypatch.setattr(prod_lockdown, "_BLOCKED", rules)
         with pytest.raises(BlockAction):
             _check(f"{authorized}; {_TAG_PUSH}")
+
+
+_ENQUEUE = (
+    "gh api graphql -f query='mutation($id: ID!) { enqueuePullRequest(input: {pullRequestId: $id})"
+    " { mergeQueueEntry { id } } }' -f id=PR_kwDO123"
+)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        _ENQUEUE,
+        f"git status && GH_TOKEN=$T {_ENQUEUE}",
+        _ENQUEUE.replace("gh api", "gh -R owner/repo api"),
+        _ENQUEUE.replace("gh api", "env gh api"),
+        f'bash -c "{_ENQUEUE}"',
+        f'git -c alias.q="!{_ENQUEUE}" q',
+        f'rg --pre "{_ENQUEUE}" x',
+        'echo \'{"query": "mutation { enqueuePullRequest(input: {}) { clientMutationId } }"}\' | gh api graphql --input -',
+        "cat q.json | grep enqueuePullRequest | gh api graphql --input -",
+        'grep -h enqueuePullRequest q.graphql | (read -r q; gh api graphql -f query="$q")',
+        "python3 - <<'EOF'\nrequests.post(url, json={'query': 'mutation { enqueuePullRequest(input: {}) { clientMutationId } }'})\nEOF",
+        'gh api graphql -f query="$(cat <<\'EOF\'\nmutation { enqueuePullRequest(input: {pullRequestId: "x"}) { clientMutationId } }\nEOF\n)"',
+        'curl -s https://api.github.com/graphql -d \'{"query": "mutation { enqueuePullRequest(input: {}) { clientMutationId } }"}\'',
+    ],
+)
+def test_swarm_session_cannot_run_the_raw_enqueue_mutation(monkeypatch, command):
+    from hooks.hook_manager import BlockAction
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    with pytest.raises(BlockAction) as blocked:
+        _check(command)
+    assert str(blocked.value) == (
+        "BLOCKED [raw enqueuePullRequest in a swarm]: the swarm queue command records every merge queue "
+        "entry in its journal. Queue it with `agentihooks swarm rig merge queue <url>`."
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "agentihooks swarm rig merge queue https://github.com/owner/repo/pull/123",
+        "grep -rn enqueuePullRequest scripts/swarm",
+        "gh api repos/owner/repo/pulls/12 --jq .title; grep -rn enqueuePullRequest scripts/swarm",
+        "curl -s https://example.com/merge_queue.py | grep enqueuePullRequest",
+        "\\grep -n enqueuePullRequest scripts/swarm/merge_queue.py > hits.txt",
+        'gh pr comment 12 --body "queued with the swarm command, not the enqueuePullRequest api"',
+        "cat <<'EOF' > notes.md\nenqueuePullRequest writes no journal row\nEOF",
+        "MUTATION=enqueuePullRequest",
+        "echo enqueuePullRequest is the mutation name",
+        "printf '%s\\n' enqueuePullRequest | wc -c",
+        "head -n 20 scripts/swarm/merge_queue.py | grep -c enqueuePullRequest",
+        "tail -n 20 notes/enqueuePullRequest.md",
+        "ls scripts/enqueuePullRequest",
+        "jq '.enqueuePullRequest' response.json",
+        'agentihooks swarm rig say "never call enqueuePullRequest by hand"',
+    ],
+)
+def test_swarm_session_keeps_the_swarm_queue_command(monkeypatch, command):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    _check(command)
+
+
+def test_raw_enqueue_mutation_outside_a_swarm_is_unchanged():
+    _check(_ENQUEUE)
