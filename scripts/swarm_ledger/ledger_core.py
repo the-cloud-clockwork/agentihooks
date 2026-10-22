@@ -321,6 +321,7 @@ class Context:
         self.at, self.rev = at, meta["rev"] + 1
         self.stamps, self.events = meta["stamps"], []
         self.meta, self.dirty, self.refused, self.dropped = meta, False, [], []
+        self.unstored = set()
         self.names = {}
         self.slug = slug
 
