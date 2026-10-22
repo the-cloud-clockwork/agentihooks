@@ -40,7 +40,7 @@ class Choice:
 
 
 def hosts(role: str, hive: dict, aliases: tuple[str, ...] = ()) -> bool:
-    return not {role, *aliases} & set(hive["excluded"])
+    return hive.get("draining") != YES and not {role, *aliases} & set(hive["excluded"])
 
 
 def _room(hive: dict) -> int:

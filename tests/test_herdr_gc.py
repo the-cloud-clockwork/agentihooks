@@ -43,6 +43,7 @@ class FakeHerdr:
     def __init__(self):
         self.panes, self.info, self.screens, self.closed = {}, {}, {}, []
         self.extra_tabs, self.extra_workspaces = set(), set()
+        self.labels = {}
 
     def add(self, pane_id, terminal, spot=Spot()):
         tab = spot.tab or f"{spot.workspace}:t-{pane_id}"
@@ -71,7 +72,9 @@ class FakeHerdr:
         counts = {tab: 0 for tab in self.extra_tabs}
         for pane in self.panes.values():
             counts[pane["tab_id"]] = counts.get(pane["tab_id"], 0) + 1
-        return [{"tab_id": tab, "pane_count": count} for tab, count in counts.items()]
+        return [
+            {"tab_id": tab, "pane_count": count, "label": self.labels.get(tab, "")} for tab, count in counts.items()
+        ]
 
     def workspaces(self):
         counts = {space: 0 for space in self.extra_workspaces}
@@ -932,3 +935,76 @@ def test_a_failing_sweep_never_breaks_the_tick(monkeypatch, capsys):
 def test_the_suite_never_sweeps_the_real_launch_folder_or_herdr(tmp_path):
     assert herdr_panes.run_folder(dict(os.environ)).is_relative_to(tmp_path)
     assert os.environ["HERDR_SOCKET_PATH"].startswith(str(tmp_path))
+
+
+def restored(herdr, pane_id, label, info=SHELL):
+    herdr.add(pane_id, f"term-{pane_id}", Spot(info=info, tab=f"w1:t-{pane_id}"))
+    herdr.labels[f"w1:t-{pane_id}"] = label
+    return f"w1:t-{pane_id}"
+
+
+def test_a_restored_agent_tab_with_no_live_agent_closes(env):
+    herdr = FakeHerdr()
+    tab = restored(herdr, "w1:p1", "engineer-323133-2505")
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == [tab]
+    assert herdr.closed == [("tab", tab)]
+
+
+def test_a_tab_whose_agent_runs_is_kept(env):
+    herdr = FakeHerdr()
+    restored(herdr, "w1:p1", "engineer-323133-2505")
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, {"engineer@323133-2505"}) == []
+    assert herdr.closed == []
+
+
+@pytest.mark.parametrize("label", ["1", "dev", "engineer-323133-2505-tail", "agentihooks-323133"])
+def test_a_tab_without_an_agent_label_is_kept(env, label):
+    herdr = FakeHerdr()
+    restored(herdr, "w1:p1", label)
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == []
+
+
+@pytest.mark.parametrize("info", [CLAUDE, LAUNCHER])
+def test_a_tab_running_anything_but_a_bare_shell_is_kept(env, info):
+    herdr = FakeHerdr()
+    restored(herdr, "w1:p1", "ci-323133-1356", info)
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == []
+
+
+def test_a_tab_with_one_live_pane_among_bare_shells_is_kept(env):
+    herdr = FakeHerdr()
+    tab = restored(herdr, "w1:p1", "ci-323133-1356")
+    herdr.add("w1:p2", "term-2", Spot(info=CLAUDE, tab=tab))
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == []
+
+
+def test_a_tab_launched_inside_the_grace_is_left_for_its_launcher(env):
+    herdr = FakeHerdr()
+    launch(env, herdr, "w1:p1", "term-1", Spot(tab="w1:t-new"), Owner(name="engineer@323133-2600", at=NOW - 1))
+    herdr.labels["w1:t-new"] = "engineer-323133-2600"
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == []
+    later = NOW - 1 + herdr_gc.DEFAULT_GRACE_MINUTES * MIN
+    assert herdr_gc.close_dead_tabs(env, later, herdr, set()) == ["w1:t-new"]
+
+
+def test_a_record_whose_pane_now_holds_a_restored_terminal_does_not_hold_the_tab(env):
+    herdr = FakeHerdr()
+    launch(env, herdr, "w1:p1", "term-old", Spot(tab="w1:t-old"), Owner(name="engineer@323133-2601", at=NOW - 1))
+    herdr.panes["w1:p1"]["terminal_id"] = "term-restored"
+    herdr.labels["w1:t-old"] = "engineer-323133-2601"
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == ["w1:t-old"]
+
+
+def test_a_fresh_record_whose_pane_herdr_dropped_holds_nothing(env):
+    herdr = FakeHerdr()
+    launch(env, herdr, "w1:p9", "term-9", Spot(tab="w1:t-gone"), Owner(name="engineer@323133-2602", at=NOW - 1))
+    del herdr.panes["w1:p9"]
+    tab = restored(herdr, "w1:p1", "engineer-323133-2505")
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == [tab]
+
+
+def test_a_kept_tab_does_not_stop_the_tabs_after_it(env):
+    herdr = FakeHerdr()
+    restored(herdr, "w1:p1", "engineer-323133-2505")
+    later = restored(herdr, "w1:p2", "engineer-323133-2506")
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, {"engineer@323133-2505"}) == [later]

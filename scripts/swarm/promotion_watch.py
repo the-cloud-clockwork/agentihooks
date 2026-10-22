@@ -50,7 +50,6 @@ SHARD_CONSUMERS = (
     "coverage-ratchet",
     "coverage-baseline",
     "flake-budget",
-    "stage-budget",
 )
 MISSING_SHARD_SIGNS = (
     "Missing coverage for shard ",
@@ -58,6 +57,7 @@ MISSING_SHARD_SIGNS = (
     "collected tests did not run in exactly one of ",
     "head shard coverage missing: ",
     "baseline shard coverage missing: ",
+    "No flake reports under ",
 )
 REFRESH_JOB = "refresh-durations"
 LOST_SAMPLES_SIGN = "kept no samples from durations-"

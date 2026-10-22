@@ -71,33 +71,37 @@ def test_each_task_ruling_has_its_verb():
     assert [master_fence.verb({"op": kind}) for kind in ("add", "relay")] == ["comment on", "relay onto"]
 
 
-def test_a_backend_master_comment_on_a_task_with_no_phase_is_refused_naming_the_front_door(world):
-    assert comment(world, SECOND_NAME, LOOSE) == {
-        "accepted": False,
-        "warnings": [f"tasks/{LOOSE} belongs to {LEAD}, so {SECOND} cannot comment on it"],
-    }
+def test_a_backend_master_comments_on_a_task_with_no_phase(world):
+    assert comment(world, SECOND_NAME, LOOSE) == {"accepted": True, "warnings": []}
     task = next(t for t in world.doc()["tasks"] if t["id"] == LOOSE)
-    assert task["comments"] == []
-    assert world.refusals() == 1
+    assert len(task["comments"]) == 1
+    assert [(r["owner"], r["seat"], r["by"]) for r in world.cross()[f"tasks/{LOOSE}"]] == [(LEAD, SECOND, SECOND_NAME)]
+    assert world.refusals() == 0
 
 
 def test_the_front_door_comments_on_a_task_with_no_phase(world):
     assert comment(world, LEAD_NAME, LOOSE) == {"accepted": True, "warnings": []}
 
 
-def test_a_phase_owner_comments_on_its_own_phase_and_not_on_another(world):
+def test_a_phase_owner_comments_on_its_own_phase_and_on_another(world):
     assert comment(world, SECOND_NAME, "t2") == {"accepted": True, "warnings": []}
-    assert comment(world, SECOND_NAME, "t1")["warnings"] == [
-        f"tasks/t1 belongs to {LEAD}, so {SECOND} cannot comment on it"
-    ]
+    assert comment(world, SECOND_NAME, "t1") == {"accepted": True, "warnings": []}
 
 
-def test_a_backend_master_relay_onto_a_task_with_no_phase_is_refused_naming_the_front_door(world):
-    assert relay(world, SECOND_NAME, LOOSE) == {
-        "accepted": False,
-        "warnings": [f"tasks/{LOOSE} belongs to {LEAD}, so {SECOND} cannot relay onto it"],
-    }
+def test_a_backend_master_relays_onto_a_task_with_no_phase(world):
+    assert relay(world, SECOND_NAME, LOOSE)["warnings"] == []
     assert relay(world, LEAD_NAME, LOOSE)["warnings"] == []
+    assert world.refusals() == 0
+
+
+def test_a_master_without_a_live_seat_cannot_comment_or_relay_naming_the_owner(world):
+    assert comment(world, cases.FORMER, LOOSE)["warnings"] == [
+        f"tasks/{LOOSE} belongs to {LEAD}, so {cases.FORMER} cannot comment on it"
+    ]
+    assert relay(world, cases.FORMER, "t1")["warnings"] == [
+        f"tasks/t1 belongs to {LEAD}, so {cases.FORMER} cannot relay onto it"
+    ]
+    assert world.refusals() == 2
 
 
 def test_an_engineer_comment_is_not_fenced(world):

@@ -618,17 +618,20 @@ def cmd_prober(store, args):
 
 def cmd_tick_watch(store, args):
     from scripts.swarm import scheduled_tick, tick_watch
-    from scripts.swarm.tick import respawn_master
+    from scripts.swarm.tick import place_master, respawn_master
     from scripts.swarm_ledger import ledger_link
 
-    repair = None
+    runtime = routed(herdr=HerdrRuntime())
     if ledger_link.local_mode(os.environ):
-        runtime = routed(herdr=HerdrRuntime())
 
         def respawn(slug):
             return respawn_master(slug, store, runtime, now_ms())
 
         repair = tick_watch.Repair(scheduled_tick.restart, respawn)
+    else:
+
+        def repair(slug, now):
+            return place_master(slug, store, runtime, now)
 
     tick_watch.run(store, now_ms, repair)
 
@@ -1648,7 +1651,10 @@ def cmd_done(store, args):
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
-    print(json.dumps({"task": agent.task, "state": "done", "next": "stop now; the swarm closes this session"}))
+    fallback = {"pull_request": pull.fallback} if pull is not None and pull.fallback else {}
+    print(
+        json.dumps({"task": agent.task, "state": "done", **fallback, "next": "stop now; the swarm closes this session"})
+    )
 
 
 def _pull_reader(url, pull):

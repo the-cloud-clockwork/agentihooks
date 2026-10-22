@@ -1,7 +1,9 @@
-"""Owner fenced master writes: only the master seat owning an item answers it, decides it or sets it.
+"""Owner fenced master writes: any live master seat answers, decides, sets, comments on or relays onto an item; a
+master without a live seat is refused unless it owns the item. A write by a seat other than the owner keeps the owner
+and is recorded under the cross write record with its writer.
 
 The fence runs inside the ledger's locked write, so the owner check and the write never interleave with another
-master's. A question or follow up keeps the seat that decided it until someone other than a master changes it; a task
+master's. A question or follow up keeps its owning seat until someone other than a master changes it; a task
 follows its phase owner.
 """
 
@@ -18,6 +20,8 @@ NAME = "master-fence"
 SWITCH = "AGENTIHOOKS_MASTER_FENCE"
 OFF = "off"
 DECISIONS = "master_decisions"
+CROSS = "master_cross_writes"
+CROSS_KEPT = 20
 REFUSALS = "write_refusals"
 DECIDED = ("questions/", "followups/")
 TASKS = "tasks/"
@@ -73,12 +77,13 @@ def current(record: dict, item: str, stamps: dict) -> bool:
     return any(stamp["rev"] == record["rev"] for stamp in fields) and all(lane_of(s["by"]) == MASTER for s in later)
 
 
-def announcement(seat: str, op: dict) -> str:
+def announcement(seat: str, op: dict, owner: str = "") -> str:
+    suffix = f" for {owner}" if owner and owner != seat else ""
     if op["op"] == "answer":
-        return f"{seat} answered {op['item']}: {op['text'].strip()}"
+        return f"{seat} answered {op['item']}{suffix}: {op['text'].strip()}"
     if op["op"] == "set":
-        return f"{seat} set {op['path']} to {json.dumps(op['value'])}"
-    return f"{seat} set {op['item']}: {', '.join(sorted(op['fields']))}"
+        return f"{seat} set {op['path']} to {json.dumps(op['value'])}{suffix}"
+    return f"{seat} set {op['item']}: {', '.join(sorted(op['fields']))}{suffix}"
 
 
 def measurements(redis, slug: str) -> dict:
@@ -189,21 +194,26 @@ class Fence:
             return self._inner(doc, op, ctx, apply)
         writer = seats.writer(by)
         owner, rev = seats.owner(item, ctx.meta)
-        if writer != owner:
+        if writer != owner and writer not in seats.live:
             ctx.refused.append(refusal(item, owner, writer, verb(op), rev))
             self._redis.hincrby(seats.table.key(self.slug), REFUSALS)
             return False
         before = _fields(ctx.stamps, item)
         done = self._inner(doc, op, ctx, apply)
+        if done and writer != owner:
+            rows = ctx.meta.setdefault(CROSS, {}).setdefault(item, [])
+            rows.append({"owner": owner, "seat": writer, "by": by, "rev": ctx.rev})
+            del rows[:-CROSS_KEPT]
         if done and _fields(ctx.stamps, item) != before:
-            self._decided(op, item, writer, by, seats.count, ctx)
+            self._decided(op, item, (owner, writer, by), seats.count, ctx)
         return done
 
-    def _decided(self, op, item, writer, by, count, ctx) -> None:
+    def _decided(self, op, item, authors, count, ctx) -> None:
+        owner, writer, by = authors
         if item.startswith(DECIDED):
-            ctx.meta.setdefault(DECISIONS, {})[item] = {"seat": writer, "rev": ctx.rev}
+            ctx.meta.setdefault(DECISIONS, {})[item] = {"seat": owner, "rev": ctx.rev}
         if count > 1:
-            self.decided.append((op["id"], writer, by, announcement(writer, op), ctx.at / 1000))
+            self.decided.append((op["id"], writer, by, announcement(writer, op, owner), ctx.at / 1000))
 
     def _seats(self, doc):
         from scripts.swarm.store import RedisStore, SwarmError
