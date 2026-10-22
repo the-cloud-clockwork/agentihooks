@@ -99,3 +99,18 @@ def test_one_live_worker_absorbs_its_claim_among_several_local_workers(setup, mo
     monkeypatch.setattr(terminate_agent, "sessions", lambda: rows)
     setup.store.redis.hset(local_slots.key("workstation"), "doctor/engineer@bbbbbb-0001", lease.now_ms(setup.store))
     assert local_slots.held(setup.store, "workstation", setup.config.slug, "task") == 2
+
+
+def test_root_hive_room_includes_pending_claims_before_any_process_exists(setup, monkeypatch):
+    from scripts.hive import launch
+    from scripts.swarm import commands
+    from tests.hive.test_controller_launch import write_hive
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    write_hive(setup, id="workstation", ui="yes", max_agents=1)
+    local_slots.claim(setup.store, "workstation", setup.config.slug, "other", "pending", 1)
+    hives = {row["id"]: row for row in launch.loaded_hives(setup.store)}
+    assert hives["workstation"]["agents"] == 0
+    assert hives["workstation"]["room"] == 0
+    assert hives["remote"]["room"] == 3
