@@ -196,12 +196,33 @@ def serving(timeout: float = 1, url: str | None = None) -> str | None:
 
 def page_line(slug):
     line = f"Ledger page: {page_url(slug)} (open it to follow and steer the work)"
-    served = serving()
+    if remote(slug=slug):
+        return hosted_line(slug, line)
+    target = base(slug=slug)
+    served = serving(url=target)
     if served is None:
         return f"{line}. The ledger server is not answering: start it with {START}"
     if not served or Path(served).resolve() != folder().resolve():
         return (
-            f"No ledger page link: {base()} serves {served or 'no ledger folder'}, not {folder()}. "
+            f"No ledger page link: {target} serves {served or 'no ledger folder'}, not {folder()}. "
             f"Set a spare LEDGER_PORT and start the ledger server with {START}"
         )
+    return line
+
+
+def hosted_line(slug, line):
+    from scripts.swarm_ledger import ledger
+
+    target = base(slug=slug)
+    silent = f"No ledger page link: the hosted ledger server {target} is not answering"
+    if serving(url=target) is None:
+        return silent
+    try:
+        ledger.resource(slug, "metadata")
+    except urllib.error.HTTPError as error:
+        return f"No ledger page link: {target} answered a read of ledger {slug} with HTTP {error.code}"
+    except ledger.Unauthenticated as error:
+        return f"No ledger page link: {target} refused a read of ledger {slug}: {error}"
+    except OSError:
+        return silent
     return line

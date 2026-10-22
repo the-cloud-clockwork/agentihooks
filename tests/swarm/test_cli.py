@@ -2571,7 +2571,7 @@ def test_restore_decision_hands_resume_the_routed_runtime_the_clock_and_the_ledg
 
 @pytest.mark.parametrize("command", ["create", "start", "url"])
 def test_create_start_and_url_end_with_the_ledger_page_line(env, capsys, monkeypatch, command):
-    monkeypatch.setattr(cli.ledger_link, "serving", lambda: str(cli.ledger_link.folder()))
+    monkeypatch.setattr(cli.ledger_link, "serving", lambda **kw: str(cli.ledger_link.folder()))
     if command != "create":
         run("sw", "create", "--repo", "/repo")
         capsys.readouterr()
