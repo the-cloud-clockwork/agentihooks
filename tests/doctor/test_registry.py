@@ -323,14 +323,14 @@ def test_one_slow_read_is_retried_once_inside_the_budget(cursors):
     assert registry.ATTEMPTS == 2
 
 
-def test_a_budget_spent_before_reading_leaves_every_binding_unread_and_says_so(cursors):
+def test_a_budget_spent_before_reading_leaves_every_binding_unread_and_says_so(cursors, read_clock):
     second = {**AGENT, "name": "engineer@1-0002"}
     langfuse = Langfuse([], [])
     found, failures = registry.read("s", [AGENT, second], langfuse, {}, 15, 50, clock=_clock(0, 16))
     assert [b["read"] for b in found] == [False, False]
     assert failures == [
-        "active read budget of 15 seconds spent before engineer@1-0001",
-        "active read budget of 15 seconds spent before engineer@1-0002",
+        f"active read budget of 15 seconds spent before engineer@1-0001 at {read_clock}",
+        f"active read budget of 15 seconds spent before engineer@1-0002 at {read_clock}",
     ]
     assert langfuse.calls == []
 
@@ -415,7 +415,7 @@ def test_a_failing_binding_is_tried_exactly_the_attempts(cursors, read_clock):
     assert failures == [f"active read of engineer@1-0001 failed at {read_clock}: ConnectionError: refused{_at(get, 2)}"]
 
 
-def test_a_read_unfinished_when_the_budget_ends_leaves_its_binding_unread(cursors):
+def test_a_read_unfinished_when_the_budget_ends_leaves_its_binding_unread(cursors, read_clock):
     second = {**AGENT, "name": "engineer@1-0002"}
     langfuse = Langfuse([], [])
     release = threading.Event()
@@ -428,7 +428,7 @@ def test_a_read_unfinished_when_the_budget_ends_leaves_its_binding_unread(cursor
     found, failures = registry.read("s", [AGENT, second], get, {}, 2, 50)
     release.set()
     assert [b["read"] for b in found] == [True, False]
-    assert failures == ["active read budget of 2 seconds spent before engineer@1-0002"]
+    assert failures == [f"active read budget of 2 seconds spent before engineer@1-0002 at {read_clock}"]
 
 
 def test_a_full_read_drops_watermarks_of_traces_no_longer_active(cursors):
@@ -571,13 +571,16 @@ def test_a_codex_binding_reads_its_rollout_through_its_harness(cursors, monkeypa
     assert found["local"]["generated_bytes"] == os.path.getsize(rollout)
 
 
-def test_unreadable_exporter_progress_is_a_failure_line_not_a_crash(cursors):
+def test_unreadable_exporter_progress_is_a_failure_line_not_a_crash(cursors, read_clock):
     agent_trace._cursor_path("bad").write_text(json.dumps({"version": 2, "source": {"accepted_bytes": "x"}}))
     bad = {**AGENT, "conversation_id": "bad"}
     second = {**AGENT, "name": "engineer@1-0002"}
     found, failures = registry.read("s", [bad, second], Langfuse([], []), {}, 15, 50)
     assert [b["local"] for b in found] == [None, None]
     [failure] = failures
-    reason = "exporter progress of engineer@1-0001 unreadable: ValueError: invalid literal for int() with base 10: 'x'"
+    reason = (
+        f"exporter progress read of engineer@1-0001 failed at {read_clock}: "
+        "ValueError: invalid literal for int() with base 10: 'x'"
+    )
     assert failure.startswith(f"{reason} at {registry.__file__}:")
     assert failure.rpartition(":")[2].isdigit()

@@ -445,7 +445,7 @@ def reader(record: dict, limits: Limits) -> list[Finding]:
                 (
                     coverage[1],
                     *_caps(historical),
-                    *historical.get("unreadable", [])[:3],
+                    *_failure_detail(historical.get("unreadable", [])),
                     "tool error, task cost and turn gap findings cover only the read traces",
                     "each Doctor scan reads more within its read budget",
                 ),

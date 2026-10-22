@@ -250,7 +250,7 @@ def test_a_failed_listing_is_a_failure_and_not_an_empty_swarm(tmp_path, read_clo
     assert failures == [f"trace listing failed at {read_clock}: TimeoutError: read timed out{_at(down)}"]
 
 
-def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(tmp_path):
+def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(tmp_path, read_clock):
     asked = []
     broken = {"a"}
 
@@ -266,7 +266,9 @@ def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(
     rows, coverage, failures = traces_read.history("s", get, tmp_path, budget, clock=_ticks(1))
     assert failures == []
     assert asked == ["a"]
-    assert coverage["unreadable"] == [f"trace a unreadable: TimeoutError: read timed out{_at(get, 5)}"]
+    assert coverage["unreadable"] == [
+        f"trace a unreadable: observation read failed at {read_clock}: TimeoutError: read timed out{_at(get, 5)}"
+    ]
     assert coverage["covered"] == 0 and [len(r["observations"]) for r in rows] == [0, 0, 0]
     asked.clear()
     rows, coverage, _ = traces_read.history("s", get, tmp_path, budget, clock=_ticks(1))
@@ -553,12 +555,12 @@ def test_the_listing_keeps_every_page_and_stops_when_the_budget_is_spent(tmp_pat
     assert [r["id"] for r in rows] == ["p1"] and coverage["listed"] is False
 
 
-def test_record_passes_its_budget_clock_and_cache_to_both_reads(tmp_path):
+def test_record_passes_its_budget_clock_and_cache_to_both_reads(tmp_path, read_clock):
     agents = [{"name": "s-eng-1", "state": "working", "task": "t1", "started_at": 5}]
     langfuse = Langfuse([_trace_row("a", "u")])
     budget = traces_read.Budget(active_page=3, active_seconds=1, history_seconds=100)
     data = traces_read.record("s", [], agents, 1000, langfuse, home=tmp_path, budget=budget, clock=_ticks(2))
-    assert data["reader"]["failures"] == ["active read budget of 1 seconds spent before s-eng-1"]
+    assert data["reader"]["failures"] == [f"active read budget of 1 seconds spent before s-eng-1 at {read_clock}"]
     assert (tmp_path / "s" / traces_read.CACHE_DIR / "a.json").exists()
     langfuse.calls.clear()
     data = traces_read.record("s", [], agents, 2000, langfuse, home=tmp_path, budget=traces_read.Budget(active_page=3))

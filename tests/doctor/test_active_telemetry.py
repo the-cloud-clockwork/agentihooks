@@ -431,7 +431,7 @@ def test_a_reader_outage_at_the_bound_keeps_every_failure_with_no_overflow_line(
     assert found.evidence[:51] == (*failures, "active bindings read 0 of 1")
 
 
-def test_partial_coverage_reads_in_full_and_keeps_three_unreadable_traces():
+def test_partial_coverage_reads_in_full_and_keeps_every_unreadable_trace():
     unreadable = [f"trace t{n} unreadable: TimeoutError" for n in range(5)]
     record = _record(historical={"traces": 10, "covered": 4, "complete": False, "unreadable": unreadable})
     assert traces.reader(record, LIMITS) == [
@@ -441,7 +441,7 @@ def test_partial_coverage_reads_in_full_and_keeps_three_unreadable_traces():
             "observations of 6 traces not read yet",
             (
                 "observations read for 4 of 10 traces",
-                *unreadable[:3],
+                *unreadable,
                 "tool error, task cost and turn gap findings cover only the read traces",
                 "each Doctor scan reads more within its read budget",
             ),

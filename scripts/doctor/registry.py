@@ -31,8 +31,12 @@ def failure(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc} at {frame.filename}:{frame.lineno}"
 
 
+def read_at() -> str:
+    return _iso(int(wall() * 1000))
+
+
 def failed_read(target: str, exc: BaseException) -> str:
-    return f"{target} failed at {_iso(int(wall() * 1000))}: {failure(exc)}"
+    return f"{target} failed at {read_at()}: {failure(exc)}"
 
 
 def _json(path: Path) -> dict:
@@ -236,12 +240,12 @@ def read(
     for binding, (remote, marked, error) in zip(active, results):
         kept.update(marked)
         if not remote["read"]:
-            error = error or f"active read budget of {seconds:g} seconds spent before {binding['agent']}"
+            error = error or f"active read budget of {seconds:g} seconds spent before {binding['agent']} at {read_at()}"
         merged = {**binding, **remote, "local": None}
         try:
             merged["local"] = progress(merged["session_id"], merged["harness"]) if merged["session_id"] else None
         except (OSError, ValueError, TypeError) as exc:
-            error = error or f"exporter progress of {binding['agent']} unreadable: {failure(exc)}"
+            error = error or failed_read(f"exporter progress read of {binding['agent']}", exc)
         failures += [error] if error else []
         found.append(merged)
     state["marks"] = {**marks, **kept} if failures else kept
