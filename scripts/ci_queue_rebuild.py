@@ -19,7 +19,8 @@ QUERY = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
 } } }"""
 UNSEEN = (
     "no entry ahead was enqueued and this pull request was not removed while the group ran; "
-    "a removal ahead with no queue run at the old parent, a base push or a ruleset change is not visible in queue entries"
+    "a removal ahead with no queue run at the old parent, a base push or a ruleset change "
+    "is not visible in queue entries"
 )
 CORRELATED = (
     "the queue entry was enqueued ahead of this pull request while the cancelled group ran; "
@@ -50,8 +51,8 @@ def base_removals(repo: str, parent: str | None, run) -> dict | None:
     try:
         ahead = base_pull(repo, parent, run)
         return ahead and {"pull": ahead, "events": timeline(ahead, run)}
-    except SwarmError:
-        return None
+    except (SwarmError, KeyError, TypeError) as exc:
+        return {"gap": f"queue unreadable: {exc}"}
 
 
 def cause(
@@ -80,6 +81,8 @@ def cause(
             "at": adds[-1]["createdAt"],
             "events": [removals[-1]["id"], adds[-1]["id"]],
         }
+    if base and "gap" in base:
+        return {"action": "unknown", "gap": base["gap"]}
     if base and (
         gone := [e for e in window(base["events"], started, until) if e["__typename"] == "RemovedFromMergeQueueEvent"]
     ):
