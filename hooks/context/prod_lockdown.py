@@ -364,12 +364,8 @@ def _sends_enqueue(command: Node) -> bool:
 
 
 def _feeds_enqueue(stages: list[Node]) -> bool:
-    carried = False
-    for stage in stages:
-        if carried and _program(stage) not in _ENQUEUE_READERS:
-            return True
-        carried = carried or b"enqueuePullRequest" in stage.text
-    return False
+    first = next(index for index, stage in enumerate(stages) if b"enqueuePullRequest" in stage.text)
+    return any(_program(stage) not in _ENQUEUE_READERS for stage in stages[first + 1 :])
 
 
 def check_prod_lockdown(payload: dict) -> None:
