@@ -179,6 +179,22 @@ def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, re
     assert not any(note.startswith("Starting a fresh agent") for note in ledger.notes)
 
 
+def test_a_resume_that_fails_to_start_awaits_a_decision_without_a_fresh_start_notice(store, rebooted):
+    ledger, runtime = rebooted
+    eng = next(a for a in _local(store).values() if a.lane == "eng")
+
+    def refuse(config, agent, text):
+        raise RuntimeError("herdr refused the pane")
+
+    runtime.resume = refuse
+
+    actions, _ = _booted(store, ledger, runtime)
+
+    assert f"{eng.name} awaits a resume or fresh decision after the workstation rebooted" in actions
+    assert _local(store)[eng.name].state == resume.AWAITING
+    assert not any(note.startswith("Starting a fresh agent") for note in ledger.notes)
+
+
 def test_a_master_that_cannot_reopen_carries_its_shutdown_handoff(store, rebooted):
     ledger, runtime = rebooted
     master = next(a for a in _local(store).values() if a.lane == MASTER)

@@ -157,7 +157,7 @@ def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
             routed = replace(agent, account="")
             store.put_agent(slug, routed)
         if not dead_resume._reason(store, slug, routed) and dead_resume.reopen(
-            slug, store, ledger, runtime, routed, now_ms
+            slug, store, ledger, runtime, routed, now_ms, fresh_next=False
         ):
             actions.append(f"resumed {agent.name} after the workstation rebooted")
         elif dead_resume._owns(store, slug, routed, ledger):
