@@ -536,7 +536,9 @@ def test_the_workflow_grades_every_branch_push_with_the_dev_grader():
     assert steps[0]["with"] == {
         "ref": "dev",
         "fetch-depth": 1,
-        "sparse-checkout": "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n",
+        "sparse-checkout": (
+            "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
+        ),
         "sparse-checkout-cone-mode": False,
         "persist-credentials": False,
     }
