@@ -250,9 +250,11 @@ class Consumer:
         started = self.store.redis.hget(self.orders.receipt(order), "started")
         if started is not None:
             return self.resumed(order, int(started), now)
-        if not self.store.redis.hsetnx(self.orders.receipt(order), "started", str(now)):
-            return None
-        self.store.redis.hset(self.orders.receipt(order), "pod", self.pod)
+        with self.store.redis.pipeline() as pipe:
+            pipe.hsetnx(self.orders.receipt(order), "started", str(now))
+            pipe.hsetnx(self.orders.receipt(order), "pod", self.pod)
+            if not pipe.execute()[0]:
+                return None
         if order.expires_at <= now:
             return Ack("failed", {}, "expired")
         try:
