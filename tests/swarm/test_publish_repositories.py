@@ -622,11 +622,13 @@ def test_prepare_uses_a_recorded_checkout_present_here_outside_the_search(reposi
 
 
 def test_publish_from_a_worktree_skips_a_declared_repository_missing_here(repositories, monkeypatch, tmp_path):
+    from pathlib import Path
+
     p = repositories
     monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
     p.task["repositories"] = [str(p.bundle)]
     root = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"]
-    install_gate(tmp_path / root)
+    install_gate(Path(root))
     p.task["repositories"] = ["/srv/workstation/dev/agentibrain-kernel", str(p.bundle)]
     monkeypatch.chdir(root)
     result = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Gate bundle", ["chosen.txt"])
