@@ -466,7 +466,7 @@ def held_pins(lanes: dict, held: dict, reason: str) -> str:
 
 def hive_wait(store: RedisStore, slug: str, held: dict) -> str:
     reasons = sorted(wait["reason"] for wait in placement_waits.read(store, slug).values() if held.get(wait["lane"]))
-    return f"hive room: {reasons[0]}" if reasons else ""
+    return f"hive placement: {reasons[0]}" if reasons else ""
 
 
 def record_pass(

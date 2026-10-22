@@ -565,7 +565,7 @@ def test_a_quota_hold_names_the_lane_pin_that_limits_it(tmp_path, monkeypatch, a
 @pytest.mark.parametrize(
     ("wait_lane", "expected"),
     [
-        ("eng", ("hive room: no hive for eng has room", 1, "host", "")),
+        ("eng", ("hive placement: no hive for eng has room", 1, "host", "")),
         ("ci", ("accounts have quota; 1 eng spawn held on the eng lane pinned to codex", 1, "quota", "codex")),
     ],
 )
