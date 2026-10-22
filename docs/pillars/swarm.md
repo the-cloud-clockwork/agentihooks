@@ -724,7 +724,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 |---|---|
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
-| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
+| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). A pull request whose body declares a staged pair is refused until its proof is complete on the exact heads ([Staged compatibility before admission](#staged-compatibility-before-admission)). |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
 | `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. When no listed file changed and the selected remote branch already matches `HEAD`, it skips the commit, gate and push; see [publishing unchanged files](#publishing-unchanged-files). Otherwise the result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the published branch and its repository (`branch_repo`, the origin remote without credentials). When the local branch tracks `origin/<task branch>`, retain that recorded task branch even when the local name differs; otherwise use the local branch. The selected branch must exist on origin. See [recording a published upstream branch](#recording-a-published-upstream-branch). |
@@ -2627,8 +2627,10 @@ The ending outcome is one line, used in the tick action line and the inbox notic
 ## The minute tick
 
 An agentihooks scheduler cron (`* * * * *`, one per machine) runs `agentihooks swarm tick` every minute. `start`
-registers it and starts the scheduler runner; each tick pass re-registers it if it is gone and deletes the
-`agentihooks-swarm` systemd timer and service an older install left. A minute fires a holder that takes a machine
+registers it and starts the scheduler runner; each tick pass re-registers it if it is gone. The
+`agentihooks-swarm` systemd timer and service an older install left are deleted only after a scheduler running the
+installed code has delivered a tick; until then they keep ticking (see
+[Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
 minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
 again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
@@ -2671,6 +2673,131 @@ of an `agentihooks controller run` install; `swarm tick` refuses to run with it 
 every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
+
+### Scheduled tick delivery guard
+
+The minute tick moved from the `agentihooks-swarm` systemd timer to the scheduler cron. On 18 October an install
+retired the timer while the running scheduler supervisor still ran an older checkout that had no
+`scripts.swarm.scheduled_tick` module. Every minute the cron fired and the delivery failed with
+`ModuleNotFoundError`, so no swarm on the machine ticked for seven hours. Nothing restarted the supervisor: the
+only path that did was the tick itself. The guard closes both gaps: the timer stays until the scheduler proves the
+tick, and the wait pass keeps a supervisor from the installed code running.
+
+#### The delivery record
+
+After a scheduled tick exits with status zero, the holder that ran it writes one Redis record,
+`swarm-tick-delivered`, in the scheduler's machine keyspace: the root of the code the holder ran from (the
+supervisor's checkout) and the time of the tick. A tick that fails, cannot start, times out or is skipped because
+another tick holds the machine lock writes nothing. A tick run by the systemd timer (`agentihooks swarm tick`)
+never writes the record, so only the scheduler can prove the scheduler. A Redis error while writing prints
+`the swarm tick delivery could not be recorded: <error>` to the holder's log (`swarm-tick.log` in the scheduler
+runtime folder); the tick's work stands, and delivery stays unproven until a later tick writes the record.
+
+The record proves delivery only when all of these hold. Otherwise the reason below is the evidence everywhere the
+guard reports it:
+
+| Reason | Meaning |
+|---|---|
+| `no scheduler has delivered a swarm tick yet` | No record exists. |
+| `the swarm tick delivery record is unreadable: <raw>` | The record is not JSON holding a `root` path and a numeric `at`. |
+| `the last swarm tick was delivered by a scheduler running <root>, not the installed <installed>` | The supervisor runs another checkout. Both paths are resolved, so a symlink to the installed root counts as installed. |
+| `the last swarm tick was delivered <n> seconds ago` | The record is older than 690 seconds: the nine minute tick stop, its 90 second kill grace and one minute. |
+| `the swarm tick delivery could not be read: <error>` | Redis failed while reading the record. |
+
+#### Retiring the systemd timer
+
+Every path that installs the swarm services (`agentihooks swarm <id> start`, `master up` or `take-master` on a
+stopped or stopping swarm, and each tick pass while the timer units are still on disk) reads the delivery record first:
+
+- **Not proven.** The `agentihooks-swarm.service` and `agentihooks-swarm.timer` units are kept, or written back
+  if an earlier pass deleted them, and the timer is enabled and started. The pass prints
+  `the agentihooks-swarm timer stays: <reason>`. The scheduler cron is still registered, so both run; the
+  machine tick lock lets only one tick run at a time.
+- **Proven.** The timer is disabled, its service group is drained (stop, then SIGTERM for 30 seconds, then SIGKILL
+  for 10), and both unit files are deleted. A timer that cannot be disabled, or a group that does not empty, keeps
+  its files and prints why; a later pass retries.
+
+The cron and the supervisor are registered after this decision in both cases. A run from a git worktree or from a
+checkout other than the installed agentihooks leaves the shared units alone and says so.
+
+#### The wait pass guard
+
+`agentihooks swarm waits`, run by `agentihooks-swarm-waits.timer` every 15 seconds, guards the scheduled tick before
+it checks any wait:
+
+1. **Recycle a stale supervisor.** When the supervisor's record (`supervisor.json` in the scheduler runtime folder)
+   names no code, another checkout than the installed one, or another git revision than the installed one, the pass
+   prints `recycling the scheduler supervisor: <why>` and sends it SIGTERM, then waits up to 30 seconds for its lock
+   to free.
+2. **Start a missing supervisor.** With no supervisor holding the machine lock, it starts one from the installed
+   code. A supervisor that died is back within 15 seconds.
+3. **Restore the timer while delivery is unproven.** When the tick units on disk are current and the timer is
+   enabled, nothing changes. Otherwise it runs the same install as above, which writes and enables the timer.
+4. **Retire the timer once the new supervisor proves itself.** When delivery is proven, the timer units are still on
+   disk, no process is left in the tick service group and the latest delivery happened after the current supervisor
+   started, it runs the install, which retires the timer.
+
+A guard that cannot enable the timer prints
+`warning: the scheduled swarm tick guard could not enable the swarm tick timer`; one that raises prints
+`the scheduled swarm tick guard failed: <error>`. In both cases the pass goes on and checks the waits. The pass
+refuses to run at all from outside the installed agentihooks:
+`the wait pass refused to run: this run comes from <running>, not the installed agentihooks at <installed>`.
+
+The `agentihooks-tick-watch` service is a second, independent restart path: while a swarm's tick is stale it stops
+the supervisor and registers the tick again from the installed code (see
+[Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher)). The wait pass acts within 15 seconds of a
+dead supervisor; the watcher acts once the tick has been stale for 10 minutes.
+
+#### The Doctor finding
+
+Every Doctor detection pass runs the `scheduled tick` detector, timed as the `doctor.scheduled tick` step (see
+[What one timer step does](#what-one-timer-step-does)). While delivery is not proven it raises one finding for the
+machine:
+
+| Field | Value |
+|---|---|
+| id | `scheduled-tick/<hostname>` |
+| summary | `the scheduler has not proven the swarm tick, so the systemd timer stays` |
+| evidence | the reason from the table above |
+| threshold | `a swarm tick delivered by the installed code within the last 690 seconds` |
+| measure | `1` |
+
+It raises nothing once a fresh delivery from the installed code is recorded. Judge it like any Doctor finding.
+Right after an install or upgrade, a finding with `no scheduler has delivered a swarm tick yet` or a foreign root
+is expected until the next scheduled minute is delivered.
+
+#### Inspect the guard
+
+All of these only read.
+
+```bash
+# Empty output means proven; otherwise the reason the timer stays
+PY="$(dirname "$(readlink -f "$(command -v agentihooks)")")/python"
+"$PY" -c 'from scripts.swarm import timer; print(timer.undelivered() or "proven")'
+
+# Is the systemd tick timer still installed and enabled?
+systemctl --user list-timers 'agentihooks-*' --no-pager
+systemctl --user is-enabled agentihooks-swarm.timer
+
+# Which code the scheduler supervisor runs, and since when (local Redis; other endpoints use a hashed subfolder)
+cat ~/.cache/agentihooks/scheduler/supervisor.json
+
+# What the guard did on recent wait passes
+journalctl --user -u agentihooks-swarm-waits.service --since "-1h" | grep -E "timer stays|recycling|tick guard"
+```
+
+On a proven machine the first command prints `proven`, `list-timers` shows `agentihooks-swarm-waits.timer` and
+no `agentihooks-swarm.timer`, and `is-enabled` reports that the unit file is missing.
+
+#### Troubleshooting the scheduled tick
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `the agentihooks-swarm timer stays` on every pass after an install | The scheduler has not delivered a tick since the install. | Wait one scheduled minute. When it persists, read `scheduler.log` and `swarm-tick.log` in the scheduler runtime folder for the failed delivery. |
+| Evidence names a foreign root | The supervisor started from a worktree or an older checkout. | The next wait pass recycles it. When it stays, check `systemctl --user status agentihooks-swarm-waits.timer`. |
+| Evidence says the last tick was delivered hundreds of seconds ago | The cron stopped firing, every tick failed, or the supervisor died. | The wait pass starts a supervisor and restores the timer, so ticks continue. Read `swarm-tick.log` for the failing tick. |
+| `could not be read` evidence | Redis is down for the scheduler. | The timer stays until Redis answers and the record proves delivery. |
+| `the scheduled swarm tick guard failed: OSError: …` | `systemctl` is missing or the user bus is down. | The waits keep running but nothing guards the tick. Restore the user systemd session. |
 
 ### Tick lock holder record
 
@@ -4579,3 +4706,82 @@ Add one declaration to the body of both pull requests:
 Use the exact successful job names from a completed CI run on the candidate head. The candidate must contain the exact prerequisite commit. Both pull requests and the run belong to the same repository. A prerequisite can enter the queue after this proof succeeds; its candidate waits until that prerequisite has merged. The prerequisite head must still match after a squash merge. If either head, the scoped implementation or the inventory changes, complete the edits, regenerate the affected proof and update both declarations before admission.
 
 `swarm ready` refuses an incomplete declaration before releasing its owner. `merge queue` checks it again against live GitHub heads immediately before admission, including admissions by the ready merge pass and queue priority path. A missing or unsuccessful contract job, an unreadable proof, or a stale head names the missing piece. Pull requests without a declaration retain their existing admission behavior. Required checks, reviews and the queue unit suite retain their current policy; the proof adds no slow suite to the pull request tier.
+
+#### Declaration fields
+
+The check reads the first `<!-- staged-compatibility` marker in the pull request body and parses the text up to the next `-->` as JSON. Text before and after the declaration is ignored, so the body keeps its description and any later HTML comments. A body with no marker is not checked.
+
+| Field | Meaning |
+|---|---|
+| `complete` | The JSON value `true`. `false`, a string or a missing field is refused. |
+| `prerequisite.url` | `https://github.com/OWNER/REPO/pull/NUMBER` of the tests-first prerequisite. |
+| `prerequisite.head` | The full 40 character lowercase commit of the prerequisite's current head. |
+| `candidate.url` | `https://github.com/OWNER/REPO/pull/NUMBER` of the pull request that combines the prerequisite with its scoped implementation. It must differ from the prerequisite. |
+| `candidate.head` | The full 40 character lowercase commit of the candidate's current head. |
+| `run` | `https://github.com/OWNER/REPO/actions/runs/ID` of a completed, successful workflow run on the candidate head, with nothing after the run id. |
+| `contracts` | A non-empty list of job names from that run. Each name matches a job exactly and that job completed with `success` on the candidate head. |
+
+The owner and repository are compared as written, so copy all three URLs as GitHub prints them, for example from `gh pr view <number> --json url`. The JSON must not contain `-->`, and the body carries one declaration only; a second marker is refused.
+
+#### Write the declaration
+
+Push the prerequisite and the candidate, let CI finish on the candidate head, then read the values from GitHub:
+
+```bash
+gh pr view 123 --json url,commits --jq '.url, .commits[-1].oid'
+gh pr view 124 --json url,commits --jq '.url, .commits[-1].oid'
+gh api "repos/OWNER/REPO/actions/runs?head_sha=<candidate head>&per_page=100" \
+  --jq '.workflow_runs[] | [.name, .status, .conclusion, .html_url] | @tsv'
+gh api --paginate "repos/OWNER/REPO/actions/runs/<run id>/jobs?per_page=100" \
+  --jq '.jobs[] | [.name, .conclusion, .head_sha] | @tsv'
+```
+
+Put the two URLs and heads, the run URL and the affected job names into the declaration shown above, and paste the same declaration into both pull request bodies (`gh pr edit <number> --body-file <file>`, or the pulls endpoint through `gh api` when `gh pr edit` fails). Then queue the prerequisite as usual with `agentihooks swarm <slug> ready <handoff>` or `agentihooks swarm <slug> merge queue <prerequisite url>`. Once the prerequisite has merged, release or queue the candidate the same way.
+
+Every push to either pull request changes a head. Update both heads in both bodies, wait for a new successful run on the new candidate head, and replace the `run` URL before the next admission.
+
+#### What each admission path does with a refusal
+
+Each path runs the check against the head it is about to admit, before it enqueues that head.
+
+| Path | On refusal |
+|---|---|
+| `agentihooks swarm <slug> ready <doc>` | The command fails with the message. The owner keeps the seat and the task. |
+| `agentihooks swarm <slug> merge queue <url>` | The command fails with the message. No queue intent is recorded and nothing is enqueued. |
+| The `ready` merge pass, once the released pull request's checks pass | The task reopens with the comment `Reopened by the swarm: its pull request <url> could not be queued: staged compatibility: <reason>. The next engineer continues it from the handoff its engineer left.` |
+| The merge pass requeue after a transient unmergeable exit | The `requeue` ledger alert reads `The swarm could not queue <url> again for task <task> after a transient unmergeable state: staged compatibility: <reason>`. The pass retries with backoff and reopens the task after five tries. |
+| `agentihooks swarm <slug> merge priority <url>` for the pull request | The priority is refused before any entry leaves the queue. |
+| Restoring an entry that `merge priority` displaced | That entry stays out; the priority result lists `could not restore <url>: staged compatibility: <reason>`. |
+| The requeue of an entry left out by an interrupted `merge priority` | The `merge-priority-requeue:<url>` ledger alert names the reason, the task's claimant gets one inbox notice, and the swarm retries on every refresh. |
+| `python -m scripts.ci_requeue` | That pull request's row reads `refused: staged compatibility: <reason>` and the sweep continues. |
+
+#### Refusals and fixes
+
+Every refusal starts with `staged compatibility:`.
+
+| Reason | Cause | Fix |
+|---|---|---|
+| `provide one complete declaration` | The marker has no closing `-->`, or the body holds a second marker. | Keep one marker and close it with `-->`. |
+| `declaration must be valid JSON` | The text between the marker and `-->` does not parse. | Validate it with `python -m json.tool`. |
+| `finish all planned prerequisite edits and set complete to true` | `complete` is not `true`, or the JSON is not an object. | Finish every planned prerequisite edit, then set `"complete": true`. |
+| `declare the prerequisite pull request and head` / `declare the candidate pull request and head` | The role is missing or not an object. | Add the role with its `url` and `head`. |
+| `declare a valid prerequisite URL and full head` / `declare a valid candidate URL and full head` | The URL is not a pull request URL, or the head is short, uppercase or empty. | Use the pull request URL and the full 40 character head. |
+| `distinct prerequisite and candidate and their proof run must share a repository` | The two pull requests and the run name different repositories, the run URL is malformed, or both roles name the same pull request. | Point all three at one repository and two different pull requests. |
+| `declaration does not grade this exact pull request head` | The pull request being admitted is neither declared role, or its live head differs from the declared head. | Copy this pull request's URL and current head into the declaration. |
+| `prerequisite head changed; regenerate compatibility proof` / `candidate head changed; regenerate compatibility proof` | A push moved that pull request after the declaration was written. | Rerun CI on the candidate and update both heads and the run. |
+| `prerequisite must merge before candidate admission` | The candidate was released or queued while its prerequisite is still open. | Queue the prerequisite first and wait for its merge. |
+| `candidate must contain prerequisite head` | The candidate branch does not include the prerequisite commit. | Merge or rebase the prerequisite head into the candidate, then regenerate the proof. |
+| `stale proof head; regenerate compatibility proof` | The run was made on another commit than the candidate head. | Use a run on the current candidate head. |
+| `require a completed successful compatibility run` | The run is still going, or it ended in anything other than success. | Wait for the run, or fix the failure and use the new successful run. |
+| `declare every affected contract job` | `contracts` is missing, empty or holds a blank or non-string name. | List each affected job name. |
+| `missing successful contract jobs: <names>` | A named job is absent from the run, did not succeed, or ran on another head. | Copy the exact names from the jobs listing above, or fix the failing job. |
+| `incomplete compatibility job inventory` | GitHub returned fewer jobs than the run's total across its pages. | Run the admission again; persistent failures point at the GitHub API. |
+| `unreadable compatibility proof; repair the declaration or GitHub response` | A field has the wrong type, or a GitHub response lacks a field the check reads. | Compare the declaration with the field table and retry once GitHub answers. |
+
+#### Limits
+
+- A body holds one declaration, so a pull request belongs to one staged pair. A pull request that is the candidate of one pair cannot also declare itself the prerequisite of the next.
+- `complete` records the owner's word that the planned edits are finished. CI proves only the named contract jobs and the run on the recorded candidate head.
+- A pull request whose body has no declaration is admitted exactly as before, so the protection applies only when the owner declares a staged pair.
+
+`tests/swarm/test_staged_admission.py` pins this behaviour. Delivered by pull request [4469](https://github.com/the-cloud-clockwork/agentihooks/pull/4469), which closed issue [4286](https://github.com/the-cloud-clockwork/agentihooks/issues/4286).

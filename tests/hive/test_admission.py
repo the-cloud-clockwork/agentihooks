@@ -203,7 +203,7 @@ def test_status_counts_refusals_by_reason_in_a_fixed_order():
     }
     assert admission.status_lines(waits) == ["admission refusals  cpu 2  ram 1  quota 1"]
     assert admission.status_lines({}) == []
-    assert admission.REASONS == ("cpu", "ram", "quota", "placement", "node cap", "missing telemetry")
+    assert admission.REASONS == ("cpu", "ram", "quota", "placement", "node cap", "max agents", "missing telemetry")
 
 
 def test_status_report_carries_refusal_counts_for_the_ledger_page(env):
@@ -337,3 +337,29 @@ def test_a_full_pod_refuses_on_its_memory_and_floors_at_zero():
     assert admission.refusal(found) == (
         "ram: pod 600 of 6300 MB available, 700 MB per agent, fits 0 more under the 80 percent line"
     )
+
+
+def test_a_hive_at_its_max_agents_refuses_on_the_cap_whatever_its_headroom():
+    found = admission.capped(admission.Room(5, admission.RAM, "fits 5 more"), 3, 3)
+    assert found == admission.Room(0, admission.MAX_AGENTS, "3 of 3 agents on the hive, fits 0 more")
+    assert admission.refusal(found) == "max agents: 3 of 3 agents on the hive, fits 0 more"
+
+
+def test_a_hive_past_its_max_agents_floors_its_room_at_zero():
+    assert admission.capped(admission.Room(5, admission.CPU, "fits 5 more"), 4, 3) == admission.Room(
+        0, admission.MAX_AGENTS, "4 of 3 agents on the hive, fits 0 more"
+    )
+
+
+def test_the_max_agents_cap_binds_only_when_tighter_than_the_headroom():
+    headroom = admission.Room(2, admission.RAM, "fits 2 more")
+    assert admission.capped(headroom, 1, 4) == headroom
+    assert admission.capped(headroom, 1, 3) == headroom
+    assert admission.capped(headroom, 2, 3) == admission.Room(
+        1, admission.MAX_AGENTS, "2 of 3 agents on the hive, fits 1 more"
+    )
+
+
+def test_a_max_agents_refusal_falls_in_its_own_reason():
+    assert admission.category("no hive for eng has room: remote max agents: 3 of 3 agents") == admission.MAX_AGENTS
+    assert admission.MAX_AGENTS in admission.REASONS
