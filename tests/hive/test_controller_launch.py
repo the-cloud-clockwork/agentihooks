@@ -75,7 +75,9 @@ def test_no_advertised_slot_does_not_probe_controller_credentials(setup):
     from scripts.hive.placement import Wait
 
     setup.herdr._quota_accounts = []
-    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait("no advertised Claude account has room")
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        "no Claude account has room after hive sessions: "
+    )
     setup.herdr.choose.assert_not_called()
 
 
@@ -1014,14 +1016,19 @@ def test_account_selection_orders_room_by_usage_then_name(setup):
     assert setup.launcher.select(setup.config, "eng", {"id": "task"}).account.name == "a"
 
 
-@pytest.mark.parametrize("row", [("codex", 0, 6), ("claude", 6, 6)])
-def test_non_claude_and_full_accounts_cannot_place_a_worker(setup, row):
+@pytest.mark.parametrize(
+    ("row", "seats"),
+    [(("codex", 0, 6), ""), (("claude", 6, 6), "account 6 here and 0 on hives of 6")],
+)
+def test_non_claude_and_full_accounts_cannot_place_a_worker(setup, row, seats):
     from scripts.hive.placement import Wait
     from scripts.swarm.capacity import Account
 
     harness, sessions, cap = row
     setup.herdr._quota_accounts = [Account(harness, "account", "room", sessions, 80, 80, cap)]
-    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait("no advertised Claude account has room")
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        f"no Claude account has room after hive sessions: {seats}", "eng"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1637,7 +1644,7 @@ def test_terminal_order_is_cleared_even_when_replacement_has_no_account_room(set
     setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
     setup.herdr._quota_accounts = []
     assert setup.launcher.spawn(request_for(setup)) == Outcome(
-        "spawn", Status.UNAVAILABLE, "hive", detail="no advertised Claude account has room"
+        "spawn", Status.UNAVAILABLE, "hive", detail="no Claude account has room after hive sessions: "
     )
     assert setup.launcher.orders_for("task") is None
 
@@ -1688,7 +1695,7 @@ def test_capacity_wait_is_recorded_without_a_missing_hive_finding(setup):
     setup.herdr._quota_accounts = []
     setup.launcher.select(setup.config, "eng", {"id": "task"})
     record = placement_waits.read(setup.store, setup.config.slug)["task"]
-    assert record["reason"] == "no advertised Claude account has room"
+    assert record["reason"] == "no Claude account has room after hive sessions: "
     assert record["lane"] == "eng"
     assert placement_waits.findings(setup.store, setup.config.slug, record["started_at"] + 1_800_000) == []
 
