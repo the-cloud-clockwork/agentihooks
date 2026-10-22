@@ -2627,8 +2627,10 @@ The ending outcome is one line, used in the tick action line and the inbox notic
 ## The minute tick
 
 An agentihooks scheduler cron (`* * * * *`, one per machine) runs `agentihooks swarm tick` every minute. `start`
-registers it and starts the scheduler runner; each tick pass re-registers it if it is gone and deletes the
-`agentihooks-swarm` systemd timer and service an older install left. A minute fires a holder that takes a machine
+registers it and starts the scheduler runner; each tick pass re-registers it if it is gone. The
+`agentihooks-swarm` systemd timer and service an older install left are deleted only after a scheduler running the
+installed code has delivered a tick; until then they keep ticking (see
+[Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
 minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
 again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
@@ -2671,6 +2673,126 @@ of an `agentihooks controller run` install; `swarm tick` refuses to run with it 
 every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
+
+### Scheduled tick delivery guard
+
+The minute tick moved from the `agentihooks-swarm` systemd timer to the scheduler cron. On 18 October an install
+retired the timer while the running scheduler supervisor still ran an older checkout that had no
+`scripts.swarm.scheduled_tick` module. Every minute the cron fired and the delivery failed with
+`ModuleNotFoundError`, so no swarm on the machine ticked for seven hours. Nothing restarted the supervisor: the
+only path that did was the tick itself. The guard closes both gaps: the timer stays until the scheduler proves the
+tick, and the wait pass keeps a supervisor from the installed code running.
+
+#### The delivery record
+
+After a scheduled tick exits with status zero, the holder that ran it writes one Redis record,
+`swarm-tick-delivered`, in the scheduler's machine keyspace: the root of the code the holder ran from (the
+supervisor's checkout) and the time of the tick. A tick that fails, cannot start, times out or is skipped because
+another tick holds the machine lock writes nothing. A tick run by the systemd timer (`agentihooks swarm tick`)
+never writes the record, so only the scheduler can prove the scheduler. A Redis error while writing prints
+`the swarm tick delivery could not be recorded: <error>` to the holder's log (`swarm-tick.log` in the scheduler
+runtime folder); the tick's work stands, and delivery stays unproven until a later tick writes the record.
+
+The record proves delivery only when all of these hold. Otherwise the reason below is the evidence everywhere the
+guard reports it:
+
+| Reason | Meaning |
+|---|---|
+| `no scheduler has delivered a swarm tick yet` | No record exists. |
+| `the swarm tick delivery record is unreadable: <raw>` | The record is not JSON holding a `root` path and a numeric `at`. |
+| `the last swarm tick was delivered by a scheduler running <root>, not the installed <installed>` | The supervisor runs another checkout. Both paths are resolved, so a symlink to the installed root counts as installed. |
+| `the last swarm tick was delivered <n> seconds ago` | The record is older than 690 seconds: the nine minute tick stop, its 90 second kill grace and one minute. |
+| `the swarm tick delivery could not be read: <error>` | Redis failed while reading the record. |
+
+#### Retiring the systemd timer
+
+Every path that installs the swarm services (`agentihooks swarm <id> start`, `master up`, `take-master` on a
+stopped swarm, and each tick pass while the timer units are still on disk) reads the delivery record first:
+
+- **Not proven.** The `agentihooks-swarm.service` and `agentihooks-swarm.timer` units are kept, or written back
+  if an earlier pass deleted them, and the timer is enabled and started. The pass prints
+  `the agentihooks-swarm timer stays: <reason>`. The scheduler cron is still registered, so both run; the
+  machine tick lock lets only one tick run at a time.
+- **Proven.** The timer is disabled, its service group is drained (stop, then SIGTERM for 30 seconds, then SIGKILL
+  for 10), and both unit files are deleted. A timer that cannot be disabled, or a group that does not empty, keeps
+  its files and prints why; a later pass retries.
+
+The cron and the supervisor are registered after this decision in both cases. A run from a git worktree or from a
+checkout other than the installed agentihooks leaves the shared units alone and says so.
+
+#### The wait pass guard
+
+`agentihooks swarm waits`, run by `agentihooks-swarm-waits.timer` every 15 seconds, guards the scheduled tick before
+it checks any wait:
+
+1. **Recycle a stale supervisor.** When the supervisor's record (`supervisor.json` in the scheduler runtime folder)
+   names no code, another checkout than the installed one, or another git revision than the installed one, the pass
+   prints `recycling the scheduler supervisor: <why>` and sends it SIGTERM, then waits up to 30 seconds for its lock
+   to free.
+2. **Start a missing supervisor.** With no supervisor holding the machine lock, it starts one from the installed
+   code. A supervisor that died is back within 15 seconds.
+3. **Restore the timer while delivery is unproven.** When the tick units on disk are current and the timer is
+   enabled, nothing changes. Otherwise it runs the same install as above, which writes and enables the timer.
+4. **Retire the timer once the new supervisor proves itself.** When delivery is proven, the timer units are still on
+   disk, no process is left in the tick service group and the latest delivery happened after the current supervisor
+   started, it runs the install, which retires the timer.
+
+A guard that cannot enable the timer prints
+`warning: the scheduled swarm tick guard could not enable the swarm tick timer`; one that raises prints
+`the scheduled swarm tick guard failed: <error>`. In both cases the pass goes on and checks the waits. The pass
+refuses to run at all from outside the installed agentihooks:
+`the wait pass refused to run: this run comes from <running>, not the installed agentihooks at <installed>`.
+
+#### The Doctor finding
+
+Every Doctor detection pass runs the `scheduled tick` detector, timed as the `doctor.scheduled tick` step (see
+[What one timer step does](#what-one-timer-step-does)). While delivery is not proven it raises one finding for the
+machine:
+
+| Field | Value |
+|---|---|
+| id | `scheduled-tick/<hostname>` |
+| summary | `the scheduler has not proven the swarm tick, so the systemd timer stays` |
+| evidence | the reason from the table above |
+| threshold | `a swarm tick delivered by the installed code within the last 690 seconds` |
+| measure | `1` |
+
+It raises nothing once a fresh delivery from the installed code is recorded. Judge it like any Doctor finding.
+Right after an install or upgrade, a finding with `no scheduler has delivered a swarm tick yet` or a foreign root
+is expected until the next scheduled minute is delivered.
+
+#### Inspect the guard
+
+All of these only read.
+
+```bash
+# Empty output means proven; otherwise the reason the timer stays
+PY="$(dirname "$(readlink -f "$(command -v agentihooks)")")/python"
+"$PY" -c 'from scripts.swarm import timer; print(timer.undelivered() or "proven")'
+
+# Is the systemd tick timer still installed and enabled?
+systemctl --user list-timers 'agentihooks-*' --no-pager
+systemctl --user is-enabled agentihooks-swarm.timer
+
+# Which code the scheduler supervisor runs, and since when (local Redis; other endpoints use a hashed subfolder)
+cat ~/.cache/agentihooks/scheduler/supervisor.json
+
+# What the guard did on recent wait passes
+journalctl --user -u agentihooks-swarm-waits.service --since "-1h" | grep -E "timer stays|recycling|tick guard"
+```
+
+On a proven machine the first command prints `proven`, `list-timers` shows `agentihooks-swarm-waits.timer` and
+no `agentihooks-swarm.timer`, and `is-enabled` reports that the unit file is missing.
+
+#### Troubleshooting the scheduled tick
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `the agentihooks-swarm timer stays` on every pass after an install | The scheduler has not delivered a tick since the install. | Wait one scheduled minute. When it persists, read `scheduler.log` and `swarm-tick.log` in the scheduler runtime folder for the failed delivery. |
+| Evidence names a foreign root | The supervisor started from a worktree or an older checkout. | The next wait pass recycles it. When it stays, check `systemctl --user status agentihooks-swarm-waits.timer`. |
+| Evidence says the last tick was delivered hundreds of seconds ago | The cron stopped firing, every tick failed, or the supervisor died. | The wait pass starts a supervisor and restores the timer, so ticks continue. Read `swarm-tick.log` for the failing tick. |
+| `could not be read` evidence | Redis is down for the scheduler. | The timer stays until Redis answers and the record proves delivery. |
+| `the scheduled swarm tick guard failed: OSError: …` | `systemctl` is missing or the user bus is down. | The waits keep running but nothing guards the tick. Restore the user systemd session. |
 
 ### Tick lock holder record
 

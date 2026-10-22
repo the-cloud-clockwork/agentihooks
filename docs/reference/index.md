@@ -21,6 +21,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Tool dependency synchronization](../getting-started/installation.md#synchronize-an-editable-tool-installation) | Update the editable source checkout and its running tool environment, check missing requirements and recover failed installs |
 | [CLI Commands](cli-commands.md) | All `agentihooks` subcommands and flags: init, uninstall, claude, ignore |
 | [Developer account login](account-login.md) | Claude and Codex login, managed shell tokens, OpenBao paths and key names, refresh authority and token stores |
+| [Scheduled tick delivery guard](../pillars/swarm.md#scheduled-tick-delivery-guard) | When the systemd tick timer is retired or restored, the delivery record and its reasons, the wait pass supervisor guard, the Doctor `scheduled tick` finding, inspection commands and troubleshooting |
 | [Task scope authorizations](../pillars/swarm.md#task-scope-authorizations) | Record master or operator scope, retrace a plan, interpret authorized pieces and configure enforcement |
 | [Master inbox intent grouping](../pillars/swarm.md#intent-grouping) | Settings, how a pooled item is matched to a master, token cost per item, fallbacks to round robin, Redis keys and troubleshooting |
 | [Task notices when a seat changes tasks](../pillars/swarm.md#task-notices-when-a-seat-changes-tasks) | Automatic routing to task comments, relocation of indexed seat notices, successor and master fallback rules, inspection commands and troubleshooting |
