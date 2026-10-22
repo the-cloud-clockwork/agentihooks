@@ -361,6 +361,57 @@ def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, faul
     assert ("shared hosted lane concurrency group" in out) is (fault == "proofs")
 
 
+def _shallow_preflight(preflight):
+    shallow = copy.deepcopy(preflight)
+    steps = shallow["jobs"]["grade"]["steps"]
+    steps[0]["with"]["fetch-depth"] = 1
+    steps[0]["with"]["sparse-checkout"] = (
+        "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
+    )
+    steps[0]["with"]["sparse-checkout-cone-mode"] = False
+    fetch = next(step for step in steps if step.get("run", "").startswith("git fetch"))
+    fetch["run"] = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
+    return shallow
+
+
+@pytest.mark.parametrize("fault", [None, "wider", "cone", "history", "fetch", "proofs"])
+def test_the_required_grader_accepts_only_the_exact_shallow_sparse_preflight(repo, fault, capsys):
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trusted preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    shallow = _shallow_preflight(preflight)
+    checkout = shallow["jobs"]["grade"]["steps"][0]["with"]
+    if fault == "wider":
+        checkout["sparse-checkout"] += "/scripts/\n"
+    elif fault == "cone":
+        checkout["sparse-checkout-cone-mode"] = True
+    elif fault == "history":
+        checkout["fetch-depth"] = 0
+    elif fault == "fetch":
+        shallow["jobs"]["grade"]["steps"][-2]["run"] = "git fetch --no-tags origin dev"
+    elif fault == "proofs":
+        shallow[True]["push"]["branches-ignore"].append("diffcheck/**")
+    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": shallow}, {}, "shallow preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == (0 if fault is None else 1)
+    refused = "::error::The head changes or removes the trusted branch lane preflight." in capsys.readouterr().out
+    assert refused is (fault is not None)
+
+
+def test_the_shallow_preflight_covers_proof_branches_from_a_preflight_that_ignored_them(repo):
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    old = copy.deepcopy(preflight)
+    if "diffcheck/**" not in old[True]["push"]["branches-ignore"]:
+        old[True]["push"]["branches-ignore"].append("diffcheck/**")
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": old}, {}, "old preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _shallow_preflight(old)
+    head[True]["push"]["branches-ignore"].remove("diffcheck/**")
+    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": head}, {}, "shallow preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 0
+
+
 @pytest.mark.parametrize("cover_proofs", [False, True])
 @pytest.mark.parametrize("quoted", [False, True])
 def test_the_required_grader_preserves_preflight_and_allows_proof_coverage(repo, cover_proofs, quoted):
