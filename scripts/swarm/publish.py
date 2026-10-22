@@ -82,7 +82,7 @@ def repository_root(repo: Path) -> Path:
 
 
 def repository_name(value: str) -> str:
-    return stack.repo_key(value).rpartition("/")[2]
+    return stack.repo_key(value).rpartition("/")[2].lower()
 
 
 def local_repository(value: str, repo: str) -> Path:
@@ -92,7 +92,9 @@ def local_repository(value: str, repo: str) -> Path:
 
     name = repository_name(value)
     candidates = [found.parent for found in Path(repo).parent.glob("*/.git")] + daemon._checkouts()
-    found = {repository_root(path) for path in candidates if (path / ".git").is_dir() and path.name == name}
+    found = {
+        repository_root(path) for path in candidates if (path / ".git").is_dir() and repository_name(str(path)) == name
+    }
     if len(found) != 1:
         raise SwarmError(f"repository {value} has {len(found)} checkouts named {name} on this host")
     return found.pop()
@@ -102,7 +104,9 @@ def repository_task(repo: Path, task: dict) -> dict:
     branches = task.get("repository_branches", {})
     branch = branches.get(str(repo))
     if branch is None:
-        branch = next((value for key, value in branches.items() if repository_name(key) == repo.name), None)
+        branch = next(
+            (value for key, value in branches.items() if repository_name(key) == repository_name(str(repo))), None
+        )
     if branch is None:
         branch = task.get("branch", "")
         remote = task.get("branch_repo")

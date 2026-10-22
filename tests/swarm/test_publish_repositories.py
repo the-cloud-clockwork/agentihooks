@@ -607,7 +607,7 @@ def test_prepare_and_publish_resolve_a_repository_recorded_on_another_host(repos
 def test_prepare_finds_a_foreign_repository_in_the_hive_checkout_root(repositories, monkeypatch, tmp_path):
     p = repositories
     monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
-    p.task["repositories"] = [f"/srv/workstation/dev/{p.bundle.name}"]
+    p.task["repositories"] = ["git@github.com:The-Cloud-Clockwork/AgentiHooks-Bundle.git"]
     fields = publish.prepare("swarm", p.agent, str(tmp_path / "elsewhere" / "agentihooks"), p.ledger)
     assert fields["repository"] == str(p.bundle)
 
@@ -618,7 +618,7 @@ def test_prepare_reuses_a_branch_recorded_under_another_host_path(repositories, 
     p.task["repositories"] = [str(p.bundle)]
     root = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"]
     git(root, "branch", "-m", "prior-task-branch")
-    foreign = f"/srv/workstation/dev/{p.bundle.name}"
+    foreign = "/srv/workstation/dev/AgentiHooks-Bundle"
     p.task.update(repositories=[foreign], repository_branches={foreign: "prior-task-branch"})
     p.task.pop("branch", None)
     result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
