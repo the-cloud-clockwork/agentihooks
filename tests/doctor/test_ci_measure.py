@@ -256,8 +256,16 @@ def test_a_run_scope_absent_from_the_window_prints_zero_runs(actions, monkeypatc
     "finding, record, error",
     [
         ("ci-tier-wall-time/20-1", WAITED, "run 20 attempt 1 has no tier wall time"),
-        ('ci-runner-wait/20-1-["x"]', WAITED, 'run 20 attempt 1 has no job on runner labels \\["x"\\]'),
-        ("ci-runner-wait/22-1-1", run(22, []), "run 22 attempt 1 has no job on runner labels null"),
+        (
+            'ci-runner-wait/20-1-["x"]',
+            WAITED,
+            '^run 20 attempt 1 has no job on runner labels \\["x"\\]; known label sets: anton-batch; anton-oss-light$',
+        ),
+        (
+            "ci-runner-wait/22-1-1",
+            run(22, []),
+            "^run 22 attempt 1 has no job on runner labels null; known label sets: none$",
+        ),
     ],
 )
 def test_a_run_without_the_finding_value_is_refused_never_zero(finding, record, error):
