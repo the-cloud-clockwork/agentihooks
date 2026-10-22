@@ -5,7 +5,7 @@ import json
 import sys
 import time
 from collections.abc import Callable
-from threading import Thread
+from threading import Lock, Thread
 
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import sd_notify, tick_heartbeat, timing
@@ -54,12 +54,15 @@ class Repair:
     """The scheduler serves every swarm on the machine, so it restarts at most once per stale window."""
 
     def __init__(self, restart: Callable[[], str], respawn: Callable[[str], list[str]]):
-        self.restart, self.respawn, self.restarted = restart, respawn, None
+        self.restart, self.respawn, self.restarted, self.lock = restart, respawn, None, Lock()
 
     def __call__(self, slug: str, now: int) -> list[str]:
         actions = []
-        if self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS:
-            self.restarted = now
+        with self.lock:
+            due = self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS
+            if due:
+                self.restarted = now
+        if due:
             actions.append(self.restart())
         return actions + self.respawn(slug)
 
