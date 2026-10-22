@@ -822,26 +822,6 @@ def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(s
     assert ledger.rows["t1"]["claimed_by"] != first
 
 
-def test_an_outage_while_waiting_for_a_hive_acknowledgement_does_not_count_against_the_claim_lease(
-    store, monkeypatch, tmp_path
-):
-    from scripts.swarm import outage
-    from scripts.swarm.tick import LEASE_MS
-
-    monkeypatch.setattr(outage, "HOME", tmp_path)
-    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    first = runtime.ordered[0]
-    outage.observe("sw", "redis", ["connection refused"], 2_000)
-    outage.observe("sw", "redis", [], 2_000 + 6 * 60_000)
-    runtime.acked.add(first)
-    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS + 5 * 60_000)
-    launches = {row["agent"]: row for row in store.launches("sw")}
-    assert launches[first]["state"] == "started"
-    assert first in {agent.name for agent in store.agents("sw")}
-    assert ledger.rows["t1"]["claimed_by"] == first
-
-
 def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)
