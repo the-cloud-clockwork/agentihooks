@@ -134,17 +134,13 @@ class ExecutionRegistry:
     def records(self, slug: str, reader: Redis | Pipeline | None = None) -> list[AgentRecord]:
         from scripts.swarm.store import AgentRecord
 
-        keys = (self.store.key(slug, "executions"), self.store.key(slug, ARCHIVE))
-        if reader is None:
-            with self.redis.pipeline() as pipe:
-                for key in keys:
-                    pipe.hvals(key)
-                live, archived = pipe.execute()
-        else:
-            live, archived = (reader.hvals(key) for key in keys)
-        return sorted(
-            (AgentRecord(**json.loads(row)) for row in (*live, *archived)), key=lambda a: (a.seat, a.generation)
-        )
+        source = reader if reader is not None else self.redis
+        rows = {}
+        for key in (self.store.key(slug, "executions"), self.store.key(slug, ARCHIVE)):
+            for raw in source.hvals(key):
+                row = AgentRecord(**json.loads(raw))
+                rows.setdefault(row.execution_id, row)
+        return sorted(rows.values(), key=lambda a: (a.seat, a.generation))
 
     def occupants(self, slug: str, reader: Redis | Pipeline | None = None) -> dict[str, AgentRecord]:
         from scripts.swarm.store import AgentRecord
