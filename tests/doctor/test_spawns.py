@@ -157,9 +157,10 @@ def test_a_hive_agent_that_never_starts_is_raised_one_tick_after_its_acknowledge
     assert found.measure == 2
     assert found.evidence == (f"acknowledged at {ACKED}", "hive h1", "harness claude", "pane w4:p1")
     assert found.threshold == "no heartbeat one tick after the hive acknowledgement"
-    unreturned = _hive("engineer@a-2", launch_timings={})
+    assert found.summary == "hive agent has sent no heartbeat since its hive acknowledged the launch"
+    unreturned = {k: v for k, v in _hive("engineer@a-2", launch_timings={}).items() if k not in ("harness", "pane_id")}
     [found] = spawns.silent_starts([unreturned], {}, ACKED - 5_000 + spawns.TICK_MS)
-    assert found.evidence[0] == f"acknowledged at {ACKED - 5_000}"
+    assert found.evidence == (f"acknowledged at {ACKED - 5_000}", "hive h1", "harness ", "pane ")
 
 
 def test_a_launch_still_waiting_for_its_hive_acknowledgement_is_not_raised():
@@ -182,3 +183,6 @@ def test_a_local_agent_keeps_the_first_event_rule():
     assert found.evidence == ("started at 1000", "harness ", "pane ")
     assert found.threshold == "no hook event one tick after spawn"
     assert spawns.silent_starts([agent], {agent["name"]: 2_000}, 1_000 + spawns.TICK_MS, beats={}) == []
+    late = {**agent, "started_at": 1_000_000}
+    [found] = spawns.silent_starts([late], {}, 1_000_000 + 2 * spawns.TICK_MS)
+    assert found.measure == 2
