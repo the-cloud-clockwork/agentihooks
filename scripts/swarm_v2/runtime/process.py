@@ -21,6 +21,12 @@ def local_namespace(boot_id: Path = BOOT_ID, pid_namespace: Path = PID_NAMESPACE
         return ""
 
 
+def previous_boot(recorded: str, current: str) -> bool:
+    recorded_boot, _, recorded_pid = recorded.partition("/")
+    current_boot, _, current_pid = current.partition("/")
+    return bool(recorded_boot and recorded_pid and current_boot and current_pid and recorded_boot != current_boot)
+
+
 def launch_target(pid: object, namespace: str, table: Mapping[int, Process]) -> dict:
     number = max(pid, 0) if type(pid) is int else 0
     found = table.get(number)

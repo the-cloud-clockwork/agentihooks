@@ -219,7 +219,7 @@ def test_the_recorded_pid_of_a_reused_process_is_never_signalled_but_pane_and_ho
 def test_a_foreign_namespace_terminate_signals_nothing_and_counts_one_rejection(tmp_path, monkeypatch):
     local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
     router = RuntimeRouter([local])
-    outcome = router.terminate(record(namespace=WORKER))
+    outcome = router.terminate(record(namespace="boot-anton/pid:[4026539999]"))
     assert outcome == Outcome(
         "terminate", Status.REFUSED, LOCAL, Unqualified.FOREIGN_NAMESPACE, "process belongs to another PID namespace"
     )
@@ -268,6 +268,8 @@ def test_a_same_boot_foreign_pid_namespace_stays_refused(tmp_path, monkeypatch, 
         ("old/pid:[1]", "new", False),
         ("/pid:[1]", "new/pid:[1]", False),
         ("old/pid:[1]", "/pid:[1]", False),
+        ("old/", "new/pid:[1]", False),
+        ("old/pid:[1]", "new/", False),
     ],
 )
 def test_previous_boot_requires_two_readable_boot_qualified_namespaces(recorded, current, expected):
@@ -281,7 +283,7 @@ def test_a_record_this_host_launched_before_its_namespace_restarted_retires_with
     agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": "hive-a"})
     router = RuntimeRouter([local])
     assert router.terminate(agent, ("/scratch/t1",)) == Outcome(
-        "terminate", Status.OK, LOCAL, detail="its process namespace has ended"
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
     )
     assert (ended, calls) == ([], [])
     assert router.rejected == {}
