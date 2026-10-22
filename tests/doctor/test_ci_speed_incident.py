@@ -130,11 +130,13 @@ def test_groups_keep_label_sets_and_tiers_apart_and_grow_without_another_notice(
     wall = {
         "id": 4,
         "event": "merge_group",
-        "status": "in_progress",
+        "status": "completed",
+        "conclusion": "success",
         "path": ".github/workflows/test.yml",
         "jobs": [{**waiting(4, "2026-10-19T16:40:00Z")["jobs"][0], "status": "in_progress", "runner_name": "r"}],
     }
     wall["jobs"][0]["started_at"] = "2026-10-19T16:41:00Z"
+    wall["jobs"][0]["completed_at"] = "2026-10-19T17:00:00Z"
     runs(monkeypatch, [waiting(1, "2026-10-19T16:40:00Z"), batch, wall])
     cli.timer(store, DOCTOR, AFTER, False)
     assert sorted(finding["kind"] for finding in details(store)) == [
@@ -238,6 +240,7 @@ def test_judged_group_delivers_new_evidence_once_within_the_same_window(store, m
         status="completed",
         runner_name="runner",
     )
+    run.update(status="completed", conclusion="success")
     records = [run]
     monkeypatch.setattr(
         ci_speed_read,
@@ -415,7 +418,8 @@ def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents
     wall = {
         "id": 4,
         "event": "merge_group",
-        "status": "in_progress",
+        "status": "completed",
+        "conclusion": "success",
         "path": ".github/workflows/test.yml",
         "jobs": [
             {
@@ -426,6 +430,7 @@ def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents
             }
         ],
     }
+    wall["jobs"][0]["completed_at"] = "2026-10-19T16:30:00Z"
     groups = ci_speed.group({}, [retry, wall], start, now, window, incidents)
     assert sorted(groups) == ["ci-queue-age-unconfirmed/[]", "ci-tier-wall-time/merge_group"]
     queued, tier = sorted(ci_speed.grouped(groups), key=lambda finding: finding.kind)
@@ -443,10 +448,13 @@ def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents
 def stalled_runs():
     runner = waiting(1, "2026-10-19T16:00:00Z")
     runner["jobs"][0].update(status="in_progress", started_at="2026-10-19T16:10:00Z", runner_name="r")
+    runner.update(status="completed", conclusion="success")
+    runner["jobs"][0]["completed_at"] = "2026-10-19T16:30:00Z"
     tier = {
         "id": 2,
         "event": "pull_request",
-        "status": "in_progress",
+        "status": "completed",
+        "conclusion": "success",
         "path": ".github/workflows/test.yml",
         "jobs": [{**runner["jobs"][0], "id": 20, "started_at": "2026-10-19T15:51:00Z"}],
     }
@@ -525,22 +533,23 @@ def test_a_judged_open_crossing_does_not_return_as_its_clock_grows(store, monkey
         "jobs": [job],
     }
     runs(monkeypatch, [wall])
-    cli.timer(store, DOCTOR, AFTER, False)
-    [finding] = details(store)
-    assert json.loads(store.redis.hget(loop.verdicts(store, DOCTOR).key, finding["id"]))["evidence_identity"] == [
-        "4",
-        0,
-    ]
-    loop.verdicts(store, DOCTOR).judge(finding["id"], "established", "investigated", "reader", AFTER)
-    cli.timer(store, DOCTOR, AFTER + 60000, False)
-    cli.timer(store, DOCTOR, AFTER + 660000, False)
-    for texts in items(store).values():
-        assert len(texts) == 1
+    for elapsed in [0, 60000, 660000]:
+        cli.timer(store, DOCTOR, AFTER + elapsed, False)
+        assert details(store) == []
+        assert all(texts == [] for texts in items(store).values())
     job.update(status="completed", conclusion="success", completed_at="2026-10-19T17:15:00Z")
     wall.update(status="completed", conclusion="success")
     cli.timer(store, DOCTOR, AFTER + 1200000, False)
+    [finding] = details(store)
+    assert json.loads(store.redis.hget(loop.verdicts(store, DOCTOR).key, finding["id"]))["evidence_identity"] == [
+        "4",
+        2100,
+    ]
+    loop.verdicts(store, DOCTOR).judge(finding["id"], "established", "investigated", "reader", AFTER + 1200000)
+    cli.timer(store, DOCTOR, AFTER + 1260000, False)
+    cli.timer(store, DOCTOR, AFTER + 1860000, False)
     for texts in items(store).values():
-        assert len(texts) == 2
+        assert len(texts) == 1
 
 
 def test_a_member_kept_before_open_ends_were_recorded_counts_as_settled():
@@ -576,8 +585,11 @@ def wall_run(identity, event, status, gate_completed=None):
 def test_a_wall_crossing_is_open_only_while_its_gate_and_run_run(event, status, gate_completed, expected):
     since, now = iso_ms("2026-10-19T16:00:00Z"), iso_ms("2026-10-19T16:30:00Z")
     groups = ci_speed.group({}, [wall_run(5, event, status, gate_completed)], since, now, now - 600000, [])
-    [member] = groups[f"ci-tier-wall-time/{event}"]["members"].values()
-    assert member["open"] is expected
+    if status != "completed":
+        assert groups == {}
+    else:
+        [member] = groups[f"ci-tier-wall-time/{event}"]["members"].values()
+        assert member["open"] is expected
 
 
 def test_a_window_start_is_dropped_from_a_dashed_label_set():
