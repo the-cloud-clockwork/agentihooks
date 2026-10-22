@@ -123,7 +123,7 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         root = Path(current.stdout.strip())
         primary = repository_root(root)
         declared = task.get("repositories")
-        if declared and primary not in {local_repository(value, repo) for value in declared}:
+        if declared and repository_name(str(primary)) not in {repository_name(value) for value in declared}:
             raise SwarmError(f"current worktree repository {primary} is not in the task repositories")
         scoped = repository_task(primary, task)
         branch = require_branch(git(root, "branch", "--show-current"))

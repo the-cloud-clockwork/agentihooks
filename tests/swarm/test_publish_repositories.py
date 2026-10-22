@@ -612,6 +612,27 @@ def test_prepare_finds_a_foreign_repository_in_the_hive_checkout_root(repositori
     assert fields["repository"] == str(p.bundle)
 
 
+def test_prepare_uses_a_recorded_checkout_present_here_outside_the_search(repositories, monkeypatch, tmp_path):
+    p = repositories
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
+    copy = tmp_path / "scratch" / "copy"
+    git(tmp_path, "clone", "-q", str(tmp_path / "agentihooks-bundle.git"), str(copy))
+    p.task["repositories"] = [str(copy)]
+    assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["repository"] == str(copy)
+
+
+def test_publish_from_a_worktree_skips_a_declared_repository_missing_here(repositories, monkeypatch, tmp_path):
+    p = repositories
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
+    p.task["repositories"] = [str(p.bundle)]
+    root = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"]
+    install_gate(tmp_path / root)
+    p.task["repositories"] = ["/srv/workstation/dev/agentibrain-kernel", str(p.bundle)]
+    monkeypatch.chdir(root)
+    result = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Gate bundle", ["chosen.txt"])
+    assert result["worktree"] == root
+
+
 def test_prepare_reuses_a_branch_recorded_under_another_host_path(repositories, monkeypatch, tmp_path):
     p = repositories
     monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
