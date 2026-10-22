@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import time
+from itertools import islice
 from types import SimpleNamespace
 from unittest import mock
 
@@ -161,8 +162,8 @@ def test_the_facade_serves_calls_from_many_caller_threads(bus):
 def test_watch_runs_its_body_on_the_caller_thread(bus):
     store = bus.state("tasks")
     store.create("k", b"v1")
-    threads = {threading.current_thread() for _ in store.watch("k")}
-    assert threads == {threading.current_thread()}
+    threads = [threading.current_thread() for _ in islice(store.watch("k"), 2)]
+    assert threads == [threading.current_thread()]
     assert bus._loop.thread not in threads
 
 
@@ -355,4 +356,4 @@ def test_watch_yields_an_empty_value_and_starts_at_the_first_revision(bus):
     store = bus.state("tasks")
     store.create("k", b"")
     store.update("k", b"v2", 1)
-    assert [(e.value, e.revision) for e in store.watch("k")] == [(b"", 1), (b"v2", 2)]
+    assert [(e.value, e.revision) for e in islice(store.watch("k"), 3)] == [(b"", 1), (b"v2", 2)]
