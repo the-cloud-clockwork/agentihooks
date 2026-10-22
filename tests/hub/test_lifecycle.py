@@ -22,7 +22,12 @@ def rig():
         name="engineer", lane="eng", task="task", execution_id="execution", generation=3, seat="eng-1", account="a"
     )
     row = {"id": "task", "state": "claimed", "claimed_by": agent.name, "claim_generation": 7, "done": False}
-    ledger = SimpleNamespace(task=lambda *_: dict(row), writes=[])
+
+    def task(slug, task_id):
+        assert (slug, task_id) == ("rig", "task")
+        return dict(row)
+
+    ledger = SimpleNamespace(task=task, writes=[])
 
     def update(*args, **kwargs):
         ledger.writes.append((args, kwargs))
@@ -160,6 +165,7 @@ def test_default_registry_wires_the_lifecycle_consumer(rig):
     assert reactor.singleton is True
     assert isinstance(reactor.handler.__self__, lifecycle.Lifecycle)
     assert reactor.handler.__self__.bus is rig.bus
+    assert reactor.handler.__self__.ledger.service is True
 
 
 def test_a_ledger_outage_retries_settlement_without_returning_the_slot_again(rig):
@@ -278,3 +284,27 @@ def test_legacy_hive_exit_events_remain_owned_by_the_legacy_tick(rig):
     rig.react.handle(event)
     assert rig.ledger.writes == rig.returned == []
     assert rig.store.execution_registry.get("rig", "execution") == rig.agent
+
+
+@pytest.mark.parametrize("guard", ["task-authority", "claim-journal"])
+def test_returning_capacity_preserves_a_protected_task_claim(rig, guard):
+    rig.store.redis.set(rig.store.key("rig", guard, "task"), "protected")
+    rig.react.handle(rig.event)
+    assert rig.store.redis.get(rig.store.key("rig", "claim", "task")) == "engineer"
+    assert rig.store.execution_registry.get("rig", "execution").state == "ended"
+
+
+def test_an_exited_unqueued_pull_request_reopens_for_another_engineer(rig):
+    rig.row["state"] = "pr"
+    rig.react.handle(rig.event)
+    assert rig.row["state"] == "open"
+    assert rig.row["claimed_by"] == ""
+    assert len(rig.ledger.writes) == 1
+
+
+def test_a_legacy_task_without_claim_generation_uses_generation_zero(rig):
+    rig.row.pop("claim_generation")
+    event = replace(rig.event, data={**rig.event.data, "task_generation": 0})
+    rig.react.handle(event)
+    assert rig.row["state"] == "open"
+    assert rig.ledger.writes[0][1]["if_match"] == {"claimed_by": "engineer", "claim_generation": 0}
