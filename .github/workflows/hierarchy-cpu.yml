@@ -83,6 +83,7 @@ jobs:
           set -o pipefail
           order=(base head)
           [[ "$PAIR" == [13] ]] || order=(head base)
+          rm -rf "$RUNNER_TEMP/hierarchy-barrier"
           pids=()
           for side in "${order[@]}"; do
             ( cd "$side" && HIERARCHY_CPU_REPORT="$GITHUB_WORKSPACE/hierarchy-evidence/$side.json" \

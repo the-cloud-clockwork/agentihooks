@@ -84,6 +84,7 @@ def test_the_pair_probes_run_side_by_side_from_one_start_on_their_own_data():
     job = workflow()["jobs"]["hierarchy"]
     script = "\n".join(step.get("run", "") for step in job["steps"])
     assert "set -o pipefail\norder=(base head)" in script
+    assert 'rm -rf "$RUNNER_TEMP/hierarchy-barrier"\npids=()' in script
     assert 'HIERARCHY_START_BARRIER="$RUNNER_TEMP/hierarchy-barrier"' in script
     assert '--basetemp "$RUNNER_TEMP/hierarchy-$side"' in script
     assert ") &\n" in script
