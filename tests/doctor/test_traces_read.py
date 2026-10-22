@@ -700,7 +700,7 @@ def test_working_agents_without_traces_in_a_project_that_holds_the_swarm_stay_mi
     ]
 
 
-def test_a_failed_listing_with_accepted_exports_is_one_listing_failure(tmp_path, monkeypatch):
+def test_a_failed_listing_with_accepted_exports_is_one_listing_failure(tmp_path, monkeypatch, read_clock):
     from scripts.doctor import registry
 
     monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
@@ -711,7 +711,9 @@ def test_a_failed_listing_with_accepted_exports_is_one_listing_failure(tmp_path,
         return Project("antoncore")(path, params)
 
     data = traces_read.record("s", [], WORKING[:1], 10**9, listing_down, home=tmp_path)
-    assert data["reader"]["failures"] == [f"trace listing failed: ConnectionError: refused{_at(listing_down, 2)}"]
+    assert data["reader"]["failures"] == [
+        f"trace listing failed at {read_clock}: ConnectionError: refused{_at(listing_down, 2)}"
+    ]
 
 
 def test_a_binding_trace_missing_from_an_empty_listing_is_not_an_empty_project(tmp_path, monkeypatch):
