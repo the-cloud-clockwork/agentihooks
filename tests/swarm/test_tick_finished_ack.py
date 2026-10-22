@@ -11,7 +11,7 @@ def _finished_before_ack(store, monkeypatch, *ids):
     ledger, runtime = tasks(*[(i, "eng") for i in ids or ("t1",)]), HiveAcks()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     for agent in [a for a in store.agents("sw") if a.name in runtime.ordered]:
-        store.put_agent("sw", replace(agent, state="finished"))
+        store.put_agent("sw", replace(agent, state="finished", harness="claude"))
         runtime.failing.add(agent.name)
     released = []
     monkeypatch.setattr(
@@ -32,6 +32,7 @@ def test_an_agent_that_finished_before_its_acknowledgement_was_collected_is_no_s
     rows = [(r["agent"], r["state"], r["error"], r["after"]) for r in store.launches("sw")]
     assert rows == [(name, "started", "", "reclaimed")]
     assert store.claims("sw", "t1") == lives + 1
+    assert store.spawns("sw") == {"claude": 1}
     assert store.take_restart("sw", "t1") == ""
     assert failed_panes.held(store, "sw") == {}
     assert [a.state for a in store.agents("sw") if a.name == name] == ["finished"]
