@@ -972,7 +972,7 @@ def _spend_host(store, name, now_ms):
 
 
 def _spend_local(store, agent, now_ms):
-    if not agent.hive:
+    if not agent.hive or agent.hive == commands.hive_id():
         _spend_host(store, agent.name, now_ms)
 
 
