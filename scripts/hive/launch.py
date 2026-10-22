@@ -71,12 +71,14 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         from scripts.swarm.commands import hive_id
 
         held = admission.pending(store.redis, hive["id"])
+        used = hive["agents"]
         if hive["id"] == hive_id():
             hive["agents"] = max(hive["agents"], local_slots.running(store, "", ""))
-            held = max(held, local_slots.held(store, hive["id"], "", "") - hive["agents"])
+            used = max(hive["agents"], local_slots.held(store, hive["id"], "", ""))
+            held = max(held, used - hive["agents"])
         found = admission.capped(
             admission.room(headroom.read(store.redis, hive["id"], now), pending=held),
-            hive["agents"] + held,
+            used,
             hive["max_agents"],
         )
         hive["room"] = found.room
@@ -148,8 +150,11 @@ def _match(check: str, expected: object, actual: object) -> None:
 
 
 def release(store: RedisStore, slug: str, agent: AgentRecord) -> None:
+    from scripts.swarm import local_slots
+
     LaunchSlots(store.redis).release(agent.execution_id)
     admission.release(store.redis, agent.hive, f"{slug}/{agent.name}")
+    local_slots.release(store, agent.hive, slug, agent.name)
 
 
 class HiveLaunch:
@@ -175,6 +180,17 @@ class HiveLaunch:
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
         decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ))
         hives, now = self.hives(), lease.now_ms(self.store)
+        if lane != "master":
+            from scripts.swarm import local_slots
+            from scripts.swarm.commands import hive_id
+
+            for hive in hives:
+                if hive["id"] == hive_id():
+                    bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
+                    taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
+                    limited = admission.capped(admission.Room(hive["room"], "", ""), taken, bound)
+                    if limited.room < hive["room"]:
+                        hive["room"], hive["refusal"] = limited.room, admission.refusal(limited)
         hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
         hives = _by_origin(hives, config.repo)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
@@ -285,7 +301,10 @@ class HiveLaunch:
         try:
             return self.send_order(request, selected, task)
         except BaseException:
+            from scripts.swarm import local_slots
+
             admission.release(self.store.redis, selected.hive, f"{self.slug}/{request.name}")
+            local_slots.release(self.store, selected.hive, self.slug, request.name)
             raise
 
     def send_order(self, request: SpawnRequest, selected: Selection, task: dict) -> Outcome:
@@ -337,11 +356,23 @@ class HiveLaunch:
     def reserve_room(self, request: SpawnRequest, selected: Selection) -> str:
         if selected.master_placement is not None:
             return ""
+        from scripts.swarm import local_slots
+        from scripts.swarm.commands import hive_id
+
         reading = headroom.read(self.store.redis, selected.hive, lease.now_ms(self.store))
         member = f"{self.slug}/{request.name}"
+        local = selected.hive == hive_id()
+        if local:
+            running = local_slots.running(self.store, self.slug, request.task["id"])
+            bound = local_slots.maximum(self.store, self.slug, running + admission.room(reading).room)
+            taken = local_slots.claim(self.store, selected.hive, self.slug, request.task["id"], request.name, bound)
+            if taken >= bound:
+                return f"no hive has room{placement.LOCAL_FULL}{taken} of its {bound} agents"
         reserved, held = admission.reserve(self.store.redis, selected.hive, member, admission.room(reading).room)
         if reserved:
             return ""
+        if local:
+            local_slots.release(self.store, selected.hive, self.slug, request.name)
         refused = admission.refusal(admission.room(reading, pending=held))
         return f"no hive for {request.lane} has room: {selected.hive} {refused}"
 

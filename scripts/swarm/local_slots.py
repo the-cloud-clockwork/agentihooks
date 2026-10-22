@@ -18,6 +18,15 @@ def running(store: RedisStore, slug: str, task: str) -> int:
     return len(_workers(_records(store), f"{slug}/{task}"))
 
 
+def maximum(store: RedisStore, slug: str, ceiling: int) -> int:
+    from scripts.hive import registry
+    from scripts.swarm.commands import hive_id
+
+    hive = registry.show(store.redis, hive_id())
+    bound = min(ceiling, store.config(slug).local_max_agents)
+    return min(bound, hive["max_agents"]) if hive is not None else bound
+
+
 def claim(store: RedisStore, machine: str, slug: str, task: str, name: str, local_max: int) -> int:
     from redis.exceptions import WatchError
 
@@ -85,5 +94,5 @@ def _local_worker(agent) -> bool:
         agent.runtime_backend == LOCAL
         and agent.hive in ("", hive_id())
         and agent.lane != "master"
-        and agent.state not in (STARTING, "finished")
+        and agent.state not in (STARTING, "finished", "ended")
     )

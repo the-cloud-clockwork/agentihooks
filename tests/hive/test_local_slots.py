@@ -52,8 +52,11 @@ def test_agents_recorded_on_this_hive_consume_local_slots_but_remote_hives_do_no
 
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
-    setup.store.put_agent(setup.config.slug, AgentRecord("local", "ci", "other", hive="workstation"))
-    setup.store.put_agent(setup.config.slug, AgentRecord("remote", "eng", "remote", hive="anton"))
+    rows = [
+        AgentRecord("local", "ci", "other", hive="workstation"),
+        AgentRecord("remote", "eng", "remote", hive="anton"),
+    ]
+    monkeypatch.setattr(setup.store, "agents", lambda _: rows)
     assert local_slots.running(setup.store, setup.config.slug, "task") == 1
 
 
@@ -76,4 +79,4 @@ def test_root_hive_reports_all_local_lane_processes_against_its_limit(setup, mon
     root = next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "workstation")
     assert root["agents"] == 1
     assert root["room"] == 0
-    assert "max-agents" in root["refusal"]
+    assert "max agents" in root["refusal"]

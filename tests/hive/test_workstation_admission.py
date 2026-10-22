@@ -50,3 +50,32 @@ def test_local_deployment_obeys_the_workstation_cap(setup, monkeypatch):
     local_agents(setup, 8)
     with pytest.raises(SpawnError, match="the local machine runs"):
         fenced.spawn(setup.config, "ci", "next", {"id": "task"})
+
+
+def test_failed_root_publication_releases_the_shared_local_reservation(setup, monkeypatch):
+    from scripts.hive import launch
+    from scripts.swarm import local_slots
+    from tests.hive.test_controller_launch import request_for
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    write_hive(setup, id="workstation", ui="yes", max_agents=1)
+    request = request_for(setup)
+    selected = launch.Selection(
+        setup.herdr._profile_decision.return_value, "workstation", setup.herdr._quota_accounts[0], "subscription"
+    )
+    monkeypatch.setattr(setup.launcher, "select", lambda *_: selected)
+    setup.launcher.send_order = lambda *_: (_ for _ in ()).throw(RuntimeError("publication failed"))
+    with pytest.raises(RuntimeError, match="publication failed"):
+        setup.launcher.spawn(request)
+    assert setup.store.redis.hgetall(local_slots.key("workstation")) == {}
+
+
+def test_ending_a_root_launch_releases_its_shared_local_slot(setup, monkeypatch):
+    from scripts.hive import launch
+    from scripts.swarm import local_slots
+    from scripts.swarm.store import AgentRecord
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    local_slots.claim(setup.store, "workstation", setup.config.slug, "task", "first", 1)
+    launch.release(setup.store, setup.config.slug, AgentRecord("first", "eng", "task", hive="workstation"))
+    assert setup.store.redis.hgetall(local_slots.key("workstation")) == {}
