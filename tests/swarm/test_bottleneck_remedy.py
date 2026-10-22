@@ -321,15 +321,15 @@ def test_workstation_only_move_requires_room_for_the_lane(store, home, shipped, 
 
     hive_only(store, monkeypatch, excluded="plan")
     store.update(SLUG, local_max_agents=limit)
-    calls = []
-    monkeypatch.setattr(local_slots, "held", lambda *args: calls.append(args) or occupied)
+    for index in range(occupied):
+        store.redis.hset(local_slots.key("ws"), f"other/worker{index}", str(NOW))
+    monkeypatch.setattr(local_slots.lease, "now_ms", lambda store: NOW)
     pin(store, "eng", "claude")
     detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
     why = bottleneck_remedy.UNPLACEABLE.format(target="codex", lane="eng")
     text = bottleneck_remedy.MOVED.format(lane="eng", source="claude", target="codex", targeted=FAILED)
     assert run(store) == [text if moves else proposed(FAILED, why)]
     assert lane_of(store, "eng") == (("codex", "auto") if moves else ("claude", "opus"))
-    assert calls == [(store, "ws", SLUG, "")]
 
 
 @pytest.mark.parametrize("source_room", [0, 1, 8])

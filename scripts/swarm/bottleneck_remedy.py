@@ -10,7 +10,7 @@ from functools import partial
 
 from scripts import agent_choice
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, bottleneck_status, dispatcher, lane_split, stage_cover, templates
+from scripts.swarm import bottleneck, bottleneck_status, capacity, dispatcher, lane_split, stage_cover, templates
 from scripts.swarm.health import standing
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import SENDER, Mail
@@ -162,6 +162,8 @@ def _move(slug, config, store, stage):
     lane = next((key for key in PINNABLE if lanes.get(key, {}).get("agent") == stuck), None)
     if lane is None:
         return UNPINNED.format(harness=stuck)
+    if stage.name == "quota_hold" and capacity.read(store, slug).get("placeable", {}).get(stuck, 0) > 0:
+        return f"{stuck} accounts still have room"
     if not _placeable(store, config, lane, target):
         return UNPLACEABLE.format(target=target, lane=lane)
     source = lanes[lane]["agent"]
@@ -177,7 +179,7 @@ def _placeable(store, config, lane, harness):
     from scripts import herdr_host
     from scripts.hive import placement, registry
     from scripts.hive.launch import ROLE_PROFILES
-    from scripts.swarm import controller
+    from scripts.swarm import controller, local_slots
     from scripts.swarm.commands import hive_id
 
     environ = dict(os.environ)
@@ -185,7 +187,9 @@ def _placeable(store, config, lane, harness):
         return False
     local = registry.show(store.redis, hive_id())
     profiles = tuple(profile for profile, role in ROLE_PROFILES.items() if role == lane)
-    return local is None or placement.hosts(lane, local, profiles)
+    occupied = local_slots.held(store, hive_id(), config.slug, "")
+    expected = getattr(config, f"max_{lane}")
+    return (local is None or placement.hosts(lane, local, profiles)) and occupied + expected <= config.local_max_agents
 
 
 def _propose(slug, store, stage, why, fixer):
