@@ -11,8 +11,6 @@ from scripts.hub import lifecycle, registry, runner
 from scripts.routing import reservation
 from scripts.swarm.store import AgentRecord, RedisStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def rig():
