@@ -45,7 +45,7 @@ def rig():
     from scripts.events.envelope import Envelope
     from scripts.events.memory import open_bus
     from scripts.hive.spoke import Spoke, SpokeConfig
-    from scripts.swarm_v2.runtime.base import SpawnRequest
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 
     policy = QueuePolicy(max_deliver=3, backoff_ms=(10, 20))
     bus = open_bus(BusConfig())
@@ -53,6 +53,9 @@ def rig():
     tasks, runtime = Mock(), Mock()
     request = SpawnRequest(config.swarm, "eng", "agent-a", {"id": "task-a"})
     tasks.request.return_value = request
+    runtime.spawn.return_value = Outcome(
+        "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a")
+    )
     event = Envelope(
         "ready-a", "task.ready", "rig", "task", "task-a", 0, 12, "readiness", {"lane": "eng", "generation": 0}
     )
@@ -80,11 +83,11 @@ def test_only_one_spoke_can_claim_duplicate_offers_of_the_same_task_generation(r
         return rig.request
 
     rig.tasks.request.side_effect = request
-    assert rig.spoke.poll() == "claimed"
+    assert rig.spoke.poll() == "started"
     assert raced == ["busy"]
     rig.tasks.request.assert_called_once_with(rig.event)
     other_tasks.request.assert_not_called()
-    rig.runtime.spawn.assert_not_called()
+    rig.runtime.spawn.assert_called_once_with(rig.request)
 
 
 def test_a_withdrawn_task_is_terminated_without_launching(rig):
@@ -92,3 +95,57 @@ def test_a_withdrawn_task_is_terminated_without_launching(rig):
     assert rig.spoke.poll() == "withdrawn"
     assert rig.queue.take(0) is None
     rig.runtime.spawn.assert_not_called()
+
+
+def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknowledging(rig):
+    from scripts.events.envelope import Envelope
+
+    observed = []
+    real_take = rig.queue.take
+    real_publish = rig.bus.events.publish
+
+    def take(timeout_ms):
+        delivery = real_take(timeout_ms)
+        real_ack = delivery.ack
+
+        def ack():
+            observed.append("ack")
+            real_ack()
+
+        delivery.ack = ack
+        return delivery
+
+    def publish(subject, event):
+        observed.append((subject, event))
+        return real_publish(subject, event)
+
+    rig.queue.take = take
+    rig.bus.events.publish = publish
+    rig.runtime.spawn.side_effect = lambda request: (observed.append("spawn"), rig.runtime.spawn.return_value)[1]
+
+    assert rig.spoke.poll() == "started"
+    rig.runtime.spawn.assert_called_once_with(rig.request)
+    assert observed[0] == "spawn"
+    subject, event = observed[1]
+    assert subject == "swarm.rig.execution.started"
+    assert isinstance(event, Envelope)
+    assert (event.type, event.swarm, event.entity, event.key, event.version, event.author, event.cause) == (
+        "execution.started",
+        "rig",
+        "execution",
+        "agent-a",
+        0,
+        "hive-a",
+        "ready-a",
+    )
+    assert event.data == {
+        "task": "task-a",
+        "lane": "eng",
+        "hive": "hive-a",
+        "name": "agent-a",
+        "pane_id": "pane-a",
+        "harness": "claude",
+        "account": "slot-a",
+    }
+    assert observed[2:] == ["ack"]
+    assert real_take(0) is None
