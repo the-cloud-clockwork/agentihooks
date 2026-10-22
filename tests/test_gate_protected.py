@@ -440,8 +440,9 @@ def test_a_branch_still_carrying_the_full_preflight_passes_a_shallow_base(repo, 
     assert gate_protected.main(["--root", str(repo), "--head", planted]) == (0 if fault is None else 1)
 
 
+@pytest.mark.parametrize("cover_proofs", [False, True])
 @pytest.mark.parametrize("form", [_full_preflight, _shallow_preflight])
-def test_either_checkout_form_covers_proof_branches_from_a_preflight_that_ignored_them(repo, form):
+def test_either_checkout_form_covers_proof_branches_from_a_preflight_that_ignored_them(repo, form, cover_proofs):
     preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
     old = _full_preflight(preflight)
     if "diffcheck/**" not in old[True]["push"]["branches-ignore"]:
@@ -449,7 +450,8 @@ def test_either_checkout_form_covers_proof_branches_from_a_preflight_that_ignore
     _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": old}, {}, "old preflight")
     _git(repo, "checkout", "-q", "-b", "pr")
     head = form(old)
-    head[True]["push"]["branches-ignore"].remove("diffcheck/**")
+    if cover_proofs:
+        head[True]["push"]["branches-ignore"].remove("diffcheck/**")
     planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": head}, {}, "covering preflight")
     _git(repo, "checkout", "-q", "dev")
     assert gate_protected.main(["--root", str(repo), "--head", planted]) == 0

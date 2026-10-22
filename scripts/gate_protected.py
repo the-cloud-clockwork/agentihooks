@@ -13,7 +13,9 @@ GATE = ci_wiring.GATE
 WORKFLOWS = ".github/workflows"
 SHALLOW_PREFLIGHT_CHECKOUT = {
     "fetch-depth": 1,
-    "sparse-checkout": "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n",
+    "sparse-checkout": (
+        "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
+    ),
     "sparse-checkout-cone-mode": False,
 }
 FULL_PREFLIGHT_CHECKOUT = {"fetch-depth": 0}
