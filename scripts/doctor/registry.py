@@ -16,6 +16,7 @@ TRACES_LIMIT = 5
 ATTEMPTS = 2
 WINDOW_BYTES = 1 << 20
 CORRELATION = "agentihooks.correlation."
+wall = time.time
 REMOTE_FIELDS = {
     "life": "agent.life",
     "seat": "seat",
@@ -28,6 +29,10 @@ REMOTE_FIELDS = {
 def failure(exc: BaseException) -> str:
     frame = traceback.extract_tb(exc.__traceback__)[-1]
     return f"{type(exc).__name__}: {exc} at {frame.filename}:{frame.lineno}"
+
+
+def failed_read(target: str, exc: BaseException) -> str:
+    return f"{target} failed at {_iso(int(wall() * 1000))}: {failure(exc)}"
 
 
 def _json(path: Path) -> dict:
@@ -197,7 +202,7 @@ def _attempts(get, slug: str, binding: dict, marks: dict, page: int, ended: Even
             slot.clear()
             return remote, kept
         except Exception as exc:  # noqa: BLE001
-            slot["error"] = f"active read of {binding['agent']} failed: {failure(exc)}"
+            slot["error"] = failed_read(f"active read of {binding['agent']}", exc)
     return _unread(), {}
 
 
