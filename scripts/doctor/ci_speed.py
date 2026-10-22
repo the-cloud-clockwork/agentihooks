@@ -175,11 +175,16 @@ def _during(run, incidents):
 
 
 def _member(groups, finding, scope, text, window_ms, run, during):
-    subject = f"{window_ms}-{scope}"
-    group = groups.setdefault(
-        f"{finding.kind.replace(' ', '-')}/{subject}",
-        {"kind": finding.kind, "subject": subject, "text": text, "window": window_ms, "members": {}},
-    )
+    identity = f"{finding.kind.replace(' ', '-')}/{scope}"
+    group = groups.get(identity)
+    if group is None or group["window"] != window_ms:
+        group = groups[identity] = {
+            "kind": finding.kind,
+            "subject": scope,
+            "text": text,
+            "window": window_ms,
+            "members": {},
+        }
     attempt = run.get("run_attempt", 1)
     group["members"][finding.id] = {
         "order": [run["id"], attempt],
@@ -247,9 +252,15 @@ def grouped(groups: dict) -> list[Finding]:
     return found
 
 
+def scope_of(subject: str) -> str:
+    """The label set or tier of a grouped subject, without the window start older ids carry."""
+    head, _, rest = subject.partition("-")
+    return rest if head.isdigit() else subject
+
+
 def _covered(finding, identity, verdict):
     kind, _, subject = identity.partition("/")
-    if kind != finding.kind.replace(" ", "-") or subject.partition("-")[2] != finding.subject.partition("-")[2]:
+    if kind != finding.kind.replace(" ", "-") or scope_of(subject) != scope_of(finding.subject):
         return False
     identity = verdict.get("evidence_identity")
     members = identity[:-1] if identity is not None else verdict["evidence"][0].rpartition(", runs ")[2].split(", ")

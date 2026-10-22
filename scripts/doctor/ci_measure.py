@@ -22,6 +22,18 @@ class Target:
     run: int | None = None
     attempt: int = 1
     labels: tuple | None = None
+    scope: str | None = None
+
+
+def _grouped(kind: str, scope: str) -> Target | None:
+    if kind == WALL:
+        return Target(kind, scope=ci_speed.TIERS[scope]) if scope in ci_speed.TIERS else None
+    if not scope.startswith("["):
+        return None
+    labels = json.loads(scope)
+    if not all(isinstance(label, str) for label in labels):
+        raise ValueError(f"runner labels {scope} are not a list of names")
+    return Target(kind, scope=_scope(sorted(set(labels))))
 
 
 def target(finding: str) -> Target | None:
@@ -31,11 +43,15 @@ def target(finding: str) -> Target | None:
     if not subject:
         return Target(kind)
     try:
+        head, _, tail = subject.partition("-")
+        grouped = _grouped(kind, subject) or (_grouped(kind, tail) if head.isdigit() else None)
+        if grouped:
+            return grouped
         run, attempt, *rest = subject.split("-", 2)
         labels = tuple(json.loads(rest[0])) if rest and rest[0].startswith("[") else None
         return Target(kind, int(run), int(attempt), labels)
     except ValueError as exc:
-        raise SwarmError(f"{finding} names no run attempt: {exc}") from exc
+        raise SwarmError(f"{finding} names no run attempt, runner label set or tier: {exc}") from exc
 
 
 def _scope(labels):
@@ -98,7 +114,7 @@ def line(kind: str, scope: str, values: list[int], window: tuple[int, int]) -> s
 
 
 def measure(finding: str, goal: Target, window: tuple[int, int], now_ms: int) -> Iterator[str]:
-    scope = None
+    scope = goal.scope
     if goal.run is not None:
         try:
             run = ci_speed_read.attempt(goal.run, goal.attempt)
