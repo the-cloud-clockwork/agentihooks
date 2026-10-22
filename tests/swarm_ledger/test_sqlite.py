@@ -224,6 +224,19 @@ def test_a_second_writer_invalidates_the_first_writers_copy(tmp_path):
     assert [m["id"] for m in state["chat"]] == ["m1", "m2", "m3"]
 
 
+def test_only_a_whole_rebuild_hands_its_freed_heap_back(tmp_path, monkeypatch):
+    first, second = store(tmp_path), store(tmp_path)
+    first.create("ledger", CONTENT)
+    second.apply_ops("ledger", ops=[chat(1)])
+    released = []
+    monkeypatch.setattr(sqlite.heap, "release", lambda: released.append(True))
+    assert [m["id"] for m in first.current("ledger").state["chat"]] == ["m1"]
+    first.current("ledger")
+    first.apply_ops("ledger", ops=[chat(2)])
+    first.current("ledger")
+    assert released == [True]
+
+
 def test_a_reader_of_an_older_revision_keeps_the_newer_copy_for_the_next_writer(tmp_path, monkeypatch):
     repo = store(tmp_path)
     repo.create("ledger", CONTENT)
