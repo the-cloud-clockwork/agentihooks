@@ -73,11 +73,9 @@ end
 return result
 """
 _MANAGED = """
-for _, key in ipairs(KEYS) do
-    for _, raw in ipairs(redis.call('HVALS', key)) do
-        if cjson.decode(raw).name == ARGV[1] then
-            return 1
-        end
+for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
+    if cjson.decode(raw).name == ARGV[1] then
+        return 1
     end
 end
 return 0
@@ -158,8 +156,13 @@ class ExecutionRegistry:
         return {agent.seat: agent for agent in agents}
 
     def managed(self, slug: str, name: str, reader: Redis | Pipeline | None = None) -> bool:
-        keys = (self.store.key(slug, "executions"), self.store.key(slug, ARCHIVE))
-        return bool((reader if reader is not None else self.redis).eval(_MANAGED, len(keys), *keys, name))
+        source = reader if reader is not None else self.redis
+        if source.eval(_MANAGED, 1, self.store.key(slug, "executions"), name):
+            return True
+        marker = json.dumps(name)
+        return any(
+            marker in raw and json.loads(raw)["name"] == name for raw in source.hvals(self.store.key(slug, ARCHIVE))
+        )
 
     def archive(self, slug: str) -> int:
         keys = (self.store.key(slug, "executions"), self.store.key(slug, "agents"), self.store.key(slug, ARCHIVE))
