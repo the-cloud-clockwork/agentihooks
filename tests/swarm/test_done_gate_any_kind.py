@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.swarm import done_gate, prompt
+from scripts.swarm import cli, done_gate, prompt
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import ASSIST, DELEGATE, MANUAL
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -92,6 +92,20 @@ def test_swarm_done_closes_a_tune_task_whose_proof_files_the_fix(env, monkeypatc
 def test_swarm_done_closes_a_tune_task_whose_pull_request_merged(env, monkeypatch):  # noqa: F811
     ledger = _tune(env, monkeypatch, "MERGED")
     assert run("sw", "done", *PROOF) == 0
+    assert ledger.rows["t1"]["state"] == "done"
+
+
+def test_an_ops_task_waits_for_its_queued_linked_pull_request_before_done(env, monkeypatch):  # noqa: F811
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", NAME)
+    ledger.rows["t1"]["kind"] = "ops"
+    ledger.pulls[URL] = PullRequest("OPEN", None, 1, False, queued=True)
+    assert run("sw", "done", "--pr", URL, *PROOF) == 1
+    assert ledger.rows["t1"]["state"] != "done"
+    assert cli.idle.wait(store.redis, "sw", NAME)["on"] == {"kind": "merge", "target": URL}
+    assert run("sw", "done", "--pr", URL, *PROOF, "--filed", "f1") == 0
     assert ledger.rows["t1"]["state"] == "done"
 
 
