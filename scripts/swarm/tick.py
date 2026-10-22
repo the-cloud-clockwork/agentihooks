@@ -1043,6 +1043,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             return actions + [stop]
         blocked = (
             _lives_spent(slug, store, ledger, rows, task)
+            or _room_wait(runtime, lane, task)
             or _held_back(slug, ledger, rows, runtime, task, now_ms)
             or _owner_hold(slug, store, runtime, task)
         )
@@ -1226,6 +1227,11 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
     return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])], waits
+
+
+def _room_wait(runtime, lane, task):
+    refused = seat_spawn.placed_elsewhere(runtime, lane, task)
+    return f"task {task['id']} waits: {refused}" if refused else ""
 
 
 def _admission(runtime):
