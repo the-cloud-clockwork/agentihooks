@@ -755,7 +755,7 @@ def test_a_launch_whose_mean_cost_lands_exactly_on_the_budget_waits_a_pass(store
     assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
 
 
-def test_one_launch_well_inside_the_budget_lets_the_next_one_start(store, monkeypatch):
+def test_a_launch_just_under_half_the_budget_lets_the_next_one_start(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
     _slow_launches(monkeypatch, runtime, 9.99)
     tick("sw", store, ledger, runtime, now_ms=1_000)
