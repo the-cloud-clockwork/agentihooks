@@ -4,7 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import cli, idle, ledger_events, mutation_wait, waits
+from scripts.swarm import cli, idle, mutation_wait, waits
+from scripts.swarm.ledger_events import head as pull_head
+from scripts.swarm.ledger_events import view as pull_view
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME
 
@@ -223,7 +225,7 @@ def test_a_rate_limited_pull_request_head_admits_the_checks_wait_pending(env, gi
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     ledger.tasks = lambda slug: list(ledger.rows.values())
-    monkeypatch.setattr(cli.ledger_events, "head", lambda url: ledger_events.head(url, subprocess.run))
+    monkeypatch.setattr(cli.ledger_events, "head", lambda url: pull_head(url, subprocess.run))
     assert cli.main(["sw", "--as", ME, "wait", "--on", "checks", PR]) == 0
     assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "checks", "target": PR, "head": None}
     assert github.asked == [PULL, "rate_limit"]
@@ -235,14 +237,14 @@ def test_a_rate_limited_pull_request_head_admits_the_checks_wait_pending(env, gi
 
 
 def test_pull_request_reads_back_off_until_the_quota_reset(github):
-    assert ledger_events.head(PR, subprocess.run) is None
+    assert pull_head(PR, subprocess.run) is None
     github.limited = False
     github.now = RESET - 1
-    assert ledger_events.head(PR, subprocess.run) is None
-    assert ledger_events.view(PR, subprocess.run) is None
+    assert pull_head(PR, subprocess.run) is None
+    assert pull_view(PR, subprocess.run) is None
     assert github.asked == [PULL, "rate_limit"]
     github.now = RESET + 1
-    assert ledger_events.head(PR, subprocess.run) == "first"
+    assert pull_head(PR, subprocess.run) == "first"
 
 
 def test_rest_reads_are_refused_locally_while_the_backoff_holds(github):
@@ -257,7 +259,7 @@ def test_rest_reads_are_refused_locally_while_the_backoff_holds(github):
 
 
 def test_a_rate_limited_checks_view_holds_the_shared_backoff(github):
-    assert ledger_events.view(PR, subprocess.run) is None
+    assert pull_view(PR, subprocess.run) is None
     assert github.asked == ["graphql", "rate_limit"]
     github.limited = False
     assert mutation_wait.run_resolution(URL) == ""
