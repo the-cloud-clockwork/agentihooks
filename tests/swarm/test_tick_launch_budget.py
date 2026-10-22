@@ -1,5 +1,6 @@
 import pytest
 
+from scripts.swarm.store import MASTER
 from scripts.swarm.tick import SpawnError, tick
 from tests.swarm.test_tick import FakeRuntime, _slow_launches, tasks
 from tests.swarm.test_tick import store as store
@@ -22,7 +23,8 @@ def test_the_urgent_head_spends_the_shared_launch_budget_first(
     attempts, spawn = [], runtime.spawn
 
     def launch(config, lane, name, task):
-        attempts.append(task["id"])
+        if lane != MASTER:
+            attempts.append(task["id"])
         if fail_lower and task["id"] == "lower":
             raise SpawnError("no hive accepts this placement")
         return spawn(config, lane, name, task)
