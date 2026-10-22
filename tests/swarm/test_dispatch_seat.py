@@ -816,6 +816,9 @@ def hive_member(monkeypatch):
                 raise SimpleError(NO_PERMISSION_KEY_ERROR)
 
     monkeypatch.setattr(AccessControlList, "validate_command", validate)
+    for variable in ("AGENTIHOOKS_HIVE_REDIS_URL", "AGENTIHOOKS_SWARM_REDIS_URL"):
+        monkeypatch.setenv(variable, "redis://hive.example:6380/0")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
 
 
 def test_the_hive_member_rules_refuse_a_key_outside_the_grant(monkeypatch):
