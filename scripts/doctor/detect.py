@@ -1,6 +1,7 @@
 """Every Doctor detector over the watched swarm: one list of findings, and a line for each detector that failed."""
 
 import contextvars
+import json
 import os
 import re
 import time
@@ -31,6 +32,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import idle, status, timing
 from scripts.swarm.health import activity
 from scripts.swarm.runtime import SWARM_HOME
+from scripts.swarm.tick import ACKNOWLEDGING
 
 PR_RE = re.compile(r"github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)")
 
@@ -72,6 +74,14 @@ def _overruns(store, slug):
     )
 
 
+def _starts(store, slug, now_ms):
+    agents = [asdict(a) for a in store.agents(slug)]
+    launches = store.redis.hgetall(store.key(slug, "launches"))
+    pending = {name for name, raw in launches.items() if json.loads(raw)["state"] == ACKNOWLEDGING}
+    beats = {a["name"] for a in agents if a["hive"] and idle.heartbeat(store.redis, slug, a["name"])}
+    return spawns.silent_starts(agents, activity.first_events(slug), now_ms, beats, pending)
+
+
 def _once(load):
     lock = Lock()
     kept = cache(load)
@@ -107,9 +117,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         "handoff": lambda: handoffs.findings(read.handoffs(store, mail, home, slug, items())),
         "spawn": lambda: spawns.findings(spawn_read.records(store, slug, now_ms)),
         "master launch": lambda: master_launches.findings(spawn_read.master_records(store, slug)),
-        "startup": lambda: spawns.silent_starts(
-            [asdict(a) for a in store.agents(slug)], activity.first_events(slug), now_ms
-        ),
+        "startup": lambda: _starts(store, slug, now_ms),
         "context overrun": lambda: _overruns(store, slug),
         "ci": lambda: _ci(store, tasks(), now_ms),
         "dev workflow": lambda: ci.red_dev_workflows(ci_read.dev_pushes(store.config(slug).repo)),
