@@ -385,7 +385,7 @@ class HiveLaunch:
             taken = local_slots.claim(self.store, selected.hive, self.slug, request.task["id"], request.name, bound)
             if taken >= bound:
                 refused = f"no hive has room{placement.LOCAL_FULL}{taken} of its {bound} agents"
-                return refused
+                return refused  # nosemgrep: python.flask.security.audit.directly-returned-format-string.directly-returned-format-string
         reserved, held = admission.reserve(self.store.redis, selected.hive, member, admission.room(reading).room)
         if reserved:
             return ""
