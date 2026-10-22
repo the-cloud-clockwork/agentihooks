@@ -84,7 +84,7 @@ def test_heartbeat_refreshes_cheap_checks_at_cadence(monkeypatch):
     from scripts.swarm.store import AgentRecord, RedisStore
 
     redis = FakeRedis(decode_responses=True)
-    agent = AgentRecord("engineer", "eng", "task", execution_id="execution", hive="worker")
+    agent = AgentRecord("engineer", "eng", "task", seat="eng-1@swarm", execution_id="execution", hive="worker")
     RedisStore(redis).put_agent("swarm", agent)
     join_report.start(redis, "swarm", agent, "session", passing(), {}, 1000)
     calls = []
@@ -133,10 +133,12 @@ def test_heartbeat_ends_only_reports_of_executions_the_swarm_no_longer_runs(monk
 
     redis = FakeRedis(decode_responses=True)
     store = RedisStore(redis)
-    kept = AgentRecord("kept", "eng", "one", execution_id="kept-run", generation=1, hive="worker")
+    kept = AgentRecord("kept", "eng", "one", seat="eng-1@swarm", execution_id="kept-run", generation=1, hive="worker")
     store.put_agent("swarm", kept)
     old = AgentRecord("moved", "eng", "two", execution_id="old-run", generation=1, hive="worker")
-    other = AgentRecord("elsewhere", "eng", "three", execution_id="other-run", generation=1, hive="worker")
+    other = AgentRecord(
+        "elsewhere", "eng", "three", seat="eng-1@other", execution_id="other-run", generation=1, hive="worker"
+    )
     store.put_agent("other", other)
     for record, slug in ((kept, "swarm"), (old, "swarm"), (other, "swarm")):
         join_report.start(redis, slug, record, "session", passing(), {}, 1000)
