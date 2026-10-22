@@ -23,13 +23,87 @@ The base is the merge base of the head with the event's base: `origin/dev` for p
 
 ## What it compares
 
-Each checkout collects its own `tests/` with `pytest --collect-only`, in its own directory so the base imports its own sources. Both collections run in parallel.
+The head collects its own `tests/` with `pytest --collect-only`. The base uses a matching [dev suite record](#dev-suite-records) when available; otherwise it collects in its own directory so it imports its own sources. When both sides need collection, they run in parallel.
 
 - A collection error, or no tests collected, on either side fails the job: `Collecting the base tests failed or found none, so the floor cannot be graded.`
 - The floor is the base count minus the admitted lost tests.
 - The job passes when the head count is at least the floor. Otherwise it lists every lost test that was not admitted and fails: `The head collects N fewer tests than the base floor of F.`
 
 The floor compares counts. A renamed test passes, since the new id offsets the lost one, and so does any lost test offset by an equal number of added tests.
+
+## Dev suite records
+
+A pull request can reuse the base suite collected on protected `dev` instead of collecting that same base again. The record contains the collected test ids, preserving both the count and the lost-test admission rules. It never substitutes a dev result for the head collection or changes the floor.
+
+The **Dev test count records** workflow runs on pushes to `dev`, independently of the Tests workflow. Its `count-record` job collects a clean detached checkout of the pushed commit and uploads `record.json` as `count-record-3.12`, retained for seven days. Separate production ensures that reusing an earlier Tests result does not skip recording the new dev commit. The job is best effort, with a six minute job timeout and a two minute recording step timeout; an absent record leaves later grading to collection.
+
+### Which record is trusted
+
+For a same-repository pull request into `dev`, Tests uses a CI App token with Actions read permission to look up the record. The base checkout's own `tests.count_floor.dev_record` selects from the first hundred artifacts named for the Python version. It accepts an unexpired artifact only when its run:
+
+- names branch `dev`;
+- names the exact merge base commit printed as `BASE: <sha>`;
+- has matching repository and head repository ids, both present.
+
+A newer dev commit's record does not match an older merge base. Records supplied by the pull request's own run or by a fork are ignored. The artifact selector and the floor grader run from the base checkout, so editing the head's record or grader cannot lower its own floor. The workflow fetches these records only for pull request events; other grading events use collection or the separate collection cache.
+
+The base grader then validates the record's `identity` against the clean base checkout. Identity covers the Git tree, tests path, Python version, platform, installed package names and versions, collector source and `PYTEST_` environment options. The project's own commit-derived package version is excluded. `nodeids` must be a nonempty list of strings. A changed dependency environment can therefore cause a miss even for the correct commit.
+
+### Configuration and CI usage
+
+Reuse is automatic; contributors do not upload or commit records. The current producer and consumer both use Python 3.12. Maintainers changing that matrix must keep the artifact name and collection environment aligned. The consumer requires the existing `TCC_CI_CLIENT_ID` and `TCC_CI_APP_PRIVATE_KEY` secrets to mint its Actions read token.
+
+The producer runs this command inside its clean CI checkout, with the output directory already created:
+
+```bash
+python -m tests.count_floor \
+  --record "$RUNNER_TEMP/count-record/record.json" \
+  --head "$RUNNER_TEMP/base"
+```
+
+The existing base grading command accepts these environment settings:
+
+| Setting | Use |
+|---|---|
+| `TEST_COUNT_BASE_RECORD` | Downloaded record file. Unset, unreadable, malformed or mismatched records fall back to base collection. |
+| `TEST_COUNT_COLLECTION_CACHE` | Directory for the separate exact collection cache, used for sides still needing collection. |
+| `TEST_COUNT_ENVIRONMENT` | Environment key required to enable that cache; CI uses the restored test environment's primary cache key. |
+| `TEST_COUNT_HEAD_COLLECTION` | Optional output file for collected head ids, reused by later CI steps. |
+
+For example, the workflow grades from the base checkout with the downloaded record:
+
+```bash
+cd "$RUNNER_TEMP/base"
+TEST_COUNT_BASE_RECORD="$RUNNER_TEMP/base-record.json" \
+  python -m tests.count_floor \
+  --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+```
+
+These are CI collection commands; collection imports the test suite. Run verification through CI under the repository's test policy.
+
+### Inspecting a hit or miss
+
+Find a pull request's Tests run and read its job output:
+
+```bash
+gh run list --workflow test.yml --event pull_request --limit 10
+gh run view RUN_ID --log | rg 'BASE: |suite count|dev record|head collects'
+gh run list --workflow count-record.yml --branch dev --limit 10
+gh api 'repos/the-cloud-clockwork/agentihooks/actions/artifacts?name=count-record-3.12&per_page=100' \
+  --jq '.artifacts[] | {id, expired, workflow_run}'
+```
+
+Replace `RUN_ID` with the selected run's id. Compare the artifact run's `head_sha` with the logged base, rather than the latest dev head.
+
+| Output or symptom | Meaning and action |
+|---|---|
+| `base count read from the dev record` | Provenance and identity matched; only the head needs collection, subject to its own collection cache. |
+| `No dev run recorded the suite count for <sha>.` | No eligible artifact appeared in the lookup. Check the producer for that exact commit, artifact expiry and the hundred-artifact lookup limit. Base collection continues. |
+| `no dev record matches the base, so it is collected` | The configured file is missing, invalid or has a different identity. Check environment differences and the downloaded artifact. |
+| Artifact listing, download or extraction failed | The fetch step leaves no usable record and grading falls back. Inspect that step's error before treating a slower job as a grading failure. |
+| `The tree did not collect cleanly, so no record is written.` | The producer could not collect tests or its checkout identity was unavailable or changed. Fix that producer failure through a normal pull request; later grading still collects the base. |
+
+A cache miss preserves normal grading. Token creation is a separate workflow step: its failure can fail the job before the best effort artifact fetch runs. A fallback collection error or empty suite still fails the floor as described above.
 
 ## Admitted lost tests
 
@@ -125,6 +199,17 @@ Delete the function, class or constant and the tests that exercised it in the sa
 - for a keyword branch, check that the test passed the keyword by name, that the base function tested it in a branch condition and never reassigned it, and that the head copy sits in the same module with no `**kwargs` and no new parameter.
 
 ## Proof
+
+Dev record reuse shipped in pull requests [4239](https://github.com/the-cloud-clockwork/agentihooks/pull/4239) and [4278](https://github.com/the-cloud-clockwork/agentihooks/pull/4278). Issue [4238](https://github.com/the-cloud-clockwork/agentihooks/issues/4238) records the matched cohort: green full scope pull request Tests runs from 17 October 2026 at 22:03 to 18 October at 03:00 UTC, with the same job layout, classified by the test count log line.
+
+| Base source | Jobs | Median test count job | Median collection step |
+|---|---|---|---|
+| Collected | 12 | 61.5 seconds | 25.0 seconds |
+| Dev record | 18 | 53.0 seconds | 18.0 seconds |
+
+The observed hit rate was 60 percent; this comparison measures hits against fallback within that cohort, rather than guaranteeing a hit for every pull request. Record production now runs in its own workflow.
+
+The unmerged plant [4307](https://github.com/the-cloud-clockwork/agentihooks/pull/4307) uploaded a lowered record from its own run and deleted one test. Run [39081653661](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39081653661) ignored that record, collected the base and failed with `The head collects 1 fewer tests than the base floor of 34831.`
 
 Definition admission, both ways on planted branches, graded by the delivered gate as the base copy (pull request [3492](https://github.com/the-cloud-clockwork/agentihooks/pull/3492)):
 
