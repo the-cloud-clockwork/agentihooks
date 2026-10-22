@@ -383,6 +383,7 @@ class TestSessionRegistry:
             sessions = _load_sessions()
             assert session_name(4242) == "sw-master-1"
             assert sessions["sess-b"]["name"] == "sw-master-1"
+            assert sessions["sess-a"]["superseded_at"] == sessions["sess-b"]["started_at"]
             assert "name" not in sessions["agent-1"]
             register_session("sess-c", pid=5151, cwd="/tmp", model="opus")
             assert "name" not in _load_sessions()["sess-c"]
