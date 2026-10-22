@@ -390,6 +390,35 @@ def test_reopening_a_capped_consumer_enables_dead_letter_handling(bus):
     assert _consumer_config(bus, nats.EVENT_STREAM, "legacy").max_deliver == -1
 
 
+def test_a_lost_termination_does_not_duplicate_a_dead_letter_after_dedupe_expiry(url, monkeypatch):
+    opened = nats.open_bus(BusConfig(backend="nats", url=url, dedupe_window_ms=100))
+    try:
+        queue = opened.queue("work", QueuePolicy(max_deliver=1, ack_wait_ms=100))
+        queue.offer(event())
+        delivery = queue.take(500)
+        delivery.nak()
+        original_term = nats.Msg.term
+
+        async def refuse(message):
+            assert message.data == event().encode()
+            raise OSError("termination lost")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(nats.Msg, "term", refuse)
+            with pytest.raises(OSError, match="^termination lost$"):
+                queue.take(500)
+        assert nats.Msg.term == original_term
+        time.sleep(0.2)
+        assert queue.take(500) is None
+        reader = opened.dead.consumer("dead", "dead.>")
+        letters = reader.fetch(2, 100)
+        assert len(letters) == 1
+        letters[0].ack()
+        assert opened._loop.run(opened._js.stream_info(nats.queue_stream("work"))).state.messages == 0
+    finally:
+        opened.close()
+
+
 def test_the_state_store_is_shared_per_bucket(bus):
     assert bus.state("tasks") is bus.state("tasks")
     assert bus.state("tasks") is not bus.state("hives")

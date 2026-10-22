@@ -322,6 +322,20 @@ def test_a_failed_dead_letter_publish_leaves_the_delivery_unsettled(bus, clock, 
     assert letters[0].event.cause == event().id
 
 
+def test_zero_backoff_does_not_expire_a_delivery_inside_its_current_batch(clock):
+    opened = memory.open_bus(BusConfig(queue=QueuePolicy(max_deliver=1, backoff_ms=(0,))), clock=clock)
+    try:
+        consumer = opened.events.consumer("reader", "swarm.>")
+        opened.events.publish("swarm.s.task", event())
+        deliveries = consumer.fetch(2, 0)
+        assert len(deliveries) == 1
+        deliveries[0].ack()
+        assert consumer.fetch(2, 0) == []
+        assert opened.dead.consumer("dead", "dead.>").fetch(2, 0) == []
+    finally:
+        opened.close()
+
+
 def test_a_stale_delivery_cannot_settle_its_redelivery(bus, clock):
     queue = bus.queue("work", QueuePolicy(ack_wait_ms=10))
     queue.offer(event())
