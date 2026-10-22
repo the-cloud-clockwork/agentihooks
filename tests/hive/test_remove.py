@@ -255,6 +255,66 @@ def test_an_ended_agent_on_the_hive_does_not_hold_the_drain(store):
     assert remove.hosted(store, member) == []
 
 
+def test_a_stopping_hive_takes_no_new_agents_and_waits_for_its_agents_to_finish(store, tmp_path):
+    member = _member(store)
+    _agent(store, member)
+    clock = Clock(store, member, 2)
+
+    settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
+
+    assert settled == f"hive {member} drained: no agents running"
+    assert (clock.now, clock.slept) == (2 * remove.POLL_S, 2)
+    assert registry.show(store.redis, member)["draining"] == "yes"
+    assert [item for inbox in InboxStore(store.redis).worlds() for item in inbox.inbox(SEAT)] == []
+
+
+def test_a_stopping_hive_gives_up_on_its_agents_at_the_deadline(store, tmp_path):
+    member = _member(store)
+    _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("engineer@2", "eng", "t2", seat=f"eng-2@{SLUG}", hive=member))
+    clock = Clock(store, member, 99)
+
+    settled = remove.settle(store, member, 30, _host(clock, Run(), tmp_path))
+
+    assert settled == f"hive {member} stops after 30 seconds with engineer@1, engineer@2 still running"
+    assert (clock.now, clock.slept) == (30, 2)
+
+
+def test_a_stopping_hive_with_no_record_is_refused_and_never_recorded(store, tmp_path):
+    with pytest.raises(auth.HiveError) as refused:
+        remove.settle(store, "pod-name", 30, _host(Clock(store, "pod-name", 1), Run(), tmp_path))
+
+    assert str(refused.value) == "hive pod-name has no record to drain"
+    assert registry.show(store.redis, "pod-name") is None
+
+
+def test_the_drain_command_settles_this_hive_with_its_wait(store, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "redis_client", lambda: store.redis)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "anton-9")
+    seen = []
+
+    def settled(swarm, hive, wait_s, host):
+        seen.append((swarm.redis is store.redis, hive, wait_s, type(host)))
+        return "drained"
+
+    monkeypatch.setattr(remove, "settle", settled)
+
+    assert cli.main(["drain"]) == 0
+    assert cli.main(["drain", "--wait", "5"]) == 0
+    assert capsys.readouterr().out == "drained\ndrained\n"
+    assert seen == [(True, "anton-9", 3600, remove.Host), (True, "anton-9", 5, remove.Host)]
+
+
+def test_the_drain_help_names_its_wait(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "300")
+    with pytest.raises(SystemExit):
+        cli.main(["drain", "--help"])
+    shown = capsys.readouterr().out
+    assert shown.startswith("usage: agentihooks hive drain [-h] [--wait WAIT]")
+    assert " seconds to wait for its agents to finish\n" in shown
+    assert " Take no new agents on this hive and wait until its agents finish\n" in cli._parser().format_help()
+
+
 @pytest.mark.parametrize(
     ("target", "host"),
     [(TARGET, "[10.10.30.207]:2222"), ("ssh://worker@box:22", "box"), ("worker@box", "box")],

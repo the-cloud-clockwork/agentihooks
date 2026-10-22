@@ -50,7 +50,7 @@ def _wait(run, jobs, since_ms, now_ms):
         kind = "ci runner wait" if started(job) else "ci queue age unconfirmed"
         key = (kind, tuple(sorted(set(job["labels"]))))
         groups.setdefault(key, []).append(elapsed)
-        if not started(job) or began >= since_ms:
+        if not started(job) or (run["status"] == "completed" and run.get("conclusion") in COUNTED):
             active.add(key)
     found = []
     for (kind, labels), waits in groups.items():
@@ -110,6 +110,8 @@ def wall_ms(run: dict, now_ms: int) -> int | None:
 
 
 def _wall(run, now_ms):
+    if run["status"] != "completed":
+        return []
     elapsed = wall_ms(run, now_ms)
     if elapsed is None or elapsed <= WALL_MS:
         return []

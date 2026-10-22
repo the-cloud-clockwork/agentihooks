@@ -196,6 +196,8 @@ controller:
 workers:
   replicas: 0
   maxAgents: 20
+  # A stopping hive takes no new agents and waits this long for its agents to finish before it exits.
+  drainSeconds: 3600
   excluded: [master]
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
