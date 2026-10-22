@@ -43,8 +43,9 @@ def _github(monkeypatch, runs, *, manifests, failed=(), uncovered=()):
     listing = f"{ACTIONS}/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=10"
 
     def api(endpoint):
-        if endpoint == listing:
-            return json.dumps({"workflow_runs": runs}).encode()
+        if endpoint.startswith(listing):
+            page = int(endpoint.removeprefix(listing).removeprefix("&page=") or 1)
+            return json.dumps({"workflow_runs": runs[(page - 1) * 10 : page * 10]}).encode()
         assert endpoint.startswith(f"{ACTIONS}/")
         if endpoint.endswith("/artifacts?per_page=100"):
             run_id = int(endpoint.split("/runs/")[1].split("/")[0])
@@ -252,6 +253,111 @@ def test_a_manifest_for_another_commit_is_skipped_for_an_older_record(monkeypatc
 def test_a_record_whose_shard_coverage_expired_is_skipped(monkeypatch):
     _github(monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(2), 1: _manifest(1)}, uncovered={2})
     assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
+
+
+def _counted(monkeypatch):
+    api, jobs = ci_test_plan._api, ci_test_plan.read_jobs
+    requests = []
+
+    def fetch(endpoint):
+        requests.append(endpoint)
+        return api(endpoint)
+
+    def listing(endpoint, size=None):
+        requests.append(endpoint)
+        return jobs(endpoint, size)
+
+    monkeypatch.setattr(ci_test_plan, "_api", fetch)
+    monkeypatch.setattr(ci_test_plan, "read_jobs", listing)
+    return requests
+
+
+def test_a_usable_record_older_than_ten_cancelled_runs_is_found(monkeypatch):
+    _github(
+        monkeypatch,
+        [_run(n, conclusion="cancelled") for n in range(25, 1, -1)] + [_run(1)],
+        manifests={1: _manifest(1)},
+    )
+    requests = _counted(monkeypatch)
+    run, manifest = ci_test_plan.find_record(REPOSITORY, LATER)
+    assert run["id"] == 1
+    assert manifest == _manifest(1)
+    assert [endpoint for endpoint in requests if endpoint.endswith("/zip")] == [f"{ACTIONS}/artifacts/1/zip"]
+    assert [endpoint.rpartition("&")[2] for endpoint in requests if "/workflows/" in endpoint] == [
+        "page=1",
+        "page=2",
+        "page=3",
+    ]
+
+
+def test_the_search_stops_at_its_request_budget_and_reports_every_read(monkeypatch, capsys):
+    _github(monkeypatch, [_run(n) for n in range(200, 0, -1)], manifests={})
+    requests = _counted(monkeypatch)
+    assert ci_test_plan.find_record(REPOSITORY, LATER) is None
+    assert len(requests) == 77 <= ci_test_plan.REQUESTS
+    assert capsys.readouterr().out == (
+        "Searched 70 dev push runs in 77 of 100 GitHub requests, request budget exhausted:"
+        " 70 kept no manifest or shard coverage, 0 failed unit shards, 0 recorded another commit\n"
+    )
+
+
+def test_the_budget_holds_when_every_candidate_reads_its_jobs_and_download(monkeypatch, capsys):
+    runs = [_run(n) for n in range(200, 0, -1)]
+    _github(
+        monkeypatch,
+        runs,
+        manifests={run["id"]: _manifest(run["id"]) for run in runs},
+        failed={(run["id"], "unit (3.12, 4)") for run in runs},
+    )
+    requests = _counted(monkeypatch)
+    assert ci_test_plan.find_record(REPOSITORY, LATER) is None
+    assert len(requests) == 93 <= ci_test_plan.REQUESTS
+    assert capsys.readouterr().out == (
+        "Searched 30 dev push runs in 93 of 100 GitHub requests, request budget exhausted:"
+        " 0 kept no manifest or shard coverage, 30 failed unit shards, 0 recorded another commit\n"
+    )
+
+
+def test_the_search_ends_when_no_older_runs_remain(monkeypatch, capsys):
+    _github(monkeypatch, [_run(n) for n in range(15, 0, -1)], manifests={})
+    requests = _counted(monkeypatch)
+    assert ci_test_plan.find_record(REPOSITORY, LATER) is None
+    assert len(requests) == 17
+    assert capsys.readouterr().out == (
+        "Searched 15 dev push runs in 17 of 100 GitHub requests, no older dev push runs:"
+        " 15 kept no manifest or shard coverage, 0 failed unit shards, 0 recorded another commit\n"
+    )
+
+
+def test_records_for_other_commits_are_skipped_across_pages(monkeypatch, capsys):
+    runs = [_run(n) for n in range(13, 0, -1)]
+    _github(monkeypatch, runs, manifests={**{n: _manifest(99) for n in range(13, 1, -1)}, 1: _manifest(1)})
+    assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
+    assert capsys.readouterr().out == "".join(
+        f"Dev run {n} recorded a manifest for {99:040d}, not {n:040d}\n" for n in range(13, 1, -1)
+    )
+
+
+def test_a_failed_listing_of_an_older_page_stays_red(monkeypatch):
+    _github(monkeypatch, [_run(n) for n in range(20, 0, -1)], manifests={1: _manifest(1)})
+    api = ci_test_plan._api
+
+    def fail(endpoint):
+        if endpoint.endswith("&page=2"):
+            raise subprocess.CalledProcessError(1, ["gh"])
+        return api(endpoint)
+
+    monkeypatch.setattr(ci_test_plan, "_api", fail)
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_test_plan.find_record(REPOSITORY, LATER)
+
+
+def test_a_run_shifted_onto_the_next_page_is_read_once(monkeypatch):
+    runs = [_run(n) for n in range(20, 10, -1)] + [_run(n) for n in range(11, 0, -1)]
+    _github(monkeypatch, runs, manifests={1: _manifest(1)})
+    requests = _counted(monkeypatch)
+    assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
+    assert requests.count(f"{ACTIONS}/runs/11/artifacts?per_page=100") == 1
 
 
 def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
