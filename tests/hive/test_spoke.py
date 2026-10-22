@@ -25,8 +25,9 @@ def test_a_spoke_does_not_take_work_until_its_local_cgroup_admits_another_agent(
 
 
 def test_an_admitted_spoke_takes_only_from_its_own_lane_with_the_requested_timeout():
-    from scripts.events.config import QueuePolicy
     from scripts.hive.spoke import Spoke, SpokeConfig
+
+    from scripts.events.config import QueuePolicy
 
     bus, runtime, tasks = Mock(), Mock(), Mock()
     bus.queue.return_value.take.return_value = None
