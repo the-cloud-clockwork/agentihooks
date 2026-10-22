@@ -17,7 +17,7 @@ def test_queue_policy_keeps_a_backoff_no_longer_than_its_deliveries():
 
 
 @pytest.mark.parametrize("value", [0, -1, 1.5, True, "3"])
-def test_queue_policy_refuses_a_max_deliver_below_one(value):
+def test_queue_policy_refuses_a_max_deliver_not_a_positive_integer(value):
     with pytest.raises(ValueError, match=r"^queue max deliver must be a positive integer$"):
         QueuePolicy(max_deliver=value)
 

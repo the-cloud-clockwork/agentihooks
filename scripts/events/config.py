@@ -2,6 +2,8 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from .envelope import _count
+
 BACKEND_ENV = "AGENTIHOOKS_BUS"
 URL_ENV = "AGENTIHOOKS_BUS_URL"
 DEFAULT_BACKEND = "memory"
@@ -9,10 +11,6 @@ DEFAULT_BACKEND = "memory"
 
 def _positive(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
-
-
-def _count(value) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 @dataclass(frozen=True)

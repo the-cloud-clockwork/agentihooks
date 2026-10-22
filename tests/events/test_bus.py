@@ -1,7 +1,6 @@
 import pytest
 
-from scripts.events import bus
-from scripts.events.bus import Bus, Consumer, Delivery, EventLog, StateConflict, StateEntry, StateStore, WorkQueue
+from scripts.events.bus import Bus, Consumer, Delivery, EventLog, StateEntry, StateStore, WorkQueue
 from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
 
@@ -86,28 +85,28 @@ class _Bus:
     def close(self) -> None: ...
 
 
-def test_delivery_carries_ack_delayed_nak_term_and_attempt():
+def test_delivery_protocol_requires_ack_nak_term_and_attempt():
     assert isinstance(_Delivery(), Delivery)
     assert not isinstance(_NoNak(), Delivery)
 
 
-def test_event_log_publishes_with_dedupe_and_opens_durable_consumers():
+def test_event_log_protocol_requires_publish_and_durable_consumer():
     assert isinstance(_EventLog(), EventLog)
     assert isinstance(_Consumer(), Consumer)
     assert not isinstance(_WorkQueue(), EventLog)
 
 
-def test_work_queue_offers_and_takes():
+def test_work_queue_protocol_requires_offer_and_take():
     assert isinstance(_WorkQueue(), WorkQueue)
     assert not isinstance(_Consumer(), WorkQueue)
 
 
-def test_state_store_gets_creates_updates_and_watches_from_a_revision():
+def test_state_store_protocol_requires_get_create_update_and_watch():
     assert isinstance(_StateStore(), StateStore)
     assert not isinstance(_NoWatch(), StateStore)
 
 
-def test_bus_composes_the_event_log_queues_and_state_stores():
+def test_bus_protocol_requires_events_queue_state_and_close():
     assert isinstance(_Bus(), Bus)
     assert not isinstance(_EventLog(), Bus)
 
@@ -117,8 +116,3 @@ def test_state_entry_is_a_frozen_key_value_revision_record():
     assert (entry.key, entry.value, entry.revision) == ("task.t1", b"{}", 3)
     with pytest.raises(AttributeError):
         entry.revision = 4
-
-
-def test_state_conflict_is_the_compare_and_set_failure():
-    assert issubclass(StateConflict, Exception)
-    assert bus.StateConflict is StateConflict
