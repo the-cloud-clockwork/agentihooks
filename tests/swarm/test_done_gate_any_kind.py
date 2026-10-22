@@ -89,6 +89,13 @@ def test_swarm_done_closes_a_tune_task_whose_proof_files_the_fix(env, monkeypatc
     assert ledger.rows["t1"]["proof"]["filed"] == "f1"
 
 
+def test_swarm_done_reads_a_filed_proof_already_stored_on_the_task(env, monkeypatch):  # noqa: F811
+    ledger = _tune(env, monkeypatch, "OPEN")
+    ledger.rows["t1"]["proof"] = {"command": "probe", "output": "before 3 after 0", "filed": "f1"}
+    assert run("sw", "done") == 0
+    assert ledger.rows["t1"]["state"] == "done"
+
+
 def test_swarm_done_closes_a_tune_task_whose_pull_request_merged(env, monkeypatch):  # noqa: F811
     ledger = _tune(env, monkeypatch, "MERGED")
     assert run("sw", "done", *PROOF) == 0
