@@ -2607,7 +2607,7 @@ def _traced(env, monkeypatch, tmp_path, plan, *p_yes):
 
     store, ledger, _ = env
     ledger.followups = []
-    ledger.followup = lambda slug, text, by: ledger.followups.append((slug, text, by))
+    ledger.followup_once = lambda slug, text, by, op_id: ledger.followups.append((slug, text, by))
     ledger.phases = [{"id": "p1", "title": "Build", "description": "Build the doghouse."}]
     ledger.rows["t1"].update(phase="p1", title="Doghouse", description="A house for the dog.")
     asked = {f"piece_{i}": Answer(type="noul", noul=p) for i, p in enumerate(p_yes)}

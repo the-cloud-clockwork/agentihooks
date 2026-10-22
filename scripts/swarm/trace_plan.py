@@ -228,6 +228,7 @@ def trace(pieces, state, previous, now_ms=None):
         "plan_hash": plan_hash(pieces),
         "failures": previous.get("failures", 0),
         "filed": list(previous.get("filed", [])),
+        "accepted": list(previous.get("accepted", [])),
         "at": int(time.time() * 1000) if now_ms is None else now_ms,
         "authorizations": ids,
     }
@@ -267,6 +268,7 @@ def _record(verdict, rows, size, reasons, source, calibrated, base):
         "calibrated": calibrated,
         "failures": base["failures"],
         "filed": base["filed"],
+        "accepted": base["accepted"],
         "at": base["at"],
     } | ({"authorizations": base["authorizations"]} if base["authorizations"] else {})
 
@@ -286,16 +288,32 @@ def save(folder, record):
     os.replace(staged, path)
 
 
-def _cuts(record):
-    rows = [row for row in record["pieces"] if not row["kept"] and _row_key(row) not in record["filed"]]
-    record["filed"] += [_row_key(row) for row in rows]
-    return rows
+def cut_id(who, key):
+    digest = hashlib.sha256("\n".join((who.swarm, who.task, key)).encode()).hexdigest()
+    return f"cut-{digest[:16]}"
 
 
-def _file_cuts(rows, ledger, who, home):
-    for row in rows:
-        ledger.followup(who.swarm, followup_text(who.task, row["what"]), by=who.name)
-        gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "count", who, reason=f"cut: {row['what']}"), home)
+def _log(record, who, mode, home):
+    if record["verdict"] == UNCHECKED:
+        gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "fail-open", who, reason=NO_ANSWER), home)
+    elif record["verdict"] == FAIL and mode in FAIL_KINDS:
+        reason = " and ".join(record["reasons"])
+        gate_log.append(who.swarm, gate_log.Row.of(GATE.name, FAIL_KINDS[mode], who, reason=reason), home)
+
+
+def _file_cuts(folder, record, ledger, who, home):
+    accepted, legacy, texts = record.setdefault("accepted", []), record["filed"], None
+    for row in record["pieces"]:
+        key, text = _row_key(row), followup_text(who.task, row["what"])
+        if row["kept"] or key in accepted:
+            continue
+        if key in legacy and texts is None:
+            texts = {item["text"] for item in ledger.state(who.swarm).get("followups", [])}
+        if key not in legacy or text not in texts:
+            ledger.followup_once(who.swarm, text, who.name, cut_id(who, key))
+            gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "count", who, reason=f"cut: {row['what']}"), home)
+        accepted.append(key)
+        save(folder, record)
 
 
 def _read(folder, who, state):
@@ -314,20 +332,14 @@ def run(folder, state, ledger, who, mode, home=None, now_ms=None):
         if mode in FAIL_KINDS:
             gate_log.append(who.swarm, gate_log.Row.of(GATE.name, FAIL_KINDS[mode], who, reason=str(exc)), home)
         raise
-    previous = load(folder)
-    if previous.get("plan_hash") == plan_hash(pieces) and previous.get("authorizations", []) == _ids(state):
-        return previous, False
-    record, cuts = trace(pieces, state, previous, now_ms), []
+    record, block = load(folder), False
+    if record.get("plan_hash") != plan_hash(pieces) or record.get("authorizations", []) != _ids(state):
+        record = trace(pieces, state, record, now_ms)
+        _log(record, who, mode, home)
+        save(folder, record)
+        block = record["verdict"] == FAIL and record["failures"] > RETURNS and mode == "enforce"
     if record["verdict"] == PASS:
-        cuts = _cuts(record)
-    elif record["verdict"] == UNCHECKED:
-        gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "fail-open", who, reason=NO_ANSWER), home)
-    elif mode in FAIL_KINDS:
-        reason = " and ".join(record["reasons"])
-        gate_log.append(who.swarm, gate_log.Row.of(GATE.name, FAIL_KINDS[mode], who, reason=reason), home)
-    save(folder, record)
-    _file_cuts(cuts, ledger, who, home)
-    block = record["verdict"] == FAIL and record["failures"] > RETURNS and mode == "enforce"
+        _file_cuts(folder, record, ledger, who, home)
     return record, block
 
 
