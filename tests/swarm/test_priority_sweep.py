@@ -310,23 +310,23 @@ def test_only_operator_decisions_refuse_an_agents_write(path, item, decides):
 
 
 @pytest.mark.parametrize(
-    "by, handed",
+    "by, handed, operator_only",
     [
-        ("dispatcher@a1b2c3-0001", True),
-        ("master@a1b2c3-0001", True),
-        ("engineer@a1b2c3-0001", False),
-        ("dispatcher", False),
-        ("ledger", False),
-        (None, False),
+        ("dispatcher@a1b2c3-0001", True, True),
+        ("master@a1b2c3-0001", False, True),
+        ("engineer@a1b2c3-0001", False, False),
+        ("dispatcher", False, False),
+        ("ledger", False, False),
+        (None, False, False),
     ],
 )
-def test_a_priority_a_dispatcher_handed_to_the_operator_counts_only_his_writes(by, handed):
+def test_a_priority_a_dispatcher_handed_to_the_operator_counts_only_his_writes(by, handed, operator_only):
     path = "tasks/t1"
     row = {"item": path, "by": by}
     doc = {"tasks": [{"id": "t1", "state": "blocked"}]}
     assert priority_sweep.handed(row) is handed
     for agent in ("dispatcher@a1b2c3-0001", "eng-1@sw"):
-        assert priority_sweep._counts(doc, row, priority_sweep.Write(agent, "comment", path, "x")) is not handed
+        assert priority_sweep._counts(doc, row, priority_sweep.Write(agent, "comment", path, "x")) is not operator_only
     assert priority_sweep._counts(doc, row, priority_sweep.Write("operator", "comment", path, "x")) is True
 
 
