@@ -1035,17 +1035,36 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
 
     saved = {"profile": "engineer", "harness": harness, "account": "account"}
     task = {"id": "task", "launch_assignment": saved}
-    config = replace(setup.config, lanes={"eng": {"agent": "auto", "profile": "engineer"}})
+    config = replace(setup.config, lanes={"eng": {"agent": "codex", "profile": "engineer"}})
     environ = {"fixture": "scope"}
     with patch.object(launch, "os", SimpleNamespace(environ=environ)):
         selected = setup.launcher.select(config, "eng", task)
     setup.herdr._profile_decision.assert_called_once_with(
         config, "eng", config.lanes["eng"], task, saved, saved, environ
     )
-    if harness == "codex":
-        assert selected == Wait("Codex hive placement is not enabled")
-    else:
-        assert selected.hive == "remote"
+    assert not isinstance(selected, Wait)
+    assert (selected.hive, selected.account.name) == ("remote", "account")
+    assert selected.fallback == ("no hive places the saved codex harness" if harness == "codex" else "")
+
+
+def test_a_saved_codex_task_with_no_codex_placement_launches_on_claude(setup):
+    from scripts.swarm.capacity import Account
+
+    saved = {"profile": "engineer", "harness": "codex", "account": "a-codex-account"}
+    setup.herdr._quota_accounts.append(Account("claude", "a-codex-account", "room", 0, 80, 80, 6))
+    setup.herdr.planned_account.return_value = "account"
+    write_hive(
+        setup,
+        slots=[*setup.hive["slots"], {"harness": "claude", "account": "a-codex-account", "kind": "subscription"}],
+    )
+    request = request_for(setup)
+    request = replace(request, task={**request.task, "launch_assignment": saved})
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(request) == "pending"
+    order = setup.launcher.orders_for("task")
+    assert (order.harness, order.slot, order.hive) == ("claude", "account", "remote")
+    agent = setup.store.execution_occupants("fixture")[request.task["seat"]]
+    assert agent.profile_decision["placement_fallback"] == "no hive places the saved codex harness"
 
 
 def test_handoff_assignment_is_forwarded_to_profile_resolution(setup):
