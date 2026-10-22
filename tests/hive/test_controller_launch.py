@@ -920,6 +920,18 @@ def test_a_pass_longer_than_the_reservation_still_lands_a_launch_the_hive_acknow
     assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
 
 
+def test_an_acknowledgement_records_an_expired_slot_live_only_for_a_named_slot_and_never_after_a_release(setup):
+    slots = setup.launcher.slots
+    assert not slots.acknowledge("unnamed")
+    assert slots.counts() == {}
+    assert slots.acknowledge("expired", "claude:account")
+    assert slots.counts() == {"claude:account": 1}
+    assert slots.reserve("claude:account", "released", 6, 300000)
+    assert slots.release("released")
+    assert not slots.acknowledge("released", "claude:account")
+    assert slots.counts() == {"claude:account": 1}
+
+
 def test_ambiguous_receipt_keeps_the_reservation_and_order(setup):
     from scripts.hive.orders import Ack
     from scripts.swarm_v2.runtime.base import Outcome, Status

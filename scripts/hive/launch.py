@@ -427,7 +427,9 @@ class HiveLaunch:
         except SwarmError:
             self.reap_execution(order)
             raise
-        if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(agent.execution_id):
+        if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(
+            agent.execution_id, f"claude:{agent.account}"
+        ):
             self.reap(order, agent)
             self.end(agent, LATE)
             self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)

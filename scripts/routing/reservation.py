@@ -168,8 +168,13 @@ if mode == 'release' then
     return 1
 end
 if mode == 'ack' then
-    if not held or held.state == 'exited' then return 0 end
-    if held.state == 'live' then return 1 end
+    if held and held.state == 'exited' then return 0 end
+    if held and held.state == 'live' then return 1 end
+    if not held then
+        if slot == '' then return 0 end
+        held = {slot=slot}
+        redis.call('SADD', KEYS[1], execution)
+    end
     held.state = 'live'
     redis.call('SET', KEYS[2], cjson.encode(held), 'PX', ARGV[5])
     return 1
@@ -234,8 +239,9 @@ class LaunchSlots:
             raise ValueError("invalid launch slot cap or lifetime")
         return self._call("reserve", slot, execution, cap, ttl_ms, previous)
 
-    def acknowledge(self, execution: str) -> bool:
-        return self._call("ack", "", execution, 0, 45000)
+    def acknowledge(self, execution: str, slot: str = "") -> bool:
+        """A slot names the row to record live again when the reservation expired before the acknowledgement was read."""
+        return self._call("ack", slot, execution, 0, 45000)
 
     def release(self, execution: str) -> bool:
         return self._call("release", "", execution, 0, 0)
