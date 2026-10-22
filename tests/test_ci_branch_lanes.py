@@ -399,8 +399,9 @@ def test_only_refused_workflows_the_push_can_trigger_are_waited_for(tmp_path, mo
     assert calls == [("o/r", sha, {f"{lanes.WORKFLOWS}/fired.yml"}, 60.0)]
 
 
-def test_a_refused_workflow_that_does_not_parse_is_still_waited_for(tmp_path, monkeypatch):
-    base, head, sha = _repo(tmp_path, {"broken.yml": "jobs: [\n"})
+@pytest.mark.parametrize("body", ["jobs: [\n", "- push\n"])
+def test_a_refused_workflow_that_is_not_a_mapping_is_still_waited_for(tmp_path, monkeypatch, body):
+    base, head, sha = _repo(tmp_path, {"broken.yml": body})
     monkeypatch.chdir(base)
     monkeypatch.setenv("GIT_DIR", str(head / ".git"))
     calls = []
