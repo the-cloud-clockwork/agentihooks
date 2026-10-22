@@ -140,9 +140,9 @@ def test_controller_keeps_only_the_workstation_login_master_off_hive_placement(s
         setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
     )
     assert fenced.runtime.router.placed_backend("master", task) == ("local" if login else "hive")
-    assert fenced.runtime.router.placed_backend("master-2", {"id": "master-2"}) == "hive"
-    assert fenced.runtime.router.placed_backend("master-3", {"id": "master-3"}) == "hive"
-    assert fenced.runtime.router.placed_backend("master-4", {"id": "master-4"}) == "local"
+    assert fenced.runtime.router.placed_backend("master", {"id": "master-2"}) == "hive"
+    assert fenced.runtime.router.placed_backend("master", {"id": "master-3"}) == "hive"
+    assert fenced.runtime.router.placed_backend("master", {"id": "master-4"}) == "local"
 
 
 @pytest.mark.parametrize("route", ["interactive", "subscription", "api"])
