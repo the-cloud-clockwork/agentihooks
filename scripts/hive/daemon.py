@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
+# A launch inside a beat can run for minutes, so headroom publishes on its own thread well inside its stale window.
+HEADROOM_SECONDS = 10
 RETRY_SECONDS = (1, 2, 4, 8, 16, 30)
 CONNECT_TIMEOUT_S = 3
 READ_TIMEOUT_S = 5
@@ -56,25 +59,26 @@ def beat(redis: "Redis", local_id: str) -> None:
         registry.seed(pipe, local_id)
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
         fields["master_login"] = json.dumps({"claude": master_claude_login.signed_in()})
-        fields["heartbeat_at"] = str(int(time.time() * 1000))
+        beat_ms = int(time.time() * 1000)
+        fields["heartbeat_at"] = str(beat_ms)
         pipe.hset(key, mapping=fields)
         if not member:
             pipe.sadd(registry.INDEX, local_id)
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
         pipe.execute()
+    from scripts.hive import headroom, join_report
+
+    headroom.publish(redis, local_id, beat_ms)
     if not member:
         LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
     if not fenced:
         consumer.poll()
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
-    from scripts.hive import headroom, join_report
-
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
-    headroom.publish(redis, local_id, int(time.time() * 1000))
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
 
@@ -124,6 +128,24 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
     return redis.hlen(key) > 0
 
 
+def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
+    from redis.exceptions import ConnectionError, RedisError, TimeoutError
+
+    from scripts.hive import headroom
+
+    while not stop.is_set():
+        try:
+            scheduled_wait(HEADROOM_SECONDS, redis=waiter, timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
+        except (ConnectionError, TimeoutError):
+            return
+        if stop.is_set():
+            return
+        try:
+            headroom.publish(redis, local_id, int(time.time() * 1000))
+        except (RedisError, ValueError, KeyError) as exc:
+            print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
 def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
@@ -134,8 +156,10 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     renewed = time.time()
     failures = 0
     while True:
+        stop = threading.Event()
         try:
             redis, waiter = connect()
+            threading.Thread(target=publish_headroom, args=(redis, waiter, local_id, stop), daemon=True).start()
             while True:
                 started = time.monotonic()
                 worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
@@ -146,8 +170,11 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                 scheduled_wait(delay, redis=waiter, timeout=max(delay, BEAT_SECONDS - elapsed - WAKE_SLACK_S / 2))
                 failures = 0
         except lost as exc:
+            stop.set()
             _back_off(exc, failures)
             failures += 1
+        finally:
+            stop.set()
 
 
 def _back_off(exc: Exception, failures: int) -> None:
