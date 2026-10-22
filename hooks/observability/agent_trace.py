@@ -124,7 +124,7 @@ def _is_prompt(entry: dict) -> bool:
         return False
     if entry.get("isMeta"):
         origin = entry.get("origin")
-        return isinstance(origin, dict) and origin.get("kind") == "channel"
+        return isinstance(origin, dict) and origin.get("kind") == "channel" and origin.get("server") == "inbox"
     text = _text(_blocks(entry))
     if (
         entry.get("uuid", "").startswith("codex-")
