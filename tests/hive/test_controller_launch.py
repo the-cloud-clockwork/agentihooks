@@ -989,7 +989,7 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
 
     saved = {"profile": "engineer", "harness": harness, "account": "account"}
     task = {"id": "task", "launch_assignment": saved}
-    config = replace(setup.config, lanes={"eng": {"agent": "auto", "profile": "engineer"}})
+    config = replace(setup.config, lanes={"eng": {"agent": "codex", "profile": "engineer"}})
     environ = {"fixture": "scope"}
     with patch.object(launch, "os", SimpleNamespace(environ=environ)):
         selected = setup.launcher.select(config, "eng", task)
@@ -998,6 +998,7 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
     )
     assert not isinstance(selected, Wait)
     assert (selected.hive, selected.account.name) == ("remote", "account")
+    assert selected.fallback == ("no hive places the saved codex harness" if harness == "codex" else "")
 
 
 def test_a_saved_codex_task_with_no_codex_placement_launches_on_claude(setup):
