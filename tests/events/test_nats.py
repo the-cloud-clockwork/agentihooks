@@ -275,6 +275,7 @@ def test_a_work_queue_stream_keeps_work_queue_retention(bus):
 
 def test_queue_names_have_stable_bounded_nats_stream_identifiers():
     assert nats.queue_stream("work") == "AGENTIHOOKS_QUEUE_work"
+    assert nats.queue_stream("Work_9-a") == "AGENTIHOOKS_QUEUE_Work_9-a"
     assert nats.queue_stream("swarm.rig.ready.eng") == (
         "AGENTIHOOKS_QUEUE_hca99d3a2340278a9654e1cae8e2a90ce639c9f79f5d643206ccde38b8a0fd396"
     )
