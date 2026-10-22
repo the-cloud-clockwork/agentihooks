@@ -729,6 +729,7 @@ def test_launches_inside_the_budget_keep_filling_the_lanes(store, monkeypatch):
 
 
 def test_a_launch_the_mean_launch_cost_would_carry_past_the_budget_waits_a_pass(store, monkeypatch):
+    store.update("sw", max_eng=3)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
     _slow_launches(monkeypatch, runtime, 8)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
