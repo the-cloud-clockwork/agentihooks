@@ -76,6 +76,6 @@ def test_a_ledger_purged_from_the_bin_takes_its_artifacts_with_it():
     assert artifact_files.load("kept", "a.md") == b"stays"
 
 
-def test_a_malformed_artifact_id_is_refused_before_any_lookup(published):
+def test_a_malformed_artifact_id_is_refused(published):
     with pytest.raises(ValueError, match="not an artifact id"):
         ledger_artifacts.read(published, "../plan.md")
