@@ -2,6 +2,7 @@ import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 
+from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
@@ -44,7 +45,7 @@ def durable(reactor: Reactor) -> str:
 REACTORS = Registry()
 
 
-def configured(bus) -> Registry:
+def configured(bus: Bus) -> Registry:
     from scripts.hub.lifecycle import Lifecycle
 
     return Registry([*REACTORS, Lifecycle(bus).reactor()])

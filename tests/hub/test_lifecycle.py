@@ -8,7 +8,10 @@ from scripts.events import memory
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.hub import lifecycle, registry, runner
+from scripts.routing import reservation
 from scripts.swarm.store import AgentRecord
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 @pytest.fixture
@@ -178,3 +181,16 @@ def test_exit_accepts_the_launching_entry_revision_before_started_is_written(rig
     rig.react.handle(replace(rig.event, data={**rig.event.data, "claim_revision": revision}))
     assert rig.row["state"] == "open"
     assert len(rig.returned) == 1
+
+
+def test_the_default_slot_return_makes_the_account_available_again(rig):
+    import fakeredis
+
+    rig.store.redis = fakeredis.FakeRedis()
+    slots = reservation.LaunchSlots(rig.store.redis)
+    assert slots.reserve("claude:a", "execution", 1, 10000)
+    assert not slots.reserve("claude:a", "next", 1, 10000)
+    lifecycle.Lifecycle(rig.bus, rig.store, rig.ledger).handle(rig.event)
+    assert slots.reserve("claude:a", "next", 1, 10000)
+    lifecycle.Lifecycle(rig.bus, rig.store, rig.ledger).handle(rig.event)
+    assert not slots.reserve("claude:a", "third", 1, 10000)
