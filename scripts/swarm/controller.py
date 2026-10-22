@@ -366,6 +366,7 @@ def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
 
 def _stopped(*_) -> None:
     # The pod grace period can end before the tick's finally reaches its release.
+    tick_stop.STOP.set()
     tick_stop.release_all()
     sys.exit(143)
 
