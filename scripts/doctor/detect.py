@@ -90,7 +90,8 @@ def _ci(store, tasks, now_ms):
     return [f for record in records for f in ci.findings(record, now_ms)]
 
 
-def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetry=True, trace_client=None):
+def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetry=True):
+    """`telemetry` is False to skip the trace reader, or the client factory it reads through instead of the default."""
     env = os.environ if environ is None else environ
     mail = InboxStore(store.redis)
     items = _once(lambda: read.inbox_items(mail, slug))
@@ -112,7 +113,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         "context overrun": lambda: _overruns(store, slug),
         "ci": lambda: _ci(store, tasks(), now_ms),
         "dev workflow": lambda: ci.red_dev_workflows(ci_read.dev_pushes(store.config(slug).repo)),
-        "trace": lambda: _traces(store, tasks(), slug, now_ms, env, trace_client),
+        "trace": lambda: _traces(store, tasks(), slug, now_ms, env, None if telemetry is True else telemetry),
     }
     return found if telemetry else {name: read for name, read in found.items() if name != "trace"}
 

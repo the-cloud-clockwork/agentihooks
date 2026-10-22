@@ -311,7 +311,7 @@ def _collect(readers):
 
 
 def _measured_readers(store, slug, now):
-    return detect.readers(store, swarm.LedgerClient(), slug, now, trace_client=traces_read.measured_client)
+    return detect.readers(store, swarm.LedgerClient(), slug, now, telemetry=traces_read.measured_client)
 
 
 def _class_read(store, slug, doctor, now, name):

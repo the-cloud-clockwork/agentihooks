@@ -123,16 +123,16 @@ def test_the_trace_detector_reads_through_the_client_it_is_given(monkeypatch):
     monkeypatch.setattr(traces_read, "client", lambda environ: pytest.fail("the default client was used"))
     store = type("Store", (), {"redis": object(), "agents": lambda self, slug: []})()
     ledger = type("Ledger", (), {"tasks": lambda self, slug: []})()
-    reader = detect.readers(store, ledger, "s", 1, environ=CALLER, trace_client=refusing)["trace"]
+    reader = detect.readers(store, ledger, "s", 1, environ=CALLER, telemetry=refusing)["trace"]
     with pytest.raises(RuntimeError, match=WRONG):
         reader()
     assert given == [CALLER]
 
 
 def detecting(monkeypatch):
-    def readers(store, ledger, slug, now, trace_client):
-        assert (slug, now, trace_client) == (WATCHED, NOW, traces_read.measured_client)
-        return {"trace": lambda: [] if trace_client(dict(CALLER)) else None}
+    def readers(store, ledger, slug, now, telemetry):
+        assert (slug, now, telemetry) == (WATCHED, NOW, traces_read.measured_client)
+        return {"trace": lambda: [] if telemetry(dict(CALLER)) else None}
 
     monkeypatch.setattr(doctor.detect, "readers", readers)
 
