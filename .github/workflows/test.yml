@@ -2777,6 +2777,7 @@ jobs:
           name: mutation-selection
 
       - name: Install the pinned nats server for the bus backend tests
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         timeout-minutes: 3
         uses: ./.github/actions/nats-server
 
@@ -2880,6 +2881,7 @@ jobs:
           name: mutation-selection
 
       - name: Install the pinned nats server for the bus backend tests
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         timeout-minutes: 3
         uses: ./.github/actions/nats-server
 
