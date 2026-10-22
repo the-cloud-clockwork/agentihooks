@@ -620,6 +620,118 @@ Triggers: an `agentihooks-gc` cron on the agentihooks scheduler (`0 * * * *`) st
 
 Roots come from `profiles/_base/lifecycle.json`, overlaid by `lifecycle.json` in the bundle, each active profile and `~/.agentihooks/lifecycle.json`, merged by `id` (`"enabled": false` drops a root). Kinds: `worktrees`, `scratch`, `ttl` (delete idle entries), `archive` (gzip idle files matching `include`), `traces` (delete injection traces of ended sessions).
 
+### Git maintenance and object counts
+
+Lifecycle setup registers the primary checkout behind each discovered managed
+linked worktree for native Git maintenance. Registration uses the global Git
+`maintenance.repo` entries, so several worktrees of one repository produce one
+primary checkout entry. A repository with no discovered managed linked worktree
+is outside this discovery path.
+
+```bash
+agentihooks gc --install-timer
+```
+
+This installs the hourly lifecycle sweep and checks maintenance registration on
+every setup run. `agentihooks init` also runs this setup when
+`LIFECYCLE_GC_ENABLED=true` (the default). Missing registrations use
+`git maintenance start` in the operating system user's real home, which asks Git
+to schedule its native maintenance. With a redirected `HOME`, setup uses
+`git maintenance register` without starting the user's scheduler. Already
+registered repositories are left registered without another start attempt;
+registration alone does not prove the native Git scheduler is healthy.
+
+A successful new registration prints, for example:
+
+```text
+[OK] git maintenance registered for /home/me/dev/myrepo
+```
+
+Subsequent setup runs print no maintenance line for that repository while its
+registration remains present. Every `agentihooks gc --enforce` sweep also repairs
+missing registrations immediately, without waiting for the cleanup confirmation
+period. It can perform the other due cleanup actions described above too.
+`agentihooks gc` without `--enforce` only reports registration and object counts.
+
+#### Configure discovery
+
+The existing lifecycle roots determine which linked worktrees are discovered.
+For example, this personal `~/.agentihooks/lifecycle.json` adds a second worktree
+root alongside the default `~/dev/worktrees`:
+
+```json
+{
+  "roots": [
+    {"id": "extra-worktrees", "path": "~/projects/worktrees", "kind": "worktrees"}
+  ]
+}
+```
+
+Place linked worktrees under `<root>/<repo>/<worktree>` (or
+`<root>/<repo>/_tmp/<worktree>`). Nested linked worktrees in configured `scratch`
+roots are also discovered. See [`lifecycle.json`](#lifecyclejson) for overlay
+precedence and root settings. There is no separate maintenance root list or
+backlog threshold setting.
+
+#### Read a checkout's backlog
+
+```bash
+agentihooks gc
+agentihooks gc --json | jq '.git_maintenance'
+git config --global --get-all maintenance.repo
+git -C ~/dev/myrepo count-objects -v
+```
+
+The `git` lines show the number of loose objects (`count` from
+`git count-objects -v`) and pack files (`packs`), rather than sizes or the number
+of packed objects. Example report-only output with a missing registration:
+
+```text
+git       78532 loose    47 packs  /home/me/dev/myrepo  (maintenance not registered)
+```
+
+The corresponding entry in the JSON report and `~/.agentihooks/gc-last.json` is:
+
+```json
+{
+  "path": "/home/me/dev/myrepo",
+  "registered": false,
+  "outcome": "",
+  "loose": 78532,
+  "packs": 47
+}
+```
+
+`registered` reflects membership in `maintenance.repo`, including a successful
+registration during this sweep. `outcome` is empty when no registration was
+attempted, `registered` when the attempt succeeded, or `failed: <reason>` when it
+failed. Text output uses that outcome, or `maintenance registered` /
+`maintenance not registered` when it is empty.
+
+Counts are sampled on every completed sweep that reaches maintenance reporting;
+registration does not run compaction synchronously or guarantee an immediate
+reduction. Compare counts over time to spot a growing backlog before Git warns.
+The sweep reports counts without raising a threshold alert. A scoped sweep with
+`--path` includes a maintenance entry only if the **primary checkout** lies
+within that scope. Scoping to its separate linked worktree directory can omit it;
+use an unscoped sweep to see all discovered primaries.
+
+#### Troubleshooting
+
+A registration failure prints `[!!] git maintenance failed: <reason> for <path>`
+during setup, or `failed: <reason>` in the sweep entry. Check Git's reported
+scheduler or permission error, correct that cause, then repeat setup or an
+enforcing sweep. Git execution errors and timeouts are reported per checkout so
+other checkout entries can still be collected.
+
+If object counting fails, JSON counts are `null` and text counts are `None`;
+these mean unavailable, not zero. Run `git -C <primary> count-objects -v` to see
+Git's diagnostic. If an entry is absent, check configured roots, the presence of
+a managed linked worktree and any `--path` filter. If a registered checkout keeps
+accumulating objects, inspect the native Git maintenance scheduler separately:
+setup repairs a missing registration, but does not restart an already registered
+repository's schedule or clear previous Git garbage collection errors.
+
 ### Worktree verdicts
 
 Each worktree gets the first verdict that applies, checked top to bottom. The reason is the text `gc` prints in parentheses after the path.
