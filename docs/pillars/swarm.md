@@ -2302,7 +2302,9 @@ task t31 reopened, https://github.com/o/r/pull/812 has red checks
 The pull request, delivery branch and stored handoff remain available, and
 the worktree stays in place for repair. The tick offers repair work ahead of
 fresh work of the same rank. A successor reads the supplied handoff and task
-comments, checks the existing pull request and continues its recorded branch:
+comments, checks the existing pull request and continues its recorded branch.
+If GitHub still has it queued, dequeue it with `swarm merge dequeue <url>`
+before publishing a repair:
 
 ```bash
 agentihooks ledger --slug example show
@@ -2315,8 +2317,7 @@ agentihooks swarm example publish --message "Fix the failed check" -- <files>
 ```
 
 Use [continuation publication](#publishing-after-a-successor-prepares-a-branch)
-to retain the existing delivery branch and pull request. If GitHub still has
-it queued, dequeue it before pushing a repair. After review and checks meet
+to retain the existing delivery branch and pull request. After review and checks meet
 the normal ship requirements, record the existing pull request with `swarm
 pr`, then release with a fresh handoff or queue the green head using `swarm
 merge queue`. A new claimant does not require a replacement pull request.
