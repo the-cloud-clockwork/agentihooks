@@ -179,6 +179,10 @@ jobs:
               stream.write(f"files={' '.join(tests)}\nbrowser={browser}\nworkers={workers}\n")
           PY
 
+      - name: Install the pinned nats server for the bus backend tests
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
+
       - name: Install the browser that page tests drive
         if: steps.touched.outputs.browser == 'true'
         timeout-minutes: 6
@@ -233,6 +237,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: mutation-selection
+
+      - name: Install the pinned nats server for the bus backend tests
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
 
       - name: Install the browser that page tests drive
         id: browser
@@ -408,6 +416,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: mutation-selection
+
+      - name: Install the pinned nats server for the bus backend tests
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
 
       - name: Install the browser that page tests drive
         id: browser
