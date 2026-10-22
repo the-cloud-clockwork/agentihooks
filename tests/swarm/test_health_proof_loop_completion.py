@@ -5,7 +5,6 @@ import pytest
 from scripts.swarm.health.findings import Limits, proof_loops
 from scripts.swarm.health.verdicts import VerdictStore
 
-
 HOUR = 3_600_000
 SUBJECTS = ("t1294", "t1391", "t1394")
 
