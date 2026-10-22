@@ -96,14 +96,17 @@ def _core_reset(now):
 
 def _hold(endpoint):
     now = _now()
-    until = _core_reset(now)
+    until = max(_core_reset(now), _held_until())
     home = _backoff_home()
-    home.mkdir(parents=True, exist_ok=True)
-    staged = home / f"github-backoff.json.{os.getpid()}"
-    staged.write_text(json.dumps({"until": until}))
-    staged.replace(home / "github-backoff.json")
-    with (home / "github-backoff.jsonl").open("a") as log:
-        log.write(json.dumps({"at": now, "endpoint": endpoint, "until": until}) + "\n")
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        staged = home / f"github-backoff.json.{os.getpid()}"
+        staged.write_text(json.dumps({"until": until}))
+        staged.replace(home / "github-backoff.json")
+        with (home / "github-backoff.jsonl").open("a") as log:
+            log.write(json.dumps({"at": now, "endpoint": endpoint, "until": until}) + "\n")
+    except OSError:
+        pass
     return until
 
 

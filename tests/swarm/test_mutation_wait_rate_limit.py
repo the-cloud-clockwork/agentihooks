@@ -36,7 +36,7 @@ def github(monkeypatch, tmp_path):
         asked=[],
         home=tmp_path,
     )
-    monkeypatch.setattr(mutation_wait, "_now", lambda: state.now, raising=False)
+    monkeypatch.setattr(mutation_wait, "_now", lambda: state.now)
 
     def api(args, **kwargs):
         assert args[:2] == ["gh", "api"]
@@ -96,6 +96,25 @@ def test_a_secondary_limit_backs_off_one_minute_while_core_reports_quota(github)
     github.now = NOW + 61
     assert mutation_wait.run_resolution(URL) == ""
     assert github.asked == [RUN, "rate_limit", RUN]
+
+
+def test_a_secondary_limit_never_shortens_a_longer_core_backoff(github):
+    mutation_wait.run_resolution(URL)
+    github.core = {"remaining": 4000, "reset": RESET}
+    assert mutation_wait._hold(RUN) == RESET
+    github.limited = False
+    github.now = NOW + 61
+    assert mutation_wait.run_resolution(URL) == ""
+    assert github.asked == [RUN, "rate_limit", "rate_limit"]
+
+
+def test_an_unwritable_backoff_home_still_admits_and_holds_pending(github, monkeypatch):
+    blocked = github.home / "blocked"
+    blocked.write_text("")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(blocked))
+    assert mutation_wait.bind(URL) is None
+    held = {**waits.on("mutation", URL), "head": None}
+    assert waits.resolution(held, {}, None, None, None, False) == ""
 
 
 def test_every_rate_limited_read_is_logged_with_its_backoff(github):
