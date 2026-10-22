@@ -56,25 +56,26 @@ def beat(redis: "Redis", local_id: str) -> None:
         registry.seed(pipe, local_id)
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
         fields["master_login"] = json.dumps({"claude": master_claude_login.signed_in()})
-        fields["heartbeat_at"] = str(int(time.time() * 1000))
+        beat_ms = int(time.time() * 1000)
+        fields["heartbeat_at"] = str(beat_ms)
         pipe.hset(key, mapping=fields)
         if not member:
             pipe.sadd(registry.INDEX, local_id)
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
         pipe.execute()
+    from scripts.hive import headroom, join_report
+
+    headroom.publish(redis, local_id, beat_ms)
     if not member:
         LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
     if not fenced:
         consumer.poll()
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
-    from scripts.hive import headroom, join_report
-
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
-    headroom.publish(redis, local_id, int(time.time() * 1000))
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
 
