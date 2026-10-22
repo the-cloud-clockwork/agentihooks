@@ -161,6 +161,85 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     sleep.assert_called_once_with(12, redis=waiter, timeout=12)
 
 
+class _Stop:
+    def __init__(self, results):
+        self.results, self.waits = list(results), []
+
+    def wait(self, seconds):
+        self.waits.append(seconds)
+        return self.results.pop(0)
+
+
+def test_headroom_publishes_on_its_own_cadence_until_stopped(monkeypatch):
+    from scripts.hive import headroom
+
+    calls = []
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: calls.append((client, hive, now_ms)))
+    monkeypatch.setattr(daemon.time, "time", lambda: 7.5)
+    stop, connection = _Stop([False, False, True]), object()
+    daemon.publish_headroom(connection, "local", stop)
+    assert calls == [(connection, "local", 7_500), (connection, "local", 7_500)]
+    assert stop.waits == [daemon.HEADROOM_SECONDS] * 3
+    assert daemon.HEADROOM_SECONDS * 1000 < headroom.STALE_MS
+
+
+@pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError"])
+def test_headroom_keeps_its_cadence_through_a_lost_connection(monkeypatch, capsys, error):
+    from redis import exceptions
+
+    from scripts.hive import headroom
+
+    calls = []
+
+    def publish(client, hive, now_ms):
+        calls.append(now_ms)
+        if len(calls) == 1:
+            raise getattr(exceptions, error)("gone")
+
+    monkeypatch.setattr(headroom, "publish", publish)
+    monkeypatch.setattr(daemon.time, "time", lambda: 1)
+    daemon.publish_headroom(object(), "local", _Stop([False, False, True]))
+    assert calls == [1_000, 1_000]
+    assert capsys.readouterr().err == f"hive headroom publish failed ({error}: gone)\n"
+
+
+def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect(monkeypatch):
+    from redis.exceptions import ConnectionError
+
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "local")
+    monkeypatch.setattr(daemon, "_back_off", lambda exc, failures: None)
+    first, second = object(), object()
+    threads = []
+
+    class Thread:
+        def __init__(self, target, args, daemon):
+            self.target, self.args, self.daemon = target, args, daemon
+
+        def start(self):
+            assert all(thread.args[2].is_set() for thread in threads)
+            threads.append(self)
+
+    beats = []
+
+    def beat(redis, hive):
+        beats.append(redis)
+        if redis is first:
+            raise ConnectionError("lost")
+
+    monkeypatch.setattr(daemon.threading, "Thread", Thread)
+    monkeypatch.setattr(daemon, "beat", beat)
+    monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(Mock(side_effect=[(first, first), (second, second)]))
+    assert beats == [first, second]
+    assert [(thread.target, thread.args[:2], thread.daemon) for thread in threads] == [
+        (daemon.publish_headroom, (first, "local"), True),
+        (daemon.publish_headroom, (second, "local"), True),
+    ]
+    assert threads[1].args[2].is_set()
+
+
 def test_install_writes_the_service_and_enables_it(tmp_path):
     run = Mock(return_value=Mock(returncode=0))
     assert daemon.install("/bin/agentihooks", tmp_path, run)
