@@ -57,7 +57,7 @@ def triggers(doc: dict, now_ms: int) -> list[dict]:
     ]
 
 
-def _routing_applied(store, slug: str) -> bool:
+def _routing_applied(store, slug: str, write: bool) -> bool:
     key = store.key(slug, "dispatcher-quota-lanes")
     decision = capacity.read(store, slug)
     effective = decision.get("effective", {})
@@ -68,7 +68,7 @@ def _routing_applied(store, slug: str) -> bool:
             for lane, cap in decision.get("configured", {}).items()
             if effective.get(lane, cap) < cap
         }
-        if affected:
+        if affected and write:
             store.redis.set(key, json.dumps(affected))
         return False
     lanes = store.config(slug).lanes
@@ -78,18 +78,23 @@ def _routing_applied(store, slug: str) -> bool:
     )
 
 
-def uncovered(store, slug: str, now_ms: int) -> list[dict]:
+def uncovered(store, slug: str, now_ms: int, write: bool = True) -> list[dict]:
     held = json.loads(store.redis.get(store.key(slug, lane_split.KEY)) or "{}")
     named = held.get("named")
     if not named or named in lane_split.MOVES or held["ticks"] < lane_split.TICKS or now_ms - held["at"] > STALE_MS:
-        store.redis.delete(store.key(slug, "dispatcher-quota-lanes"))
+        _forget_quota_lanes(store, slug, write)
         return []
     if named != "quota":
-        store.redis.delete(store.key(slug, "dispatcher-quota-lanes"))
-    elif _routing_applied(store, slug):
+        _forget_quota_lanes(store, slug, write)
+    elif _routing_applied(store, slug, write):
         return []
     text = bottleneck.line(bottleneck.read(store, slug), now_ms)
     return [{"id": f"{BOTTLENECK}{named}", "kind": "bottleneck", "ticks": held["ticks"], "text": text}]
+
+
+def _forget_quota_lanes(store, slug: str, write: bool) -> None:
+    if write:
+        store.redis.delete(store.key(slug, "dispatcher-quota-lanes"))
 
 
 def red_dev(store, slug: str, doc: dict) -> list[dict]:
@@ -116,21 +121,21 @@ def inbox_work(store, slug: str) -> list[dict]:
     ]
 
 
-def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bool) -> list[dict]:
+def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bool, write: bool = True) -> list[dict]:
     active = config.autonomy == FULL and config.state not in ENDED_STATES and not sleeping
     if not active:
         return []
     held = [
         trigger
-        for trigger in uncovered(store, slug, now_ms)
-        if not stage_cover.covered(store, slug, doc, trigger["id"].removeprefix(BOTTLENECK), share=True)
+        for trigger in uncovered(store, slug, now_ms, write)
+        if not stage_cover.covered(store, slug, doc, trigger["id"].removeprefix(BOTTLENECK), share=True, write=write)
     ]
     return triggers(doc, now_ms) + held + red_dev(store, slug, doc) + inbox_work(store, slug)
 
 
 def refusal(slug: str, config, store, doc: dict, now_ms: int) -> str:
-    sleeping = lifetime.sleeping(slug, store, {task["id"]: task for task in doc["tasks"]})
-    found = open_triggers(slug, config, store, doc, now_ms, sleeping)
+    sleeping = lifetime.sleeping(slug, store, {task["id"]: task for task in doc["tasks"]}, write=False)
+    found = open_triggers(slug, config, store, doc, now_ms, sleeping, write=False)
     return REFUSED.format(lines="\n".join(line(trigger) for trigger in found)) if found else ""
 
 

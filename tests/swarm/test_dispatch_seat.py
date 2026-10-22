@@ -5,7 +5,7 @@ import pytest
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import dispatch_seat, naming, prompt, seat_spawn
+from scripts.swarm import dispatch_seat, lifetime, naming, prompt, seat_spawn
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.templates import DEFAULT_PROFILES
@@ -158,6 +158,7 @@ def test_done_from_the_seat_passes_while_the_swarm_sleeps_as_the_tick_raises_not
     assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, found, NOW) == ""
     woken = {**found, "tasks": [{"id": "t2", "state": "open"}]}
     assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, woken, NOW).startswith("dispatcher triggers")
+    assert lifetime.sleeping(SLUG, store, {"t2": woken["tasks"][0]}) is False
     assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, found, NOW).startswith("dispatcher triggers")
 
 
@@ -641,6 +642,7 @@ def test_quota_pressure_closes_after_automatic_routing_is_applied(ci_agent):
     store.update(SLUG, lanes={"eng": {"agent": "claude"}, "ci": {"agent": ci_agent}})
     held(store, "quota")
     quota_caps(store, eng=0)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
     assert "bottleneck" in dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(), NOW)
 
     store.update(SLUG, lanes={"eng": {"agent": "auto"}, "ci": {"agent": ci_agent}})
@@ -847,6 +849,27 @@ def test_the_refusal_a_hive_seat_reads_leaves_the_tick_bookkeeping_to_the_tick(m
     assert store.redis.get(lanes) == json.dumps({"eng": 2})
     assert list(store.redis.hgetall(covers)) == ["review"]
     assert store.redis.get(retired) == json.dumps(["t1"])
+    monkeypatch.undo()
+    assert run(store, FakeRuntime(), closed) == [f"spawned dispatcher {NAME} for 1 trigger"]
+    assert store.redis.get(lanes) is None
+    assert store.redis.hgetall(covers) == {}
+
+
+def test_the_refusal_a_hive_seat_reads_records_no_quota_lanes_and_the_tick_records_only_a_deficit(monkeypatch):
+    store = swarm()
+    lanes = store.key(SLUG, "dispatcher-quota-lanes")
+    held(store, "quota")
+    quota_caps(store)
+    hive_member(monkeypatch)
+    assert "bottleneck" in dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(), NOW)
+    assert store.redis.get(lanes) is None
+    monkeypatch.undo()
+    quota_caps(store, eng=2)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+    assert store.redis.get(lanes) is None
+    quota_caps(store)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+    assert store.redis.get(lanes) == json.dumps({"eng": 0})
 
 
 def test_done_from_a_hive_dispatcher_seat_writes_only_keys_the_hive_member_may_write(monkeypatch, capsys):
