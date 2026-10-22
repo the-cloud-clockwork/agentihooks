@@ -3261,6 +3261,127 @@ nobody takes the task up (it is done or blocked, for example), each item is with
 item naming the agent and the message; a sender that has itself left is told through the master. Agents that
 exited between ticks are settled at the start of the next tick.
 
+## Doctor measurement task readiness
+
+A measurement task uses kind `tune` and lists the fixes it measures in
+`depends_on`. A title containing “measurement” or “after window” does not set
+its kind. When a dependency is `code` or `ci`, the tune task waits for that
+dependency's ledger state to become `done`. A claimed fix with a pushed branch,
+an open pull request and a pull request in the merge queue all leave the tune
+task waiting. This rule applies to every swarm; it prevents a measurement from
+taking a seat before its fix finishes.
+
+A swarm using template `doctor` also requires an `applied_at` value on each
+code or CI dependency. The tick and the dispatcher's queue head apply this
+additional check. A merged pull request alone does not supply that value.
+Other claim requirements, including phase, focus, lane and capacity, still
+apply after both conditions pass.
+
+| Fix dependency | Tune task in any swarm | Additional Doctor requirement |
+|---|---|---|
+| `claimed` or `pr`, with or without a branch | Wait for `done` | Still waiting |
+| `done`, without `applied_at` | Dependency is ready | Wait for application to be recorded |
+| `done`, with `applied_at` | Dependency is ready | Application check passes |
+
+The special measurement rule applies only to `tune` tasks measuring `code` or
+`ci` dependencies. Dependencies of other kinds follow the usual dependency
+rules. There is no separate enable flag or measurement delay setting.
+
+### Configure and inspect a measurement task
+
+For example, a master can create an after window task for an existing fix
+`t42` in phase `p2`. Replace these example identifiers with the ledger's own:
+
+```bash
+agentihooks ledger --slug <doctor-ledger> --as <master-name> task add - \
+  'Measure the fix over an equal active hour' --phase p2 --kind tune \
+  --depends-on t42 \
+  --description 'Compare the same counter before and after application over equal active hours' \
+  --must 'The before and after counts use the same command and equal active windows' \
+  --check 'Record the command, output, application time and both window bounds' \
+  --judge 'Doctor master'
+```
+
+Inspect the recorded task fields without claiming the measurement:
+
+```bash
+agentihooks ledger --slug <doctor-ledger> show | jq \
+  '.tasks[] | select(.id == "t42" or ((.depends_on // []) | index("t42"))) |
+   {id, kind, state, depends_on, applied_at, parked_on, claimed_by}'
+```
+
+### Record when the fix is applied
+
+The Doctor's `pull-dev` intervention pulls the watched swarm's main checkout,
+which must be on `dev`. Before pulling it selects done code or CI fixes that
+an unfinished tune task in the Doctor ledger measures and that have no
+`applied_at`. It excludes fixes whose recorded `branch_repo` identifies another
+repository. After a successful pull it stamps the selected fixes with the
+current UTC time, preserving existing stamps.
+
+Use the intervention against the watched swarm:
+
+```bash
+agentihooks doctor <watched-ledger> intervene pull-dev
+```
+
+When application needs another action, such as a service restart or an update
+in another repository, verify that action before recording its actual time by
+hand on the fix task in the Doctor ledger:
+
+```bash
+agentihooks ledger --slug <doctor-ledger> --as <master-name> task set t42 \
+  applied_at=2026-10-18T16:26:29Z
+```
+
+The ledger accepts UTC timestamps in `YYYY-MM-DDTHH:MM:SSZ` format, or an empty
+value (`applied_at=`) to clear a mistaken stamp. The claim check reads the
+recorded value; it does not verify service health or impose an elapsed window.
+Keep the deployment or restart evidence and the measurement bounds with the
+task proof. A pull stamp records the pull's completion time, so a measurement
+that needs a later runtime change must use that later verified boundary.
+
+### Release a read only measurement seat
+
+An engineer already holding a read only task can use `swarm park` when a
+dependency is unfinished, or when a Doctor tune task's code or CI dependency
+has no application stamp. Here “read only” means any task kind except `code`
+and `ci`; parking requires no branch, worktree or GitHub issue for those kinds.
+
+Write a Handoff v2 document using the installed `handoff` skill, with the recorded before window,
+command and output, the remaining application or measurement boundary, and
+the successor's next action. Then run:
+
+```bash
+agentihooks swarm <doctor-ledger> park <handoff-document>
+```
+
+Park validates the handoff, comments on the task, records its blocking
+dependency identifiers in `parked_on`, stores the handoff and releases the
+seat. In a Doctor swarm that list includes measured code or CI fixes without
+`applied_at`, even when they are already done. The tick reopens the task for
+a successor after its blockers are done and its application check passes.
+The measurement window lives in the handoff; park does not validate the
+measurement's substantive proof.
+
+A window still running after every dependency is done and applied has no
+dependency to park on. Use a declared `swarm wait` while holding it, or the
+normal handoff path to transfer it. `swarm block` on an unfinished dependency
+becomes a wait retaining the claim; use park when the seat must be released.
+
+| Symptom | Check and action |
+|---|---|
+| Tune task stays open while its fix is queued | Expected: wait for the fix task to be `done`, then verify application |
+| Fix is done but Doctor does not claim the tune task | Inspect the fix's `applied_at`; apply the fix and record its time, then check other claim constraints |
+| `pull-dev` did not stamp a fix | Check for an unfinished tune dependent, the fix's done state and its recorded repository; another repository needs its own verified application |
+| Timestamp write is refused | Use the UTC format above, without an offset or fractional seconds |
+| Park says the task waits on no open dependency | Finish it, declare the remaining window as a wait, or hand it off; park needs a dependency blocker |
+| Park asks for a pushed branch | Inspect the task kind: `code` and `ci` retain the [stacked work parking requirements](#parking-on-a-dependency-already-merged-into-dev) |
+
+This behavior shipped in [pull request 4523](https://github.com/the-cloud-clockwork/agentihooks/pull/4523),
+after three Doctor seats were taken by measurements of unmerged fixes on
+18 October. That observation is the baseline, not a measured after result.
+
 ## Queue rank
 
 Every task carries a queue rank: `urgent`, `high`, `normal` or `low`. A task without one, every task written
