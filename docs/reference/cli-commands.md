@@ -473,8 +473,8 @@ SIGKILL.
 
 One interactive Codex process can carry several conversations, each listed as
 its own row with the same PID. Ending that process ends all of them, so a
-termination refuses it with `target process is shared by other session UUIDs:
-<ids>; use --force-shared`. Add `--force-shared` only when every listed
+termination refuses it with
+`target process is shared by other session UUIDs: <ids>; use --force-shared`. Add `--force-shared` only when every listed
 conversation belongs to the agent being stopped.
 
 ### Stand down one Codex conversation
