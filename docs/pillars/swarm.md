@@ -3405,9 +3405,9 @@ case also reopens the task for the next engineer with its handoff and branch.
 | Case | When it counts | Default limit | Setting |
 |---|---|---|---|
 | green and not queued | Checks resolved and passing, not queued, not a draft, and the task not awaiting a ready merge | 10 minutes | `AGENTIHOOKS_STALL_GREEN_MINUTES` |
-| red with no push | Checks resolved and failing, not queued, not a draft, latest run not cancelled | 15 minutes | `AGENTIHOOKS_STALL_RED_MINUTES` |
+| red with no push | Checks resolved and failing, not queued, not a draft, latest run not cancelled, failures not all older than the latest reopen or queue entry | 15 minutes | `AGENTIHOOKS_STALL_RED_MINUTES` |
 | owner not live | No case above, and the claimant has no live session | 10 minutes | `AGENTIHOOKS_STALL_OWNER_MINUTES` |
-| unmergeable or dropped from the queue | Conflicting, or seen in the merge queue and no longer queued, while the owner is not working on it and it is not a draft | 5 minutes | `AGENTIHOOKS_STALL_UNMERGEABLE_MINUTES` |
+| unmergeable or dropped from the queue | Outside the queue and conflicting, or previously seen queued and now outside it with no required checks pending; owner not working on it, not a draft | 5 minutes | `AGENTIHOOKS_STALL_UNMERGEABLE_MINUTES` |
 | ready and unclaimed while its lane is full | Ready tasks wait while every configured seat of the lane is taken, accounts show free seats and scaling is not manual; alert only, closed once the lane frees or the task is claimed | 15 minutes | `AGENTIHOOKS_STALL_UNCLAIMED_MINUTES` |
 
 A setting takes a positive whole number of minutes; any other value keeps the default. Time inside an open
@@ -3442,6 +3442,88 @@ The watchdog skips a task, for every case, while:
 
 A wait on the task's own pull request holds nothing: a green pull request still counts while its owner waits on its
 checks, and the owner queues it once they pass.
+
+#### Requeued pull requests and refreshed checks
+
+A pull request that leaves the merge queue can start fresh checks before it returns. While required checks on
+its current head are pending, the watchdog does not count its absence from the queue as a drop. Once it is back
+in the queue, it is also excluded from the green, red and unmergeable cases, whatever its queue position.
+There is no special queue position limit for this protection.
+
+The pending check protection applies to the dropped queue case. An actual merge conflict can still qualify as
+unmergeable, and an absent claimant can still qualify as owner not live. Drafts and a live owner recorded as
+`working` hold the unmergeable case. A pull request previously seen queued that stays outside the queue with
+settled checks can still qualify as dropped after the configured limit, five minutes by default.
+
+For the red case, the watchdog uses checks on the current head and the latest reopen or merge queue entry event.
+When every failing check has a known start time before that event, the failures are stale and do not qualify as
+red with no push. A failure that starts at or after the event remains eligible once checks resolve; if a failure
+has no start time, the watchdog cannot establish that all failures are stale. Check start time falls back to
+creation time when needed. Reopening or requeueing does not erase a fresh failure.
+
+Before acting on a pull request case past its limit, the watchdog makes an uncached GitHub read and judges that
+fresh state again. It acts only if that read still qualifies for a case past its limit. This prevents a snapshot
+taken before the tick's merge pass queued a pull request from stopping the owner after queue entry. A failed
+read, or a pull request that is no longer open, holds the action for that pass. The extra read occurs only for
+a candidate already past its limit; a failed read is reconsidered on a later tick.
+
+For example, after requeueing a reviewed pull request, its claimant can inspect the queue and declare the wait:
+
+```bash
+agentihooks swarm <slug> merge state <pr-url>
+agentihooks swarm <slug> wait --on merge <pr-url>
+```
+
+If it is outside the queue while refreshed checks run, wait on those checks instead:
+
+```bash
+agentihooks swarm <slug> wait --on checks <pr-url>
+```
+
+Once the required checks pass and review is closed, queue it and wait on the merge:
+
+```bash
+agentihooks swarm <slug> merge queue <pr-url>
+agentihooks swarm <slug> wait --on merge <pr-url>
+```
+
+Declaring a wait on the task's own pull request does not disable the watchdog. The observed queue and check state
+provide the protection; a green request left unqueued or an owner with no live session remains subject to the
+other cases. See [ready merge pass queue exits](#ready-merge-pass-queue-exits) for tasks whose owners already
+released their seats with `swarm ready`.
+
+#### Configure watchdog enforcement and limits
+
+The operator or master selects the swarm's enforcement mode. Inspect the current modes and start with observation:
+
+```bash
+agentihooks swarm <slug> status --json
+agentihooks swarm <slug> set "stall-gate=log only"
+```
+
+`log only` is the default: cases still raise alerts and log would-be actions, preserving the claim and owner.
+After checking those observations against GitHub and the owner's live state, the operator or master can select
+`stall-gate=deny` to enable reopening and stopping, or `stall-gate=skip` to suppress those actions and their
+attempt logs. Alerts and escalation remain active in every mode.
+
+Configure limits in the environment of the process running the tick, for example:
+
+```bash
+export AGENTIHOOKS_STALL_UNMERGEABLE_MINUTES=10
+export AGENTIHOOKS_STALL_RED_MINUTES=20
+```
+
+These values give a genuine queue drop or conflict ten minutes and a fresh red case twenty minutes, subject to
+the clock resets and holds above. An export affects only processes launched with that environment; configure
+the scheduled controller's launch environment for scheduled passes. Changing a limit does not change the
+current-head check protection or the decision time reread.
+
+[Pull request #4597](https://github.com/the-cloud-clockwork/agentihooks/pull/4597) delivered the refreshed check,
+stale failure and decision time read safeguards. Its
+[red regression run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39156484867) and
+[green regression run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39157196513) record the
+automated proof. They do not establish a measured reduction in live false owner stops; compare equal exposure
+windows using the same false stop classification before and after the running controller loads the correction.
 
 #### Holding a finished pull request for the next release
 
@@ -3496,6 +3578,10 @@ an outage are left alone. See the `set stall-gate` command for the modes.
 | A task with `after_release` never resumes after the release | The new tag is not newer, or is not three dotted numbers | Check `git ls-remote --tags --refs origin` in the swarm repository against the task's tag |
 | A `release` alert names held tasks | The tag lookup fails | Fix the repository's `origin` remote or network, then close the alert |
 | The green limit seems to restart | A push, a new owner session, the tick ending the owner's wait, or a pass that skipped or did not see the case restarted the clock | Queue the pull request once its checks pass |
+| A requeued request is reported as dropped | The decision may use an older installation or GitHub state different from the observed queue entry | Compare queue events, current head and required check state with the alert; verify the running controller includes the safeguards from #4597 |
+| A red alert follows a reopen or requeue | A failing check started after the latest event, its start time is unknown, or the controller predates the correction | Compare the current head's check start times with the latest reopen or queue entry, then fix any fresh failure |
+| Pending checks hold a queue drop but the owner still receives a stall alert | A conflict or absent owner can qualify independently | Read the alert's case; resolve the conflict or restore a live claimant |
+| An overdue candidate produces no action after a GitHub read failure | The fresh read could not confirm the stall | Restore GitHub access and inspect the next tick; the watchdog holds that pass |
 
 ### Ledger event pass
 
