@@ -1,5 +1,5 @@
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 
 import pytest
@@ -9,13 +9,15 @@ from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.hub import lifecycle, registry, runner
 from scripts.routing import reservation
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 @pytest.fixture
 def rig():
+    import fakeredis
+
     bus = memory.open_bus(BusConfig())
     agent = AgentRecord(
         name="engineer", lane="eng", task="task", execution_id="execution", generation=3, seat="eng-1", account="a"
@@ -29,9 +31,10 @@ def rig():
         return dict(row)
 
     ledger.update_task = update
-    store = SimpleNamespace(execution_registry=SimpleNamespace(get=lambda *_: agent), released=[], dropped=[])
-    store.release = lambda *args: store.released.append(args)
-    store.drop_agent = lambda *args: store.dropped.append(args)
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.hset(store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    store.redis.hset(store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
+    store.redis.set(store.key("rig", "claim", agent.task), agent.name)
     returned = []
     event = Envelope(
         id="exit",
@@ -42,14 +45,15 @@ def rig():
         version=3,
         time=100,
         author="hive",
-        data={"name": agent.name, "task": "task", "claim_key": "claim", "claim_revision": 1},
+        data={"name": agent.name, "task": "task", "claim_key": "claim", "claim_revision": 1, "task_generation": 7},
     )
     bus.state("spoke-work").create("claim", json.dumps({"state": "started", "claim_revision": 1}).encode())
-    react = lifecycle.Lifecycle(bus, store, ledger, release=lambda *args: returned.append(args))
+    react = lifecycle.Lifecycle(bus, store, ledger, release=lambda _store, slug, agent: returned.append((slug, agent)))
     yield SimpleNamespace(
         bus=bus, agent=agent, row=row, store=store, ledger=ledger, returned=returned, event=event, react=react
     )
     bus.close()
+    store.redis.close()
 
 
 def test_exit_reopens_unfinished_work_and_returns_its_execution_slot(rig):
@@ -61,9 +65,10 @@ def test_exit_reopens_unfinished_work_and_returns_its_execution_slot(rig):
             {"if_state": ("claimed", "pr"), "if_match": {"claimed_by": "engineer", "claim_generation": 7}},
         )
     ]
-    assert rig.returned == [(rig.store, "rig", rig.agent)]
-    assert rig.store.released == [("rig", "task", "engineer")]
-    assert rig.store.dropped == [("rig", "engineer")]
+    assert rig.returned == [("rig", rig.agent)]
+    assert rig.store.redis.get(rig.store.key("rig", "claim", "task")) is None
+    assert rig.store.redis.hget(rig.store.key("rig", "agents"), "engineer") is None
+    assert rig.store.execution_registry.get("rig", "execution").state == "ended"
     assert json.loads(rig.bus.state("spoke-work").get("claim").value)["state"] == "exited"
 
 
@@ -73,7 +78,7 @@ def test_exit_closes_a_task_with_an_authoritative_completion_proof(rig):
     assert rig.row["state"] == "done"
     assert rig.row["done"] is True
     assert rig.row["claimed_by"] == "engineer"
-    assert rig.returned == [(rig.store, "rig", rig.agent)]
+    assert rig.returned == [("rig", rig.agent)]
 
 
 @pytest.mark.parametrize("state", ["done", "blocked", "handoff", "open"])
@@ -108,7 +113,7 @@ def test_exit_leaves_a_queued_pull_request_for_its_merge_reactor(rig):
 )
 def test_stale_or_unrelated_exits_cannot_settle_or_return_another_slot(rig, change):
     rig.react.handle(replace(rig.event, **change))
-    assert rig.ledger.writes == rig.returned == rig.store.released == rig.store.dropped == []
+    assert rig.ledger.writes == rig.returned == []
 
 
 def test_exit_does_not_reopen_a_successors_task(rig):
@@ -123,7 +128,7 @@ def test_redelivery_does_not_repeat_task_or_slot_effects(rig):
     lifecycle.Lifecycle(rig.bus, rig.store, rig.ledger, release=lambda *args: rig.returned.append(args)).handle(
         rig.event
     )
-    assert len(rig.ledger.writes) == len(rig.returned) == len(rig.store.released) == len(rig.store.dropped) == 1
+    assert len(rig.ledger.writes) == len(rig.returned) == 1
 
 
 def test_failed_slot_return_retries_without_prematurely_reopening_the_task(rig):
@@ -171,7 +176,7 @@ def test_a_ledger_outage_retries_settlement_without_returning_the_slot_again(rig
     rig.ledger.update_task = saved
     rig.react.handle(rig.event)
     assert rig.row["state"] == "open"
-    assert len(rig.returned) == len(rig.store.released) == len(rig.store.dropped) == 1
+    assert len(rig.returned) == 1
 
 
 def test_exit_accepts_the_launching_entry_revision_before_started_is_written(rig):
@@ -184,9 +189,6 @@ def test_exit_accepts_the_launching_entry_revision_before_started_is_written(rig
 
 
 def test_the_default_slot_return_makes_the_account_available_again(rig):
-    import fakeredis
-
-    rig.store.redis = fakeredis.FakeRedis()
     slots = reservation.LaunchSlots(rig.store.redis)
     assert slots.reserve("claude:a", "execution", 1, 10000)
     assert not slots.reserve("claude:a", "next", 1, 10000)
@@ -194,3 +196,61 @@ def test_the_default_slot_return_makes_the_account_available_again(rig):
     assert slots.reserve("claude:a", "next", 1, 10000)
     lifecycle.Lifecycle(rig.bus, rig.store, rig.ledger).handle(rig.event)
     assert not slots.reserve("claude:a", "third", 1, 10000)
+
+
+def test_a_launching_exit_keeps_its_original_revision_after_a_slot_outage(rig):
+    claims = rig.bus.state("spoke-work")
+    entry = claims.get("claim")
+    revision = claims.update("claim", json.dumps({"state": "launching"}).encode(), entry.revision)
+    event = replace(rig.event, data={**rig.event.data, "claim_revision": revision})
+
+    def unavailable(*_):
+        raise OSError("unavailable")
+
+    with pytest.raises(OSError, match="unavailable"):
+        lifecycle.Lifecycle(rig.bus, rig.store, rig.ledger, release=unavailable).handle(event)
+    rig.react.handle(event)
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
+
+
+def successor(rig):
+    agent = replace(rig.agent, execution_id="successor", generation=4)
+    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    rig.store.redis.hset(rig.store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
+    return agent
+
+
+def test_a_delayed_exit_cannot_retire_a_same_name_successor(rig):
+    replacement = successor(rig)
+    rig.row["claim_generation"] = 8
+    rig.react.handle(rig.event)
+    assert rig.ledger.writes == rig.returned == []
+    assert rig.store.execution_registry.get("rig", replacement.execution_id) == replacement
+    assert rig.store.redis.hget(rig.store.key("rig", "agents"), replacement.name) is not None
+    assert rig.store.redis.get(rig.store.key("rig", "claim", "task")) == replacement.name
+
+
+def test_a_replacement_during_slot_return_aborts_the_whole_retirement(rig):
+    slots = reservation.LaunchSlots(rig.store.redis)
+    assert slots.reserve("claude:a", "execution", 1, 10000)
+    replacements = []
+
+    def race(store, slug, agent):
+        lifecycle.release_slot(store, slug, agent)
+        replacements.append(successor(rig))
+
+    lifecycle.Lifecycle(rig.bus, rig.store, rig.ledger, release=race).handle(rig.event)
+    assert len(replacements) == 1
+    assert rig.ledger.writes == []
+    assert not slots.reserve("claude:a", "other", 1, 10000)
+    assert rig.store.execution_registry.get("rig", "successor") == replacements[0]
+    assert rig.store.redis.get(rig.store.key("rig", "claim", "task")) == rig.agent.name
+
+
+def test_a_new_task_claim_generation_is_never_reopened_by_the_old_exit(rig):
+    rig.row["claim_generation"] = 8
+    rig.react.handle(rig.event)
+    assert rig.ledger.writes == []
+    assert rig.row["state"] == "claimed"
+    assert rig.row["claim_generation"] == 8
