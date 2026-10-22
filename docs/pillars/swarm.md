@@ -383,7 +383,7 @@ before this change carry no `task` and keep front door routing.
 | An agent's follow up reaches the front door instead of its task's master. | Check that the agent's session had `AGENTIHOOKS_SWARM_TASK` set, that the follow up has no `hive`, and that the owning phase seat has a live master. |
 | A master's `followup done` is refused with `followups/<id> belongs to <seat>`. | The writer holds no live master seat; ask the named seat with `masters-channel say`. |
 | A live master's decision on another master's follow up passes. | This is expected: the ledger records it as a cross owner write and keeps the owner. |
-| A ledger write from a script is refused with `task needs a task id ...`. | `task` is an `add_item` op field, not a CLI flag. Pass it only on an `add_item` op to the `followups` list, as a plain task id, or leave it out. |
+| A ledger write from a script is refused with `task needs a task id ...`. | `task` is an `add_item` op field, not a CLI flag. Set it only on an `add_item` op for `followups`, as a plain task id, or leave it out. |
 
 ##### Configuration and failure handling
 
