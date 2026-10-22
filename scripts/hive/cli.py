@@ -233,7 +233,7 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--tls-cert", help="PEM certificate; required off loopback")
     serve.add_argument("--tls-key", help="PEM private key for --tls-cert")
     settings = sub.add_parser("set", help=f"Set {', '.join(registry.SETTINGS)} as key=value")
-    settings.add_argument("--keep", action="store_true", help="Leave max-agents and excluded as stored")
+    settings.add_argument("--keep", action="store_true", help="Leave max-agents, excluded, ui and ephemeral as stored")
     settings.add_argument("id")
     settings.add_argument("settings", nargs="*", metavar="key=value")
     sub.add_parser("show", help="Print a hive's record as JSON").add_argument("id")

@@ -33,6 +33,7 @@ INT_FIELDS = ("max_agents", "heartbeat_at")
 LEGACY = "roles"
 LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
+KEPT = (*UNSET, "ui", "ephemeral")
 
 
 def key(hive_id: str) -> str:
@@ -184,7 +185,7 @@ def update(redis: "Redis", hive_id: str, pairs: list[str], keep: bool = False) -
     def write(pipe: "Pipeline") -> dict:
         legacy = pipe.hexists(key(hive_id), LEGACY)
         stored = _stored(pipe, hive_id) or {}
-        fields = {f: v for f, v in parsed.items() if not (keep and f in UNSET and f in stored)}
+        fields = {f: v for f, v in parsed.items() if not (keep and f in KEPT and f in stored)}
         record = _settle(hive_id, {**stored, **fields})
         _check(record)
         pipe.multi()

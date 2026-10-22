@@ -88,13 +88,20 @@ def test_a_restarted_registration_keeps_the_stored_settings(redis):
     expected = {**DEFAULT, "name": "Pod", "ephemeral": "yes", "excluded": ["qa"], "max_agents": 3}
     assert restarted == expected
     assert registry.show(redis, "box") == expected
-    assert redis.hget(f"{registry.ROOT}:hive:box", "max_agents") == "3"
+    assert redis.hget(registry.key("box"), "max_agents") == "3"
+
+
+def test_a_restarted_registration_keeps_a_stored_ui_and_ephemeral(redis):
+    registry.update(redis, "box", ["ui=yes", "ephemeral=no"])
+    restarted = registry.update(redis, "box", ["ui=no", "ephemeral=yes", "name=Pod"], keep=True)
+    assert (restarted["ui"], restarted["ephemeral"], restarted["name"]) == ("yes", "no", "Pod")
+    assert redis.hmget(registry.key("box"), "ui", "ephemeral", "name") == ["yes", "no", "Pod"]
 
 
 def test_a_restarted_registration_with_nothing_new_writes_nothing(redis):
     registry.update(redis, "box", ["max-agents=3"])
     assert registry.update(redis, "box", ["max-agents=9"], keep=True) == {**DEFAULT, "max_agents": 3}
-    assert redis.hget(f"{registry.ROOT}:hive:box", "max_agents") == "3"
+    assert redis.hget(registry.key("box"), "max_agents") == "3"
 
 
 def test_empty_excluded_and_prefer_clear_them(redis):
