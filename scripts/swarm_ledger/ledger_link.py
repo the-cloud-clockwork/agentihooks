@@ -219,7 +219,7 @@ def hosted_line(slug, line):
     try:
         ledger.resource(slug, "metadata")
     except urllib.error.HTTPError as error:
-        return f"No ledger page link: {target} refused a read of ledger {slug}: HTTP {error.code}"
+        return f"No ledger page link: {target} answered a read of ledger {slug} with HTTP {error.code}"
     except ledger.Unauthenticated as error:
         return f"No ledger page link: {target} refused a read of ledger {slug}: {error}"
     except OSError:

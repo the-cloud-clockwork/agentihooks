@@ -50,7 +50,7 @@ def test_a_hosted_server_refusing_the_credential_names_the_refusal(hosted, monke
 
     monkeypatch.setattr(ledger, "resource", refused)
     line = ledger_link.page_line(SLUG)
-    assert line == f"No ledger page link: {HOSTED} refused a read of ledger {SLUG}: HTTP 403"
+    assert line == f"No ledger page link: {HOSTED} answered a read of ledger {SLUG} with HTTP 403"
 
 
 def test_a_hosted_server_without_the_ledger_names_the_missing_ledger(hosted, monkeypatch):
@@ -58,7 +58,9 @@ def test_a_hosted_server_without_the_ledger_names_the_missing_ledger(hosted, mon
         raise urllib.error.HTTPError(f"{HOSTED}/api", 404, "Not Found", {}, io.BytesIO(b""))
 
     monkeypatch.setattr(ledger, "resource", missing)
-    assert ledger_link.page_line(SLUG) == f"No ledger page link: {HOSTED} refused a read of ledger {SLUG}: HTTP 404"
+    assert (
+        ledger_link.page_line(SLUG) == f"No ledger page link: {HOSTED} answered a read of ledger {SLUG} with HTTP 404"
+    )
 
 
 def test_a_missing_hosted_credential_names_its_reason(hosted, monkeypatch):
