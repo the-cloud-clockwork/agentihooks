@@ -397,4 +397,223 @@ def test_default_admission_reuses_the_previous_cpu_sample_before_taking_again(mo
     assert worker.poll() == "empty"
     assert worker.poll() == "held"
     assert samples == [(0, 1234, None), (0, 5678, first)]
+    assert all(type(now_ms) is int for _, now_ms, _ in samples)
     bus.queue.assert_called_once_with("swarm.rig.ready.eng", worker.config.policy)
+
+
+def claim(rig):
+    import json
+
+    from scripts.hive.spoke import claim_key
+
+    return json.loads(rig.bus.state("spoke-work").get(claim_key(rig.event)).value)
+
+
+def seed_pending(rig, state, attempt=1):
+    import json
+
+    from scripts.hive.spoke import claim_key
+
+    rig.bus.state("spoke-work").create(claim_key(rig.event), json.dumps(state).encode())
+    pending = rig.bus.state("spoke-pending")
+    pending.create(rig.spoke._pending_key, json.dumps({"event": rig.event.to_dict(), "attempt": attempt}).encode())
+    return pending
+
+
+@pytest.mark.parametrize("boundary", ["queue", "take"])
+def test_one_remaining_admission_slot_takes_without_waiting_and_reports_queue_failures(monkeypatch, boundary):
+    from scripts.hive import spoke
+
+    bus = Mock()
+    bus.state.return_value.get.return_value = None
+    bus.queue.return_value.take.return_value = None
+    monkeypatch.setattr(spoke.admission, "room", lambda value: SimpleNamespace(room=1))
+    worker = spoke.Spoke(spoke.SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a"), bus, Mock(), Mock(), reading)
+    assert worker.poll() == "empty"
+    bus.queue.return_value.take.assert_called_once_with(0)
+    target = bus.queue if boundary == "queue" else bus.queue.return_value.take
+    target.side_effect = RuntimeError("unavailable")
+    assert worker.poll() == "retry"
+
+
+def test_claim_and_pending_ownership_are_visible_before_request_loading(rig):
+    from scripts.hive.spoke import Spoke
+
+    observed = []
+    other = Spoke(rig.config, rig.bus, Mock(), Mock(), Mock(side_effect=AssertionError("must not measure")))
+
+    def request(event):
+        observed.append((claim(rig), other.poll()))
+        return rig.request
+
+    rig.tasks.request.side_effect = request
+    assert rig.spoke.poll() == "started"
+    assert observed == [({"owner": "hive-a", "state": "claimed"}, "busy")]
+
+
+@pytest.mark.parametrize("field", ["hive", "lane", "swarm"])
+def test_pending_completion_is_isolated_between_spokes(rig, field):
+    from dataclasses import replace
+
+    from scripts.hive.spoke import Spoke
+    from scripts.swarm.readiness import queue_name
+
+    real_publish = rig.bus.events.publish
+
+    def publish(subject, event):
+        if event.data["task"] == rig.event.key:
+            raise RuntimeError("publication unavailable")
+        return real_publish(subject, event)
+
+    rig.bus.events.publish = publish
+    assert rig.spoke.poll() == "retry"
+    value = SimpleNamespace(slug="other") if field == "swarm" else "other"
+    config = replace(rig.config, **{field: value})
+    ready = replace(rig.event, id="other-ready", key="task-b", swarm=config.swarm.slug)
+    rig.bus.queue(queue_name(config.swarm.slug, config.lane), config.policy).offer(ready)
+    other = Spoke(config, rig.bus, rig.runtime, rig.tasks, reading)
+    assert other.poll() == "started"
+    assert rig.runtime.spawn.call_count == 2
+
+
+def test_competing_claim_creation_is_nacked_for_the_claim_wait(rig):
+    from scripts.events.bus import StateConflict
+
+    claims = rig.bus.state("spoke-work")
+    real_create = claims.create
+    claims.create = Mock(side_effect=StateConflict)
+    assert rig.spoke.poll() == "busy"
+    rig.tasks.request.assert_not_called()
+    assert rig.queue.take(0) is None
+    claims.create = real_create
+    rig.clock.now = rig.config.policy.ack_wait_ms - 1
+    assert rig.spoke.poll() == "empty"
+    rig.clock.now += 1
+    assert rig.spoke.poll() == "started"
+
+
+def test_failed_pending_reservation_releases_the_task_claim_for_retry(rig):
+    pending = rig.bus.state("spoke-pending")
+    real_create = pending.create
+    pending.create = Mock(side_effect=RuntimeError("unavailable"))
+    assert rig.spoke.poll() == "retry"
+    assert claim(rig) == {"state": "ready"}
+    rig.runtime.spawn.assert_not_called()
+    pending.create = real_create
+    rig.clock.now = 10
+    assert rig.spoke.poll() == "started"
+
+
+def test_known_failed_launch_releases_its_pending_reservation_by_revision(rig):
+    import json
+
+    pending = rig.bus.state("spoke-pending")
+    pending.update = Mock(wraps=pending.update)
+    reserved = []
+
+    def request(event):
+        reserved.append(pending.get(rig.spoke._pending_key).revision)
+        raise RuntimeError("unavailable")
+
+    rig.tasks.request.side_effect = request
+    assert rig.spoke.poll() == "retry"
+    assert json.loads(pending.get(rig.spoke._pending_key).value) == {}
+    pending.update.assert_called_once_with(rig.spoke._pending_key, b"{}", reserved[0])
+
+
+@pytest.mark.parametrize("attempt", [1, 3])
+def test_ready_recovery_retries_below_the_cap_and_reopens_at_the_cap(rig, attempt):
+    pending = seed_pending(rig, {"state": "ready"}, attempt)
+    if attempt == 1:
+        assert rig.spoke.poll() == "started"
+        rig.tasks.reopen.assert_not_called()
+    else:
+        rig.spoke.measure = lambda: None
+        assert rig.spoke.poll() == "dead"
+        rig.runtime.spawn.assert_not_called()
+        rig.tasks.reopen.assert_called_once_with(rig.event)
+        letter = rig.bus.dead.consumer("audit", "dead.>").fetch(1, 0)[0].event
+        assert letter.data["attempts"] == 3
+    assert pending.get(rig.spoke._pending_key).value == b"{}"
+
+
+def test_uncertain_recovery_retains_ownership_and_does_not_measure_or_take(rig):
+    pending = seed_pending(rig, {"state": "launching", "owner": "hive-a", "name": "agent-a"})
+    before = pending.get(rig.spoke._pending_key)
+    rig.spoke.measure = Mock(side_effect=AssertionError("must not measure"))
+    rig.queue.take = Mock(wraps=rig.queue.take)
+    assert rig.spoke.poll() == "uncertain"
+    assert pending.get(rig.spoke._pending_key) == before
+    rig.queue.take.assert_not_called()
+    rig.runtime.spawn.assert_not_called()
+
+
+def test_another_spoke_does_not_restart_an_uncertain_launch(rig):
+    import json
+
+    from scripts.hive.spoke import claim_key
+
+    rig.bus.state("spoke-work").create(claim_key(rig.event), json.dumps({"state": "launching"}).encode())
+    assert rig.spoke.poll() == "uncertain"
+    assert rig.queue.take(0) is None
+    rig.clock.now = rig.config.policy.ack_wait_ms - 1
+    assert rig.spoke.poll() == "empty"
+    rig.runtime.spawn.assert_not_called()
+
+
+def test_another_spoke_finishes_a_pending_dead_letter_without_a_local_pending_record(rig):
+    import json
+
+    from scripts.events.dead import dead_letter
+    from scripts.hive.spoke import claim_key
+
+    letter = dead_letter(rig.event, "swarm.rig.ready.eng", 3)
+    rig.bus.state("spoke-work").create(
+        claim_key(rig.event), json.dumps({"state": "dead_pending", "event": letter.to_dict()}).encode()
+    )
+    assert rig.spoke.poll() == "dead"
+    rig.tasks.reopen.assert_called_once_with(rig.event)
+    rig.runtime.spawn.assert_not_called()
+    assert rig.queue.take(0) is None
+
+
+def test_completed_dead_work_does_not_repeat_recovery_on_a_held_spoke(rig):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local")
+    for now in (0, 10):
+        rig.clock.now = now
+        assert rig.spoke.poll() == "retry"
+    rig.clock.now = 29
+    assert rig.spoke.poll() == "empty"
+    rig.clock.now = 30
+    assert rig.spoke.poll() == "dead"
+    rig.spoke.measure = lambda: None
+    assert rig.spoke.poll() == "held"
+    rig.tasks.reopen.assert_called_once_with(rig.event)
+
+
+def test_ambiguous_launch_intent_keeps_owner_and_name_after_the_exception(rig):
+    rig.runtime.spawn.side_effect = RuntimeError("response lost")
+    assert rig.spoke.poll() == "retry"
+    assert claim(rig) == {"state": "launching", "owner": "hive-a", "name": "agent-a"}
+
+
+def test_started_event_uses_a_millisecond_wall_clock(rig, monkeypatch):
+    from scripts.hive import spoke
+
+    monkeypatch.setattr(spoke, "time", SimpleNamespace(time_ns=lambda: 1_234_567_890_123))
+    assert rig.spoke.poll() == "started"
+    event = rig.bus.events.consumer("audit", "swarm.rig.execution.started").fetch(1, 0)[0].event
+    assert event.time == 1_234_567
+
+
+def test_withdrawn_work_retains_its_terminal_state_and_cannot_be_loaded_again(rig):
+    from dataclasses import replace
+
+    rig.tasks.request.return_value = None
+    assert rig.spoke.poll() == "withdrawn"
+    assert claim(rig) == {"state": "withdrawn"}
+    rig.queue.offer(replace(rig.event, id="withdrawn-duplicate"))
+    assert rig.spoke.poll() == "withdrawn"
+    rig.tasks.request.assert_called_once_with(rig.event)

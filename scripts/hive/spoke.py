@@ -33,10 +33,6 @@ def claim_key(event: Envelope) -> str:
     return hashlib.sha256(json.dumps([event.swarm, event.key, event.version]).encode()).hexdigest()
 
 
-def measured() -> dict | None:
-    return headroom.measure(0, time.time_ns() // 1_000_000)
-
-
 class Spoke:
     def __init__(
         self,
@@ -44,12 +40,20 @@ class Spoke:
         bus: Bus,
         runtime: Runtime,
         tasks: Tasks,
-        measure: Callable[[], dict | None] = measured,
+        measure: Callable[[], dict | None] | None = None,
     ):
-        self.config, self.bus, self.runtime, self.tasks, self.measure = config, bus, runtime, tasks, measure
+        self.config, self.bus, self.runtime, self.tasks = config, bus, runtime, tasks
+        self._previous = None
+        self.measure = measure or self._measure
         self._pending_key = hashlib.sha256(
             json.dumps([config.swarm.slug, config.lane, config.hive]).encode()
         ).hexdigest()
+
+    def _measure(self) -> dict | None:
+        sample = headroom.measure(0, time.time_ns() // 1_000_000, previous=self._previous)
+        if sample is not None:
+            self._previous = sample
+        return sample
 
     def poll(self, timeout_ms: int = 0) -> str:
         try:
@@ -86,7 +90,7 @@ class Spoke:
         pending = self.bus.state("spoke-pending")
         entry = pending.get(self._pending_key)
         if entry and json.loads(entry.value):
-            raise StateConflict("pending completion is busy")
+            raise StateConflict
         value = json.dumps({"event": delivery.event.to_dict(), "attempt": delivery.attempt}).encode()
         return (
             pending.update(self._pending_key, value, entry.revision)
@@ -181,7 +185,7 @@ class Spoke:
         outcome = self.runtime.spawn(request)
         if not outcome.ok:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
-            raise RuntimeError(outcome.detail)
+            raise RuntimeError
         placed = outcome.value
         started = Envelope(
             id=f"started:{key}",
@@ -227,7 +231,7 @@ class Spoke:
             value = json.dumps({"state": "dead_pending", "event": letter.to_dict()}).encode()
             revision = claims.update(key, value, entry.revision)
         else:
-            raise StateConflict("execution state requires recovery")
+            raise StateConflict
         self.bus.dead.publish(f"dead.{event.swarm}", letter)
         self.tasks.reopen(event)
         claims.update(key, json.dumps({"state": "dead"}).encode(), revision)
