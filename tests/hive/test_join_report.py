@@ -4,6 +4,17 @@ from dataclasses import replace
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _every_running_report_is_live(monkeypatch):
+    from scripts.hive import join_report
+
+    monkeypatch.setattr(
+        join_report,
+        "running_executions",
+        lambda redis, reports: {(report["slug"], report["execution_id"], report["generation"]) for report in reports},
+    )
+
+
 def passing():
     return dict.fromkeys(
         (

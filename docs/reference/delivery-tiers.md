@@ -181,6 +181,7 @@ A repository with no merge queue on `dev` gets a squash merge from the same comm
 | Message | Cause | Action |
 |---|---|---|
 | `required checks on the current pull request head must pass before queueing` | A required check of the pull request's repository has not reported on the current head, is still running, or failed. A failed check is named after `; failed:`. | Wait on checks with `agentihooks swarm <slug> wait --on checks <url>`, or fix the red check, then queue again. |
+| `staged compatibility: <reason>` | The pull request body declares a staged prerequisite and candidate pair whose proof is incomplete, stale or unreadable on the exact heads. | Fix the reason named in [Staged compatibility before admission](../pillars/swarm.md#staged-compatibility-before-admission), then queue again. |
 | `swarm merge queue operations require a pull request into dev` | The pull request base is not `dev`. | Retarget the pull request to `dev`. |
 | `gh: Not Found (HTTP 404)` | The caller's `gh` cannot read the `dev` branch rules of the repository named in the URL. | Check `gh auth status`; the account must read that repository's branch rules and pull requests. |
 | `GitHub URL does not identify a pull request` | The URL names no pull request the caller can read. | Check the owner, repository and number in the URL. |
