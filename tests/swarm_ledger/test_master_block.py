@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import tick
+from scripts.swarm import readiness, tick
 from scripts.swarm_ledger import ledger_tasks
 from scripts.swarm_ledger.ledger_core import Context
 
@@ -79,4 +79,4 @@ def test_incident_worker_publication_cannot_feed_ownerless_recovery():
     actions = tick._orphans("sw", store, client, rows)
     assert actions == []
     assert doc["tasks"][0]["state"] == "blocked"
-    assert not tick.ready(rows["t1"], rows, doc, {}, "")
+    assert not readiness.ready(rows["t1"], rows, doc, {}, "")
