@@ -210,10 +210,11 @@ def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatc
     monkeypatch.delenv("AGENTIHOOKS_BUS_URL", raising=False)
     monkeypatch.setenv("HOSTNAME", "hub-0")
     previous = signal.getsignal(signal.SIGTERM)
+    leases = opened.state(lease.BUCKET)
     assert runner.main(["run", "--once"]) == 0
     assert handler.seen == [("e1", 1)]
     assert capsys.readouterr().out == "lifecycle: handled\n"
-    assert lease.read(opened.state(lease.BUCKET), "reactor.lifecycle") == lease.LeaseState("hub-0", 0)
+    assert lease.read(leases, "reactor.lifecycle") == lease.LeaseState("hub-0", 0)
     assert signal.getsignal(signal.SIGTERM) is previous
 
 
@@ -233,10 +234,11 @@ def test_sigterm_ends_the_hub_with_143_and_releases_its_leases(monkeypatch):
     monkeypatch.setattr(registry, "REACTORS", declared)
     monkeypatch.setattr(runner, "open_bus", lambda config: opened)
     monkeypatch.setenv("HOSTNAME", "hub-1")
+    leases = opened.state(lease.BUCKET)
     with pytest.raises(SystemExit) as stopped:
         runner.main(["run"])
     assert stopped.value.code == 143
-    assert lease.read(opened.state(lease.BUCKET), "reactor.timers") == lease.LeaseState("hub-1", 0)
+    assert lease.read(leases, "reactor.timers") == lease.LeaseState("hub-1", 0)
 
 
 class Stop(BaseException):
