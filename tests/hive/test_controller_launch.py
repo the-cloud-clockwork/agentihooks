@@ -815,27 +815,33 @@ def test_hive_reaps_the_process_it_acknowledged_for_the_named_execution(setup):
 
 @pytest.mark.parametrize("status,detail", [("ok", ""), ("refused", "process identity changed")])
 def test_execution_reap_uses_the_receipt_even_when_the_registry_pane_changed(setup, status, detail):
+    from unittest.mock import patch
+
     from scripts.hive.orders import Ack, CommandOrder, Consumer
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     _, order, ack = live_order(setup)
     agent = setup.store.execution_registry.get("fixture", order.execution_id)
-    setup.store.execution_registry.update(
-        "fixture",
-        replace(
-            agent,
-            generation=agent.generation + 1,
-            pane_id="replacement",
-            runtime_target={"host_id": "elsewhere", "pid": 999},
-        ),
+    changed = replace(
+        agent,
+        generation=agent.generation + 1,
+        pane_id="replacement",
+        runtime_target={"host_id": "elsewhere", "pid": 999},
     )
     runtime = Mock()
     runtime.terminate.return_value = Outcome("terminate", Status(status), "local", detail=detail)
     reap = CommandOrder("reap", "reap_execution", "fixture", "", order.execution_id, order.generation)
     expected = Ack("done" if status == "ok" else "failed", ack.target, detail)
-    assert Consumer(setup.store.redis, "remote", runtime).command(reap) == expected
+    consumer = Consumer(setup.store.redis, "remote", runtime)
+    with patch.object(consumer.store.execution_registry, "get", return_value=changed):
+        assert consumer.command(reap) == expected
     (reaped,), _ = runtime.terminate.call_args
-    assert (reaped.execution_id, reaped.runtime_target, reaped.pane_id) == (order.execution_id, ack.target, "pane")
+    assert (reaped.execution_id, reaped.generation, reaped.runtime_target, reaped.pane_id) == (
+        order.execution_id,
+        order.generation,
+        ack.target,
+        "pane",
+    )
     runtime.herdr.reap_name.assert_not_called()
 
 
