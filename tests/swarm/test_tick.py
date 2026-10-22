@@ -876,6 +876,15 @@ def test_a_hive_launch_failing_after_admission_releases_its_hive_room_and_launch
     assert runtime.slots.counts() == {}
 
 
+def test_a_failed_hive_launch_gone_from_the_store_still_releases_its_hive_room(store):
+    from scripts.hive import admission
+    from scripts.swarm.tick import _release_hive_launch
+
+    assert admission.reserve(store.redis, "remote", "sw/eng@gone", 3) == (True, 0)
+    _release_hive_launch("sw", store, AgentRecord("eng@gone", "eng", "t1", hive="remote"))
+    assert admission.pending(store.redis, "remote") == 0
+
+
 def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)
