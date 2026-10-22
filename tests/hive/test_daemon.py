@@ -8,6 +8,8 @@ from scripts.hive import daemon, registry
 
 pytestmark = pytest.mark.unit
 
+PUBLISH_HEADROOM = daemon.publish_headroom
+
 
 @pytest.fixture
 def redis():
@@ -161,26 +163,32 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     sleep.assert_called_once_with(12, redis=waiter, timeout=12)
 
 
-class _Stop:
-    def __init__(self, results):
-        self.results, self.waits = list(results), []
+def _paced(monkeypatch, rounds):
+    import threading
 
-    def wait(self, seconds):
-        self.waits.append(seconds)
-        return self.results.pop(0)
+    stop, waits = threading.Event(), []
+
+    def wait(seconds, redis, timeout):
+        waits.append((seconds, redis, timeout))
+        if len(waits) == rounds:
+            stop.set()
+
+    monkeypatch.setattr(daemon, "scheduled_wait", wait)
+    return stop, waits
 
 
-def test_headroom_publishes_on_its_own_cadence_until_stopped(monkeypatch):
+def test_headroom_publishes_on_the_scheduler_cadence_until_stopped(monkeypatch):
     from scripts.hive import headroom
 
     calls = []
     monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: calls.append((client, hive, now_ms)))
     monkeypatch.setattr(daemon.time, "time", lambda: 7.5)
-    stop, connection = _Stop([False, False, True]), object()
-    daemon.publish_headroom(connection, "local", stop)
+    stop, waits = _paced(monkeypatch, 3)
+    connection, waiter = object(), object()
+    PUBLISH_HEADROOM(connection, waiter, "local", stop)
     assert calls == [(connection, "local", 7_500), (connection, "local", 7_500)]
-    assert stop.waits == [daemon.HEADROOM_SECONDS] * 3
-    assert daemon.HEADROOM_SECONDS * 1000 < headroom.STALE_MS
+    assert waits == [(daemon.HEADROOM_SECONDS, waiter, daemon.HEADROOM_SECONDS + daemon.WAKE_SLACK_S)] * 3
+    assert (daemon.HEADROOM_SECONDS + daemon.WAKE_SLACK_S) * 1000 < headroom.STALE_MS
 
 
 @pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError", "ResponseError", "JSONDecodeError", "KeyError"])
@@ -202,9 +210,26 @@ def test_headroom_keeps_its_cadence_through_a_failed_publish(monkeypatch, capsys
 
     monkeypatch.setattr(headroom, "publish", publish)
     monkeypatch.setattr(daemon.time, "time", lambda: 1)
-    daemon.publish_headroom(object(), "local", _Stop([False, False, True]))
+    stop, _ = _paced(monkeypatch, 3)
+    PUBLISH_HEADROOM(object(), object(), "local", stop)
     assert calls == [1_000, 1_000]
     assert capsys.readouterr().err == f"hive headroom publish failed ({error}: {failure})\n"
+
+
+@pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError"])
+def test_headroom_ends_when_its_wait_loses_the_connection(monkeypatch, error):
+    import threading
+
+    from redis import exceptions
+
+    from scripts.hive import headroom
+
+    def wait(seconds, redis, timeout):
+        raise getattr(exceptions, error)("gone")
+
+    monkeypatch.setattr(daemon, "scheduled_wait", wait)
+    monkeypatch.setattr(headroom, "publish", Mock(side_effect=AssertionError("published")))
+    PUBLISH_HEADROOM(object(), object(), "local", threading.Event())
 
 
 def test_headroom_keeps_publishing_while_a_beat_blocks(monkeypatch):
@@ -214,7 +239,8 @@ def test_headroom_keeps_publishing_while_a_beat_blocks(monkeypatch):
 
     _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
-    monkeypatch.setattr(daemon, "HEADROOM_SECONDS", 0.01)
+    monkeypatch.setattr(daemon, "publish_headroom", PUBLISH_HEADROOM)
+    monkeypatch.setattr(daemon, "scheduled_wait", lambda seconds, redis, timeout: threading.Event().wait(0.001))
     published = threading.Event()
     calls = []
 
@@ -242,9 +268,9 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     backed_off = []
     monkeypatch.setattr(
-        daemon, "_back_off", lambda exc, failures: backed_off.append([t.args[2].is_set() for t in threads])
+        daemon, "_back_off", lambda exc, failures: backed_off.append([t.args[3].is_set() for t in threads])
     )
-    first, second = object(), object()
+    first, second, first_waiter, second_waiter = object(), object(), object(), object()
     threads = []
 
     class Thread:
@@ -252,7 +278,7 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
             self.target, self.args, self.daemon = target, args, daemon
 
         def start(self):
-            assert all(thread.args[2].is_set() for thread in threads)
+            assert all(thread.args[3].is_set() for thread in threads)
             threads.append(self)
 
     beats = []
@@ -266,14 +292,14 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
     monkeypatch.setattr(daemon, "beat", beat)
     monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=KeyboardInterrupt))
     with pytest.raises(KeyboardInterrupt):
-        daemon.run(Mock(side_effect=[(first, first), (second, second)]))
+        daemon.run(Mock(side_effect=[(first, first_waiter), (second, second_waiter)]))
     assert beats == [first, second]
-    assert [(thread.target, thread.args[:2], thread.daemon) for thread in threads] == [
-        (daemon.publish_headroom, (first, "local"), True),
-        (daemon.publish_headroom, (second, "local"), True),
+    assert [(thread.target, thread.args[:3], thread.daemon) for thread in threads] == [
+        (daemon.publish_headroom, (first, first_waiter, "local"), True),
+        (daemon.publish_headroom, (second, second_waiter, "local"), True),
     ]
     assert backed_off == [[True]]
-    assert threads[1].args[2].is_set()
+    assert threads[1].args[3].is_set()
 
 
 def test_install_writes_the_service_and_enables_it(tmp_path):

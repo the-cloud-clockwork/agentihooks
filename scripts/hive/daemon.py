@@ -128,12 +128,18 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
     return redis.hlen(key) > 0
 
 
-def publish_headroom(redis: "Redis", local_id: str, stop: threading.Event) -> None:
-    from redis.exceptions import RedisError
+def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
+    from redis.exceptions import ConnectionError, RedisError, TimeoutError
 
     from scripts.hive import headroom
 
-    while not stop.wait(HEADROOM_SECONDS):
+    while not stop.is_set():
+        try:
+            scheduled_wait(HEADROOM_SECONDS, redis=waiter, timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
+        except (ConnectionError, TimeoutError):
+            return
+        if stop.is_set():
+            return
         try:
             headroom.publish(redis, local_id, int(time.time() * 1000))
         except (RedisError, ValueError, KeyError) as exc:
@@ -153,7 +159,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
         stop = threading.Event()
         try:
             redis, waiter = connect()
-            threading.Thread(target=publish_headroom, args=(redis, local_id, stop), daemon=True).start()
+            threading.Thread(target=publish_headroom, args=(redis, waiter, local_id, stop), daemon=True).start()
             while True:
                 started = time.monotonic()
                 worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
