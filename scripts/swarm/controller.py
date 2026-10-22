@@ -299,8 +299,8 @@ def _dead(raw: str) -> bool:
 
 def _ended_boot(held: dict, host: str) -> bool:
     machine = _read("/etc/machine-id")
-    boot = str(held.get("host", "")).split(":", 1)[0]
-    return bool(machine) and held.get("machine") == machine and bool(boot) and boot != host.split(":", 1)[0]
+    boot = str(held.get("host", "")).partition(":")[0]
+    return bool(machine) and held.get("machine") == machine and bool(boot) and boot != host.partition(":")[0]
 
 
 def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int) -> str | None:

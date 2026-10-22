@@ -187,6 +187,8 @@ def test_read_strips_a_file_and_reads_a_missing_one_as_empty(tmp_path):
         ("m", {"host": "boot:ns", "pid": 8, "start": "s", "machine": "m"}, False),
         ("m", {"host": "oldboot:ns", "pid": 8, "start": "s", "machine": "other"}, False),
         ("m", {"host": "oldboot:ns", "pid": 8, "start": "s"}, False),
+        ("m", {"pid": 8, "start": "s", "machine": "m"}, False),
+        ("m", {"host": "boot", "pid": 8, "start": "s", "machine": "m"}, False),
         ("", {"host": "oldboot:ns", "pid": 8, "start": "s", "machine": ""}, False),
     ],
 )
