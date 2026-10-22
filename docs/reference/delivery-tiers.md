@@ -117,7 +117,7 @@ For agentibrain-kernel, whose `dev` rules require `Gate — Required` reported b
 
 A merge group unit shard that loses its runner is rerun once inside the same Tests run, so the pull request stays in the queue and merges on the rerun's green.
 
-1. `queue-fail-fast` reads the log of each failed `unit (<python>, <shard>)` job once on the App token. Only an error line `Process completed with exit code <1 to 127>` with no runner loss signature proves a real failure and cancels the run at once; a timed out shard also cancels it. A lost runner can leave no log, or only an annotation the App token cannot read, so any other shard failure waits for the classifier. Every other failed job, the classifier and the rerun included, cancels the run at once.
+1. `queue-fail-fast` reads the log of each failed `unit (<python>, <shard>)` job once on the App token. Only an error line `Process completed with exit code <1 to 127>` with no runner loss signature proves a real failure and cancels the run at once; a timed out shard also cancels it. A lost runner can leave no log, or only an annotation the App token cannot read, so any other shard failure waits for the classifier. Every other failed job, the classifier and the rerun included, cancels the run at once. A run whose group was rebuilt is cancelled too, after the watcher writes a [queue rebuild record](#the-watcher-record).
 2. `unit-lost` starts when the `unit` matrix ends in failure or cancelled. On the App token it lists this attempt's jobs and runs `python -m scripts.ci_unit_rerun --jobs <listing> --repo <owner>/<repo> --plan <queue plan>`, which judges each failed shard's log by the watcher's rule. A timed out shard, a shard whose log proves a real failure, or a lost leg missing from the queue shard plan makes `unit-lost` fail and the queue drops the entry.
 3. `unit-rerun` runs the `unit` job's own steps once for each lost leg, from the same queue shard plan, and overwrites that leg's durations, flake and coverage artifacts. `shard-check` waits for it, so completeness is graded on the rerun's results.
 4. `Gate — Required` accepts a merge group only when `unit` passed with both rerun jobs skipped, or `unit` failed or was cancelled and both `unit-lost` and `unit-rerun` passed. A rerun that fails for any reason, a second runner loss included, fails the gate and the queue drops the entry. Queue retry never requeues it: a run whose `unit rerun` job failed is refused with `failed again on its in-run rerun`.
@@ -215,6 +215,139 @@ A job whose runner pod or node vanished can stay `in_progress` with no failure, 
 A stalled run is cancelled, then force cancelled if a plain cancel does not end it. Its failed jobs are rerun once only when it is a first attempt and no job failed or timed out on its own; a run that failed on its own is never rerun, and a second loss ends cancelled. Every suspect run is confirmed on a second read at least two minutes after the first, and one tick waits only once. Each examined run prints one JSON line with its action, `none`, `cancel`, `rerun` or `error`, and the reason. A refused API call reports `error` for that run, the other runs are still examined, and the job fails. Like Queue retry, a scheduled workflow runs from `main`, so a change takes effect after promotion.
 
 GitHub can list a dead runner online for over a minute, and the scheduled workflow starts at most every ten minutes, so the swarm tick also runs the watchdog with `--cluster` on the tick host, where `kubectl` can read the cluster; CI runners cannot. The tick step `lost_runner.sweep` starts it at most once a minute per repository, only where `kubectl` exists and the repository has the Tests workflow, and a file lock under the AgentiHooks home keeps one watchdog acting at a time; a later tick finding it held exits and the next free minute looks again. The watchdog runs isolated (`python -I`), so it imports the installed AgentiHooks package, and a change to it reaches the tick when the installed checkout pulls `dev`. In cluster mode a runner is lost when its pod ended (phase Failed or Succeeded, or its `runner` container terminated), sits on a node NotReady for at least sixty seconds or on a node the cluster no longer lists, is in phase Unknown on a Ready node, or is missing from a scale set the cluster lists. There is no job age grace and the second read comes thirty seconds after the first. The only reads are `kubectl get autoscalingrunnersets --all-namespaces`, `kubectl get pods --all-namespaces -l actions.github.com/scale-set-name` and `kubectl get nodes`, so the tick host's kubeconfig needs list rights on those three. A refused cluster read reports `error` and never counts as a loss, and a runner whose scale set the cluster does not list is never counted lost. Its output goes to `lost-runner.log` under the AgentiHooks home.
+
+## Queue rebuild records
+
+GitHub rebuilds a merge group whenever an entry ahead of it changes: an enqueue or priority insertion ahead, a dequeue, a requeue, a removal ahead or a push to the base. The rebuilt group gets a new head commit, and the Tests run still building the old head is cancelled. On 16 October a priority insertion rebuilt three group chains and cancelled 195.550 runner minutes, and no record named the action that caused it ([issue 4282](https://github.com/the-cloud-clockwork/agentihooks/issues/4282)). Two records now keep that link:
+
+- the **queue journal**, written on the machine running the swarm tooling for every queue mutation that tooling performs, and
+- the **watcher record**, written in CI by the stale group watcher before it cancels a run whose group is no longer current.
+
+Neither record changes what the queue does. Both were delivered by [pull request 4355](https://github.com/the-cloud-clockwork/agentihooks/pull/4355); [pull request 5706](https://github.com/the-cloud-clockwork/agentihooks/pull/5706) added the removal ahead cause.
+
+### The queue journal
+
+Every record is one JSON line appended to `merge-queue-events.jsonl` in the AgentiHooks home (`$AGENTIHOOKS_HOME`, else `~/.agentihooks`). Nothing needs to be enabled. A write that fails prints `merge queue record not written: <error>` on stderr, and the queue operation still completes.
+
+| Action | Written by | Queue read before and after |
+|---|---|---|
+| `queue` | `agentihooks swarm <slug> merge queue <url>`, the `ready` merge pass and the requeue sweep `python -m scripts.ci_requeue` | yes |
+| `dequeue` | `agentihooks swarm <slug> merge dequeue <url>` and the `ready` merge pass | yes |
+| `priority` | `agentihooks swarm <slug> merge priority <url>` when it reorders the queue, at once or when the tick replays a deferred request | yes |
+| `priority-deferred` | A priority request that waits because the head group's merge group run has not completed | no |
+| `priority-lift` | A priority request with `--lift`, which skips that wait | no |
+| `priority-applied` | The tick replaying a deferred priority that succeeded | no |
+| `priority-failed` | The tick replaying a deferred priority that failed | no |
+| `priority-dropped` | The tick dropping a deferred priority whose pull request closed, left `dev` or became a draft | no |
+| `priority-requeue` | The tick requeuing an entry an interrupted priority left out | no |
+| `priority-requeue-skipped` | The tick leaving such an entry out because it became a draft, its head moved or it conflicts with `dev` | no |
+
+`merge state` writes nothing. A `queue` for a pull request already in the queue writes nothing, and neither does a `queue` into a repository with no `dev` merge queue, which squash merges instead.
+
+Each record carries:
+
+| Field | Meaning |
+|---|---|
+| `id`, `at` | A random hex identifier and the UTC write time |
+| `action` | One of the actions above |
+| `token_actor` | The GitHub login of the token that read the queue, which is the actor GitHub records for the mutation; `null` when no queue read succeeded |
+| `agent` | `AGENTIHOOKS_AGENT_NAME` of the calling session; `null` outside a swarm session |
+| `pull`, `expected_head` | The pull request URL and the head it was queued or dequeued at; empty for `priority-deferred`, `priority-lift`, `priority-applied`, `priority-failed` and `priority-dropped` |
+| `old_groups`, `new_groups` | Every `dev` queue entry, all pages, in queue order, read just before and just after the mutation; `null` when not read or unreadable |
+| `observed_between` | The times of the first and last queue reads |
+| `rebuilt` | Each pull request in both reads whose group head changed, with `old_head`, `new_head`, `old_base` and `new_base` |
+| `removed`, `added` | Pull requests only in the first read, or only in the second |
+| `gaps` | Why a queue read failed, as `queue unreadable: <error>` |
+| `errors` | The GitHub errors the mutation returned; the after read still runs when the mutation fails |
+| `steps` | `priority` only: each `["dequeue", url]`, `["queue", url]` and `["restore", url]` in the order sent |
+
+Each queue group lists `pull`, `pull_head`, `position`, `state`, `jump`, `enqueued_at`, `enqueuer`, `head` (the merge group commit) and `base`. An entry still waiting for its group has a `null` head. `rebuilt`, `removed` and `added` appear only when both reads succeeded. Records from the `ready` merge pass also carry `swarm`, `task`, `timer` (the tick process ID) and `by: "merge watcher"`. Deferred priority records carry the request's `repo`, `group_head`, `run_id`, `sender` and `order`; `priority-dropped` and `priority-requeue-skipped` carry `reason`.
+
+`rebuilt` shows only what changed between two reads taken seconds apart. GitHub rebuilds groups after the mutation returns, so most records show no rebuild, and an entry that gained its first group head counts as rebuilt from `null`. To find the mutation behind a rebuild, search by time, as below.
+
+Count records by action:
+
+```bash
+jq -r .action ~/.agentihooks/merge-queue-events.jsonl | sort | uniq -c
+```
+
+Read the last priority insertion and the order it sent:
+
+```bash
+jq -c 'select(.action == "priority") | {at, token_actor, agent, pull, steps, errors}' \
+  ~/.agentihooks/merge-queue-events.jsonl | tail -1
+```
+
+List every swarm mutation inside a cancelled run's window, taking `started` and `at` from its watcher record:
+
+```bash
+jq -c --arg from "<started>" --arg to "<at>" \
+  'select(.at[0:19] >= $from[0:19] and .at[0:19] <= $to[0:19]) | {at, action, agent, pull, steps}' \
+  ~/.agentihooks/merge-queue-events.jsonl
+```
+
+An empty result means no swarm tooling on this machine changed the queue while the run built.
+
+### The watcher record
+
+The `queue-fail-fast` job of every merge group Tests run polls its queue ref. When the ref no longer points at the run's commit, the group was rebuilt and the run can no longer merge. Before cancelling, the job runs `python3 -m scripts.ci_queue_rebuild <observed ref head>`, which reads, on the job's App token:
+
+1. the run's start time and the first parent of the run's commit (`old_parent`),
+2. every page of the `dev` merge queue,
+3. the last 20 merge queue add and removal events of this pull request, and
+4. the pull request whose merge group run built `old_parent`, and its last 20 queue events.
+
+The App token carries `permission-pull-requests: read` for these reads. Each read times out after 20 seconds.
+
+The record is printed on one log line beginning `queue-rebuild ` and appended to the job summary under the heading `Queue rebuild queue-rebuild-<run id>-<attempt>`. Its fields:
+
+| Field | Meaning |
+|---|---|
+| `id` | `queue-rebuild-<run id>-<run attempt>` |
+| `at`, `started` | The record time and the run's start time, which bound the event window |
+| `ref`, `pull` | The queue ref and the pull request it names |
+| `old_head`, `old_parent` | The cancelled run's commit and its first parent: the previous group head in a chain, not necessarily `dev` |
+| `observed_ref_head` | The ref head the watcher saw |
+| `new_head`, `new_base`, `expected_head` | This pull request's current group head and base, and its pull request head; `null` when it left the queue |
+| `cause` | The linked cause below |
+| `groups` | The whole queue, in the journal's group format |
+
+Only queue events inside the run window, deduplicated by event ID, name a cause. The first row that matches decides:
+
+| `cause.action` | When | Also carries |
+|---|---|---|
+| `dequeue` | The pull request left the queue and was removed during the run | `actor`, `reason`, `at`, `events` |
+| `unknown` | The pull request left the queue with no removal event | `gap` |
+| `requeue` | It was removed and added again during the run, the add last | `actor` of the add, `removed_reason`, `at`, `events` |
+| `unknown` | The pull request ahead could not be read | `gap` |
+| `removed_ahead` | The pull request whose group built `old_parent` was removed during the run | `pull`, `actor`, `reason`, `at`, `events` |
+| `unknown` | Entries ahead were enqueued during the run | `gap`, and `correlated`: each entry's `pull`, `enqueuer`, `enqueued_at` and `jump` |
+| `unknown` | None of the above | `gap` naming what queue entries cannot show: a removal ahead with no queue run at the old parent, a base push or a ruleset change |
+
+A correlated entry is evidence, not a cause: GitHub records no event linking an enqueue ahead to the rebuild it caused. Any failed read makes the cause `unknown` with the gap `queue unreadable: <error>`.
+
+The cancellation names the record. From run [39708426310](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39708426310):
+
+```text
+FAILED: queue group is no longer current (record queue-rebuild-39708426310-1: unknown cause: no entry ahead was enqueued and this pull request was not removed while the group ran; ...)
+```
+
+The other causes read `dequeue by <actor> (<reason>)`, `requeue by <actor>` and `removal of <url> ahead by <actor> (<reason>)`; a correlated unknown appends `; jump of <url> by <login> at <time>` or `; enqueue of <url> by <login> at <time>` for each entry. When the record cannot be produced at all the cancellation reads `queue group is no longer current (record unavailable)`, and the run is still cancelled.
+
+Read a record from its job log:
+
+```bash
+gh api repos/<owner>/<repo>/actions/jobs/<queue-fail-fast job id>/logs \
+  | grep -m1 'queue-rebuild {' | sed 's/.*queue-rebuild //' | jq '{id, started, at, old_head, cause}'
+```
+
+### Limits
+
+- A native enqueue, jump or dequeue made outside the swarm tooling, from the GitHub interface or a plain `gh` call, is journaled by nothing; the watcher sees it only through queue events and entries when a rebuild cancels a run.
+- A removal ahead whose group never ran at `old_parent`, a base push and a ruleset change stay `unknown` with that gap.
+- The journal lives only on the machine that ran the tooling. The watcher record lives only in the run log and job summary.
+- Journal records are not deduplicated against GitHub events: each mutation call writes one record.
+- `merge priority` reorders with dequeue and requeue, never GitHub's native `jump`, so its insertions appear as `steps`, not as `jump: true` entries.
 
 ## Coverage grading
 
