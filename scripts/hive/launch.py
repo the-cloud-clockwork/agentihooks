@@ -174,7 +174,10 @@ class HiveLaunch:
         hives = _by_origin(hives, config.repo)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
         hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
-        harness = saved.get("harness") or chosen.get("agent") or "claude"
+        moved = ""
+        if (saved.get("harness") or "claude") not in ("claude", "auto"):
+            moved = f"no hive places the saved {saved['harness']} harness"
+        harness = "claude" if moved else saved.get("harness") or chosen.get("agent") or "claude"
         if harness not in ("claude", "auto"):
             return self._record_wait(lane, task, placement.Wait("Codex hive placement is not enabled", role))
         rows = getattr(self.herdr, "_quota_accounts", None)
@@ -183,7 +186,7 @@ class HiveLaunch:
             front = front_door.holds(self.slug, task.get("seat", ""))
             selected = self._master_selection(config, decision, hives, now, rows, front)
             return self._record_wait(lane, task, selected)
-        account = saved.get("account") or self.herdr.planned_account(task["id"], "claude")
+        account = ("" if moved else saved.get("account")) or self.herdr.planned_account(task["id"], "claude")
         candidates = [
             row
             for row in rows
@@ -197,7 +200,7 @@ class HiveLaunch:
             row, choice = found
             fallback = (
                 f"the task is pinned to {task['hive']}" if choice.fallback and task.get("hive") else choice.fallback
-            )
+            ) or moved
             matched = _matched_origin(hives, choice.hive, config.repo)
             found = (
                 matched
