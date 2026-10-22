@@ -1444,6 +1444,7 @@ def test_expire_reaps_and_ends_the_live_execution_of_its_own_claimant(setup, sta
 @pytest.mark.parametrize("case", ["ended", "finished", "other claimant", "no order"])
 def test_expire_leaves_an_ended_foreign_or_missing_order_alone(setup, case):
     request, order, _ = live_order(setup)
+    setup.store.redis.delete(setup.launcher.orders.receipt(order))
     agent = setup.store.execution_registry.get("fixture", order.execution_id)
     if case in ("ended", "finished"):
         setup.store.execution_registry.update("fixture", replace(agent, state=case))
