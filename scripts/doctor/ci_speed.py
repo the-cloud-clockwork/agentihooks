@@ -175,19 +175,31 @@ def _during(run, incidents):
 
 
 def _member(groups, finding, scope, text, window_ms, run, during):
-    subject = f"{window_ms}-{scope}"
-    group = groups.setdefault(
-        f"{finding.kind.replace(' ', '-')}/{subject}",
-        {"kind": finding.kind, "subject": subject, "text": text, "window": window_ms, "members": {}},
-    )
+    identity = f"{finding.kind.replace(' ', '-')}/{scope}"
+    group = groups.get(identity)
+    if group is None or group["window"] != window_ms:
+        group = groups[identity] = {
+            "kind": finding.kind,
+            "subject": scope,
+            "text": text,
+            "window": window_ms,
+            "members": {},
+        }
     attempt = run.get("run_attempt", 1)
-    group["members"][finding.id] = {
+    member = group["members"][finding.id] = {
         "order": [run["id"], attempt],
         "run": str(run["id"]) if attempt == 1 else f"{run['id']} attempt {attempt}",
         "measure": finding.measure,
         "evidence": finding.evidence[0],
         "during": during,
     }
+    return member
+
+
+def _running(run):
+    return run["status"] != "completed" and not any(
+        job.get("completed_at") for job in run["jobs"] if job["name"] == GATE
+    )
 
 
 def group(
@@ -198,9 +210,12 @@ def group(
         during = _during(run, incidents)
         for finding in _wait(run, run["jobs"], since_ms, now_ms):
             scope = finding.subject.split("-", 2)[2]
-            _member(groups, finding, scope, ", ".join(json.loads(scope)) or "unassigned", window_ms, run, during)
+            text = ", ".join(json.loads(scope)) or "unassigned"
+            member = _member(groups, finding, scope, text, window_ms, run, during)
+            member["open"] = finding.kind != "ci runner wait"
         for finding in _wall(run, now_ms):
-            _member(groups, finding, run["event"], TIERS[run["event"]], window_ms, run, during)
+            member = _member(groups, finding, run["event"], TIERS[run["event"]], window_ms, run, during)
+            member["open"] = _running(run)
     return groups
 
 
@@ -241,19 +256,28 @@ def grouped(groups: dict) -> list[Finding]:
                 (*evidence, *(member["evidence"] for member in members)),
                 THRESHOLDS[entry["kind"]],
                 max(measures),
-                evidence_identity=(*[member["run"] for member in members], max(measures)),
+                evidence_identity=(
+                    *[member["run"] for member in members],
+                    max((member["measure"] for member in members if not member.get("open")), default=0),
+                ),
             )
         )
     return found
 
 
+def scope_of(subject: str) -> str:
+    """The label set or tier of a grouped subject, without the window start older ids carry."""
+    head, _, rest = subject.partition("-")
+    return rest if head.isdigit() else subject
+
+
 def _covered(finding, identity, verdict):
     kind, _, subject = identity.partition("/")
-    if kind != finding.kind.replace(" ", "-") or subject.partition("-")[2] != finding.subject.partition("-")[2]:
+    if kind != finding.kind.replace(" ", "-") or scope_of(subject) != scope_of(finding.subject):
         return False
     identity = verdict.get("evidence_identity")
     members = identity[:-1] if identity is not None else verdict["evidence"][0].rpartition(", runs ")[2].split(", ")
-    return finding.measure <= verdict["measure"] and set(finding.evidence_identity[:-1]).issubset(members)
+    return finding.evidence_identity[-1] <= verdict["measure"] and set(finding.evidence_identity[:-1]).issubset(members)
 
 
 def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int) -> list[Finding]:
@@ -273,4 +297,4 @@ def notice_key(finding: Finding, records: dict) -> str:
     prior = records.get(finding.id)
     if finding.evidence_identity is None or prior is None or not json.loads(prior)["verdict"]:
         return finding.id
-    return json.dumps([finding.id, finding.evidence_identity, finding.measure])
+    return json.dumps([finding.id, finding.evidence_identity])

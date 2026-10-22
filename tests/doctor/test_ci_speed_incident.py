@@ -112,16 +112,16 @@ def test_ten_runs_on_one_label_in_one_pass_are_one_finding(store, monkeypatch): 
         assert text.count("\n- ") == 1
 
 
-def test_a_wait_across_a_window_boundary_is_one_crossing_per_pass(store, monkeypatch):  # noqa: F811
+def test_a_wait_across_a_window_boundary_keeps_one_finding_and_one_notice(store, monkeypatch):  # noqa: F811
     status(monkeypatch)
     runs(monkeypatch, [waiting(1, "2026-10-19T16:40:00Z")])
     before = cli.timer(store, DOCTOR, AFTER - 60000, False)
     after = cli.timer(store, DOCTOR, AFTER, False)
     assert any("1 crossings" in action for action in before)
     assert any("1 crossings" in action for action in after)
-    assert len(details(store)) == 2
+    assert [finding["id"] for finding in details(store)] == ['ci-queue-age-unconfirmed/["anton-oss", "self-hosted"]']
     for texts in items(store).values():
-        assert len(texts) == 2
+        assert len(texts) == 1
 
 
 def test_groups_keep_label_sets_and_tiers_apart_and_grow_without_another_notice(store, monkeypatch):  # noqa: F811
@@ -191,7 +191,8 @@ def test_judged_runs_do_not_notify_again_in_the_next_window(store, monkeypatch):
         ({"evidence_identity": ("1", 899), "measure": 899}, False),
         ({"evidence_identity": ("1", "2", "3", 900)}, True),
         ({"evidence_identity": ("1", "2 attempt 2", 900)}, True),
-        ({"measure": 901}, True),
+        ({"measure": 901}, False),
+        ({"evidence_identity": ("1", "2", 901)}, True),
         ({"subject": "200-pull_request"}, True),
         ({"kind": "ci queue age unconfirmed"}, True),
         ({"elapsed": 60000}, True),
@@ -426,7 +427,7 @@ def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents
         ],
     }
     groups = ci_speed.group({}, [retry, wall], start, now, window, incidents)
-    assert sorted(groups) == [f"ci-queue-age-unconfirmed/{window}-[]", f"ci-tier-wall-time/{window}-merge_group"]
+    assert sorted(groups) == ["ci-queue-age-unconfirmed/[]", "ci-tier-wall-time/merge_group"]
     queued, tier = sorted(ci_speed.grouped(groups), key=lambda finding: finding.kind)
     assert queued.summary == "unassigned jobs read as queued up to 20.00 minutes in 1 run"
     assert queued.evidence[:2] == (
@@ -437,3 +438,149 @@ def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents
     assert tier.summary == "queue tier took up to 30.00 minutes in 1 run"
     assert tier.evidence[1] == "1 of these runs had jobs created during the GitHub incident Actions delays"
     assert tier.threshold == "tier wall time over 15 minutes"
+
+
+def stalled_runs():
+    runner = waiting(1, "2026-10-19T16:00:00Z")
+    runner["jobs"][0].update(status="in_progress", started_at="2026-10-19T16:10:00Z", runner_name="r")
+    tier = {
+        "id": 2,
+        "event": "pull_request",
+        "status": "in_progress",
+        "path": ".github/workflows/test.yml",
+        "jobs": [{**runner["jobs"][0], "id": 20, "started_at": "2026-10-19T15:51:00Z"}],
+    }
+    return [runner, tier]
+
+
+def test_two_windows_with_the_same_tier_and_labels_yield_one_finding_id():
+    since, now = iso_ms("2026-10-19T16:00:00Z"), iso_ms("2026-10-19T16:30:00Z")
+    first, second = now - 1200000, now - 600000
+    ids = [
+        sorted(finding.id for finding in ci_speed.grouped(ci_speed.group({}, stalled_runs(), since, now, window, [])))
+        for window in (first, second)
+    ]
+    assert ids[0] == ids[1] == ['ci-runner-wait/["anton-oss", "self-hosted"]', "ci-tier-wall-time/pull_request"]
+
+
+def test_a_later_window_replaces_the_group_it_keeps_for_the_same_id():
+    since, now = iso_ms("2026-10-19T16:00:00Z"), iso_ms("2026-10-19T16:30:00Z")
+    groups = ci_speed.group({}, stalled_runs(), since, now, now - 1200000, [])
+    groups['ci-runner-wait/["anton-oss", "self-hosted"]']["members"]["stale"] = {"order": [0, 1]}
+    ci_speed.group(groups, stalled_runs(), since, now, now - 600000, [])
+    assert sorted(groups) == ['ci-runner-wait/["anton-oss", "self-hosted"]', "ci-tier-wall-time/pull_request"]
+    assert {entry["window"] for entry in groups.values()} == {now - 600000}
+    assert "stale" not in groups['ci-runner-wait/["anton-oss", "self-hosted"]']["members"]
+
+
+@pytest.mark.parametrize(
+    "judged,current,expected",
+    [
+        ('100-["a"]', '["a"]', []),
+        ("100-merge_group", "merge_group", []),
+        ('["a"]', '["a"]', []),
+        ("merge_group", "pull_request", None),
+        ('["a"]', '["a", "b"]', None),
+    ],
+)
+def test_a_verdict_on_a_window_or_stable_id_covers_only_the_same_scope(store, judged, current, expected):  # noqa: F811
+    from dataclasses import replace
+
+    from scripts.swarm.health.findings import Finding
+
+    kind = "ci tier wall time" if "_" in judged else "ci runner wait"
+    original = Finding(kind, judged, "slow", ("text",), "wall time", 900, evidence_identity=("1", 900))
+    loop.record(store, DOCTOR, [original], AFTER, 60000)
+    judgments = loop.verdicts(store, DOCTOR)
+    judgments.judge(original.id, "established", "investigated", "reader", AFTER)
+    later = replace(original, subject=current)
+    found = ci_speed.unjudged([later], store.redis.hgetall(judgments.key), AFTER + 1, 60000)
+    assert found == ([later] if expected is None else expected)
+
+
+def test_a_group_emptied_and_refilled_in_one_pass_is_not_retracted(store, monkeypatch):  # noqa: F811
+    status(monkeypatch)
+    first = waiting(1, "2026-10-19T16:40:00Z")
+    records = [first]
+    runs(monkeypatch, records)
+    cli.timer(store, DOCTOR, AFTER + 60000, False)
+    first["jobs"][0].update(status="in_progress", started_at="2026-10-19T16:41:00Z", runner_name="r")
+    records.append(waiting(2, "2026-10-19T16:40:00Z"))
+    cli.timer(store, DOCTOR, AFTER + 120000, False)
+    identity = 'ci-queue-age-unconfirmed/["anton-oss", "self-hosted"]'
+    assert [finding["id"] for finding in details(store)] == [identity]
+    for texts in items(store).values():
+        assert not any(text.startswith("Retracted") for text in texts)
+
+
+def test_a_judged_open_crossing_does_not_return_as_its_clock_grows(store, monkeypatch):  # noqa: F811
+    status(monkeypatch)
+    job = {**waiting(4, "2026-10-19T16:40:00Z")["jobs"][0], "status": "in_progress", "runner_name": "r"}
+    job["started_at"] = "2026-10-19T16:41:00Z"
+    wall = {
+        "id": 4,
+        "event": "merge_group",
+        "status": "in_progress",
+        "path": ".github/workflows/test.yml",
+        "jobs": [job],
+    }
+    runs(monkeypatch, [wall])
+    cli.timer(store, DOCTOR, AFTER, False)
+    [finding] = details(store)
+    assert json.loads(store.redis.hget(loop.verdicts(store, DOCTOR).key, finding["id"]))["evidence_identity"] == [
+        "4",
+        0,
+    ]
+    loop.verdicts(store, DOCTOR).judge(finding["id"], "established", "investigated", "reader", AFTER)
+    cli.timer(store, DOCTOR, AFTER + 60000, False)
+    cli.timer(store, DOCTOR, AFTER + 660000, False)
+    for texts in items(store).values():
+        assert len(texts) == 1
+    job.update(status="completed", conclusion="success", completed_at="2026-10-19T17:15:00Z")
+    wall.update(status="completed", conclusion="success")
+    cli.timer(store, DOCTOR, AFTER + 1200000, False)
+    for texts in items(store).values():
+        assert len(texts) == 2
+
+
+def test_a_member_kept_before_open_ends_were_recorded_counts_as_settled():
+    groups = {
+        "ci-tier-wall-time/merge_group": {
+            "kind": "ci tier wall time",
+            "subject": "merge_group",
+            "text": "queue",
+            "window": 0,
+            "members": {"a": {"order": [1, 1], "run": "1", "measure": 950, "evidence": "run 1", "during": []}},
+        }
+    }
+    [finding] = ci_speed.grouped(groups)
+    assert finding.evidence_identity == ("1", 950)
+
+
+def wall_run(identity, event, status, gate_completed=None):
+    job = {**waiting(identity, "2026-10-19T16:00:00Z")["jobs"][0], "status": "in_progress", "runner_name": "r"}
+    job["started_at"] = "2026-10-19T16:00:00Z"
+    job["completed_at"] = "2026-10-19T16:20:00Z" if status == "completed" else None
+    gate = {**job, "id": identity * 10 + 1, "name": ci_speed.GATE, "completed_at": gate_completed}
+    return {"id": identity, "event": event, "status": status, "conclusion": "success", "jobs": [job, gate]}
+
+
+@pytest.mark.parametrize(
+    "event,status,gate_completed,expected",
+    [
+        ("pull_request", "in_progress", None, True),
+        ("pull_request", "in_progress", "2026-10-19T16:20:00Z", False),
+        ("merge_group", "completed", None, False),
+    ],
+)
+def test_a_wall_crossing_is_open_only_while_its_gate_and_run_run(event, status, gate_completed, expected):
+    since, now = iso_ms("2026-10-19T16:00:00Z"), iso_ms("2026-10-19T16:30:00Z")
+    groups = ci_speed.group({}, [wall_run(5, event, status, gate_completed)], since, now, now - 600000, [])
+    [member] = groups[f"ci-tier-wall-time/{event}"]["members"].values()
+    assert member["open"] is expected
+
+
+def test_a_window_start_is_dropped_from_a_dashed_label_set():
+    assert ci_speed.scope_of('1792617600000-["anton-oss"]') == '["anton-oss"]'
+    assert ci_speed.scope_of('["anton-oss"]') == '["anton-oss"]'
+    assert ci_speed.scope_of("1792617600000-merge_group") == "merge_group"
