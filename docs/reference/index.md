@@ -18,6 +18,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Configuration](configuration.md) | All environment variables across every integration, in one place |
 | [Deployed swarm host capacity](../pillars/swarm.md#deployed-host-capacity) | Worker namespace quota and pool budgets, autoscale inspection, configuration and disabled host pressure alerts |
 | [Git maintenance and object counts](cli-commands.md#git-maintenance-and-object-counts) | Register managed primary checkouts, repair missing registrations, configure discovery, read loose object and pack counts and diagnose failures |
+| [Tool dependency synchronization](../getting-started/installation.md#synchronize-an-editable-tool-installation) | Update the editable source checkout and its running tool environment, check missing requirements and recover failed installs |
 | [CLI Commands](cli-commands.md) | All `agentihooks` subcommands and flags: init, uninstall, claude, ignore |
 | [Developer account login](account-login.md) | Claude and Codex login, managed shell tokens, OpenBao paths and key names, refresh authority and token stores |
 | [Task scope authorizations](../pillars/swarm.md#task-scope-authorizations) | Record master or operator scope, retrace a plan, interpret authorized pieces and configure enforcement |
@@ -38,6 +39,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Sonar shard coverage merge](sonar-gate.md#shard-coverage-merge) | Distinct-arc merging, preserved test contexts and coverage inputs, workflow configuration, CI inspection, startup measurements and troubleshooting |
 | [Resource sampling and stop condition checks](../ci-timing.md#resource-sampling-and-stop-condition-regression-checks) | Whole tree resource warning ownership, condition timing budgets, fixture configuration, focused CI proof commands and failure diagnostics |
 | [Mutation preflight legs on the batch pool](../ci-timing.md#mutation-preflight-legs-on-the-batch-pool) | Per run concurrency groups for the stats and shard legs, the `anton-oss-batch` ceiling, per branch cancellation, checking shard pickup, measured waits and troubleshooting |
+| [Branch workflow lanes compatibility](../ci-timing.md#branch-workflow-lanes-compatibility) | Current and exact legacy mutation group examples, trusted workflow and runner requirements, refusal of jobs without lanes and CI diagnosis |
 | [Standing CI budget report](../ci-timing.md#standing-ci-budget-report) | One CI overrun finding, per-stage counts and worst times, openable run links, retention, configuration and watched swarm isolation |
 | [OCI runner migration measurements](../ci-timing.md#oci-runner-migration-measurements) | Named UTC cohorts, gate and image timings, hourly pickup wait, cordons, infrastructure loss, CPU requests and evidence limits |
 | [Ledger load gate](ledger-load-gate.md) | The `Ledger server load` workflow and its `ledger-load` job: ninety seconds of writes and reads on a full size scratch ledger, write latency and CPU budgets, the server thread and memory growth check, limits graded from the base, manual dispatch and failure diagnosis |

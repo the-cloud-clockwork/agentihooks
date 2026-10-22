@@ -118,6 +118,105 @@ Codex executable, routed authentication and an admitted swarm seat. See
 [Managed Codex terminals](../reference/codex-managed-terminal.md#runtime-dependencies)
 for transport configuration, connection checks and failure recovery.
 
+### Synchronize an editable tool installation
+
+An editable install reads code from its source checkout immediately, but a plain
+Git pull does not install newly declared Python dependencies. For a native
+installation whose source checkout tracks `dev`, use:
+
+```bash
+agentihooks deps sync
+agentihooks deps check
+```
+
+`deps sync` selects the checkout containing the running `agentihooks` code,
+regardless of your current directory. It requires that checkout to be on `dev`
+and runs `git pull --ff-only origin dev`. It compares `[project].dependencies`
+from the committed revision before and after the pull, then installs added or
+changed requirement strings and any still missing declared distributions.
+Installation uses `uv pip install --python` with the Python executing the CLI;
+it targets the installed tool environment when invoked through the installed
+`agentihooks` command. Activating a workspace venv does not change that tool's
+interpreter.
+
+For example, a pull adding `croniter>=6.2.4,<7` reports:
+
+```text
+deps sync: installed croniter>=6.2.4,<7 into the agentihooks tool environment
+```
+
+When no installation is needed, it reports:
+
+```text
+deps sync: pulled dev; declared dependencies unchanged
+```
+
+The Doctor's `pull-dev` intervention uses the same comparison and installation
+when the watched repository is the source checkout running AgentiHooks. Its
+success message names installed requirements, alongside any merged fixes it
+records as applied. Pulling another repository installs none of that
+repository's Python dependencies into the AgentiHooks environment.
+
+#### Dependency declarations and checks
+
+Declare runtime requirements in `[project].dependencies`, for example:
+
+```toml
+[project]
+dependencies = [
+    "croniter>=6.2.4,<7",
+]
+```
+
+This is an illustrative requirement entry; retain the project's other entries.
+No new environment variable configures synchronization: the source checkout,
+its `dev` branch and the running interpreter determine its targets. `uv`, Git,
+repository access and access to the configured package index must be available.
+Bundle tools remain declared separately in `deps.json`.
+
+`deps check` checks installed distribution metadata in the running environment.
+It exits with status 1 if anything is missing and prints each requirement with
+an installation command using that environment's Python. For example:
+
+```text
+missing: croniter>=6.2.4,<7 (python) — declared in pyproject.toml but missing from the agentihooks tool environment; install it with uv pip install --python /path/to/tool/bin/python 'croniter>=6.2.4,<7'
+deps: 1 unsatisfied
+```
+
+When every declaration and bundle dependency is present, it prints
+`deps: all satisfied` and exits with status 0. These Python checks detect absent
+distributions; they do not validate installed versions against constraints or
+prove that every import succeeds. Synchronization installs changed requirement
+strings, but removes no packages when a declaration is deleted and does not
+synchronize optional dependency groups or a lock file.
+
+#### Repair and failure handling
+
+If synchronization fails, it exits with status 1 and prints `deps sync:` followed
+by the branch refusal, Git failure, install error or timeout. Each subprocess
+has a 600 second timeout. Resolve a checkout on the wrong branch or a refused
+fast forward through the normal repository workflow; do not force the checkout.
+An installation failure can occur after the checkout has advanced, so code may
+already be newer than its installed dependencies.
+
+After correcting package index access or the reported installation problem,
+rerun `agentihooks deps sync`. Even with no further Git changes it installs
+missing declared distributions. For a failed change to an already installed
+package's version constraint, use the exact requirement and tool interpreter
+from the failure to retry `uv pip install --python`; presence checks alone
+cannot detect that version mismatch. Finish with `agentihooks deps check` and
+verify the previously failing command using the installed CLI.
+
+`agentihooks deps ensure` also attempts missing declared requirements during an
+uncached bundle preflight. It returns early when no bundle manifest exists or
+its stamp is fresh. A declared Python installation failure is reported and
+preflight continues; `--quiet` suppresses that report. A successful `ensure`
+exit therefore does not prove Python dependency repair. Use `deps check` for
+the explicit missing dependency result.
+
+See the [deps command reference](../reference/cli-commands.md#agentihooks-deps)
+for the command summary and flags.
+
 ---
 
 ## 5. Verify

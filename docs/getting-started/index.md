@@ -29,6 +29,6 @@ Harness capabilities differ. See the [Codex reference](../reference/CODEX-COMPAT
 | Page | What it covers |
 |------|---------------|
 | [Docker Compose quick start](compose-quick-start.md) | Start the packaged swarm services and connect clients |
-| [Installation](installation.md) | Install native Claude Code and Codex hooks |
+| [Installation](installation.md) | Install native Claude Code and Codex hooks; [synchronize editable tool dependencies](installation.md#synchronize-an-editable-tool-installation) |
 | [Profiles](profiles.md) | Choose and switch agent profiles, 3-layer merge |
 | [Portability & Reusability](portability.md) | Move setups across machines, manage credentials |
