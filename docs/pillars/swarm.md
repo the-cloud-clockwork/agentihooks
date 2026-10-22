@@ -640,7 +640,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set nightwatch-gate=deny\|log only\|skip` | Operator or master only. The night watch runs every tick after placement and needs no master: it holds the front door master seat, the spawn path and the dev merge queue against a limit. A running swarm, not asleep, whose front door seat holds no live working master for ten minutes raises an `empty master seat` finding; ready work with no agent launched for thirty minutes raises a `held spawn` finding naming the hold, `sleep`, `host room`, `cap`, `quota`, `tick` for a hold the tick recorded itself, or `no named hold`, with its evidence; no merge into dev for an hour while the queue holds entries, or the last three merge group runs failing in a row, measured whether or not the queue holds entries, raises a `merge stall` or `merge failures` finding. A stopped swarm skips the tick, so the watch rests with it. The seat and merge checks rest while the swarm is not running or sleeps; the spawn check keeps watching a sleeping swarm and names `sleep` as the hold, because a sleeping swarm spawns nothing for ready work. A pass more than five minutes after the last one closes its alerts and starts every episode over, and a merge observation that fails leaves the merge episode and its alert as they were. The findings show in every mode. It defaults to `log only`, recording each would-be action in the swarm gate log; `deny` acts: it respawns the front door master at most three times an hour, ten minutes apart, counted the same way in `log only`, past the host hold and a spent startup retry, and raises one ledger alert per episode, source `seat`, `spawn` or `merge`, closed when the condition clears; an episode logged before the switch to `deny` raises its alert on the next pass, and a second merge finding in the same episode replaces the merge alert; a merge alert also emails the operator at `AGENTIHOOKS_OPERATOR_EMAIL`, else the swarm repository's git user email, through the SMTP settings. `skip` runs the checks for their findings only, with no gate log row, action or alert. |
 | `agentihooks swarm <id> set lane-split-gate=deny\|log only\|skip` | Operator or master only. The lane split moves one seat between the eng and ci lanes after the bottleneck report names the same stage three ticks running, and the `seat_wait` remedy moves one from ci to eng. It defaults to `log only`, recording each would-be move in the swarm gate log; `deny` lets it move seats, `skip` holds every move without logging. In every mode it holds a move into a lane with no ready task, and it never moves caps the operator or the master set with `max-eng-agents` or `max-ci-agents`, through `swarm set`, the ledger page or `create` flags; those caps stay where they set them for the swarm's life, and a swarm stored before the pin existed counts as set. A tick hold names its reason in the tick's held line; a remedy hold names it in the task proposal to the master. |
 | `agentihooks swarm <id> set talk-gate=deny\|log only\|skip` | Operator or master only. The ledger server counts each eng and ci agent's talk writes (comments, chat lines, follow-ups) since its last outcome: a pushed commit, an opened pull request, resolved checks, a task state, pull request or proof change. Past 10, `deny` refuses the write and `log only` (the default) logs the would-be deny in the gate log. Talk owed to the operator and a typed `lift the talk gate` pass. The ledger hook's nudge and Stop gate also restart on an outcome and skip tool calls made inside sub-agents. |
-| `agentihooks swarm <id> set intent-gate=deny\|log only\|skip` | Operator or master only. `swarm pr` writes the parent intent (project overview, phase, task) into the pull request body and arms the task's intent check. On the next tick the classifier reads that intent with the pull request title, body, changed files, the task proof and the task's plan slice, resolved the way `agentihooks plan read` resolves it (phase range, plan artifact or Swarm v2 package, without the shared sections), and judges whether the phase can use the change as delivered and whether it weakens anything the phase builds; under 0.3, or a weakening at 0.5 or more, the verdict is fail, with reasons. It also asks phase fit on its own, so a fail names its criterion: a change that fits the phase but is not usable yet fails on delivery, never as a phase mismatch. Each verdict records its stage, criterion, model and definition digest. `python -m scripts.gates.intent_calibration` measures the check on its corpus of retained and control inputs. `deny` returns a failed task to its agent (claimed again, a ledger comment and an inbox item); `log only` (the default) logs the fail in the gate log; `skip` skips the check. The `intent` gate (`python -m scripts.gates intent`) refuses `gh pr merge` and `swarm done` while the verdict is fail, or pending for under two minutes; a check still pending after two minutes passes unchecked and is counted. A pass names the plan lines it judged. A task whose plan passed intent at `swarm trace-plan` opens its pull request on that pass, with no pending hold, and the tick still judges the pull request and replaces the plan verdict. Running `swarm pr` again starts a new check. A split task's halves are judged and merged one by one; see [Intent grading of each half](#intent-grading-of-each-half). |
+| `agentihooks swarm <id> set intent-gate=deny\|log only\|skip` | Operator or master only. `swarm pr` writes the parent intent (project overview, phase, task) into the pull request body and arms the task's intent check. On the next tick the classifier reads that intent with the pull request title, body, changed files, the task proof and the task's plan slice, resolved the way `agentihooks plan read` resolves it (phase range, plan artifact or Swarm v2 package, without the shared sections), and judges whether the phase can use the change as delivered and whether it weakens anything the phase builds; under 0.3, or a weakening at 0.5 or more, the verdict is fail, with reasons. It also asks phase fit on its own, so a fail names its criterion: a change that fits the phase but is not usable yet fails on delivery, never as a phase mismatch. Each verdict records its stage, criterion, model and definition digest. `python -m scripts.gates.intent_calibration` measures the check on its corpus of retained and control inputs. `deny` returns a failed task to its agent (claimed again, a ledger comment and an inbox item); `log only` (the default) logs the fail in the gate log; `skip` skips the check. The `intent` gate (`python -m scripts.gates intent`) refuses `gh pr merge` and `swarm done` while the verdict is fail, or pending for under two minutes; a check still pending after two minutes passes unchecked and is counted. A pass names the plan lines it judged. A task whose plan passed intent at `swarm trace-plan` opens its pull request on that pass, with no pending hold, and the tick still judges the pull request and replaces the plan verdict. Running `swarm pr` again starts a new check. A split task's halves are judged and merged one by one; see [Intent grading of each half](#intent-grading-of-each-half). A task whose plan slice is shared with other open tasks is judged only on the rows that name it; see [Plan slices shared by several tasks](#plan-slices-shared-by-several-tasks). |
 | `agentihooks swarm <id> master move --to HIVE` | Orders the live master to hand off so its successor starts on that hive. It refuses the hive the master already runs on, a hive that is not live, and a hive hive placement would not give the master. One durable inbox order reaches the master seat; after the master's Handoff v2 the tick starts the successor through hive launch on the named hive. A master that leaves without handing off gets no pin. Walkthrough: [Master failover and master move](hives.md#master-failover-and-master-move). |
 | `agentihooks swarm <id> set local-max-agents=N` | With hive placement on, an eng, ci, plan or dispatch spawn no hive takes runs in the local machine's herdr panes while the machine runs fewer than N worker agents across every swarm. Default 8. See [Hive placement for one swarm on a local machine](hives.md#hive-placement-for-one-swarm-on-a-local-machine). |
 | `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
@@ -2188,6 +2188,81 @@ A task that shares nothing gets no such lines. The agent coordinates with each c
 merges `dev` into its branch only on a real conflict. The engineer skill adds one case the prompt line leaves out:
 where the repo has a merge queue, a green head is queued as it stands, because the merge group tests it on top of
 the newest `dev`, and the agent also merges `dev` when GitHub refuses the enqueue.
+
+### Plan slices shared by several tasks
+
+Each task should own its plan lines. A slice is shared when another task in the same phase that is not `done` holds
+the same plan lines and is not part of the same grouped task (a group lead and its members count as one task).
+Tasks in any state except `done` (`open`, `claimed`, `blocked` or `pr`) count. The ledger refuses new sharing, and for
+a task that already shares a slice, the intent check and `agentihooks plan read` narrow the slice to that task's rows.
+
+**Adding or setting a slice.** `ledger task add --plan-slice NAME` and `ledger task set <id> plan_slice=NAME` resolve
+the slice to plan lines first. When those lines already belong to another task in the phase that is not `done`, the
+write is refused:
+
+```text
+plan slice tasks already belongs to open task t2, t3: give each task its own slice anchor, a <!-- slice: name --> line above its own row or section, or group the tasks into one grouped task
+```
+
+`task set` checks only a changed slice, so resending a task's current slice is not refused. Two ways clear the
+refusal:
+
+- Put a unique anchor line directly above each task's own row or section and name it on each task. The slice runs
+  from the anchor line through the row or section it labels, so `plan read` prints the anchor line too:
+
+  ```markdown
+  <!-- slice: t1-ledger-route -->
+  | t1 | Ledger route | Serve the new route |
+  <!-- slice: t2-ledger-page -->
+  | t2 | Ledger page | Render the route |
+  ```
+
+  ```bash
+  agentihooks ledger --slug <slug> --as <name> task set t1 plan_slice=t1-ledger-route
+  agentihooks ledger --slug <slug> --as <name> task set t2 plan_slice=t2-ledger-page
+  ```
+
+- Fold the tasks into one grouped task (the master's `fold-tasks` skill), so one agent delivers them in one pull
+  request.
+
+**Intent verdict on a shared slice.** Tasks given their slice before this refusal existed can still share one. For
+such a task the intent check judges only the rows that name it: a row whose first cell, after a list or heading
+marker, starts with the task id as a whole word (`t1` does not match `t10`) or equals the task title ignoring case.
+Only the first run of consecutive matching rows counts. The verdict reason ends with what it judged:
+
+```text
+...; plan lines 51-82 are shared with tasks t735, t737; this task's scope is plan lines 58-58, the rows that name it
+```
+
+When no row names the task, the check judges it on the task text without plan lines, and the reason ends with
+`plan lines 51-82 are shared with tasks t735, t737, and no row names this task, so none of them is its scope`. A slice
+named after its own task id stays whole for that task's intent check; `plan read` still scopes it.
+
+**Plan read on a shared slice.** `agentihooks plan read` for such a task prints the matched rows as scope and the
+rest as context:
+
+```text
+Scope: plan lines 51-55 are shared with tasks t1, t3; this task's scope is plan lines 54-54, the rows that name it.
+| t2 | Ledger page | Render the route |
+
+Context only, not scope:
+...
+| Task | Title | Work |
+|---|---|---|
+| t1 | Ledger route | Serve the new route |
+| t3 | Ledger export | Export the page |
+...
+```
+
+The context part is the slice with ten lines of margin on each side, without the task's own rows, followed by the
+linked sections the plain read appends. With no matching row, the scope part is the task description. A phase read
+(`--phase`) and a Swarm v2 package plan print as before.
+
+| Symptom | Cause and fix |
+|---|---|
+| `plan slice <name> already belongs to open task ...` | Another task in the phase that is not `done` resolves to the same plan lines. Add a per task `<!-- slice: name -->` anchor and set each task to its own anchor, or group the tasks. |
+| Intent fails a task for leaving out rows of other tasks | Check the verdict reason. Without `this task's scope is plan lines`, no row's first cell names the task id or title; put the task id first in its row, or give the task its own anchor. |
+| `plan read` prints the whole slice for one of several tasks | The other tasks are `done`, or they and this task are one grouped task, so the slice is no longer shared. |
 
 ### Split tasks across pull requests
 
