@@ -349,11 +349,15 @@ on a task, and stores that task id on the new follow up as `task`. The owner is 
 | `task`, no `hive` | The owner of that task: its phase's owning master seat, or the front door for a task without a phase |
 | Neither | The front door |
 
-An owner seat with no live master falls back to the front door. The follow up's added notice, its priority notice
-and its escalation reach the owning master, and the [master fence](#configuration-and-failure-handling) judges
-`followup done`, `followup open`, `followup flag` and `followup unflag` against the same owner. A comment on a follow
-up is not fenced. Once a master decides a follow up, that decision's owner seat holds the follow up until a writer
-outside the master lane changes it.
+An owner seat with no live master falls back to the front door. The follow up's added notice reaches the owning
+master. Still undecided after 15 minutes, it gets a raise notice to the same owner; after 30 minutes it is raised to
+the operator's Priorities, and that priority notice also goes to the owner.
+
+The [master fence](#configuration-and-failure-handling) checks `followup done`, `followup open`, `followup flag` and
+`followup unflag` by a master: the owner passes, any other live master seat passes as a recorded cross owner write,
+and a master holding no live seat is refused. A comment on a follow up is not fenced. Once a master decides a follow
+up, the owner recorded with that decision stays its owner for later master writes, until a writer outside the master
+lane changes the follow up.
 
 ```bash
 # In an engineer session on task t42, which sits in a phase master-2@my-swarm owns.
@@ -377,8 +381,9 @@ before this change carry no `task` and keep front door routing.
 | Symptom | Action |
 |---|---|
 | An agent's follow up reaches the front door instead of its task's master. | Check that the agent's session had `AGENTIHOOKS_SWARM_TASK` set, that the follow up has no `hive`, and that the owning phase seat has a live master. |
-| A master's `followup done` is refused with `followups/<id> belongs to <seat>`. | The writer holds no live master seat; ask the named seat with `masters-channel say`. A live master's decision on another master's follow up passes and is recorded as a cross owner write. |
-| A follow up add from a script is refused with `task needs a task id ...`. | Send `task` only with `list` `followups` and a plain task id, or leave it out. |
+| A master's `followup done` is refused with `followups/<id> belongs to <seat>`. | The writer holds no live master seat; ask the named seat with `masters-channel say`. |
+| A live master's decision on another master's follow up passes. | This is expected: the ledger records it as a cross owner write and keeps the owner. |
+| A ledger write from a script is refused with `task needs a task id ...`. | `task` is an `add_item` op field, not a CLI flag. Pass it only on an `add_item` op to the `followups` list, as a plain task id, or leave it out. |
 
 ##### Configuration and failure handling
 
