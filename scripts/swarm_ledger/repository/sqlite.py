@@ -8,7 +8,7 @@ from pathlib import Path
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, hierarchy, media_files
+from . import artifact_files, hierarchy, media_files, outbox
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS events (slug TEXT, key TEXT, revision INTEGER, positi
 CREATE INDEX IF NOT EXISTS events_revision ON events(slug,revision);
 CREATE INDEX IF NOT EXISTS events_position ON events(slug,position);
 CREATE TABLE IF NOT EXISTS relay_journal (kind TEXT, slug TEXT, revision INTEGER, PRIMARY KEY(kind,slug,revision));
+CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, slug TEXT NOT NULL, revision INTEGER NOT NULL, subject TEXT NOT NULL, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS artifact_files (slug TEXT, id TEXT, data TEXT, PRIMARY KEY(slug,id));
 CREATE TABLE IF NOT EXISTS media_files (slug TEXT, id TEXT, data TEXT, saved_at INTEGER, PRIMARY KEY(slug,id));
 """
@@ -553,6 +554,7 @@ class SQLiteLedgerRepository:
         append_events(connection, slug, events, kept)
         if not events and "events" in state["_meta"]:
             trim_events(connection, slug, kept)
+        outbox.write(connection, slug, state["_meta"]["rev"], entry.state, state)
         generation = entry.generation + 1
         connection.execute(
             UPDATE,
@@ -564,6 +566,7 @@ class SQLiteLedgerRepository:
         previous = connection.execute(GENERATION, (slug,)).fetchone()
         now = self.domain.now_ms()
         generation = now << GENERATION_SHIFT if previous is None else max(now << GENERATION_SHIFT, previous[0] + 1)
+        before = {} if previous is None else self._entry(connection, slug).state
         for table in PER_LEDGER:
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         stored = {**state, "_meta": {**state["_meta"]}}
@@ -573,6 +576,7 @@ class SQLiteLedgerRepository:
         write_rows(connection, slug, {}, flatten(stored))
         write_events(connection, slug, events)
         write_seeds(connection, slug, seeds or {})
+        outbox.write(connection, slug, state["_meta"]["rev"], before, state)
         connection.execute(
             INSERT,
             (
@@ -663,6 +667,9 @@ class SQLiteLedgerRepository:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
 
     def purge(self, slug: str, connection) -> None:
+        if connection.execute(STORED, (slug,)).fetchone():
+            before = self._entry(connection, slug).state
+            outbox.write(connection, slug, before["_meta"]["rev"], before, {})
         for table in (*PER_LEDGER, artifact_files.TABLE, media_files.TABLE):
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
