@@ -316,6 +316,92 @@ A pull request whose head is a tests-only addition on top of a graded head does 
 
 Everything else runs unchanged. A change with one or more changed Python files still collects stats in every planned part and mutates in every planned shard, so the selected tests and the statistics match a run before forwarding existed.
 
+### Planned test selection and older heads
+
+The Tests workflow can come from the pull request merge ref while its mutation
+planner runs from the head being tested. An older head can therefore run under
+a newer workflow without producing the new planned test selection. The
+`mutation-plan` job checks this contract before uploading anything.
+
+The planner's file is `.mutation-selection.json`; its Actions artifact is
+`mutation-selection`. These are separate from the mutation report artifacts.
+The compatibility check applies whenever the plan is not reusing an exact head
+report.
+
+| Planner output | Contract result | Following jobs |
+|---|---|---|
+| File absent | Succeeds with `selection=false` and explains the fallback in the job summary | Skips selection upload and downloads; mutation selects matching and importing test modules as before |
+| Valid JSON object whose values are lists of strings | Succeeds with `selection=true` | Uploads `mutation-selection`; stats and mutation download it when `forwarded` is not `true` |
+| File present but invalid JSON, a non-object, or an object containing a value that is not a list of strings | Fails with `.mutation-selection.json is malformed.` | No successful plan proceeds to stats or mutation |
+
+The missing file path preserves test selection and mutation grading for older
+producers. It does not waive the mutation gate. A malformed file must be fixed
+in the producer; removing it to hide the failure discards the planned selection.
+For reused or empty reports, the [forwarding behavior](#when-the-plan-forwards)
+still applies, and forwarded jobs do not download a selection.
+
+#### Format and configuration
+
+This is an automatic workflow contract; it has no operator environment variable
+or dispatch switch. The planner produces the file in the job checkout, and the
+workflow carries it between jobs. Contributors changing the planner should emit
+a JSON object mapping source modules to test module lists, for example:
+
+```json
+{
+  "scripts/example.py": ["tests/test_example.py"],
+  "scripts/another.py": []
+}
+```
+
+An empty object and empty test lists pass this shape check. The check validates
+types; it does not prove that paths exist or that the selected tests cover the
+changed behavior. A scalar value such as
+`{"scripts/example.py": "tests/test_example.py"}` or a list containing a number
+fails. Keep the upload and both downloads gated by the plan's `selection`
+output when changing the workflow. Upload remains strict when a selection was
+promised: `if-no-files-found: error`.
+
+#### Inspecting compatibility and failures
+
+Open the Tests run's `mutation-plan` job and read **Check the planned selection
+contract**. For an absent file, its summary says:
+
+```text
+This head's planner predates the planned test selection, so mutation selects matching and importing test modules as before.
+```
+
+Inspect a run without starting another one:
+
+```bash
+gh run view RUN_ID --log --repo the-cloud-clockwork/agentihooks
+gh api 'repos/the-cloud-clockwork/agentihooks/actions/runs/RUN_ID/artifacts' \
+  --jq '.artifacts[] | {name, expired}'
+```
+
+Replace `RUN_ID` with the Tests run being investigated. When the contract
+publishes a selection, download it into your task evidence folder:
+
+```bash
+gh run download RUN_ID --repo the-cloud-clockwork/agentihooks \
+  --name mutation-selection --dir EVIDENCE_DIR
+cat EVIDENCE_DIR/.mutation-selection.json
+```
+
+| Symptom | Interpretation and action |
+|---|---|
+| No selection artifact and the older planner summary is present | Expected compatibility fallback; inspect stats and mutation results for the actual grade |
+| No selection artifact on a reused report | Expected; inspect the forwarded report and reuse evidence instead |
+| Contract step reports malformed selection | Read the producer output and correct its JSON or value types; this case never falls back |
+| Selection was promised but upload or download fails | Inspect the transfer step and artifact availability; the fallback covers an absent planner file, not a failed artifact transfer |
+
+The delivered change is [pull request 4560](https://github.com/the-cloud-clockwork/agentihooks/pull/4560).
+Its incident was [Tests run 39118631511](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39118631511),
+which failed at **Upload planned mutation test selection** because the older
+head did not write the file. Regression coverage exercises absence, valid and
+malformed selections, transfer conditions and the runner's previous selection
+behavior.
+
 ### What a forwarded run shows
 
 | Job | Forwarded run | Normal run |
