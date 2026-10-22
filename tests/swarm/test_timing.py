@@ -132,22 +132,21 @@ def test_a_failure_inside_a_timed_call_names_the_call_frame(capsys):
     assert finished["raised_at"] == f"scripts/swarm/timing.py:{line} call"
 
 
-def test_a_repository_file_outside_the_code_packages_is_skipped_for_its_caller():
-    code = compile("raise ValueError()", str(timing.ROOT / "setup.py"), "exec")
+def _raised_in(root, monkeypatch, name):
+    root = root.resolve()
+    monkeypatch.setattr(timing, "ROOT", root)
+    code = compile("raise ValueError()", str(root / name), "exec")
     with pytest.raises(ValueError) as caught:
         exec(code)
-    here = test_a_repository_file_outside_the_code_packages_is_skipped_for_its_caller
-    assert (
-        timing.raised_at(caught.value)
-        == f"tests/swarm/test_timing.py:{here.__code__.co_firstlineno + 3} {here.__name__}"
-    )
+    return timing.raised_at(caught.value)
 
 
-def test_a_hooks_frame_is_repository_code():
-    code = compile("raise ValueError()", str(timing.ROOT / "hooks" / "probe.py"), "exec")
-    with pytest.raises(ValueError) as caught:
-        exec(code)
-    assert timing.raised_at(caught.value) == "hooks/probe.py:1 <module>"
+def test_a_repository_file_outside_the_code_packages_names_no_frame(tmp_path, monkeypatch):
+    assert _raised_in(tmp_path, monkeypatch, "setup.py") == ""
+
+
+def test_a_hooks_frame_is_repository_code(tmp_path, monkeypatch):
+    assert _raised_in(tmp_path, monkeypatch, "hooks/probe.py") == "hooks/probe.py:1 <module>"
 
 
 def test_an_exception_that_never_ran_here_has_no_frame():
