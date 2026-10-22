@@ -74,7 +74,7 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
             try:
                 await asyncio.to_thread(scheduler.run_due)
             except transient:
-                print("scheduler pass skipped: Redis did not answer", file=sys.stderr, flush=True)
+                print("scheduler pass skipped: Redis did not answer", file=sys.stderr)
             try:
                 await asyncio.wait_for(stopped.wait(), timeout=1)
             except TimeoutError:

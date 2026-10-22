@@ -70,7 +70,9 @@ def prepare(store, slug, now_ms, run=subprocess.run):
     target = record_path(slug)
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_suffix(".partial")
-    partial.write_text(json.dumps(doc), encoding="utf-8")
+    partial.write_text(
+        json.dumps(doc),
+    )
     partial.replace(target)
     inbox = InboxStore(store.redis)
     for master in (a for a in agents if a.lane == MASTER and local(a)):
@@ -81,7 +83,7 @@ def prepare(store, slug, now_ms, run=subprocess.run):
 
 def _read(file):
     try:
-        return json.loads(file.read_text(encoding="utf-8"))
+        return json.loads(file.read_text())
     except FileNotFoundError:
         return None
 
@@ -100,7 +102,7 @@ def recorded(store, slug, ended):
 
 
 def boot_id():
-    return BOOT_ID.read_text(encoding="utf-8").strip()
+    return BOOT_ID.read_text().strip()
 
 
 def last_quota(harness, account, now=None):
@@ -157,7 +159,7 @@ def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
             routed = replace(agent, account="")
             store.put_agent(slug, routed)
         if not dead_resume._reason(store, slug, routed) and dead_resume.reopen(
-            slug, store, ledger, runtime, routed, now_ms, fresh_next=False
+            slug, store, ledger, runtime, routed, now_ms, notice=""
         ):
             actions.append(f"resumed {agent.name} after the workstation rebooted")
         elif dead_resume._owns(store, slug, routed, ledger):
@@ -191,6 +193,6 @@ def _await_decision(slug, store, ledger, agent, now_ms):
 
 def _shutdown_handoff(slug):
     try:
-        return handoff_path(slug).read_text(encoding="utf-8")
+        return handoff_path(slug).read_text()
     except FileNotFoundError:
         return ""

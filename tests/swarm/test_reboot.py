@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 from dataclasses import replace
 
 import pytest
@@ -64,6 +66,7 @@ def _local(store):
 
 def _taken(monkeypatch, written):
     def take(store, slug, now_ms, run=None):
+        assert run is subprocess.run
         written.append((now_ms, reboot.record_path(slug).exists()))
         return snapshot.path(slug)
 
@@ -127,10 +130,13 @@ def test_the_shutdown_command_prints_the_record_and_its_local_agents(store, monk
 
     doc = {"agents": [{"name": "engineer@a1b2c3-0001"}, {"name": "master@a1b2c3-0001"}]}
     monkeypatch.setattr(cli, "connect", lambda: store)
-    monkeypatch.setattr(cli.reboot, "prepare", lambda store, slug, now: doc)
+    calls = []
+    monkeypatch.setattr(cli, "now_ms", lambda: 4242)
+    monkeypatch.setattr(cli.reboot, "prepare", lambda *args: calls.append(args) or doc)
 
     cli.main(["sw", "shutdown"])
 
+    assert calls == [(store, "sw", 4242)]
     assert json.loads(capsys.readouterr().out) == {
         "swarm": "sw",
         "record": str(reboot.record_path("sw")),
@@ -217,10 +223,10 @@ def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, re
         eng.task,
         eng.conversation_id,
     )
-    assert outcome["reason"] == "own conversation did not reopen after the workstation rebooted"
+    assert (outcome["reason"], outcome["at"]) == ("own conversation did not reopen after the workstation rebooted", 900)
     assert other in store.restored("sw")
     transfer = transfers.get(store, "sw", outcome["transfer"])
-    assert (transfer["handoff"], transfer["reason"]) == ("carry on from the parser", "restore")
+    assert (transfer["handoff"], transfer["reason"], transfer["at"]) == ("carry on from the parser", "restore", 900)
     assert ledger.rows[eng.task]["claimed_by"] == eng.name
     assert f"{action}; nothing was started in its place." in ledger.notes
     assert not any(note.startswith("Starting a fresh agent") for note in ledger.notes)
@@ -234,12 +240,16 @@ def test_a_resume_that_fails_to_start_awaits_a_decision_without_a_fresh_start_no
         raise RuntimeError("herdr refused the pane")
 
     runtime.resume = refuse
+    before = list(ledger.notes)
 
     actions, _ = _booted(store, ledger, runtime)
 
-    assert f"{eng.name} awaits a resume or fresh decision after the workstation rebooted" in actions
+    awaits = sorted(
+        f"{a.name} awaits a resume or fresh decision after the workstation rebooted" for a in _local(store).values()
+    )
+    assert sorted(actions) == awaits
     assert _local(store)[eng.name].state == resume.AWAITING
-    assert not any(note.startswith("Starting a fresh agent") for note in ledger.notes)
+    assert sorted(ledger.notes[len(before) :]) == [f"{action}; nothing was started in its place." for action in awaits]
 
 
 def test_a_master_that_cannot_reopen_carries_its_shutdown_handoff(store, rebooted):
@@ -252,6 +262,64 @@ def test_a_master_that_cannot_reopen_carries_its_shutdown_handoff(store, reboote
 
     (outcome,) = [r for r in store.restored("sw") if r["name"] == master.name]
     assert transfers.get(store, "sw", outcome["transfer"])["handoff"] == "## Intent\nKeep the swarm running\n"
+
+
+def _awaiting_handoff(store, name):
+    (outcome,) = [r for r in store.restored("sw") if r["name"] == name]
+    return transfers.get(store, "sw", outcome["transfer"])["handoff"]
+
+
+def test_only_a_master_carries_the_shutdown_handoff_and_none_without_one(store, rebooted):
+    ledger, runtime = rebooted
+    for agent in _local(store).values():
+        store.put_agent("sw", replace(agent, conversation_id=""))
+    reboot.handoff_path("sw").unlink(missing_ok=True)
+
+    _booted(store, ledger, runtime)
+
+    assert {_awaiting_handoff(store, name) for name in _local(store)} == {""}
+
+
+def test_an_engineer_never_takes_the_master_shutdown_handoff(store, rebooted):
+    ledger, runtime = rebooted
+    eng = next(a for a in _local(store).values() if a.lane == "eng")
+    store.put_agent("sw", replace(eng, conversation_id=""))
+    reboot.handoff_path("sw").write_text("## Intent\nKeep the swarm running\n")
+
+    _booted(store, ledger, runtime)
+
+    assert _awaiting_handoff(store, eng.name) == ""
+
+
+def test_a_finished_recorded_agent_is_not_reopened(store, rebooted):
+    ledger, runtime = rebooted
+    eng = next(a for a in _local(store).values() if a.lane == "eng")
+    store.put_agent("sw", replace(eng, state="finished"))
+
+    _booted(store, ledger, runtime)
+
+    assert eng.name not in {a.name for a in runtime.resumed}
+
+
+def test_a_planned_record_taken_with_the_last_automatic_snapshot_wins(store, rebooted):
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    folder = snapshot.auto_dir("sw")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "auto-500.json").write_text(
+        json.dumps({"taken_at": 500, "state": {"keys": {store.key("sw", "agents"): {"value": {master.name: {}}}}}})
+    )
+
+    assert reboot.recorded(store, "sw", "boot-1") == set(_local(store))
+
+
+def test_shutdown_creates_the_swarm_folder(store, swarm, monkeypatch, tmp_path):
+    target = tmp_path / "home" / "swarm" / "sw" / "snapshot.json"
+    monkeypatch.setattr(reboot.snapshot, "path", lambda slug: target)
+    _taken(monkeypatch, [])
+
+    reboot.prepare(store, "sw", 500)
+
+    assert json.loads((target.parent / "reboot.json").read_text())["taken_at"] == 500
 
 
 def test_a_boot_with_every_recorded_agent_live_starts_nothing(store, rebooted):
@@ -290,7 +358,8 @@ def test_the_same_boot_and_a_first_sighting_resume_nothing(store, rebooted):
     assert runtime.resumed == []
 
 
-def test_a_live_agent_and_a_stopped_swarm_are_left_alone(store, rebooted):
+@pytest.mark.parametrize("state", ["stopped", "stopping"])
+def test_a_live_agent_and_a_stopped_swarm_are_left_alone(store, rebooted, state):
     ledger, runtime = rebooted
     master = next(a for a in _local(store).values() if a.lane == MASTER)
     runtime.live.add(master.name)
@@ -299,8 +368,9 @@ def test_a_live_agent_and_a_stopped_swarm_are_left_alone(store, rebooted):
     assert master.name not in {a.name for a in runtime.resumed}
 
     store.redis.set(store.key("sw", "boot", "workstation"), "boot-1")
-    store.update("sw", state="stopped")
+    store.update("sw", state=state)
     runtime.resumed.clear()
+    runtime.live.clear()
     assert _booted(store, ledger, runtime) == ([], [])
     assert runtime.resumed == []
     assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-2"
@@ -367,7 +437,7 @@ def test_last_quota_reuses_a_stale_reading_only_until_a_window_resets(monkeypatc
         (20.0, Reading("c", 2, resets=(None, 900))),
     ]
     monkeypatch.setattr(balancer, "cached_observations", lambda: readings)
-    monkeypatch.setattr(balancer, "account_cap", lambda result, now: result.cap)
+    monkeypatch.setattr(balancer, "account_cap", lambda result, now: result.cap if now >= 0 else None)
     monkeypatch.setattr(session_bands, "fresh", lambda at, now: now - at <= 50)
 
     assert reboot.last_quota("claude", "a", now=60) is False
@@ -395,8 +465,10 @@ def test_start_server_reports_a_herdr_failure_as_an_action(monkeypatch):
 
     monkeypatch.setattr(reboot.herdr_host, "ensure_server", refuse)
     assert reboot.start_server() == ["herdr server did not start after the reboot: herdr is not installed"]
-    monkeypatch.setattr(reboot.herdr_host, "ensure_server", lambda environ: True)
+    seen = []
+    monkeypatch.setattr(reboot.herdr_host, "ensure_server", lambda environ: seen.append(environ))
     assert reboot.start_server() == []
+    assert seen == [dict(os.environ)]
 
 
 def test_boot_id_reads_the_kernel_boot_id(tmp_path, monkeypatch):
