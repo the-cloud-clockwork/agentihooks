@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 
 import pytest
@@ -28,6 +29,20 @@ def test_a_stored_artifact_is_served_without_its_disk_copy(published):
     assert plan_ranges.stored_text(state["phases"][0]["plan_ref"], state) == test_plan_ranges.PLAN
     assert ledger_artifacts.read(published, file_id) == test_plan_ranges.PLAN.encode()
     assert ledger_artifacts.entry(published, file_id) == artifact["file"]
+
+
+def test_serving_a_disk_only_artifact_adopts_it_into_the_database(plan_ledger):
+    data = test_plan_ranges.PLAN.encode()
+    file_id = f"{hashlib.sha256(data).hexdigest()}.md"
+    folder = ledger_artifacts.media.folder(plan_ledger)
+    folder.mkdir(parents=True)
+    (folder / file_id).write_bytes(data)
+    assert ledger_artifacts.read(plan_ledger, file_id) == data
+    assert artifact_files.load(plan_ledger, file_id) is None
+    assert ledger_artifacts.served(plan_ledger, file_id) == data
+    assert artifact_files.load(plan_ledger, file_id) == data
+    shutil.rmtree(folder)
+    assert ledger_artifacts.served(plan_ledger, file_id) == data
 
 
 def test_a_purged_artifact_leaves_the_database(published):
