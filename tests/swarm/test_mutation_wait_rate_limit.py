@@ -4,13 +4,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import cli, idle, mutation_wait, waits
+from scripts.swarm import cli, idle, ledger_events, mutation_wait, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME
 
 pytestmark = pytest.mark.unit
 URL = "https://github.com/org/repo/actions/runs/123"
 RUN = "repos/org/repo/actions/runs/123"
+PR = "https://github.com/org/repo/pull/7"
+PULL = "repos/org/repo/pulls/7"
 LIMITED = b"gh: API rate limit exceeded for user ID 31187725. (HTTP 403)"
 NOW = 1_792_561_000.0
 RESET = 1_792_561_590
@@ -40,21 +42,29 @@ def github(monkeypatch, tmp_path):
 
     def api(args, **kwargs):
         assert args[:2] == ["gh", "api"]
+        assert kwargs.pop("text", False) == (args[2] in ("graphql", PULL))
         assert kwargs == {"capture_output": True, "timeout": 20}
         endpoint = args[2]
         state.asked.append(endpoint)
         if endpoint == "rate_limit":
             body = {"resources": {"core": state.core}}
-            return subprocess.CompletedProcess(args, 0, json.dumps(body).encode(), b"")
+            return completed(args, 0, json.dumps(body), "")
         if state.limited or (state.jobs_limited and "/jobs?" in endpoint):
-            return subprocess.CompletedProcess(args, 1, b"", LIMITED)
+            return completed(args, 1, "", LIMITED.decode())
         if "/jobs?" in endpoint:
             body = {"jobs": [{"name": "unit (3)", "conclusion": "failure"}]}
         elif "/git/ref/heads/" in endpoint:
             body = {"object": {"sha": "first"}}
+        elif endpoint == PULL:
+            body = {"head": {"sha": "first"}}
         else:
             body = state.run
-        return subprocess.CompletedProcess(args, 0, json.dumps(body).encode(), b"")
+        return completed(args, 0, json.dumps(body), "")
+
+    def completed(args, code, out, err):
+        if args[2] in ("graphql", PULL):
+            return subprocess.CompletedProcess(args, code, out, err)
+        return subprocess.CompletedProcess(args, code, out.encode(), err.encode())
 
     monkeypatch.setattr(subprocess, "run", api)
     return state
@@ -206,3 +216,45 @@ def test_a_rate_limited_jobs_read_keeps_a_red_run_wait_for_its_evidence(github):
     assert mutation_wait.run_resolution(URL) == (
         f"checks on {URL}, now red; the run concluded failure; failed jobs: unit (3) failure"
     )
+
+
+def test_a_rate_limited_pull_request_head_admits_the_checks_wait_pending(env, github, monkeypatch):  # noqa: F811
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.tasks = lambda slug: list(ledger.rows.values())
+    monkeypatch.setattr(cli.ledger_events, "head", ledger_events.head)
+    assert cli.main(["sw", "--as", ME, "wait", "--on", "checks", PR]) == 0
+    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "checks", "target": PR, "head": None}
+    assert github.asked == [PULL, "rate_limit"]
+    lines = (github.home / "github-backoff.jsonl").read_text().splitlines()
+    assert [json.loads(line) for line in lines] == [
+        {"at": NOW, "endpoint": PULL, "until": RESET},
+        {"at": NOW, "admitted_pending": PR},
+    ]
+
+
+def test_pull_request_reads_back_off_until_the_quota_reset(github):
+    assert ledger_events.head(PR) is None
+    github.limited = False
+    github.now = RESET - 1
+    assert ledger_events.head(PR) is None
+    assert ledger_events.view(PR) is None
+    assert github.asked == [PULL, "rate_limit"]
+    github.now = RESET + 1
+    assert ledger_events.head(PR) == "first"
+
+
+def test_a_rate_limited_checks_view_holds_the_shared_backoff(github):
+    assert ledger_events.view(PR) is None
+    assert github.asked == ["graphql", "rate_limit"]
+    github.limited = False
+    assert mutation_wait.run_resolution(URL) == ""
+    assert github.asked == ["graphql", "rate_limit"]
+
+
+def test_a_pending_checks_wait_binds_the_head_on_its_first_readable_view(github):
+    pull = SimpleNamespace(state="OPEN", head="first")
+    held = {**waits.on("checks", PR), "head": None}
+    assert waits.checks_resolution(held, lambda target: pull) == ""
+    assert held["head"] == "first"
