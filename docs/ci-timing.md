@@ -554,6 +554,70 @@ Grouping per branch stays at the workflow level. A branch push run joins `mutati
 
 The runner labels apply to runs from the trusted actors the workflow lists and to merge queue runs; any other run takes `ubuntu-latest`.
 
+### Branch workflow lanes compatibility
+
+The `Branch workflow lanes` workflow grades branch pushes using the grader from
+`dev`; it fetches the pushed head as data. It excludes pushes to `dev`, `main`
+and merge queue branches. Its `grade` job checks new or edited workflows, so an
+older branch can be refused even when `Gate Required` passes. Read both checks.
+
+The Mutation preflight exception accepts the current per run groups and the exact
+superseded three lane expression. The latter keeps branches cut before the batch
+pool change gradeable until they incorporate `dev`; it does not move current
+jobs back onto shared lanes or remove the batch pool ceiling.
+
+For maintainers changing the existing jobs, these are the current job level
+`concurrency` blocks. Keep the jobs' existing runner expressions, matrices and
+other configuration:
+
+{% raw %}
+```yaml
+jobs:
+  stats:
+    concurrency:
+      group: ${{ format('mutation-preflight-job-{0}-stats-{1}', github.run_id, matrix.part) }}
+  mutation-shard:
+    concurrency:
+      group: ${{ format('mutation-preflight-job-{0}-shard-{1}', github.run_id, matrix.shard) }}
+```
+{% endraw %}
+
+Neither block has `queue` or `cancel-in-progress`. Workflow level cancellation
+of older pushes stays in effect. No new environment variable or operator toggle
+enables compatibility; the trusted grader supplies it automatically.
+
+The accepted legacy `stats` block below is a compatibility example, not a
+recommended configuration for new work:
+
+{% raw %}
+```yaml
+concurrency:
+  group: ${{ format('{0}-stats-{1}', github.workflow == 'Mutation preflight' && format('mutation-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('mutation-preflight-job-{0}', github.run_id), matrix.part) }}
+  queue: ${{ github.workflow == 'Mutation preflight' && 'max' || 'single' }}
+```
+{% endraw %}
+
+For the legacy `mutation-shard` block, the stage is `shard` and the index is
+`matrix.shard`; every other part of the expression and queue policy is identical.
+Under the workflow's own name, these legacy blocks select `mutation-lane-a`,
+`mutation-lane-b` or `mutation-lane-c` with `queue: max`. Under a caller's name,
+they select the caller's per run group with `queue: single`.
+
+This exception has a narrow boundary:
+
+| Requirement | Accepted boundary |
+|---|---|
+| Trusted workflow | The same workflow path exists in the trusted baseline, with matching workflow name and event configuration; its name is `Mutation preflight` |
+| Job | Only the baseline's existing `stats` and `mutation-shard` jobs qualify |
+| Runner | The job's `runs-on` expression equals the baseline's expression, including its hosted fallback |
+| Group | The entire concurrency mapping equals the current per run block or the superseded block for that job |
+| Other branch workflows | A copied preflight, renamed job or branch only job gains no mutation exception; the ordinary lane rules still apply |
+
+A different stage, matrix index, lane selection, queue policy or an added
+`cancel-in-progress` field fails this exception. A branch only job with no
+accepted job or workflow level lane group is still refused with
+`job <name> has no shared hosted lane concurrency group`.
+
 ### Before the change
 
 Until pull request [#4487](https://github.com/the-cloud-clockwork/agentihooks/pull/4487), the two legs shared three mutation lanes, `mutation-lane-a`, `mutation-lane-b` and `mutation-lane-c`, picked from the last digit of the run id like the hosted lanes, with `queue: max`. A lane held one stats leg and one shard leg per matrix index, so a ready shard queued behind the shard of the same index from another branch whose run id ended in the same range, even while batch runners sat free. In [run 39086455436](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39086455436), shard 2 was created at 01:32:17 and started at 01:45:36, a 799 second wait; the investigation found 794 seconds of it before its runner pod was created, while pods on the batch pool were created, scheduled and ready within two seconds of being asked. Pull request #4487 superseded [#4300](https://github.com/the-cloud-clockwork/agentihooks/pull/4300), which computed the lane count from the ceiling and stage width and still gave three lanes for ten shards and a ceiling of 30.
@@ -597,10 +661,43 @@ No shard in the after window waited as long as the 799 second case. A push run u
 | A shard queues for minutes while other branches run mutation | Read the batch runner set's current and maximum runners; at the maximum, the ceiling is the limit |
 | A branch's older preflight run disappears | A newer push to the same branch cancelled it; read the newer run |
 | A shard runs on `ubuntu-latest` | The actor or triggering actor is not on the workflow's trusted list |
-| Gate Protected refuses a pull request that edits a mutation leg | The branch lane grader accepts a trusted stats or shard leg only with its own run and matrix index as the group, an unchanged runner label and no queue policy |
+| Branch workflow lanes refuses `stats` or `mutation-shard` | Check the trusted workflow name, events and runner expression, then compare the entire concurrency mapping with the current or exact legacy block above. Incorporating `dev` restores the current per run groups |
+| Gate Protected refuses a workflow edit | Read that separate gate's diagnostic; a passing branch lane grade does not establish that every workflow protection passed |
+| A branch only job without a lane group is refused | Give it an accepted shared hosted lane using an existing hosted workflow as the model; copying a mutation job's per run group does not qualify it for the exception |
 | The lanes contract test fails after a workflow edit | A leg's group no longer names its own run id, or the leg left `anton-oss-batch`; restore the per run group |
 
 `tests/test_ci_hosted_lanes.py` holds the contract: `test_mutation_legs_of_two_branches_never_share_a_concurrency_lane_and_stay_on_the_batch_pool` resolves both legs for two branches and asserts two distinct groups, none of them a lane, and the `anton-oss-batch` label; `test_a_branch_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait_on` asserts the per run group for ten run ids and three indexes. In the red Tests run [39123433688](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39123433688), the `unit-selected (3.11, 2)` job failed the new contract test with both branches on `mutation-lane-a`; the green Tests run [39136265932](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39136265932) passed after the branch lane grader accepted per run groups in [#4491](https://github.com/the-cloud-clockwork/agentihooks/pull/4491).
+
+Pull request [#4576](https://github.com/the-cloud-clockwork/agentihooks/pull/4576)
+then added legacy block compatibility. Its regression cases cover both jobs,
+altered queue, cancellation, stage, index, lane and runner, changed events,
+swapped blocks and a branch only copy. The original refusal of a job without a
+lane group remains covered. The delivery issue records two refusals among eight
+branch pushes in its initial sample; this is narrower than the source task's
+claim that every push failed. The Doctor's applied check reports all first six
+branch lane runs after the merge passed, including
+[39154101511](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39154101511).
+
+To diagnose the branch grade separately from shard pickup, inspect its push run:
+
+```bash
+gh run list --workflow branch-lanes.yml --branch <branch> --limit 5
+gh run view <run id> --log-failed
+```
+
+For a grader regression, run the existing contract tests in CI after pushing:
+
+```bash
+gh workflow run proofs.yml --ref <branch> -f proof=tests \
+  -f tests='tests/test_ci_branch_lanes.py'
+gh run list --workflow proofs.yml --branch <branch> --limit 5
+gh run view <proof run id> --log
+```
+
+Keep the no group refusal control alongside the accepted current and legacy
+cases. A green grade proves workflow admission; it does not prove that mutation
+tests passed or that a runner was immediately available. Run no tests on the
+shared development host.
 
 ## Focused proof CPU worker limits
 
