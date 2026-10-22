@@ -234,15 +234,13 @@ class _Late(_Unset):
 
 def test_a_running_loop_that_misses_its_start_bound_is_stopped_and_closed(monkeypatch):
     monkeypatch.setattr(_Unset, "timeouts", [])
-    monkeypatch.setattr(nats.threading, "Event", _Late)
     threads = []
-    real = nats.threading.Thread
 
     def record(*args, **kwargs):
-        threads.append(real(*args, **kwargs))
+        threads.append(threading.Thread(*args, **kwargs))
         return threads[-1]
 
-    monkeypatch.setattr(nats.threading, "Thread", record)
+    monkeypatch.setattr(nats, "threading", SimpleNamespace(Thread=record, Event=_Late))
     with pytest.raises(RuntimeError, match="^bus loop did not start$"):
         nats._Loop()
     threads[0].join(5)
