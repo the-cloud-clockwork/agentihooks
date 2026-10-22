@@ -356,3 +356,22 @@ def test_an_ambiguous_spawn_keeps_its_identity_and_never_launches_again(rig):
     assert restarted.poll() == "uncertain"
     rig.runtime.spawn.assert_called_once_with(rig.request)
     rig.tasks.reopen.assert_not_called()
+
+
+def test_pending_publication_is_recovered_before_taking_new_work_from_a_busy_lane(rig):
+    from dataclasses import replace
+
+    real_publish = rig.bus.events.publish
+    rig.bus.events.publish = Mock(side_effect=RuntimeError("bus unavailable"))
+    assert rig.spoke.poll() == "retry"
+    for index in range(4):
+        rig.queue.offer(replace(rig.event, id=f"offer-{index}", key=f"new-{index}"))
+        rig.clock.now += 10
+        assert rig.spoke.poll() == "retry"
+    rig.runtime.spawn.assert_called_once_with(rig.request)
+    rig.tasks.reopen.assert_not_called()
+    rig.bus.events.publish = real_publish
+    assert rig.spoke.poll() == "started"
+    assert rig.spoke.poll() == "started"
+    assert rig.runtime.spawn.call_count == 2
+    rig.tasks.reopen.assert_not_called()

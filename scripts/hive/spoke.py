@@ -52,35 +52,35 @@ class Spoke:
         ).hexdigest()
 
     def poll(self, timeout_ms: int = 0) -> str:
-        held = admission.room(self.measure()).room < 1
         try:
-            queue = (
-                None
-                if held
-                else self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
-            )
-            delivery = None if held else queue.take(timeout_ms)
+            recovered = self._recover()
         except Exception:
-            return self._reconcile("retry")
+            return "retry"
+        if recovered in ("busy", "uncertain"):
+            return recovered
+        if admission.room(self.measure()).room < 1:
+            return recovered or "held"
+        try:
+            queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
+            delivery = queue.take(timeout_ms)
+        except Exception:
+            return "retry"
         if delivery is None:
-            return self._reconcile("held" if held else "empty")
+            return recovered or "empty"
         try:
             return self._apply(delivery)
         except Exception:
-            try:
-                if delivery.attempt >= self.config.policy.max_deliver:
-                    return self._exhaust(delivery)
-            except Exception:
-                pass
-            steps = self.config.policy.backoff_ms or (self.config.policy.ack_wait_ms,)
-            delivery.nak(steps[min(delivery.attempt - 1, len(steps) - 1)])
-            return "retry"
+            return self._retry(delivery)
 
-    def _reconcile(self, fallback: str) -> str:
+    def _retry(self, delivery: Delivery) -> str:
         try:
-            return self._recover() or fallback
+            if delivery.attempt >= self.config.policy.max_deliver:
+                return self._exhaust(delivery)
         except Exception:
-            return "retry"
+            pass
+        steps = self.config.policy.backoff_ms or (self.config.policy.ack_wait_ms,)
+        delivery.nak(steps[min(delivery.attempt - 1, len(steps) - 1)])
+        return "retry"
 
     def _reserve(self, delivery: Delivery) -> int:
         pending = self.bus.state("spoke-pending")
