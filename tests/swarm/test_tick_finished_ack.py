@@ -7,16 +7,17 @@ from tests.swarm.test_tick import HiveAcks, tasks
 from tests.swarm.test_tick import store as store
 
 
-def _finished_before_ack(store, monkeypatch):
-    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+def _finished_before_ack(store, monkeypatch, *ids):
+    ledger, runtime = tasks(*[(i, "eng") for i in ids or ("t1",)]), HiveAcks()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    name = runtime.ordered[0]
-    agent = next(a for a in store.agents("sw") if a.name == name)
-    store.put_agent("sw", replace(agent, state="finished"))
-    runtime.failing.add(name)
+    for agent in [a for a in store.agents("sw") if a.name in runtime.ordered]:
+        store.put_agent("sw", replace(agent, state="finished"))
+        runtime.failing.add(agent.name)
     released = []
-    monkeypatch.setattr(tick_module, "_release_hive_launch", lambda slug, store, record: released.append(record.name))
-    return ledger, runtime, name, released
+    monkeypatch.setattr(
+        tick_module, "_release_hive_launch", lambda s, st, record: released.append((s, st is store, record.name))
+    )
+    return ledger, runtime, runtime.ordered[0], released
 
 
 def test_an_agent_that_finished_before_its_acknowledgement_was_collected_is_no_spawn_failure(store, monkeypatch):
@@ -26,7 +27,7 @@ def test_an_agent_that_finished_before_its_acknowledgement_was_collected_is_no_s
     doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "done"}]}
     actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
     assert actions == [f"{name} finished t1 before the tick collected its hive acknowledgement"]
-    assert released == [name]
+    assert released == [("sw", True, name)]
     assert runtime.collected == []
     rows = [(r["agent"], r["state"], r["error"], r["after"]) for r in store.launches("sw")]
     assert rows == [(name, "started", "", "reclaimed")]
@@ -51,5 +52,17 @@ def test_an_agent_finished_before_its_acknowledgement_on_an_open_task_is_still_a
     doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "claimed"}]}
     actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
     assert [a for a in actions if a.startswith("spawn failed for t1")]
-    assert released == [name]
+    assert released == [("sw", True, name)]
     assert [r["state"] for r in store.launches("sw") if r["agent"] == name] != ["started"]
+
+
+def test_every_agent_finished_before_its_acknowledgement_is_collected_in_one_pass(store, monkeypatch):
+    ledger, runtime, _, released = _finished_before_ack(store, monkeypatch, "t1", "t2")
+    doc = {"tasks": [{"id": t, "lane": "eng", "state": "done"} for t in ("t1", "t2")]}
+    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
+    ordered = {a.name: a.task for a in store.agents("sw") if a.name in runtime.ordered}
+    assert len(ordered) == 2
+    assert sorted(actions) == sorted(
+        f"{name} finished {task} before the tick collected its hive acknowledgement" for name, task in ordered.items()
+    )
+    assert sorted(r[2] for r in released) == sorted(runtime.ordered)
