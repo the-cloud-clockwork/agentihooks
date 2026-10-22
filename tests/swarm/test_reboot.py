@@ -37,7 +37,7 @@ def swarm(store):
             replace(agent, conversation_id=f"conversation-{agent.lane}", profile="engineer", overlays=["frontend"]),
         )
     hive = AgentRecord(
-        "engineer@a1b2c3-0099",
+        store.next_name("sw", "eng"),
         "eng",
         "t9",
         harness="claude",
@@ -49,15 +49,17 @@ def swarm(store):
     )
     store.start_execution("sw", hive)
     store.start_execution(
-        "sw", replace(hive, name="master@a1b2c3-0098", lane=MASTER, task=MASTER, seat="hive-master@sw")
+        "sw", replace(hive, name=store.next_name("sw", MASTER), lane=MASTER, task=MASTER, seat="hive-master@sw")
     )
     return ledger, runtime
 
 
+def _hive(store):
+    return {a.name: a for a in store.agents("sw") if a.runtime_target.get("host_id") == "anton-hive"}
+
+
 def _local(store):
-    return {
-        a.name: a for a in store.agents("sw") if not a.name.startswith(("engineer@a1b2c3-0099", "master@a1b2c3-0098"))
-    }
+    return {a.name: a for a in store.agents("sw") if a.name not in _hive(store)}
 
 
 def _taken(monkeypatch, written):
@@ -104,7 +106,8 @@ def test_shutdown_records_every_local_agent_and_asks_the_master_for_its_handoff(
     master = next(a for a in local.values() if a.lane == MASTER)
     items = InboxStore(store.redis).inbox(master.name)
     assert [i.text for i in items] == [reboot.ASK.format(path=reboot.handoff_path("sw"))]
-    assert InboxStore(store.redis).inbox("master@a1b2c3-0098") == []
+    (hive_master,) = [name for name, a in _hive(store).items() if a.lane == MASTER]
+    assert InboxStore(store.redis).inbox(hive_master) == []
     assert str(reboot.handoff_path("sw")).endswith("/sw/master-shutdown-handoff.md")
 
 
@@ -139,7 +142,8 @@ def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_ac
 
     assert started == [1]
     assert sorted(a.name for a in runtime.resumed) == sorted(before)
-    assert "engineer@a1b2c3-0099" not in {a.name for a in runtime.resumed}
+    assert not set(_hive(store)) & {a.name for a in runtime.resumed}
+    assert len(_hive(store)) == 2
     assert sorted(actions) == sorted(f"resumed {name} after the workstation rebooted" for name in before)
     for name, agent in _local(store).items():
         assert (agent.conversation_id, agent.seat, agent.task, agent.account) == (
