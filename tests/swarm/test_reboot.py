@@ -253,7 +253,13 @@ def test_a_resume_that_fails_to_start_awaits_a_decision_without_a_fresh_start_no
     )
     assert sorted(actions) == awaits
     assert _local(store)[eng.name].state == resume.AWAITING
-    assert sorted(ledger.notes[len(before) :]) == [f"{action}; nothing was started in its place." for action in awaits]
+    failed = [
+        f"{name} did not reopen after the workstation rebooted because resume failed: herdr refused the pane."
+        for name in _local(store)
+    ]
+    assert sorted(ledger.notes[len(before) :]) == sorted(
+        [*failed, *(f"{action}; nothing was started in its place." for action in awaits)]
+    )
 
 
 def test_a_master_that_cannot_reopen_carries_its_shutdown_handoff(store, rebooted):
@@ -308,12 +314,14 @@ def test_an_agent_without_a_submitted_handoff_carries_its_task_s_last_transfer(s
 
 def test_a_finished_recorded_agent_is_not_reopened(store, rebooted):
     ledger, runtime = rebooted
-    eng = next(a for a in _local(store).values() if a.lane == "eng")
-    store.put_agent("sw", replace(eng, state="finished"))
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    store.put_agent("sw", replace(master, state="finished"))
 
-    _booted(store, ledger, runtime)
+    actions, _ = _booted(store, ledger, runtime)
 
-    assert eng.name not in {a.name for a in runtime.resumed}
+    assert master.name not in {a.name for a in runtime.resumed}
+    assert not any(master.name in action for action in actions)
+    assert _local(store)[master.name].state == "finished"
 
 
 def test_a_planned_record_taken_with_the_last_automatic_snapshot_wins(store, rebooted):
@@ -335,7 +343,18 @@ def test_shutdown_creates_the_swarm_folder(store, swarm, monkeypatch, tmp_path):
     reboot.prepare(store, "sw", 500)
 
     assert json.loads((target.parent / "reboot.json").read_text())["taken_at"] == 500
-    assert [p.name for p in target.parent.iterdir()] == ["reboot.json"]
+
+
+def test_a_torn_planned_record_falls_back_to_the_automatic_snapshot(store, rebooted):
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    reboot.record_path("sw").write_text('{"slug": "sw", "taken_at": 9')
+    folder = snapshot.auto_dir("sw")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "auto-700.json").write_text(
+        json.dumps({"taken_at": 700, "state": {"keys": {store.key("sw", "agents"): {"value": {master.name: {}}}}}})
+    )
+
+    assert reboot.recorded(store, "sw", "boot-1") == {master.name}
 
 
 def test_a_boot_with_every_recorded_agent_live_starts_nothing(store, rebooted):

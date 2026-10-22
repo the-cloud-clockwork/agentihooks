@@ -4,7 +4,6 @@ reopens each recorded agent in its own conversation and seat; hive agents are ne
 import json
 import os
 import subprocess
-import tempfile
 import time
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -20,6 +19,7 @@ from scripts.swarm.store import MASTER
 RECORD = "reboot.json"
 HANDOFF = "master-shutdown-handoff.md"
 BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
+FAILED = "{name} did not reopen after the workstation rebooted because {reason}."
 FIELDS = (
     "name",
     "lane",
@@ -70,9 +70,7 @@ def prepare(store, slug, now_ms, run=subprocess.run):
     }
     target = record_path(slug)
     target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", dir=target.parent, delete=False) as partial:
-        json.dump(doc, partial)
-    Path(partial.name).replace(target)
+    target.write_text(json.dumps(doc))
     inbox = InboxStore(store.redis)
     for master in (a for a in agents if a.lane == MASTER and local(a)):
         inbox.send(exits.BY, master.name, ASK.format(path=handoff_path(slug)))
@@ -81,9 +79,10 @@ def prepare(store, slug, now_ms, run=subprocess.run):
 
 
 def _read(file):
+    """None when the file is missing or torn, as a record cut off by a power loss mid write would be."""
     try:
         return json.loads(file.read_text())
-    except FileNotFoundError:
+    except (FileNotFoundError, ValueError):
         return None
 
 
@@ -158,7 +157,7 @@ def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
             routed = replace(agent, account="")
             store.put_agent(slug, routed)
         if not dead_resume._reason(store, slug, routed) and dead_resume.reopen(
-            slug, store, ledger, runtime, routed, now_ms, notice=""
+            slug, store, ledger, runtime, routed, now_ms, notice=FAILED
         ):
             actions.append(f"resumed {agent.name} after the workstation rebooted")
         elif dead_resume._owns(store, slug, routed, ledger):
