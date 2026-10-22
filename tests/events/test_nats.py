@@ -110,7 +110,7 @@ def test_the_event_log_and_queue_create_only_pull_consumers(bus):
     bus.events.consumer("watcher", "swarm.>")
     bus.queue("work", POLICY)
     log = _consumer_config(bus, nats.EVENT_STREAM, "watcher")
-    work = _consumer_config(bus, nats.queue_stream("work"), nats.queue_stream("work"))
+    work = _consumer_config(bus, nats.queue_stream("work"), "work")
     assert (log.deliver_subject, work.deliver_subject) == (None, None)
     assert (log.filter_subject, work.filter_subject) == ("swarm.>", "agentihooks.queue.work")
 
@@ -119,7 +119,7 @@ def test_a_consumer_carries_the_queue_policy(bus):
     bus.events.consumer("watcher", "swarm.>")
     bus.queue("work", POLICY)
     log = _consumer_config(bus, nats.EVENT_STREAM, "watcher")
-    work = _consumer_config(bus, nats.queue_stream("work"), nats.queue_stream("work"))
+    work = _consumer_config(bus, nats.queue_stream("work"), "work")
     assert (log.max_deliver, log.ack_wait, log.backoff) == (3, 1.0, None)
     assert (work.max_deliver, work.backoff) == (3, [0.2, 0.4])
 
@@ -274,6 +274,7 @@ def test_a_work_queue_stream_keeps_work_queue_retention(bus):
 
 
 def test_queue_names_have_stable_bounded_nats_stream_identifiers():
+    assert nats.queue_stream("work") == "AGENTIHOOKS_QUEUE_work"
     assert nats.queue_stream("swarm.rig.ready.eng") == (
         "AGENTIHOOKS_QUEUE_ca99d3a2340278a9654e1cae8e2a90ce639c9f79f5d643206ccde38b8a0fd396"
     )
