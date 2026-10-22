@@ -206,3 +206,98 @@ def test_a_publication_retry_reuses_the_started_execution_after_a_spoke_restart(
     rig.tasks.reopen.assert_not_called()
     assert published[0] == published[1]
     assert rig.queue.take(0) is None
+
+
+def test_the_final_failed_attempt_is_dead_lettered_and_reopened_before_term(rig):
+    from dataclasses import replace
+
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room")
+    observed = []
+    real_publish = rig.bus.dead.publish
+    real_take = rig.queue.take
+
+    def publish(subject, event):
+        observed.append("dead")
+        return real_publish(subject, event)
+
+    def take(timeout_ms):
+        delivery = real_take(timeout_ms)
+        if delivery is not None:
+            real_term = delivery.term
+
+            def term():
+                observed.append("term")
+                real_term()
+
+            delivery.term = term
+        return delivery
+
+    rig.bus.dead.publish = publish
+    rig.queue.take = take
+    rig.tasks.reopen.side_effect = lambda event: observed.append("reopen")
+    assert rig.spoke.poll() == "retry"
+    rig.clock.now = 10
+    assert rig.spoke.poll() == "retry"
+    rig.clock.now = 30
+    assert rig.spoke.poll() == "dead"
+    assert observed == ["dead", "reopen", "term"]
+    rig.tasks.reopen.assert_called_once_with(rig.event)
+    letters = rig.bus.dead.consumer("audit", "dead.>").fetch(10, 0)
+    assert len(letters) == 1
+    letter = letters[0].event
+    assert letter.type == "dead_lettered"
+    assert letter.cause == rig.event.id
+    assert letter.data["event"] == rig.event.to_dict()
+    assert letter.data["attempts"] == 3
+    assert letter.data["source"] == "swarm.rig.ready.eng"
+    letters[0].ack()
+    assert real_take(0) is None
+    rig.queue.offer(replace(rig.event, id="duplicate-after-dead"))
+    assert rig.spoke.poll() == "dead"
+    assert rig.runtime.spawn.call_count == 3
+    rig.tasks.reopen.assert_called_once()
+    assert rig.bus.dead.consumer("audit", "dead.>").fetch(10, 0) == []
+
+
+def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
+    from scripts.events import nats
+    from scripts.events.config import BusConfig
+    from scripts.events.envelope import Envelope
+    from scripts.hive.spoke import Spoke, SpokeConfig
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+    from tests.events import nats_server
+
+    with nats_server.running(tmp_path / "nats") as url:
+        bus = nats.open_bus(BusConfig(backend="nats", url=url))
+        try:
+            config = SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a")
+            tasks, runtime = Mock(), Mock()
+            tasks.request.return_value = SpawnRequest(config.swarm, "eng", "agent-a", {"id": "task-a"})
+            runtime.spawn.return_value = Outcome(
+                "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a")
+            )
+            queue = bus.queue("swarm.rig.ready.eng", config.policy)
+            queue.offer(
+                Envelope(
+                    "nats-ready",
+                    "task.ready",
+                    "rig",
+                    "task",
+                    "task-a",
+                    0,
+                    12,
+                    "readiness",
+                    {"lane": "eng", "generation": 0},
+                )
+            )
+            spoke = Spoke(config, bus, runtime, tasks, reading)
+            assert spoke.poll(500) == "started"
+            runtime.spawn.assert_called_once_with(tasks.request.return_value)
+            found = bus.events.consumer("audit", "swarm.rig.execution.started").fetch(1, 500)
+            assert len(found) == 1
+            assert found[0].event.key == "agent-a"
+            assert queue.take(10) is None
+        finally:
+            bus.close()
