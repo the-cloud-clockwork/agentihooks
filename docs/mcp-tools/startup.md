@@ -105,6 +105,88 @@ use the returned schemas for calls rather than assuming a fixed tool count.
 | Memory rises before a tool call | Check the client's request sequence. Unsupported lightweight requests and malformed inputs can enter the SDK path; catalogue generation also uses a temporary child. |
 | A network server loads the SDK at startup | Expected for `sse` and `streamable-http`; compare equivalent transports when investigating memory. |
 
+## Measured idle memory
+
+The Doctor's read only measurement after deferred startup was applied found
+mean private resident memory of **7.75 MiB per unused tool server**, compared
+with **37.86 MiB before**, a reduction of about 79.5%. These are historical
+process cohorts, not a fixed memory budget for a session.
+
+The original investigation on 18 October 2026 at 06:46:56 UTC counted 29 tool
+server processes: 1144.12 MiB resident (RSS), 917.65 MiB proportional (PSS), and
+310.21 MiB swap in total. Fresh processes held about 43 MiB private resident.
+Those fleet totals describe the initial problem; the comparison below uses
+the filtered processes with no matched AgentiHooks tool call.
+
+| Census time (UTC) | Eligible processes | Mean private resident |
+|---|---:|---:|
+| 18 October 2026, 15:04:34 | 16 started after 06:46:56 that day, no matched call | 37.86 MiB |
+| 19 October 2026, 07:32:10 | 17 started after application, no matched call | 7.75 MiB |
+
+The master recorded application when the main checkout first carried the
+change, at **19 October 2026, 05:25:38 UTC**. The after census occurred over two
+hours later. Of its 27 processes, eight started before application and two
+newer processes had matched calls; both groups were excluded from the idle
+mean. The 17 included processes all started after application. A merge time
+alone does not establish when new local processes began using the change.
+
+### Reading the measurement
+
+Private resident memory is `(Private_Clean + Private_Dirty) / 1024` MiB from
+Linux `smaps_rollup`. RSS includes shared resident pages; PSS apportions shared
+pages; swap is reported separately. Resident memory can fall when pages move
+to swap, so retain swap alongside resident metrics when comparing runs.
+This observation does not establish a reduction in total session memory or
+whole-host swap.
+
+The archived `memory_census.py` selected Python processes running `hooks.mcp`
+as a module or import bootstrap, read memory and inferred owners from process
+ancestry. `after_filter.py` joined live process start times to that census
+and searched retained Claude and Codex profile-home transcripts for tool calls.
+Processes that exited before filtering were omitted: the before census had
+17 processes, while its filtered result retained 16.
+
+Here, "no matched call" means no call was associated with the inferred owner
+in the transcripts the filter inspected. Unknown owners remained eligible;
+this is not proof that every included process never received a call. A request
+that falls through to the SDK can also load the backend without a successful
+tool call. Preserve request history and owner coverage when interpreting a
+new census. The current catalogue child adds temporary startup memory, while
+the reported saving concerns the retained parent process.
+
+### Read only inspection
+
+For a known tool server PID on Linux, read its start time and memory without
+calling a tool or restarting the process. Replace `12345` with that PID:
+
+```bash
+tool_pid=12345
+date -u '+%Y-%m-%dT%H:%M:%SZ'
+TZ=UTC ps -p "$tool_pid" -o pid=,lstart=
+awk '/^(Rss|Pss|Private_Clean|Private_Dirty|Swap):/ { print }' \
+  "/proc/$tool_pid/smaps_rollup"
+awk '/^Private_(Clean|Dirty):/ { private_kib += $2 }
+  END { printf "private_resident_mib=%.2f\n", private_kib / 1024 }' \
+  "/proc/$tool_pid/smaps_rollup"
+```
+
+If the process exits or permissions deny access, record the missing reading
+instead of treating it as zero. Keep the census time, process count, transport,
+configured filters, process start times, owner matches and call history with
+the results. For a repeat of the delivery measurement, record the application
+time, wait at least one hour, and compare only processes started after it with
+no observed call. Use the same selection and metric before and after; keep
+older processes and callers separate. Discovery alone stays lightweight, but
+a diagnostic `tools/call` moves the measured process to the full server path.
+
+The source measurement scripts are incident evidence, not installed CLI
+commands. The [measurement record](https://github.com/the-cloud-clockwork/agentihooks/issues/5848#issuecomment-6339320057)
+preserves their method, cohort counts, application boundary and limitations.
+The [original investigation](https://github.com/the-cloud-clockwork/agentihooks/issues/4422#issuecomment-6246778217)
+records the fleet census and import costs. Configuration and first-use examples
+above describe how to use deferred startup; changing category filters is not
+required to enable it.
+
 ## Delivery evidence
 
 [Pull request 4431](https://github.com/the-cloud-clockwork/agentihooks/pull/4431)
