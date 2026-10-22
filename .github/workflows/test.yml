@@ -723,7 +723,7 @@ jobs:
               echo "reused=0" >> "$GITHUB_OUTPUT"
               return 0
             fi
-            bash .github/scripts/pypi-retry.sh "Install the test planner dependencies" -- uv pip install --python "$PYTHON_PATH" --quiet PyYAML==6.0.3
+            bash .github/scripts/pypi-retry.sh "Install the test planner dependencies" -- "$HOME/venv/bin/uv" pip install --python "$PYTHON_PATH" --quiet PyYAML==6.0.3
             before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
             cd "$RUNNER_TEMP/planner"
             "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \

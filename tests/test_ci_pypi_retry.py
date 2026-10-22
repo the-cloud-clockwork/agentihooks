@@ -271,7 +271,7 @@ def test_the_test_planner_installs_its_pinned_pyyaml_with_uv_through_the_retry()
     (plan,) = [step for step in steps if step.get("name") == "Plan the tests whose inputs did not change"]
     assert [line.strip() for line in plan["run"].splitlines() if "pip install" in line] == [
         'bash .github/scripts/pypi-retry.sh "Install the test planner dependencies" -- '
-        'uv pip install --python "$PYTHON_PATH" --quiet PyYAML==6.0.3'
+        '"$HOME/venv/bin/uv" pip install --python "$PYTHON_PATH" --quiet PyYAML==6.0.3'
     ]
     assert 'cat "$RUNNER_TEMP/plan.log"' in next(s for s in steps if s.get("name") == "Wait for the test plan")["run"]
 
