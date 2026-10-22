@@ -15,10 +15,13 @@ contributors who change the inbox tests, the `mcp-sdk` worker group or the code
 those tests import.
 
 [PR #4607](https://github.com/the-cloud-clockwork/agentihooks/pull/4607) added
-the `mcp_sdk` fixture and its probe test.
-[PR #4985](https://github.com/the-cloud-clockwork/agentihooks/pull/4985) and
-[PR #5244](https://github.com/the-cloud-clockwork/agentihooks/pull/5244) extended
-the same fixture to `fakeredis`, the hive scope and the inbox pool. All three
+the `mcp_sdk` fixture, listed it in the reconnect module's marks and added its
+probe test.
+[PR #4985](https://github.com/the-cloud-clockwork/agentihooks/pull/4985) made
+`recovery_deadline` depend on `mcp_sdk` and added `fakeredis` and
+`tests.inbox.test_channel_server` to the preload.
+[PR #5244](https://github.com/the-cloud-clockwork/agentihooks/pull/5244) added the
+hive scope and the inbox pool. All three
 change tests only; the inbox channel, its reconnect backoff and the mcp server
 code are unchanged.
 
@@ -42,8 +45,10 @@ In attempt 2 the same reconnect case took 3.6 seconds and every test passed.
 
 ## Root cause
 
-All of these modules share one pytest worker because they carry
-`pytest.mark.xdist_group("mcp-sdk")`:
+CI runs the unit suite with `--dist loadgroup` and `--reruns 2`. Under
+`loadgroup`, every module that carries `pytest.mark.xdist_group("mcp-sdk")` runs
+on the same pytest worker, and `--reruns 2` retries a failed test up to twice on
+that worker:
 
 | Module | Why it is in the group |
 |---|---|
@@ -54,8 +59,11 @@ All of these modules share one pytest worker because they carry
 
 The sequence on a cold worker:
 
-1. The first reconnect case arms the `recovery_deadline` alarm, then imports the
-   inbox channel, which imports the mcp SDK for the first time.
+1. The first reconnect case arms the `recovery_deadline` alarm. Its test helpers
+   in `tests/inbox/test_channel_server.py` import `mcp.types` and
+   `mcp.shared.message` inside their functions, so the mcp SDK is imported for
+   the first time under the alarm. `scripts/inbox/channel.py` loads at collection
+   but imports mcp only inside its functions.
 2. The cold import runs past five seconds. `mcp.server.stdio` has already loaded.
 3. The alarm raises `AssertionError` inside the fastmcp server import. Python
    removes the partly imported `mcp.server` from `sys.modules` but keeps
@@ -95,16 +103,27 @@ def recovery_deadline(mcp_sdk):
     signal.setitimer(signal.ITIMER_REAL, 5)
 ```
 
-`recovery_deadline` depends on `mcp_sdk`, and the reconnect module lists both in
-its marks, preload first:
+The guard is the `mcp_sdk` parameter of `recovery_deadline`: pytest sets up
+`mcp_sdk` before the fixture body arms the alarm, whatever order a module lists
+them in. Every test that uses `recovery_deadline` gets the preload this way:
+
+| Module | Uses the alarm |
+|---|---|
+| `tests/inbox/test_channel_reconnect.py` | Every case, through `pytestmark` |
+| `tests/inbox/test_waker_reconnect.py` | Every case, through `pytestmark` |
+| `tests/inbox/test_codex_pump.py` | The `watchdog` fixture and the delivery order and recovery cases that request the alarm |
+| `tests/inbox/test_realtime.py` | The waker wake pass on notify case |
+
+The reconnect module also names both fixtures in its marks:
 
 ```python
 pytestmark = [pytest.mark.xdist_group("mcp-sdk"), pytest.mark.usefixtures("mcp_sdk", "recovery_deadline")]
 ```
 
-The preload costs its import time once per worker. A cold import stays outside
-the alarm, so the five second deadline measures only the recovery loop it
-guards.
+`mcp_sdk` is function scoped and runs for every such test. Only the first test
+on a worker pays the cold import; later tests find the modules in `sys.modules`.
+A cold import stays outside the alarm, so the five second deadline measures only
+the recovery loop it guards.
 
 | Setting | Value | Where |
 |---|---|---|
@@ -133,22 +152,28 @@ prints one JSON line with the pytest exit code and those records.
 `PLANTED_DELAY` and `ARMED_DELAY` are read only by the probe subprocess. The probe
 strips `PYTEST_ADDOPTS` so CI options such as reruns do not reach the inner run.
 
+Only the subscriber case runs with `ARMED_DELAY`, so only that case reports late
+imports. The pending items case is checked for SDK state when the alarm is armed;
+the other reconnect cases and the waker, Codex pump and realtime modules are
+covered by the shared fixture but not probed.
+
 ## Change the reconnect tests safely
 
 Adding a reconnect case, or code that a reconnect case reaches for the first time:
 
 1. Push the change and read the subscriber probe in CI. A non empty `late` list
-   names the first module imported while the alarm was armed.
+   names the first module the subscriber case imported while the alarm was
+   armed. For a module the subscriber case never reaches, add a probe test that
+   passes that case's node id to `_probe` with `ARMED_DELAY="6"`.
 2. Add that module to `mcp_sdk` as a plain import.
 3. Push again and confirm `late` is empty.
 
-Adding a test module to the `mcp-sdk` group needs no preload of its own: only
-the reconnect cases arm the alarm, and the inbox fixture loads the SDK before
-they do.
+Adding a test module to the `mcp-sdk` group needs no preload of its own when it
+arms no alarm. A new test that arms its own timer should use `recovery_deadline`
+so it inherits the preload.
 
-Do not raise the deadline, drop `mcp_sdk` from `usefixtures`, or move
-`recovery_deadline` ahead of it. Each of these lets a cold import run under the
-alarm again.
+Do not raise the deadline or remove the `mcp_sdk` parameter from
+`recovery_deadline`. Either lets a cold import run under the alarm again.
 
 ## Verify in CI
 
@@ -165,24 +190,27 @@ gh workflow run proofs.yml \
 Read each case's outcome and the flake report. A green job after a retry is not a
 first attempt pass.
 
-Retained evidence for PR #4607:
+Retained evidence, as recorded in the PR #4607 body. The probe then recorded
+only `stdio` and `message`; PR #4985 added the `fakeredis` key.
 
-- Red, with the `mcp_sdk` fixture dropped
+- Red, with the `mcp_sdk` fixture dropped on the reverted wip commit `85081aa6c`
   ([run 39161684579](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39161684579)):
   the probe printed `{"code": 0, "armed": [{"stdio": false, "message": false}]}`;
   1 failed, 141 passed.
-- Green, with the fixture
+- Green, with the fixture, commit `b15a6ac3b`
   ([run 39161687437](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39161687437)):
   142 passed.
+
+Those counts cover that run's test selection, not the two file command above.
 
 ## Troubleshooting
 
 | Symptom | Cause | Action |
 |---|---|---|
-| `'module' object at mcp.server.stdio has no attribute 'stdio'` in any `mcp-sdk` group test | An alarm interrupted the cold SDK import earlier on the same worker | Find the first reconnect case on that worker in the job log. Check its duration and rerun. Then run the subscriber probe to name the late import |
+| `'module' object at mcp.server.stdio has no attribute 'stdio'` in any `mcp-sdk` group test | An alarm interrupted the cold SDK import earlier on the same worker | Find the first reconnect case on that worker in the job log. Check its duration and whether CI reran it. Then run the subscriber probe to name the late import |
 | `AssertionError: recovery loop exceeded its deadline` on the first reconnect case of a worker only | A first import under the alarm took the window | Read the subscriber probe's `late` list and add the module to `mcp_sdk` |
 | The same assertion on every attempt and worker | The recovery loop itself is slow or stuck | Debug the reconnect code; the preload is not involved |
-| A probe report shows `"stdio": false` or `"message": false` | `recovery_deadline` runs before `mcp_sdk` | Restore the fixture dependency and the `usefixtures` order |
+| A probe report shows `"stdio": false` or `"message": false` | `recovery_deadline` lost its `mcp_sdk` parameter | Restore `def recovery_deadline(mcp_sdk)` in `tests/inbox/conftest.py` |
 | A probe fails to parse JSON | The inner pytest crashed before printing | Read the probe's captured output in the assertion message |
 
 Preserve the exact node id, run, job and attempt when comparing failures. A later
