@@ -832,8 +832,8 @@ def register_session(
         # age to reflect the true session start, not the last event).
         existing = sessions.get(session_id)
         started_at = existing.get("started_at", now) if existing else now
-        launched = (existing or {}).get("name") if (existing or {}).get("named_by") == LAUNCHER else ""
-        named = {"name": launched, "named_by": LAUNCHER} if launched else ({"name": name} if name else {})
+        kept = existing.get("name", "") if existing and existing.get("named_by") == LAUNCHER else ""
+        named = {"name": kept, "named_by": LAUNCHER} if kept else {"name": name} if name else {}
         sessions[session_id] = {
             **named,
             "started_at": started_at,

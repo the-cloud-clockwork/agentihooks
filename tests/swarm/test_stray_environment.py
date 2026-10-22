@@ -16,6 +16,8 @@ def test_runtime_spares_a_session_whose_environment_no_longer_carries_the_stray_
     rt = runtime.HerdrRuntime(home=tmp_path)
     rt.hive = SimpleNamespace(holder=lambda name: pytest.fail("a locally held name is never ordered to a hive"))
     rt.reap = lambda pids: reaped.append(pids) or Outcome(tuple(pids))
-    assert rt.reap_name("x@a") is True and reaped == [[7]]
+    assert rt.reap_name("x@a") is False and reaped == [[7]]
     carried[7] = "engineer@other-0002"
-    assert rt.reap_name("x@a") is True and reaped[-1] == []
+    assert rt.reap_name("x@a") is False and reaped[-1] == []
+    carried[5] = carried[7] = "x@a"
+    assert rt.reap_name("x@a") is True and reaped[-1] == [5, 7]

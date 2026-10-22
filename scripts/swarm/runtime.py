@@ -1090,7 +1090,8 @@ class HerdrRuntime:
         held = [s.process.pid for s in sessions() if s.name == name]
         host = "" if held or self.hive is None else self.hive.holder(name)
         if not host:
-            return not self.reap([pid for pid in held if _carries(pid, name)]).refusal
+            carrying = [pid for pid in held if _carries(pid, name)]
+            return not self.reap(carrying).refusal and len(carrying) == len(held)
         order = CommandOrder(f"reap:{name}", "reap", name=name)
         reaped = self._order(host, order, name)
         if reaped:
