@@ -10,6 +10,7 @@ BUCKET = "hub-leases"
 Clock = Callable[[], int]
 
 
+# Expiry is compared across replicas, so the clock is wall time and replicas must keep their clocks in sync.
 def wall_ms() -> int:
     return time.time_ns() // 1_000_000
 
