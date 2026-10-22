@@ -1,4 +1,5 @@
 import signal
+import threading
 
 import pytest
 
@@ -41,6 +42,7 @@ def test_controller_run_turns_sigterm_into_exit_so_its_cleanup_runs(monkeypatch)
 def test_controller_run_releases_held_tick_locks_on_sigterm_before_exiting(monkeypatch):
     installed, released = [], []
     monkeypatch.setattr(tick_stop, "_HELD", {})
+    monkeypatch.setattr(tick_stop, "STOP", threading.Event())
     monkeypatch.setattr(operator_env, "fill", lambda env: None)
     monkeypatch.setattr(operator_env, "classifier", lambda env: [])
     monkeypatch.setattr(controller, "connect", lambda: "store")
