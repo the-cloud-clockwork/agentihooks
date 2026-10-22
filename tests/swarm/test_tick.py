@@ -637,7 +637,7 @@ class HiveAcks(FakeRuntime):
         super().__init__()
         self.ordered, self.collected, self.acked, self.failing, self.broken = [], [], set(), set(fail), set()
         self.refused, self.collected_slugs, self.conflicted = set(), set(), set()
-        self.expired, self.expire_broken = [], set()
+        self.expired, self.expire_broken = [], {}
 
     def expire(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER
@@ -646,7 +646,7 @@ class HiveAcks(FakeRuntime):
         assert task["seat"].startswith(f"{lane}-")
         self.expired.append(name)
         if name in self.expire_broken:
-            raise ConnectionError("redis went away")
+            raise self.expire_broken[name]
 
     def spawn(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER
@@ -837,18 +837,22 @@ def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(s
     assert ledger.rows["t1"]["claimed_by"] != first
 
 
-def test_a_launch_the_hive_cannot_expire_at_the_claim_lease_keeps_waiting(store, capsys):
+@pytest.mark.parametrize(
+    "error",
+    [ConnectionError("redis went away"), SwarmError("the controller lease is stale"), SpawnError("refused")],
+)
+def test_a_launch_the_hive_cannot_expire_at_the_claim_lease_keeps_waiting(store, capsys, error):
     from scripts.swarm.tick import LEASE_MS
 
     ledger, runtime = tasks(("t1", "eng")), HiveAcks()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     first = runtime.ordered[0]
-    runtime.expire_broken.add(first)
+    runtime.expire_broken[first] = error
     tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
     assert runtime.expired == [first]
     assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
     assert ledger.rows["t1"]["claimed_by"] == first and store.claimant("sw", "t1") == first
-    assert f"{first} collect for t1 raised ConnectionError('redis went away'), waiting for the hive" in (
+    assert f'{first} collect for t1 raised RuntimeError("expiring the launch raised {error!r}"), waiting' in (
         capsys.readouterr().err
     )
 

@@ -1176,7 +1176,7 @@ def _expire_launch(config, runtime, agent):
     try:
         runtime.expire(config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True})
     except Exception as exc:
-        return exc
+        return RuntimeError(f"expiring the launch raised {exc!r}")
     return SpawnError(ACK_EXPIRED)
 
 
