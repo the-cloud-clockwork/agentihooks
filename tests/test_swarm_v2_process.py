@@ -241,6 +241,39 @@ def test_a_local_record_from_a_previous_boot_retires_as_ended_without_signalling
     assert router.rejected == {}
 
 
+def test_an_old_boot_record_retires_its_reopened_conversation_process(tmp_path, monkeypatch):
+    from scripts.terminate_agent import Session
+
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = replace(record(namespace=WORKER), harness="codex", conversation_id="restored")
+    current = proc(pid=PID + 1, start=STARTED + 1)
+    unrelated = Session("another", "codex", NAME, proc(pid=PID + 2), "", "alive")
+    reopened = Session("restored", "codex", NAME, current, "", "alive")
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [unrelated, reopened])
+    router = RuntimeRouter([local])
+    assert router.terminate(agent, ("/scratch/t1",)) == Outcome("terminate", Status.OK, LOCAL)
+    assert ended == [(NAME, PID + 1, ("/scratch/t1",), STARTED + 1)]
+    assert ["pane", "close", "w1:p1"] in calls
+    assert router.rejected == {}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("name", "another"), ("session_id", "another"), ("target", "claude"), ("status", "dead")],
+)
+def test_previous_boot_retirement_does_not_signal_another_conversation_process(tmp_path, monkeypatch, field, value):
+    from scripts.terminate_agent import Session
+
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = replace(record(namespace=WORKER), harness="codex", conversation_id="restored")
+    candidate = replace(Session("restored", "codex", NAME, proc(pid=PID + 1), "", "alive"), **{field: value})
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [candidate])
+    assert RuntimeRouter([local]).terminate(agent) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
+    )
+    assert (ended, calls) == ([], [])
+
+
 @pytest.mark.parametrize("host_id", ["", "hive-a"])
 def test_a_same_boot_foreign_pid_namespace_stays_refused(tmp_path, monkeypatch, host_id):
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
