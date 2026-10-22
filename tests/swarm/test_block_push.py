@@ -157,16 +157,19 @@ def test_block_records_the_pushed_branch_of_a_repository_recorded_on_another_hos
     assert row["repository_branches"] == {str(other): BRANCH}
 
 
-def test_block_skips_a_foreign_repository_without_one_checkout_here(worktree, monkeypatch, tmp_path):
+def test_block_skips_a_repository_with_two_checkouts_here_and_one_missing_here(worktree, monkeypatch, tmp_path):
     ledger = worktree[0]
     hive = tmp_path / "hive"
     monkeypatch.setenv("HIVE_REPO_ROOT", str(hive))
-    _repository(tmp_path, "antoncore")
+    _, _, other_top = _repository(tmp_path, "antoncore")
     _git(tmp_path, "clone", "-q", str(tmp_path / "antoncore.git"), str(hive / "antoncore"))
+    _git(other_top, "commit", "--allow-empty", "-m", "Antoncore work")
+    _git(other_top, "push", "-u", "origin", BRANCH)
     ledger.rows["t1"]["repositories"] = ["/srv/workstation/dev/antoncore", "/srv/workstation/dev/agentibrain-kernel"]
     assert block() == 0
     assert ledger.rows["t1"]["state"] == "blocked"
     assert "branch" not in ledger.rows["t1"]
+    assert "repository_branches" not in ledger.rows["t1"]
 
 
 @pytest.mark.parametrize("hive", [("sw", True, True), ("other", True, False), ("sw", False, False)])

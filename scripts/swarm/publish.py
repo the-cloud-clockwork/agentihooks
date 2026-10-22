@@ -148,7 +148,7 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
             resolved.append(local_repository(value, repo))
         except SwarmError:
             continue
-    candidates = resolved or [repository_root(Path(value)) for value in [repo] if Path(value).is_dir()]
+    candidates = resolved or ([repository_root(Path(repo))] if Path(repo).is_dir() else [])
     for repository in dict.fromkeys(candidates):
         scoped = repository_task(repository, task)
         root = existing(repository, scoped, agent)
