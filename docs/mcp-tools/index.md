@@ -10,6 +10,8 @@ The AgentiHooks MCP server (`agentihooks`) serves Claude Code and Codex and expo
 
 See [Server Startup](startup.md) for deferred stdio loading, first call behavior,
 configuration examples and troubleshooting.
+Its [measured idle memory](startup.md#measured-idle-memory) section records the
+before and after cohorts, read only inspection and limits of the comparison.
 
 ## Categories
 
