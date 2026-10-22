@@ -249,13 +249,17 @@ def test_launch_failure_without_one_failing_harness_is_proposed(store, home, shi
     assert lane_of(store, "eng") == ("claude", "opus")
 
 
-def hive_only(store, monkeypatch, excluded="eng"):
+def hive_only(store, monkeypatch, excluded="eng", herdr=True, deployment="local"):
+    from scripts import herdr_host
     from scripts.hive import registry
     from scripts.swarm import commands
 
     store.update(SLUG, hive_placement=True)
-    registry.update(store.redis, "ws", [f"excluded={excluded}"])
+    if excluded:
+        registry.update(store.redis, "ws", [f"excluded={excluded}"])
     monkeypatch.setattr(commands, "hive_id", lambda: "ws")
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: herdr)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", deployment)
 
 
 def test_launch_failure_keeps_a_hive_only_lane_on_the_harness_hives_place(store, home, shipped, monkeypatch):
@@ -280,14 +284,23 @@ def test_launch_failure_moves_a_lane_the_workstation_hosts_off_claude(store, hom
 
 
 def test_launch_failure_moves_a_lane_off_claude_with_no_workstation_record(store, home, shipped, monkeypatch):
-    from scripts.swarm import commands
-
-    store.update(SLUG, hive_placement=True)
-    monkeypatch.setattr(commands, "hive_id", lambda: "ws")
+    hive_only(store, monkeypatch, excluded="")
     pin(store, "eng", "claude")
     detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
     text = bottleneck_remedy.MOVED.format(lane="eng", source="claude", target="codex", targeted=FAILED)
     assert run(store) == [text]
+
+
+@pytest.mark.parametrize(("herdr", "deployment"), [(False, "local"), (True, "compose"), (True, "distributed")])
+def test_launch_failure_keeps_a_lane_on_claude_when_the_workstation_takes_no_overflow(
+    store, home, shipped, monkeypatch, herdr, deployment
+):
+    hive_only(store, monkeypatch, excluded="plan", herdr=herdr, deployment=deployment)
+    pin(store, "eng", "claude")
+    detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
+    why = bottleneck_remedy.UNPLACEABLE.format(target="codex", lane="eng")
+    assert run(store) == [proposed(FAILED, why)]
+    assert lane_of(store, "eng") == ("claude", "opus")
 
 
 def test_launch_failure_moves_a_lane_the_workstation_excludes_without_hive_placement(store, home, shipped, monkeypatch):

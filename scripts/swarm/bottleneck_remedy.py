@@ -3,6 +3,7 @@ one task to the master: one action per stage per window, logged with the hours i
 stage's last action.
 """
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -173,9 +174,14 @@ def _move(slug, config, store, stage):
 def _placeable(store, config, lane, harness):
     if not config.hive_placement or harness == HIVE_HARNESS:
         return True
+    from scripts import herdr_host
     from scripts.hive import placement, registry
+    from scripts.swarm import controller
     from scripts.swarm.commands import hive_id
 
+    environ = dict(os.environ)
+    if controller.deployment_for(config, environ) != controller.HYBRID or not herdr_host.server_running(environ):
+        return False
     local = registry.show(store.redis, hive_id())
     return local is None or placement.hosts(lane, local)
 
