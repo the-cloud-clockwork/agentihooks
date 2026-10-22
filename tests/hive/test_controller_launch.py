@@ -961,7 +961,9 @@ def test_hive_sessions_force_a_full_account_to_fall_back_to_one_with_room(setup,
         Account("claude", "full_on_hives", "room", 0, 80, 80, 6),
         Account("claude", "account", "room", 1, 80, 80, 6),
     ]
-    write_hive(setup, slots=[{"harness": "claude", "account": "full_on_hives", "kind": "subscription"}, *setup.hive["slots"]])
+    write_hive(
+        setup, slots=[{"harness": "claude", "account": "full_on_hives", "kind": "subscription"}, *setup.hive["slots"]]
+    )
     setup.store.redis.set(f"{registry.key('remote')}:sessions", '{"claude:full_on_hives": 6}')
     task = {"id": "task"}
     if pin == "saved":
