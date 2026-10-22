@@ -15,7 +15,9 @@ from scripts.swarm_v2.runtime.base import Runtime, SpawnRequest
 
 
 class Tasks(Protocol):
-    def request(self, event: Envelope) -> SpawnRequest | None: ...
+    def request(self, event: Envelope) -> SpawnRequest | None:
+        """The task carries the admitted execution_id and execution_generation."""
+        ...
 
     def reopen(self, event: Envelope) -> None: ...
 
@@ -173,6 +175,9 @@ class Spoke:
         claims = self.bus.state("spoke-work")
         try:
             request = self.tasks.request(event)
+            if request is not None:
+                execution_id = request.task["execution_id"]
+                generation = request.task["execution_generation"]
         except Exception:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
             raise
@@ -182,7 +187,7 @@ class Spoke:
         intent = json.dumps({"state": "launching", "owner": self.config.hive, "name": request.name}).encode()
         revision = claims.update(key, intent, revision)
         request = replace(request, task={**request.task, "claim_fence": {"key": key, "revision": revision}})
-        execution_events.prepare(self.bus, event.swarm, request.name, request.task.get("generation", event.version))
+        execution_events.prepare(self.bus, event.swarm, request.name, generation)
         outcome = self.runtime.spawn(request)
         if not outcome.ok:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
@@ -193,15 +198,15 @@ class Spoke:
             type="execution.started",
             swarm=event.swarm,
             entity="execution",
-            key=request.task.get("execution_id") or request.name,
-            version=request.task.get("generation", event.version),
+            key=execution_id,
+            version=generation,
             time=time.time_ns() // 1_000_000,
             author=self.config.hive,
             data={
                 "task": event.key,
                 "claim_key": key,
                 "claim_revision": revision,
-                "generation": request.task.get("generation", event.version),
+                "generation": generation,
                 "lane": self.config.lane,
                 "hive": self.config.hive,
                 "name": request.name,

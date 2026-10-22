@@ -145,3 +145,24 @@ def test_an_initial_launching_claim_is_owned_at_its_pinned_revision(monkeypatch)
     with patch.object(claim_fence, "open_bus", return_value=bus), patch.object(claim_fence, "terminate") as kill:
         assert claim_fence.check({"hook_event_name": "SessionStart"}) is None
     kill.assert_not_called()
+
+
+def test_hook_dispatch_passes_the_normalized_payload_through_the_claim_fence():
+    import io
+
+    from hooks import hook_manager
+    from hooks.context import claim_fence
+
+    payload = {"hook_event_name": "Notification", "session_id": "claim-session"}
+    handler = Mock()
+    with (
+        patch.object(hook_manager.sys, "stdin", io.StringIO(json.dumps(payload))),
+        patch.object(hook_manager.os, "_exit", side_effect=SystemExit),
+        patch.dict(hook_manager.EVENT_HANDLERS, {"Notification": handler}),
+        patch.object(claim_fence, "check", return_value=None) as check,
+    ):
+        with pytest.raises(SystemExit) as exited:
+            hook_manager.main()
+    assert exited.value.code == 0
+    check.assert_called_once_with(payload)
+    handler.assert_called_once_with(payload)
