@@ -455,7 +455,7 @@ def held_harness(lanes: dict, held: dict) -> str:
     return agents.pop() if len(agents) == 1 and agents.issubset(agent_choice.AGENTS) else ""
 
 
-def held_pins(lanes: dict, held: dict, reason: str) -> str:
+def held_pins(lanes: dict, held: dict, reason: str | None) -> str:
     notes = [
         f"{count} {lane} {'spawn' if count == 1 else 'spawns'} held on the {lane} lane pinned to {agent}"
         for lane, count in sorted(held.items())
@@ -484,7 +484,7 @@ def record_pass(
     room = hold or hive_wait(store, slug, held)
     quota["held_by"] = ("host" if room else "quota") if quota["held_spawns"] else ""
     quota["held_harness"] = "" if room else held_harness(store.config(slug).lanes, held)
-    quota["reason"] = room or held_pins(store.config(slug).lanes, held, quota.get("reason", ""))
+    quota["reason"] = room or held_pins(store.config(slug).lanes, held, quota.get("reason"))
     quota.update(placement_counts(live))
     reviews, classifiers = read_review_events(slug, box), read_classifier_calls(box)
     rounds = read_review_rounds(slug, box)

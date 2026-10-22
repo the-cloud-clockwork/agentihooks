@@ -409,6 +409,7 @@ def test_quota_hold_keeps_a_lane_on_a_harness_with_available_accounts(store, hom
     ("hive", "moves"),
     [
         ({"room": 2}, True),
+        ({"room": 1}, True),
         ({"room": 0}, False),
         ({"room": 2, "heartbeat_at": NOW - 10 * 60_000}, False),
         ({"room": 2, "excluded": ["eng"]}, False),

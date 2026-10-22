@@ -335,8 +335,8 @@ def _split(pieces: list, lives: list, cap: int | None) -> list[tuple]:
 
 def _held_pieces(pieces: list, held: list[Span]) -> tuple[list, dict]:
     charged, cut = [], {}
+    under = [piece for _, piece in pieces]
     for hold in held:
-        under = [piece for _, piece in pieces if piece[1] < hold.end and hold.start < piece[2]]
         edges = {min(max(edge, hold.start), hold.end) for piece in under for edge in piece[1:3]}
         points = sorted(edges | {hold.start, hold.end})
         for low, high in zip(points, points[1:]):
