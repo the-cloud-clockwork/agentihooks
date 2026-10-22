@@ -32,7 +32,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import idle, status, timing
 from scripts.swarm.health import activity
 from scripts.swarm.runtime import SWARM_HOME
-from scripts.swarm.tick import ACKNOWLEDGING
 
 PR_RE = re.compile(r"github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)")
 
@@ -75,10 +74,14 @@ def _overruns(store, slug):
 
 
 def _starts(store, slug, now_ms):
+    from scripts.swarm.tick import ACKNOWLEDGING
+
     agents = [asdict(a) for a in store.agents(slug)]
     launches = store.redis.hgetall(store.key(slug, "launches"))
-    pending = {name for name, raw in launches.items() if json.loads(raw)["state"] == ACKNOWLEDGING}
-    beats = {a["name"] for a in agents if a["hive"] and idle.heartbeat(store.redis, slug, a["name"])}
+    pending = frozenset(name for name, raw in launches.items() if json.loads(raw)["state"] == ACKNOWLEDGING)
+    beats = {
+        a["name"]: beat["at"] for a in agents if a["hive"] and (beat := idle.heartbeat(store.redis, slug, a["name"]))
+    }
     return spawns.silent_starts(agents, activity.first_events(slug), now_ms, beats, pending)
 
 

@@ -48,7 +48,9 @@ def fresh_restores(record: dict) -> list[Finding]:
     ]
 
 
-def silent_starts(agents: list[dict], hooked: dict, now_ms: int, beats=None, pending=()) -> list[Finding]:
+def silent_starts(
+    agents: list[dict], hooked: dict, now_ms: int, beats: dict | None = None, pending: frozenset = frozenset()
+) -> list[Finding]:
     beats = beats or {}
     found = []
     for agent in agents:
@@ -80,7 +82,8 @@ def _silent_local(agent: dict, hooked: dict, now_ms: int) -> list[Finding]:
 
 def _silent_hive(agent: dict, beats: dict, now_ms: int) -> list[Finding]:
     acked = (agent.get("launch_timings") or {}).get("returned_at") or agent.get("launched_at")
-    if not acked or agent["name"] in beats or now_ms - acked < TICK_MS:
+    beat = beats.get(agent["name"])
+    if not acked or (beat and beat >= agent["started_at"]) or now_ms - acked < TICK_MS:
         return []
     return [
         Finding(

@@ -144,6 +144,9 @@ def test_a_running_hive_agent_is_judged_from_its_heartbeat():
     agent = _hive("engineer@a-1")
     later = ACKED + 10 * spawns.TICK_MS
     assert spawns.silent_starts([agent], {}, later, beats={agent["name"]: ACKED + 1}) == []
+    assert spawns.silent_starts([agent], {}, later, beats={agent["name"]: 1_000}) == []
+    [stale] = spawns.silent_starts([agent], {}, later, beats={agent["name"]: 999})
+    assert stale.measure == 10
 
 
 def test_a_hive_agent_that_never_starts_is_raised_one_tick_after_its_acknowledgement():
@@ -174,7 +177,7 @@ def test_a_local_agent_keeps_the_first_event_rule():
         "launched_at": 3_000,
         "launch_timings": {"returned_at": 4_000},
     }
-    [found] = spawns.silent_starts([agent], {}, 1_000 + spawns.TICK_MS, beats={agent["name"]: 2_000}, pending=set())
+    [found] = spawns.silent_starts([agent], {}, 1_000 + spawns.TICK_MS, beats={agent["name"]: 2_000})
     assert found.measure == 1
     assert found.evidence == ("started at 1000", "harness ", "pane ")
     assert found.threshold == "no hook event one tick after spawn"
