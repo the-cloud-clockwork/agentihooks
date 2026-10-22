@@ -541,6 +541,8 @@ def test_a_kind_change_succeeds_when_the_work_folder_lives_on_another_host(live,
 
 
 def test_an_owned_task_changes_kind_over_http_and_an_invalid_kind_changes_nothing(live, tmp_path):
+    from scripts.swarm_ledger.api import schemas
+
     contract = {"must": "The number moved", "check": "Before and after", "judge": "Standards reader"}
 
     def post(operation):
