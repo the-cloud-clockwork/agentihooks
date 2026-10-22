@@ -110,7 +110,7 @@ print(auth.env_text("https://hive-join:8770", auth.mint(redis_client(), "worker"
 printf '%s' "$member_env" | kubectl create secret generic hive-member --from-file=credential=/dev/stdin >/dev/null
 unset member_env
 helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml \
-  --set workers.replicas=1 --set workers.maxAgents=1 --set workers.image.repository=local/agentihooks-hive-worker \
+  --set workers.replicas=1 --set workers.maxAgents=1 --set workers.drainSeconds=20 --set workers.image.repository=local/agentihooks-hive-worker \
   --set workers.image.pullPolicy=Never --set workers.credentialSecret.name=hive-member --set workers.credentialSecret.key=credential \
   --set workers.caSecret.name=hive-tls --set workers.caSecret.key=cert.pem | kubectl apply -f -
 deployment=proof-agentihooks-swarm-worker-hive
@@ -167,6 +167,11 @@ kubectl logs "$pod" > "$out/worker.log"
 restarts="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
 [[ "$restarts" == 0 ]]
 kubectl delete pod "$pod" --wait --timeout=60s
+hook_failures="$(kubectl get events --field-selector "involvedObject.name=$pod,reason=FailedPreStopHook" -o name)"
+if [[ -n "$hook_failures" ]]; then
+  echo "the hive drain preStop failed on $pod" >&2
+  exit 1
+fi
 kubectl rollout status "deployment/$deployment" --timeout=120s
 replacement="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
 [[ "$replacement" != "$pod" ]]
