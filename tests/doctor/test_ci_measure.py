@@ -155,6 +155,11 @@ def test_a_subject_without_a_run_attempt_is_refused(finding):
         ci_measure.target(finding)
 
 
+def test_a_label_set_of_non_names_is_refused_with_its_labels():
+    with pytest.raises(SwarmError, match=r"runner labels \[1, \"a\"\] are not a list of names"):
+        ci_measure.target('ci-runner-wait/[1, "a"]')
+
+
 def test_an_old_subject_without_labels_takes_the_longest_wait_of_the_run():
     goal = ci_measure.target("ci-runner-wait/20-1-117")
     assert ci_measure.value(goal, WAITED, NOW) == (440, None)

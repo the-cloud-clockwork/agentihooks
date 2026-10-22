@@ -196,6 +196,12 @@ def _member(groups, finding, scope, text, window_ms, run, during):
     return member
 
 
+def _running(run):
+    return run["status"] != "completed" and not any(
+        job.get("completed_at") for job in run["jobs"] if job["name"] == GATE
+    )
+
+
 def group(
     groups: dict, records: list[dict], since_ms: int, now_ms: int, window_ms: int, incidents: list[tuple]
 ) -> dict:
@@ -209,7 +215,7 @@ def group(
             member["open"] = finding.kind != "ci runner wait"
         for finding in _wall(run, now_ms):
             member = _member(groups, finding, run["event"], TIERS[run["event"]], window_ms, run, during)
-            member["open"] = wall_ms(run, now_ms + 1) != wall_ms(run, now_ms)
+            member["open"] = _running(run)
     return groups
 
 

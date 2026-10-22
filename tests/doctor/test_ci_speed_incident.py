@@ -534,3 +534,32 @@ def test_a_member_kept_before_open_ends_were_recorded_counts_as_settled():
     }
     [finding] = ci_speed.grouped(groups)
     assert finding.evidence_identity == ("1", 950)
+
+
+def wall_run(identity, event, status, gate_completed=None):
+    job = {**waiting(identity, "2026-10-19T16:00:00Z")["jobs"][0], "status": "in_progress", "runner_name": "r"}
+    job["started_at"] = "2026-10-19T16:00:00Z"
+    job["completed_at"] = "2026-10-19T16:20:00Z" if status == "completed" else None
+    gate = {**job, "id": identity * 10 + 1, "name": ci_speed.GATE, "completed_at": gate_completed}
+    return {"id": identity, "event": event, "status": status, "conclusion": "success", "jobs": [job, gate]}
+
+
+@pytest.mark.parametrize(
+    "event,status,gate_completed,expected",
+    [
+        ("pull_request", "in_progress", None, True),
+        ("pull_request", "in_progress", "2026-10-19T16:20:00Z", False),
+        ("merge_group", "completed", None, False),
+    ],
+)
+def test_a_wall_crossing_is_open_only_while_its_gate_and_run_run(event, status, gate_completed, expected):
+    since, now = iso_ms("2026-10-19T16:00:00Z"), iso_ms("2026-10-19T16:30:00Z")
+    groups = ci_speed.group({}, [wall_run(5, event, status, gate_completed)], since, now, now - 600000, [])
+    [member] = groups[f"ci-tier-wall-time/{event}"]["members"].values()
+    assert member["open"] is expected
+
+
+def test_a_window_start_is_dropped_from_a_dashed_label_set():
+    assert ci_speed.scope_of('1792617600000-["anton-oss"]') == '["anton-oss"]'
+    assert ci_speed.scope_of('["anton-oss"]') == '["anton-oss"]'
+    assert ci_speed.scope_of("1792617600000-merge_group") == "merge_group"
