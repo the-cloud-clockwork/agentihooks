@@ -417,7 +417,7 @@ Agents must NOT volunteer the toggle ("want me to disable controls?"). The opera
 
 ## Guardrail 10: Serena edit guard
 
-**Hook:** `PreToolUse` on `Bash`, `Edit`, `MultiEdit` and `Write` (Codex `apply_patch` reaches the hook as `Edit`)
+**Hook:** `PreToolUse` (Bash, Edit, MultiEdit and Write; Codex `apply_patch` reaches the hook as Edit)
 **Default:** On — `AGENTIHOOKS_SERENA=true`
 
 Python in a linked worktree is edited through Serena's symbol tools (Development Manifesto §7), so the guard refuses built-in and shell rewrites of an existing `.py` file there. A linked worktree is a checkout whose `.git` is a file; the primary checkout, whose `.git` is a folder, stays open for work done directly on the base branch. Serena exposes no file deletion, so deleting a whole Python file is a separate path: allowed inside the session's own checkout, refused in any other checkout.
@@ -496,7 +496,7 @@ Deleting non-Python files there, or a `.py` path that does not exist, is not che
 - `git -C` with a quoted folder path that contains spaces is not parsed, so that deletion is not checked.
 - A guard failure other than a refusal prints `WARNING: serena_edit_guard check failed (...) — guard bypassed` and lets the call through.
 
-Delivered by pull request [#4513](https://github.com/the-cloud-clockwork/agentihooks/pull/4513) (red Proofs runs 39128039655 and 39129889642, green 39128167690) and extended to the session's worktrees in other repositories by [#5242](https://github.com/the-cloud-clockwork/agentihooks/pull/5242) (red 39413853717, green 39416415454). Tests: `tests/context/test_serena_edit_guard.py`.
+The edit guard was delivered by pull request [#445](https://github.com/the-cloud-clockwork/agentihooks/pull/445). Whole-file deletion was added by [#4513](https://github.com/the-cloud-clockwork/agentihooks/pull/4513) (red Proofs runs 39128039655 and 39129889642, green 39128167690) and extended to the session's worktrees in other repositories by [#5242](https://github.com/the-cloud-clockwork/agentihooks/pull/5242) (red 39413853717, green 39416415454). Tests: `tests/context/test_serena_edit_guard.py`.
 
 ---
 
