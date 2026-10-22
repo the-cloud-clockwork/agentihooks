@@ -403,10 +403,13 @@ class HiveLaunch:
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
         return self.spawn(request)
 
-    def expire(self, request: SpawnRequest) -> None:
+    def expire(self, request: SpawnRequest) -> bool | None:
+        """False when the hive acknowledged the order, which leaves its launch running for a later collect."""
         order = self.orders_for(request.task["id"])
         previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
         if previous and previous.name == request.name and previous.state not in ("ended", "finished"):
+            if self.orders.ack(order) is not None:
+                return False
             self.retire(order, previous)
 
     def reserve_room(self, request: SpawnRequest, selected: Selection) -> str:
@@ -507,7 +510,9 @@ class HiveLaunch:
         except SwarmError:
             self.reap_execution(order)
             raise
-        if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(agent.execution_id):
+        if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(
+            agent.execution_id, f"claude:{agent.account}"
+        ):
             self.reap(order, agent)
             self.end(agent, LATE)
             self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)

@@ -160,6 +160,16 @@ def test_a_launch_admits_one_server_binds_its_thread_and_opens_once(store, serve
     assert all(connection.closed for connection in server.connections)
 
 
+def test_local_codex_app_server_admission_records_the_root_hive(store, server, clock, root, tmp_path, monkeypatch):
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation-root")
+    spec = launch_spec(store, server, tmp_path)
+    admitted = supervisor.admit(store, spec, deps(server, clock, root))
+    assert admitted.hive == "workstation-root"
+    assert store.execution(SLUG, admitted.execution_id).hive == "workstation-root"
+
+
 def test_no_opening_prompt_sends_no_turn(store, server, clock, root, tmp_path):
     started = supervisor.launch(store, launch_spec(store, server, tmp_path, opening=""), deps(server, clock, root))
     assert "turn/start" not in server.methods()

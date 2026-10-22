@@ -905,6 +905,50 @@ def test_live_acknowledgement_after_its_reservation_expired_ends_the_execution_a
     ]
 
 
+def test_a_pass_longer_than_the_reservation_still_lands_a_launch_the_hive_acknowledged_in_time(setup):
+    from scripts.swarm.keyspace import ROOT
+    from scripts.swarm.tick import ACK_LATER
+
+    request, order, _ = live_order(setup)
+    late = replace(order, expires_at=0)
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(late.__dict__))
+    setup.store.redis.delete(f"{ROOT}:launch-slot:{order.execution_id}")
+    outcome = setup.launcher.collect(replace(request, task={**request.task, ACK_LATER: True}))
+    assert outcome.ok
+    assert outcome.value.execution.state == "working"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "working"
+    assert setup.launcher.orders_for("task") == late
+    assert setup.launcher.slots.counts() == {"claude:account": 1}
+    assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
+
+
+def test_expiring_a_launch_the_hive_acknowledged_leaves_it_running(setup):
+    from scripts.swarm.tick import ACK_LATER
+
+    request, order, _ = live_order(setup)
+    assert setup.launcher.expire(replace(request, task={**request.task, ACK_LATER: True})) is False
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
+    assert setup.launcher.orders_for("task") == order
+    assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
+
+
+def test_an_acknowledgement_records_an_expired_slot_live_only_for_a_named_slot_and_never_after_a_release(setup):
+    slots = setup.launcher.slots
+    assert not slots.acknowledge("unnamed")
+    assert slots.counts() == {}
+    from scripts.swarm.keyspace import ROOT
+
+    assert slots.acknowledge("expired", "claude:account")
+    setup.store.redis.pexpire(f"{ROOT}:launch-slot:expired", 1000)
+    assert slots.acknowledge("expired", "claude:account")
+    assert 0 < setup.store.redis.pttl(f"{ROOT}:launch-slot:expired") <= 1000
+    assert slots.counts() == {"claude:account": 1}
+    assert slots.reserve("claude:account", "released", 6, 300000)
+    assert slots.release("released")
+    assert not slots.acknowledge("released", "claude:account")
+    assert slots.counts() == {"claude:account": 1}
+
+
 def test_ambiguous_receipt_keeps_the_reservation_and_order(setup):
     from scripts.hive.orders import Ack
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -1452,7 +1496,8 @@ def test_a_controller_expire_retires_the_order_under_the_held_lease(setup, monke
     monkeypatch.setattr(controller.lease, "kept", keep)
     fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
     task = {"id": "task", "seat": "eng-1@fixture", ACK_LATER: True}
-    assert fenced.expire(setup.config, "eng", "engineer", task) is None
+    routed.hive_launch.expire.return_value = False
+    assert fenced.expire(setup.config, "eng", "engineer", task) is False
     routed.hive_launch.expire.assert_called_once_with(
         SpawnRequest(setup.config, "eng", "engineer", {**task, "controller_epoch": setup.held.epoch})
     )
@@ -1464,6 +1509,7 @@ def test_expire_reaps_and_ends_the_live_execution_of_its_own_claimant(setup, sta
     request, order, _ = live_order(setup)
     agent = setup.store.execution_registry.get("fixture", order.execution_id)
     setup.store.execution_registry.update("fixture", replace(agent, state=state))
+    setup.store.redis.delete(setup.launcher.orders.receipt(order))
     assert setup.launcher.expire(request) is None
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
     assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id)) == {
@@ -1479,6 +1525,7 @@ def test_expire_reaps_and_ends_the_live_execution_of_its_own_claimant(setup, sta
 @pytest.mark.parametrize("case", ["ended", "finished", "other claimant", "no order"])
 def test_expire_leaves_an_ended_foreign_or_missing_order_alone(setup, case):
     request, order, _ = live_order(setup)
+    setup.store.redis.delete(setup.launcher.orders.receipt(order))
     agent = setup.store.execution_registry.get("fixture", order.execution_id)
     if case in ("ended", "finished"):
         setup.store.execution_registry.update("fixture", replace(agent, state=case))
