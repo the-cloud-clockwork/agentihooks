@@ -20,7 +20,7 @@ class Snapshot:
     graph: dict
     fix: str
     claimed: Callable[[str], bool]
-    admits: Callable[[dict], bool] = lambda task: True
+    admits: Callable[[dict], bool]
 
 
 def ready(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> bool:

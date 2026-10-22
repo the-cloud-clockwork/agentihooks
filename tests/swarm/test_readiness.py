@@ -23,10 +23,10 @@ def doc(tasks, **extra):
     return {"overview": "o", "tasks": list(tasks), "phases": phases, **extra}
 
 
-def snapshot(found, claimed=(), fix="", **admits):
+def snapshot(found, claimed=(), fix="", admits=lambda task: True):
     rows = {t["id"]: t for t in found["tasks"]}
     graph = hierarchy.project(found)[0]
-    return readiness.Snapshot(SLUG, rows, found, graph, fix, lambda task_id: task_id in claimed, **admits)
+    return readiness.Snapshot(SLUG, rows, found, graph, fix, lambda task_id: task_id in claimed, admits)
 
 
 class Clock:
