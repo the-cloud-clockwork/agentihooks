@@ -245,6 +245,10 @@ def test_a_view_hands_its_freed_heap_back_once_per_generation(tmp_path, monkeypa
     assert json.loads(repo.encoded_view("ledger", json.dumps))["title"] == "Store"
     repo.encoded_view("ledger", json.dumps)
     assert released == [True]
+    repo.apply_ops("ledger", ops=[chat(1)])
+    repo.encoded_view("ledger", json.dumps)
+    repo.encoded_view("ledger", json.dumps)
+    assert released == [True, True]
 
 
 def test_a_reader_of_an_older_revision_keeps_the_newer_copy_for_the_next_writer(tmp_path, monkeypatch):
