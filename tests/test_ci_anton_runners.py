@@ -64,6 +64,7 @@ MOVED = {
     ("swarm-image.yml", "publish"): STANDARD,
     ("swarm-node-base.yml", "copy"): STANDARD,
     ("swarm-node-image.yml", "image"): STANDARD,
+    ("swarm-node-image.yml", "hive"): STANDARD,
     ("swarm-node-smoke.yml", "worker-health"): QUEUED,
     ("swarm-node-smoke.yml", "worker-image"): QUEUED,
     ("swarm-node-smoke.yml", "worker-image-compare"): LIGHT,
