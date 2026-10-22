@@ -258,7 +258,9 @@ def hive_only(store, monkeypatch, excluded="eng", herdr=True, deployment="local"
     if excluded:
         registry.update(store.redis, "ws", [f"excluded={excluded}"])
     monkeypatch.setattr(commands, "hive_id", lambda: "ws")
-    monkeypatch.setattr(herdr_host, "server_running", lambda environ: herdr)
+    monkeypatch.setattr(
+        herdr_host, "server_running", lambda environ: herdr and environ["AGENTIHOOKS_DEPLOYMENT"] == deployment
+    )
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", deployment)
 
 
