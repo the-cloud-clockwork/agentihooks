@@ -3219,6 +3219,90 @@ writers above or `task set`.
 - **No label appears.** Check the task's `state`: a `done` task never shows one. Otherwise set the field with
   `task set`, never by writing the ledger database.
 
+## Agent status comments
+
+Every agent, the master and the tick's own `swarm` author keep one status comment per ledger item. A new status
+from the same author either amends that comment in place or posts a new comment at the end of the thread. It amends
+only when the author's latest status comment is still the last live entry in the thread. Any later comment, by any
+author, makes the new status a new comment at the end, so the newest status always sits below everything written
+before it.
+
+### Which writes are status comments
+
+| Write | Thread entry |
+|---|---|
+| `ledger comment ITEM TEXT`, with or without `--image` | Status comment: amends or posts by the rule below |
+| `--status T` on `phase`, `followup` and `scope` | Status comment: `T` follows the same rule as `comment` |
+| A comment carrying an outcome, `done` or `blocked` | Always its own entry; no later status amends it |
+| An agent's answer to the operator, an entry with `to` | Always its own entry; it never amends or is amended |
+| The operator's comments on the page | Never amended by any agent |
+
+### The amend rule
+
+For a new status from author A on one item, the ledger reads the thread without deleted entries and takes A's
+latest entry that is not an answer to the operator:
+
+| Thread state | Result |
+|---|---|
+| A has no status comment on the item | New comment at the end |
+| A's latest status comment is the last live entry | Amended in place with the new text; the entry gains `edited_at` and the page shows `edited` |
+| Any live entry follows it: the master, another agent, the operator, the `swarm` tick, or A's own answer to the operator | New comment at the end; the earlier comment keeps its text |
+| A's latest entry carries an outcome | New comment at the end |
+| Only deleted entries follow it | Amended in place, as if the deleted entries were absent |
+
+An amend with the same text and attachments changes nothing. A replayed write with an entry id already in the
+thread is not added twice. Each write records `comment added` or `comment edited` in the ledger events and marks
+the author seen.
+
+### Example
+
+A task's thread holds a claim cap block from `swarm`, then a comment from the master that reopens the task:
+
+```text
+swarm    The swarm blocked this task before a fourth agent life: claimed 3 times, cap 3. ...
+master   Reopened by the master: ...
+```
+
+When the tick blocks the task again, its new notice posts at the end:
+
+```text
+swarm    The swarm blocked this task before a fourth agent life: claimed 3 times, cap 3. ...
+master   Reopened by the master: ...
+swarm    The swarm blocked this task before a fourth agent life: claimed 3 times, cap 3. ...
+```
+
+Before [pull request 4332](https://github.com/the-cloud-clockwork/agentihooks/pull/4332), only a later comment by
+the operator started a new entry. The second block notice amended the first one above the master's comment, so the
+thread looked unchanged and the master read the task as blocked with no reason. On 17 October two block notices
+were hidden that way; the rule above brings that count to zero.
+
+### Checking a thread
+
+Print one item's thread in order, with who wrote each entry and whether it was amended:
+
+```bash
+agentihooks ledger --slug SLUG show \
+  | jq -r '.tasks[] | select(.id == "t325") | .comments[]
+           | [.by, (if .edited_at then "edited" else "" end), (.outcome // ""), .text] | @tsv'
+```
+
+Use `.phases[]` or `.followups[]` for other items. The last row is the newest status. A row marked `edited` was
+amended in place and was the last live entry when it changed.
+
+### Troubleshooting
+
+- **A status appears as a new comment instead of amending the earlier one.** Someone wrote in the thread after
+  it, or the earlier entry carries an outcome. This is expected; the earlier comment keeps its text.
+- **An earlier comment's text changed after later comments were added.** Check its `edited_at` against the `at` of
+  the entries below it. An edit after them comes from an explicit `ledger edit` by its author or the master, never
+  from a status write.
+- **Several status comments from one author pile up.** Each one followed a later entry by someone else. Delete
+  stale ones with `ledger delete ITEM ENTRY`.
+
+The rule lives in the ledger's comment handling and is pinned by its tests for later comments by the master,
+another agent and the author's own answer, for an amend when the comment ends the thread, and for a deleted later
+comment. The swarm ledger skill states the same rule for agents.
+
 ## Ledger artifacts
 
 An artifact is a file published on the ledger for the operator to review: markdown, JSON, SVG, or a PNG, JPEG,
