@@ -7,6 +7,7 @@ import pytest
 from scripts.events import memory
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
+from scripts.hive import execution_events
 from scripts.hub import lifecycle, registry, runner
 from scripts.routing import reservation
 from scripts.swarm.store import AgentRecord, RedisStore
@@ -252,3 +253,28 @@ def test_a_new_task_claim_generation_is_never_reopened_by_the_old_exit(rig):
     assert rig.ledger.writes == []
     assert rig.row["state"] == "claimed"
     assert rig.row["claim_generation"] == 8
+
+
+def test_the_hive_publisher_drives_the_lifecycle_reactor_with_the_admitted_identity(rig):
+    started = replace(rig.event, id="started", type="execution.started")
+    execution_events.started(rig.bus, started)
+    hub = runner.HubRunner(rig.bus, registry.Registry([rig.react.reactor()]), "hub")
+    report = {
+        "observed_at": 200,
+        "executions": {"execution": {"slug": "rig", "name": "engineer", "generation": 3, "pane": {"state": "exited"}}},
+    }
+    execution_events.publish(rig.bus, "hive", report)
+    assert hub.run_once() == {"lifecycle": ["handled"]}
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
+    execution_events.publish(rig.bus, "hive", report)
+    assert hub.run_once() == {"lifecycle": []}
+    assert len(rig.ledger.writes) == 1
+    hub.stop()
+
+
+def test_legacy_hive_exit_events_remain_owned_by_the_legacy_tick(rig):
+    event = replace(rig.event, data={"name": "engineer", "hive": "hive", "generation": 3})
+    rig.react.handle(event)
+    assert rig.ledger.writes == rig.returned == []
+    assert rig.store.execution_registry.get("rig", "execution") == rig.agent

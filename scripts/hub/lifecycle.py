@@ -37,7 +37,9 @@ class Lifecycle:
         if event.type != "execution.exited" or event.entity != "execution":
             return
         claims = self.bus.state("spoke-work")
-        key = event.data["claim_key"]
+        key = event.data.get("claim_key")
+        if not key:
+            return
         entry = claims.get(key)
         if entry is None:
             return
