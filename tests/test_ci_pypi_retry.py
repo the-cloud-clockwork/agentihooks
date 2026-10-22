@@ -4,7 +4,9 @@ import socket
 import subprocess
 import sys
 import threading
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.metadata import distribution
 from pathlib import Path
 
 import pytest
@@ -226,3 +228,140 @@ def test_every_unit_dependency_install_runs_uv_through_the_retry(job):
     run = _install_steps()[job]["run"]
     install = next(line for line in run.splitlines() if "uv pip install" in line)
     assert install.strip().startswith('bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install')
+
+
+def _mutation_installs():
+    installs = {}
+    for workflow, names in (
+        ("test.yml", ("mutation-plan", "mutation-stats", "mutation")),
+        ("mutation-preflight.yml", None),
+    ):
+        jobs = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"]
+        for name in names or jobs:
+            for step in jobs[name].get("steps", []):
+                for line in step.get("run", "").splitlines():
+                    if "pip install" in line:
+                        installs.setdefault((workflow, name, step["name"]), []).append(line.strip())
+    return installs
+
+
+def test_every_mutation_dependency_install_runs_uv_through_the_retry():
+    installs = _mutation_installs()
+    assert {key[:2] for key in installs} >= {
+        ("test.yml", "mutation-plan"),
+        ("test.yml", "mutation-stats"),
+        ("test.yml", "mutation"),
+        ("mutation-preflight.yml", "plan"),
+        ("mutation-preflight.yml", "touched-tests"),
+        ("mutation-preflight.yml", "stats"),
+        ("mutation-preflight.yml", "refine"),
+        ("mutation-preflight.yml", "mutation-shard"),
+    }
+    for (workflow, job, _), lines in installs.items():
+        for line in lines:
+            assert line.startswith(
+                'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system '
+            ), (
+                workflow,
+                job,
+                line,
+            )
+
+
+def test_the_test_planner_installs_its_pinned_pyyaml_with_uv_through_the_retry():
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["test-count"]["steps"]
+    (plan,) = [step for step in steps if step.get("name") == "Plan the tests whose inputs did not change"]
+    assert [line.strip() for line in plan["run"].splitlines() if "pip install" in line] == [
+        'bash .github/scripts/pypi-retry.sh "Install the test planner dependencies" -- '
+        '"$HOME/venv/bin/uv" pip install --python "$PYTHON_PATH" --quiet PyYAML==6.0.3'
+    ]
+    assert 'cat "$RUNNER_TEMP/plan.log"' in next(s for s in steps if s.get("name") == "Wait for the test plan")["run"]
+
+
+class _FlakyIndex(BaseHTTPRequestHandler):
+    failures = 0
+    wheel = None
+
+    def do_GET(self):
+        if type(self).failures:
+            type(self).failures -= 1
+            self.send_response(502)
+            self.end_headers()
+            return
+        name = self.wheel.name
+        if self.path.rstrip("/") == "/simple/pyyaml":
+            body, kind = f'<a href="/files/{name}">{name}</a>'.encode(), "text/html"
+        elif self.path == f"/files/{name}":
+            body, kind = self.wheel.read_bytes(), "application/octet-stream"
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command == "GET":
+            self.wfile.write(body)
+
+    do_HEAD = do_GET
+
+    def log_message(self, *args):
+        pass
+
+
+def _pyyaml_wheel(directory):
+    package = distribution("PyYAML")
+    tag = next(
+        line.removeprefix("Tag: ") for line in package.read_text("WHEEL").splitlines() if line.startswith("Tag: ")
+    )
+    wheel = directory / f"pyyaml-{package.version}-{tag}.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for entry in package.files:
+            if ".." not in entry.parts:
+                archive.write(package.locate_file(entry), str(entry))
+    return wheel, package.version
+
+
+def test_a_real_uv_install_retries_a_transient_index_failure_then_installs_the_package(tmp_path):
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    wheel, version = _pyyaml_wheel(wheels)
+    _FlakyIndex.wheel, _FlakyIndex.failures = wheel, 2
+    venv = tmp_path / "venv"
+    subprocess.run([_uv(), "venv", "--python", sys.executable, str(venv)], check=True, capture_output=True, timeout=60)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _FlakyIndex)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        result, sleeps, summary = _run(
+            tmp_path,
+            _bin(tmp_path),
+            [
+                _uv(),
+                "pip",
+                "install",
+                "--python",
+                str(venv / "bin/python"),
+                "--no-cache",
+                "--default-index",
+                f"http://127.0.0.1:{server.server_port}/simple",
+                f"PyYAML=={version}",
+            ],
+            UV_HTTP_RETRIES="0",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sleeps == [5, 10]
+    assert result.stderr.count("::warning title=Python package index retry::") == 2
+    assert LABEL not in result.stderr
+    assert summary == ""
+    imported = subprocess.run(
+        [str(venv / "bin/python"), "-I", "-c", "import yaml; print(yaml.__version__)"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert imported.stdout.strip() == version, imported.stdout + imported.stderr
