@@ -2261,6 +2261,128 @@ Red checks, a closed pull request or a queue ejection reopen a task of any kind 
 
 `tests/swarm/test_ready.py` pins this behavior: `test_ready_records_the_pull_request_and_head_and_ends_the_agent` runs for code, ci, tune, troubleshoot and ops tasks; `test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof` covers the reopen; `test_a_merged_pull_request_of_another_kind_waits_while_its_owner_is_live` and `test_a_merged_pull_request_of_another_kind_keeps_its_record_when_the_claim_release_is_refused` cover the two cases where the task is left unchanged. The tests failed first on [run 39126290206](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39126290206) (seven expected failures) and passed on [run 39126356416](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39126356416).
 
+### Recovering a released task after red checks
+
+An engineer can finish review and release its seat with `swarm ready` while
+checks run. The task stays `pr`, with `awaiting` set to `merge`; the ready
+record and Handoff v2 document give the merge pass responsibility for the
+remaining checks and queue. A normal `wait --on checks` keeps the engineer
+responsible and wakes that engineer when checks resolve. Releasing with
+`ready` lets a successor take over when a repair is needed.
+
+#### Release and repair example
+
+After both reviews close, publish the final change, record its pull request
+and take it out of draft. From the task worktree, use the handoff skill to
+write a Handoff v2 document naming what was delivered, the evidence, and what
+a successor should inspect if checks fail. Replace the example values below
+with the recorded swarm, agent, pull request and handoff document:
+
+```bash
+agentihooks swarm example pr https://github.com/o/r/pull/812
+gh pr ready https://github.com/o/r/pull/812
+agentihooks ledger --slug example --as engineer@ab12cd-0042 leave
+agentihooks swarm example ready <handoff-document>
+```
+
+`ready` requires delegate or full autonomy, a clean worktree and a worktree
+head matching the open pull request. See [ready on a task of any kind](#ready-on-a-task-of-any-kind)
+for refusals and the different proof requirements after a merge. An accepted
+release ends the engineer's session; the engineer stops working on the task.
+
+When the current head's checks resolve red, the ready merge pass reopens the
+task for repair once no live owner holds it. It sets `state` to `open`, clears
+`claimed_by`, sets `awaiting` to `fix` and comments on the task. Its action
+line identifies the reason, for example:
+
+```text
+task t31 reopened, https://github.com/o/r/pull/812 has red checks
+```
+
+The pull request, delivery branch and stored handoff remain available, and
+the worktree stays in place for repair. The tick offers repair work ahead of
+fresh work of the same rank. A successor reads the supplied handoff and task
+comments, checks the existing pull request and continues its recorded branch:
+
+```bash
+agentihooks ledger --slug example show
+gh pr checks https://github.com/o/r/pull/812
+agentihooks swarm example merge state https://github.com/o/r/pull/812
+agentihooks swarm example prepare
+cd <returned-worktree>
+# Fix the reported failure, then publish the explicit changed files.
+agentihooks swarm example publish --message "Fix the failed check" -- <files>
+```
+
+Use [continuation publication](#publishing-after-a-successor-prepares-a-branch)
+to retain the existing delivery branch and pull request. If GitHub still has
+it queued, dequeue it before pushing a repair. After review and checks meet
+the normal ship requirements, record the existing pull request with `swarm
+pr`, then release with a fresh handoff or queue the green head using `swarm
+merge queue`. A new claimant does not require a replacement pull request.
+
+#### Recovery rules and configuration
+
+The ready merge pass handles red checks without waiting for the watchdog's
+red limit. Its checks stage uses [the same head and resolution rules as a checks wait](#when-a-checks-wait-ends).
+Unavailable GitHub reads and unresolved checks hold the ready record for a
+later tick. Closure without merge, conflicts and queue exits can also need
+repair; green queue exits can be retried automatically. See [ready merge pass
+queue exits](#ready-merge-pass-queue-exits) for those outcomes.
+
+The [stall watchdog](#stall-watchdog) also inspects pull requests on claimed
+or `pr` tasks, including tasks released during checks. It alerts after the
+configured limit and reopens only when its `stall` gate is `deny`. Its default
+`log only` mode preserves task and owner state. That switch controls watchdog
+mutations; it does not disable the ready merge pass's red check recovery.
+A task awaiting a ready merge is exempt from the watchdog's green and missing
+owner cases, so its released seat alone does not make it an orphan.
+
+The operator or master can inspect the modes and configure the watchdog:
+
+```bash
+agentihooks swarm example status
+agentihooks swarm example set 'stall-gate=log only'
+# After checking the logged actions against reality:
+agentihooks swarm example set stall-gate=deny
+```
+
+To change the red stall limit, configure the environment of the process that
+runs the swarm tick, for example `AGENTIHOOKS_STALL_RED_MINUTES=20`. This takes
+a positive whole number of minutes; invalid values keep the 15 minute
+default. The other limits and dependency holds are listed under [Stall
+watchdog](#stall-watchdog). These settings do not change when the ready merge
+pass reacts to resolved red checks.
+
+A fresh claimant gets the full applicable watchdog limit: red, green and
+unmergeable clocks are bounded by its current session start, the latest push
+and red result, and the tick's last wake of the owner. Time before that claim
+cannot immediately exhaust its allowance. Queued red checks do not trigger
+the red case, and draft conflicts or conflicts with a live working owner
+hold the unmergeable case. Outage time is excluded.
+
+#### Troubleshooting released work
+
+| Observation | Check and action |
+|---|---|
+| Released task shows `MERGE` while checks run | Expected. Read the current head's required checks; an unresolved result holds the merge pass. |
+| Red checks, but no successor yet | Read the task comment, current claimant and swarm capacity. The merge pass waits for an existing owner to end and preserves a changed claim. |
+| Task reopens with `FIX` | Read the handoff and failure reason, prepare the continuation and repair the existing pull request. |
+| Watchdog alerts without reopening | Inspect `stall-gate`; `log only` is the default and `skip` also preserves the task. Alerts remain active. |
+| Newly claimed task is stopped immediately for an old red result | Compare the current claim and push with the recorded watchdog reason; verify the running tick includes the claim timing correction in [pull request 3103](https://github.com/the-cloud-clockwork/agentihooks/pull/3103). |
+
+#### Observed recovery time
+
+The read only [Doctor measurement](https://github.com/the-cloud-clockwork/agentihooks/issues/4562)
+compared equal 24 hour windows around the watchdog's application. For released
+tasks needing pull request action, excluding dependency holds and drafts,
+median unowned time fell from 16 to 3 minutes, waits over 20 minutes from 22
+to 5, and waits over 90 minutes from one to zero. Those are cohort results,
+not a recovery deadline: dependency holds and drafts changed the overall tail.
+In equal windows around the claim timing correction, wrongful stops of fresh
+claimants fell from 21 to zero. The source task records the measuring commands,
+window boundaries and outputs.
+
 ### Ready merge pass queue exits
 
 After `swarm ready` releases a seat, the tick's merge pass queues the pull request once its checks pass and then waits on the merge queue the way `wait --on merge` does. Each tick it reads the pull request again; when the pull request reads open and outside the queue it reads it a second time before judging, so a queue that is still settling is not mistaken for an exit. It is not judged while its checks are still running, nor, for five minutes after the pass queued it, while the pass has never seen it inside the queue. A pull request seen back in the queue, for example after the [Queue retry workflow](../reference/delivery-tiers.md#lost-runner-requeue) put it back for a lost runner, keeps the task waiting.

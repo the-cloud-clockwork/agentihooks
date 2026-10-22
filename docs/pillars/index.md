@@ -10,6 +10,8 @@ AgentiHooks is organised around four pillars: Identity, Guardrails, Context Inte
 
 The [swarm guide](swarm.md) covers fleet task execution, including [ready on a task of any kind](swarm.md#ready-on-a-task-of-any-kind), [ready handoffs for tasks split across pull requests](swarm.md#ready-handoffs-for-split-tasks), [labelled halves for tasks without a plan](swarm.md#labelled-halves-for-tasks-without-a-plan) and [what the ready merge pass does when a pull request leaves the merge queue](swarm.md#ready-merge-pass-queue-exits).
 
+See [recovering a released task after red checks](swarm.md#recovering-a-released-task-after-red-checks) for the handoff and branch continuation, configuration, owner safeguards and measured recovery time.
+
 See [proof loop health findings](swarm.md#proof-loop-health-findings) for rerun exclusions, [pull request head changes](swarm.md#pull-request-head-changes), review counts, cap configuration and verdict examples.
 
 See [stalled activity findings](swarm.md#stalled-activity-findings) for threshold configuration, wrapper loss recovery and investigation of active agents reported as stalled.
