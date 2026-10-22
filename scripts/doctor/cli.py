@@ -59,6 +59,7 @@ from scripts.doctor import (
     registry,
     spawn_read,
     spawns,
+    traces_read,
 )
 from scripts.doctor.priming import SUFFIX, TEMPLATE, cancel_master_items, doctor_slug
 from scripts.inbox.store import InboxError, InboxStore
@@ -297,7 +298,7 @@ def cmd_measure(store, args):
     if "/" not in args.finding:
         print(_class_read(store, slug, doctor, now, args.finding).line(args.finding))
         return
-    found, failed = _collect(detect.readers(store, swarm.LedgerClient(), slug, now))
+    found, failed = _collect(_measured_readers(store, slug, now))
     live = {name for a in store.agents(slug) if a.state == registry.ACTIVE for name in (a.name, a.seat) if name}
     print(f"{args.finding} {measure.exact(args.finding, found, failed, loop.seen(store, doctor), live)}")
 
@@ -309,8 +310,12 @@ def _collect(readers):
     return found, failed
 
 
+def _measured_readers(store, slug, now):
+    return detect.readers(store, swarm.LedgerClient(), slug, now, telemetry=traces_read.measured_client)
+
+
 def _class_read(store, slug, doctor, now, name):
-    readers = detect.readers(store, swarm.LedgerClient(), slug, now)
+    readers = _measured_readers(store, slug, now)
     if name in measure.LAG_CLASSES:
         found, failed = detect.collect({"trace": readers["trace"]})
         if failed:

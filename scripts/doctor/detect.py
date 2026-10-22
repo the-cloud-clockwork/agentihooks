@@ -50,10 +50,11 @@ def _inbox(store, mail, slug, now_ms, env, items):
     return inbox.findings(items, now_ms, wake.window_ms(env), read.inbox_receivers(store, mail, slug, items))
 
 
-def _traces(store, tasks, slug, now_ms, env):
+def _traces(store, tasks, slug, now_ms, env, trace_client=None):
     started = time.monotonic()
     limits = traces.Limits.from_env(env)
-    record = traces_read.record(slug, tasks, [asdict(a) for a in store.agents(slug)], now_ms, traces_read.client(env))
+    get = (trace_client or traces_read.client)(env)
+    record = traces_read.record(slug, tasks, [asdict(a) for a in store.agents(slug)], now_ms, get)
     record["waits"], record["waits_unread"] = traces_read.waits(
         lambda name: idle.wait_history(store.redis, slug, name),
         traces.gap_agents(record, limits),
@@ -90,6 +91,7 @@ def _ci(store, tasks, now_ms):
 
 
 def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetry=True):
+    """`telemetry` is False to skip the trace reader, or the client factory it reads through instead of the default."""
     env = os.environ if environ is None else environ
     mail = InboxStore(store.redis)
     items = _once(lambda: read.inbox_items(mail, slug))
@@ -111,7 +113,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         "context overrun": lambda: _overruns(store, slug),
         "ci": lambda: _ci(store, tasks(), now_ms),
         "dev workflow": lambda: ci.red_dev_workflows(ci_read.dev_pushes(store.config(slug).repo)),
-        "trace": lambda: _traces(store, tasks(), slug, now_ms, env),
+        "trace": lambda: _traces(store, tasks(), slug, now_ms, env, None if telemetry is True else telemetry),
     }
     return found if telemetry else {name: read for name, read in found.items() if name != "trace"}
 
