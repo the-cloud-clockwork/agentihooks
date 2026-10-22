@@ -43,12 +43,12 @@ class Api:
 
 
 def test_a_run_whose_only_red_jobs_are_the_watcher_and_the_gate_is_a_drop():
-    assert drops.classify(watcher_only(3), lambda job_id: "") == "drop"
+    assert drops.classify(watcher_only(3), lambda job_id: []) == "drop"
 
 
 def test_a_run_where_the_watcher_reported_a_rebuild_is_not_a_drop():
     seen = []
-    assert drops.classify(watcher_only(3), lambda job_id: seen.append(job_id) or REBUILT) == "rebuild"
+    assert drops.classify(watcher_only(3), lambda job_id: seen.append(job_id) or [REBUILT]) == "rebuild"
     assert seen == [3]
 
 
@@ -66,7 +66,7 @@ def test_runs_with_other_red_jobs_or_without_both_are_not_counted(jobs):
 
 
 def test_a_job_with_no_conclusion_counts_as_red():
-    assert drops.classify([*watcher_only(3), job(6, "lint", None)], lambda job_id: "") is None
+    assert drops.classify([*watcher_only(3), job(6, "lint", None)], lambda job_id: []) is None
 
 
 def test_count_reads_each_failed_merge_group_run_of_the_day_and_splits_drops_from_rebuilds():

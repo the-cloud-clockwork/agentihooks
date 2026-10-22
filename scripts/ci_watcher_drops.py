@@ -11,18 +11,18 @@ REBUILT = "queue group is no longer current"
 FAILED_RUNS = '.workflow_runs[] | select(.conclusion != "success") | .id'
 
 
-def classify(jobs: list[dict], notes: Callable[[int], str]) -> str | None:
+def classify(jobs: list[dict], notes: Callable[[int], list[str]]) -> str | None:
     red = {job["name"]: job for job in jobs if job.get("conclusion") not in ("success", "skipped")}
     if set(red) != {WATCHER, GATE}:
         return None
-    return "rebuild" if REBUILT in notes(red[WATCHER]["id"]) else "drop"
+    return "rebuild" if any(REBUILT in note for note in notes(red[WATCHER]["id"])) else "drop"
 
 
 def count(repo: str, day: str, api: Callable[..., str]) -> dict:
     found = {"day": day, "drops": [], "rebuilds": []}
 
-    def notes(job_id: int) -> str:
-        return "\n".join(note["message"] for note in json.loads(api(f"repos/{repo}/check-runs/{job_id}/annotations")))
+    def notes(job_id: int) -> list[str]:
+        return [note["message"] for note in json.loads(api(f"repos/{repo}/check-runs/{job_id}/annotations"))]
 
     runs = f"repos/{repo}/actions/workflows/test.yml/runs?event=merge_group&created={day}&per_page=100"
     for run_id in api("--paginate", runs, "--jq", FAILED_RUNS).split():
