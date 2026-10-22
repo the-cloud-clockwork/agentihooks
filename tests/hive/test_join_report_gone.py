@@ -58,17 +58,24 @@ def test_heartbeat_ends_only_reports_of_executions_their_swarm_no_longer_runs(st
 
     kept = running(store, "swarm", "eng-1")
     elsewhere = running(store, "other", "eng-1")
+    loaded = running(store, "other", "eng-2")
     reports = {
         "kept": (kept, "swarm"),
-        "old generation": (replace(kept, execution_id="old", generation=kept.generation + 1), "swarm"),
-        "wrong swarm": (elsewhere, "swarm"),
+        "old generation": (replace(kept, generation=kept.generation + 1, hive="second"), "swarm"),
+        "wrong swarm": (replace(elsewhere, hive="second"), "swarm"),
+        "other kept": (replace(loaded, hive="second"), "other"),
     }
     for label, (agent, slug) in reports.items():
         join_report.start(store.redis, slug, replace(agent, name=label), "session", passing(), {}, 1000)
     monkeypatch.setattr(join_report, "cheap_checks", lambda *args: {})
-    join_report.heartbeat(store.redis, "worker", 1001)
-    after = {report["agent"]: report for report in join_report.listing(store.redis, "worker")}
-    assert after["kept"]["status"] == "running"
-    assert "ended_at" not in after["kept"]
+    after = {}
+    for hive in ("worker", "second"):
+        join_report.heartbeat(store.redis, hive, 1001)
+        after |= {report["agent"]: report for report in join_report.listing(store.redis, hive)}
+    for label in ("kept", "other kept"):
+        assert after[label]["status"] == "running"
+        assert "ended_at" not in after[label]
     for label in ("old generation", "wrong swarm"):
-        assert {name: after[label][name] for name in ("ended_at", *ENDED)} == {"ended_at": 1001, **ENDED}
+        assert after[label]["ended_at"] == 1001
+        assert after[label]["exit_reason"] == "agent gone from the swarm"
+        assert after[label]["status"] == "ended"
