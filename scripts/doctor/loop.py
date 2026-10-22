@@ -103,7 +103,7 @@ def retract(store, doctor, watched, cleared, now_ms):
     mail = InboxStore(store.redis)
     for slug in (watched, doctor):
         store.redis.srem(store.key(doctor, "ci-speed-notified", slug), *gone)
-        mail.send(SENDER, seat_address(slug, MASTER), text)
+        mail.send(SENDER, seat_address(slug, MASTER), text, fyi=True)
     return gone
 
 
@@ -147,7 +147,7 @@ def _hold(mail, watched, doctor, held):
             "during it are labelled."
         )
         for slug in (watched, doctor):
-            mail.send(SENDER, seat_address(slug, MASTER), text)
+            mail.send(SENDER, seat_address(slug, MASTER), text, fyi=True)
         incident["noticed"] = True
 
 
