@@ -1203,6 +1203,15 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     rows, actions = {t["id"]: t for t in doc["tasks"]}, []
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
+        if agent.state == "finished" and task.get("state") == "done":
+            _release_hive_launch(slug, store, agent)
+            store.count_claim(slug, agent.task)
+            store.count_spawn(slug, agent.harness)
+            store.record_launch(
+                slug, agent, "started", after=store.take_restart(slug, agent.task) or _master_set(doc, agent.task)
+            )
+            actions.append(f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement")
+            continue
         try:
             placed = runtime.collect(
                 config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True}
