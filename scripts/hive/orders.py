@@ -249,11 +249,7 @@ class Consumer:
         now = lease.now_ms(self.store)
         started = self.store.redis.hget(self.orders.receipt(order), "started")
         if started is not None:
-            if order.expires_at <= now:
-                return Ack("failed", {}, "expired")
-            if self.orphaned(order):
-                return Ack("failed", {}, RESTARTED)
-            return Ack("failed", {}, "ambiguous") if now - int(started) >= 300000 else None
+            return self.resumed(order, int(started), now)
         if not self.store.redis.hsetnx(self.orders.receipt(order), "started", str(now)):
             return None
         self.store.redis.hset(self.orders.receipt(order), "pod", self.pod)
@@ -285,6 +281,13 @@ class Consumer:
             return self.launch(order, agent, task)
         except SwarmError:
             return Ack("failed", {}, "refused")
+
+    def resumed(self, order: LaunchOrder, started: int, now: int) -> Ack | None:
+        if order.expires_at <= now:
+            return Ack("failed", {}, "expired")
+        if self.orphaned(order):
+            return Ack("failed", {}, RESTARTED)
+        return Ack("failed", {}, "ambiguous") if now - started >= 300000 else None
 
     def orphaned(self, order: LaunchOrder) -> bool:
         owner = self.store.redis.hget(self.orders.receipt(order), "pod")
