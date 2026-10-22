@@ -151,31 +151,41 @@ def test_hive_list_shows_live_headroom_beside_each_hive(redis, monkeypatch, caps
     )
 
 
-POD_LIMITS = {"memory.max": "6606028800\n", "memory.current": "1048576000\n", "cpu.max": "250000 100000\n"}
+POD_LIMITS = {
+    "memory.max": "6606028800\n",
+    "memory.current": "1048576000\n",
+    "memory.stat": "anon 943718400\nfile 104857600\ninactive_file 104857600\n",
+    "cpu.max": "250000 100000\n",
+    "cpu.stat": "usage_usec 9000000\nuser_usec 6000000\n",
+}
+
+
+def limit(cgroup, files):
+    for name, text in files.items():
+        (cgroup / name).write_text(text)
 
 
 def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc, cgroup, monkeypatch):
     monkeypatch.setattr(headroom.os, "cpu_count", lambda: 8)
-    for name, text in POD_LIMITS.items():
-        (cgroup / name).write_text(text)
+    limit(cgroup, POD_LIMITS)
     assert headroom.measure(0, 5, proc) == {
         "cpus": 8,
         "load5": 3.456,
         "available_mb": 8000,
         "total_mb": 15625,
         "pod_total_mb": 6300,
-        "pod_available_mb": 5300,
+        "pod_available_mb": 5400,
         "pod_cpus": 2.5,
+        "pod_cpu_usec": 9_000_000,
         "pending": 0,
         "measured_at": 5,
     }
 
 
 def test_measure_rounds_pod_memory_down_to_whole_megabytes(proc, cgroup):
-    (cgroup / "memory.max").write_text("6606029823\n")
-    (cgroup / "memory.current").write_text("1048576001\n")
+    limit(cgroup, {"memory.max": "6607077375\n", "memory.current": "943718400\n", "memory.stat": "inactive_file 0\n"})
     measured = headroom.measure(0, 5, proc)
-    assert (measured["pod_total_mb"], measured["pod_available_mb"]) == (6300, 5299)
+    assert (measured["pod_total_mb"], measured["pod_available_mb"]) == (6300, 5400)
 
 
 @pytest.mark.parametrize(
@@ -183,16 +193,23 @@ def test_measure_rounds_pod_memory_down_to_whole_megabytes(proc, cgroup):
     [
         ({}, {}),
         ({"memory.max": "max\n", "memory.current": "100\n", "cpu.max": "max 100000\n"}, {}),
-        ({"memory.max": "max\n", "cpu.max": "50000 100000\n"}, {"pod_cpus": 0.5}),
         (
-            {"memory.max": "2097152000\n", "memory.current": "0\n", "cpu.max": "max 100000\n"},
+            {"memory.max": "max\n", "cpu.max": "50000 100000\n", "cpu.stat": "usage_usec 7\n"},
+            {"pod_cpus": 0.5, "pod_cpu_usec": 7},
+        ),
+        (
+            {
+                "memory.max": "2097152000\n",
+                "memory.current": "0\n",
+                "memory.stat": "inactive_file 0\n",
+                "cpu.max": "max 1\n",
+            },
             {"pod_total_mb": 2000, "pod_available_mb": 2000},
         ),
     ],
 )
 def test_measure_keeps_the_node_reading_alone_for_each_unlimited_pod_resource(proc, cgroup, files, pod):
-    for name, text in files.items():
-        (cgroup / name).write_text(text)
+    limit(cgroup, files)
     measured = headroom.measure(0, 5, proc)
     assert {field: value for field, value in measured.items() if field.startswith("pod_")} == pod
     assert measured["total_mb"] == 15625
@@ -203,16 +220,46 @@ def test_measure_keeps_the_node_reading_alone_for_each_unlimited_pod_resource(pr
     [
         {"memory.max": "6606028800\n"},
         {"memory.max": "6606028800\n", "memory.current": "lots\n"},
+        {"memory.max": "6606028800\n", "memory.current": "0\n"},
+        {"memory.max": "6606028800\n", "memory.current": "0\n", "memory.stat": "anon 0\n"},
         {"memory.max": "\n", "memory.current": "0\n"},
         {"cpu.max": "250000\n"},
         {"cpu.max": "many 100000\n"},
+        {"cpu.max": "250000 100000\n"},
+        {"cpu.max": "250000 100000\n", "cpu.stat": "usage_usec\n"},
     ],
 )
 def test_measure_is_none_on_an_unreadable_pod_limit(proc, cgroup, files):
-    for name, text in files.items():
-        (cgroup / name).write_text(text)
+    limit(cgroup, files)
     assert headroom.measure(0, 5, proc) is None
 
 
-def test_measure_reads_the_cgroup_folder_of_its_own_process_by_default():
+@pytest.mark.parametrize(
+    ("previous", "load"),
+    [
+        ({"pod_cpu_usec": 6_000_000, "measured_at": 5_000}, {"pod_load": 0.2}),
+        ({"pod_cpu_usec": 9_000_000, "measured_at": 5_000}, {"pod_load": 0.0}),
+        (None, {}),
+        ({"measured_at": 5_000}, {}),
+        ({"pod_cpu_usec": 9_000_001, "measured_at": 5_000}, {}),
+        ({"pod_cpu_usec": 6_000_000, "measured_at": 20_000}, {}),
+        ({"pod_cpu_usec": 6_000_000, "measured_at": 20_001}, {}),
+    ],
+)
+def test_measure_reads_pod_load_from_cpu_time_since_the_previous_reading(proc, cgroup, previous, load):
+    limit(cgroup, POD_LIMITS)
+    measured = headroom.measure(0, 20_000, proc, previous)
+    assert {field: value for field, value in measured.items() if field == "pod_load"} == load
+
+
+def test_publish_reads_pod_load_against_the_previous_live_reading(redis, proc, cgroup):
+    limit(cgroup, POD_LIMITS)
+    headroom.publish(redis, "box", 5_000, proc)
+    assert "pod_load" not in json.loads(redis.get(headroom.key("box")))
+    (cgroup / "cpu.stat").write_text("usage_usec 12000000\n")
+    headroom.publish(redis, "box", 20_000, proc)
+    assert json.loads(redis.get(headroom.key("box")))["pod_load"] == 0.2
+
+
+def test_the_cgroup_folder_defaults_to_the_cgroup_v2_mount():
     assert DEFAULT_CGROUP == Path("/sys/fs/cgroup")

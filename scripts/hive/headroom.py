@@ -24,12 +24,12 @@ def key(hive: str) -> str:
     return f"{registry.key(hive)}:headroom"
 
 
-def measure(pending: int, now_ms: int, proc: Path = Path("/proc")) -> dict | None:
+def measure(pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dict | None = None) -> dict | None:
     try:
         load5 = float((proc / "loadavg").read_text().split()[1])
         available_mb = host_budget._memory_mb(proc)[0]
         total_mb = _total_mb(proc)
-        pod = _pod(CGROUP)
+        pod = _pod(CGROUP, now_ms, previous)
     except (OSError, ValueError, IndexError, KeyError, StopIteration):
         return None
     return {
@@ -48,17 +48,31 @@ def _total_mb(proc: Path) -> int:
     return int(line.split()[1]) // 1024
 
 
-def _pod(cgroup: Path) -> dict:
+def _pod(cgroup: Path, now_ms: int, previous: dict | None) -> dict:
     pod = {}
     memory = _limit(cgroup / "memory.max")
     if memory is not None:
         total = int(memory[0])
+        used = int((cgroup / "memory.current").read_text()) - _stat(cgroup / "memory.stat")["inactive_file"]
         pod["pod_total_mb"] = total // MIB
-        pod["pod_available_mb"] = (total - int((cgroup / "memory.current").read_text())) // MIB
+        pod["pod_available_mb"] = (total - used) // MIB
     cpu = _limit(cgroup / "cpu.max")
     if cpu is not None:
         pod["pod_cpus"] = int(cpu[0]) / int(cpu[1])
+        pod["pod_cpu_usec"] = _stat(cgroup / "cpu.stat")["usage_usec"]
+        pod.update(_load(pod["pod_cpu_usec"], now_ms, previous))
     return pod
+
+
+def _load(usage: int, now_ms: int, previous: dict | None) -> dict:
+    if previous is None or "pod_cpu_usec" not in previous:
+        return {}
+    used, elapsed_ms = usage - previous["pod_cpu_usec"], now_ms - previous["measured_at"]
+    return {"pod_load": used / (1000 * elapsed_ms)} if used >= 0 and elapsed_ms > 0 else {}
+
+
+def _stat(path: Path) -> dict[str, int]:
+    return {name: int(value) for name, value in (line.split() for line in path.read_text().splitlines())}
 
 
 def _limit(path: Path) -> list[str] | None:
@@ -71,7 +85,7 @@ def _limit(path: Path) -> list[str] | None:
 def publish(redis: "Redis", hive: str, now_ms: int, proc: Path = Path("/proc")) -> None:
     from scripts.hive.orders import Orders
 
-    measured = measure(redis.xlen(Orders(redis).stream(hive)), now_ms, proc)
+    measured = measure(redis.xlen(Orders(redis).stream(hive)), now_ms, proc, read(redis, hive, now_ms))
     if measured is not None:
         redis.set(key(hive), json.dumps(measured), px=STALE_MS)
 

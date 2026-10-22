@@ -292,36 +292,40 @@ def pod(**fields):
 
 
 def test_a_pod_memory_limit_binds_below_the_node_memory():
-    measured = pod(pod_total_mb=6300, pod_available_mb=5300, pod_cpus=4.0)
+    measured = pod(pod_total_mb=6300, pod_available_mb=5300, pod_cpus=4.0, pod_load=0.0)
     assert admission.room(measured) == admission.Room(
         5, admission.RAM, "pod 5300 of 6300 MB available, 700 MB per agent, fits 5 more under the 80 percent line"
     )
     assert admission.room(measured, pending=2) == admission.Room(
         3,
         admission.RAM,
-        "pod 5300 of 6300 MB available, 700 MB per agent with 2 pending launches, fits 3 more under the 80 percent line",
+        "pod 5300 of 6300 MB available, 700 MB per agent with 2 pending launches, "
+        "fits 3 more under the 80 percent line",
     )
 
 
-def test_a_pod_cpu_limit_binds_below_the_node_cpus():
-    measured = pod(pod_total_mb=6300, pod_available_mb=5300, pod_cpus=2.5)
+def test_a_pod_cpu_limit_counts_the_pod_load_below_the_node_cpus():
+    measured = pod(pod_total_mb=6300, pod_available_mb=5300, pod_cpus=2.5, pod_load=0.6)
     assert admission.room(measured, pending=1) == admission.Room(
-        3,
+        1,
         admission.CPU,
-        "pod limit 2.5 CPUs, 0.5 CPU per agent with 1 pending launches, fits 3 more under the 80 percent line",
+        "pod load 0.60 on a 2.5 CPU limit, 0.5 CPU per agent with 1 pending launches, "
+        "fits 1 more under the 80 percent line",
     )
+    assert admission.room({**measured, "pod_load": 0.0}, pending=1).room == 3
 
 
-def test_a_pod_limit_alone_binds_without_the_other_pod_resource():
-    assert admission.room(pod(pod_cpus=1.0)).detail == (
-        "pod limit 1 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line"
+def test_a_pod_limit_binds_alone_and_needs_both_of_its_fields():
+    assert admission.room(pod(pod_cpus=1.0, pod_load=0.0)).detail == (
+        "pod load 0.00 on a 1 CPU limit, 0.5 CPU per agent, fits 1 more under the 80 percent line"
     )
     assert admission.room(pod(pod_total_mb=1400, pod_available_mb=1400)).room == 1
-    assert admission.room(pod(pod_available_mb=0)).room == admission.room(pod()).room == 25
+    for partial in ({"pod_cpus": 1.0}, {"pod_load": 0.0}, {"pod_available_mb": 0}, {"pod_total_mb": 0}):
+        assert admission.room(pod(**partial)).room == admission.room(pod()).room == 25
 
 
 def test_the_node_binds_when_it_is_tighter_than_the_pod():
-    measured = pod(load5=12.0, pod_total_mb=64 * GB, pod_available_mb=64 * GB, pod_cpus=16.0)
+    measured = pod(load5=12.0, pod_total_mb=64 * GB, pod_available_mb=64 * GB, pod_cpus=16.0, pod_load=0.0)
     assert admission.room(measured) == admission.Room(
         1, admission.CPU, "five minute load 12.00 on 16 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line"
     )
