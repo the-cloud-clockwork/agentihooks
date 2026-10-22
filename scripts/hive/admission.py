@@ -18,7 +18,10 @@ AGENT_CPU = 0.5
 AGENT_MB = MEMORY_PER_AGENT_MB
 PENDING_MS = 900_000
 NO_READING = "no fresh headroom reading"
-FIELDS = ("cpus", "load5", "available_mb", "total_mb")
+# cpus/load5 shipped with the first headroom reading; a hive daemon still on an older image before total_mb
+# joined the schema still publishes them, so a reading missing only the RAM fields is read, not refused.
+CORE_FIELDS = ("cpus", "load5")
+RAM_FIELDS = frozenset({"available_mb", "total_mb"})
 QUOTA_MARKS = ("account has room", "account reservation is full")
 
 _RESERVE = """
@@ -55,19 +58,24 @@ class Room:
 
 
 def _host(measured: dict, pending: int) -> list[tuple[int, str, str]]:
-    cpus, load5, available, total = (measured[field] for field in FIELDS)
-    cpu = int((HOST_PERCENT * cpus - 100 * load5) // (100 * AGENT_CPU)) - pending
-    ram = (available * 100 - (100 - HOST_PERCENT) * total) // (100 * AGENT_MB) - pending
+    cpus, load5 = measured["cpus"], measured["load5"]
     line = f"under the {HOST_PERCENT} percent line"
     held = f" with {pending} pending launches" if pending else ""
-    return [
+    cpu = int((HOST_PERCENT * cpus - 100 * load5) // (100 * AGENT_CPU)) - pending
+    limits = [
         (
             cpu,
             CPU,
             f"five minute load {load5:.2f} on {cpus} CPUs, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {line}",
-        ),
-        (ram, RAM, f"{available} of {total} MB available, {AGENT_MB} MB per agent{held}, fits {{}} more {line}"),
+        )
     ]
+    if RAM_FIELDS <= measured.keys():
+        available, total = measured["available_mb"], measured["total_mb"]
+        ram = (available * 100 - (100 - HOST_PERCENT) * total) // (100 * AGENT_MB) - pending
+        limits.append(
+            (ram, RAM, f"{available} of {total} MB available, {AGENT_MB} MB per agent{held}, fits {{}} more {line}")
+        )
+    return limits
 
 
 def _swarm(measured: dict, agents: int) -> list[tuple[int, str, str]]:
@@ -82,9 +90,11 @@ def _swarm(measured: dict, agents: int) -> list[tuple[int, str, str]]:
 
 
 def room(measured: dict | None, swarm_agents: int | None = None, pending: int = 0) -> Room:
-    if measured is None or any(field not in measured for field in FIELDS):
+    if measured is None or any(field not in measured for field in CORE_FIELDS):
         return Room(0, MISSING, NO_READING)
-    limits = _host(measured, pending) + ([] if swarm_agents is None else _swarm(measured, swarm_agents))
+    limits = _host(measured, pending)
+    if swarm_agents is not None and RAM_FIELDS <= measured.keys():
+        limits += _swarm(measured, swarm_agents)
     count, reason, detail = min(limits, key=lambda limit: limit[0])
     count = max(0, count)
     return Room(count, reason, detail.format(count))

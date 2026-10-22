@@ -65,11 +65,22 @@ def test_cpu_room_rounds_down_to_whole_agents():
     assert (found.room, found.reason) == (2, admission.CPU)
 
 
-@pytest.mark.parametrize("measured", [None, {"cpus": 4, "load5": 0.0, "available_mb": 1000}])
-def test_a_machine_without_a_full_reading_refuses_on_missing_telemetry(measured):
+@pytest.mark.parametrize("measured", [None, {"available_mb": 1000, "total_mb": 2000}, {"cpus": 4}, {"load5": 0.0}])
+def test_a_machine_without_cpu_or_load_refuses_on_missing_telemetry(measured):
     found = admission.room(measured)
     assert found == admission.Room(0, admission.MISSING, "no fresh headroom reading")
     assert admission.refusal(found) == "missing telemetry: no fresh headroom reading"
+
+
+def test_a_reading_from_a_hive_not_yet_republishing_total_mb_is_read_on_cpu_alone():
+    found = admission.room({"cpus": 4, "load5": 0.0, "available_mb": 1000})
+    assert (found.room, found.reason) == (6, admission.CPU)
+    assert admission.refusal(found) == ""
+
+
+def test_swarm_share_is_skipped_on_a_reading_without_total_mb():
+    found = admission.room({"cpus": 16, "load5": 0.0, "available_mb": 1000}, swarm_agents=10)
+    assert (found.room, found.reason) == (25, admission.CPU)
 
 
 def test_the_workstation_keeps_swarm_agents_to_forty_percent_of_its_cpu():
