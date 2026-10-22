@@ -652,7 +652,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
 | `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
-| `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
+| `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. When no listed file changed and the selected remote branch already matches `HEAD`, it skips the commit, gate and push; see [publishing unchanged files](#publishing-unchanged-files). Otherwise the result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the published branch and its repository (`branch_repo`, the origin remote without credentials). When the local branch tracks `origin/<task branch>`, retain that recorded task branch even when the local name differs; otherwise use the local branch. The selected branch must exist on origin. See [recording a published upstream branch](#recording-a-published-upstream-branch). |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. Rounds spent before the task records a pull request, on its first pull request and on each later one, count on separate counters ([Review round counters](#review-round-counters)). |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. A code or ci task needs its pull request merged. A task of any other kind with a recorded pull request is refused until that pull request merges, unless its proof gives `--filed` for a fix proposed instead of made; its prompt tells it to release the seat with `ready` instead, or at manual or assist autonomy to wait for the operator's merge. A `plan` task records no pull request. |
@@ -1196,10 +1196,12 @@ resolve a sole task repository, but refuses an ambiguous selection when the
 task declares several repositories. Without a `repositories` list, the swarm
 repository is the default.
 
-Publication stages only the named files, commits if needed, runs the selected
-repository's prepush gate, then pushes. A failure reports a `Next:` command;
+Publication stages only the named files and commits if needed. Unless the
+[unchanged publication check](#publishing-unchanged-files) skips the gate and
+push, it runs the selected repository's prepush gate, then pushes. A failure reports a `Next:` command;
 fix the reported cause and repeat that command. An already committed head is
-graded again without an empty commit. Missing worktrees require `prepare`;
+graded again without an empty commit when the selected remote branch does not
+already match it. Missing worktrees require `prepare`;
 unrelated tracked changes must be dealt with before publication. Tests run in
 CI. A push rejected because the remote changed remains a failure to reconcile;
 branch selection does not resolve concurrent remote updates.
@@ -1210,9 +1212,69 @@ fix ([red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs
 the corrected publication and continuation cases passed afterward
 ([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38725568065)).
 
+### Publishing unchanged files
+
+Repeating `swarm publish` after a successful publication avoids an unnecessary
+push when there is nothing new to deliver. After staging the explicit file
+list, publish checks the selected branch on `origin` with `git ls-remote`.
+If the index has no changes and that remote branch already points at local
+`HEAD`, it makes no commit, runs no prepush gate and makes no push. This repeat
+publication starts no push-triggered mutation preflight.
+
+Run from the task worktree, using repository relative file names after `--`:
+
+```bash
+agentihooks swarm <id> publish \
+  --message "Document publication behavior" -- docs/pillars/swarm.md
+```
+
+Repeat the same command when that file is unchanged. The result includes the
+current `head`, the selected `branch` and this `unchanged` field; it has no
+`gate` field:
+
+```json
+{
+  "unchanged": "no changes in the listed files and the remote branch already points at this head; nothing pushed"
+}
+```
+
+An empty file list also supports publishing a head that is already committed,
+without making an empty commit:
+
+```bash
+agentihooks swarm <id> publish --message "Publish the committed head" --
+```
+
+| Listed files and selected remote branch | Result |
+|---|---|
+| No staged changes; remote equals local `HEAD` | Skip commit, gate and push; return `unchanged`. |
+| No staged changes; remote branch is missing or behind local `HEAD` | Grade the committed head and push it; no new commit or `unchanged` field. |
+| Listed files produce staged changes | Commit, grade and push normally. |
+
+No flag, environment variable or additional configuration enables this check;
+it is automatic. Repository and delivery branch selection still follow the
+[successor publication rules](#publishing-after-a-successor-prepares-a-branch).
+For a task with several repositories, use the appropriate prepared worktree;
+the comparison applies to that repository's selected delivery branch.
+
+A clean file list alone does not mean nothing needs publishing: a local commit
+may still be absent from origin. A different remote head takes the normal gate
+and push path, including when histories diverge; the check does not repair a
+rejected push. A failed remote lookup is a publication failure, not proof that
+the remote matches. Follow its reported `Next:` command after resolving access
+or connectivity. Unrelated tracked changes are still refused before staging;
+resolve them before retrying, including when passing an empty file list.
+
+Delivered in [pull request 4549](https://github.com/the-cloud-clockwork/agentihooks/pull/4549).
+The [red CI proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39139111507)
+observed the unnecessary push; the
+[green CI proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39139298958)
+covered unchanged and empty lists, matching remotes, and missing or behind branches.
+
 ### Fallback gate for repositories without their own
 
-`publish` runs the repository's own gate when the worktree holds
+When publication requires a push, `publish` runs the repository's own gate
+when the worktree holds
 `scripts/ci_prepush.py` or `scripts/ci_prepush/__main__.py`. Otherwise it runs
 the AgentiHooks touched Python fallback, and the publish result names it in
 its `gate` field:
