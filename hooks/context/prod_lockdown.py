@@ -28,7 +28,7 @@ _MERGE_QUEUE = (
     " repository { mergeQueue(branch: $branch) { id } } } } }"
 )
 
-_ENQUEUE_READERS = frozenset({"agentihooks", "cat", "grep"})
+_ENQUEUE_READERS = frozenset({"agentihooks", "cat", "echo", "grep", "head", "jq", "ls", "printf", "tail", "wc"})
 
 _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
@@ -338,17 +338,38 @@ def _check_swarm_enqueue(command: str) -> None:
 
 
 def _runs_enqueue(node: Node) -> bool:
-    command = node.child_by_field_name("body") if node.type == "redirected_statement" else node
-    if command and command.type == "command" and b"enqueuePullRequest" in node.text:
-        program = Path(shlex.split(command.child_by_field_name("name").text.decode())[0]).name
-        arguments = [
-            child.text.decode()
-            for index, child in enumerate(command.named_children)
-            if command.field_name_for_named_child(index) == "argument"
-        ]
-        if program not in _ENQUEUE_READERS and (program != "gh" or "api" in arguments):
+    if b"enqueuePullRequest" in node.text:
+        command = node.child_by_field_name("body") if node.type == "redirected_statement" else node
+        if command and command.type == "command" and _sends_enqueue(command):
+            return True
+        if node.type == "pipeline" and _feeds_enqueue(node.named_children):
             return True
     return any(_runs_enqueue(child) for child in node.named_children)
+
+
+def _program(node: Node) -> str | None:
+    command = node.child_by_field_name("body") if node.type == "redirected_statement" else node
+    if command and command.type == "command":
+        return Path(shlex.split(command.child_by_field_name("name").text.decode())[0]).name
+
+
+def _sends_enqueue(command: Node) -> bool:
+    arguments = [
+        child.text.decode()
+        for index, child in enumerate(command.named_children)
+        if command.field_name_for_named_child(index) == "argument"
+    ]
+    program = _program(command)
+    return program not in _ENQUEUE_READERS and (program != "gh" or "api" in arguments)
+
+
+def _feeds_enqueue(stages: list[Node]) -> bool:
+    carried = False
+    for stage in stages:
+        if carried and _program(stage) not in _ENQUEUE_READERS:
+            return True
+        carried = carried or b"enqueuePullRequest" in stage.text
+    return False
 
 
 def check_prod_lockdown(payload: dict) -> None:
