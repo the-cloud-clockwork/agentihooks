@@ -142,9 +142,8 @@ def end_gone(redis: "Redis", hive: str, reports: list[dict], at: int) -> list[di
 def heartbeat(redis: "Redis", hive: str, at: int) -> None:
     from redis.exceptions import WatchError
 
-    for report in end_gone(
-        redis, hive, [report for report in listing(redis, hive) if report["status"] == "running"], at
-    ):
+    reports = [report for report in listing(redis, hive) if report["status"] == "running"]
+    for report in end_gone(redis, hive, reports, at):
         if at - report["heartbeat_at"] < HEARTBEAT_MS:
             continue
         checks = cheap_checks(redis, report)
