@@ -439,6 +439,7 @@ def test_one_remaining_admission_slot_takes_without_waiting_and_reports_queue_fa
 def test_claim_and_pending_ownership_are_visible_before_request_loading(rig):
     from scripts.hive.spoke import Spoke
 
+    seed_pending(rig, {"state": "ready"})
     observed = []
     other = Spoke(rig.config, rig.bus, Mock(), Mock(), Mock(side_effect=AssertionError("must not measure")))
 
@@ -524,11 +525,11 @@ def test_known_failed_launch_releases_its_pending_reservation_by_revision(rig):
 @pytest.mark.parametrize("attempt", [1, 3])
 def test_ready_recovery_retries_below_the_cap_and_reopens_at_the_cap(rig, attempt):
     pending = seed_pending(rig, {"state": "ready"}, attempt)
+    rig.spoke.measure = lambda: None
     if attempt == 1:
-        assert rig.spoke.poll() == "started"
+        assert rig.spoke.poll() == "held"
         rig.tasks.reopen.assert_not_called()
     else:
-        rig.spoke.measure = lambda: None
         assert rig.spoke.poll() == "dead"
         rig.runtime.spawn.assert_not_called()
         rig.tasks.reopen.assert_called_once_with(rig.event)
