@@ -70,3 +70,43 @@ def test_failed_exit_publication_can_be_retried_after_publisher_restart():
         assert len(bus.events.consumer("audit", "swarm.rig.execution.exited").fetch(10, 0)) == 1
     finally:
         bus.close()
+
+
+@pytest.mark.parametrize("state", ["dead", "exited"])
+def test_a_confirmed_exit_remains_terminal_after_late_live_observations(state):
+    from scripts.hive.execution_events import publish
+
+    bus = open_bus(BusConfig())
+    publish(bus, "hive-a", report(state))
+    publish(bus, "hive-a", report("working"))
+    events = bus.events.consumer("audit", "swarm.rig.execution.*").fetch(10, 0)
+    assert [item.event.type for item in events] == ["execution.exited"]
+    assert events[0].event.cause.startswith("started:")
+    bus.close()
+
+
+def test_bus_failure_defers_publication_and_a_later_observation_retries(monkeypatch):
+    from scripts.hive import execution_events
+
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    bus = open_bus(BusConfig())
+    with patch.object(execution_events, "open_bus", side_effect=RuntimeError("offline")):
+        assert execution_events.observe("hive-a", report("working")) is None
+    with (
+        patch.object(execution_events, "open_bus", return_value=bus),
+        patch.object(bus, "close") as close,
+    ):
+        execution_events.observe("hive-a", report("working"))
+    close.assert_called_once_with()
+    assert len(bus.events.consumer("audit", "swarm.rig.execution.started").fetch(10, 0)) == 1
+    bus.close()
+
+
+def test_unconfigured_or_empty_hive_observation_needs_no_bus(monkeypatch):
+    from scripts.hive import execution_events
+
+    with patch.object(execution_events, "open_bus", side_effect=AssertionError("unneeded")):
+        monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+        execution_events.observe("hive-a", report("working"))
+        monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+        execution_events.observe("hive-a", {"executions": {}})

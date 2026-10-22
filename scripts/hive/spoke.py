@@ -9,8 +9,7 @@ from scripts.events.bus import Bus, Delivery, StateConflict
 from scripts.events.config import QueuePolicy
 from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
-from scripts.events.subjects import subject
-from scripts.hive import admission, headroom
+from scripts.hive import admission, execution_events, headroom
 from scripts.swarm import readiness
 from scripts.swarm_v2.runtime.base import Runtime, SpawnRequest
 
@@ -193,12 +192,15 @@ class Spoke:
             type="execution.started",
             swarm=event.swarm,
             entity="execution",
-            key=request.name,
-            version=event.version,
+            key=request.task.get("execution_id") or request.name,
+            version=request.task.get("generation", event.version),
             time=time.time_ns() // 1_000_000,
             author=self.config.hive,
             data={
                 "task": event.key,
+                "claim_key": key,
+                "claim_revision": revision,
+                "generation": request.task.get("generation", event.version),
                 "lane": self.config.lane,
                 "hive": self.config.hive,
                 "name": request.name,
@@ -216,7 +218,7 @@ class Spoke:
         return started
 
     def _publish(self, event: Envelope) -> None:
-        self.bus.events.publish(subject(event.swarm, "execution", "started"), event)
+        execution_events.started(self.bus, event)
 
     def _clear_current(self, event: Envelope) -> None:
         pending = self.bus.state("spoke-pending").get(self._pending_key)
