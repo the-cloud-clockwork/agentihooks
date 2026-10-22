@@ -147,6 +147,7 @@ SWARM_IDENTITY = (
     "AGENTIHOOKS_SWARM_TASK",
     "AGENTIHOOKS_SWARM_AUTONOMY",
     "AGENTIHOOKS_SWARM_LAUNCHER",
+    "AGENTIHOOKS_CLAIM_FENCE",
     effort_range.VARIABLE,
 )
 
@@ -186,6 +187,9 @@ def _swarm_exports(environ: dict[str, str]) -> str:
         "AGENTIHOOKS_SWARM_TASK",
         "AGENTIHOOKS_COMPACT_LIMIT",
         "AGENTIHOOKS_LEDGER_AGENT_TOKEN",
+        "AGENTIHOOKS_CLAIM_FENCE",
+        "AGENTIHOOKS_BUS",
+        "AGENTIHOOKS_BUS_URL",
     )
     exports = {name: environ[name] for name in names if environ.get(name)}
     exports["AGENTIHOOKS_LANGFUSE_ENABLED"] = "1"
@@ -782,6 +786,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--auth", choices=("interactive",), default="", help="Use the declared interactive login")
     parser.add_argument("--profile", default="", help="Role profile for this run")
+    parser.add_argument("--claim-fence", default="", help="Pinned event bus claim identity for this execution")
     parser.add_argument(
         "--overlay", action="append", default=[], help="Overlay the profile wears; repeat for up to three"
     )
@@ -949,6 +954,8 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"
         active_env = _launch_environ(_with_predecessor(active_env, args.handoff), name, args.handoff)
+        if args.claim_fence:
+            active_env["AGENTIHOOKS_CLAIM_FENCE"] = args.claim_fence
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
         agent, reason = (

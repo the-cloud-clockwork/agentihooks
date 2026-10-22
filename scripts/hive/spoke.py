@@ -2,7 +2,7 @@ import hashlib
 import json
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from scripts.events.bus import Bus, Delivery, StateConflict
@@ -182,6 +182,7 @@ class Spoke:
             return None
         intent = json.dumps({"state": "launching", "owner": self.config.hive, "name": request.name}).encode()
         revision = claims.update(key, intent, revision)
+        request = replace(request, task={**request.task, "claim_fence": {"key": key, "revision": revision}})
         outcome = self.runtime.spawn(request)
         if not outcome.ok:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
@@ -207,7 +208,11 @@ class Spoke:
             },
             cause=event.id,
         )
-        claims.update(key, json.dumps({"state": "started", "event": started.to_dict()}).encode(), revision)
+        claims.update(
+            key,
+            json.dumps({"state": "started", "claim_revision": revision, "event": started.to_dict()}).encode(),
+            revision,
+        )
         return started
 
     def _publish(self, event: Envelope) -> None:

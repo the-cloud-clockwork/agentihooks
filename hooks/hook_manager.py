@@ -2845,6 +2845,12 @@ def main() -> None:
 
         unpin()
 
+        from hooks.context.claim_fence import check as claim_fence
+
+        _claim_block = claim_fence(payload)
+        if _claim_block:
+            raise BlockAction(_claim_block)
+
         # Route to handler
         handler = EVENT_HANDLERS.get(event_name)
 
