@@ -317,11 +317,14 @@ def test_recorded_pending_handoffs_keep_findings_with_bounded_scan_pages(redis, 
     recorded = json.loads((Path(__file__).parents[1] / "fixtures/doctor/handoffs.json").read_text())
     store, box = RedisStore(redis), InboxStore(redis)
     expected = []
+    seeded = set()
     for index, handoff in enumerate(recorded["handoffs"]):
         task = f"recorded-{index}"
         store.put_handoff(SLUG, task, handoff["document"], handoff["seat"], {"agent": handoff["from"]})
-        for recap in reversed(handoff["recaps"]):
-            store.memory.add_recap(handoff["seat"], recap["occupant"], recap["task"], recap["text"], recap["at"])
+        if handoff["seat"] not in seeded:
+            for recap in reversed(handoff["recaps"]):
+                store.memory.add_recap(handoff["seat"], recap["occupant"], recap["task"], recap["text"], recap["at"])
+            seeded.add(handoff["seat"])
         expected.append({**handoff, "task": task, "to": "", "at": 0, "asked": []})
     redis.mset({f"unrelated:{index}": "value" for index in range(2500)})
     store.put_handoff("other", "not-ours", "ignored")
