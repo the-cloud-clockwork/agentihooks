@@ -264,9 +264,9 @@ def test_cli_set_show_and_list(redis, monkeypatch, capsys):
 def test_cli_set_keep_leaves_stored_settings(redis, monkeypatch, capsys):
     monkeypatch.setattr(cli, "redis_client", lambda: redis)
     registry.update(redis, "box", ["max-agents=3"])
-    assert cli.main(["set", "--keep", "box", "max-agents=9", "ephemeral=yes"]) == 0
+    assert cli.main(["set", "--keep", "box", "max-agents=9", "name=Pod"]) == 0
     printed = json.loads(capsys.readouterr().out)
-    assert (printed["max_agents"], printed["ephemeral"]) == (3, "yes")
+    assert (printed["max_agents"], printed["name"]) == (3, "Pod")
     assert cli.main(["set", "box", "max-agents=9"]) == 0
     assert json.loads(capsys.readouterr().out)["max_agents"] == 9
 
