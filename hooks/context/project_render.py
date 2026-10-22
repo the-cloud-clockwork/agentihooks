@@ -6,8 +6,8 @@ def render_project_block(memory: ProjectMemory, max_bytes: int) -> str:
     if memory.arcs:
         arc = memory.arcs[0]
         focus = arc.get("summary") or arc["title"]
-        active = arc.get("updated") or arc.get("created") or "unknown"
-        lines.append(f"Focus: {focus} ({arc.get('status') or 'unknown'}; last active {active}).")
+        last_active = arc.get("updated") or arc.get("created") or "unknown"
+        lines.append(f"Focus: {focus} ({arc.get('status') or 'unknown'}; last active {last_active}).")
         lines.append("Hot arcs:")
         lines.extend(f"* {arc['title']} [{arc['id']}]" for arc in memory.arcs)
     if memory.lessons:
