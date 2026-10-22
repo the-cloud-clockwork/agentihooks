@@ -60,6 +60,23 @@ def server_socket(environ: dict[str, str]) -> str:
     return environ.get("HERDR_SOCKET_PATH") or str(Path.home() / ".config" / "herdr" / "herdr.sock")
 
 
+SESSION_KEYS = (
+    "AGENTIHOOKS_AGENT_NAME",
+    "AGENTIHOOKS_PROFILE",
+    "AGENTIHOOKS_SWARM",
+    "AGENTIHOOKS_SWARM_TASK",
+    "CLAUDECODE",
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "COPILOT_HOME",
+)
+
+
+def server_environ(environ: dict[str, str]) -> dict[str, str]:
+    """Every pane inherits the server's environment, so one agent's identity must not reach the operator's panes."""
+    return {key: value for key, value in environ.items() if key not in SESSION_KEYS}
+
+
 def ensure_server(environ: dict[str, str], timeout: float = 10.0) -> bool:
     """Start a detached herdr server when none answers; True when one was started."""
     if server_running(environ):
@@ -69,7 +86,7 @@ def ensure_server(environ: dict[str, str], timeout: float = 10.0) -> bool:
         raise HerdrError("herdr is not installed")
     subprocess.Popen(
         [exe, "server"],
-        env=environ,
+        env=server_environ(environ),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
