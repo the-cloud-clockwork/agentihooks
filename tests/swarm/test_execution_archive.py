@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -49,6 +50,25 @@ def test_archive_moves_only_rows_no_live_reader_returns(store):
     assert registry.managed("fixture", second.name)
     assert not registry.managed("fixture", "nobody@fixture")
     assert registry.archive("fixture") == 0
+
+
+def test_set_pane_still_finds_an_archived_attempt(store):
+    first, *_ = history(store)
+    store.execution_registry.archive("fixture")
+
+    store.execution_registry.set_pane("fixture", first.execution_id, "pane-9")
+
+    assert store.execution("fixture", first.execution_id).pane_id == "pane-9"
+
+
+def test_archive_keeps_rows_without_a_seat_or_generation(store):
+    history(store)
+    key = store.key("fixture", "executions")
+    store.redis.hset(key, "legacy", json.dumps({"name": "old@fixture"}))
+
+    store.execution_registry.archive("fixture")
+
+    assert store.redis.hexists(key, "legacy")
 
 
 def test_reconcile_archives_dead_rows(store):

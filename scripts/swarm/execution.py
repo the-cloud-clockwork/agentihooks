@@ -87,15 +87,17 @@ local rows = redis.call('HGETALL', KEYS[1])
 local head, decoded = {}, {}
 for i = 1, #rows, 2 do
     local row = cjson.decode(rows[i + 1])
-    decoded[i] = row
-    if not head[row.seat] or row.generation > head[row.seat] then
-        head[row.seat] = row.generation
+    if type(row.seat) == 'string' and type(row.generation) == 'number' then
+        decoded[i] = row
+        if not head[row.seat] or row.generation > head[row.seat] then
+            head[row.seat] = row.generation
+        end
     end
 end
 local moved = 0
 for i = 1, #rows, 2 do
     local row = decoded[i]
-    if row.generation < head[row.seat] and redis.call('HEXISTS', KEYS[2], row.name) == 0 then
+    if row and row.generation < head[row.seat] and redis.call('HEXISTS', KEYS[2], row.name) == 0 then
         redis.call('HSET', KEYS[3], rows[i], rows[i + 1])
         redis.call('HDEL', KEYS[1], rows[i])
         moved = moved + 1
@@ -359,7 +361,7 @@ class ExecutionRegistry:
             with self.redis.pipeline() as pipe:
                 try:
                     pipe.watch(key)
-                    raw = pipe.hget(key, execution_id)
+                    raw = pipe.hget(key, execution_id) or pipe.hget(self.store.key(slug, ARCHIVE), execution_id)
                     if not raw:
                         pipe.unwatch()
                         self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
