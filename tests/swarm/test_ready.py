@@ -346,7 +346,7 @@ def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_reques
     monkeypatch.setattr(stall_watch, "ntfy", lambda *args: "")
     attempts = []
 
-    def queue(action, url):
+    def queue(action, url, journal=None):
         attempts.append(url)
         if pull.queued:
             return {}
@@ -1347,6 +1347,37 @@ def test_a_watcher_dequeue_hands_the_queue_a_journal_naming_swarm_task_and_timer
     journal = merging.queue.journals[-1]
     assert journal.url == URL
     assert journal.context == {"swarm": "sw", "task": "t1", "timer": os.getpid(), "by": "merge watcher"}
+
+
+def watcher_journals(merging):
+    import os
+
+    context = {"swarm": "sw", "task": "t1", "timer": os.getpid(), "by": "merge watcher"}
+    return [
+        journal is not None and journal.url == URL and journal.context == context
+        for (action, _), journal in zip(merging.queued, merging.queue.journals, strict=True)
+        if action == "queue"
+    ]
+
+
+def test_a_watcher_queue_on_green_checks_hands_the_queue_its_journal(merging):
+    queued_at_now(merging)
+    assert watcher_journals(merging) == [True]
+
+
+def test_a_watcher_requeue_after_a_green_drop_hands_the_queue_its_journal(merging):
+    left_queue_green(merging)
+    merging.exits.failures = []
+    assert merging.run(NOW + 120_000) == [f"queued {URL} for task t1"]
+    assert watcher_journals(merging) == [True, True]
+
+
+def test_a_watcher_recovery_requeue_hands_the_queue_its_journal(merging):
+    dequeued_transient(merging)
+    merging.pulls[URL] = GREEN
+    assert merging.run(ready.record(merging.store, "sw", "t1")["retry_at"]) == [f"queued {URL} for task t1"]
+    assert merging.queued == [("queue", URL), ("dequeue", URL), ("queue", URL)]
+    assert watcher_journals(merging) == [True, True]
 
 
 def test_a_watcher_dequeue_writes_its_identity_into_the_queue_journal(env, monkeypatch, tmp_path):
