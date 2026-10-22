@@ -50,6 +50,8 @@ class Envelope:
 
     @classmethod
     def from_dict(cls, raw: dict) -> "Envelope":
+        if not isinstance(raw, dict):
+            raise ValueError("event envelope must be a JSON object")
         names = {field.name for field in fields(cls)}
         missing = sorted(names - raw.keys())
         unknown = sorted(raw.keys() - names)
@@ -64,5 +66,5 @@ class Envelope:
         return cls.from_dict(json.loads(raw))
 
 
-def create(**fields) -> Envelope:
-    return Envelope(id=uuid.uuid4().hex, time=time.time_ns() // 1_000_000, **fields)
+def create(**values) -> Envelope:
+    return Envelope(id=uuid.uuid4().hex, time=time.time_ns() // 1_000_000, **values)

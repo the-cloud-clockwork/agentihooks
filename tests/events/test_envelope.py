@@ -31,6 +31,17 @@ def test_envelope_carries_every_field_as_a_plain_dict():
     assert event.to_dict() == _fields()
 
 
+def test_envelope_round_trips_through_a_plain_dict():
+    event = Envelope(**_fields())
+    assert Envelope.from_dict(event.to_dict()) == event
+
+
+@pytest.mark.parametrize("raw", [b"[]", b"1", b'"event"', b"null"])
+def test_decode_refuses_json_that_is_not_an_object(raw):
+    with pytest.raises(ValueError, match="event envelope must be a JSON object"):
+        Envelope.decode(raw)
+
+
 def test_envelope_round_trips_through_json_bytes():
     event = Envelope(**_fields())
     raw = event.encode()
@@ -110,7 +121,7 @@ def test_create_stamps_a_fresh_id_the_clock_and_the_schema_version(monkeypatch):
     assert first.cause is None
     assert len(first.id) == 32
     assert first.id != second.id
-    assert first.to_dict() | {"id": "x"} == second.to_dict() | {"id": "x"}
+    assert {**first.to_dict(), "id": ""} == {**second.to_dict(), "id": ""}
 
 
 def test_create_passes_a_cause_through():
