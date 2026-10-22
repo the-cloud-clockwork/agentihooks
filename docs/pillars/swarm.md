@@ -286,6 +286,80 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
   round robin; a classifier fault never holds an item. With the flag off, delivery is plain round robin.
   [Intent grouping](#intent-grouping) gives every rule.
 
+#### Task ownership and master rulings
+
+Each task has one routing owner. A task in a phase uses that phase's owning master seat. A task without a phase
+uses the front door: `master@<id>`, or the lowest numbered live master when the lead seat is empty. If a phase's
+owner is absent, routing falls back to the front door. Claiming an inbox item from the master pool does not make
+that master the task's owner. Every master can still read the ledger and inspect tasks owned by another master.
+
+Ownership is assigned automatically from the phase owners and live seats described in [Several master
+seats](#several-master-seats). There is no separate task owner setting. Changing the master count can rebalance
+phase ownership; coordinate with the current owner over the masters channel before issuing a conflicting ruling.
+
+The original [task ownership change](https://github.com/the-cloud-clockwork/agentihooks/pull/4586) refused
+nonowner task rulings. A later [live master write change](https://github.com/the-cloud-clockwork/agentihooks/pull/5620)
+allows any live master seat to make covered ledger writes on another owner's item. The current behavior is:
+
+| Operation by a master | Ownership check |
+|---|---|
+| `ledger task set`, a task comment, a task answer or a relay onto a task | The owner passes. Another live master also passes; its cross owner write is recorded. A master that is neither the owner nor a live seat is refused with the owner named. Other command permissions still apply. |
+| `swarm say` to a task claimant, or `msg send` / `msg reply` to that claimant | With at least two live masters, only the task owner passes. This checks the recipient's claimed task regardless of the message text. |
+| Ledger reads | Open to every master. |
+
+Accepted cross owner ledger writes keep routing with the owner. The ledger retains the latest 20 records per item
+in `_meta.master_cross_writes`, each with `owner`, `seat`, `by` and `rev`. Decision announcements on the masters
+channel identify the writer and end with `for <owner>` when it differs from the owner.
+
+For a standalone task, a backend master can therefore read it and make a covered ledger write while live, but
+cannot send instructions directly to its claimant. For a task in that backend master's own phase, both its ledger
+rulings and claimant messages pass. Use the masters channel to ask the owner to deliver instructions:
+
+```bash
+# Run from a master session; read phase ownership and coordinate with the named owner.
+agentihooks swarm my-swarm masters-channel read
+agentihooks swarm my-swarm masters-channel say "Please ask the standalone task owner to confirm the staged turnover before instructing its engineer."
+
+# The owning master can record its ruling and message the claimant.
+# Replace t42 and engineer@my-swarm-0012 with the actual task and claimant.
+agentihooks ledger --slug my-swarm comment tasks/t42 "Use the agreed staged turnover."
+agentihooks msg send engineer@my-swarm-0012 "Keep the staged turnover; await its validation before cutover."
+```
+
+A refused claimant message names both the task owner and the command to ask it, for example:
+
+```text
+tasks/t42 belongs to master@my-swarm, so master-2@my-swarm cannot message its claimant; ask master@my-swarm with agentihooks swarm my-swarm masters-channel say "<text>"
+```
+
+The message check skips recipients with no claimed task and senders outside the master lane. With fewer than two
+live masters it returns without reading the ledger. A live master of a mutually linked Doctor swarm may also
+message a live watched master seat for coordination; that exception does not permit instructions to an engineer
+claiming another master's task.
+
+##### Configuration and failure handling
+
+`AGENTIHOOKS_MASTER_FENCE` enables the ownership check by default. The exact value `off` disables it in the process
+performing the check; it does not change phase assignments or grant other command permissions. Ledger checks run
+in the ledger writer and claimant message checks run in the sending process, so a one command environment setting
+on a sender only affects that sender's check:
+
+```bash
+# Explicitly retain the default message check for this invocation.
+AGENTIHOOKS_MASTER_FENCE=on agentihooks msg send engineer@my-swarm-0012 "Keep the agreed staged turnover."
+```
+
+If a check crashes, the operation proceeds and the swarm gate log records `master-fence`, decision `fail-open`,
+with `ledger` or `inbox` as the target and the exception as its reason. A refusal increments
+`master_write_refusals_total`; this is a count of blocked attempts, not successful conflicting rulings.
+
+| Symptom | Action |
+|---|---|
+| A backend master cannot message a standalone task's engineer. | Ask the front door owner named in the refusal through `masters-channel say`. |
+| A master took the inbox item but its message is refused. | Pool delivery and task ownership are separate. Read the current phase owners and ask the task owner to deliver the instruction. |
+| Another live master successfully comments on an owned task. | This is the later live master write policy. The ledger records cross owner writes; claimant messages remain owner checked. |
+| A message passes despite an unexpected owner. | Check the sender's fence setting, the live master count, the recipient's claimed task and `fail-open` gate log rows. A linked Doctor master message to a watched master is also allowed. |
+
 #### Sizing settings
 
 `master-per`, `masters-step` and the manual `masters=N` count decide the master count. The tick reads them in this
