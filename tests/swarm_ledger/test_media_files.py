@@ -27,13 +27,15 @@ def test_an_entry_naming_an_image_another_server_stored_is_written():
     assert state["chat"][-1]["attachments"] == [entry]
 
 
-def test_serving_a_disk_only_image_adopts_it_into_the_database():
+def test_serving_a_disk_only_image_adopts_it_into_the_database(monkeypatch):
     data = png(3, 7)
     media_id = ledger_media.store("adopted-media", data)["id"]
     media_files.drop("adopted-media", {media_id})
     assert ledger_media.read("adopted-media", media_id) == data
     assert media_files.load("adopted-media", media_id) is None
+    monkeypatch.setattr(core, "now_ms", lambda: 9_000_000)
     assert ledger_media.served("adopted-media", media_id) == data
+    assert media_files.ages("adopted-media") == {media_id: 9_000_000}
     shutil.rmtree(ledger_media.folder("adopted-media"))
     assert ledger_media.served("adopted-media", media_id) == data
 
