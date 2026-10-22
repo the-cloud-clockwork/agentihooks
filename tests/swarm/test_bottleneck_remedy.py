@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -349,7 +350,7 @@ def test_workstation_only_move_counts_existing_local_lane_workers_once(
 
     hive_only(store, monkeypatch, excluded="plan")
     store.update(SLUG, local_max_agents=limit)
-    store.put_agent(SLUG, agent)
+    store.start_execution(SLUG, replace(agent, name=store.next_name(SLUG, agent.lane), seat=f"{agent.lane}-1@{SLUG}"))
     monkeypatch.setattr(local_slots.lease, "now_ms", lambda store: NOW)
     pin(store, "eng", "claude")
     detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
@@ -372,6 +373,25 @@ def test_workstation_only_move_counts_other_lane_workers_for_any_task_name(store
     why = bottleneck_remedy.UNPLACEABLE.format(target="codex", lane="eng")
     assert run(store) == [proposed(FAILED, why)]
     assert lane_of(store, "eng") == ("claude", "opus")
+
+
+@pytest.mark.parametrize(("count", "moves"), [(2, True), (3, False)])
+def test_workstation_only_move_does_not_credit_workers_above_the_lane_limit(
+    store, home, shipped, monkeypatch, count, moves
+):
+    from scripts.swarm import local_slots
+
+    hive_only(store, monkeypatch, excluded="plan")
+    store.update(SLUG, local_max_agents=2)
+    for index in range(count):
+        store.put_agent(SLUG, AgentRecord(f"worker{index}", "eng", f"task{index}"))
+    monkeypatch.setattr(local_slots.lease, "now_ms", lambda store: NOW)
+    pin(store, "eng", "claude")
+    detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
+    why = bottleneck_remedy.UNPLACEABLE.format(target="codex", lane="eng")
+    text = bottleneck_remedy.MOVED.format(lane="eng", source="claude", target="codex", targeted=FAILED)
+    assert run(store) == [text if moves else proposed(FAILED, why)]
+    assert lane_of(store, "eng") == (("codex", "auto") if moves else ("claude", "opus"))
 
 
 @pytest.mark.parametrize("source_room", [0, 1, 8])
