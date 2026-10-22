@@ -20,6 +20,8 @@ For an existing pull request, see [continuing with one push](swarm.md#continue-a
 
 See [Doctor timer pass](swarm.md#doctor-timer-pass) for what one Doctor timer step reads, its interval setting and how to measure its wall time per pass.
 
+See [Doctor measurement task readiness](swarm.md#doctor-measurement-task-readiness) for tune dependencies, application timestamps, configuration examples and releasing a read only seat with its recorded window.
+
 See [worker execution lease through a controller rollout](swarm.md#worker-execution-lease-through-a-controller-rollout) for the lease and grant timing that keeps an Anton worker alive through a release, and why a worker exits 70.
 
 See [one push per pull request](swarm.md#one-push-per-pull-request) for when a worker may open a pull request, when a push is refused while checks run, gate modes and troubleshooting.
