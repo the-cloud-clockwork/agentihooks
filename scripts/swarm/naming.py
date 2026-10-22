@@ -25,6 +25,7 @@ LEGACY_RE = re.compile(r"(.+)-(eng|ci|master)-\d+")
 CODE_RE = re.compile(r"[0-9a-f]{6}")
 SWARM_RE = re.compile(r"swarm@([0-9a-f]{6})")
 MINT_ATTEMPTS = 20
+NAMES_PAGE = 500
 _BASE = rf"(?:(?:{_KINDS})-[0-9a-f]{{6}}-\d{{4}}|session-[0-9a-f]{{8}})"
 _REPO = r"[a-z0-9][a-z0-9._-]*"
 PROOF_RE = re.compile(r"proof-[0-9a-f]{6}-[a-z0-9]+-\d+")
@@ -421,10 +422,12 @@ class NameRegistry:
         if not names:
             return []
         resolved = self.resolve_many(names)
-        with self.redis.pipeline(transaction=False) as pipe:
-            for name in names:
-                pipe.hgetall(self.key("name", resolved[name]))
-            rows = pipe.execute()
+        rows = []
+        for start in range(0, len(names), NAMES_PAGE):
+            with self.redis.pipeline(transaction=False) as pipe:
+                for name in names[start : start + NAMES_PAGE]:
+                    pipe.hgetall(self.key("name", resolved[name]))
+                rows += pipe.execute()
         whole = ("number", "spawned_at", "retired_at")
         return [
             {"name": resolved[name], **{k: int(v) if k in whole else v for k, v in raw.items()}} if raw else {}
