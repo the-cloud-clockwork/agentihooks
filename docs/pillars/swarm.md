@@ -3218,7 +3218,7 @@ dependency is unfinished, or when a Doctor tune task's code or CI dependency
 has no application stamp. Here “read only” means any task kind except `code`
 and `ci`; parking requires no branch, worktree or GitHub issue for those kinds.
 
-Write a [Handoff v2](#handoff) document with the recorded before window,
+Write a Handoff v2 document using the installed `handoff` skill, with the recorded before window,
 command and output, the remaining application or measurement boundary, and
 the successor's next action. Then run:
 
