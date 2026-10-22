@@ -721,10 +721,19 @@ def test_quiet_names_only_indexed_addresses_without_open_mail(store):
     store.open_items("sizeless")
     store.redis.delete(store.key("open-size", "sizeless"))
     addresses = ["gone", "empty", "late", "never-indexed", "unknown", "unflagged", "sizeless"]
-    assert store.quiet(addresses) == {"gone", "empty"}
+    assert store.quiet(addresses) == {"gone", "empty", "unknown", "sizeless"}
     store.send("alice", "empty", "arrived after the index")
     assert store.quiet(["empty"]) == set()
     assert store.quiet([]) == set()
+
+
+def test_an_address_with_no_items_and_no_index_is_quiet(store):
+    assert store.quiet(["never-touched"]) == {"never-touched"}
+
+
+def test_a_never_indexed_address_holding_an_open_item_is_not_quiet(store):
+    store.send("alice", "never-indexed", "contract")
+    assert store.quiet(["never-indexed"]) == set()
 
 
 def test_quiet_reads_in_one_pipeline_without_a_transaction(store, monkeypatch):

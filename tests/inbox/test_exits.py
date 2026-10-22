@@ -630,7 +630,7 @@ def test_the_sweep_settles_a_closed_tasks_agent_with_its_task_outcome(redis, sta
     assert inbox.get(item.id).reason == f"cancelled: sw-eng-1 {exit_text} before closing it"
 
 
-def test_a_sweep_of_settled_agents_reads_the_open_index_once(redis, monkeypatch):
+def test_a_sweep_of_settled_agents_reads_the_open_index_once_per_settle_step(redis, monkeypatch):
     store, inbox = RedisStore(redis), InboxStore(redis)
     store.create(SwarmConfig("sw", "/repo", 0, 0))
     for n in (1, 2, 3):
@@ -639,7 +639,32 @@ def test_a_sweep_of_settled_agents_reads_the_open_index_once(redis, monkeypatch)
     reads, quiet = [], inbox.quiet
     monkeypatch.setattr(inbox, "quiet", lambda names: reads.append(sorted(names)) or quiet(names))
     exits.sweep(inbox, "sw", store, dict)
-    assert reads == [["sw-eng-1", "sw-eng-2", "sw-eng-3"]]
+    assert reads == [
+        ["sw-eng-1", "sw-eng-2", "sw-eng-3"],
+        ["eng-1@sw", "eng-2@sw", "eng-3@sw"],
+        ["eng-1@sw", "eng-2@sw", "eng-3@sw"],
+    ]
+
+
+def test_the_sweep_does_not_open_a_quiet_seat_but_still_settles_a_live_one(monkeypatch, redis, tmp_path):
+    from scripts.swarm.store import AgentRecord
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path))
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item = notice_moved_to_the_seat(inbox, store)
+    store.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw"))
+    quiet_seats = [f"eng-{n}@sw" for n in range(2, 22)]
+    for n in range(2, 22):
+        store.seats.occupy(f"eng-{n}@sw", f"sw-eng-{n}", n)
+        store.put_agent("sw", AgentRecord(name=f"sw-eng-{n}", lane="eng", task=f"t{n}", seat=f"eng-{n}@sw"))
+    exits.sweep(inbox, "sw", store, dict)
+    store.drop_agent("sw", "sw-eng-1")
+    calls, open_items = [], inbox.open_items
+    monkeypatch.setattr(inbox, "open_items", lambda address: calls.append(address) or open_items(address))
+    exits.sweep(inbox, "sw", store, dict)
+    assert set(quiet_seats).isdisjoint(calls)
+    assert "eng-1@sw" in calls
+    assert inbox.get(item.id).state == "done"
 
 
 def test_each_gone_agent_is_settled_once_per_sweep(redis, monkeypatch):
