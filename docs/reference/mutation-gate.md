@@ -274,7 +274,7 @@ Before it mutates anything, mutmut runs the selected tests against the unmutated
 | `report.json` | `failing_tests`, a list of failing test ids with their first error line, in the order they first appear |
 | Job summary | A `Mutation clean baseline failed` heading followed by one bullet per failing test |
 
-This applies to every job that runs `python -m scripts.ci_mutation`. In the pull request Tests run that is each `mutation-stats` part, the inline mutation step of a single shard `mutation-stats` job and each `mutation` shard. The push preflight follows the same split, a statistics job and then a `mutation-shard` job, with no inline step. Which tests run and how mutants are graded are unchanged.
+This applies to every job that runs `python -m scripts.ci_mutation`: in the pull request Tests run, each `mutation-stats` part, the inline mutation step of a single shard `mutation-stats` job, and each `mutation` shard. The push preflight follows the same split, a statistics job and then a `mutation-shard` job, with no inline step. Which tests run and how mutants are graded are unchanged.
 
 ### How failing tests are read
 
