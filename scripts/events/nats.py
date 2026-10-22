@@ -6,7 +6,7 @@ import nats as nats_client
 from nats.aio.msg import Msg
 from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
-from nats.js.errors import KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
+from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
 
 from .bus import StateConflict, StateEntry
 from .config import BusConfig, QueuePolicy
@@ -132,12 +132,7 @@ class NatsConsumer:
         for msg in messages:
             if msg.metadata.num_delivered > self._policy.max_deliver:
                 event = Envelope.decode(msg.data)
-                await _publish(
-                    self._js,
-                    f"dead.{event.swarm}",
-                    DEAD_STREAM,
-                    dead_letter(event, self._identity, self._policy.max_deliver),
-                )
+                await _publish_dead(self._js, event, self._identity, self._policy.max_deliver)
                 await msg.term()
             else:
                 deliveries.append(msg)
@@ -147,6 +142,22 @@ class NatsConsumer:
 async def _publish(js, subject: str, stream: str, event: Envelope) -> bool:
     ack = await js.publish(subject, event.encode(), stream=stream, headers={MSG_ID: event.id})
     return not ack.duplicate
+
+
+async def _publish_dead(js: JetStreamContext, event: Envelope, identity: str, attempts: int) -> None:
+    letter = dead_letter(event, identity, attempts)
+    subject = f"dead.{event.swarm}.{letter.id}"
+    try:
+        await js.publish(
+            subject,
+            letter.encode(),
+            stream=DEAD_STREAM,
+            headers={MSG_ID: letter.id, "Nats-Expected-Last-Subject-Sequence": "0"},
+        )
+    except APIError:
+        stored = await js.get_last_msg(DEAD_STREAM, subject)
+        if Envelope.decode(stored.data).id != letter.id:
+            raise
 
 
 class NatsEventLog:

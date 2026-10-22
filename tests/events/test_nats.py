@@ -347,9 +347,9 @@ def test_a_dead_letter_is_published_before_the_original_is_terminated():
 
     async def publish(subject, data, *, stream, headers):
         letter = Envelope.decode(data)
-        assert subject == "dead.s"
+        assert subject == f"dead.s.{letter.id}"
         assert stream == "AGENTIHOOKS_DEAD"
-        assert headers == {"Nats-Msg-Id": letter.id}
+        assert headers == {"Nats-Msg-Id": letter.id, "Nats-Expected-Last-Subject-Sequence": "0"}
         assert letter.data == {"event": event().to_dict(), "source": "queue.work", "attempts": 3}
         assert letter.cause == event().id
         calls.append("publish")
@@ -417,6 +417,28 @@ def test_a_lost_termination_does_not_duplicate_a_dead_letter_after_dedupe_expiry
         assert opened._loop.run(opened._js.stream_info(nats.queue_stream("work"))).state.messages == 0
     finally:
         opened.close()
+
+
+@pytest.mark.parametrize("stored_id", ["expected", "other"])
+def test_a_dead_letter_publish_refusal_requires_the_same_retained_event(stored_id):
+    letter = nats.dead_letter(event(), "queue.work", 3)
+    stored = letter if stored_id == "expected" else event("other")
+    refusal = APIError(code=400, err_code=10071, description="subject sequence differs")
+    js = SimpleNamespace(
+        publish=mock.AsyncMock(side_effect=refusal),
+        get_last_msg=mock.AsyncMock(return_value=SimpleNamespace(data=stored.encode())),
+    )
+    loop = nats._Loop()
+    try:
+        if stored_id == "expected":
+            assert loop.run(nats._publish_dead(js, event(), "queue.work", 3)) is None
+        else:
+            with pytest.raises(APIError) as raised:
+                loop.run(nats._publish_dead(js, event(), "queue.work", 3))
+            assert raised.value is refusal
+        js.get_last_msg.assert_awaited_once_with("AGENTIHOOKS_DEAD", f"dead.s.{letter.id}")
+    finally:
+        loop.close()
 
 
 def test_the_state_store_is_shared_per_bucket(bus):

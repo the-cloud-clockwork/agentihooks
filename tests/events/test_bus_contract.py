@@ -30,6 +30,7 @@ class Harness:
 class Channel:
     offer: Callable[[Envelope], bool]
     take: Callable[[], list[Delivery]]
+    source: str
 
 
 @contextmanager
@@ -68,6 +69,7 @@ def _event_log(harness: Harness) -> Channel:
     return Channel(
         lambda envelope: harness.bus.events.publish("swarm.s.task", envelope),
         lambda: consumer.fetch(1, harness.poll_ms),
+        "events.contract",
     )
 
 
@@ -78,7 +80,7 @@ def _work_queue(harness: Harness) -> Channel:
         delivery = queue.take(harness.poll_ms)
         return [] if delivery is None else [delivery]
 
-    return Channel(queue.offer, take)
+    return Channel(queue.offer, take, "queue.contract")
 
 
 @pytest.fixture(params=BACKENDS)
@@ -136,9 +138,7 @@ def test_an_exhausted_delivery_is_retained_once_in_the_dead_stream(channel, harn
     assert letter.type == "dead_lettered"
     assert letter.cause == original.id
     assert (letter.swarm, letter.entity, letter.key, letter.version) == ("s", "task", "t1", 1)
-    assert letter.data["event"] == original.to_dict()
-    assert letter.data["attempts"] == 3
-    assert letter.data["source"]
+    assert letter.data == {"event": original.to_dict(), "attempts": 3, "source": channel.source}
     assert letter.id != original.id
     letters[0].ack()
     harness.advance(2 * harness.policy.ack_wait_ms)

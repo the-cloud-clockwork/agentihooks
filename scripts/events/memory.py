@@ -123,7 +123,12 @@ class _Pending:
             self.add(event)
         now = self._runtime.clock()
         for message in self._messages:
-            if not message.settled and message.attempt >= self._policy.max_deliver and message.ready_at <= now:
+            if (
+                message not in taken
+                and not message.settled
+                and message.attempt >= self._policy.max_deliver
+                and message.ready_at <= now
+            ):
                 if self._dead is not None:
                     self._dead.publish(
                         f"dead.{message.event.swarm}",
