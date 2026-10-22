@@ -161,7 +161,7 @@ def stored_text(ref: dict, doc: dict, load: Callable[[str, str], bytes] | None =
         return load(slug, file_id).decode()
     from scripts.swarm_ledger import ledger_artifacts
 
-    return ledger_artifacts.path_of(slug, file_id).read_bytes().decode()
+    return ledger_artifacts.read(slug, file_id).decode()
 
 
 def check_phase_ref(doc: dict, phase: dict) -> None:

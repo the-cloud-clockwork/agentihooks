@@ -655,7 +655,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the published branch and its repository (`branch_repo`, the origin remote without credentials). When the local branch tracks `origin/<task branch>`, retain that recorded task branch even when the local name differs; otherwise use the local branch. The selected branch must exist on origin. See [recording a published upstream branch](#recording-a-published-upstream-branch). |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. Rounds spent before the task records a pull request, on its first pull request and on each later one, count on separate counters ([Review round counters](#review-round-counters)). |
-| `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
+| `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. A code or ci task needs its pull request merged. A task of any other kind with a recorded pull request is refused until that pull request merges, unless its proof gives `--filed` for a fix proposed instead of made; its prompt tells it to release the seat with `ready` instead, or at manual or assist autonomy to wait for the operator's merge. A `plan` task records no pull request. |
 | `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; their swarm owners receive an inbox message. Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. Each reorder, deferral, replay and restore is recorded in the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
 | `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue ([Ready on a task of any kind](#ready-on-a-task-of-any-kind)). Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff and leave the worktree in place; a green ejection with no failed merge group run of its own is queued again instead ([Ready merge pass queue exits](#ready-merge-pass-queue-exits)). Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. A dependency that is not `done` turns the block into a checked wait on that task instead, keeping the claim. Before blocking, refuses while a task worktree holds commits its remote branch lacks, naming the push to run, and records a pushed branch on the task; see [Blocking with unpushed commits](#blocking-with-unpushed-commits). |
@@ -3260,6 +3260,127 @@ goes on (a handoff, or a task reopened for a successor), each item moves to its 
 nobody takes the task up (it is done or blocked, for example), each item is withdrawn and its sender gets an
 item naming the agent and the message; a sender that has itself left is told through the master. Agents that
 exited between ticks are settled at the start of the next tick.
+
+## Doctor measurement task readiness
+
+A measurement task uses kind `tune` and lists the fixes it measures in
+`depends_on`. A title containing “measurement” or “after window” does not set
+its kind. When a dependency is `code` or `ci`, the tune task waits for that
+dependency's ledger state to become `done`. A claimed fix with a pushed branch,
+an open pull request and a pull request in the merge queue all leave the tune
+task waiting. This rule applies to every swarm; it prevents a measurement from
+taking a seat before its fix finishes.
+
+A swarm using template `doctor` also requires an `applied_at` value on each
+code or CI dependency. The tick and the dispatcher's queue head apply this
+additional check. A merged pull request alone does not supply that value.
+Other claim requirements, including phase, focus, lane and capacity, still
+apply after both conditions pass.
+
+| Fix dependency | Tune task in any swarm | Additional Doctor requirement |
+|---|---|---|
+| `claimed` or `pr`, with or without a branch | Wait for `done` | Still waiting |
+| `done`, without `applied_at` | Dependency is ready | Wait for application to be recorded |
+| `done`, with `applied_at` | Dependency is ready | Application check passes |
+
+The special measurement rule applies only to `tune` tasks measuring `code` or
+`ci` dependencies. Dependencies of other kinds follow the usual dependency
+rules. There is no separate enable flag or measurement delay setting.
+
+### Configure and inspect a measurement task
+
+For example, a master can create an after window task for an existing fix
+`t42` in phase `p2`. Replace these example identifiers with the ledger's own:
+
+```bash
+agentihooks ledger --slug <doctor-ledger> --as <master-name> task add - \
+  'Measure the fix over an equal active hour' --phase p2 --kind tune \
+  --depends-on t42 \
+  --description 'Compare the same counter before and after application over equal active hours' \
+  --must 'The before and after counts use the same command and equal active windows' \
+  --check 'Record the command, output, application time and both window bounds' \
+  --judge 'Doctor master'
+```
+
+Inspect the recorded task fields without claiming the measurement:
+
+```bash
+agentihooks ledger --slug <doctor-ledger> show | jq \
+  '.tasks[] | select(.id == "t42" or ((.depends_on // []) | index("t42"))) |
+   {id, kind, state, depends_on, applied_at, parked_on, claimed_by}'
+```
+
+### Record when the fix is applied
+
+The Doctor's `pull-dev` intervention pulls the watched swarm's main checkout,
+which must be on `dev`. Before pulling it selects done code or CI fixes that
+an unfinished tune task in the Doctor ledger measures and that have no
+`applied_at`. It excludes fixes whose recorded `branch_repo` identifies another
+repository. After a successful pull it stamps the selected fixes with the
+current UTC time, preserving existing stamps.
+
+Use the intervention against the watched swarm:
+
+```bash
+agentihooks doctor <watched-ledger> intervene pull-dev
+```
+
+When application needs another action, such as a service restart or an update
+in another repository, verify that action before recording its actual time by
+hand on the fix task in the Doctor ledger:
+
+```bash
+agentihooks ledger --slug <doctor-ledger> --as <master-name> task set t42 \
+  applied_at=2026-10-18T16:26:29Z
+```
+
+The ledger accepts UTC timestamps in `YYYY-MM-DDTHH:MM:SSZ` format, or an empty
+value (`applied_at=`) to clear a mistaken stamp. The claim check reads the
+recorded value; it does not verify service health or impose an elapsed window.
+Keep the deployment or restart evidence and the measurement bounds with the
+task proof. A pull stamp records the pull's completion time, so a measurement
+that needs a later runtime change must use that later verified boundary.
+
+### Release a read only measurement seat
+
+An engineer already holding a read only task can use `swarm park` when a
+dependency is unfinished, or when a Doctor tune task's code or CI dependency
+has no application stamp. Here “read only” means any task kind except `code`
+and `ci`; parking requires no branch, worktree or GitHub issue for those kinds.
+
+Write a Handoff v2 document using the installed `handoff` skill, with the recorded before window,
+command and output, the remaining application or measurement boundary, and
+the successor's next action. Then run:
+
+```bash
+agentihooks swarm <doctor-ledger> park <handoff-document>
+```
+
+Park validates the handoff, comments on the task, records its blocking
+dependency identifiers in `parked_on`, stores the handoff and releases the
+seat. In a Doctor swarm that list includes measured code or CI fixes without
+`applied_at`, even when they are already done. The tick reopens the task for
+a successor after its blockers are done and its application check passes.
+The measurement window lives in the handoff; park does not validate the
+measurement's substantive proof.
+
+A window still running after every dependency is done and applied has no
+dependency to park on. Use a declared `swarm wait` while holding it, or the
+normal handoff path to transfer it. `swarm block` on an unfinished dependency
+becomes a wait retaining the claim; use park when the seat must be released.
+
+| Symptom | Check and action |
+|---|---|
+| Tune task stays open while its fix is queued | Expected: wait for the fix task to be `done`, then verify application |
+| Fix is done but Doctor does not claim the tune task | Inspect the fix's `applied_at`; apply the fix and record its time, then check other claim constraints |
+| `pull-dev` did not stamp a fix | Check for an unfinished tune dependent, the fix's done state and its recorded repository; another repository needs its own verified application |
+| Timestamp write is refused | Use the UTC format above, without an offset or fractional seconds |
+| Park says the task waits on no open dependency | Finish it, declare the remaining window as a wait, or hand it off; park needs a dependency blocker |
+| Park asks for a pushed branch | Inspect the task kind: `code` and `ci` retain the [stacked work parking requirements](#parking-on-a-dependency-already-merged-into-dev) |
+
+This behavior shipped in [pull request 4523](https://github.com/the-cloud-clockwork/agentihooks/pull/4523),
+after three Doctor seats were taken by measurements of unmerged fixes on
+18 October. That observation is the baseline, not a measured after result.
 
 ## Queue rank
 

@@ -269,20 +269,6 @@ def test_done_waits_on_a_queued_pull_request_and_accepts_only_after_it_lands(env
     assert next(a for a in store.agents("sw") if a.name == name).state == "finished"
 
 
-def test_an_ops_task_completes_with_its_proof_even_when_a_linked_pull_request_is_queued(env, monkeypatch):
-    store, ledger, _ = env
-    run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
-    name = "engineer@a1b2c3-0001"
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
-    ledger.rows["t1"]["kind"] = "ops"
-    url = "https://github.com/o/r/pull/9"
-    ledger.pulls[url] = PullRequest("OPEN", None, 1, False, queued=True)
-    assert run("sw", "done", "--pr", url, "--command", "probe", "--output", "passed") == 0
-    assert ledger.rows["t1"]["state"] == "done"
-    assert cli.idle.wait(store.redis, "sw", name) is None
-
-
 def test_the_tick_reopens_a_done_task_whose_pull_request_closed_unmerged(env, monkeypatch):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
