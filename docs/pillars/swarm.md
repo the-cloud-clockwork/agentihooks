@@ -2625,6 +2625,9 @@ A detection pass reads:
   one `NameRegistry.slugs_of` call: one `MGET` for aliases and one `HMGET` for agent codes. The pass keeps the same
   items, in the same order, as the old one key at a time loop. The inbox detector and the handoff detector share
   this one read.
+- **The inbox receivers, in a fixed number of reads.** The inbox detector then resolves who each address reaches
+  in a fixed number of round trips however many addresses the inbox holds, seven against the live store; see
+  [Inbox receiver read](#inbox-receiver-read).
 - **The watched tasks, once.** The CI detector and the trace detector share one read of the watched ledger's tasks.
 - **Every detector side by side.** Each detector runs in its own thread and is still timed as its own
   `doctor.<name>` step: `runtime storage`, `scheduled tick`, `health`, `inbox`, `handoff`, `spawn`,
@@ -2636,6 +2639,95 @@ A detection pass reads:
   the whole step; see [How the Doctor reads traces](../reference/observability-langfuse.md#how-the-doctor-reads-traces)).
 
 No detector, finding or threshold changed with this work: a pass raises the same findings it raised before.
+
+#### Inbox receiver read
+
+The `inbox past window` finding asks, for every item it reads, whether the item's receiver can still act on it.
+`inbox_receivers` in `scripts.doctor.read` answers that once per detection pass, for every address the items reach
+and every agent that took delivery of an item (the last `delivered` or `read` entry in its history). The detector
+passes the result to `inbox.findings`.
+
+It reads the whole pass in a fixed set of batched reads:
+
+| Read | Redis commands | Round trips |
+|---|---|---|
+| Live agents of the watched swarm and of its Doctor | the agent registry of each swarm | one pipeline per swarm against the live store |
+| Which swarm each address belongs to | `NameRegistry.slugs_of`: one `MGET` of aliases, one `HMGET` of agent codes | two |
+| Seat occupancies and the swarm configuration behind every seat | one pipeline of `HGETALL` per seat and per seat's swarm | one |
+| The current name of every seat occupant and delivery taker | `NameRegistry.resolve_many`: one `MGET` of aliases | one |
+| The recorded exit of every live agent | `SeatStore.exits`: one `MGET` | one |
+
+The number of round trips depends on how many reads the agent registry makes, never on the number of addresses.
+CI holds it at sixteen or fewer for both ten and two hundred agents, each with an alias, a seat, a delivery taker
+in a foreign swarm and a foreign swarm configuration.
+
+Each address gets one `Receiver`:
+
+| Address | Receiver |
+|---|---|
+| `operator` | In scope, not live, no seat wait |
+| An address whose swarm is neither the watched swarm nor its Doctor | Out of scope: `scoped` false, so its items never count as waiting |
+| A name, or a seat whose occupant is a live agent that has not exited this occupancy | Live, with `quiet_ms` from the agent's idle ticks (one minute each), its `occupant` and `harness` |
+| A seat whose occupant exited, or is not live | Not live; `seat_wait` true unless the seat's swarm is `stopped` or the seat number is above its lane cap (`max_eng`, `max_ci`, `max_plan`; a configuration without `max_plan` counts as a cap of one). A seat whose swarm has no configuration waits |
+| Any other name | In scope, not live |
+
+A delivery taker is looked up in its own swarm, so mail delivered to a seat of another swarm is judged by that
+swarm's state and caps. An item to a seat with `seat_wait` set and no live receiver is skipped: it waits for the
+seat's next occupant, not for a gone one.
+
+Nothing about the read is configurable: the batched reads, the sixteen trip bound in CI and the one minute per idle
+tick are fixed in code.
+
+##### Check the receiver read
+
+The read uses only the store and inbox clients, so it can be called read only against the live Redis from a
+checkout. A count of the receivers the watched swarm's current inbox resolves to:
+
+```bash
+cd ~/dev/tcc-ecosystem/agentihooks
+~/dev/tcc-ecosystem/.venv/bin/python - rig-grade-swarm <<'PY'
+import sys, time
+from scripts.doctor import read
+from scripts.inbox.store import InboxStore
+from scripts.swarm.store import RedisStore, redis_client
+
+slug = sys.argv[1]
+redis = redis_client()
+store, box = RedisStore(redis), InboxStore(redis)
+items = read.inbox_items(box, slug)
+started = time.monotonic()
+found = read.inbox_receivers(store, box, slug, items)
+print(len(items), "items;", len(found), "receivers;",
+      sum(r.live for r in found.values()), "live;",
+      sum(r.seat_wait for r in found.values()), "seats waiting;",
+      round(time.monotonic() - started, 3), "s")
+PY
+```
+
+Output on 22 October 2026:
+
+```text
+43569 items; 3294 receivers; 10 live; 2 seats waiting; 0.329 s
+```
+
+Pass the watched swarm's id, not the Doctor's: the read covers the watched swarm and its Doctor together. Run it
+from a worktree with `PYTHONPATH` set to that worktree, or the editable install loads the main checkout's code.
+
+##### Measured result
+
+Pull request [4474](https://github.com/the-cloud-clockwork/agentihooks/pull/4474) merged into `dev` on 18 October
+2026 at 19:15 UTC.
+
+| Measure | Before | After |
+|---|---|---|
+| Fixed live snapshot: 34,444 items, 2,301 addresses, 2,808 receivers | 53,062 round trips, 25.05 s | 7 round trips (3 pipelines, 3 `MGET`, 1 `HMGET`), 0.25 s, on the branch head |
+| CI round trips, ten and two hundred agents | 75 and 1,405 (red run [39118414817](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39118414817)) | sixteen or fewer (green run [39119319483](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39119319483)) |
+| `doctor.inbox` step, thirty minute window | 4 passes, 31.2 to 63.5 s (18 October, 09:44 to 10:14 UTC) | 4 passes, 6.8 to 7.6 s (22 October, 09:30 to 10:00 UTC) |
+| Timer step, same windows | 15 steps, 5.7 to 74.6 s | 15 steps, 5.9 to 74.0 s |
+
+Both windows were read with the journal commands under [Measure the timer step](#measure-the-timer-step). The after
+window also runs the later handoff scan batching, [pull request 5785](https://github.com/the-cloud-clockwork/agentihooks/pull/5785),
+which changes the handoff detector, so the timer step's maximum is still set by `doctor.handoff`.
 
 #### Configuration
 
@@ -2709,6 +2801,8 @@ by fast forwarding the main checkout at 09:37:59 UTC on 18 October 2026. On 22 O
 |---|---|---|
 | A timer step over 60 seconds | The detector steps with the same `pid` | The slowest `doctor.<name>` step sets the pass time; that detector is the one to bound |
 | A `doctor.<name>` record with `"outcome": "error"` | Its `error` field, and the Doctor tick's action line `the <name> detector failed: ...` | That detector raised; the other detectors of the pass still reported |
+| `doctor.inbox` takes tens of seconds again | The receiver check under [Inbox receiver read](#inbox-receiver-read) and the inbox size it prints | Under a second for the receivers means the time is spent elsewhere in the inbox step; seconds there means a per address read came back |
+| An `inbox past window` finding on mail to an empty seat | The seat swarm's `state`, `max_eng`, `max_ci` and `max_plan` in its stored configuration | A seat waits for its next occupant unless its swarm is stopped or the seat number is above the lane cap |
 | `controller lease is stale` after a Doctor step | [Controller lease during long steps](#controller-lease-during-long-steps) | The heartbeat lost the lease to a higher epoch; the next pass takes a new one |
 | Tick runs killed by the service start timeout | The timeout count above and the timer step walls in the same window | A step past the timeout ends the whole tick; bound the slowest step |
 
