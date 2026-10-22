@@ -130,11 +130,10 @@ def test_the_timer_excludes_jobs_that_started_before_the_saved_window(store, mon
     assert InboxStore(store.redis).inbox(f"master@{WATCHED}") == []
 
 
-def test_a_judged_speed_finding_returns_only_after_its_cooldown(store, monkeypatch):
+def test_a_judged_speed_finding_returns_only_after_its_cooldown_with_new_evidence(store, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES", "2")
-    monkeypatch.setattr(
-        ci_speed_read, "read", lambda *args, **kwargs: snapshot([record([job(0, queued=True, created=-901)])])
-    )
+    records = [record([job(0, queued=True, created=-901)])]
+    monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot(records))
     cli.timer(store, DOCTOR, NOW, False)
     judgments = loop.verdicts(store, DOCTOR)
     judgments.judge(QUEUED, "early-real", "runner delay", "reader", NOW)
@@ -142,6 +141,9 @@ def test_a_judged_speed_finding_returns_only_after_its_cooldown(store, monkeypat
     first = json.loads(store.redis.hget(judgments.key, QUEUED))
     assert first["returned"] is False
     cli.timer(store, DOCTOR, NOW + 120000, False)
+    assert json.loads(store.redis.hget(judgments.key, QUEUED))["returned"] is False
+    records.append(record([job(0, queued=True, created=-901)], identity=8))
+    cli.timer(store, DOCTOR, NOW + 180000, False)
     second = json.loads(store.redis.hget(judgments.key, QUEUED))
     assert second["returned"] is True
 
