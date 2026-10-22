@@ -1167,7 +1167,8 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
         try:
-            if now_ms - agent.started_at >= LEASE_MS:
+            waited = now_ms - agent.started_at - outage.paused_ms(slug, agent.started_at, now_ms)
+            if waited >= LEASE_MS:
                 raise SpawnError(ACK_EXPIRED)
             placed = runtime.collect(
                 config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True}
