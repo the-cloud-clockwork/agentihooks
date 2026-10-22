@@ -22,6 +22,13 @@ GROUP_LINE = (
     "each in its body. When it merges, swarm done on your task closes them all:"
 )
 PUBLISHED = "It opens a GitHub issue where the repo has issues, else a ledger artifact"
+PULLED_KINDS = ("ops", "tune", "troubleshoot", "research")
+READY_PULL = (
+    "If this work opens a pull request, record it with {me} pr <pr url>. Once its review closed and it is out of "
+    "draft, write a Handoff v2 document, leave the crew with {led} leave and release your seat with {me} ready "
+    "<handoff doc> instead of done: the swarm merges it and reopens the task for its proof. Done refuses while a "
+    "recorded pull request is open, unless the proof gives --filed for a fix proposed instead of made."
+)
 THROUGH_CODE = (
     "Reach that state through code: any change to what runs goes through a worktree (wt.sh new {name}), a pull "
     "request into dev and CI, never a live patch."
@@ -738,6 +745,8 @@ GATED_SHIP = {MANUAL: manual_ship, ASSIST: assist_ship}
 
 def kind_steps(kind, me, led, name, phase, autonomy, task_id):
     steps = STEPS[kind](me, led, naming.plain(name), phase)
+    if kind in PULLED_KINDS:
+        return [*steps[:-1], READY_PULL.format(me=me, led=led), steps[-1]]
     if kind not in ("code", "ci") or autonomy not in GATED_SHIP:
         return steps
     return steps[:5] + GATED_SHIP[autonomy](me, led, task_id)

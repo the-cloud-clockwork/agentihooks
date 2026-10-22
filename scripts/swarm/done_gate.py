@@ -1,4 +1,5 @@
-"""Done on a code or ci task needs its pull request merged.
+"""Done on a code or ci task needs its pull request merged; on any other kind, its recorded pull request merged
+unless the proof files the fix instead.
 
 `swarm done` refuses until GitHub reads the pull request as merged. The tick re-reads the tasks a lane agent marked
 done in the last day and reopens one whose pull request is not merged; a done from the master or operator stands.
@@ -10,6 +11,11 @@ from scripts.swarm_ledger import ledger_kinds
 GATED = ("code", "ci")
 WORKERS = ("eng", "ci")
 MERGED = "MERGED"
+MERGE = "merge it, then run swarm done again"
+READY = (
+    "release the seat with swarm ready <handoff doc> so the swarm merges it, "
+    "or give --filed when the fix is proposed instead of made"
+)
 RECHECK_MS = 24 * 60 * 60_000
 SEEN_TTL_S = 2 * 24 * 3600
 REOPENED = (
@@ -22,7 +28,7 @@ def refusal(task, url, github):
     """Why `swarm done` must refuse this task, or '' when it may close."""
     kind = ledger_kinds.kind(task)
     if kind not in GATED:
-        return ""
+        return _unmerged(url, github, READY) if url and gated(task) else ""
     if task.get("split"):
         return _split_refusal(task, url, github)
     if not url:
@@ -30,12 +36,16 @@ def refusal(task, url, github):
     return _unmerged(url, github)
 
 
-def _unmerged(url, github):
+def gated(task):
+    return ledger_kinds.kind(task) in GATED or not str((task.get("proof") or {}).get("filed", "")).strip()
+
+
+def _unmerged(url, github, then=MERGE):
     found = github(url)
     if found is None:
         return f"could not read pull request {url} from GitHub; run swarm done again when it answers"
     if found.state != MERGED:
-        return f"pull request {url} is {found.state.lower()}, not merged; merge it, then run swarm done again"
+        return f"pull request {url} is {found.state.lower()}, not merged; {then}"
     return ""
 
 
