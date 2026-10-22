@@ -632,6 +632,169 @@ def test_a_launch_is_pending_while_the_runtime_spawns_it(store):
     assert [row["state"] for row in store.launches("sw")] == ["started"]
 
 
+class HiveAcks(FakeRuntime):
+    def __init__(self, fail=()):
+        super().__init__()
+        self.ordered, self.collected, self.acked, self.failing, self.broken = [], [], set(), set(fail), set()
+        self.refused, self.collected_slugs = set(), set()
+
+    def spawn(self, config, lane, name, task):
+        from scripts.swarm.tick import ACK_LATER
+
+        if lane == MASTER:
+            return super().spawn(config, lane, name, task)
+        assert task[ACK_LATER] is True
+        if task["id"] in self.refused:
+            raise SpawnError("hive refused the order", "refused")
+        self.ordered.append(name)
+        raise SpawnError("hive launch ordered, waiting for its acknowledgement", "pending")
+
+    def collect(self, config, lane, name, task):
+        from scripts.swarm.tick import ACK_LATER
+
+        assert task[ACK_LATER] is True
+        assert task["seat"].startswith(f"{lane}-")
+        self.collected.append(name)
+        self.collected_slugs.add(config.slug)
+        if name in self.broken:
+            raise ConnectionError("redis went away")
+        if name in self.failing:
+            raise SpawnError("hive launch failed: prompt", "refused", pane_id=f"pane-{name}")
+        if name not in self.acked:
+            raise SpawnError("hive launch ordered, waiting for its acknowledgement", "pending")
+        return super().spawn(config, lane, name, task)
+
+
+def test_a_tick_pass_never_waits_on_hive_acknowledgements_and_a_later_pass_records_them(store):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), HiveAcks()
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    names = list(runtime.ordered)
+    waits = {f"{ledger.rows[t]['claimed_by']} waits for the hive acknowledgement of {t}" for t in ("t1", "t2", "t3")}
+    assert waits <= set(actions)
+    assert len(names) == 3 and runtime.spawned == []
+    assert sorted(row["state"] for row in store.launches("sw")) == ["acknowledging"] * 3
+    tick("sw", store, ledger, runtime, now_ms=STARTUP_GRACE_MS + 2_000)
+    assert sorted(runtime.collected) == sorted(names) and runtime.ordered == names
+    assert [store.claimant("sw", t) for t in ("t1", "t2", "t3")] == [
+        ledger.rows[t]["claimed_by"] for t in ("t1", "t2", "t3")
+    ]
+    assert all(ledger.rows[t]["claimed_by"] in names for t in ("t1", "t2", "t3"))
+    runtime.acked.update(names)
+    actions = tick("sw", store, ledger, runtime, now_ms=STARTUP_GRACE_MS + 3_000)
+    spawned = {f"spawned {ledger.rows[t]['claimed_by']} for {t}" for t in ("t1", "t2", "t3")}
+    assert spawned <= set(actions)
+    assert sorted(name for _, name, _ in runtime.spawned) == sorted(names)
+    assert {lane for lane, _, _ in runtime.spawned} == {"eng"}
+    assert sorted(row["state"] for row in store.launches("sw")) == ["started"] * 3
+    assert [store.claims("sw", t) for t in ("t1", "t2", "t3")] == [1, 1, 1]
+    assert runtime.ordered == names
+
+
+@pytest.mark.wall_clock
+def test_a_tick_pass_with_three_unacknowledged_hive_orders_ends_within_seconds(store):
+    import time
+
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), HiveAcks()
+    started = time.monotonic()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert time.monotonic() - started < 5
+    assert len(runtime.ordered) == 3
+
+
+def test_a_refused_hive_acknowledgement_reopens_its_task(store, monkeypatch):
+    from scripts.swarm import failed_panes
+    from scripts.swarm import tick as tick_module
+
+    store.update("sw", max_eng=2)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    names = list(runtime.ordered)
+    runtime.failing.update(names)
+    released, release = [], tick_module._release_admission
+    monkeypatch.setattr(
+        tick_module, "_release_admission", lambda *args: released.append((args[1], args[2]["id"])) or release(*args)
+    )
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert sorted(released) == [(runtime, "t1"), (runtime, "t2")]
+    assert sum(action.startswith("spawn failed for ") for action in actions) == 2
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    for name in names:
+        assert (launches[name]["state"], launches[name]["error"]) == ("failed", "hive launch failed: prompt")
+        assert failed_panes.held(store, "sw")[f"pane-{name}"]["failed_at"] == 2_000
+    assert not set(names) & {agent.name for agent in store.agents("sw")}
+    assert ledger.rows["t1"]["claimed_by"] not in names and ledger.rows["t2"]["claimed_by"] not in names
+
+
+def test_a_refused_acknowledgement_of_a_task_gone_from_the_ledger_names_the_task(store):
+    from scripts.swarm.tick import _collect_acks
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.failing.update(runtime.ordered)
+    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, {"tasks": []}, 2_000)
+    assert [action.split(":")[0] for action in actions] == ["spawn failed for t1"]
+
+
+def test_every_refused_hive_order_in_one_pass_reports_its_failure(store):
+    store.update("sw", max_eng=2)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
+    runtime.refused.update({"t1", "t2"})
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    failures = sorted(action for action in actions if action.startswith("spawn failed for "))
+    assert len(failures) == 2
+    assert [failure.startswith(f"spawn failed for {t}") for failure, t in zip(failures, ("t1", "t2"))] == [True, True]
+    assert all(failure.endswith(": hive refused the order") for failure in failures)
+    assert runtime.ordered == []
+
+
+def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(store, monkeypatch):
+    from scripts.swarm import tick as tick_module
+    from scripts.swarm.tick import LEASE_MS
+    from scripts.swarm_v2.runtime import codex
+
+    admitted, admit = [], codex.admit_legacy
+    monkeypatch.setattr(codex, "admit_legacy", lambda *args: admitted.append(args) or admit(*args))
+    refreshed, refresh = [], store.refresh
+    monkeypatch.setattr(store, "refresh", lambda *args: refreshed.append(args) or refresh(*args))
+    started, start = [], tick_module._started
+    monkeypatch.setattr(tick_module, "_started", lambda *args: started.append(args) or start(*args))
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    runtime.broken.add(first)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
+    assert ledger.rows["t1"]["claimed_by"] == first and store.claimant("sw", "t1") == first
+    assert ("sw", "t1", first, LEASE_MS) in refreshed
+    runtime.broken.clear()
+    runtime.acked.add(first)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert [row["state"] for row in store.launches("sw")] == ["started"]
+    assert runtime.ordered == [first]
+    assert [(args[0], args[1], args[3]) for args in admitted if args[2].name == first] == [(store, "sw", runtime)]
+    assert [(args[3], args[5].task["lane"]) for args in started if args[5].record.name == first] == [(ledger, "eng")]
+    assert runtime.collected_slugs == {"sw"}
+
+
+def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(store):
+    from scripts.swarm.tick import ACK_EXPIRED, LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS - 1)
+    assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
+    collected = len(runtime.collected)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    assert (launches[first]["state"], launches[first]["error"]) == ("failed", ACK_EXPIRED)
+    assert len(runtime.collected) == collected
+    assert first not in {agent.name for agent in store.agents("sw")}
+    assert ledger.rows["t1"]["claimed_by"] != first
+
+
 def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)
