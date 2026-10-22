@@ -151,11 +151,36 @@ def test_the_reader_is_the_latest_agent_that_took_delivery_or_read_the_item():
     assert inbox.reader({"history": [took, {"state": "delivered", "by": "engineer@a-0003"}]}) == "engineer@a-0003"
 
 
-def test_an_informational_item_on_an_emptied_seat_is_never_counted_and_a_work_item_still_is():
+def test_an_item_on_an_empty_seat_awaiting_a_successor_is_not_counted_and_a_live_occupant_item_still_is():
     work = {**_delivered(), "id": "work1", "state": "pending", "fyi": False}
     fyi = {**copy.deepcopy(work), "id": "fyi1", "fyi": True}
     waiting = {work["address"]: inbox.Receiver(seat_wait=True)}
-    [found] = inbox.past_window([work, fyi], 11 * MIN, WINDOW, waiting)
+    assert inbox.past_window([work, fyi], 11 * MIN, WINDOW, waiting) == []
+    assert inbox.findings([work, fyi], 11 * MIN, WINDOW, waiting) == []
+    live = {work["address"]: inbox.Receiver(live=True, occupant="demo-eng-1")}
+    [found] = inbox.past_window([work, fyi], 11 * MIN, WINDOW, live)
     assert found.id == "inbox-past-window/work1"
-    assert found.summary == "seat wait; sent 10 minutes ago"
+    assert found.summary == "unread delivery; sent 10 minutes ago"
     assert inbox.past_window([fyi], 11 * MIN, WINDOW, {}) == []
+
+
+def test_a_quiet_live_reader_of_an_item_on_an_empty_seat_is_still_raised():
+    row = _delivered()
+    row["history"][1]["by"] = "engineer@a-0001"
+    seat = {row["address"]: inbox.Receiver(seat_wait=True)}
+    quiet = {**seat, "engineer@a-0001": inbox.Receiver(live=True, quiet_ms=WINDOW)}
+    assert [f.subject for f in inbox.past_window([row], 20 * MIN, WINDOW, quiet)] == [row["id"]]
+    working = {**seat, "engineer@a-0001": inbox.Receiver(live=True, quiet_ms=WINDOW - 1)}
+    assert inbox.past_window([row], 20 * MIN, WINDOW, working) == []
+    gone = {**seat, "engineer@a-0001": inbox.Receiver()}
+    assert inbox.past_window([row], 20 * MIN, WINDOW, gone) == []
+
+
+def test_an_empty_seat_item_does_not_hide_a_later_live_occupant_item():
+    empty = {**_delivered("eng-1@demo"), "id": "empty", "state": "pending"}
+    live = {**_delivered("eng-2@demo"), "id": "live", "state": "pending"}
+    receivers = {
+        empty["address"]: inbox.Receiver(seat_wait=True),
+        live["address"]: inbox.Receiver(live=True, occupant="demo-eng-2", quiet_ms=WINDOW),
+    }
+    assert [f.subject for f in inbox.past_window([empty, live], 20 * MIN, WINDOW, receivers)] == ["live"]
