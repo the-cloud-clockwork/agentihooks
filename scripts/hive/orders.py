@@ -102,7 +102,10 @@ class Orders:
         return f"{registry.key(hive)}:orders"
 
     def receipt(self, order: LaunchOrder) -> str:
-        return f"{registry.key(order.hive)}:launch-orders:{order.slug}:{order.execution_id}:{order.generation}"
+        return self.launch_receipt(order.hive, order.slug, order.execution_id, order.generation)
+
+    def launch_receipt(self, hive: str, slug: str, execution_id: str, generation: int) -> str:
+        return f"{registry.key(hive)}:launch-orders:{slug}:{execution_id}:{generation}"
 
     def pod(self, hive: str, pod: str) -> str:
         return f"{registry.key(hive)}:pod:{pod}"
@@ -231,6 +234,8 @@ class Consumer:
             agent = self.store.execution_registry.get(order.slug, order.execution_id)
         except SwarmError:
             return FOREIGN
+        if order.action == "reap_execution":
+            return self.reap_execution(order, agent)
         if agent.generation != order.generation or agent.runtime_target.get("host_id") != self.hive:
             return FOREIGN
         if order.action == "name":
@@ -244,6 +249,18 @@ class Consumer:
         if outcome.ok:
             return Ack(DONE, agent.runtime_target)
         return Ack(FAILED, agent.runtime_target, outcome.detail or outcome.status.value)
+
+    def reap_execution(self, order: CommandOrder, agent: AgentRecord) -> Ack:
+        receipt = self.orders.launch_receipt(self.hive, order.slug, order.execution_id, order.generation)
+        raw = self.store.redis.hget(receipt, "ack")
+        if raw is None:
+            return FOREIGN
+        ack = Ack(**json.loads(raw))
+        if ack.status != "live" or ack.target.get("host_id") != self.hive:
+            return FOREIGN
+        live = replace(agent, generation=order.generation, runtime_target=ack.target, pane_id=ack.execution["pane_id"])
+        outcome = self.runtime.terminate(live)
+        return Ack(DONE if outcome.ok else FAILED, ack.target, "" if outcome.ok else outcome.detail)
 
     def apply(self, order: LaunchOrder) -> Ack | None:
         now = lease.now_ms(self.store)
