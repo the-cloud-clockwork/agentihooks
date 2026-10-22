@@ -847,11 +847,17 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
     view = readiness.Snapshot(
-        slug, rows, doc, graph, fix, lambda task_id: task_id in awaiting or store.claimant(slug, task_id) is not None
+        slug,
+        rows,
+        doc,
+        graph,
+        fix,
+        lambda task_id: task_id in awaiting or store.claimant(slug, task_id) is not None,
+        lambda task: released(task) and applied(task),
     )
     clear, overlapping = [], []
     for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
-        if readiness.claimable(t, lane, view) and released(t) and applied(t):
+        if readiness.claimable(t, lane, view):
             mine = t.get("territory") or []
             if any(_overlaps(mine, other) for other in held):
                 overlapping.append(t)
