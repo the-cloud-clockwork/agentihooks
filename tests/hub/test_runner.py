@@ -268,7 +268,7 @@ def test_the_hub_loop_idles_only_after_a_pass_with_every_reactor_on_standby(monk
 
     slept = []
     monkeypatch.setattr(runner.HubRunner, "run_once", run_once)
-    monkeypatch.setattr(runner.time, "sleep", slept.append)
+    monkeypatch.setattr(runner, "scheduled_wait", slept.append)
     monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
     with pytest.raises(Stop):
         runner.main(["run"])

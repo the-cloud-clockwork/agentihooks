@@ -4,7 +4,6 @@ import os
 import signal
 import socket
 import sys
-import time
 import traceback
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
@@ -13,9 +12,10 @@ from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.hub import lease, registry
 from scripts.hub.registry import Reactor, Registry
+from scripts.scheduler.process_timer import wait as scheduled_wait
 
 VERSIONS = "hub-versions"
-IDLE_S = 0.5
+IDLE_S = 5.0
 BATCH = 32
 FETCH_TIMEOUT_MS = 500
 LEASE_TTL_MS = 15_000
@@ -107,7 +107,7 @@ def _run(hub: HubRunner, once: bool) -> int:
         if once:
             return 0
         if all(outcomes == ["standby"] for outcomes in passes.values()):
-            time.sleep(IDLE_S)
+            scheduled_wait(IDLE_S)
 
 
 def main(argv: list[str]) -> int:
