@@ -23,8 +23,8 @@ class Envelope:
     version: int
     time: int
     author: str
-    cause: str | None
     data: dict
+    cause: str | None = None
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self):
@@ -64,18 +64,5 @@ class Envelope:
         return cls.from_dict(json.loads(raw))
 
 
-def create(
-    type: str, swarm: str, entity: str, key: str, version: int, author: str, data: dict, cause: str | None = None
-) -> Envelope:
-    return Envelope(
-        id=uuid.uuid4().hex,
-        type=type,
-        swarm=swarm,
-        entity=entity,
-        key=key,
-        version=version,
-        time=time.time_ns() // 1_000_000,
-        author=author,
-        cause=cause,
-        data=data,
-    )
+def create(**fields) -> Envelope:
+    return Envelope(id=uuid.uuid4().hex, time=time.time_ns() // 1_000_000, **fields)

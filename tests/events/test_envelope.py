@@ -88,10 +88,23 @@ def test_envelope_refuses_data_that_is_not_a_dict():
         Envelope(**_fields(data=[1]))
 
 
+def _created(**changes):
+    fields = _fields(**changes)
+    del fields["id"], fields["time"], fields["schema_version"]
+    if "cause" not in changes:
+        del fields["cause"]
+    return fields
+
+
+def test_create_refuses_a_caller_id():
+    with pytest.raises(TypeError):
+        envelope.create(**_created(), id="mine")
+
+
 def test_create_stamps_a_fresh_id_the_clock_and_the_schema_version(monkeypatch):
     monkeypatch.setattr(envelope.time, "time_ns", lambda: 1_700_000_000_123_456_789)
-    first = envelope.create("task.claimed", "crew", "task", "t1", 3, "engineer@1-1", {"lane": "eng"})
-    second = envelope.create("task.claimed", "crew", "task", "t1", 3, "engineer@1-1", {"lane": "eng"})
+    first = envelope.create(**_created())
+    second = envelope.create(**_created())
     assert first.time == 1_700_000_000_123
     assert first.schema_version == SCHEMA_VERSION
     assert first.cause is None
@@ -101,5 +114,5 @@ def test_create_stamps_a_fresh_id_the_clock_and_the_schema_version(monkeypatch):
 
 
 def test_create_passes_a_cause_through():
-    event = envelope.create("task.done", "crew", "task", "t1", 4, "engineer@1-1", {}, cause="e1")
+    event = envelope.create(**_created(cause="e1"))
     assert event.cause == "e1"
