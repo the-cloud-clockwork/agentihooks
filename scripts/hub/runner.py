@@ -16,39 +16,39 @@ from scripts.hub.registry import Reactor, Registry
 
 VERSIONS = "hub-versions"
 IDLE_S = 0.5
+BATCH = 32
+FETCH_TIMEOUT_MS = 500
+LEASE_TTL_MS = 15_000
 
 
 def handled_key(reactor: Reactor, event: Envelope) -> str:
-    digest = hashlib.sha256(f"{event.swarm}\0{event.key}".encode()).hexdigest()[:32]
+    digest = hashlib.sha256(f"{event.swarm}\0{event.key}".encode()).hexdigest()
     return f"{reactor.name}.{event.entity}.{digest}"
 
 
-def _handled(store: StateStore, key: str) -> int:
+def record(store: StateStore, key: str, version: int) -> None:
     entry = store.get(key)
-    return -1 if entry is None else int(entry.value)
-
-
-def _record(store: StateStore, key: str, version: int) -> None:
-    while True:
-        entry = store.get(key)
-        if entry is not None and int(entry.value) >= version:
-            return
-        try:
-            if entry is None:
-                store.create(key, str(version).encode())
-            else:
-                store.update(key, str(version).encode(), entry.revision)
-            return
-        except StateConflict:
-            continue
+    if entry is not None and int(entry.value) >= version:
+        return
+    try:
+        if entry is None:
+            store.create(key, str(version).encode())
+        else:
+            store.update(key, str(version).encode(), entry.revision)
+    except StateConflict:
+        record(store, key, version)
 
 
 # A singleton lease renews only between deliveries, so one singleton handler must finish within lease_ttl_ms.
 class HubRunner:
     def __init__(
-        self, bus: Bus, reactors: Registry, holder: str, clock: lease.Clock = lease.wall_ms, lease_ttl_ms: int = 15_000
+        self,
+        bus: Bus,
+        reactors: Registry,
+        holder: str,
+        clock: lease.Clock = lease.wall_ms,
+        lease_ttl_ms: int = LEASE_TTL_MS,
     ):
-        self._bus = bus
         self._reactors = list(reactors)
         self._versions = bus.state(VERSIONS)
         self._consumers = {r.name: bus.events.consumer(registry.durable(r), r.subject) for r in self._reactors}
@@ -59,7 +59,7 @@ class HubRunner:
             if r.singleton
         }
 
-    def run_once(self, batch: int = 32, timeout_ms: int = 500) -> dict[str, list[str]]:
+    def run_once(self, batch: int = BATCH, timeout_ms: int = FETCH_TIMEOUT_MS) -> dict[str, list[str]]:
         return {reactor.name: self._pass(reactor, batch, timeout_ms) for reactor in self._reactors}
 
     def stop(self) -> None:
@@ -82,7 +82,8 @@ class HubRunner:
     def _deliver(self, reactor: Reactor, delivery: Delivery) -> str:
         event = delivery.event
         key = handled_key(reactor, event)
-        if _handled(self._versions, key) >= event.version:
+        entry = self._versions.get(key)
+        if entry is not None and int(entry.value) >= event.version:
             delivery.ack()
             return "skipped"
         try:
@@ -92,9 +93,21 @@ class HubRunner:
             traceback.print_exc()
             delivery.nak()
             return "failed"
-        _record(self._versions, key, event.version)
+        record(self._versions, key, event.version)
         delivery.ack()
         return "handled"
+
+
+def _run(hub: HubRunner, once: bool) -> int:
+    while True:
+        passes = hub.run_once()
+        for name, outcomes in passes.items():
+            for outcome in outcomes:
+                print(f"{name}: {outcome}")
+        if once:
+            return 0
+        if all(outcomes == ["standby"] for outcomes in passes.values()):
+            time.sleep(IDLE_S)
 
 
 def main(argv: list[str]) -> int:
@@ -106,15 +119,7 @@ def main(argv: list[str]) -> int:
     hub = HubRunner(bus, registry.REACTORS, os.environ.get("HOSTNAME") or socket.gethostname())
     previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
-        while True:
-            passes = hub.run_once()
-            for name, outcomes in passes.items():
-                for outcome in outcomes:
-                    print(f"{name}: {outcome}", flush=True)
-            if args.once:
-                return 0
-            if all(outcomes == ["standby"] for outcomes in passes.values()):
-                time.sleep(IDLE_S)
+        return {"run": _run}[args.action](hub, args.once)
     finally:
         hub.stop()
         bus.close()

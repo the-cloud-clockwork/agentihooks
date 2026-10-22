@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from scripts.events import memory
@@ -61,6 +63,7 @@ def test_a_release_frees_the_lease_only_for_its_holder(store, clock):
     second.release()
     assert second.acquire() is False
     first.release()
+    assert lease.read(store, "reactor.timers") == lease.LeaseState("a", 0)
     assert second.acquire() is True
 
 
@@ -109,5 +112,12 @@ def test_a_conflict_on_release_leaves_the_successor_in_place(store, clock):
 
 
 def test_a_lease_refuses_a_non_positive_ttl(store, clock):
-    with pytest.raises(ValueError, match="lease ttl must be a positive integer"):
+    with pytest.raises(ValueError, match="^lease ttl must be a positive integer$"):
         lease.Lease(store, "reactor.timers", "a", ttl_ms=0, clock=clock)
+
+
+def test_lease_time_is_whole_wall_clock_milliseconds():
+    before = time.time_ns() // 1_000_000
+    now = lease.wall_ms()
+    assert isinstance(now, int)
+    assert before <= now <= time.time_ns() // 1_000_000

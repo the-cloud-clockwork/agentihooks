@@ -1,7 +1,11 @@
+import hashlib
+import signal
+
 import pytest
 
 from scripts import cli_delegates
 from scripts.events import memory
+from scripts.events.bus import StateEntry
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.hub import lease, registry, runner
@@ -197,15 +201,124 @@ def test_a_singleton_lease_lost_inside_a_batch_hands_the_rest_back(bus, clock):
 
 def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatch, capsys):
     handler = Recorder()
-    declared = registry.Registry([registry.Reactor("lifecycle", "swarm.*.task.>", handler)])
+    declared = registry.Registry([registry.Reactor("lifecycle", "swarm.*.task.>", handler, singleton=True)])
+    opened = memory.open_bus(BusConfig())
+    opened.events.publish(SUBJECT, event("e1", 1))
+    monkeypatch.setattr(registry, "REACTORS", declared)
+    monkeypatch.setattr(runner, "open_bus", lambda config: opened if config == BusConfig(backend="memory") else None)
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+    monkeypatch.delenv("AGENTIHOOKS_BUS_URL", raising=False)
+    monkeypatch.setenv("HOSTNAME", "hub-0")
+    previous = signal.getsignal(signal.SIGTERM)
+    assert runner.main(["run", "--once"]) == 0
+    assert handler.seen == [("e1", 1)]
+    assert capsys.readouterr().out == "lifecycle: handled\n"
+    assert lease.read(opened.state(lease.BUCKET), "reactor.lifecycle") == lease.LeaseState("hub-0", 0)
+    assert signal.getsignal(signal.SIGTERM) is previous
+
+
+def test_the_hub_command_refuses_an_unknown_action(capsys):
+    with pytest.raises(SystemExit):
+        runner.main(["stop"])
+    assert "usage: agentihooks hub" in capsys.readouterr().err
+
+
+def test_sigterm_ends_the_hub_with_143_and_releases_its_leases(monkeypatch):
+    def terminate(event: Envelope) -> None:
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+
+    declared = registry.Registry([registry.Reactor("timers", "swarm.*.task.>", terminate, singleton=True)])
     opened = memory.open_bus(BusConfig())
     opened.events.publish(SUBJECT, event("e1", 1))
     monkeypatch.setattr(registry, "REACTORS", declared)
     monkeypatch.setattr(runner, "open_bus", lambda config: opened)
-    monkeypatch.setenv("HOSTNAME", "hub-0")
-    assert runner.main(["run", "--once"]) == 0
-    assert handler.seen == [("e1", 1)]
-    assert "lifecycle: handled" in capsys.readouterr().out
+    monkeypatch.setenv("HOSTNAME", "hub-1")
+    with pytest.raises(SystemExit) as stopped:
+        runner.main(["run"])
+    assert stopped.value.code == 143
+    assert lease.read(opened.state(lease.BUCKET), "reactor.timers") == lease.LeaseState("hub-1", 0)
+
+
+class Stop(BaseException):
+    pass
+
+
+def test_the_hub_loop_idles_only_after_a_pass_with_every_reactor_on_standby(monkeypatch):
+    passes = iter([{"page": ["handled"]}, {"page": ["standby"]}, {"page": []}])
+
+    def run_once(self):
+        try:
+            return next(passes)
+        except StopIteration:
+            raise Stop from None
+
+    slept = []
+    monkeypatch.setattr(runner.HubRunner, "run_once", run_once)
+    monkeypatch.setattr(runner.time, "sleep", slept.append)
+    monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
+    with pytest.raises(Stop):
+        runner.main(["run"])
+    assert slept == [runner.IDLE_S]
+
+
+def test_a_failed_handler_names_its_reactor_and_event_on_stderr(bus, capsys):
+    hosted = hub(bus, [registry.Reactor("lifecycle", "swarm.*.task.>", Recorder(fail=1))])
+    bus.events.publish(SUBJECT, event("e1", 1))
+    hosted.run_once(batch=10, timeout_ms=0)
+    err = capsys.readouterr().err
+    assert err.startswith("hub: reactor lifecycle failed on event e1\n")
+    assert "RuntimeError: handler failed" in err
+
+
+def test_the_handled_key_names_reactor_entity_and_a_digest_of_swarm_and_key():
+    reactor = registry.Reactor("lifecycle", "swarm.>", Recorder())
+    digest = hashlib.sha256(b"s\0t1").hexdigest()
+    assert runner.handled_key(reactor, event("e1", 1)) == f"lifecycle.task.{digest}"
+
+
+def test_handled_versions_live_in_the_versions_bucket(bus):
+    reactor = registry.Reactor("lifecycle", "swarm.*.task.>", Recorder())
+    hosted = hub(bus, [reactor])
+    bus.events.publish(SUBJECT, event("e1", 3))
+    hosted.run_once(batch=10, timeout_ms=0)
+    assert bus.state(runner.VERSIONS).get(runner.handled_key(reactor, event("e1", 3))).value == b"3"
+
+
+def test_record_raises_the_version_and_never_lowers_or_rewrites_it(bus):
+    store = bus.state(runner.VERSIONS)
+    runner.record(store, "k", 2)
+    runner.record(store, "k", 5)
+    revision = store.get("k").revision
+    runner.record(store, "k", 5)
+    runner.record(store, "k", 4)
+    assert store.get("k") == StateEntry("k", b"5", revision)
+
+
+class Contended:
+    def __init__(self, store, rival: int):
+        self.store = store
+        self.rival = rival
+
+    def get(self, key):
+        entry = self.store.get(key)
+        if self.rival:
+            version, self.rival = self.rival, 0
+            runner.record(self.store, key, version)
+        return entry
+
+    def create(self, key, value):
+        return self.store.create(key, value)
+
+    def update(self, key, value, revision):
+        return self.store.update(key, value, revision)
+
+
+@pytest.mark.parametrize(("rival", "kept"), [(3, b"7"), (9, b"9")])
+def test_record_retries_a_lost_compare_and_set_and_keeps_the_higher_version(bus, rival, kept):
+    store = bus.state(runner.VERSIONS)
+    runner.record(store, "k", 1)
+    runner.record(Contended(store, rival), "k", 7)
+    assert store.get("k").value == kept
 
 
 def test_the_hub_command_is_a_delegated_cli():
