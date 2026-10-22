@@ -529,6 +529,39 @@ def test_the_host_sample_names_who_holds_its_spawns(tmp_path, monkeypatch, hold,
         box.close()
 
 
+@pytest.mark.parametrize(
+    ("agent", "ready_ids", "reason"),
+    [
+        ("codex", ["a", "b"], "accounts have quota; 1 eng spawn held on the eng lane pinned to codex"),
+        ("codex", ["a", "b", "c", "d"], "accounts have quota; 2 eng spawns held on the eng lane pinned to codex"),
+        ("auto", ["a", "b"], "accounts have quota"),
+        ("codex", ["a"], "accounts have quota"),
+    ],
+)
+def test_a_quota_hold_names_the_lane_pin_that_limits_it(tmp_path, monkeypatch, agent, ready_ids, reason):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0, lanes={"eng": {"agent": agent, "model": "auto"}}))
+    decision = {"configured": {"eng": 4}, "placements": {"eng": [{"index": 0}]}, "reason": "accounts have quota"}
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    ready = {lane: [] for lane in metrics_swarm.capacity.LANES}
+    ready["eng"] = [{"id": task} for task in ready_ids]
+    monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        metrics_swarm.record_pass(box, SLUG, NOW, store, doc(), [], {})
+        [row] = box.recent("host_samples", NOW)
+        assert row["reason"] == reason
+    finally:
+        box.close()
+
+
 def test_done_task_is_observed_once_even_when_completion_precedes_the_tick(tmp_path, monkeypatch):
     import fakeredis
 

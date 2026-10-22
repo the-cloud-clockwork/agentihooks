@@ -482,6 +482,25 @@ def test_quota_holds_carry_the_held_harness_and_split_where_it_changes():
     }
 
 
+def test_a_hold_charges_only_as_many_waiting_tasks_as_spawns_it_held_earliest_ready_first():
+    tasks = [
+        {"id": "t0", "state": "done"},
+        *({"id": f"t{n}", "state": "open", "depends_on": ["t0"]} for n in (2, 3, 4)),
+    ]
+    held = [
+        {**sample(at(9), 1, "quota"), "held_harness": "codex"},
+        {**sample(at(9, 5), 2, "quota"), "held_harness": "codex"},
+        sample(at(9, 10), 0, ""),
+    ]
+    source = rows(ledger_events=[ledger("task done", at(8), "tasks/t0")], host_samples=held)
+    assert seconds_of(stages.report(source, tasks, NOW)) == {
+        ("quota_hold", "codex"): 900.0,
+        ("seat_wait", ""): 20700.0,
+    }
+    charged = {timeline.task: seconds for timeline, seconds in stages._charged(source, tasks, NOW, 4 * H, None)}
+    assert [charged[task].get(("quota_hold", "codex"), 0.0) for task in ("t2", "t3", "t4")] == [600.0, 300.0, 0.0]
+
+
 def test_a_reopen_at_the_claim_instant_is_the_ready_time():
     found = stages.report(
         rows(
