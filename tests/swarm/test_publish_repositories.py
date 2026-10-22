@@ -648,6 +648,20 @@ def test_prepare_reuses_a_branch_recorded_under_another_host_path(repositories, 
     assert (result["worktree"], result["branch"]) == (root, "prior-task-branch")
 
 
+def test_prepare_prefers_this_host_branch_record_over_a_same_named_foreign_one(repositories, monkeypatch, tmp_path):
+    p = repositories
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
+    p.task["repositories"] = [str(p.bundle)]
+    first = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    git(p.bundle, "push", "origin", "dev:refs/heads/stale-branch")
+    git(p.bundle, "fetch", "origin")
+    foreign = f"/srv/workstation/dev/{p.bundle.name}"
+    p.task["repository_branches"] = {foreign: "stale-branch", str(p.bundle): "engineer-test"}
+    p.task.pop("branch", None)
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert (result["worktree"], result["branch"]) == (first["worktree"], "engineer-test")
+
+
 @pytest.mark.parametrize("copies", [0, 2])
 def test_prepare_refuses_a_foreign_repository_without_one_local_checkout(repositories, monkeypatch, tmp_path, copies):
     from scripts.swarm.store import SwarmError
