@@ -415,6 +415,13 @@ Agents must NOT volunteer the toggle ("want me to disable controls?"). The opera
 
 ---
 
+## Local test and mutation execution
+
+The local test guard blocks shell commands that execute tests or mutation by
+default, while permitting narrow source and symbol inspections and prose that
+mentions runners. See [Local test guard](../reference/local-test-guard.md) for
+examples, configuration, syntax limits and troubleshooting.
+
 ## All guardrails at a glance
 
 | # | Guardrail | Hook event | Default | Block or warn | Config key |

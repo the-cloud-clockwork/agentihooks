@@ -1623,7 +1623,8 @@ def cmd_done(store, args):
     ledger = LedgerClient()
     row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
-    missing = ledger_kinds.unmet({**row, "proof": {**(row.get("proof") or {}), **proof}})
+    proven = {**row, "proof": {**(row.get("proof") or {}), **proof}}
+    missing = ledger_kinds.unmet(proven)
     if missing:
         if ledger_kinds.kind(row) == "research":
             raise SwarmError(
@@ -1633,7 +1634,7 @@ def cmd_done(store, args):
         flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
         raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
     url = args.pr or row.get("pr_url")
-    pull = ledger_events.view(url) if ledger_kinds.kind(row) in done_gate.GATED and url else None
+    pull = ledger_events.view(url) if done_gate.gated(proven) and url else None
     if pull is not None and pull.state == "OPEN" and pull.queued:
         at = now_ms()
         idle.declare_wait(
@@ -1646,7 +1647,7 @@ def cmd_done(store, args):
             on=waits.on("merge", url),
         )
         raise SwarmError(f"pull request {url} is in the merge queue; waiting for it to land before swarm done")
-    refused = done_gate.refusal(row, url, _pull_reader(url, pull))
+    refused = done_gate.refusal(proven, url, _pull_reader(url, pull))
     if refused:
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
