@@ -795,6 +795,34 @@ def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(s
     assert ledger.rows["t1"]["claimed_by"] != first
 
 
+def test_a_hive_execution_recorded_without_a_start_time_is_acknowledged_on_a_later_pass(store):
+    from scripts.swarm.tick import LEASE_MS
+
+    now = 5 * LEASE_MS
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=now)
+    first = runtime.ordered[0]
+    [agent] = [a for a in store.agents("sw") if a.name == first]
+    store.put_agent("sw", replace(agent, started_at=0))
+    tick("sw", store, ledger, runtime, now_ms=now + 1_000)
+    assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
+    assert runtime.collected == [first]
+    runtime.acked.add(first)
+    actions = tick("sw", store, ledger, runtime, now_ms=now + 2_000)
+    assert f"spawned {first} for t1" in actions
+    assert [(row["state"], row["at"]) for row in store.launches("sw")] == [("started", now)]
+    assert store.claimant("sw", "t1") == first
+
+
+def test_a_collect_error_outside_the_spawn_errors_is_reported_with_its_message(store):
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    runtime.broken.add(first)
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert f"{first} acknowledgement collect for t1 failed, retrying: redis went away" in actions
+
+
 def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)
