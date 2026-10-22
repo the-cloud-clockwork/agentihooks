@@ -142,10 +142,14 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
 
 
 def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
-    record = {}
-    present = [value for value in task.get("repositories") or [] if Path(value).is_dir()]
-    candidates = [value for value in present or [repo] if Path(value).is_dir()]
-    for repository in dict.fromkeys(repository_root(Path(value)) for value in candidates):
+    record, resolved = {}, []
+    for value in task.get("repositories") or []:
+        try:
+            resolved.append(local_repository(value, repo))
+        except SwarmError:
+            continue
+    candidates = resolved or [repository_root(Path(value)) for value in [repo] if Path(value).is_dir()]
+    for repository in dict.fromkeys(candidates):
         scoped = repository_task(repository, task)
         root = existing(repository, scoped, agent)
         if root and stack.pushed(root, scoped["branch"]):
