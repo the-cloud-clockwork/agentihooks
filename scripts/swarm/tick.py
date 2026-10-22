@@ -29,7 +29,6 @@ from scripts.swarm import (
     affinity,
     apply_wait,
     bottleneck_remedy,
-    claim_hold,
     claim_order,
     content_refusal,
     continuation,
@@ -59,6 +58,7 @@ from scripts.swarm import (
     pane_evidence,
     profile_first,
     promotion_watch,
+    readiness,
     reaper,
     release_wait,
     resume,
@@ -846,16 +846,12 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
+    view = readiness.Snapshot(
+        slug, rows, doc, graph, fix, lambda task_id: task_id in awaiting or store.claimant(slug, task_id) is not None
+    )
     clear, overlapping = [], []
     for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
-        if (
-            t.get("lane") == lane
-            and t["id"] not in awaiting
-            and ready(t, rows, doc, graph, fix)
-            and store.claimant(slug, t["id"]) is None
-            and released(t)
-            and applied(t)
-        ):
+        if readiness.claimable(t, lane, view) and released(t) and applied(t):
             mine = t.get("territory") or []
             if any(_overlaps(mine, other) for other in held):
                 overlapping.append(t)
@@ -863,15 +859,6 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
             clear.append(t)
             held.append(mine)
     return clear + overlapping
-
-
-def ready(task, rows, doc, graph, fix):
-    return (
-        task.get("state") == "open"
-        and not task.get("out_of_scope")
-        and not task.get("merged_into")
-        and not claim_hold.hold(task, rows, doc, graph, fix)
-    )
 
 
 def _launch_order(slug, store, tasks, dispatched=None):
