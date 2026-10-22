@@ -42,7 +42,7 @@ class Timers:
                     return
             request = None if complete or event.type == "deadline.cancelled" else event.to_dict()
             rows[event.key] = {"version": event.version, "request": request}
-            value = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+            value = json.dumps(rows).encode()
             try:
                 if entry:
                     self._state.update(INDEX, value, entry.revision)

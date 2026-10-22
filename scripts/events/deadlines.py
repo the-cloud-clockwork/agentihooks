@@ -11,7 +11,7 @@ SUBJECT = "swarm.*.deadline.*"
 
 
 def _digest(parts: list) -> str:
-    return hashlib.sha256(json.dumps(parts, separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(parts).encode()).hexdigest()
 
 
 def _kind(kind: str) -> None:

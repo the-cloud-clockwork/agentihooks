@@ -116,3 +116,12 @@ def test_zero_deadlines_and_target_identities_are_preserved():
     assert request.key != deadlines.schedule(replace(event, entity="claim"), "idle", 0).key
     assert request.key != deadlines.schedule(replace(event, key="other"), "idle", 0).key
     assert request.id != deadlines.cancel(event, "idle").id
+
+
+def test_timer_identities_remain_compatible_across_producer_and_hub_versions():
+    from scripts.events import deadlines
+
+    request = deadlines.schedule(source(), "idle", 1200)
+    assert request.id == "a276476eb6aee7fd2dbede1856e1341e4238e5e5787d3d29b40cbbe0f49eb9cd"
+    assert request.key == "7a01327c25d6e39067f64c5477ba4b4614ad400a15e3e0c61ed5970aa1556f58"
+    assert deadlines.expired(request).id == "9c86f6b4047ad9e69574598e512911455abbb55f67d95d158d5a35b2eed58dee"
