@@ -40,9 +40,10 @@ REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
 
 def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive import reports
-    from scripts.hive.orders import Consumer
+    from scripts.hive.orders import Consumer, alive
     from scripts.routing.reservation import LaunchSlots
 
+    alive(redis, local_id)
     consumer = Consumer.local(redis, local_id)
     fenced = fence(redis, local_id, consumer.runtime)
     processes = account_sessions.local_processes()
@@ -131,7 +132,7 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
 def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
     from redis.exceptions import ConnectionError, RedisError, TimeoutError
 
-    from scripts.hive import headroom
+    from scripts.hive import headroom, orders
 
     while not stop.is_set():
         try:
@@ -142,6 +143,7 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
             return
         try:
             headroom.publish(redis, local_id, int(time.time() * 1000))
+            orders.alive(redis, local_id)
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
 
