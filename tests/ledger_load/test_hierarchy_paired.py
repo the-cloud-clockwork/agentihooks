@@ -80,6 +80,35 @@ def test_the_workflow_runs_an_even_number_of_hierarchy_pairs_against_the_merge_b
     assert "did not halve" not in script
 
 
+def test_the_pair_probes_run_side_by_side_from_one_start_on_their_own_data():
+    job = workflow()["jobs"]["hierarchy"]
+    script = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "set -o pipefail\norder=(base head)" in script
+    assert 'rm -rf "$RUNNER_TEMP/hierarchy-barrier"\npids=()' in script
+    assert 'HIERARCHY_START_BARRIER="$RUNNER_TEMP/hierarchy-barrier"' in script
+    assert '--basetemp "$RUNNER_TEMP/hierarchy-$side"' in script
+    assert ") &\n" in script
+    assert 'wait "${pids[$index]}" || failed="$failed ${order[$index]}"' in script
+    assert '[[ -z "$failed" ]] || { echo "::error::hierarchy probe failed on$failed"; exit 1; }' in script
+
+
+def test_the_probe_start_waits_for_its_pair(tmp_path, monkeypatch):
+    from tests.ledger_load import hierarchy_probe
+
+    hierarchy_probe.align(None)
+    barrier = tmp_path / "barrier"
+    barrier.mkdir()
+    (barrier / "other").touch()
+    hierarchy_probe.align(str(barrier))
+    assert len(list(barrier.iterdir())) == 2
+    alone = tmp_path / "alone"
+    clock = iter([0.0, 0.0, 301.0])
+    monkeypatch.setattr(hierarchy_probe.time, "monotonic", lambda: next(clock, 301.0))
+    monkeypatch.setattr(hierarchy_probe.time, "sleep", lambda seconds: None)
+    with pytest.raises(AssertionError, match="the paired hierarchy probe never became ready"):
+        hierarchy_probe.align(str(alone))
+
+
 def test_redis_installs_from_the_distribution_archive_alone():
     for name in ("hierarchy", "load"):
         steps = workflow()["jobs"][name]["steps"]
