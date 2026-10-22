@@ -897,6 +897,7 @@ def test_done_from_a_hive_dispatcher_seat_writes_only_keys_the_hive_member_may_w
 
     monkeypatch.setattr(cli, "LedgerClient", Ledger)
     hive_member(monkeypatch)
+    assert not store.redis.exists(f"{registry.key('m1')}:inbox:open-indexed")
     cli.cmd_done(store, Namespace(slug=SLUG, name=seat.name))
     assert [a.state for a in seats(store)] == ["finished"]
     assert store.redis.sismember(f"{registry.key('m1')}:inbox:open-indexed", f"dispatcher@{SLUG}")
