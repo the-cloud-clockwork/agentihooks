@@ -379,7 +379,9 @@ def test_reopening_keeps_a_live_claimant_instead_of_spawning_a_successor(release
         pull = pull_request({"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}})
     attempts = list(runtime.spawned)
     rows = ledger.rows
-    run = ready.Pass(store, "sw", ledger, lambda url: pull, lambda url: pull, NOW, lambda *args: {"queued": False})
+    run = ready.Pass(
+        store, "sw", ledger, lambda url: pull, lambda url: pull, NOW, lambda *args, **kwargs: {"queued": False}
+    )
     ready.merge_pass(run, rows)
     tick.tick("sw", store, ledger, runtime, NOW + 1_000)
     assert runtime.spawned == attempts
@@ -636,8 +638,8 @@ def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging,
             data = {"resource": pull}
         return subprocess.CompletedProcess(command, 0, json.dumps({"data": data}))
 
-    def queue(action, url):
-        return merge_queue.operate(action, url, github)
+    def queue(action, url, journal=None):
+        return merge_queue.operate(action, url, github, journal=journal)
 
     merging.run(queuer=queue)
     assert merged_heads == [f"head={HEAD}"]
@@ -646,7 +648,7 @@ def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging,
     assert ready.record(merging.store, "sw", "t1") is None
 
 
-def refused(action, url):
+def refused(action, url, journal=None):
     raise SwarmError("GraphQL: Pull request is not mergeable")
 
 
@@ -1142,7 +1144,7 @@ def test_an_enqueue_github_refuses_reopens_the_task_awaiting_fix(merging):
     merging.pulls[URL] = GREEN
     error = "GitHub refused to enqueue the pull request"
 
-    def refused_enqueue(action, url):
+    def refused_enqueue(action, url, journal=None):
         raise SwarmError(error)
 
     assert merging.run(queuer=refused_enqueue) == [
