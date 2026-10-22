@@ -5,7 +5,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from types import ModuleType
 
-from . import hierarchy
+from . import hierarchy, refresh
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Snapshot, SQLiteLedgerRepository
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
@@ -250,7 +250,7 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
                 return
             with connection:
                 connection.execute(BEGIN_IMMEDIATE)
-                connection.executescript(SCHEMA + hierarchy.SCHEMA + ROWS_SCHEMA)
+                connection.executescript(SCHEMA + hierarchy.SCHEMA + ROWS_SCHEMA + refresh.SCHEMA)
             self._ready.add(address)
 
     @contextmanager

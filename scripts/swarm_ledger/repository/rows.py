@@ -150,9 +150,10 @@ def changes(before: dict, after: dict) -> dict:
     }
 
 
-def write_rows(connection, slug: str, before: dict, after: dict) -> None:
+def write_rows(connection, slug: str, before: dict, after: dict) -> list:
     deletes, upserts = {}, {}
-    for path, row in changes(before, after).items():
+    changed = changes(before, after)
+    for path, row in changed.items():
         old = before.get(path)
         if old and (row is None or old[0] != row[0]):
             deletes.setdefault(old[0], []).append((slug, path))
@@ -165,3 +166,4 @@ def write_rows(connection, slug: str, before: dict, after: dict) -> None:
             f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(slug,path) DO UPDATE SET parent=excluded.parent,key=excluded.key,position=excluded.position,kind=excluded.kind,value=excluded.value",
             rows,
         )
+    return list(changed)
