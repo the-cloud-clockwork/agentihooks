@@ -385,6 +385,27 @@ def test_a_crossing_cleared_in_the_next_window_retracts_the_previous_window_grou
         assert any(text.startswith("Retracted") and f"- {finding['id']}" in text for text in texts)
 
 
+def test_hold_and_retraction_notices_reach_both_masters_as_information(store, monkeypatch):  # noqa: F811
+    status(monkeypatch, INCIDENT)
+    runs(monkeypatch, [])
+    loop.speed(store, DOCTOR, WATCHED, DURING)
+    status(monkeypatch)
+    runs(monkeypatch, [waiting(1, "2026-10-19T16:40:00Z")])
+    loop.speed(store, DOCTOR, WATCHED, AFTER - 60000)
+    started = waiting(1, "2026-10-19T16:40:00Z")
+    started["jobs"][0].update(status="in_progress", started_at="2026-10-19T16:40:30Z", runner_name="r")
+    runs(monkeypatch, [started])
+    loop.speed(store, DOCTOR, WATCHED, AFTER)
+    for slug in (WATCHED, DOCTOR):
+        notices = [
+            item
+            for item in InboxStore(store.redis).inbox(f"master@{slug}")
+            if item.text.startswith(("Retracted", "Doctor CI speed findings"))
+        ]
+        assert len(notices) == 2
+        assert all(item.fyi for item in notices)
+
+
 def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents():
     start, end = iso_ms("2026-10-19T16:00:00Z"), iso_ms("2026-10-19T16:10:00Z")
     now, window = iso_ms("2026-10-19T16:30:00Z"), iso_ms("2026-10-19T16:20:00Z")
