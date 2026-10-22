@@ -29,6 +29,96 @@ The gate refuses to run outside GitHub Actions:
 the ledger load gate runs in CI only: it loads the machine for a minute and a half
 ```
 
+## Hierarchy CPU Redis acquisition
+
+The `Hierarchy CPU proof` also needs Redis before it can compare the base and
+head ledger workloads. An acquisition failure stops setup before any CPU or
+latency result exists. Treat service readiness and workload grading as separate
+results.
+
+### Delivered service image repair
+
+[Pull request 4743](https://github.com/the-cloud-clockwork/agentihooks/pull/4743)
+applied the ledger load registry repair from
+[pull request 4680](https://github.com/the-cloud-clockwork/agentihooks/pull/4680)
+to the hierarchy workflow. It replaced
+`mirror.gcr.io/library/redis:7-alpine` with
+`public.ecr.aws/docker/library/redis:7-alpine`. Existing image pull retries
+remained unchanged; the repair added no retry loop or setting.
+
+This is the historical service configuration delivered by that change, not
+the current hierarchy setup:
+
+```yaml
+services:
+  redis:
+    image: public.ecr.aws/docker/library/redis:7-alpine
+    ports:
+      - 6379:6379
+    options: >-
+      --health-cmd "redis-cli ping"
+      --health-interval 2s
+      --health-retries 15
+```
+
+The fifteen health retries check container readiness after acquisition. They
+do not retry an image download. The registry replacement preserved the port,
+health check, runner selection and workload assertions.
+
+### Current setup and usage
+
+The current hierarchy workflow starts `redis-server` directly on each probe
+runner instead of pulling a service image. If Redis is already installed, it
+prints its version and skips package acquisition. Otherwise it uses the Ubuntu
+archive source with apt `Acquire::Retries=5` to refresh indexes and install
+`redis-server`. An incomplete index refresh emits a warning; installation must
+still succeed. This apt setting belongs to the later native setup, not the
+service image repair.
+
+Both hierarchy and load probe jobs start Redis with persistence disabled:
+
+```bash
+redis-server --port 6379 --save '' --appendonly no --daemonize yes
+```
+
+They require `redis-cli -p 6379 ping` to return `PONG`, trying up to thirty
+times with one second between attempts, then fail if Redis is not ready.
+Cleanup runs `redis-cli -p 6379 shutdown nosave`. There is no workflow input
+for the Redis image, port or retry counts; those settings live in the workflow.
+
+Run the proof in CI on the branch to be measured, then inspect its setup and
+grading steps:
+
+```bash
+gh workflow run hierarchy-cpu.yml --ref <branch> -f base=<base-revision>
+gh run list --workflow hierarchy-cpu.yml --branch <branch> --limit 5
+gh run view <run-id> --log
+```
+
+The optional `base` selects the comparison revision. On a manual dispatch with
+no base, hierarchy uses the merge base with `dev`; load uses its pinned baseline.
+Use an explicit base when reproducing a historical comparison. Do not run the
+load proof on the shared development host.
+
+### Acquisition evidence and troubleshooting
+
+| Observation | Meaning and action |
+|---|---|
+| Historical `Initialize containers` fails with missing attestation blobs | Acquisition failed before the workload. Read the image name and pull errors; changing health retries cannot repair missing registry blobs. |
+| Current `Start Redis on this runner` fails during apt installation | Read the archive and package errors. This setup no longer acquires a Redis container image. |
+| Redis starts but the ping loop fails | Check the startup error and port availability on the CI runner before interpreting workload results. |
+| Redis is ready but the comparison fails | Inspect the measured CPU, latency or response differences. Successful acquisition alone does not pass the workflow. |
+
+The [ledger promotion failure](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39206814774/job/117913406677)
+exhausted three pulls of the Google mirror image in about fifty seconds. It
+established exposure to the same image, not an observed hierarchy failure count.
+The [hierarchy proof on the repaired head](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39229149347/job/117988597865)
+initialized Redis from public ECR in six seconds with zero image pull failures.
+Its response identity and CPU per read check passed, but its paired write latency
+and CPU comparison failed. This proves the acquisition repair on that head;
+it does not establish a fully green hierarchy workflow or a measured reduction
+in hierarchy image pull failures across a time window.
+
 ## Workload
 
 | Setting | Value |
