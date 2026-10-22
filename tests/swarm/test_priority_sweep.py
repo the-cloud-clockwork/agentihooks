@@ -310,23 +310,23 @@ def test_only_operator_decisions_refuse_an_agents_write(path, item, decides):
 
 
 @pytest.mark.parametrize(
-    "by, handed",
+    "by, handed, operator_only",
     [
-        ("dispatcher@a1b2c3-0001", True),
-        ("master@a1b2c3-0001", False),
-        ("engineer@a1b2c3-0001", False),
-        ("dispatcher", False),
-        ("ledger", False),
-        (None, False),
+        ("dispatcher@a1b2c3-0001", True, True),
+        ("master@a1b2c3-0001", False, True),
+        ("engineer@a1b2c3-0001", False, False),
+        ("dispatcher", False, False),
+        ("ledger", False, False),
+        (None, False, False),
     ],
 )
-def test_a_priority_a_dispatcher_handed_to_the_operator_counts_only_his_writes(by, handed):
+def test_a_priority_a_dispatcher_handed_to_the_operator_counts_only_his_writes(by, handed, operator_only):
     path = "tasks/t1"
     row = {"item": path, "by": by}
     doc = {"tasks": [{"id": "t1", "state": "blocked"}]}
     assert priority_sweep.handed(row) is handed
     for agent in ("dispatcher@a1b2c3-0001", "eng-1@sw"):
-        assert priority_sweep._counts(doc, row, priority_sweep.Write(agent, "comment", path, "x")) is not handed
+        assert priority_sweep._counts(doc, row, priority_sweep.Write(agent, "comment", path, "x")) is not operator_only
     assert priority_sweep._counts(doc, row, priority_sweep.Write("operator", "comment", path, "x")) is True
 
 
@@ -337,6 +337,68 @@ def test_operator_only_covers_handed_rows_and_operator_decisions():
     assert priority_sweep.operator_only(empty, {"item": "tasks/t1", "by": "dispatcher@a1b2c3-0001"}) is True
     approval = {"tasks": [{"id": "t1", "awaiting": "approval"}]}
     assert priority_sweep.operator_only(approval, {"item": "tasks/t1", "by": "master@a1b2c3-0001"}) is True
+
+
+@pytest.mark.parametrize("raiser", ["master@a1b2c3-0001", "dispatcher@a1b2c3-0001"])
+@pytest.mark.parametrize("writer", ["master@a1b2c3-0001", "engineer@a1b2c3-0823"])
+@pytest.mark.parametrize("kind", ["comment added", "message added"])
+def test_agent_evidence_never_resolves_a_priority_raised_for_the_operator(raiser, writer, kind):
+    text = "Operator acceptance is still required before merge or installation."
+    priority = row("tasks/t1") | {"by": raiser, "text": "Accept the shorter reminder wording proposal?"}
+    event = write(1, "tasks/t1" if kind == "comment added" else "chat", text, by=writer, kind=kind)
+    if kind == "message added":
+        event["text"] = f"tasks/t1: {text}"
+    judge = Judge(yes=0.83)
+    actions, calls = dict_pass([priority], [event], judge, tasks=[{"id": "t1", "state": "blocked"}])
+    assert actions == []
+    assert calls == []
+    assert judge.asked == []
+
+
+@pytest.mark.parametrize("raiser", ["master@a1b2c3-0001", "dispatcher@a1b2c3-0001"])
+@pytest.mark.parametrize("yes, resolves", [(0.95, True), (0.05, False)])
+def test_operator_answer_to_a_raised_priority_still_needs_the_classifier(raiser, yes, resolves):
+    priority = row("tasks/t1") | {"by": raiser}
+    judge = Judge(yes=yes)
+    actions, calls = dict_pass(
+        [priority], [write(1, "tasks/t1", "Approved, merge it.")], judge, tasks=[{"id": "t1", "state": "blocked"}]
+    )
+    assert bool(actions) is resolves
+    assert bool(calls) is resolves
+    assert judge.asked[0][0]["write"]["by"] == "the operator"
+
+
+@pytest.mark.parametrize("raiser", ["master@sw-0001", "dispatcher@sw-0001"])
+@pytest.mark.parametrize("verified", [True, False])
+def test_a_raised_priority_requires_a_verified_operator_relay(env, raiser, verified):
+    from hooks.context import operator_words
+
+    master = "master@sw-0001"
+    core.sync(SLUG, ops=[{"op": "join", "id": "j-m", "by": master, "role": "orchestrator"}])
+    core.sync(SLUG, ops=[{"op": "priority", "id": "p-op", "by": raiser, "item": "tasks/t1", "text": ASK}])
+    run(env)
+    if verified:
+        operator_words.record(master, "yes approve the demo merge")
+    core.sync(
+        SLUG,
+        ops=[
+            {
+                "op": "relay",
+                "id": "rl-op",
+                "by": master,
+                "item": "tasks/t1",
+                "text": "Approved, merge it.",
+                "quote": "approve the demo merge",
+            }
+        ],
+    )
+    judge = Judge(yes=0.95)
+    actions = run(env, judge)
+    assert bool(actions) is verified
+    assert ("tasks/t1" not in priorities()) is verified
+    assert len(judge.asked) == int(verified)
+    if verified:
+        assert judge.asked[0][0]["write"]["by"] == "the operator"
 
 
 def test_a_priority_on_a_collection_the_ledger_lacks_counts_as_gone():
