@@ -59,7 +59,7 @@ def test_set_pane_still_finds_an_archived_attempt(store):
     store.execution_registry.set_pane("fixture", first.execution_id, "pane-9")
 
     assert store.execution("fixture", first.execution_id).pane_id == "pane-9"
-    assert [a.execution_id for a in store.execution_registry.records("fixture")].count(first.execution_id) == 1
+    assert not store.redis.hexists(store.key("fixture", ARCHIVE), first.execution_id)
 
 
 def test_archive_keeps_every_row_of_a_live_name_and_seat_head_ties(store):

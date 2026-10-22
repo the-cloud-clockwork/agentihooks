@@ -155,10 +155,7 @@ class ExecutionRegistry:
         source = reader if reader is not None else self.redis
         if source.eval(_MANAGED, 1, self.store.key(slug, "executions"), name):
             return True
-        marker = json.dumps(name)
-        return any(
-            marker in raw and json.loads(raw)["name"] == name for raw in source.hvals(self.store.key(slug, ARCHIVE))
-        )
+        return any(json.loads(raw)["name"] == name for raw in source.hvals(self.store.key(slug, ARCHIVE)))
 
     def archive(self, slug: str) -> int:
         keys = (self.store.key(slug, "executions"), self.store.key(slug, "agents"), self.store.key(slug, ARCHIVE))
