@@ -360,6 +360,68 @@ with `ledger` or `inbox` as the target and the exception as its reason. A refusa
 | Another live master successfully comments on an owned task. | This is the later live master write policy. The ledger records cross owner writes; claimant messages remain owner checked. |
 | A message passes despite an unexpected owner. | Check the sender's fence setting, the live master count, the recipient's claimed task and `fail-open` gate log rows. A linked Doctor master message to a watched master is also allowed. |
 
+#### Follow ups an agent adds on its task
+
+`ledger followup add` run inside a swarm task session records that task on the follow up. The CLI reads
+`AGENTIHOOKS_SWARM_TASK`; when it is set and not empty, the `add_item` operation carries `task` with that id, and
+the stored follow up row keeps it. There is no `--task` flag on `followup add`, and `question add` never sends a
+task. Outside a task session, or with the variable empty, the follow up has no task.
+
+```bash
+# Inside a swarm task session the tick has already set AGENTIHOOKS_SWARM_TASK=t42.
+agentihooks ledger --slug my-swarm --as engineer@my-swarm-0012 followup add "Retry the notes build"
+agentihooks ledger --slug my-swarm --as engineer@my-swarm-0012 followup add "Decide the port" --needs-operator
+# {"followup": "add"}
+```
+
+A follow up's routing owner is chosen in this order:
+
+| Follow up carries | Routing owner |
+|---|---|
+| `hive` | The live master owning that hive |
+| `task`, no `hive` | The owner of the task, read as in [Task ownership and master rulings](#task-ownership-and-master-rulings) |
+| Neither | The front door |
+
+An owner that is not a live master seat falls back to the front door. The owner receives the follow up's added
+event notice and, after 15 minutes undecided, its raised notice. Master `set` writes on the follow up's `done`
+and `needs_operator` follow the same ownership check as task rulings: the owner and any other live master pass,
+with a cross owner write recorded, and a former master is refused with the owner named. Comments on a follow up
+are not ownership checked.
+
+The operation schema accepts `task` on any `add_item`; the domain check then accepts it only on a follow up:
+
+| Check | Accepts | Refusal |
+|---|---|---|
+| Operation schema (`scripts.swarm_ledger.api.schemas`) | `add_item` fields `by`, `list`, `text`, `needs_operator`, `hive`, `task`; `task` must be a string | `schema_invalid` with `Operation add_item does not match its schema at field task` |
+| Domain check | `task` only when `list` is `followups`, as an id of 1 to 128 letters, digits, dots, underscores or hyphens starting with a letter or digit | `schema_invalid` with `Operation does not match its domain schema: task needs a task id of up to 128 letters, digits, dots, underscores or hyphens` |
+
+| `task` value | Result |
+|---|---|
+| `t2`, `fx-f517f382.code_1`, an id of 128 characters | Accepted |
+| A number or `null` | Refused by the operation schema |
+| An empty id, `a/b`, an id with a newline, an id of 129 characters | Refused by the domain check |
+| A valid id on a question | Refused by the domain check |
+
+List the follow ups that carry a task, with their task and state:
+
+```bash
+agentihooks ledger --slug my-swarm show \
+  | jq -r '.followups[] | select(.task) | [.id, .task, .done, (.needs_operator // false)] | @tsv'
+```
+
+The [schema change](https://github.com/the-cloud-clockwork/agentihooks/pull/4696) fixed a regression from the
+[task routing change](https://github.com/the-cloud-clockwork/agentihooks/pull/4636). That change made the CLI
+send `task` and the domain check accept it, but the operation schema still listed `add_item` without `task`, so
+from the ledger server restart on 19 October every follow up add from a task session was refused at
+field `task`. Its tests used fake ledgers that skip the schema; the delivered tests send each CLI item add through
+`schemas.check_operations` with the real ledger core.
+
+| Symptom | Action |
+|---|---|
+| `followup add` from a task session fails with `schema_invalid` at field `task`. | The ledger server runs code older than the schema change. Pull dev into the server's checkout and restart the ledger server. |
+| A follow up reaches the front door instead of the task's master. | Check that the row has `task` with the jq command above and that the session had `AGENTIHOOKS_SWARM_TASK` set. A `hive` on the row takes precedence; an owner without a live seat falls back to the front door. |
+| A follow up add is refused at the domain check. | The task id fails the id rule, or `task` was sent on a list other than `followups`. |
+
 #### Sizing settings
 
 `master-per`, `masters-step` and the manual `masters=N` count decide the master count. The tick reads them in this
