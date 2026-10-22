@@ -275,8 +275,8 @@ _ENQUEUE = (
     [
         _ENQUEUE,
         f"git status && GH_TOKEN=$T {_ENQUEUE}",
-        "gh api graphql -f query=\"$(cat <<'EOF'\nmutation { enqueuePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }\nEOF\n)\"",
-        "curl -s https://api.github.com/graphql -d '{\"query\": \"mutation { enqueuePullRequest(input: {}) { clientMutationId } }\"}'",
+        'gh api graphql -f query="$(cat <<\'EOF\'\nmutation { enqueuePullRequest(input: {pullRequestId: "x"}) { clientMutationId } }\nEOF\n)"',
+        'curl -s https://api.github.com/graphql -d \'{"query": "mutation { enqueuePullRequest(input: {}) { clientMutationId } }"}\'',
     ],
 )
 def test_swarm_session_cannot_run_the_raw_enqueue_mutation(monkeypatch, command):
