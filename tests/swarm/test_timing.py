@@ -143,6 +143,13 @@ def test_a_repository_file_outside_the_code_packages_names_no_frame():
     )
 
 
+def test_a_hooks_frame_is_repository_code():
+    code = compile("raise ValueError()", str(timing.ROOT / "hooks" / "probe.py"), "exec")
+    with pytest.raises(ValueError) as caught:
+        exec(code)
+    assert timing.raised_at(caught.value) == "hooks/probe.py:1 <module>"
+
+
 def test_an_exception_that_never_ran_here_has_no_frame():
     assert timing.raised_at(ValueError()) == ""
 

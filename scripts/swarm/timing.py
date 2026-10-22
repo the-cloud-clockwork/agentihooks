@@ -17,7 +17,7 @@ SWARM = ContextVar("tick_swarm", default=None)
 BEFORE_STEP = ContextVar("tick_before_step", default=None)
 ON_FAILURE = ContextVar("tick_failure", default=None)
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGES = ("scripts", "tests")
+PACKAGES = ("scripts", "hooks", "tests")
 
 
 def raised_at(exc: BaseException) -> str:
