@@ -533,7 +533,14 @@ def test_the_workflow_grades_every_branch_push_with_the_dev_grader():
     assert workflow["concurrency"]["cancel-in-progress"] is False
     assert workflow["permissions"] == {"contents": "read", "actions": "write"}
     steps = workflow["jobs"]["grade"]["steps"]
-    assert steps[0]["with"]["ref"] == "dev"
+    assert steps[0]["with"] == {
+        "ref": "dev",
+        "fetch-depth": 1,
+        "sparse-checkout": "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n",
+        "sparse-checkout-cone-mode": False,
+        "persist-credentials": False,
+    }
+    assert {"name": "Fetch the head as data", "run": 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'} in steps
     assert steps[-1]["run"] == 'python -m scripts.ci_branch_lanes --head "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"'
 
 
