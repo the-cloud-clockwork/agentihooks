@@ -111,7 +111,7 @@ them in. Every test that uses `recovery_deadline` gets the preload this way:
 |---|---|
 | `tests/inbox/test_channel_reconnect.py` | Every case, through `pytestmark` |
 | `tests/inbox/test_waker_reconnect.py` | Every case, through `pytestmark` |
-| `tests/inbox/test_codex_pump.py` | The `watchdog` fixture and the delivery order and recovery cases that request the alarm |
+| `tests/inbox/test_codex_pump.py` | Every case, through the autouse `watchdog` fixture |
 | `tests/inbox/test_realtime.py` | The waker wake pass on notify case |
 
 The reconnect module also names both fixtures in its marks:
