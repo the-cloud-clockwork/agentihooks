@@ -2311,7 +2311,7 @@ starts. Before this order, recovering ticks spent about 290 seconds spawning ahe
 The verdict for a task is a JSON file at `~/.agentihooks/swarm/<swarm>/gates/intent/<task>`. Two fields carry its
 timing:
 
-| Field | Value |
+| Field | Meaning |
 |---|---|
 | `at` | Start of the tick pass that judged it, in epoch milliseconds |
 | `persisted_at` | Wall time the judged verdict was written, in epoch milliseconds |
@@ -2338,7 +2338,7 @@ The measurement that drove the change: 19 watched tasks over six hours waited a 
 percentile 703 seconds from ready to a delivered verdict
 ([issue 3203](https://github.com/the-cloud-clockwork/agentihooks/issues/3203)).
 
-| Refusal or symptom | Meaning and fix |
+| Refusal or symptom | Cause and action |
 |---|---|
 | `intent for task <task> is judged once its pull request is ready for review.` | The pull request is a draft. Mark it ready; the next tick judges it. |
 | `intent check running for task <task>, started <n> s ago; it passes unchecked at 120 s.` | No verdict yet for the ready pull request. Wait for the tick; after two minutes the gate lets the call through unchecked and counts it in the gate log. |
