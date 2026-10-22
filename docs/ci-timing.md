@@ -244,8 +244,9 @@ last tick, a looser bound than the 22 passes the estimate gives.
 A slice whose own runs exceed the call budget still finishes when the budget
 runs out during the jobs requests: the completed jobs already read are saved, as
 described above, and the next pass reuses them. When the budget runs out while
-the slice's run lists or pending lookups are still being read, no jobs were read and nothing is
-saved, so the next pass repeats the same slice from the start.
+the slice's run lists or pending lookups are still being read, no jobs were
+read and nothing is saved, so the next pass repeats the same slice from the
+start.
 
 API failures keep their existing text and behavior: the read reports
 `incomplete`, raises the `CI speed API read is incomplete` finding unless a
