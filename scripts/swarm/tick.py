@@ -971,6 +971,17 @@ def _spend_host(store, name, now_ms):
     store.redis.zremrangebyrank(HOST_SPENDS, 0, -HOST_SPENDS_KEPT - 1)
 
 
+def _spend_local(store, agent, now_ms):
+    if not agent.hive:
+        _spend_host(store, agent.name, now_ms)
+
+
+def _release_hive_launch(slug, store, record):
+    from scripts.hive import launch
+
+    launch.release(store, slug, next((a for a in store.agents(slug) if a.name == record.name), record))
+
+
 def _hold(slug, store, text):
     store.redis.set(store.key(slug, SPAWN_HOLD), text)
     return text
@@ -1120,7 +1131,7 @@ def _started(slug, config, store, ledger, doc, started, now_ms):
     store.put_agent(slug, started.launched)
     launch_check.begin(store, slug, record, now_ms)
     store.count_spawn(slug, placed.harness)
-    _spend_host(store, record.name, now_ms)
+    _spend_local(store, started.launched, now_ms)
     store.clear_handoff(slug, task["id"])
     store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
     profile_first.spawned(slug, store, task["id"])
@@ -1140,6 +1151,7 @@ class Failed:
 def _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms):
     record, task, exc = failed.record, failed.task, failed.error
     _release_admission(slug, runtime, task)
+    _release_hive_launch(slug, store, record)
     _record_spawn_failure(slug, store, record, exc, now_ms)
     actions = [f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}"]
     if isinstance(exc, ProfileUnresolved):
