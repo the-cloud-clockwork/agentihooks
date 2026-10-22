@@ -287,6 +287,20 @@ def test_close_closes_the_server_connection(url):
     assert connection.is_closed
 
 
+def test_close_stops_the_loop_when_the_connection_close_fails(url, monkeypatch):
+    opened = nats.open_bus(BusConfig(backend="nats", url=url))
+    connection = opened._nc
+
+    async def refuse():
+        raise OSError("connection close refused")
+
+    monkeypatch.setattr(connection, "close", refuse)
+    with pytest.raises(OSError, match="^connection close refused$"):
+        opened.close()
+    assert opened._loop.closed is True
+    assert not opened._loop.thread.is_alive()
+
+
 def test_the_event_log_refuses_a_subject_another_stream_owns(bus):
     bus.queue("work", POLICY)
     with pytest.raises(APIError):
