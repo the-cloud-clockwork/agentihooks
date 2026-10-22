@@ -3,8 +3,9 @@ import threading
 from collections.abc import Coroutine, Iterator
 
 import nats as nats_client
+from nats.aio.msg import Msg
 from nats.errors import TimeoutError as FetchTimeout
-from nats.js import api
+from nats.js import JetStreamContext, api
 from nats.js.errors import KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
 
 from .bus import StateConflict, StateEntry
@@ -40,7 +41,7 @@ class _Loop:
         self.thread = threading.Thread(target=self._loop.run_forever, name="agentihooks-nats-bus", daemon=True)
         self.thread.start()
         if not started.wait(LOOP_START_S):
-            self._loop.close()
+            self.close()
             raise RuntimeError("bus loop did not start")
 
     def run(self, coro: Coroutine):
@@ -83,7 +84,7 @@ async def _pull(js, stream: str, durable: str, subject: str, policy: QueuePolicy
 
 
 class NatsDelivery:
-    def __init__(self, loop: _Loop, msg):
+    def __init__(self, loop: _Loop, msg: Msg):
         self._loop = loop
         self._msg = msg
         self.event = Envelope.decode(msg.data)
@@ -100,7 +101,7 @@ class NatsDelivery:
 
 
 class NatsConsumer:
-    def __init__(self, loop: _Loop, subscription):
+    def __init__(self, loop: _Loop, subscription: JetStreamContext.PullSubscription):
         self._loop = loop
         self._subscription = subscription
 
@@ -120,7 +121,7 @@ async def _publish(js, subject: str, stream: str, event: Envelope) -> bool:
 
 
 class NatsEventLog:
-    def __init__(self, loop: _Loop, js, policy: QueuePolicy):
+    def __init__(self, loop: _Loop, js: JetStreamContext, policy: QueuePolicy):
         self._loop = loop
         self._js = js
         self._policy = policy
@@ -133,7 +134,7 @@ class NatsEventLog:
 
 
 class NatsWorkQueue:
-    def __init__(self, loop: _Loop, js, name: str, policy: QueuePolicy, dedupe_window_ms: int):
+    def __init__(self, loop: _Loop, js: JetStreamContext, name: str, policy: QueuePolicy, dedupe_window_ms: int):
         self.policy = policy
         self._loop = loop
         self._js = js
@@ -158,7 +159,7 @@ class NatsWorkQueue:
 
 
 class NatsStateStore:
-    def __init__(self, loop: _Loop, js, bucket: str):
+    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str):
         self._loop = loop
         self._js = js
         self._bucket = bucket

@@ -188,6 +188,12 @@ class _Idle:
     def start(self):
         self.started = True
 
+    def join(self, timeout):
+        pass
+
+    def is_alive(self):
+        return False
+
 
 class _Unset:
     timeouts = []
