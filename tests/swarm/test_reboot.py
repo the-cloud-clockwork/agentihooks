@@ -65,8 +65,9 @@ def _local(store):
 
 
 def _taken(monkeypatch, written):
-    def take(store, slug, now_ms, run=None):
+    def take(taken_store, slug, now_ms, run=None):
         assert run is subprocess.run
+        assert (taken_store.config(slug).slug, slug) == ("sw", "sw")
         written.append((now_ms, reboot.record_path(slug).exists()))
         return snapshot.path(slug)
 
