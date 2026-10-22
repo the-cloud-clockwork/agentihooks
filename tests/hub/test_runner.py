@@ -194,9 +194,10 @@ def test_a_singleton_lease_lost_inside_a_batch_hands_the_rest_back(bus, clock):
     two = hub(bus, [registry.Reactor("timers", "swarm.*.task.>", handler, singleton=True)], "b", clock)
     bus.events.publish(SUBJECT, event("e1", 1))
     bus.events.publish(SUBJECT, event("e2", 2))
-    assert one.run_once(batch=10, timeout_ms=0) == {"timers": ["handled", "standby"]}
-    assert two.run_once(batch=10, timeout_ms=0) == {"timers": ["handled"]}
-    assert handler.seen == [("e1", 1), ("e2", 2)]
+    bus.events.publish(SUBJECT, event("e3", 3))
+    assert one.run_once(batch=10, timeout_ms=0) == {"timers": ["handled", "standby", "standby"]}
+    assert two.run_once(batch=10, timeout_ms=0) == {"timers": ["handled", "handled"]}
+    assert handler.seen == [("e1", 1), ("e2", 2), ("e3", 3)]
 
 
 def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatch, capsys):
@@ -209,6 +210,16 @@ def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatc
     monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
     monkeypatch.delenv("AGENTIHOOKS_BUS_URL", raising=False)
     monkeypatch.setenv("HOSTNAME", "hub-0")
+    passes = []
+    run_once = runner.HubRunner.run_once
+
+    def once(self):
+        if passes:
+            raise Stop
+        passes.append(run_once(self))
+        return passes[-1]
+
+    monkeypatch.setattr(runner.HubRunner, "run_once", once)
     previous = signal.getsignal(signal.SIGTERM)
     leases = opened.state(lease.BUCKET)
     assert runner.main(["run", "--once"]) == 0
@@ -227,6 +238,7 @@ def test_the_hub_command_refuses_an_unknown_action(capsys):
 def test_sigterm_ends_the_hub_with_143_and_releases_its_leases(monkeypatch):
     def terminate(event: Envelope) -> None:
         signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+        raise Stop
 
     declared = registry.Registry([registry.Reactor("timers", "swarm.*.task.>", terminate, singleton=True)])
     opened = memory.open_bus(BusConfig())

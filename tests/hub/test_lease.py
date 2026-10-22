@@ -111,9 +111,14 @@ def test_a_conflict_on_release_leaves_the_successor_in_place(store, clock):
     assert lease.read(store, "reactor.timers").holder == "rival"
 
 
-def test_a_lease_refuses_a_non_positive_ttl(store, clock):
+@pytest.mark.parametrize("ttl_ms", [0, -1, True, 1.5, "100"])
+def test_a_lease_refuses_a_ttl_that_is_not_a_positive_integer(store, clock, ttl_ms):
     with pytest.raises(ValueError, match="^lease ttl must be a positive integer$"):
-        lease.Lease(store, "reactor.timers", "a", ttl_ms=0, clock=clock)
+        lease.Lease(store, "reactor.timers", "a", ttl_ms=ttl_ms, clock=clock)
+
+
+def test_a_one_millisecond_lease_is_accepted(store, clock):
+    assert lease.Lease(store, "reactor.timers", "a", ttl_ms=1, clock=clock).acquire() is True
 
 
 def test_lease_time_is_whole_wall_clock_milliseconds():
