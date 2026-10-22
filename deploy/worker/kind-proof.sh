@@ -193,6 +193,7 @@ sleep 45
 [[ "$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o name)" == "pod/$pod" ]] || { echo "a replacement hive pod started while $pod drained" >&2; exit 1; }
 hold_agent draining
 echo "the hive drain preStop kept $pod running and draining for 45 seconds of a roll while its agent worked, with no replacement pod" | tee "$out/drain.txt"
+[[ -n "$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" ]] || { echo "the hive drain preStop let $pod stop before its agent finished" >&2; exit 1; }
 hold_agent finish "$held"
 kubectl wait --for=delete "pod/$pod" --timeout=25s
 hook_failures="$(kubectl get events --field-selector "involvedObject.name=$pod,reason=FailedPreStopHook" -o name)"
