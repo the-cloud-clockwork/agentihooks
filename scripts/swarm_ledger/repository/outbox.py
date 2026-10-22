@@ -47,11 +47,11 @@ def write(connection, slug: str, revision: int, before: dict, after: dict) -> No
 
 
 def relay(repository, events, batch: int = BATCH) -> int:
-    """Publish up to a batch of unsent rows; the row id is the event id, so the bus drops a republish after a crash."""
+    """Publish up to a batch of unsent rows under their row id, which the bus dedupes within its window."""
     with repository.connect() as connection:
         pending = connection.execute(PENDING, (batch,)).fetchall()
-    for row_id, subject, value in pending:
-        events.publish(subject, envelope.Envelope.decode(value.encode()))
-        with repository.connect() as connection, connection:
-            connection.execute(SENT, (row_id,))
+        for row_id, subject, value in pending:
+            events.publish(subject, envelope.Envelope.decode(value.encode()))
+            with connection:
+                connection.execute(SENT, (row_id,))
     return len(pending)
