@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import re
 import threading
 from collections.abc import Coroutine, Iterator
 
@@ -26,7 +28,8 @@ LOOP_STOP_S = 5
 
 
 def queue_stream(name: str) -> str:
-    return f"AGENTIHOOKS_QUEUE_{name}"
+    suffix = name if re.fullmatch("[A-Za-z0-9_-]{1,64}", name) else "h" + hashlib.sha256(name.encode()).hexdigest()
+    return f"AGENTIHOOKS_QUEUE_{suffix}"
 
 
 def _seconds(ms: int) -> float:
@@ -196,7 +199,11 @@ class NatsWorkQueue:
             )
         )
         self._consumer = NatsConsumer(
-            loop, loop.run(_pull(js, self._stream, name, self._subject, policy)), js, policy, f"queue.{name}"
+            loop,
+            loop.run(_pull(js, self._stream, self._stream.removeprefix("AGENTIHOOKS_QUEUE_"), self._subject, policy)),
+            js,
+            policy,
+            f"queue.{name}",
         )
 
     def offer(self, event: Envelope) -> bool:
