@@ -11,7 +11,8 @@ if TYPE_CHECKING:
     from redis import Redis
 
 CPU, RAM, QUOTA, PLACEMENT, NODE_CAP, MISSING = "cpu", "ram", "quota", "placement", "node cap", "missing telemetry"
-REASONS = (CPU, RAM, QUOTA, PLACEMENT, NODE_CAP, MISSING)
+MAX_AGENTS = "max agents"
+REASONS = (CPU, RAM, QUOTA, PLACEMENT, NODE_CAP, MAX_AGENTS, MISSING)
 HOST_PERCENT = 80
 SWARM_PERCENT = 40
 AGENT_CPU = 0.5
@@ -141,6 +142,13 @@ def room(measured: dict | None, swarm_agents: int | None = None, pending: int = 
     return Room(count, reason, detail.format(count))
 
 
+def capped(found: Room, agents: int, max_agents: int) -> Room:
+    left = max(0, max_agents - agents)
+    if left >= found.room:
+        return found
+    return Room(left, MAX_AGENTS, f"{agents} of {max_agents} agents on the hive, fits {left} more")
+
+
 def refusal(found: Room) -> str:
     return "" if found.room else f"{found.reason}: {found.detail}"
 
@@ -167,7 +175,7 @@ def release(redis: "Redis", machine: str, member: str) -> None:
 
 
 def category(reason: str) -> str:
-    for found in (CPU, RAM, MISSING):
+    for found in (CPU, RAM, MAX_AGENTS, MISSING):
         if f"{found}: " in reason:
             return found
     if NODE_CAP in reason:

@@ -24,6 +24,7 @@ REQUIRED = (
 )
 OPTIONAL = ("brain",)
 HEARTBEAT_MS = 180_000
+GONE = "agent gone from the swarm"
 
 
 def key(hive: str) -> str:
@@ -116,11 +117,34 @@ def cheap_checks(redis: "Redis", report: dict) -> dict:
     return cheap(redis, report)
 
 
+def running_executions(redis: "Redis", reports: list[dict]) -> set[tuple[str, str, int]]:
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(redis)
+    return {
+        (slug, agent.execution_id, agent.generation)
+        for slug in {report["slug"] for report in reports}
+        for agent in store.agents(slug)
+    }
+
+
+def end_gone(redis: "Redis", hive: str, reports: list[dict], at: int) -> list[dict]:
+    running = running_executions(redis, reports)
+    kept = []
+    for report in reports:
+        if (report["slug"], report["execution_id"], report["generation"]) in running:
+            kept.append(report)
+        else:
+            end(redis, hive, report["execution_id"], report["session_id"], GONE, "ended", at)
+    return kept
+
+
 def heartbeat(redis: "Redis", hive: str, at: int) -> None:
     from redis.exceptions import WatchError
 
-    for report in listing(redis, hive):
-        if report["status"] != "running" or at - report["heartbeat_at"] < HEARTBEAT_MS:
+    reports = [report for report in listing(redis, hive) if report["status"] == "running"]
+    for report in end_gone(redis, hive, reports, at):
+        if at - report["heartbeat_at"] < HEARTBEAT_MS:
             continue
         checks = cheap_checks(redis, report)
         with redis.pipeline() as pipe:
