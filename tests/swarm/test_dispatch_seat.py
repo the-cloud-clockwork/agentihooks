@@ -159,6 +159,7 @@ def test_done_from_the_seat_passes_while_the_swarm_sleeps_as_the_tick_raises_not
     woken = {**found, "tasks": [{"id": "t2", "state": "open"}]}
     assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, woken, NOW).startswith("dispatcher triggers")
     assert lifetime.sleeping(SLUG, store, {"t2": woken["tasks"][0]}) is False
+    assert store.redis.get(store.key(SLUG, "master-retired-tasks")) is None
     assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, found, NOW).startswith("dispatcher triggers")
 
 
@@ -880,6 +881,9 @@ def test_the_refusal_a_hive_seat_reads_records_no_quota_lanes_and_the_tick_recor
 
 
 def test_done_from_a_hive_dispatcher_seat_writes_only_keys_the_hive_member_may_write(monkeypatch, capsys):
+    from argparse import Namespace
+
+    from scripts.hive import registry
     from scripts.swarm import cli
 
     store, runtime = swarm(), FakeRuntime()
@@ -893,8 +897,9 @@ def test_done_from_a_hive_dispatcher_seat_writes_only_keys_the_hive_member_may_w
 
     monkeypatch.setattr(cli, "LedgerClient", Ledger)
     hive_member(monkeypatch)
-    cli._dispatcher_done(store, SLUG, seat)
+    cli.cmd_done(store, Namespace(slug=SLUG, name=seat.name))
     assert [a.state for a in seats(store)] == ["finished"]
+    assert store.redis.sismember(f"{registry.key('m1')}:inbox:open-indexed", f"dispatcher@{SLUG}")
     assert json.loads(capsys.readouterr().out) == {
         "seat": seat.name,
         "state": "finished",
