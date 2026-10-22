@@ -8,6 +8,8 @@ from scripts.hive.orders import Orders
 
 pytestmark = pytest.mark.unit
 
+DEFAULT_CGROUP = headroom.CGROUP
+
 MEMINFO = (
     "MemTotal:       16000000 kB\nMemAvailable:    8192000 kB\nSwapTotal:       2048000 kB\nSwapFree:  1024000 kB\n"
 )
@@ -213,4 +215,4 @@ def test_measure_is_none_on_an_unreadable_pod_limit(proc, cgroup, files):
 
 
 def test_measure_reads_the_cgroup_folder_of_its_own_process_by_default():
-    assert headroom.CGROUP == Path("/sys/fs/cgroup")
+    assert DEFAULT_CGROUP == Path("/sys/fs/cgroup")
