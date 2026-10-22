@@ -291,6 +291,17 @@ def test_an_engineer_never_takes_the_master_shutdown_handoff(store, rebooted):
     assert _awaiting_handoff(store, eng.name) == ""
 
 
+def test_an_agent_without_a_submitted_handoff_carries_its_task_s_last_transfer(store, rebooted):
+    ledger, runtime = rebooted
+    eng = next(a for a in _local(store).values() if a.lane == "eng")
+    transfers.record(store, "sw", eng, "outage", "## Intent\nFinish the parser\n", 1)
+    store.put_agent("sw", replace(eng, conversation_id=""))
+
+    _booted(store, ledger, runtime)
+
+    assert _awaiting_handoff(store, eng.name) == "## Intent\nFinish the parser\n"
+
+
 def test_a_finished_recorded_agent_is_not_reopened(store, rebooted):
     ledger, runtime = rebooted
     eng = next(a for a in _local(store).values() if a.lane == "eng")
