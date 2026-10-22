@@ -36,6 +36,9 @@ class Selection:
     origin: str = ""
 
 
+ROOM_DETAILS = {"reason": "", "detail": ""}
+
+
 def loaded_hives(store: RedisStore) -> list[dict]:
     """Every registered hive with the worker agents it runs or is launching.
 
@@ -73,8 +76,9 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         held = admission.pending(store.redis, hive["id"])
         used = hive["agents"]
         if hive["id"] == hive_id():
-            hive["agents"] = max(hive["agents"], local_slots.running(store, "", ""))
-            used = max(hive["agents"], local_slots.held(store, hive["id"], "", ""))
+            running, taken = local_slots.occupancy(store, hive["id"])
+            hive["agents"] = max(hive["agents"], running)
+            used = max(hive["agents"], taken)
             held = max(held, used - hive["agents"])
         found = admission.capped(
             admission.room(headroom.read(store.redis, hive["id"], now), pending=held),
@@ -180,17 +184,6 @@ class HiveLaunch:
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
         decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ))
         hives, now = self.hives(), lease.now_ms(self.store)
-        if lane != "master":
-            from scripts.swarm import local_slots
-            from scripts.swarm.commands import hive_id
-
-            for hive in hives:
-                if hive["id"] == hive_id():
-                    bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
-                    taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
-                    limited = admission.capped(admission.Room(hive["room"], "", ""), taken, bound)
-                    if limited.room < hive["room"]:
-                        hive["room"], hive["refusal"] = limited.room, admission.refusal(limited)
         hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
         hives = _by_origin(hives, config.repo)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
@@ -204,6 +197,16 @@ class HiveLaunch:
             front = front_door.holds(self.slug, task.get("seat", ""))
             selected = self._master_selection(config, decision, hives, now, rows, front)
             return self._record_wait(lane, task, selected)
+        from scripts.swarm import local_slots
+        from scripts.swarm.commands import hive_id
+
+        for hive in hives:
+            if hive["id"] == hive_id():
+                bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
+                taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
+                limited = admission.capped(admission.Room(hive["room"], **ROOM_DETAILS), taken, bound)
+                if limited.room < hive["room"]:
+                    hive["room"], hive["refusal"] = limited.room, admission.refusal(limited)
         account = saved.get("account") or self.herdr.planned_account(task["id"], "claude")
         candidates = [
             row

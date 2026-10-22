@@ -55,6 +55,7 @@ def test_agents_recorded_on_this_hive_consume_local_slots_but_remote_hives_do_no
     rows = [
         AgentRecord("local", "ci", "other", hive="workstation"),
         AgentRecord("remote", "eng", "remote", hive="anton"),
+        AgentRecord("ended", "eng", "old", state="ended"),
     ]
     monkeypatch.setattr(setup.store, "agents", lambda _: rows)
     assert local_slots.running(setup.store, setup.config.slug, "task") == 1
@@ -80,3 +81,21 @@ def test_root_hive_reports_all_local_lane_processes_against_its_limit(setup, mon
     assert root["agents"] == 1
     assert root["room"] == 0
     assert "max agents" in root["refusal"]
+
+
+def test_whole_machine_occupancy_includes_pending_claims_without_excluding_any_task(setup, monkeypatch):
+    from scripts.swarm import lease
+
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session("engineer@bbbbbb-0001", "codex")])
+    setup.store.put_agent(setup.config.slug, AgentRecord("ended", "eng", "old", state="ended"))
+    setup.store.redis.hset(local_slots.key("workstation"), "doctor/pending", lease.now_ms(setup.store))
+    assert local_slots.occupancy(setup.store, "workstation") == (1, 2)
+
+
+def test_one_live_worker_absorbs_its_claim_among_several_local_workers(setup, monkeypatch):
+    from scripts.swarm import lease
+
+    rows = [session("engineer@bbbbbb-0001", "codex"), session("ci@cccccc-0001")]
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: rows)
+    setup.store.redis.hset(local_slots.key("workstation"), "doctor/engineer@bbbbbb-0001", lease.now_ms(setup.store))
+    assert local_slots.held(setup.store, "workstation", setup.config.slug, "task") == 2

@@ -18,6 +18,12 @@ def running(store: RedisStore, slug: str, task: str) -> int:
     return len(_workers(_records(store), f"{slug}/{task}"))
 
 
+def occupancy(store: RedisStore, machine: str) -> tuple[int, int]:
+    running = len(_workers(_records(store), None))
+    held, _ = _held(store, store.redis.hgetall(key(machine)), None, lease.now_ms(store))
+    return running, len(held)
+
+
 def maximum(store: RedisStore, slug: str, ceiling: int) -> int:
     from scripts.hive import registry
     from scripts.swarm.commands import hive_id
@@ -52,13 +58,13 @@ def release(store: RedisStore, machine: str, slug: str, name: str) -> None:
     store.redis.hdel(key(machine), f"{slug}/{name}")
 
 
-def _held(store: RedisStore, claims: dict, own: str, now: int) -> tuple[list[str], list[str]]:
+def _held(store: RedisStore, claims: dict, own: str | None, now: int) -> tuple[list[str], list[str]]:
     records = _records(store)
     agents = _workers(records, own)
     pending = [
         named
         for named, at in claims.items()
-        if named.split("/", 1)[1] not in agents and _pending(records.get(named), own, now - int(at))
+        if not any(named.endswith(f"/{agent}") for agent in agents) and _pending(records.get(named), own, now - int(at))
     ]
     return [*agents, *pending], [named for named in claims if named not in pending]
 
@@ -77,13 +83,13 @@ def live() -> set[str]:
     return {row.name for row in sessions() if row.name and not row.name.startswith("master@")}
 
 
-def _workers(records: dict, own: str) -> set[str]:
+def _workers(records: dict, own: str | None) -> set[str]:
     excluded = {agent.name for task, agent in records.values() if task == own}
     stored = {agent.name for task, agent in records.values() if _local_worker(agent)}
     return (stored | live()) - excluded
 
 
-def _pending(record, own: str, age: int) -> bool:
+def _pending(record, own: str | None, age: int) -> bool:
     return age < PENDING_MS and (record is None or (record[0] != own and record[1].state == STARTING))
 
 
