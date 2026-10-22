@@ -95,14 +95,15 @@ def test_a_restarted_registration_keeps_the_stored_settings(redis):
 def test_a_restarted_registration_keeps_a_stored_ui_and_ephemeral(redis):
     registry.update(redis, "box", ["ui=yes", "ephemeral=no"])
     restarted = registry.update(redis, "box", ["ui=no", "ephemeral=yes", "name=Pod"], keep=True)
-    assert (restarted["ui"], restarted["ephemeral"], restarted["name"]) == ("yes", "no", "Pod")
+    assert restarted == {**HEADED, "name": "Pod"}
     assert redis.hmget(registry.key("box"), "ui", "ephemeral", "name") == ["yes", "no", "Pod"]
 
 
 def test_a_restarted_registration_with_nothing_new_writes_nothing(redis):
     registry.update(redis, "box", ["max-agents=3"])
+    stored = redis.hgetall(registry.key("box"))
     assert registry.update(redis, "box", ["max-agents=9"], keep=True) == {**DEFAULT, "max_agents": 3}
-    assert redis.hget(registry.key("box"), "max_agents") == "3"
+    assert redis.hgetall(registry.key("box")) == stored
 
 
 def test_empty_excluded_and_prefer_clear_them(redis):
@@ -266,10 +267,9 @@ def test_cli_set_keep_leaves_stored_settings(redis, monkeypatch, capsys):
     monkeypatch.setattr(cli, "redis_client", lambda: redis)
     registry.update(redis, "box", ["max-agents=3"])
     assert cli.main(["set", "--keep", "box", "max-agents=9", "name=Pod"]) == 0
-    printed = json.loads(capsys.readouterr().out)
-    assert (printed["max_agents"], printed["name"]) == (3, "Pod")
+    assert json.loads(capsys.readouterr().out) == {**DEFAULT, "max_agents": 3, "name": "Pod"}
     assert cli.main(["set", "box", "max-agents=9"]) == 0
-    assert json.loads(capsys.readouterr().out)["max_agents"] == 9
+    assert json.loads(capsys.readouterr().out) == {**DEFAULT, "max_agents": 9, "name": "Pod"}
 
 
 def test_cli_refusals_exit_one_with_the_reason(redis, monkeypatch, capsys):
@@ -289,11 +289,16 @@ def test_cli_set_takes_any_number_of_key_value_settings(redis, monkeypatch, caps
     monkeypatch.setenv("COLUMNS", "300")
     parser = cli._parser()._subparsers._group_actions[0].choices["set"]
     assert parser.format_usage() == "usage: agentihooks hive set [-h] [--keep] id [key=value ...]\n"
-    keep = r"(?m)^  --keep +Leave max-agents, excluded, ui and ephemeral as stored$"
-    assert re.search(keep, parser.format_help())
     monkeypatch.setattr(cli, "redis_client", lambda: redis)
     assert cli.main(["set", "box"]) == 1
     assert capsys.readouterr().err == "hive set refused: hive set needs at least one setting\n"
+
+
+def test_cli_set_keep_help_names_the_kept_settings(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "300")
+    parser = cli._parser()._subparsers._group_actions[0].choices["set"]
+    keep = r"(?m)^  --keep +Leave max-agents, excluded, ui and ephemeral as stored$"
+    assert re.search(keep, parser.format_help())
 
 
 def test_cli_list_joins_excluded_with_commas(redis, monkeypatch, capsys):
