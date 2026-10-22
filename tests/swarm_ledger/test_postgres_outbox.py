@@ -36,10 +36,11 @@ def ledger():
 
 def test_a_postgres_task_and_phase_change_writes_outbox_rows_in_the_write_transaction(ledger):
     repository, slug = ledger
-    assert subjects(slug) == []
+    created = repository.get_document(slug)["_meta"]["rev"]
+    assert subjects(slug) == [(f"swarm.{slug}.phase.p1", created), (f"swarm.{slug}.task.t1", created)]
     claimed, _ = repository.apply_ops(slug, ops=[CLAIM])
     done, _ = repository.apply_ops(slug, changes=[{"path": "phases/p1/done", "value": True, "base": False}])
-    assert subjects(slug) == [
+    assert subjects(slug)[2:] == [
         (f"swarm.{slug}.task.t1", claimed["_meta"]["rev"]),
         (f"swarm.{slug}.phase.p1", done["_meta"]["rev"]),
     ]
@@ -48,6 +49,7 @@ def test_a_postgres_task_and_phase_change_writes_outbox_rows_in_the_write_transa
 def test_a_failed_postgres_ledger_write_leaves_neither_the_change_nor_its_outbox_row(ledger, monkeypatch):
     repository, slug = ledger
     before = repository.get_document(slug)
+    created = subjects(slug)
 
     def broken(slug, state):
         raise RuntimeError("summary failed")
@@ -57,5 +59,5 @@ def test_a_failed_postgres_ledger_write_leaves_neither_the_change_nor_its_outbox
         repository.apply_ops(slug, ops=[CLAIM])
     assert str(caught.value) == "summary failed"
     monkeypatch.undo()
-    assert subjects(slug) == []
+    assert subjects(slug) == created
     assert postgres.PostgresLedgerRepository(URL).get_document(slug) == before

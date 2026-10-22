@@ -24,6 +24,8 @@ CHAT = {"op": "add", "id": "m1", "thread": "chat", "text": "hello"}
 def store(tmp_path):
     repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
     repo.create("ledger", CONTENT)
+    with repo.connect() as connection, connection:
+        connection.execute("DELETE FROM outbox")
     return repo
 
 
@@ -71,6 +73,29 @@ def test_a_change_to_neither_tasks_nor_phases_writes_no_outbox_row(tmp_path):
     assert rows(repo) == []
 
 
+def test_creating_a_ledger_writes_one_outbox_row_per_task_and_phase(tmp_path):
+    repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
+    repo.create("ledger", CONTENT)
+    state = repo.get_document("ledger")
+    assert [(row[2], row[3]) for row in rows(repo)] == [
+        (state["_meta"]["rev"], "swarm.ledger.phase.p1"),
+        (state["_meta"]["rev"], "swarm.ledger.task.t1"),
+        (state["_meta"]["rev"], "swarm.ledger.task.t2"),
+    ]
+    assert [event.data for event in events(repo)] == [state["phases"][0], *state["tasks"]]
+
+
+def test_a_replacing_import_writes_rows_for_the_tasks_and_phases_it_changes_and_removes(tmp_path):
+    repo = store(tmp_path)
+    source = repo.get_document("ledger")
+    replacement = {**source, "tasks": [{**source["tasks"][0], "title": "renamed"}]}
+    repo.import_document("ledger", replacement, replace=True)
+    assert [(row[3], event.type, event.data) for row, event in zip(rows(repo), events(repo))] == [
+        ("swarm.ledger.task.t1", "task.changed", replacement["tasks"][0]),
+        ("swarm.ledger.task.t2", "task.removed", {}),
+    ]
+
+
 def test_a_ledger_write_that_fails_after_the_outbox_row_leaves_neither(tmp_path, monkeypatch):
     repo = store(tmp_path)
     before = repo.get_document("ledger")
@@ -109,6 +134,12 @@ def test_changed_names_added_changed_and_removed_items_of_both_collections_in_ke
         ("phase", "p1", None),
     ]
     assert outbox.changed({}, {}) == []
+
+
+def test_changed_orders_many_keys_by_key_under_any_hash_seed():
+    keys = [f"t{n}" for n in (9, 3, 7, 1, 8, 2, 6, 0, 5, 4)]
+    found = outbox.changed({}, {"tasks": [{"id": key} for key in keys]})
+    assert [key for _, key, _ in found] == sorted(keys)
 
 
 def test_a_removed_item_is_written_as_a_removal_with_empty_data():
