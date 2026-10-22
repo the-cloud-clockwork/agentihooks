@@ -132,11 +132,11 @@ def test_a_failure_inside_a_timed_call_names_the_call_frame(capsys):
     assert finished["raised_at"] == f"scripts/swarm/timing.py:{line} call"
 
 
-def test_a_repository_file_outside_the_code_packages_names_no_frame():
+def test_a_repository_file_outside_the_code_packages_is_skipped_for_its_caller():
     code = compile("raise ValueError()", str(timing.ROOT / "setup.py"), "exec")
     with pytest.raises(ValueError) as caught:
         exec(code)
-    here = test_a_repository_file_outside_the_code_packages_names_no_frame
+    here = test_a_repository_file_outside_the_code_packages_is_skipped_for_its_caller
     assert (
         timing.raised_at(caught.value)
         == f"tests/swarm/test_timing.py:{here.__code__.co_firstlineno + 3} {here.__name__}"
