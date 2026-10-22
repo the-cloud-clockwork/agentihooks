@@ -151,7 +151,10 @@ class NatsWorkQueue:
                 duplicate_window=_seconds(dedupe_window_ms),
             )
         )
-        self._consumer = NatsConsumer(loop, loop.run(_pull(js, self._stream, self._stream.removeprefix("AGENTIHOOKS_QUEUE_"), self._subject, policy)))
+        self._consumer = NatsConsumer(
+            loop,
+            loop.run(_pull(js, self._stream, self._stream.removeprefix("AGENTIHOOKS_QUEUE_"), self._subject, policy)),
+        )
 
     def offer(self, event: Envelope) -> bool:
         return self._loop.run(_publish(self._js, self._subject, self._stream, event))
