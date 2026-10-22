@@ -76,16 +76,26 @@ jobs:
           cp head/tests/swarm_ledger/operations_corpus.json.gz base/tests/swarm_ledger/operations_corpus.json.gz
           cp head/tests/ledger_load/gate.py base/tests/ledger_load/gate.py
           cp head/tests/ledger_load/memory.py base/tests/ledger_load/memory.py
-      - name: Profile and measure one base and head pair of hierarchy routes on this runner, base first on odd pairs
+      - name: Profile and measure one base and head pair of hierarchy routes side by side on this runner, base started first on odd pairs
         env:
           PAIR: ${{ matrix.pair }}
         run: |
+          set -o pipefail
           order=(base head)
           [[ "$PAIR" == [13] ]] || order=(head base)
+          pids=()
           for side in "${order[@]}"; do
             ( cd "$side" && HIERARCHY_CPU_REPORT="$GITHUB_WORKSPACE/hierarchy-evidence/$side.json" \
-              python -m pytest tests/ledger_load/hierarchy_probe.py -n 0 -s --tb=short )
+              HIERARCHY_START_BARRIER="$RUNNER_TEMP/hierarchy-barrier" \
+              python -m pytest tests/ledger_load/hierarchy_probe.py -n 0 -s --tb=short -p no:cacheprovider \
+              --basetemp "$RUNNER_TEMP/hierarchy-$side" 2>&1 | tee "$GITHUB_WORKSPACE/hierarchy-evidence/$side.log" ) &
+            pids+=("$!")
           done
+          failed=""
+          for index in "${!order[@]}"; do
+            wait "${pids[$index]}" || failed="$failed ${order[$index]}"
+          done
+          [[ -z "$failed" ]] || { echo "::error::hierarchy probe failed on$failed"; exit 1; }
       - name: Stop Redis
         if: always()
         run: redis-cli -p 6379 shutdown nosave || true
