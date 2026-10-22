@@ -1156,6 +1156,11 @@ jobs:
             --captures "$RUNNER_TEMP/dev-coverage/js-coverage" --captures-out "$GITHUB_WORKSPACE/js-coverage"
 
       # Page tests drive Chromium; the coverage shards run them so the page JavaScript they reach is measured.
+      - name: Install the pinned nats server for the bus backend tests
+        if: needs.split.outputs.source == ''
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
+
       - name: Install the browser that page tests drive
         if: needs.split.outputs.source == '' && matrix.python-version == '3.12' && github.event_name != 'merge_group'
         timeout-minutes: 6
@@ -1403,6 +1408,10 @@ jobs:
         run: |
           echo "$HOME/codex" >> "$GITHUB_PATH"
           echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"
+
+      - name: Install the pinned nats server for the bus backend tests
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
 
       - name: Install the browser that page tests drive
         if: matrix.python-version == '3.12'
@@ -2674,9 +2683,16 @@ jobs:
           PYTHONPATH="$RUNNER_TEMP/grader" python -P -m scripts.ci_mutation.reuse "$BRANCH" "$GITHUB_RUN_ID" \
             --head "$HEAD_SHA" --base "$base" --grader "$GRADER"
 
+      - name: Take the helper scripts from the workflow revision
+        if: steps.reuse.outputs.reused != 'true'
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/workflow"
+          git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"
+
       - name: Install dependencies
         if: steps.reuse.outputs.reused != 'true'
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
 
       - name: Size mutation shards from stored timings
         id: plan
@@ -2757,15 +2773,27 @@ jobs:
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
+      - name: Take the helper scripts from the workflow revision
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/workflow"
+          git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"
+
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
         uses: actions/download-artifact@v4
         with:
           name: mutation-selection
+
+      - name: Install the pinned nats server for the bus backend tests
+        if: needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.github/actions/nats-server/action.yml') != ''
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
 
       - name: Install the browser that page tests drive
         id: browser
@@ -2856,15 +2884,27 @@ jobs:
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
+      - name: Take the helper scripts from the workflow revision
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/workflow"
+          git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"
+
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
         uses: actions/download-artifact@v4
         with:
           name: mutation-selection
+
+      - name: Install the pinned nats server for the bus backend tests
+        if: needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.github/actions/nats-server/action.yml') != ''
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
 
       - name: Install the browser that page tests drive
         id: browser

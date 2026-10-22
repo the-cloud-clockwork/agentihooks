@@ -228,7 +228,7 @@ def test_a_frozen_phase_keeps_its_urgent_task_open(store):
 
 @pytest.mark.parametrize("target", ["tasks/t1", "phases/p1", "plans/a", "slices/a.first"])
 def test_a_group_member_follows_its_leads_freeze(target):
-    from scripts.swarm.tick import ready
+    from scripts.swarm.readiness import ready
     from scripts.swarm_ledger import ledger_stats
 
     lead = task(slice="slices/a.first")

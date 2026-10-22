@@ -29,7 +29,6 @@ from scripts.swarm import (
     affinity,
     apply_wait,
     bottleneck_remedy,
-    claim_hold,
     claim_order,
     content_refusal,
     continuation,
@@ -59,6 +58,7 @@ from scripts.swarm import (
     pane_evidence,
     profile_first,
     promotion_watch,
+    readiness,
     reaper,
     release_wait,
     resume,
@@ -846,16 +846,18 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
+    view = readiness.Snapshot(
+        slug,
+        rows,
+        doc,
+        graph,
+        fix,
+        lambda task_id: task_id in awaiting or store.claimant(slug, task_id) is not None,
+        lambda task: released(task) and applied(task),
+    )
     clear, overlapping = [], []
     for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
-        if (
-            t.get("lane") == lane
-            and t["id"] not in awaiting
-            and ready(t, rows, doc, graph, fix)
-            and store.claimant(slug, t["id"]) is None
-            and released(t)
-            and applied(t)
-        ):
+        if readiness.claimable(t, lane, view):
             mine = t.get("territory") or []
             if any(_overlaps(mine, other) for other in held):
                 overlapping.append(t)
@@ -863,15 +865,6 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
             clear.append(t)
             held.append(mine)
     return clear + overlapping
-
-
-def ready(task, rows, doc, graph, fix):
-    return (
-        task.get("state") == "open"
-        and not task.get("out_of_scope")
-        and not task.get("merged_into")
-        and not claim_hold.hold(task, rows, doc, graph, fix)
-    )
 
 
 def _launch_order(slug, store, tasks, dispatched=None):
@@ -972,7 +965,9 @@ def _spend_host(store, name, now_ms):
 
 
 def _spend_local(store, agent, now_ms):
-    if not agent.hive:
+    from scripts.swarm.commands import hive_id
+
+    if not agent.hive or agent.hive == hive_id():
         _spend_host(store, agent.name, now_ms)
 
 
@@ -1189,12 +1184,12 @@ def _acknowledging(slug, store, agent):
     return bool(raw) and json.loads(raw).get("state") == ACKNOWLEDGING
 
 
-def _expire_launch(config, runtime, agent):
+def _expire_launch(config, runtime, agent, error):
     try:
-        runtime.expire(config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True})
+        kept = runtime.expire(config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True})
     except Exception as exc:
         return RuntimeError(f"expiring the launch raised {exc!r}")
-    return SpawnError(ACK_EXPIRED)
+    return error if kept is False else SpawnError(ACK_EXPIRED)
 
 
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
@@ -1221,7 +1216,7 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
             error = exc
             transient = _acknowledging_error(exc) or not isinstance(exc, SpawnError | SwarmError)
             if transient and now_ms - agent.started_at >= LEASE_MS:
-                error = _expire_launch(config, runtime, agent)
+                error = _expire_launch(config, runtime, agent, error)
             if _acknowledging_error(error):
                 store.refresh(slug, agent.task, agent.name, LEASE_MS)
             elif isinstance(error, SpawnError | SwarmError):

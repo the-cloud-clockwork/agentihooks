@@ -106,7 +106,7 @@ class FencedRuntime:
         if refused := self._mode_refusal():
             return refused
         if self.deployment == LOCAL:
-            return ""
+            return self._local_refusal(lane, task, claim)
         router = self.runtime.router
         if router.placement.backend == "hive":
             if not _hive_lane(lane, task):
@@ -132,6 +132,26 @@ class FencedRuntime:
             return WORKSTATION.format(lane=lane)
         return DISABLED.format(backend=wanted) if router.enabled_backend(wanted) != wanted else ""
 
+    def _local_refusal(self, lane: str, task: dict, name: str) -> str:
+        if lane == "master":
+            return ""
+        from scripts.hive import admission
+        from scripts.hive.placement import LOCAL_FULL
+        from scripts.swarm.commands import hive_id
+
+        machine = hive_id()
+        maximum = local_slots.maximum(self.store, self.slug, self.store.config(self.slug).local_max_agents)
+        taken = (
+            local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum)
+            if name
+            else local_slots.held(self.store, machine, self.slug, task["id"])
+        )
+        if taken >= maximum:
+            return f"{LOCAL_FULL}{taken} of its {maximum} agents"
+        if name:
+            admission.record(self.store.redis, machine, f"{self.slug}/{name}")
+        return ""
+
     def _overflow(self, lane: str, task: dict, waited: "Wait", claim: str) -> str:
         if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
             return waited.reason
@@ -150,7 +170,9 @@ class FencedRuntime:
         found = admission.room(
             headroom.measure(0, now, previous=headroom.read(self.store.redis, machine, now)), running, pending
         )
-        local_max = running + found.room
+        maximum = local_slots.maximum(self.store, self.slug, running + found.room)
+        found = admission.capped(found, running, maximum)
+        local_max = min(maximum, running + found.room)
         refused = f": {found.reason}: {found.detail}"
         chosen = overflow(waited.role, waited, held, local_max)
         if not isinstance(chosen, Choice):
@@ -220,7 +242,7 @@ class FencedRuntime:
 
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
         with lease.kept(self.store, self.slug, self.held):
-            self.runtime.hive_launch.expire(request)
+            return self.runtime.hive_launch.expire(request)
 
 
 def _hive_lane(lane: str, task: dict) -> bool:
@@ -269,6 +291,14 @@ def _stat(pid) -> list[str]:
     return _read(f"/proc/{pid}/stat").rsplit(")", 1)[-1].split()
 
 
+CONTAINER_MARKS = ("/.dockerenv", "/run/.containerenv")
+
+
+def _contained() -> bool:
+    # Pods built from one image share a machine id across nodes.
+    return bool(os.environ.get("KUBERNETES_SERVICE_HOST")) or any(Path(p).exists() for p in CONTAINER_MARKS)
+
+
 def _holder() -> dict:
     host, fields, machine = _host(), _stat(os.getpid()), _read("/etc/machine-id")
     if not host or len(fields) <= 19:
@@ -298,7 +328,7 @@ def _dead(raw: str) -> bool:
 
 
 def _ended_boot(held: dict, host: str) -> bool:
-    machine = _read("/etc/machine-id")
+    machine = "" if _contained() else _read("/etc/machine-id")
     boot = str(held.get("host", "")).partition(":")[0]
     return bool(machine) and held.get("machine") == machine and bool(boot) and boot != host.partition(":")[0]
 

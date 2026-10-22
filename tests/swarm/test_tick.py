@@ -637,7 +637,7 @@ class HiveAcks(FakeRuntime):
         super().__init__()
         self.ordered, self.collected, self.acked, self.failing, self.broken = [], [], set(), set(fail), set()
         self.refused, self.collected_slugs, self.conflicted = set(), set(), set()
-        self.expired, self.expire_broken = [], {}
+        self.expired, self.expire_broken, self.kept = [], {}, set()
 
     def expire(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER
@@ -647,6 +647,8 @@ class HiveAcks(FakeRuntime):
         self.expired.append(name)
         if name in self.expire_broken:
             raise self.expire_broken[name]
+        if name in self.kept:
+            return False
 
     def spawn(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER

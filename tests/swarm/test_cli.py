@@ -1352,6 +1352,7 @@ def test_runtime_reaps_every_session_holding_a_stray_name(tmp_path, monkeypatch)
 
     held = [SimpleNamespace(name=n, process=SimpleNamespace(pid=p)) for n, p in (("x@a", 5), ("y@b", 6), ("x@a", 7))]
     monkeypatch.setattr(terminate_agent, "sessions", lambda: held)
+    monkeypatch.setattr(terminate_agent, "agent_environ", lambda pid, keys: ("x@a" if pid in {5, 7} else "y@b",))
     reaped = []
     rt = runtime.HerdrRuntime(home=tmp_path)
     rt.reap = lambda pids: reaped.append(pids) or Outcome(tuple(pids))

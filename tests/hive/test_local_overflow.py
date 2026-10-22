@@ -156,6 +156,48 @@ def test_the_local_machine_cap_defaults_to_eight(setup):
     assert SwarmConfig("s", "r", 1, 1).local_max_agents == 8
 
 
+def test_the_swarm_setting_refuses_local_launches_even_with_spare_cpu(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.update(setup.config.slug, local_max_agents=2)
+    local_agents(setup, 2)
+    with pytest.raises(SpawnError, match="the local machine runs"):
+        fenced.spawn(setup.config, "eng", "eng-new", {"id": "task"})
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_the_workstation_hive_limit_counts_another_swarm(setup, monkeypatch):
+    from scripts.swarm import commands
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=2)
+    setup.store.create(SwarmConfig("doctor", "agentihooks", 1, 1))
+    local_agents(setup, 2, slug="doctor")
+    with pytest.raises(SpawnError, match="the local machine runs"):
+        fenced.spawn(setup.config, "eng", "eng-new", {"id": "task"})
+    setup.herdr.spawn.assert_not_called()
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci"])
+def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch, lane):
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    workstation(monkeypatch, 40)
+    setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
+    local_agents(setup, 8, slug="other-swarm", harness="codex")
+    task = {"id": "task", "seat": f"{lane}-1@fixture", "launch_assignment": {"harness": "codex"}}
+    assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal(lane, task)
+    with pytest.raises(SpawnError, match="local machine runs 8 of its 8 agents"):
+        fenced.spawn(setup.config, lane, "eng name", task)
+    setup.herdr.spawn.assert_not_called()
+    fenced.runtime.hive_launch.spawn.assert_not_called()
+
+
 @pytest.mark.parametrize("profile", ["qa", "frontend"])
 def test_ui_role_work_keeps_waiting_for_its_ui_host(setup, monkeypatch, profile):
     from scripts.swarm.profile_choice import ProfileDecision
@@ -183,7 +225,7 @@ def test_the_local_spawn_refusal_is_the_exact_overflow_text(setup, monkeypatch):
     assert fenced._refusal("eng", {"id": "task"}) == "the local machine takes eng work"
 
 
-@pytest.mark.parametrize(("profile", "refused"), [("engineer", ""), ("qa", "Codex hive placement is not enabled")])
+@pytest.mark.parametrize(("profile", "refused"), [("engineer", ""), ("qa", "no live hive takes qa")])
 def test_a_codex_worker_no_hive_can_launch_runs_locally_unless_its_role_needs_a_ui_host(
     setup, monkeypatch, profile, refused
 ):
@@ -234,7 +276,7 @@ def test_a_lane_or_role_the_local_hive_excludes_waits_for_a_hive_instead_of_runn
 def test_a_lane_the_local_hive_keeps_still_runs_locally_when_no_hive_has_room(setup, monkeypatch):
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
-    write_hive(setup, id="workstation", ui="yes", excluded=["master"], max_agents=0)
+    write_hive(setup, id="workstation", ui="yes", excluded=["master"], max_agents=1)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "workstation")
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
 
