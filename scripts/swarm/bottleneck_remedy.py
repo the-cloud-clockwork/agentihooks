@@ -188,7 +188,8 @@ def _placeable(store, config, lane, harness):
     local = registry.show(store.redis, hive_id())
     profiles = tuple(profile for profile, role in ROLE_PROFILES.items() if role == lane)
     occupied = local_slots.held(store, hive_id(), config.slug, "")
-    expected = getattr(config, f"max_{lane}")
+    running = sum(agent.lane == lane and local_slots._local_worker(agent) for agent in store.agents(config.slug))
+    expected = max(0, getattr(config, f"max_{lane}") - running)
     return (local is None or placement.hosts(lane, local, profiles)) and occupied + expected <= config.local_max_agents
 
 

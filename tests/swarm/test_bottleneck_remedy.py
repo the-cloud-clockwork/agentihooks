@@ -8,7 +8,7 @@ from scripts.swarm import bottleneck, bottleneck_remedy, bottleneck_status, disp
 from scripts.swarm.health import standing
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import Mail
-from scripts.swarm.store import ASSIST, MANUAL_SCALING, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.store import ASSIST, MANUAL_SCALING, AgentRecord, RedisStore, SwarmConfig, SwarmError
 
 SLUG = "sw"
 NOW = 1_800_000_000_000
@@ -323,6 +323,33 @@ def test_workstation_only_move_requires_room_for_the_lane(store, home, shipped, 
     store.update(SLUG, local_max_agents=limit)
     for index in range(occupied):
         store.redis.hset(local_slots.key("ws"), f"other/worker{index}", str(NOW))
+    monkeypatch.setattr(local_slots.lease, "now_ms", lambda store: NOW)
+    pin(store, "eng", "claude")
+    detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
+    why = bottleneck_remedy.UNPLACEABLE.format(target="codex", lane="eng")
+    text = bottleneck_remedy.MOVED.format(lane="eng", source="claude", target="codex", targeted=FAILED)
+    assert run(store) == [text if moves else proposed(FAILED, why)]
+    assert lane_of(store, "eng") == (("codex", "auto") if moves else ("claude", "opus"))
+
+
+@pytest.mark.parametrize(
+    ("agent", "limit", "moves"),
+    [
+        (AgentRecord("worker", "eng", "task"), 2, True),
+        (AgentRecord("worker", "eng", "task"), 1, False),
+        (AgentRecord("worker", "ci", "task"), 2, False),
+        (AgentRecord("worker", "eng", "task", state="finished"), 1, False),
+        (AgentRecord("worker", "eng", "task", hive="remote"), 1, False),
+    ],
+)
+def test_workstation_only_move_counts_existing_local_lane_workers_once(
+    store, home, shipped, monkeypatch, agent, limit, moves
+):
+    from scripts.swarm import local_slots
+
+    hive_only(store, monkeypatch, excluded="plan")
+    store.update(SLUG, local_max_agents=limit)
+    store.put_agent(SLUG, agent)
     monkeypatch.setattr(local_slots.lease, "now_ms", lambda store: NOW)
     pin(store, "eng", "claude")
     detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
