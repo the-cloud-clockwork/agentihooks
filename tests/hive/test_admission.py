@@ -285,3 +285,51 @@ def test_the_swarm_ram_share_counts_whole_agents_under_forty_percent():
     assert admission.room(measured, 0) == admission.Room(
         50, admission.RAM, "0 swarm agents at 700 MB each in 87500 MB, fits 50 more under the 40 percent swarm share"
     )
+
+
+def pod(**fields):
+    return reading(cpus=16, available_mb=28 * GB, total_mb=30 * GB, **fields)
+
+
+def test_a_pod_memory_limit_binds_below_the_node_memory():
+    measured = pod(pod_total_mb=6300, pod_available_mb=5300, pod_cpus=4.0)
+    assert admission.room(measured) == admission.Room(
+        5, admission.RAM, "pod 5300 of 6300 MB available, 700 MB per agent, fits 5 more under the 80 percent line"
+    )
+    assert admission.room(measured, pending=2) == admission.Room(
+        3,
+        admission.RAM,
+        "pod 5300 of 6300 MB available, 700 MB per agent with 2 pending launches, fits 3 more under the 80 percent line",
+    )
+
+
+def test_a_pod_cpu_limit_binds_below_the_node_cpus():
+    measured = pod(pod_total_mb=6300, pod_available_mb=5300, pod_cpus=2.5)
+    assert admission.room(measured, pending=1) == admission.Room(
+        3,
+        admission.CPU,
+        "pod limit 2.5 CPUs, 0.5 CPU per agent with 1 pending launches, fits 3 more under the 80 percent line",
+    )
+
+
+def test_a_pod_limit_alone_binds_without_the_other_pod_resource():
+    assert admission.room(pod(pod_cpus=1.0)).detail == (
+        "pod limit 1 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line"
+    )
+    assert admission.room(pod(pod_total_mb=1400, pod_available_mb=1400)).room == 1
+    assert admission.room(pod(pod_available_mb=0)).room == admission.room(pod()).room == 25
+
+
+def test_the_node_binds_when_it_is_tighter_than_the_pod():
+    measured = pod(load5=12.0, pod_total_mb=64 * GB, pod_available_mb=64 * GB, pod_cpus=16.0)
+    assert admission.room(measured) == admission.Room(
+        1, admission.CPU, "five minute load 12.00 on 16 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line"
+    )
+
+
+def test_a_full_pod_refuses_on_its_memory_and_floors_at_zero():
+    found = admission.room(pod(pod_total_mb=6300, pod_available_mb=600))
+    assert (found.room, found.reason) == (0, admission.RAM)
+    assert admission.refusal(found) == (
+        "ram: pod 600 of 6300 MB available, 700 MB per agent, fits 0 more under the 80 percent line"
+    )
