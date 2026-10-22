@@ -395,24 +395,40 @@ def test_exactly_at_a_threshold_nothing_is_raised(binding):
     assert traces.findings(_record(binding), LIMITS) == []
 
 
-def test_a_reader_outage_reads_in_full_and_keeps_five_failures():
-    failures = [f"failure {n}" for n in range(7)]
+def test_a_reader_outage_keeps_the_detail_of_every_failed_read():
+    failures = [f"failure {n}" for n in range(11)]
     record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
     assert traces.reader(record, LIMITS) == [
         traces.Finding(
             "trace reader unavailable",
             f"s.{NOW}",
-            "7 Langfuse reads failed or ran out of time",
+            "11 Langfuse reads failed or ran out of time",
             (
-                *failures[:5],
+                *failures,
                 "active bindings read 0 of 1",
                 "observations read for 0 of 0 traces",
                 "unread bindings are not judged on Langfuse evidence",
             ),
             f"any failed or unfinished Langfuse read, {CADENCE}",
-            7,
+            11,
         )
     ]
+
+
+def test_a_reader_outage_bounds_its_failure_detail_per_pass():
+    failures = [f"failure {n}" for n in range(53)]
+    record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
+    [found] = traces.reader(record, LIMITS)
+    assert found.evidence[:51] == (*failures[:50], "3 more failed reads past the bound of 50 per pass")
+    assert found.evidence[51] == "active bindings read 0 of 1"
+    assert found.measure == 53
+
+
+def test_a_reader_outage_at_the_bound_keeps_every_failure_with_no_overflow_line():
+    failures = [f"failure {n}" for n in range(50)]
+    record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
+    [found] = traces.reader(record, LIMITS)
+    assert found.evidence[:51] == (*failures, "active bindings read 0 of 1")
 
 
 def test_partial_coverage_reads_in_full_and_keeps_three_unreadable_traces():

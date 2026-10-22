@@ -241,13 +241,13 @@ def test_a_trace_with_more_observation_pages_than_the_cap_is_not_covered(tmp_pat
     assert len(row["observations"]) == 2 and coverage["covered"] == 0
 
 
-def test_a_failed_listing_is_a_failure_and_not_an_empty_swarm(tmp_path):
+def test_a_failed_listing_is_a_failure_and_not_an_empty_swarm(tmp_path, read_clock):
     def down(path, params):
         raise TimeoutError("read timed out")
 
     rows, coverage, failures = traces_read.history("s", down, tmp_path, traces_read.Budget())
     assert rows == [] and coverage["listed"] is False
-    assert failures == [f"trace listing failed: TimeoutError: read timed out{_at(down)}"]
+    assert failures == [f"trace listing failed at {read_clock}: TimeoutError: read timed out{_at(down)}"]
 
 
 def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(tmp_path):
@@ -411,7 +411,7 @@ def test_a_cache_entry_without_its_whole_history_is_read_again(tmp_path):
     assert row["complete"] is True and coverage["complete"] is True
 
 
-def test_record_carries_active_bindings_coverage_and_a_persistent_outage_start(tmp_path, monkeypatch):
+def test_record_carries_active_bindings_coverage_and_a_persistent_outage_start(tmp_path, monkeypatch, read_clock):
     agents = [{"name": "s-eng-1", "state": "working", "task": "t1", "started_at": 5}]
 
     def down(path, params):
@@ -421,8 +421,8 @@ def test_record_carries_active_bindings_coverage_and_a_persistent_outage_start(t
     assert first["reader"]["down_since"] == 1000
     assert first["reader"]["active"] == {"bindings": 1, "read": 0}
     assert first["reader"]["failures"] == [
-        f"active read of s-eng-1 failed: ConnectionError: refused{_at(down)}",
-        f"trace listing failed: ConnectionError: refused{_at(down)}",
+        f"active read of s-eng-1 failed at {read_clock}: ConnectionError: refused{_at(down)}",
+        f"trace listing failed at {read_clock}: ConnectionError: refused{_at(down)}",
     ]
     assert first["active"][0]["read"] is False
     second = traces_read.record("s", [], agents, 2000, down, home=tmp_path)
@@ -519,7 +519,9 @@ def test_only_the_verified_default_origin_is_sent_to_the_internal_ingress(monkey
 
 
 @pytest.mark.parametrize("failure", ["backend 503", "internal timeout"])
-def test_a_real_backend_failure_on_the_internal_path_still_raises_the_reader_finding(monkeypatch, tmp_path, failure):
+def test_a_real_backend_failure_on_the_internal_path_still_raises_the_reader_finding(
+    monkeypatch, tmp_path, failure, read_clock
+):
     def internal(request):
         if failure == "internal timeout":
             raise httpx.ReadTimeout("timed out", request=request)
@@ -530,7 +532,7 @@ def test_a_real_backend_failure_on_the_internal_path_still_raises_the_reader_fin
     data = traces_read.record("s", [], [], 1000, get, home=tmp_path)
     assert [f.kind for f in traces.findings(data, traces.Limits())] == ["trace reader unavailable"]
     raised = {"backend 503": "HTTPStatusError", "internal timeout": "ReadTimeout"}[failure]
-    assert data["reader"]["failures"][0].startswith(f"trace listing failed: {raised}")
+    assert data["reader"]["failures"][0].startswith(f"trace listing failed at {read_clock}: {raised}")
 
 
 def test_the_listing_keeps_every_page_and_stops_when_the_budget_is_spent(tmp_path):
