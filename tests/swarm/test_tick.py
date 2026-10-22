@@ -653,6 +653,7 @@ class HiveAcks(FakeRuntime):
         from scripts.swarm.tick import ACK_LATER
 
         assert task[ACK_LATER] is True
+        assert task["seat"].startswith(f"{lane}-")
         self.collected.append(name)
         self.collected_slugs.add(config.slug)
         if name in self.broken:
@@ -722,6 +723,16 @@ def test_a_refused_hive_acknowledgement_reopens_its_task(store, monkeypatch):
         assert failed_panes.held(store, "sw")[f"pane-{name}"]["failed_at"] == 2_000
     assert not set(names) & {agent.name for agent in store.agents("sw")}
     assert ledger.rows["t1"]["claimed_by"] not in names and ledger.rows["t2"]["claimed_by"] not in names
+
+
+def test_a_refused_acknowledgement_of_a_task_gone_from_the_ledger_names_the_task(store):
+    from scripts.swarm.tick import _collect_acks
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.failing.update(runtime.ordered)
+    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, {"tasks": []}, 2_000)
+    assert [action.split(":")[0] for action in actions] == ["spawn failed for t1"]
 
 
 def test_every_refused_hive_order_in_one_pass_reports_its_failure(store):
