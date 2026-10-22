@@ -2,8 +2,9 @@ from dataclasses import replace
 
 import pytest
 
+from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
-from scripts.events.memory import MemoryBus
+from scripts.events.memory import open_bus
 from scripts.hub import registry, runner
 
 pytestmark = pytest.mark.unit
@@ -32,11 +33,10 @@ def source(version=1, swarm="crew", key="execution-one"):
 
 @pytest.mark.parametrize("kind", ["idle", "stale", "handoff"])
 def test_deadline_expires_at_its_boundary_without_another_input(kind):
+    from scripts.events import deadlines
     from scripts.hub.timers import Timers
 
-    from scripts.events import deadlines
-
-    bus, clock = MemoryBus(), Clock()
+    bus, clock = open_bus(BusConfig()), Clock()
     timers = Timers(bus, clock)
     request = deadlines.schedule(source(), kind, 1100)
     timers.handle(request)
@@ -54,11 +54,10 @@ def test_deadline_expires_at_its_boundary_without_another_input(kind):
 
 
 def test_replacement_cancellation_and_delayed_versions_suppress_obsolete_deadlines():
+    from scripts.events import deadlines
     from scripts.hub.timers import Timers
 
-    from scripts.events import deadlines
-
-    bus, clock = MemoryBus(), Clock()
+    bus, clock = open_bus(BusConfig()), Clock()
     timers = Timers(bus, clock)
     first = deadlines.schedule(source(), "idle", 1100)
     latest = deadlines.schedule(source(2), "idle", 1200)
@@ -73,11 +72,10 @@ def test_replacement_cancellation_and_delayed_versions_suppress_obsolete_deadlin
 
 
 def test_restart_restores_pending_deadlines_and_keeps_swarms_and_executions_independent():
+    from scripts.events import deadlines
     from scripts.hub.timers import Timers
 
-    from scripts.events import deadlines
-
-    bus, clock = MemoryBus(), Clock()
+    bus, clock = open_bus(BusConfig()), Clock()
     timers = Timers(bus, clock)
     requests = [
         deadlines.schedule(source(), "idle", 1100),
@@ -94,11 +92,10 @@ def test_restart_restores_pending_deadlines_and_keeps_swarms_and_executions_inde
 
 
 def test_publication_retry_reuses_the_same_envelope_after_restart(monkeypatch):
+    from scripts.events import deadlines
     from scripts.hub.timers import Timers
 
-    from scripts.events import deadlines
-
-    bus, clock = MemoryBus(), Clock()
+    bus, clock = open_bus(BusConfig()), Clock()
     timers = Timers(bus, clock)
     request = deadlines.schedule(source(), "stale", 1000)
     timers.handle(request)
@@ -121,11 +118,10 @@ def test_publication_retry_reuses_the_same_envelope_after_restart(monkeypatch):
 
 
 def test_singleton_hub_services_deadlines_on_empty_passes_and_hands_over():
+    from scripts.events import deadlines
     from scripts.hub.timers import Timers
 
-    from scripts.events import deadlines
-
-    bus, clock = MemoryBus(), Clock()
+    bus, clock = open_bus(BusConfig()), Clock()
     first, second = Timers(bus, clock), Timers(bus, clock)
     hubs = [
         runner.HubRunner(bus, registry.Registry([timer.reactor()]), holder, clock, 100)
@@ -145,7 +141,7 @@ def test_singleton_hub_services_deadlines_on_empty_passes_and_hands_over():
 
 
 def test_production_registry_builds_the_singleton_timers_reactor():
-    bus = MemoryBus()
+    bus = open_bus(BusConfig())
     declared = list(registry.configured(bus, Clock()))
     timer = next(reactor for reactor in declared if reactor.name == "timers")
     assert timer.singleton is True
@@ -154,11 +150,10 @@ def test_production_registry_builds_the_singleton_timers_reactor():
 
 
 def test_expiry_events_do_not_reschedule_themselves():
+    from scripts.events import deadlines
     from scripts.hub.timers import Timers
 
-    from scripts.events import deadlines
-
-    bus, clock = MemoryBus(), Clock()
+    bus, clock = open_bus(BusConfig()), Clock()
     timers = Timers(bus, clock)
     request = deadlines.schedule(source(), "idle", 1000)
     timers.handle(request)
