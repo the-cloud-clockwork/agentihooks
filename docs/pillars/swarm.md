@@ -2323,6 +2323,129 @@ Red checks, a closed pull request or a queue ejection reopen a task of any kind 
 
 `tests/swarm/test_ready.py` pins this behavior: `test_ready_records_the_pull_request_and_head_and_ends_the_agent` runs for code, ci, tune, troubleshoot and ops tasks; `test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof` covers the reopen; `test_a_merged_pull_request_of_another_kind_waits_while_its_owner_is_live` and `test_a_merged_pull_request_of_another_kind_keeps_its_record_when_the_claim_release_is_refused` cover the two cases where the task is left unchanged. The tests failed first on [run 39126290206](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39126290206) (seven expected failures) and passed on [run 39126356416](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39126356416).
 
+### Recovering a released task after red checks
+
+An engineer can finish review and release its seat with `swarm ready` while
+checks run. The task stays `pr`, with `awaiting` set to `merge`; the ready
+record and Handoff v2 document give the merge pass responsibility for the
+remaining checks and queue. A normal `wait --on checks` keeps the engineer
+responsible and wakes that engineer when checks resolve. Releasing with
+`ready` lets a successor take over when a repair is needed.
+
+#### Release and repair example
+
+After both reviews close, publish the final change, record its pull request
+and take it out of draft. From the task worktree, use the handoff skill to
+write a Handoff v2 document naming what was delivered, the evidence, and what
+a successor should inspect if checks fail. Replace the example values below
+with the recorded swarm, agent, pull request and handoff document:
+
+```bash
+agentihooks swarm example pr https://github.com/o/r/pull/812
+gh pr ready https://github.com/o/r/pull/812
+agentihooks ledger --slug example --as engineer@ab12cd-0042 leave
+agentihooks swarm example ready <handoff-document>
+```
+
+`ready` requires delegate or full autonomy, a clean worktree and a worktree
+head matching the open pull request. See [ready on a task of any kind](#ready-on-a-task-of-any-kind)
+for refusals and the different proof requirements after a merge. An accepted
+release ends the engineer's session; the engineer stops working on the task.
+
+When the current head's checks resolve red, the ready merge pass reopens the
+task for repair once no live owner holds it. It sets `state` to `open`, clears
+`claimed_by`, sets `awaiting` to `fix` and comments on the task. Its action
+line identifies the reason, for example:
+
+```text
+task t31 reopened, https://github.com/o/r/pull/812 has red checks
+```
+
+The pull request, delivery branch and stored handoff remain available, and
+the worktree stays in place for repair. The tick offers repair work ahead of
+fresh work of the same rank. A successor reads the supplied handoff and task
+comments, checks the existing pull request and continues its recorded branch.
+If GitHub still has it queued, dequeue it with `swarm merge dequeue <url>`
+before publishing a repair:
+
+```bash
+agentihooks ledger --slug example show
+gh pr checks https://github.com/o/r/pull/812
+agentihooks swarm example merge state https://github.com/o/r/pull/812
+agentihooks swarm example prepare
+cd <returned-worktree>
+# Fix the reported failure, then publish the explicit changed files.
+agentihooks swarm example publish --message "Fix the failed check" -- <files>
+```
+
+Use [continuation publication](#publishing-after-a-successor-prepares-a-branch)
+to retain the existing delivery branch and pull request. After review and checks meet
+the normal ship requirements, record the existing pull request with `swarm
+pr`, then release with a fresh handoff or queue the green head using `swarm
+merge queue`. A new claimant does not require a replacement pull request.
+
+#### Recovery rules and configuration
+
+The ready merge pass handles red checks without waiting for the watchdog's
+red limit. Its checks stage uses [the same head and resolution rules as a checks wait](#when-a-checks-wait-ends).
+Unavailable GitHub reads and unresolved checks hold the ready record for a
+later tick. Closure without merge, conflicts and queue exits can also need
+repair; green queue exits can be retried automatically. See [ready merge pass
+queue exits](#ready-merge-pass-queue-exits) for those outcomes.
+
+The [stall watchdog](#stall-watchdog) also inspects pull requests on claimed
+or `pr` tasks, including tasks released during checks. It alerts after the
+configured limit and reopens only when its `stall` gate is `deny`. Its default
+`log only` mode preserves task and owner state. That switch controls watchdog
+mutations; it does not disable the ready merge pass's red check recovery.
+A task awaiting a ready merge is exempt from the watchdog's green and missing
+owner cases, so its released seat alone does not make it an orphan.
+
+The operator or master can inspect the modes and configure the watchdog:
+
+```bash
+agentihooks swarm example status
+agentihooks swarm example set 'stall-gate=log only'
+# After checking the logged actions against reality:
+agentihooks swarm example set stall-gate=deny
+```
+
+To change the red stall limit, configure the environment of the process that
+runs the swarm tick, for example `AGENTIHOOKS_STALL_RED_MINUTES=20`. This takes
+a positive whole number of minutes; invalid values keep the 15 minute
+default. The other limits and dependency holds are listed under [Stall
+watchdog](#stall-watchdog). These settings do not change when the ready merge
+pass reacts to resolved red checks.
+
+A fresh claimant gets the full applicable watchdog limit: red, green and
+unmergeable clocks are bounded by its current session start, the latest push
+and red result, and the tick's last wake of the owner. Time before that claim
+cannot immediately exhaust its allowance. Queued red checks do not trigger
+the red case, and draft conflicts or conflicts with a live working owner
+hold the unmergeable case. Outage time is excluded.
+
+#### Troubleshooting released work
+
+| Observation | Check and action |
+|---|---|
+| Released task shows `MERGE` while checks run | Expected. Read the current head's required checks; an unresolved result holds the merge pass. |
+| Red checks, but no successor yet | Read the task comment, current claimant and swarm capacity. The merge pass waits for an existing owner to end and preserves a changed claim. |
+| Task reopens with `FIX` | Read the handoff and failure reason, prepare the continuation and repair the existing pull request. |
+| Watchdog alerts without reopening | Inspect `stall-gate`; `log only` is the default and `skip` also preserves the task. Alerts remain active. |
+| Newly claimed task is stopped immediately for an old red result | Compare the current claim and push with the recorded watchdog reason; verify the running tick includes the claim timing correction in [pull request 3103](https://github.com/the-cloud-clockwork/agentihooks/pull/3103). |
+
+#### Observed recovery time
+
+The read only [Doctor measurement](https://github.com/the-cloud-clockwork/agentihooks/issues/4562)
+compared equal 24 hour windows around the watchdog's application. For released
+tasks needing pull request action, excluding dependency holds and drafts,
+median unowned time fell from 16 to 3 minutes, waits over 20 minutes from 22
+to 5, and waits over 90 minutes from one to zero. Those are cohort results,
+not a recovery deadline: dependency holds and drafts changed the overall tail.
+In equal windows around the claim timing correction, wrongful stops of fresh
+claimants fell from 21 to zero. The source task records the measuring commands,
+window boundaries and outputs.
+
 ### Ready merge pass queue exits
 
 After `swarm ready` releases a seat, the tick's merge pass queues the pull request once its checks pass and then waits on the merge queue the way `wait --on merge` does. Each tick it reads the pull request again; when the pull request reads open and outside the queue it reads it a second time before judging, so a queue that is still settling is not mistaken for an exit. It is not judged while its checks are still running, nor, for five minutes after the pass queued it, while the pass has never seen it inside the queue. A pull request seen back in the queue, for example after the [Queue retry workflow](../reference/delivery-tiers.md#lost-runner-requeue) put it back for a lost runner, keeps the task waiting.
@@ -3899,6 +4022,115 @@ master seat for the next one, and the tick tells the page chat that the master i
 A stopped swarm whose master seat holds a pending item is paused, so the tick starts its master and no engineer.
 The ledger hook, the ledger watch and the inbox share one seen mark per agent and write. Stable item ids keep
 relay retries from creating a second item; an unconfirmed delivery may still be shown again.
+
+### Inbox escalation sender exclusion
+
+Unread work climbs the inbox wake ladder without sending an escalation back to
+its own sender. When the next rung is the master, the tick checks the sender's
+name and recorded master seat membership. A message from the current master or
+an earlier occupant of that master seat skips that rung and goes directly to an
+operator follow up on the ledger, flagged as needing the operator. A normal
+agent's unread message still escalates to its master.
+
+| Sender and unread receiver | Next escalation |
+|---|---|
+| Current master to a session with no typed wake | Operator follow up; no escalation item to the master |
+| Earlier occupant of the current master's seat to a session with no typed wake | Operator follow up; no escalation item back to that seat |
+| Agent to a session with no typed wake | Master seat, or master name when it has no seat; operator follow up after another retry window if the original remains pending |
+| Work with no available master, or unread work already addressed to the master | Operator follow up when escalation is due |
+
+The sender is recorded automatically by `agentihooks msg send`; it is the
+session's `AGENTIHOOKS_AGENT_NAME`, falling back to its session identity. There
+is no sender exclusion toggle. Recorded seat membership lets the check survive
+a master handoff; the current agent name alone would miss an earlier occupant.
+
+#### Usage and configuration
+
+Send an action request normally, from the agent that owns it:
+
+```bash
+agentihooks msg send <receiver-name> "Review the open pull request and reply with the result."
+```
+
+If this runs in a master session and the receiver has no typed wake, an unread
+request reaches the operator at the first due escalation instead of coming
+back as work for that master. The same request from an engineer still reaches
+the master first. Use `--fyi` only for information requiring no action: FYI items
+do not enter this escalation ladder.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` | `300` seconds | Time between wake retries and escalation steps |
+| `AGENTIHOOKS_INBOX_QUIET_S` | `180` seconds | Quiet period after an operator prompt during which a worker pane is not typed into |
+| `AGENTIHOOKS_INBOX_REDELIVER_S` | `300` seconds | Separate timeout for returning unconfirmed delivery to pending |
+
+For example, configure the process running the swarm tick with these environment
+variables to use a ten minute retry window while retaining the default quiet
+and redelivery periods:
+
+```bash
+export AGENTIHOOKS_INBOX_RETRY_WINDOW_S=600
+export AGENTIHOOKS_INBOX_QUIET_S=180
+export AGENTIHOOKS_INBOX_REDELIVER_S=300
+```
+
+Setting these in a sending agent's shell alone does not reconfigure an already
+running tick. The retry clock excludes outage time and can be held while a seat
+awaits a successor. A pane eligible for a typed wake can receive up to three
+wake attempts before escalation. Push delivery, busy panes and typed input
+have their own protections; see [Transport capabilities](#transport-capabilities)
+and [Outage holds and recovery](#outage-holds-and-recovery).
+
+#### Inspecting an escalation
+
+List the relevant master's seat items, then inspect the original message by its
+id. Replace the placeholders with the real seat address and message id:
+
+```bash
+agentihooks msg inbox --of master@<swarm>
+agentihooks msg read <message-id>
+```
+
+The inbox listing is read only. `msg read` records receipt as read, so use it
+when taking responsibility for the item; receipt leaves the work open. Its
+history distinguishes `escalated_master` from `escalated_operator`. The master
+step names the raised item and its destination; the operator step records that
+it was shown on the ledger page. Check the ledger's operator follow ups for the
+request itself. An operator escalation records the step without closing the
+original work item. After handling it, reply or close it with an outcome:
+
+```bash
+agentihooks msg reply <message-id> "Reviewed the pull request; the requested correction is complete."
+```
+
+| Symptom | Check and response |
+|---|---|
+| A master's unread request appears as an operator follow up without a master escalation | Expected sender exclusion; handle the follow up on the ledger |
+| An engineer's unread request reaches the master | Expected first escalation; answer or close the original item after handling it |
+| An old master's request returns to the master seat | Check recorded sender and seat history, and confirm the deployed tick contains the sender exclusion fix |
+| No escalation appears after five minutes | Check the configured retry window, item state, FYI flag, outage holds and successor holds before diagnosing a failure |
+| The ledger refuses the operator follow up | A cancellable refusal closes the original with a reason beginning `refused by the ledger page:` and sends its sender a refusal notice; this notice is distinct from an escalation. Protected work can remain open when cancellation is refused |
+
+#### Delivery evidence and measurement limits
+
+[Delivered pull request 4558](https://github.com/the-cloud-clockwork/agentihooks/pull/4558)
+includes regression cases for an unseated master, a master whose seat was never
+occupied, the current seated master, an earlier occupant and an engineer sender.
+The [red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39141962530)
+failed the master sender cases; the
+[green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39142204086)
+passed the inbox wake tests. These CI cases are the primary behavior proof.
+
+The Doctor source task recorded application at **18 October 2026, 18:47:21 UTC**.
+Its cause measurement at **15:40:12 UTC** inspected 41,383 retained inbox
+histories: 31 of 72 retained escalations named their sender or its seat, all
+from master senders. The preceding 24 hours had zero of three, so that daily
+sample could not demonstrate a decrease. The master's accepted comparison uses
+the same cause measurement script on escalations sent after application, once
+at least ten exist, against the retained 31 of 72 baseline; the target is zero.
+That comparison uses different cohorts, rather than equal daily windows. The
+source code task records no completed after count; the CI proofs above establish
+the routing change without claiming a measured production decrease.
 
 ### Transport capabilities
 

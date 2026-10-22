@@ -6,7 +6,7 @@ nav_order: 13
 
 # Pull request mutation gate
 
-The Mutation workflow runs beside Tests for pull requests into dev. It discovers changed Python files in `hooks` and `scripts` from the pull request merge base. Each file runs in an isolated copy with pinned mutmut 3.6.0. Pytest runs serially; matching and importing test modules provide mutmut's function coverage stats and per mutant test selection.
+The Mutation workflow runs beside Tests for pull requests into dev. It discovers changed Python files in `hooks` and `scripts` from the pull request merge base. Each file runs in an isolated copy with pinned mutmut 3.6.0. Pytest runs serially; matching, importing and recorded covering tests provide mutmut's function coverage stats and per mutant test selection.
 
 Run a focused mutation proof in CI from a pushed branch:
 
@@ -18,6 +18,111 @@ gh workflow run proofs.yml \
 ```
 
 For a stacked branch, set `base` to its dependency branch. Branch pushes run Mutation preflight before the first draft pull request; wait for its current head to pass. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
+
+## Covering tests through production helpers
+
+Mutation planning supplements matching and importing test modules with recorded
+dev coverage. A test can reach a changed function through production helpers
+without importing the mutated module itself. The planner maps graded lines to
+their containing functions or methods, then adds existing `test_*.py` files
+whose recorded test contexts executed those units. Coverage of another function
+in the same module alone does not qualify.
+
+For example, a Doctor test imports `scripts.doctor.loop`, which calls
+`VerdictStore.visible` in `scripts.swarm.health.verdicts`. When that method
+changes, recorded execution connects the test to it despite the indirect
+import. No extra import or manual call chain configuration is needed. Recorded
+execution supplies candidates; it does not prove a test asserts enough to kill
+a mutant.
+
+The plan saves the selection by changed source path in
+`.mutation-selection.json`, uploaded as `mutation-selection`. Statistics jobs
+consume this list, and measured refinement uses the same saved list instead of
+repeating import selection. This keeps helper callers in the measured plan and
+keeps its statistics keys consistent with the collected parts. If the saved
+file is absent, the refine command falls back to import selection.
+
+### Usage and configuration
+
+The branch preflight and pull request Tests workflow pass the repository to
+the planner automatically. Their planning command is:
+
+```bash
+python -m scripts.ci_mutation.plan \
+  --base "$BASE" \
+  --repository "$GITHUB_REPOSITORY"
+```
+
+This runs inside CI with dependencies installed and `GH_TOKEN` supplied by the
+workflow. Use the pushed branch preflight or the focused CI proof above; do not
+run tests or mutation locally. `--base` defaults to `origin/dev` and `--head`
+to `HEAD`. `--repository OWNER/REPO` enables lookup of a usable dev test
+dependency record available before the lookup's UTC cutoff. Omitting it uses
+import selection only. There is no environment switch for the helper coverage
+rule.
+
+Current planning can narrow candidate files to recorded test node ids when the
+manifest and intervening changes permit it. Changed or incompletely recorded
+test files remain whole; unsupported drift prevents narrowing. A saved entry
+can therefore contain file paths, node ids, or both. This later narrowing
+preserves the recorded helper coverage rule; inspect the saved list rather
+than expecting a fixed test count.
+
+### Inspect the selection
+
+Replace `RUN_ID` and `EVIDENCE_DIR` with the run and a task evidence folder:
+
+```bash
+gh run view RUN_ID --log
+
+gh run download RUN_ID \
+  --name mutation-selection \
+  --dir EVIDENCE_DIR/selection
+
+jq '."scripts/swarm/health/verdicts.py"' \
+  EVIDENCE_DIR/selection/.mutation-selection.json
+```
+
+A successful lookup prints
+`Recorded coverage from dev run RUN_ID adds the tests that executed a changed function.`
+Read the returned entries for the expected helper caller, then inspect the
+mutation report to establish whether those tests killed the mutant. A reused
+report can skip planning and have no new selection artifact; follow its
+`reuse.json` to the source run. The selection artifact is retained for one day;
+mutation reports are retained for seven days.
+
+### Selection limits and troubleshooting
+
+| Symptom | Meaning and action |
+|---|---|
+| `No dev test dependency manifest found; tests are selected by import only.` | Lookup completed without a usable record. Import selection still applies; inspect dev Tests record production and lookup diagnostics before assuming indirect callers were included |
+| `Mutation selection fallback` warning | Current code retries a coverage read failure once, then selects every test module for each changed file. Read the preceding attempt errors and repair the record or GitHub access failure; expect more statistics work |
+| Expected helper test is absent | Check the recorded dev run, containing function identity and test file's continued existence. A new call path or renamed function may have no historical execution record; import selection remains available but recorded coverage cannot invent that execution |
+| File reports `not mutated, no matching or importing test modules` | Neither selection route supplied a test for a changed file containing functions. Planning fails; supply covering tests and inspect their recorded coverage |
+| Candidate file appears as individual node ids | Current drift checks allowed narrowing. Compare those ids with the function's recorded coverage instead of requiring the whole file |
+| Selected test still leaves a survivor | Execution coverage does not ensure an assertion detects the change. Read the mutant diff and strengthen the relevant assertion, or obtain an independent equivalent-mutant ruling |
+
+### Delivery evidence
+
+[Pull request 4553](https://github.com/the-cloud-clockwork/agentihooks/pull/4553)
+delivered recorded coverage selection and saved-selection refinement on
+2026-10-18. Its [source issue](https://github.com/the-cloud-clockwork/agentihooks/issues/4552)
+records the original omission:
+
+| Evidence | Result |
+|---|---|
+| [Original preflight 39117411178](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39117411178), head `352490e` | Three import-selected files; 27 survivors in `VerdictStore.judge` (7) and `VerdictStore.visible` (20) |
+| Dev dependency record from [Tests 39138888661](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39138888661) | 101 files recorded execution of those functions, including `tests/doctor/test_loop.py` and `tests/doctor/test_doctor_cli.py`, reaching them through production loop and CLI helpers |
+| [Red preflight 39140647781](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39140647781) | The helper-coverage and saved-refinement regression tests failed; two failed and four passed |
+| [Delivered Tests 39144942050](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39144942050) | Mutation and Gate Required passed on delivered head `96ef387` |
+
+The source investigation also recorded 38 verdict mutants killed and zero
+surviving once the loop test was selected on corrected head `b5ef273` in
+[run 39117969221, attempt 2](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39117969221/attempts/2).
+That head also removed a fallback, so this supports the selection diagnosis but
+is not an identical-head replay proving all 27 original mutants killed.
+The helper regression fixture and saved-selection refinement regression are
+maintained in `tests/test_ci_mutation_planned_selection.py`.
 
 ## Continuation publication and preflight runs
 
