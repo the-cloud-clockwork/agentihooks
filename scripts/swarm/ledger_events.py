@@ -327,7 +327,7 @@ def view(url, run=subprocess.run, required_checks=None):
             text=True,
             timeout=20,
         )
-        if done.returncode != 0 and mutation_wait.rate_limited(done.stderr or ""):
+        if done.returncode != 0 and mutation_wait.rate_limited(getattr(done, "stderr", None) or ""):
             mutation_wait.hold("graphql")
             return None
         if done.returncode != 0:
