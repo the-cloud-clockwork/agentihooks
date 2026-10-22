@@ -411,6 +411,16 @@ def test_an_unknown_label_set_in_an_empty_window_names_no_known_sets(monkeypatch
         list(ci_measure.measure("ci-runner-wait", goal, (NOW - HOUR_MS, NOW), NOW))
 
 
+def test_a_job_label_set_is_known_by_its_sorted_distinct_names(monkeypatch):
+    runs = [run(50, [job(-400, -50, ("b", "a", "a"))])]
+    monkeypatch.setattr(ci_measure.ci_speed_read, "read", lambda *args, **kwargs: {"complete": True, "runs": runs})
+    goal = ci_measure.target('ci-runner-wait/["a", "b"]')
+    assert list(ci_measure.measure("ci-runner-wait", goal, (NOW - HOUR_MS, NOW), NOW)) == [
+        "ci-runner-wait a, b, window 2026-10-17T21:00:00Z to 2026-10-17T22:00:00Z: "
+        "1 of 1 runs over 300 seconds, median 350 seconds, worst 350 seconds"
+    ]
+
+
 def test_a_run_finding_keeps_its_scope_when_the_window_lacks_it(actions, monkeypatch, capsys):
     capsys.readouterr()
     monkeypatch.setattr(

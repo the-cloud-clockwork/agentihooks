@@ -113,6 +113,14 @@ def line(kind: str, scope: str, values: list[int], window: tuple[int, int]) -> s
     return f"{text}, median {median_low(values) // 1000} seconds, worst {max(values) // 1000} seconds"
 
 
+def _known(scope: str, runs: list[dict]) -> None:
+    known = sorted({_scope(sorted(set(job["labels"]))) for run in runs for job in run["jobs"]})
+    if scope not in known:
+        raise SwarmError(
+            f"runner labels {scope} match no job in the window; known label sets: {'; '.join(known) or 'none'}"
+        )
+
+
 def measure(finding: str, goal: Target, window: tuple[int, int], now_ms: int) -> Iterator[str]:
     scope = goal.scope
     if goal.run is not None:
@@ -125,6 +133,8 @@ def measure(finding: str, goal: Target, window: tuple[int, int], now_ms: int) ->
     snapshot = ci_speed_read.read(*window, active=False, budget=WINDOW_BUDGET)
     if not snapshot["complete"]:
         raise SwarmError(snapshot["error"])
+    if goal.run is None and goal.kind != WALL and scope is not None:
+        _known(scope, snapshot["runs"])
     found = samples(goal.kind, snapshot["runs"], now_ms)
     for name in [scope] if scope is not None else (sorted(found) or ["all"]):
         yield line(goal.kind, name, found.get(name, []), window)
