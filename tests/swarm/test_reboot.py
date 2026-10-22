@@ -47,8 +47,10 @@ def swarm(store):
         seat="eng-9@sw",
         runtime_target={"host_id": "anton-hive"},
     )
-    store.put_agent("sw", hive)
-    store.put_agent("sw", replace(hive, name="master@a1b2c3-0098", lane=MASTER, task=MASTER, seat="hive-master@sw"))
+    store.start_execution("sw", hive)
+    store.start_execution(
+        "sw", replace(hive, name="master@a1b2c3-0098", lane=MASTER, task=MASTER, seat="hive-master@sw")
+    )
     return ledger, runtime
 
 
