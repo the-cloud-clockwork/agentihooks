@@ -43,13 +43,27 @@ def serving(monkeypatch, projects):
     return asked
 
 
-def test_the_installed_keys_replace_the_caller_keys_and_keep_the_host(monkeypatch):
+def test_the_installed_keys_replace_the_caller_keys_and_host(monkeypatch):
     installed(monkeypatch)
-    assert traces_read.installed_env(CALLER) == {
-        "LANGFUSE_HOST": "http://lf",
+    assert traces_read.installed_env({**CALLER, "PATH": "/bin"}) == {
+        "PATH": "/bin",
         "LANGFUSE_PUBLIC_KEY": "installed-public",
         "LANGFUSE_SECRET_KEY": "installed-secret",
     }
+
+
+def test_the_installed_secret_only_reaches_the_default_host(monkeypatch):
+    installed(monkeypatch)
+    sent = []
+
+    def through_ingress(url, **options):
+        sent.append((url, options["auth"]))
+        return httpx.Response(200, json={"data": SWARM}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(traces_read, "_through_ingress", through_ingress)
+    monkeypatch.setattr(traces_read.httpx, "get", lambda *a, **kw: pytest.fail("the caller host was used"))
+    traces_read.measured_client(CALLER)
+    assert sent == [(f"{traces_read.DEFAULT_HOST}/api/public/projects", INSTALLED_KEYS)]
 
 
 def test_the_confirmed_project_reads_with_the_installed_keys_only(monkeypatch):
@@ -62,7 +76,7 @@ def test_the_confirmed_project_reads_with_the_installed_keys_only(monkeypatch):
 
 def test_missing_installed_keys_never_fall_back_to_the_caller_keys(monkeypatch):
     installed(monkeypatch, {})
-    assert traces_read.installed_env(CALLER) == {"LANGFUSE_HOST": "http://lf"}
+    assert traces_read.installed_env(CALLER) == {}
     with pytest.raises(RuntimeError) as refused:
         traces_read.measured_client(CALLER)
     assert str(refused.value) == (
@@ -99,7 +113,7 @@ def test_a_missing_project_identity_is_refused(monkeypatch):
 
 def test_a_project_without_a_name_is_a_missing_identity(monkeypatch):
     installed(monkeypatch)
-    serving(monkeypatch, {INSTALLED_KEYS: [{"id": "p-swarm"}]})
+    serving(monkeypatch, {INSTALLED_KEYS: [*SWARM, {"id": "p-unnamed"}]})
     with pytest.raises(RuntimeError) as refused:
         traces_read.measured_client(CALLER)
     assert str(refused.value) == "Langfuse project identity is unavailable: the installed keys name no project"

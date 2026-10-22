@@ -35,6 +35,7 @@ def started(env, monkeypatch, capsys):  # noqa: F811
 def detecting(monkeypatch, found=(), failing=False):
     def readers(store, ledger, slug, now, telemetry):
         assert (store is None, ledger is None, slug, now) == (False, False, WATCHED, NOW)
+        assert telemetry is doctor.traces_read.measured_client
         read = {"trace": lambda: list(found)}
         return {**read, "inbox": lambda: 1 / 0} if failing else read
 

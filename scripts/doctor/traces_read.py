@@ -27,7 +27,7 @@ from scripts.swarm.runtime import SWARM_HOME
 
 DEFAULT_HOST = "https://langfuse.homeofanton.com"
 SWARM_PROJECT = "agent-swarm"
-KEY_NAMES = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
+KEY_NAMES = ("LANGFUSE_HOST", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
 INGRESS = httpx.URL(langfuse_route({})[0]).host
 PAGE = 100
 OBSERVATION_PAGE = 50
@@ -75,7 +75,8 @@ def _through_ingress(url: str, **options) -> httpx.Response:
 
 
 def installed_env(environ: Mapping[str, str]) -> dict[str, str]:
-    """The caller's environment with its Langfuse keys replaced by the installed swarm telemetry keys."""
+    """The caller's environment with its Langfuse host and keys replaced by the installed swarm telemetry keys,
+    so the installed secret only ever reaches the default host."""
     keys = {name.removeprefix("OTEL_"): value for name, value in profile_telemetry.agentihooks_langfuse_keys().items()}
     return {name: value for name, value in environ.items() if name not in KEY_NAMES} | keys
 
@@ -84,10 +85,10 @@ def measured_client(environ: Mapping[str, str]) -> Callable[[str, dict], dict]:
     """The reader on the installed keys, refused unless they serve the watched swarm's Langfuse project."""
     get = client(installed_env(environ))
     try:
-        names = [project.get("name") for project in get("projects", {})["data"] if project.get("name")]
+        names = [project.get("name") for project in get("projects", {})["data"]]
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Langfuse project identity is unavailable: {type(exc).__name__}: {exc}") from exc
-    if not names:
+    if not names or not all(names):
         raise RuntimeError("Langfuse project identity is unavailable: the installed keys name no project")
     if names != [SWARM_PROJECT]:
         raise RuntimeError(
