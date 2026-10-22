@@ -1982,7 +1982,7 @@ the newest `dev`, and the agent also merges `dev` when GitHub refuses the enqueu
 
 ### Split tasks across pull requests
 
-A `code` or `ci` task can declare several plan line ranges for separate pull requests while keeping one task and its completion proof. Declare the split **before recording any pull request**. The ranges must be ordered, must not overlap and, when the task has `plan_lines`, must cover that range completely.
+A `code` or `ci` task can declare two to four halves for separate pull requests while keeping one task and its completion proof. A planned task names each half by a plan line range; a task with no plan names each half by a label (see [Labelled halves for tasks without a plan](#labelled-halves-for-tasks-without-a-plan)). Declare the split **before recording any pull request**. The ranges must be ordered, must not overlap and, when the task has `plan_lines`, must cover that range completely.
 
 For example, a task covering plan lines 1 through 20 can declare two halves:
 
@@ -2012,6 +2012,43 @@ agentihooks swarm <id> done --pr <final-pull-request-url>
 ```
 
 When the worker keeps the task, the merged final half still requires `done`. Completion refuses a missing half or any recorded pull request that is open, closed without merging or unreadable on GitHub. There is no separate configuration switch for the between-halves reset; the declared split and recorded merge state determine it.
+
+#### Labelled halves for tasks without a plan
+
+Standalone tasks, such as follow ups and operator orders, carry no `plan_lines` and no `plan_slice`, so they have no plan line ranges to split. Such a task names its halves by label instead, for example a compatibility change and a stacked repair:
+
+```bash
+agentihooks ledger --slug <id> --as <agent> \
+  task split <task> compatibility repair
+```
+
+The ledger stores the labels in `split` in the order given, and that order is the half order. Everything after the split works as it does for ranges: record each pull request with `swarm pr <url> --half <n>` in order, `split_pulls` keeps each half's pull request, the stop guard resets the active link between halves, and `done` and `ready` complete the task only when every declared half has a merged pull request.
+
+```bash
+agentihooks swarm <id> pr <compatibility-pull-request-url> --half 1
+agentihooks swarm <id> pr <repair-pull-request-url> --half 2
+```
+
+The ledger reads the halves as labels when any one of them is not a plan line range (`<first>-<last>`, such as `11-20`). Labels follow these rules:
+
+| Rule | Refusal |
+|---|---|
+| Two to four halves | `halves: 2 to 4` |
+| Every half is a non-empty label, or every half is a plan line range; labels and ranges never mix | `halves: plan line ranges` |
+| Labels are distinct | `halves: distinct labels` |
+| The task has neither `plan_lines` nor `plan_slice` | `tasks/<task>: halves: plan line ranges` |
+
+A planned task still needs plan line ranges: labelled halves on a task with `plan_lines` or a `plan_slice` are refused, and its ranges must still cover its plan lines. The other split refusals in the [table below](#split-refusals-and-stop-messages) apply to labelled halves unchanged.
+
+The intent check grades a labelled half by the task description with a note naming the half's label and the labels of the other halves, and reads no plan chunk. For the split above, the second pull request is judged on the description followed by:
+
+```text
+This pull request is half 2 of 2 of a split task: it carries only repair; half 1 carries compatibility in its own pull request.
+```
+
+A labelled split's task contract carries no plan lines, so a `plan_lines` value set after the split does not enter the verdict's contract. Merge matching of each half is the same as for ranged halves; see [Intent grading of each half](#intent-grading-of-each-half).
+
+Delivered by [pull request 4509](https://github.com/the-cloud-clockwork/agentihooks/pull/4509). Its proofs show labelled halves refused with `halves: plan line ranges` before the change ([red](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39127532741)) and accepted with their order kept, while a planned task without ranges is still refused ([green](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39127535288)). The behavior is pinned by `tests/swarm_ledger/test_task_split.py`, `tests/gates/test_intent_split.py` and `tests/swarm/test_split_pr.py`.
 
 #### Ready handoffs for split tasks
 
@@ -2046,7 +2083,7 @@ Delivered by [pull request 3290](https://github.com/the-cloud-clockwork/agentiho
 
 #### Intent grading of each half
 
-The [intent check](#commands) judges each half as its own pull request. When `swarm pr` records a half, the intent prompt names that half and its plan lines, notes which plan lines the other halves carry, and reads only that half's plan slice. Each recorded half keeps its own verdict, head and input fingerprint, so a `gh pr merge` of one half reads only that half's verdict.
+The [intent check](#commands) judges each half as its own pull request. When `swarm pr` records a half, the intent prompt names that half and its plan lines, notes which plan lines the other halves carry, and reads only that half's plan slice. A labelled half is named by its label and reads no plan slice. Each recorded half keeps its own verdict, head and input fingerprint, so a `gh pr merge` of one half reads only that half's verdict.
 
 Matching starts once the first half is recorded with `swarm pr <url> --half 1`; before that the task has no intent record, and a merge is not checked. From then on the `intent` gate matches every `gh pr merge` of the task to the half it belongs to before it reads a verdict:
 
@@ -2079,6 +2116,10 @@ A split cannot change which pull request a verdict belongs to. Once the task rec
 | Message or condition | Meaning and action |
 |---|---|
 | `the task has a pull request outside the split` | A pull request was already recorded before the split. The split is refused without changing the task; declare splits before recording the first pull request. |
+| `halves: plan line ranges` | The halves mix labels and ranges, include an empty label, or are labels on a task with `plan_lines` or a `plan_slice`. Give a planned task plan line ranges; give a task without a plan distinct labels only. |
+| `halves: distinct labels` | Two labelled halves share a label. Rename one. |
+| `halves: ordered, not overlapping` | Plan line ranges are out of order or overlap. List them in plan order with no shared line. |
+| `halves: cover plan lines <lines>` | The ranges leave part of the task's `plan_lines` uncovered. Extend them to cover every assigned line. |
 | `a half has a pull request` | A split half already has a recorded pull request, so the split cannot be rewritten. Keep the declared ranges and history. |
 | No open pull request and no wait, after a half merged | The stop guard has moved past the merged half. Continue the next half or declare the real condition being awaited. |
 | A half has no pull request yet | Completion is premature. Record and merge the remaining half before `done`. |
