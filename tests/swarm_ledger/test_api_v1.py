@@ -573,7 +573,8 @@ def test_an_owned_task_changes_kind_over_http_and_an_invalid_kind_changes_nothin
     task = before["data"]
     assert (task["id"], task["kind"], task["state"], task["claimed_by"]) == ("t1", "tune", "claimed", "eng-owner")
     assert task["contract"] == contract
-    assert request(live, "GET", "tasks/t1/comments")[1]["data"] == comments != []
+    assert comments != []
+    assert request(live, "GET", "tasks/t1/comments")[1]["data"] == comments
     assert not (tmp_path / "elsewhere").exists()
     status, error = post({"op": "task_update", "item": "tasks/t1", "fields": {"kind": "bogus"}})
     assert status == 400
