@@ -1108,6 +1108,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             if _acknowledging_error(exc):
                 store.record_launch(slug, record, ACKNOWLEDGING)
                 actions.append(f"{name} waits for the hive acknowledgement of {task['id']}")
+            elif refused := _room_wait(runtime, lane, task):
+                actions.append(_room_refused(slug, store, ledger, runtime, rows, Failed(record, task, exc), refused))
             else:
                 actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(record, task, exc), now_ms)
             continue
@@ -1158,6 +1160,16 @@ def _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms):
     if isinstance(exc, ProfileUnresolved):
         actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
     return actions
+
+
+def _room_refused(slug, store, ledger, runtime, rows, failed, refused):
+    record, task = failed.record, failed.task
+    _release_admission(slug, runtime, task)
+    _release_hive_launch(slug, store, record)
+    transfers.detach(store, slug, record)
+    store.record_launch(slug, record, "waiting", str(failed.error))
+    _drop(slug, store, ledger, rows, record)
+    return refused
 
 
 def _acknowledging_error(exc):
