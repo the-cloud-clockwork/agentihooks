@@ -112,16 +112,16 @@ def test_ten_runs_on_one_label_in_one_pass_are_one_finding(store, monkeypatch): 
         assert text.count("\n- ") == 1
 
 
-def test_a_wait_across_a_window_boundary_is_one_crossing_per_pass(store, monkeypatch):  # noqa: F811
+def test_a_wait_across_a_window_boundary_keeps_one_finding_and_one_notice(store, monkeypatch):  # noqa: F811
     status(monkeypatch)
     runs(monkeypatch, [waiting(1, "2026-10-19T16:40:00Z")])
     before = cli.timer(store, DOCTOR, AFTER - 60000, False)
     after = cli.timer(store, DOCTOR, AFTER, False)
     assert any("1 crossings" in action for action in before)
     assert any("1 crossings" in action for action in after)
-    assert len(details(store)) == 2
+    assert [finding["id"] for finding in details(store)] == ['ci-queue-age-unconfirmed/["anton-oss", "self-hosted"]']
     for texts in items(store).values():
-        assert len(texts) == 2
+        assert len(texts) == 1
 
 
 def test_groups_keep_label_sets_and_tiers_apart_and_grow_without_another_notice(store, monkeypatch):  # noqa: F811
