@@ -1,10 +1,14 @@
 import asyncio
 import threading
+from types import SimpleNamespace
+from unittest import mock
 
 import pytest
+from nats.js import api
+from nats.js.errors import APIError
 
 from scripts.events import factory, nats
-from scripts.events.bus import Bus, Consumer, Delivery, EventLog, StateStore, WorkQueue
+from scripts.events.bus import Bus, Consumer, Delivery, EventLog, StateConflict, StateStore, WorkQueue
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 
@@ -167,3 +171,125 @@ def test_close_stops_the_loop_thread_and_refuses_later_calls(url):
     assert not opened._loop.thread.is_alive()
     with pytest.raises(RuntimeError, match="^bus is closed$"):
         opened.events.publish("swarm.s.task", event())
+
+
+def test_a_new_loop_starts_open():
+    loop = nats._Loop()
+    assert loop.closed is False
+    loop.close()
+    assert loop.closed is True
+
+
+class _Idle:
+    def __init__(self, *args, **kwargs):
+        self.started = False
+
+    def start(self):
+        self.started = True
+
+    def is_alive(self):
+        return False
+
+
+def test_a_loop_that_never_runs_is_refused_at_its_start_bound(monkeypatch):
+    monkeypatch.setattr(nats, "LOOP_START_S", 0.05)
+    monkeypatch.setattr(nats.threading, "Thread", _Idle)
+    with pytest.raises(RuntimeError, match="^bus loop did not start$"):
+        nats._Loop()
+
+
+def test_a_loop_that_never_stops_is_refused_at_its_stop_bound(monkeypatch):
+    loop = nats._Loop()
+    stop = loop._loop.stop
+    monkeypatch.setattr(nats, "LOOP_STOP_S", 0.05)
+    monkeypatch.setattr(loop._loop, "stop", lambda: None)
+    with pytest.raises(RuntimeError, match="^bus loop did not stop$"):
+        loop.close()
+    loop._loop.call_soon_threadsafe(stop)
+    loop.thread.join(5)
+    assert not loop.thread.is_alive()
+
+
+def test_the_consumer_config_asks_for_explicit_acks():
+    config = nats._consumer_config("d", "swarm.>", POLICY)
+    assert (config.durable_name, config.filter_subject) == ("d", "swarm.>")
+    assert config.ack_policy == api.AckPolicy.EXPLICIT
+    assert (config.max_deliver, config.ack_wait, config.backoff) == (3, 1.0, [0.2, 0.4])
+
+
+def test_a_work_queue_stream_keeps_work_queue_retention(bus):
+    bus.queue("work", POLICY)
+    info = bus._loop.run(bus._js.stream_info(nats.queue_stream("work")))
+    assert info.config.retention == api.RetentionPolicy.WORK_QUEUE
+
+
+def test_the_bus_connects_without_reconnecting(url, monkeypatch):
+    connect = mock.Mock(wraps=nats.nats_client.connect)
+    monkeypatch.setattr(nats.nats_client, "connect", connect)
+    opened = nats.open_bus(BusConfig(backend="nats", url=url))
+    opened.close()
+    connect.assert_called_once_with(url, allow_reconnect=False)
+
+
+def test_close_closes_the_server_connection(url):
+    opened = nats.open_bus(BusConfig(backend="nats", url=url))
+    connection = opened._nc
+    opened.close()
+    assert connection.is_closed
+
+
+def test_the_event_log_refuses_a_subject_another_stream_owns(bus):
+    bus.queue("work", POLICY)
+    with pytest.raises(APIError):
+        bus.events.publish("agentihooks.queue.work", event())
+
+
+def test_an_offer_refuses_a_subject_another_stream_owns(bus):
+    queue = bus.queue("work", POLICY)
+    bus._loop.run(bus._js.delete_stream(nats.queue_stream("work")))
+    bus._loop.run(bus._js.add_stream(name="OTHER", subjects=["agentihooks.queue.work"]))
+    with pytest.raises(APIError):
+        queue.offer(event())
+
+
+def test_a_consumer_fetches_a_whole_batch(bus):
+    consumer = bus.events.consumer("watcher", "swarm.>")
+    for name in ("e1", "e2", "e3"):
+        bus.events.publish("swarm.s.task", event(name))
+    assert [d.event.id for d in consumer.fetch(2, 1_000)] == ["e1", "e2"]
+
+
+def test_a_nak_without_a_delay_redelivers_at_once():
+    seen = []
+
+    async def nak(delay):
+        seen.append(delay)
+
+    msg = SimpleNamespace(data=event().encode(), metadata=SimpleNamespace(num_delivered=1), nak=nak)
+    loop = nats._Loop()
+    try:
+        nats.NatsDelivery(loop, msg).nak()
+    finally:
+        loop.close()
+    assert seen == [0]
+
+
+def test_the_state_store_is_shared_per_bucket(bus):
+    assert bus.state("tasks") is bus.state("tasks")
+    assert bus.state("tasks") is not bus.state("hives")
+
+
+def test_state_conflicts_name_the_key_and_revision(bus):
+    store = bus.state("tasks")
+    revision = store.create("k", b"v1")
+    with pytest.raises(StateConflict, match=r"^state key 'k' exists$"):
+        store.create("k", b"v2")
+    with pytest.raises(StateConflict, match=rf"^state key 'k' is not at revision {revision + 1}$"):
+        store.update("k", b"v2", revision + 1)
+
+
+def test_watch_yields_an_empty_value_and_starts_at_the_first_revision(bus):
+    store = bus.state("tasks")
+    store.create("k", b"")
+    store.update("k", b"v2", 1)
+    assert [(e.value, e.revision) for e in store.watch("k")] == [(b"", 1), (b"v2", 2)]
