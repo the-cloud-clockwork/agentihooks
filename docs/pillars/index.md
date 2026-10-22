@@ -18,7 +18,9 @@ For resumed work, see [publishing after a successor prepares a branch](swarm.md#
 
 For an existing pull request, see [continuing with one push](swarm.md#continue-an-existing-pull-request-with-one-push): retained branch selection, Stop behavior and lease failures.
 
-See [Doctor timer pass](swarm.md#doctor-timer-pass) for what one Doctor timer step reads, its interval setting and how to measure its wall time per pass, and [Inbox receiver read](swarm.md#inbox-receiver-read) for how the inbox detector resolves every receiver in a fixed number of Redis reads.
+See [Doctor timer pass](swarm.md#doctor-timer-pass) for what one Doctor timer step reads, its interval setting and how to measure its wall time per pass.
+
+See [Inbox receiver read](swarm.md#inbox-receiver-read) for how the inbox detector resolves every receiver in a fixed number of Redis reads, the check command and the measured result.
 
 See [Doctor measurement task readiness](swarm.md#doctor-measurement-task-readiness) for tune dependencies, application timestamps, configuration examples and releasing a read only seat with its recorded window.
 

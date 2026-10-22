@@ -2668,7 +2668,7 @@ Each address gets one `Receiver`:
 | `operator` | In scope, not live, no seat wait |
 | An address whose swarm is neither the watched swarm nor its Doctor | Out of scope: `scoped` false, so its items never count as waiting |
 | A name, or a seat whose occupant is a live agent that has not exited this occupancy | Live, with `quiet_ms` from the agent's idle ticks (one minute each), its `occupant` and `harness` |
-| A seat whose occupant exited, or is not live | Not live; `seat_wait` true unless the seat's swarm is `stopped` or the seat number is above its lane cap (`max_eng`, `max_ci`, `max_plan`; a configuration without `max_plan` counts as a cap of one). A seat whose swarm has no configuration waits |
+| A seat whose occupant exited, or is not live | Not live; `seat_wait` true unless the seat's swarm is `stopped` or the seat number is above its lane cap (`max_eng`, `max_ci`, `max_plan`; a configuration without `max_plan` counts as a cap of one). Only `eng`, `ci` and `plan` seats have a cap; any other seat, such as `master@<id>`, waits until its swarm stops. A seat whose swarm has no configuration waits |
 | Any other name | In scope, not live |
 
 A delivery taker is looked up in its own swarm, so mail delivered to a seat of another swarm is judged by that
@@ -2713,7 +2713,7 @@ Output on 22 October 2026:
 Pass the watched swarm's id, not the Doctor's: the read covers the watched swarm and its Doctor together. Run it
 from a worktree with `PYTHONPATH` set to that worktree, or the editable install loads the main checkout's code.
 
-##### Measured result
+##### Measured result of the receiver read
 
 Pull request [4474](https://github.com/the-cloud-clockwork/agentihooks/pull/4474) merged into `dev` on 18 October
 2026 at 19:15 UTC.
@@ -2727,7 +2727,8 @@ Pull request [4474](https://github.com/the-cloud-clockwork/agentihooks/pull/4474
 
 Both windows were read with the journal commands under [Measure the timer step](#measure-the-timer-step). The after
 window also runs the later handoff scan batching, [pull request 5785](https://github.com/the-cloud-clockwork/agentihooks/pull/5785),
-which changes the handoff detector, so the timer step's maximum is still set by `doctor.handoff`.
+which changes the handoff detector. The timer step's maximum is still set by `doctor.handoff`: in the after window's
+74.0 second pass it took 62.8 seconds, against 7.6 for `doctor.inbox`.
 
 #### Configuration
 
