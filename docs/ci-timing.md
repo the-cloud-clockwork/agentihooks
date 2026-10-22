@@ -288,8 +288,8 @@ reader has not yet reached the present. It is distinct from an API failure.
 |---|---|
 | `incomplete: Actions API read failed: RuntimeError: Actions API request or time budget exhausted` | The call or time budget was reached. Compare successive run counts; completed successes remain available for retry. |
 | Another `Actions API read failed: ...` error | Inspect the named request, authentication, timeout or pagination failure. Successful completed jobs remain saved; the read still reports incomplete. |
-| `pagination ended before the full count: endpoint=...?status=...; page=1; rows=N; total=N+1` | A single page active list stayed one or more runs short through all six reads, or the deadline left no room for a settle read. Re-read that endpoint by hand and compare `total_count` with the rows; a count that never settles points at the Actions API, not the reader. |
-| `pagination ended before the full count: ...; page=2` or higher | A multi page list stayed short after its retry. It is not settled; check whether runs arrived or left during the read and compare the next pass. |
+| `Actions API pagination ended before the full count: endpoint=...?status=...; page=1; rows=N; total=N+1` | A single page active list stayed one or more runs short through all six reads, or the deadline left no room for a settle read. Re-read that endpoint by hand and compare `total_count` with the rows; a count that never settles points at the Actions API, not the reader. |
+| `Actions API pagination ended before the full count: ...; page=2` or higher | A multi page list stayed short after its retry. It is not settled; check whether runs arrived or left during the read and compare the next pass. |
 | Rerun or active workflow fetches jobs again | Expected: reuse requires completed status and the same attempt. |
 | `catching up` | A historical slice completed; later ticks continue toward the present. |
 | Backlog never clears | Compare discovery and new or active workload with remaining request capacity; do not infer completion from a large saved count. |
