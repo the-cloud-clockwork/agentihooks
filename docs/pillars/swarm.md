@@ -1800,6 +1800,118 @@ independent repositories, worktree aliases, handover after a refused write and o
 reconciliation across owners. A live count of fixer records per failed check, before and after the change over equal
 windows, is not recorded yet.
 
+## Red dev workflows outside the promotion gate
+
+Promotion fixer intake files tasks only for the Tests workflow, the promotion gate. Every other workflow that runs on a
+`dev` push, such as an image build or a smoke test, can stay red with no task owning it. The Doctor's `dev workflow`
+detector covers that gap: it raises one `red dev workflow` finding per workflow whose latest five finished `dev` push
+runs all failed.
+
+This detector exists because the Worker hive pod workflow failed 93 of its last 100 `dev` push runs, last green on
+17 October 15:29 UTC, and no task owned it until the Doctor master asked the watched swarm's master on 18 October
+05:12 UTC.
+
+### What the detector reads
+
+The detector runs with the other detectors on every Doctor detection pass, against the watched swarm's repository.
+It calls `gh api` from that swarm's `repo` checkout, so `gh` resolves the owner and repository from that checkout's
+remote. Each call has a 60 second timeout. A pass makes these reads:
+
+1. The newest 100 completed `dev` push runs of every workflow:
+   `repos/{owner}/{repo}/actions/runs?branch=dev&event=push&status=completed&per_page=100`.
+2. For each workflow with a red streak only: its newest successful `dev` push run, through
+   `actions/workflows/<file>/runs?branch=dev&event=push&status=success&per_page=1`. This read is not limited to the
+   100 runs of the first read, so it finds a green run older than that window.
+3. For each workflow with a red streak only: the jobs of the newest run in the streak, through
+   `actions/runs/<run id>/jobs?per_page=100`.
+
+A pass where no workflow has a red streak makes only the first read.
+
+### When a finding is raised
+
+Runs are grouped by workflow file and ordered newest first by run id. Within each workflow:
+
+| Run conclusion | Effect on the streak |
+|---|---|
+| `failure`, `timed_out`, `startup_failure` | Counts as a failed run and extends the streak |
+| `success` | Ends the streak; runs older than it are not counted |
+| Any other, such as `cancelled`, `skipped`, `neutral` or `action_required` | Ignored: it neither ends nor extends the streak |
+
+The streak is the run of failed runs counted from the newest finished run. A workflow whose streak is five or longer
+raises one finding. A workflow whose newest finished run passed raises none, however many runs failed before it.
+Runs of the promotion gate, the workflow file `test.yml`, are skipped, because promotion fixer intake already owns
+them. The file name is matched, not the workflow's display name.
+
+The detector does not check whether a ledger task already owns the workflow. The Doctor judges each finding like any
+other: an owned repair gets a verdict instead of a second task.
+
+### The finding
+
+| Field | Value |
+|---|---|
+| id | `red-dev-workflow/<workflow file>`, for example `red-dev-workflow/hive-worker.yml` |
+| summary | `<workflow name> failed its last <n> dev push runs`, using the name of the newest run |
+| evidence, first line | `last green <created at> <run url>`, or `no green dev push run found` |
+| evidence, second line | `failing jobs in run <run id>: <jobs>`: the newest run's jobs whose conclusion is `failure`, `timed_out` or `startup_failure`, sorted by name, or `none read` when none qualify |
+| evidence, remaining lines | The URL of every run in the streak, newest first |
+| threshold | `5 consecutive failed dev push runs outside the promotion gate` |
+| number | The streak length |
+
+Workflows are reported apart, so two red workflows raise two findings. The streak length is fixed at five; no
+setting or environment variable changes it.
+
+### Usage
+
+Measure a finding before and after its fix. Pass the watched swarm's id:
+
+```bash
+agentihooks doctor rig-grade-swarm measure red-dev-workflow/hive-worker.yml
+```
+
+It prints the finding id and the streak length, for example `red-dev-workflow/hive-worker.yml 7`. After a green
+`dev` push run of that workflow it prints 0, provided the Doctor saw the finding earlier. An id the Doctor never saw
+is refused with `no finding red-dev-workflow/<file> has been seen`.
+
+Judge it and file a fix task:
+
+```bash
+agentihooks doctor rig-grade-swarm verdict red-dev-workflow/hive-worker.yml established \
+  --note "Worker hive pod red on dev since 17 October, no task owns it"
+agentihooks doctor rig-grade-swarm task red-dev-workflow/hive-worker.yml --fix code
+```
+
+Use `false-positive` or `resolved` instead when the workflow already has an owning task, or when a later green run
+broke the streak.
+
+Read the same runs by hand from the watched repository's checkout:
+
+```bash
+cd ~/dev/tcc-ecosystem/agentihooks
+gh api 'repos/{owner}/{repo}/actions/runs?branch=dev&event=push&status=completed&per_page=100' \
+  --jq '.workflow_runs[] | [.id, .path, .conclusion, .created_at] | @tsv' \
+  | grep -v '/test.yml' | sort -k2,2 -k1,1nr
+gh api 'repos/{owner}/{repo}/actions/workflows/hive-worker.yml/runs?branch=dev&event=push&status=success&per_page=1' \
+  --jq '.workflow_runs[] | [.id, .created_at, .html_url] | @tsv'
+gh api 'repos/{owner}/{repo}/actions/runs/<run id>/jobs?per_page=100' --jq '.jobs[] | [.name, .conclusion] | @tsv'
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Action |
+|---|---|---|
+| A workflow is red on `dev` and no finding appears | Fewer than five failed runs follow its newest green run, or fewer than five of its runs fall within the newest 100 completed `dev` push runs | Count its runs with the first `gh api` command above. A workflow that runs rarely may have fewer than five runs in that window |
+| A red workflow with cancelled runs between failures | Cancelled and skipped runs are ignored | Expected: the failures on either side still form one streak |
+| The Tests workflow is red and no finding appears | `test.yml` is the promotion gate and is skipped | Expected: promotion fixer intake files its tasks |
+| `failing jobs in run <id>: none read` | No job of the newest run ended `failure`, `timed_out` or `startup_failure`, for example a run that failed before any job started | Open the run URL in the evidence |
+| `no green dev push run found` | The workflow has no successful `dev` push run in its whole history on GitHub | Expected for a new workflow that never passed |
+| The Doctor tick prints `the dev workflow detector failed: CalledProcessError: ...` | A `gh api` call failed or timed out | Check `gh auth status` in the watched swarm's checkout. The other detectors of the pass still report |
+
+Delivered in [pull request 4679](https://github.com/the-cloud-clockwork/agentihooks/pull/4679), with
+[issue 4678](https://github.com/the-cloud-clockwork/agentihooks/issues/4678) as the spec. Its tests cover five
+consecutive failures raising one finding, a longer streak with no green run, no finding when the newest run passed,
+with four failures or with only four runs, the promotion gate skipped, cancelled and skipped runs ignored, and
+workflows judged apart.
+
 ## Plan tracing for promotion fixer tasks
 
 Promotion failures create fixer tasks whose identifiers include the Actions run
