@@ -35,3 +35,20 @@ def test_the_urgent_head_spends_the_shared_launch_budget_first(
     assert ledger.rows["lower"]["state"] == "open"
     assert store.claimant("sw", "lower") is None
     assert "spent this pass's 20 second launch budget, lower waits a pass" in actions
+
+
+@pytest.mark.parametrize("autonomy", ["assist", "delegate"])
+@pytest.mark.parametrize("rank,expected,deferred", [("normal", "healthy", "failed"), ("urgent", "failed", "healthy")])
+def test_recorded_launch_failures_follow_healthy_tasks_only_within_their_band(
+    store, monkeypatch, autonomy, rank, expected, deferred
+):
+    store.update("sw", autonomy=autonomy)
+    ledger, runtime = tasks(("failed", "eng"), ("healthy", "ci")), FakeRuntime()
+    ledger.rows["failed"]["rank"] = rank
+    store.note_launch_failure("sw", "failed", "placement refused")
+    _slow_launches(monkeypatch, runtime, 12)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == [expected]
+    assert ledger.rows[deferred]["state"] == "open"
+    assert store.claimant("sw", deferred) is None
+    assert f"spent this pass's 20 second launch budget, {deferred} waits a pass" in actions
