@@ -301,3 +301,54 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
             assert queue.take(10) is None
         finally:
             bus.close()
+
+
+@pytest.mark.parametrize("boundary", ["started", "dead", "reopen"])
+def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, boundary):
+    from scripts.hive.spoke import Spoke
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    if boundary != "started":
+        rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room")
+    target = rig.bus.events if boundary == "started" else rig.bus.dead
+    real_publish = target.publish
+    if boundary == "reopen":
+        rig.tasks.reopen.side_effect = RuntimeError("ledger unavailable")
+    else:
+        target.publish = Mock(side_effect=RuntimeError("bus unavailable"))
+    for now in (0, 10, 30):
+        rig.clock.now = now
+        assert rig.spoke.poll() == "retry"
+    rig.clock.now = 100_000
+    assert rig.queue.take(0) is None
+    target.publish = real_publish
+    rig.tasks.reopen.side_effect = None
+    restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, lambda: None)
+    assert restarted.poll() == ("started" if boundary == "started" else "dead")
+    if boundary == "started":
+        rig.runtime.spawn.assert_called_once_with(rig.request)
+        rig.tasks.reopen.assert_not_called()
+    else:
+        assert rig.runtime.spawn.call_count == 3
+        assert rig.tasks.reopen.call_args.args == (rig.event,)
+
+
+def test_an_ambiguous_spawn_keeps_its_identity_and_never_launches_again(rig):
+    import json
+
+    from scripts.hive.spoke import Spoke, claim_key
+
+    def spawn(request):
+        entry = rig.bus.state("spoke-work").get(claim_key(rig.event))
+        intent = json.loads(entry.value)
+        assert intent["state"] == "launching"
+        assert intent["name"] == request.name
+        raise RuntimeError("spawn response lost")
+
+    rig.runtime.spawn.side_effect = spawn
+    assert rig.spoke.poll() == "retry"
+    rig.clock.now = 10
+    restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, reading)
+    assert restarted.poll() == "uncertain"
+    rig.runtime.spawn.assert_called_once_with(rig.request)
+    rig.tasks.reopen.assert_not_called()
