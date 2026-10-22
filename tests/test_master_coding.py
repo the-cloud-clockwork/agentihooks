@@ -1,4 +1,5 @@
 import json
+import os
 import runpy
 from pathlib import Path
 from unittest.mock import Mock
@@ -318,8 +319,82 @@ def test_a_standalone_plan_prompt_is_denied_until_operator_on(unseated, capsys):
         "gh ruleset list",
     ],
 )
-def test_the_master_never_touches_rulesets_or_branch_protection(master, command):
+def test_the_master_never_touches_rulesets_or_branch_protection_outside_the_hotfix_window(master, command):
     assert master_coding.protection_refusal({"tool_input": {"command": command}}) == master_coding.PROTECTION_REFUSAL
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh api repos/o/r/rulesets/7 -X PUT --input .github/rulesets/dev-no-delete.json",
+        "gh api -X PUT repos/o/r/branches/dev/protection",
+        "gh ruleset list",
+    ],
+)
+def test_the_open_window_lets_the_master_change_rulesets_and_closing_it_refuses_again(master, command):
+    repo = _payload_repo(master, committed=True)
+    payload = {"session_id": SID, "cwd": str(repo), "tool_input": {"command": command}}
+    assert master_coding.protection_refusal(payload) == master_coding.PROTECTION_REFUSAL
+    master_coding.observe(SID, "allow-master-coding", typed=True)
+    assert master_coding.protection_refusal(payload) == ""
+    master_coding.observe(SID, "disallow-master-coding", typed=True)
+    assert master_coding.protection_refusal(payload) == master_coding.PROTECTION_REFUSAL
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh api -X PUT repos/o/r/branches/main/protection",
+        "gh api -X PUT repos/o/r/branches/master/protection",
+        "gh api -X PUT repos/o/r/rulesets/9 --input .github/rulesets/main-prod-lockdown.json",
+        "gh api -X PUT repos/o/r/rulesets/9 --input /home/x/payload.json",
+        "gh api -X PUT repos/o/r/rulesets/9 --input /elsewhere/.github/rulesets/dev-no-delete.json",
+        "gh api -X PUT repos/o/r/rulesets/9 --input ../.github/rulesets/dev-no-delete.json",
+        "gh api -X DELETE repos/o/r/rulesets/9",
+    ],
+)
+def test_the_open_window_never_lets_the_master_touch_main_protection(master, command):
+    master_coding.observe(SID, "allow-master-coding", typed=True)
+    payload = {"session_id": SID, "tool_input": {"command": command}}
+    assert master_coding.protection_refusal(payload) == master_coding.PROTECTION_REFUSAL
+
+
+GIT_IDENTITY = {
+    "GIT_AUTHOR_NAME": "t",
+    "GIT_AUTHOR_EMAIL": "t@t",
+    "GIT_COMMITTER_NAME": "t",
+    "GIT_COMMITTER_EMAIL": "t@t",
+}
+
+
+def _payload_repo(root, committed):
+    import subprocess
+
+    repo = root / "repo"
+    (repo / ".github" / "rulesets").mkdir(parents=True)
+    (repo / ".github" / "rulesets" / "dev-no-delete.json").write_text("{}")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    if committed:
+        subprocess.run(["git", "-C", str(repo), "add", ".github/rulesets/dev-no-delete.json"], check=True)
+        env = {**os.environ, **GIT_IDENTITY}
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "payload"], check=True, env=env)
+    return repo
+
+
+def test_a_ruleset_write_by_id_needs_its_payload_committed_in_the_checkout(master):
+    repo = _payload_repo(master, committed=False)
+    master_coding.observe(SID, "allow-master-coding", typed=True)
+    payload = {
+        "session_id": SID,
+        "cwd": str(repo),
+        "tool_input": {"command": "gh api -X PUT repos/o/r/rulesets/7 --input .github/rulesets/dev-no-delete.json"},
+    }
+    assert master_coding.protection_refusal(payload) == master_coding.PROTECTION_REFUSAL
+    committed = _payload_repo(master / "two", committed=True)
+    payload["cwd"] = str(committed)
+    assert master_coding.protection_refusal(payload) == ""
+    (committed / ".github" / "rulesets" / "dev-no-delete.json").write_text('{"relaxed": true}')
+    assert master_coding.protection_refusal(payload) == master_coding.PROTECTION_REFUSAL
 
 
 def test_ordinary_gh_calls_missing_input_and_other_seats_pass_the_protection_check(master, monkeypatch):
@@ -334,5 +409,5 @@ def test_the_shell_guard_blocks_a_master_ruleset_call(master, monkeypatch):
     monkeypatch.setattr("hooks.context.swarm_wait_nudge.check_github_watch", Mock())
     monkeypatch.setattr("hooks.context.branch_guard.check_branch_guard", Mock())
     monkeypatch.setattr("hooks.context.branch_guard.check_commit_on_main", Mock())
-    with pytest.raises(hook_manager.BlockAction, match="never changes rulesets or branch protection"):
+    with pytest.raises(hook_manager.BlockAction, match="only inside the hotfix window"):
         hook_manager._check_shell_guards({"tool_name": "Bash", "tool_input": {"command": "gh ruleset list"}})

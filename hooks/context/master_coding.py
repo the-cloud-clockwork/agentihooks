@@ -6,6 +6,7 @@ Only a prompt the operator typed in the master pane opens or closes it; agent te
 import json
 import os
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -16,16 +17,23 @@ PERMISSION_TOOLS = ("AskUserQuestion", "ExitPlanMode")
 PROTECTION = re.compile(r"\bgh\s+(?:ruleset\b|api\b[^\n;&|]*(?:/rulesets\b|/branches/[^\s/]+/protection\b))")
 NOTICES = {
     "open": "Master hotfix window open for thirty minutes: the master may create a worktree with wt.sh new, edit "
-    "inside it, commit, push its branch and merge its pull request into dev on green. Main, rulesets, branch "
-    "protection, condition folders, credential files and secrets stay closed. disallow-master-coding ends it.",
+    "inside it, commit, push its branch, merge its pull request into dev on green and change rulesets or branch "
+    "protection by command; a ruleset write names its committed payload file, and main, master and v1 stay "
+    "closed. Condition folders, credential files and secrets stay closed. "
+    "disallow-master-coding ends it.",
     "closed": "Master hotfix window closed: the master no longer edits code.",
 }
 CREDENTIALS = re.compile(
     r"(?:^|/)(?:\.env(?:\.[\w.-]+)?|[\w.-]+\.env|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass)$"
 )
 TEMPLATES = (".example", ".sample", ".template", ".dist")
+MAIN_PROTECTION = re.compile(r"(?<!\w)(?:main|master|v1)(?!\w)")
+RULESET_BY_ID = re.compile(r"/rulesets/\d+")
+RULESET_PAYLOAD = re.compile(r"(?<![\w/.~-])\.github/rulesets/[\w.-]+\.json")
 PROTECTION_REFUSAL = (
-    "BLOCKED: the master never changes rulesets or branch protection, inside the hotfix window or out of it."
+    "BLOCKED: the master changes rulesets or branch protection only inside the hotfix window, a ruleset write "
+    "only from its committed payload file under .github/rulesets, and never for main, master or v1; the operator "
+    "opens the window by typing allow-master-coding in the master pane."
 )
 
 
@@ -101,4 +109,22 @@ def asks_operator(tool_name: str, session_id: str | None) -> bool:
 
 def protection_refusal(payload: dict) -> str:
     command = str((payload.get("tool_input") or {}).get("command"))
-    return PROTECTION_REFUSAL if is_master(payload.get("session_id")) and PROTECTION.search(command) else ""
+    session_id = payload.get("session_id")
+    if not (is_master(session_id) and PROTECTION.search(command)):
+        return ""
+    if not is_open(session_id) or MAIN_PROTECTION.search(command):
+        return PROTECTION_REFUSAL
+    if RULESET_BY_ID.search(command) and not _committed_payload(command, Path(payload.get("cwd") or os.getcwd())):
+        return PROTECTION_REFUSAL
+    return ""
+
+
+def _committed_payload(command: str, cwd: Path) -> bool:
+    found = RULESET_PAYLOAD.search(command)
+    if not found:
+        return False
+    target = str((cwd / found.group(0)).resolve())
+    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    tracked = subprocess.run(["git", "-C", str(cwd), "ls-files", "--error-unmatch", target], **quiet)
+    clean = subprocess.run(["git", "-C", str(cwd), "diff", "--quiet", "HEAD", "--", target], **quiet)
+    return tracked.returncode == 0 and clean.returncode == 0
