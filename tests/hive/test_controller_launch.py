@@ -602,6 +602,21 @@ def test_an_ended_launch_releases_its_admission_reservation(setup):
     assert admission.pending(setup.store.redis, "remote") == 0
 
 
+def test_an_expired_acknowledgement_releases_its_admission_and_launch_slot(setup):
+    from scripts.hive import admission, launch
+
+    request = request_for(setup)
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(request) == "pending"
+    order = setup.launcher.orders_for("task")
+    assert admission.pending(setup.store.redis, "remote") == 1
+    assert setup.launcher.slots.counts() == {"claude:account": 1}
+    assert setup.launcher.poll(replace(order, expires_at=0)).detail == launch.EXPIRED
+    assert admission.pending(setup.store.redis, "remote") == 0
+    assert setup.launcher.slots.counts() == {}
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
+
+
 def write_hive(setup, **changes):
     from scripts.hive import registry
 

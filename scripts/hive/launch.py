@@ -137,6 +137,11 @@ def _match(check: str, expected: object, actual: object) -> None:
         )
 
 
+def release(store: RedisStore, slug: str, agent: AgentRecord) -> None:
+    LaunchSlots(store.redis).release(agent.execution_id)
+    admission.release(store.redis, agent.hive, f"{slug}/{agent.name}")
+
+
 class HiveLaunch:
     backend = HIVE
     capabilities = frozenset((Capability.SPAWN,))
@@ -371,6 +376,7 @@ class HiveLaunch:
         if ack := self.orders.ack(order):
             return self.complete(order, ack)
         if lease.now_ms(self.store) >= order.expires_at:
+            release(self.store, self.slug, self.store.execution_registry.get(self.slug, order.execution_id))
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
         return Outcome("spawn", Status.PENDING, HIVE, detail=PENDING)
 
@@ -439,8 +445,7 @@ class HiveLaunch:
 
     def end(self, agent: AgentRecord, reason: str) -> None:
         lease.require_epoch(self.store, self.slug, self.held.epoch)
-        self.slots.release(agent.execution_id)
-        admission.release(self.store.redis, agent.hive, f"{self.slug}/{agent.name}")
+        release(self.store, self.slug, agent)
         self.store.redis.hset(
             self.store.key(self.slug, ENDINGS),
             agent.execution_id,

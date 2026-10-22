@@ -822,6 +822,69 @@ def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(s
     assert ledger.rows["t1"]["claimed_by"] != first
 
 
+def _hive_reservations(store, name):
+    from scripts.hive import admission
+    from scripts.routing.reservation import LaunchSlots
+
+    agent = next(a for a in store.agents("sw") if a.name == name)
+    started = store.start_execution(
+        "sw", replace(agent, hive="remote", runtime_target={"host_id": "remote"}, state="launching"), ""
+    )
+    slots = LaunchSlots(store.redis)
+    assert slots.reserve("claude:acct", started.execution_id, 6, 300_000)
+    assert admission.reserve(store.redis, "remote", f"sw/{name}", 3) == (True, 0)
+    return slots
+
+
+@pytest.mark.parametrize("ending", ["refused", "expired"])
+def test_a_failed_hive_launch_releases_its_hive_room_and_launch_slot(store, ending):
+    from scripts.hive import admission
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    (name,) = runtime.ordered
+    slots = _hive_reservations(store, name)
+    if ending == "refused":
+        runtime.failing.add(name)
+    tick("sw", store, ledger, runtime, now_ms=2_000 if ending == "refused" else 1_000 + LEASE_MS)
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    assert launches[name]["state"] == "failed"
+    assert admission.pending(store.redis, "remote") == 0
+    assert slots.counts() == {}
+
+
+class HiveFailsAfterAdmission(HiveAcks):
+    def __init__(self, store):
+        super().__init__()
+        self.store, self.slots = store, None
+
+    def spawn(self, config, lane, name, task):
+        if lane == MASTER:
+            return super().spawn(config, lane, name, task)
+        self.slots = _hive_reservations(self.store, name)
+        raise SpawnError("hive launch failed: ambiguous", "ambiguous")
+
+
+def test_a_hive_launch_failing_after_admission_releases_its_hive_room_and_launch_slot(store):
+    from scripts.hive import admission
+
+    ledger, runtime = tasks(("t1", "eng")), HiveFailsAfterAdmission(store)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert any(action.startswith("spawn failed for t1") for action in actions)
+    assert admission.pending(store.redis, "remote") == 0
+    assert runtime.slots.counts() == {}
+
+
+def test_a_failed_hive_launch_gone_from_the_store_still_releases_its_hive_room(store):
+    from scripts.hive import admission
+    from scripts.swarm.tick import _release_hive_launch
+
+    assert admission.reserve(store.redis, "remote", "sw/eng@gone", 3) == (True, 0)
+    _release_hive_launch("sw", store, AgentRecord("eng@gone", "eng", "t1", hive="remote"))
+    assert admission.pending(store.redis, "remote") == 0
+
+
 def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)
