@@ -220,6 +220,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/flake_ledger.py",
         "tests/routing/test_codex_api.py",
         "tests/shards.py",
+        "tests/swarm_ledger/test_postgres_outbox.py",
         "tests/swarm_ledger/test_postgres_writer_lock.py",
         "tests/test_suite_speed.py",
         "scripts/ci_reuse.py",
