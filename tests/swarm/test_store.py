@@ -225,6 +225,40 @@ def test_a_refunded_claim_gives_back_one_started_life(store):
     assert (store.refund_claim("smoke", "t2"), store.claims("smoke", "t2")) == (0, 0)
 
 
+def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generation_match(store):
+    store.record_launch("smoke", AgentRecord("first", "eng", "t1"), "started")
+    store.record_launch("smoke", AgentRecord("second", "eng", "t1"), "started")
+    store.claim("smoke", "t1", "second", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+
+    assert store.refund_held_claim("smoke", "t1", "first", generation) is False
+    assert store.refund_held_claim("smoke", "t1", "second", generation + 1) is False
+    assert store.claims("smoke", "t1") == 2
+    assert store.refund_held_claim("smoke", "t1", "second", generation) is True
+    assert store.claims("smoke", "t1") == 1
+    assert store.claimant("smoke", "t1") == "second"
+
+
+def test_a_held_claim_refund_refuses_after_the_hub_released_the_claim(store):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.release("smoke", "t1", "agent")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 1
+
+
+def test_a_held_claim_refund_refuses_while_the_task_authority_is_set(store):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.redis.set(store.key("smoke", "task-authority", "t1"), "hub")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 1
+
+
 def test_launch_rows_merge_recorded_launches_with_verified_history(store):
     history, validated = store.key("smoke", "history"), {"validation": {"state": "validated"}}
     store.redis.rpush(
