@@ -1,3 +1,4 @@
+import functools
 import hashlib
 import json
 import os
@@ -206,17 +207,15 @@ class SeatPublisher:
             )
 
 
-_PUBLISHER: SeatPublisher | None = None
+@functools.cache
+def _publisher(config: BusConfig) -> SeatPublisher:
+    return SeatPublisher(lambda: open_bus(config))
 
 
 def publish(item) -> None:
-    global _PUBLISHER
     config = _nats()
-    if config is None:
-        return
-    if _PUBLISHER is None:
-        _PUBLISHER = SeatPublisher(lambda: open_bus(config))
-    _PUBLISHER.publish(item)
+    if config is not None:
+        _publisher(config).publish(item)
 
 
 class SeatFeed:

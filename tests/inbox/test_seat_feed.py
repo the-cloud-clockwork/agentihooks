@@ -218,13 +218,14 @@ def test_publish_opens_one_nats_publisher_per_process(monkeypatch):
     configs = []
     shared = memory.open_bus(BusConfig())
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
-    monkeypatch.setattr(bus, "_PUBLISHER", None)
     monkeypatch.setattr(bus, "open_bus", lambda config: configs.append(config) or shared)
+    bus._publisher.cache_clear()
     item = Item("first", "alice", SEAT, "work", "pending", 1, 1)
-    bus.publish(item)
-    publisher = bus._PUBLISHER
-    bus.publish(replace(item, id="second"))
-    assert bus._PUBLISHER is publisher
+    try:
+        bus.publish(item)
+        bus.publish(replace(item, id="second"))
+    finally:
+        bus._publisher.cache_clear()
     assert [config.backend for config in configs] == ["nats"]
     receipts = SeatInbox(shared, "swarm").consumer(SEAT, "session").fetch(5, 0)
     assert [receipt.event.id for receipt in receipts] == ["first", "second"]

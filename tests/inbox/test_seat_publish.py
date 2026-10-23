@@ -17,7 +17,8 @@ def mail(monkeypatch):
 
     shared = memory.open_bus(BusConfig())
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
-    monkeypatch.setattr(bus, "_PUBLISHER", bus.SeatPublisher(lambda: shared))
+    publisher = bus.SeatPublisher(lambda: shared)
+    monkeypatch.setattr(bus, "_publisher", lambda config: publisher)
     yield InboxStore(fakeredis.FakeRedis(decode_responses=True)), shared
     shared.close()
 
@@ -65,7 +66,8 @@ def test_a_failed_publish_keeps_the_redis_send_and_says_so(monkeypatch, capsys):
         raise OSError("nats unreachable")
 
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
-    monkeypatch.setattr(bus, "_PUBLISHER", bus.SeatPublisher(broken))
+    publisher = bus.SeatPublisher(broken)
+    monkeypatch.setattr(bus, "_publisher", lambda config: publisher)
     store = InboxStore(fakeredis.FakeRedis(decode_responses=True))
     item = store.send("alice", SEAT, "work")
     assert store.get(item.id).state == "pending"
