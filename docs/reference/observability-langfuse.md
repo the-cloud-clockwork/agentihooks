@@ -373,6 +373,82 @@ question fails or names no project. A refusal fails the `trace` detector: its
 error is printed on stderr and the measure counts it among the failed
 detectors. The caller's terminal keys never change what `doctor measure` reads.
 
+### Internal ingress for Doctor reads
+
+The reader chooses its route from `LANGFUSE_HOST` after removing trailing
+slashes. The default needs no route setting:
+
+| Reader host | Connection |
+|---|---|
+| Unset, empty, or `https://langfuse.homeofanton.com` (also with a trailing slash) | HTTPS to `10.10.30.200:443`, with `langfuse.homeofanton.com` as HTTP `Host` and TLS server name |
+| Another hostname, scheme or explicit port, such as `https://langfuse.example.com` or `https://langfuse.homeofanton.com:8443` | Directly to the configured URL |
+
+TLS verification stays enabled. Keep the hostname in `LANGFUSE_HOST`: setting
+it to the ingress IP selects a direct request and loses the hostname used for
+certificate verification. The ingress address comes from the built-in
+`langfuse_route({})` default; changing the exporter's `OTEL_LANGFUSE_ENDPOINT`
+does not change this reader route. The project key pair is passed unchanged as
+HTTP Basic authentication, and the [read budget](#read-budget) still applies.
+
+For a manual reader pass on Anton, use a shell with the watched project's keys
+already supplied, then run:
+
+```bash
+cd ~/dev/tcc-ecosystem/agentihooks
+LANGFUSE_HOST=https://langfuse.homeofanton.com \
+  LANGFUSE_PUBLIC_KEY="$SWARM_LANGFUSE_PUBLIC_KEY" \
+  LANGFUSE_SECRET_KEY="$SWARM_LANGFUSE_SECRET_KEY" \
+  ~/dev/tcc-ecosystem/.venv/bin/python -m scripts.doctor.traces_read rig-grade-swarm
+```
+
+`SWARM_LANGFUSE_PUBLIC_KEY` and `SWARM_LANGFUSE_SECRET_KEY` above are references
+to keys supplied by your secret manager. This command uses the internal route,
+prints `measures` and `findings`, and updates the reader's watermarks and cache.
+For another installation, replace the host and key references with that
+installation's HTTPS origin and project pair; that origin is read directly.
+The manual reader does not validate the project. For a measurement with the
+installed keys and the `agent-swarm` project check described above, use:
+
+```bash
+agentihooks doctor rig-grade-swarm measure trace-reader-unavailable
+```
+
+This measure command always uses the default host, regardless of the caller's
+`LANGFUSE_HOST`.
+
+#### Checking the internal connection
+
+Run this read-only probe from the host that runs the Doctor. It needs no
+project keys and keeps the same hostname and certificate verification:
+
+```bash
+curl --noproxy '*' --resolve langfuse.homeofanton.com:443:10.10.30.200 \
+  --connect-timeout 5 --max-time 10 --silent --show-error \
+  --output /dev/null --write-out 'status=%{http_code} tls=%{ssl_verify_result}\n' \
+  https://langfuse.homeofanton.com/api/public/health
+```
+
+`status=200 tls=0` confirms a healthy response and a verified certificate from
+the ingress. It does not confirm that the reader's keys open the right project
+or that trace queries finish within their budget.
+
+| Symptom | Check |
+|---|---|
+| Public URL returns a tunnel 502, internal health probe succeeds | Default-origin Doctor reads bypass the tunnel. Compare the finding's request URL and time with the internal path before attributing it to the tunnel. |
+| Internal connection times out or refuses the connection | The Doctor host must reach `10.10.30.200:443`; check that path and the ingress. There is no fallback to the public tunnel. |
+| Certificate verification fails | Check the certificate served for `langfuse.homeofanton.com`; keep verification enabled and the hostname configured. |
+| Langfuse returns 5xx through the internal path, or trace requests time out | These remain read failures and can raise `trace reader unavailable`; inspect the [failure lines](#read-budget) and backend health. |
+| Health succeeds but measurement refuses the project | Follow [Finding where a trace went](#finding-where-a-trace-went); health alone does not validate project identity. |
+
+Pull request [#5353](https://github.com/the-cloud-clockwork/agentihooks/pull/5353)
+proved the route with a public tunnel returning 502 and an internal endpoint
+returning 200. Its CI proofs went from
+[red](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39486962592)
+to [green](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39487595146),
+including checks that internal 503 responses and timeouts still raise the
+reader finding. Host memory paging was a hypothesis, not an established cause
+of that incident.
+
 ### Active telemetry
 
 Every working agent record of the watched swarm is an expected binding: name,
@@ -660,6 +736,69 @@ limit has its wait history read`. The finding is absent when every agent that
 needs its wait history was read. Each scan picks the agents again, so the next
 scan retries the unread ones.
 
+#### Live agents first
+
+An agent counts as live when the watched swarm's store lists it as a working
+agent in this scan, which gives it an expected binding under
+[Active telemetry](#active-telemetry). It counts as live whether or not its
+binding's telemetry was read in that scan. Every other agent with traces is
+retired: its traces stay in the cache and can still hold a long gap.
+
+`traces.gap_agents` sorts the agents with a long gap by three keys, in order:
+
+1. live before retired
+2. inside each group, the agent whose newest long gap ends latest first
+3. then by name
+
+`traces_read.waits` reads down that list and stops at the wait budget or the
+step deadline, so the unread agents are always the tail of the list. A live
+agent is left unread only when every retired agent with a long gap was left
+unread too. For example, with 3 live and 100 retired agents with long gaps
+and time for 40 reads, the 3 live agents and the 37 retired agents whose newest
+gap ends latest are read. The 63 left unread are all retired, and the finding
+reads `live agents unread: 0`.
+
+The `live agents unread` evidence line of `wait history partial` counts every
+live agent among all unread agents, not only the five the `unread` line names.
+A value above 0 means even the live agents did not fit in the budget. Turn gap
+findings for those live agents are missing from that scan, and no retired agent
+was read at all.
+
+| `live agents unread` | Meaning | Action |
+|---|---|---|
+| `0` | every live agent with a long gap was judged; only retired agents were skipped | none for the live swarm; retired agents are retried on later scans |
+| above `0` | the wait reads covered fewer agents than the live agents with long gaps | read the trace step time below; the Langfuse reads or Redis used up the step |
+
+The finding's number, which `doctor measure wait-history-partial/<slug>`
+prints, stays the count of all unread agents, live and retired. The live count
+appears only in the evidence line.
+
+**Why live agents come first.** Pull request #5176 bounded the wait reads and
+read the agents newest gap first. The next scans on rig-grade-swarm raised
+`wait history partial` with 106 agents with turn gaps over 30 minutes not read
+in budget, and every agent the finding named was retired. A live agent whose
+newest gap ended earlier than those retired agents' gaps would have been
+skipped behind them. Pull request #5229 (issue #5226) put live agents first
+and added the `live agents unread` line.
+
+The three seam tests failed on the old order in Proofs run
+[39410184551](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39410184551)
+(order `engineer, ci, dev` where `dev, engineer, ci` was expected, and the live
+line missing) and passed on the fix in Tests run
+[39411235265](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39411235265).
+Ten passes of the trace detector on rig-grade-swarm before the fix and ten with
+it, on 20 October 2026, each found 0 live agents left unread. In both windows
+no live agent had a turn gap over 30 minutes and every wait read finished in
+budget, so the measurement could not move, and the CI tests are the proof of
+the order.
+
+The tests are in `tests/doctor/test_turn_gap_waits.py`:
+`test_live_agents_are_read_before_retired_ones_each_newest_gap_first` pins the
+order, `test_the_partial_read_counts_the_live_agents_left_unread` pins the
+count, and
+`test_an_agent_whose_wait_history_was_not_read_is_not_judged_and_the_read_is_partial`
+pins the full evidence text.
+
 #### Why the wait reads are bounded
 
 Before this change, the step read the wait history of every traced agent,
@@ -723,6 +862,7 @@ otherwise it fails with `no finding wait-history-partial/<slug> has been seen`.
 | `wait history partial` with `doctor.trace` well under 55 seconds | the wait reads themselves used the 15 seconds; many agents have long gaps, or Redis answers slowly |
 | `doctor.trace` above 60 seconds | a Langfuse request or a wait read in flight finished past its budget; read the `trace reader unavailable` failure lines for timeouts |
 | a turn gap finding disappears while `wait history partial` is present | its agent was left unread in that scan; it is judged again once its wait history is read |
+| `wait history partial` evidence reads `live agents unread` above 0 | every retired agent with a long gap was also left unread and the live agents did not fit; see [Live agents first](#live-agents-first) |
 
 ### Historical findings
 

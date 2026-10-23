@@ -77,7 +77,7 @@ from scripts.swarm.naming import lane_of, parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.ready import awaiting as awaiting_merge
-from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
+from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale, master_seat_alarm
@@ -255,7 +255,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
-            if config.state == "running":
+            if config.state == "running" and config.engine != EVENTS_ENGINE:
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
@@ -352,16 +352,27 @@ def _master_down(slug, config, store, ledger, runtime, now_ms):
 
 
 def _drop(slug, store, ledger, rows, agent, refund=False):
-    store.release(slug, agent.task, agent.name)
-    store.drop_agent(slug, agent.name)
     held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
     held = held and not awaiting_merge(rows[agent.task])
-    if refund and held and store.claims(slug, agent.task) > 0:
-        store.refund_claim(slug, agent.task)
     expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}
+    refund = refund and held and store.claims(slug, agent.task) > 0
+    refund = refund and _still_held(ledger.task(slug, agent.task), expected)
+    store.release(slug, agent.task, agent.name)
+    store.drop_agent(slug, agent.name)
+    if refund:
+        store.refund_claim(slug, agent.task)
     reopen = held and _reopen(slug, ledger, rows, agent.task, expected)
     exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
     return f", task {agent.task} reopened" if reopen else ""
+
+
+def _still_held(row, expected):
+    row = row or {}
+    return (
+        row.get("state") in ACTIVE
+        and row.get("claimed_by") == expected["claimed_by"]
+        and row.get("claim_generation", 0) == expected["claim_generation"]
+    )
 
 
 def _verify(slug, store, ledger, runtime, rows, now_ms):

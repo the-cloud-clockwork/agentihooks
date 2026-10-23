@@ -453,6 +453,7 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
 
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from scripts.claude_quota_balancer import RoutingError
+    from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
     try:
@@ -461,4 +462,9 @@ def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], repo
         raise RoutingError(str(exc)) from exc
     _write_route_report(report, status="routed", account=found, placement="forced")
     print(f"[agenti] account={found} route={ROUTE}", flush=True)
-    os.execvpe(binary, _claude_command(binary, [*SETTINGS, *args]), child(environ, target, found))
+    execute(
+        "claude",
+        found,
+        child(environ, target, found),
+        lambda env: os.execvpe(binary, _claude_command(binary, [*SETTINGS, *args]), env),
+    )
