@@ -50,7 +50,7 @@ def problems(chart: str) -> list[str]:
     alone = render(chart, *ENABLED, "--set", "hiveOnly=true")
     if alone.returncode or hubs(alone.stdout):
         found.append("a hive only release renders the hub")
-    unaddressed = render(chart, "--set", "hub.enabled=true")
+    unaddressed = render(chart, "--set", "hub.enabled=true", "--set", "nats.enabled=false")
     if unaddressed.returncode == 0 or "hub.bus.url" not in unaddressed.stderr:
         found.append("a NATS hub without hub.bus.url renders instead of failing on the missing address")
     return found

@@ -190,6 +190,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/chart_hive_join.py",
         "tests/chart_hive_only.py",
         "tests/chart_hub.py",
+        "tests/chart_nats.py",
         "tests/chart_network.py",
         "tests/chart_redis.py",
         "tests/chart_secrets.py",
