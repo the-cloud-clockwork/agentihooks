@@ -24,7 +24,7 @@ from hooks.context.account_sessions import (
 )
 from hooks.observability.agent_trace import TRIGGER_ENV
 from hooks.observability.correlation import KEYS
-from scripts.scheduler.process_timer import wait as scheduled_wait
+from scripts.scheduler.process_timer import wait as timer_wait
 
 POLL_SEC = 1.0
 IDENTITY_KEYS = (*KEYS, "AGENTIHOOKS_SWARM_LANE")
@@ -281,6 +281,15 @@ def _lock(session_id: str, wait: float, clock: Callable[[], float], sleep: Calla
                 handle.close()
                 return None
             sleep(POLL_SEC)
+
+
+def scheduled_wait(delay: float) -> None:
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    try:
+        timer_wait(delay)
+    except (ConnectionError, TimeoutError):
+        pass
 
 
 def supervise(
