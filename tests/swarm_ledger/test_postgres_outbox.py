@@ -77,3 +77,16 @@ def test_the_relay_publishes_postgres_outbox_rows_once_and_marks_them_sent(ledge
             "SELECT count(*) FROM outbox WHERE slug = %s AND id NOT IN (SELECT id FROM outbox_sent)", (slug,)
         )
         assert cursor.fetchone() == (0,)
+
+
+def test_postgres_prune_deletes_sent_rows_and_marks_older_than_the_window_and_keeps_the_rest(ledger):
+    repository, slug = ledger
+    with closing(psycopg2.connect(URL)) as writer, writer, writer.cursor() as cursor:
+        cursor.execute("INSERT INTO outbox_sent SELECT id, 1000000 FROM outbox WHERE slug = %s", (slug,))
+    repository.apply_ops(slug, ops=[CLAIM])
+    claimed = subjects(slug)[-1]
+    outbox.prune(repository, 120_000, clock=lambda: 1_120_001)
+    assert subjects(slug) == [claimed]
+    with closing(psycopg2.connect(URL)) as reader, reader.cursor() as cursor:
+        cursor.execute("SELECT count(*) FROM outbox_sent WHERE sent_at < 1120001")
+        assert cursor.fetchone() == (0,)
