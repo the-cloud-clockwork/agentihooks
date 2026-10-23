@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import shutil
+import string
 import subprocess
 import sys
 import time
@@ -28,6 +29,7 @@ from hooks.context.account_sessions import (
     codex_sessions_by_account,
 )
 from scripts import (
+    account_names,
     codex_quota,
     codex_rollouts,
     codex_sessions,
@@ -57,6 +59,8 @@ ACCOUNT_ID_ENV = envs.CHATGPT_ACCOUNT_ID_ENV
 BEARER_PROVIDER = "agentihooks-chatgpt"
 CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex"
 OPENAI_AUTH_CLAIM = "https://api.openai.com/auth"
+OPENAI_PROFILE_CLAIM = "https://api.openai.com/profile"
+SLUG_CHARS = frozenset(string.ascii_lowercase + string.digits + "_")
 AGENT_IDENTITY_CLAIM = "agent_runtime_id"
 API_KEY_PREFIX = "sk-"
 PERSONAL_TOKEN_PREFIX = "at-"
@@ -315,16 +319,47 @@ def fingerprint(account_id: str) -> str:
 
 
 def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, str]:
-    """Each token account whose ChatGPT account repeats an earlier token account's, mapped to that earlier name."""
-    first: dict[str, str] = {}
-    repeated = {}
+    """Each token account whose ChatGPT account another token account shares, mapped to the one routed for both."""
+    groups: dict[str, list[CodexAccount]] = {}
     for account in pool:
         found = identity(account, environ) if account.is_token else ""
-        if found and found in first:
-            repeated[account.name] = first[found]
-        elif found:
-            first[found] = account.name
+        if found:
+            groups.setdefault(found, []).append(account)
+    repeated = {}
+    for group in groups.values():
+        kept = min(group, key=lambda account: _routed_rank(account, environ))
+        repeated.update({account.name: kept.name for account in group if account is not kept})
     return repeated
+
+
+def _routed_rank(account: CodexAccount, environ: Mapping[str, str]) -> tuple[bool, bool, str]:
+    claims = _claims(environ[account.env_name])
+    profile = claims.get(OPENAI_PROFILE_CLAIM)
+    email = profile.get("email") if isinstance(profile, dict) else None
+    named = isinstance(email, str) and account.name == account_names.secret_key(email).replace("-", "_")
+    return not named, not email_shaped(account.name), account.name
+
+
+def email_shaped(name: str) -> bool:
+    head, _, domain_end = name.rpartition("_")
+    return (
+        "at" in head[1:-1]
+        and set(head) <= SLUG_CHARS
+        and len(domain_end) >= 2
+        and set(domain_end) <= set(string.ascii_lowercase)
+    )
+
+
+def routed(pool: list[CodexAccount], environ: Mapping[str, str]) -> list[CodexAccount]:
+    repeated = duplicates(pool, environ)
+    return [account for account in pool if account.name not in repeated]
+
+
+def routed_live(
+    pool: list[CodexAccount], sessions: Mapping[str, int], environ: Mapping[str, str]
+) -> list[CodexAccount]:
+    repeated = duplicates(token_accounts(environ), environ)
+    return [account for account in live_accounts(pool, sessions) if account.name not in repeated]
 
 
 def identity_warnings(environ: Mapping[str, str]) -> list[str]:
@@ -426,8 +461,7 @@ class CodexAccountSource:
             for account in accounts(environ, *self._run())
             if account.signed_in and not refusal(account, environ)
         ]
-        repeated = duplicates(found, environ)
-        return [account for account in found if account.name not in repeated]
+        return routed(found, environ)
 
     def readings(
         self, pool: list[CodexAccount], environ: Mapping[str, str], now: float
@@ -616,6 +650,10 @@ def _own_command(args: list[str], environ: Mapping[str, str]) -> int | None:
         from scripts import codex_login
 
         return codex_login.main(args[1:], environ)
+    if args[:1] == ["logout"] and len(args) > 1 and not _passthrough_login(args[1]):
+        from scripts import codex_logout
+
+        return codex_logout.main(args[1:], environ)
     return None
 
 

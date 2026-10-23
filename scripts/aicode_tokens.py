@@ -141,3 +141,17 @@ def update_existing(path: Path, entries: Mapping[str, str]) -> bool:
         return False
     write_rc(path, entries)
     return True
+
+
+def remove_exports(path: Path, names: Iterable[str]) -> bool:
+    if not path.exists():
+        return False
+    path = path.resolve()
+    text = path.read_bytes().decode()
+    lines = text.splitlines(keepends=True)
+    for start, end in reversed(_blocks(lines)):
+        lines = lines[: start + 1] + _drop(lines[start + 1 : end], names) + lines[end:]
+    if "".join(lines) == text:
+        return False
+    atomic_write(path, "".join(lines).encode(), path.stat().st_mode & 0o777)
+    return True

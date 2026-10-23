@@ -54,6 +54,7 @@ class HubRunner:
         clock: lease.Clock = lease.wall_ms,
         lease_ttl_ms: int = LEASE_TTL_MS,
     ):
+        self._bus = bus
         self._reactors = list(reactors)
         self._versions = bus.state(VERSIONS)
         self._consumers = {
@@ -101,6 +102,9 @@ class HubRunner:
             delivery.ack()
             return "skipped"
         try:
+            view = self._bus.for_swarm(event.swarm)
+            if view is not self._bus:
+                buckets.provision(view)
             reactor.handler(event)
         except Exception:
             print(f"hub: reactor {reactor.name} failed on event {event.id}", file=sys.stderr)

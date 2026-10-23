@@ -540,6 +540,54 @@ Limitations:
 | A member is missing from `agentihooks hive list` | The hive index no longer holds it, and a member's beat never adds itself back. | Run `agentihooks hive refresh` on the member; refresh adds it to the index again. |
 | A member is refused an agent token | The agent's record names another hive, or no hive. | Read the agent's `hive` field with `HGET agentihooks:swarm:<slug>:agents <name>`; only the controller places an agent. |
 
+## Pulling work from the hub
+
+A swarm on the `events` engine (see [Event driven engine](swarm.md#event-driven-engine)) places no agent on a
+hive. Hives pull offers from the hub over NATS JetStream instead, through one spoke per swarm and lane. Today only the
+workstation's master lane spoke is started for real (see [Running a spoke](#running-a-spoke)). The eng lane spoke
+runs only in the Compose task smoke and the recovery drill. On every pass a spoke:
+
+1. Recovers its own unfinished claims.
+2. Checks the hive's admission room.
+3. Takes one offer from the lane work queue, rechecks it against the ledger and launches the agent.
+
+The hub creates the hive buckets; members are not allowed to create them:
+
+| Bucket | Holds |
+|---|---|
+| `spoke-work` | One claim per task and generation, keyed by a hash of swarm, task and generation. On the main path its state goes `claimed`, `launching`, `started`, then `exiting` and `exited`. A claim can also be `ready`, `withdrawn`, `dead_pending` or `dead`. |
+| `spoke-pending` | The launch slot a spoke reserves before it starts an agent. |
+| `hive-presence` | Each hive's heartbeat. |
+| `hive-executions` | What each hive reports about its running executions. |
+| `execution-starts` | Every `execution.started`. The tick and the reconciler use it to tell hub launched agents from tick launched ones. |
+| `account-slots` | Per harness and account, the executions holding one of its sessions and each hive's cap for it. A spoke reserves a slot here before launching, so hives sharing an account stay under its cap. |
+| `hive-slot-accounts` | Per hive, the harness and account pairs it has reported, so its beat renews every slot it holds. |
+
+A hive beats `hive-presence` every 15 seconds. A beat expires after 45 seconds.
+
+### When a hive is lost
+
+The hub's `hive-loss` reactor keeps an index of every started execution, by hive. A hive counts as lost when both of
+these hold:
+
+- its presence has expired;
+- this hub has watched presence for a full 45 seconds with no gap longer than one beat.
+
+The hub then publishes `execution.exited` with reason `hive-lost` for each of that hive's executions that are still
+running. The `lifecycle` reactor releases each one and reopens its task, which raises the claim generation, so another
+hive can pull the next offer.
+
+A spoke also ignores a claim or launch held by a hive that is no longer present. Every five minutes, the `reconciler`
+reactor rebuilds any missing `execution.started` from the swarm's agent records. It ends any execution
+that a hive reports gone. An execution on a lost hive ends with reason `lost`.
+
+### Running a spoke
+
+With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation.
+It takes master work from the bus and binds to the hub's streams instead of creating them. Outside distributed mode it
+refuses, because the workstation then runs the swarm engine itself. The bus settings a hive needs arrive with its
+invite; see [The hub and the bus](../reference/deployment-modes.md#the-hub-and-the-bus).
+
 ## Workstation fallback
 
 When no UI hive fits, because none is live, or the live ones lack the repo, or lack both a slot and the interactive
