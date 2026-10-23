@@ -208,7 +208,7 @@ def test_a_stored_layout_with_a_retired_row_saves_without_it(browser, visit):
         page = visit(context=context)
         assert page.box("agents-box")["height"] == pytest.approx(300, abs=1)
         page.drag("height", "handoff-box", dy=-40)
-        server_side = saved(("agents-box", "handoff-box"))
+        server_side = saved(("agents-box", "handoff-box"), page)
         assert server_side["agents-box"] == {"height": 300}
         assert "health-box" not in page.tab.evaluate("() => localStorage.getItem('plan-ledger:swarm-layout')")
     finally:
