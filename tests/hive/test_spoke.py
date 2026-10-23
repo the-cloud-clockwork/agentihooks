@@ -722,3 +722,62 @@ def test_a_request_without_admitted_execution_identity_is_retried_without_spawni
     assert rig.spoke.poll() == "retry"
     rig.runtime.spawn.assert_not_called()
     assert claim(rig) == {"state": "ready"}
+
+
+def test_poll_renews_presence_even_when_admission_holds_the_hive(rig, monkeypatch):
+    import json
+
+    from scripts.hive import spoke
+
+    rig.spoke.measure = lambda: None
+    monkeypatch.setattr(spoke.time, "time_ns", lambda: 1_234_000_000)
+    assert rig.spoke.poll() == "held"
+    store = rig.bus.state("hive-presence")
+    first = store.get("hive-a")
+    assert first is not None
+    assert json.loads(first.value) == {"heartbeat_ms": 1234, "expires_ms": 46234}
+    monkeypatch.setattr(spoke.time, "time_ns", lambda: 3_333_000_000)
+    assert rig.spoke.poll() == "held"
+    renewed = store.get("hive-a")
+    assert renewed.revision > first.revision
+    assert json.loads(renewed.value) == {"heartbeat_ms": 3333, "expires_ms": 48333}
+
+
+@pytest.mark.parametrize("state", ["claimed", "launching"])
+def test_lost_hive_work_redelivers_and_changes_the_old_claim_fence(rig, monkeypatch, state):
+    import json
+
+    from scripts.hive import spoke
+
+    monkeypatch.setattr(spoke.time, "time_ns", lambda: rig.clock.now * 1_000_000)
+    rig.bus.state("hive-presence").create("hive-lost", b'{"heartbeat_ms":0,"expires_ms":45000}')
+    claims = rig.bus.state("spoke-work")
+    key = spoke.claim_key(rig.event)
+    old_revision = claims.create(key, json.dumps({"state": state, "owner": "hive-lost", "name": "old"}).encode())
+    held = rig.queue.take(0)
+    assert held.event == rig.event
+    assert rig.spoke.poll() == "empty"
+    rig.clock.now = 45000
+    assert rig.spoke.poll() == "started"
+    request = rig.runtime.spawn.call_args.args[0]
+    assert request.task["claim_fence"]["revision"] > old_revision
+    started = rig.bus.events.consumer("loss-audit", "swarm.rig.execution.started").fetch(1, 0)
+    assert len(started) == 1
+    assert started[0].event.data["hive"] == "hive-a"
+    assert rig.queue.take(0) is None
+
+
+@pytest.mark.parametrize("state", ["claimed", "launching"])
+def test_a_fresh_hive_keeps_its_claim_until_presence_expires(rig, monkeypatch, state):
+    import json
+
+    from scripts.hive import spoke
+
+    monkeypatch.setattr(spoke.time, "time_ns", lambda: 44_999_000_000)
+    rig.bus.state("hive-presence").create("hive-live", b'{"heartbeat_ms":0,"expires_ms":45000}')
+    store = rig.bus.state("spoke-work")
+    value = json.dumps({"state": state, "owner": "hive-live"}).encode()
+    revision = store.create(spoke.claim_key(rig.event), value)
+    assert rig.spoke.poll() == ("busy" if state == "claimed" else "uncertain")
+    assert store.get(spoke.claim_key(rig.event)).revision == revision
+    rig.runtime.spawn.assert_not_called()
