@@ -610,8 +610,11 @@ workers a batch runner starts, which is three under the batch runner's CPU
 limit of three. Before this change it assumed four, so its estimates were
 optimistic by a third and a shard could run past its budget.
 
-The planning steps run on the light runner, whose own CPU limit is two, so
-the planner cannot read the batch quota from its cgroup. Each planning step
+Most planning steps run on the light runner, whose own CPU limit is two, so
+they cannot read the batch quota from their cgroup. The one exception is the
+**Refine mutation shards from measured statistics** step inside the `stats`
+job, which runs only when a single job covers the whole plan and runs on the
+batch runner itself; it reads the variable like the others. Each planning step
 passes the batch runner's quota in `MUTATION_SHARD_CPU_QUOTA`, and
 `shard_workers` in `scripts.ci_mutation.plan` turns it into a worker count
 with `worker_count` from `scripts.ci_cpu_quota`, the same function the unit
