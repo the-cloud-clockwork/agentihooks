@@ -136,5 +136,7 @@ def test_an_operator_verdict_notice_names_the_finding(controls):
     assert cli.main(["demo", "verdict", "idle/worker", "resolved"]) == 0
     items = InboxStore(store.redis).mailbox(master.name)
     assert len(items) == 1
-    assert "idle/worker" in items[0].text
-    assert "The verdict is resolved." in items[0].text
+    assert items[0].text == (
+        "The operator gave the health finding idle/worker a verdict from the command line. "
+        "The swarm is running. The verdict is resolved."
+    )
