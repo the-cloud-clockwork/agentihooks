@@ -9,7 +9,7 @@ from .config import SCOPED_STATE_BUCKETS, QueuePolicy
 from .nats import NatsEventLog, NatsWorkQueue, _seconds
 from .nats_state import ScopedStateStore
 from .scope import ScopedLog, queue_lane
-from .subjects import stream_name, subject
+from .subjects import PREFIX, stream_name, subject
 
 if TYPE_CHECKING:
     from .nats import NatsBus
@@ -46,7 +46,6 @@ class NatsScopedBus:
                         duplicate_window=_seconds(root._config.dedupe_window_ms),
                     )
                 )
-        if root._config.provision:
             for bucket in SCOPED_STATE_BUCKETS:
                 self.state(bucket)
         self.events = ScopedLog(
@@ -74,9 +73,9 @@ class NatsScopedBus:
         with self._lock:
             queue = self._queues.get(lane)
             if queue is None:
-                name = f"swarm.{self._swarm}.ready.{lane}"
+                scoped = f"{PREFIX}.{self._swarm}.ready.{lane}"
                 queue = self._queues[lane] = NatsWorkQueue(
-                    self._root._loop, self._root._js, name, policy, self._root._config, self._swarm
+                    self._root._loop, self._root._js, scoped, policy, self._root._config, self._swarm
                 )
             elif queue.policy != policy:
                 raise ValueError(f"work queue {name!r} already has another policy")

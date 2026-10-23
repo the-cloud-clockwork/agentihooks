@@ -9,6 +9,7 @@ from .config import BusConfig, QueuePolicy
 from .dead import dead_letter
 from .envelope import Envelope
 from .scope import RoutedLog, ScopedLog, ScopedQueue, queue_lane
+from .subjects import PREFIX
 from .subjects import subject as event_subject
 
 Clock = Callable[[], int]
@@ -303,7 +304,7 @@ class MemoryBus:
     def queue(self, name: str, policy: QueuePolicy) -> WorkQueue:
         if self._config.scoped:
             parts = name.split(".")
-            if len(parts) != 4 or parts[0] != "swarm" or parts[2] != "ready":
+            if len(parts) != 4 or parts[0] != PREFIX or parts[2] != "ready":
                 raise ValueError("select a swarm before opening a scoped queue")
             return self.for_swarm(parts[1]).queue(name, policy)
         if self._swarm is not None:
