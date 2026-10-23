@@ -15,7 +15,7 @@ parent: Getting Started
 
 ---
 
-For the packaged service stack, use the [Docker Compose bundle quick start](compose-quick-start.md). The native installation below configures **Claude Code and Codex** on an agent host. Plain `agentihooks init` installs both; `--target claude` or `--target codex` selects one. Claude-specific paths below describe its native configuration; Codex uses `config.toml`, `hooks.json` and `AGENTS.md` as detailed in the [Codex reference](../reference/CODEX-COMPAT.md).
+For the packaged service stack, use the [Docker Compose bundle quick start](compose-quick-start.md), the [single machine quick start](single-machine-quick-start.md) or the [Kubernetes quick start](kubernetes-quick-start.md), then [add a hive](add-hive-quick-start.md) for each further machine. The native installation below configures **Claude Code and Codex** on an agent host. Plain `agentihooks init` installs both; `--target claude` or `--target codex` selects one. Claude-specific paths below describe its native configuration; Codex uses `config.toml`, `hooks.json` and `AGENTS.md` as detailed in the [Codex reference](../reference/CODEX-COMPAT.md).
 
 ## 1. Install uv
 

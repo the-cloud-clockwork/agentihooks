@@ -11,6 +11,10 @@ permalink: /docs/pillars/hives/
 A hive is one machine that runs swarm agents: a workstation, a VM or a Kubernetes pod. Each hive joins the swarm
 once, beats every fifteen seconds, and takes every agent type its `excluded` setting allows.
 
+For a first hive, follow the [single machine quick start](../getting-started/single-machine-quick-start.md) or the
+[Kubernetes quick start](../getting-started/kubernetes-quick-start.md), then [add a hive](../getting-started/add-hive-quick-start.md)
+with one invite.
+
 1. TOC
 {:toc}
 
