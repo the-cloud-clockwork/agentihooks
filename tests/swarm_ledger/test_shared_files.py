@@ -114,7 +114,7 @@ def test_sweep_drop_and_purge_delete_from_the_shared_store(replicas, monkeypatch
     on("pod-0")
     monkeypatch.setattr(ledger_media.time, "time", lambda: 10.0)
     old_used = ledger_media.store("shared", png(1, 1))["id"]
-    old_unused = ledger_media.store("shared", png(2, 1))["id"]
+    ledger_media.store("shared", png(2, 1))
     monkeypatch.setattr(ledger_media.time, "time", lambda: 5000.0)
     fresh = ledger_media.store("shared", png(3, 1))["id"]
     other = ledger_media.store("other", png(2, 1))["id"]
