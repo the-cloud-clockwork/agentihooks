@@ -290,12 +290,19 @@ def test_snapshot_digest_is_stable_across_mapping_order():
     assert migration.digest({"a": 1, "b": 2}) == "d8497d9d82770a70729261095aa98f7ef5154d7af499f8037b6ca250296785a6"
 
 
-@pytest.mark.parametrize("args", [[], ["rehearse", "snapshot.json"]])
-def test_cli_requires_a_mode_and_a_rehearsal_receipt(args):
+@pytest.mark.parametrize(
+    "args,detail",
+    [
+        ([], "the following arguments are required: mode"),
+        (["rehearse", "snapshot.json"], "the following arguments are required: --receipt"),
+    ],
+)
+def test_cli_requires_a_mode_and_a_rehearsal_receipt(args, detail, capsys):
     with patch.object(migration, "open_bus") as opener:
         with pytest.raises(SystemExit) as error:
             migration.main(args)
     assert error.value.code == 2
+    assert capsys.readouterr().err.split(": error: ")[1].strip() == detail
     opener.assert_not_called()
 
 
@@ -333,3 +340,16 @@ def test_import_refuses_an_item_without_identity_before_writing(bus):
             migration.import_snapshot([{"item": {}}], bus)
     assert error.value.args == ("id",)
     publisher.assert_not_called()
+
+
+def test_cli_carries_the_configured_destination_into_the_cutover_guard(source, bus, tmp_path):
+    url = "nats://copy"
+    proof = migration.rehearse(migration.snapshot(source), bus, url)
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps(proof))
+    live = memory.open_bus(BusConfig())
+    with patch.object(migration, "_source", return_value=source):
+        with patch.object(migration, "open_bus", return_value=live):
+            with patch.object(migration.BusConfig, "from_environ", return_value=BusConfig(backend="nats", url=url)):
+                with pytest.raises(ValueError, match=r"^live migration requires a separate copy destination$"):
+                    migration.main(["apply", str(receipt), "--enable-live"])
