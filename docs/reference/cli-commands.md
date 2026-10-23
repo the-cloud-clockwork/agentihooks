@@ -139,6 +139,10 @@ source checkout from the running code, not the shell's working directory. It
 installs with `uv pip install --python` using the current interpreter, so invoke
 the installed CLI to update its tool environment.
 
+Every SessionStart hook also runs `ensure --quiet` when the dependency stamp is
+older than six hours, waits up to one second, then kills the check's process
+group. See [Session start dependency check](../getting-started/installation.md#session-start-dependency-check).
+
 For examples, requirement declarations, Doctor integration, preflight caching,
 version-check limitations and recovery after a pull succeeds but installation
 fails, see [Synchronize an editable tool installation](../getting-started/installation.md#synchronize-an-editable-tool-installation).

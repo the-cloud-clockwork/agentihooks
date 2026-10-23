@@ -77,7 +77,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Codex CLI cache in unit jobs](../ci-timing.md#codex-cli-cache) | Seed the CLI on main, configure its release, diagnose cache misses and verify installation and shard timings |
 | [Worker hive pod image build](../ci-timing.md#worker-hive-pod-image-build) | Reuse of the published worker base, the base inputs and rebuild decisions, build output, measurements and troubleshooting |
 | [Refused worker startup diagnostics](../swarm-v2/startup-diagnostics.md) | Startup log and exit reason kept before a refused worker Pod is removed, the bounded cleanup log retry, `pods/log` permission, reading the records and troubleshooting |
-| [Worker profile proof](worker-profile-proof.md) | Offline Codex SessionStart replay, first registry write timing, surviving hook child failures, fixed limits and CI evidence |
+| [Worker profile proof](worker-profile-proof.md) | Offline Codex SessionStart replay, first registry write timing, surviving hook child failures, the session start dependency check, fixed limits and CI evidence |
 | [Browser cache](browser-cache.md) | Verified Chromium preparation, dev push only saving, restore scope, workflow configuration and cache inspection |
 | [Task browser](task-browser.md) | The `playwright-cmd` proxy: which lane homes mount it, start on first tool call, the shared tool list cache, measured memory effect and troubleshooting |
 | [WSL disk reclaim](wsl-disk.md) | Sparse VHDX so space `agentihooks gc` frees returns to Windows; why `/tmp` empties on WSL |
