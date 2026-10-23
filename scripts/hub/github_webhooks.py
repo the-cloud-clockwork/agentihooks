@@ -20,7 +20,7 @@ MAX_BODY = 25 * 1024 * 1024
 REQUEST_TIMEOUT_S = 10
 QUEUE_ACTIONS = {"enqueued": True, "dequeued": False}
 LOGGED_HEADERS = ("X-GitHub-Delivery", "X-GitHub-Event")
-LOGGED_HEADER = 64
+LOGGED_HEADER_CHARS = 64
 
 
 def verify(secret: bytes, body: bytes, signature: str | None) -> bool:
@@ -87,7 +87,7 @@ def handler(ingress: Ingress) -> type[BaseHTTPRequestHandler]:
             self.send_response(status)
             self.send_header("Content-Length", "0")
             self.end_headers()
-            delivery, name = (str(self.headers.get(key))[:LOGGED_HEADER] for key in LOGGED_HEADERS)
+            delivery, name = (str(self.headers.get(key))[:LOGGED_HEADER_CHARS] for key in LOGGED_HEADERS)
             print(f"github-webhook: delivery {delivery} event {name} answered {status}", file=sys.stderr)
 
         def log_message(self, format, *args):
