@@ -20,6 +20,139 @@ Each tier has a wall time budget. A check that does not fit the pull request or 
 
 How a green promotion run merges `dev` into `main` and creates the release is in [Promotion and releases](promotion.md).
 
+## Hierarchy CPU proof at promotion
+
+The Tests workflow calls `Hierarchy CPU proof` as `hierarchy-cpu` on a push to
+`dev`. It compares hierarchy request CPU and response identity and runs paired
+ledger load measurements. A hierarchy cost regression therefore receives a
+grade before that head can reach `main`. The
+[hierarchy grading reference](ledger-load-gate.md#hierarchy-cpu-grading) explains
+the CPU ratio, same code margin, response checks and retained pair artifacts;
+the [paired load grade](ledger-load-gate.md#grading-after-the-fix) explains the
+separate load comparison.
+
+| Event | Hierarchy proof | Effect |
+|---|---|---|
+| Push to `dev` admitted by promotion concurrency | Called by Tests | `promote` requires `hierarchy-cpu` to succeed |
+| Pull request or merge group | Skipped | Never holds entry to the queue or merging into `dev` |
+| Manual dispatch of Tests | Skipped | Dispatch `Hierarchy CPU proof` itself for an investigation |
+| Manual dispatch of `Hierarchy CPU proof` | Runs on the selected ref | Evidence only; this workflow does not promote |
+
+`hierarchy-cpu` is a direct need of `promote`, with an explicit
+`needs.hierarchy-cpu.result == 'success'` check. It is outside the
+`Gate — Required` dependency list. A failed, cancelled or skipped hierarchy proof
+cannot authorize promotion even if `Gate — Required` is green. `main` retains
+its last promoted tree while ordinary pull requests keep merging into `dev`.
+
+### Scheduling and runner isolation
+
+Tests uses the `promotion-dev` concurrency group for dev pushes, `queue: single`
+and `cancel-in-progress: false` for that event. A running run finishes; newer
+pushes replace only the pending run. Thus a burst grades the running head and
+the newest pending head, rather than every intermediate revision. A running
+proof is not cancelled merely because another pull request merges.
+
+When called by Tests, the proof uses `hierarchy-cpu-<caller run id>` as its own
+concurrency group, avoiding the caller's lock. A standalone dispatch uses one
+of the three `hosted-lane-*` groups with `queue: max`, as described in
+[CI timing](../ci-timing.md).
+
+For trusted executions, the four current hierarchy pairs and five load pairs
+use `anton-oss-batch`; `grade` uses `anton-oss-light`. Other executions fall back
+to `ubuntu-latest` under the workflow's actor and repository trust checks.
+These jobs never select the pull request `anton-oss` or queue
+`anton-oss-queue` runner pools. Redis starts inside each pair job, using the
+runner's installed binary when available; see
+[Redis acquisition](ledger-load-gate.md#hierarchy-cpu-redis-acquisition).
+Runner pool isolation does not imply zero waits or independent physical hosts.
+
+### Configuration and investigation
+
+The promotion call has no operator setting to enable. Its workflow wiring is:
+
+```yaml
+hierarchy-cpu:
+  if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+  uses: ./.github/workflows/hierarchy-cpu.yml
+```
+
+The reusable proof accepts one optional string input, `base`, for both
+`workflow_call` and `workflow_dispatch`:
+
+| Input | Hierarchy comparison base | Paired load comparison base |
+|---|---|---|
+| Explicit `base` revision | That revision | That revision |
+| Empty on a dev push | `github.event.before`, the previous dev head | Pinned revision `726353637ab44da81bdbd374ec393db275856e22` |
+| Empty on a standalone dispatch | Merge base of HEAD and `origin/dev` | The same pinned revision |
+
+The hierarchy base on a push is the previous pushed head, which can differ
+from the last head promotion actually graded when pending runs were replaced.
+To compare a branch normally, or to measure identical code on both sides:
+
+```bash
+R=the-cloud-clockwork/agentihooks
+BRANCH=your-branch
+gh workflow run hierarchy-cpu.yml -R "$R" --ref "$BRANCH"
+HEAD_SHA=$(gh api "repos/$R/commits/$BRANCH" --jq '.sha')
+gh workflow run hierarchy-cpu.yml -R "$R" --ref "$BRANCH" -f base="$HEAD_SHA"
+```
+
+Run the workload in CI. A standalone green result supplies investigation
+evidence; the dev push's own successful proof remains the promotion requirement.
+Changing runner labels, the promotion condition or grading margins requires a
+reviewed workflow change. Current margins and same code records are documented
+under [hierarchy grading](ledger-load-gate.md#current-behavior).
+
+Inspect the latest completed dev push, including jobs beyond the first page:
+
+```bash
+R=repos/the-cloud-clockwork/agentihooks
+RUN=$(gh api "$R/actions/workflows/test.yml/runs?event=push&branch=dev&status=completed&per_page=1" --jq '.workflow_runs[0].id')
+gh api --paginate "$R/actions/runs/$RUN/jobs?per_page=100" \
+  --jq '.jobs[] | select(.name | startswith("hierarchy-cpu /") or startswith("promote /")) | {id,name,conclusion,labels,runner_name,created_at,started_at,completed_at}'
+```
+
+Use a returned job id to read its logs with
+`gh api "$R/actions/jobs/$JOB/logs"`, after setting `JOB` to that id.
+For measurements, retain the run ids, job timestamps and runner labels for
+each named before and after cohort. Separate whole Tests wall time from proof
+duration and from runner wait (`started_at` minus `created_at`). Pool waits
+alone do not attribute a slowdown to the hierarchy proof.
+
+### Delivery evidence and limits
+
+[Pull request 5223](https://github.com/the-cloud-clockwork/agentihooks/pull/5223)
+delivered the promotion dependency, callable proof and batch runner selection.
+Its tests only [red run 39408550884](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39408550884)
+failed seven new workflow contract cases. The
+[green Tests run 39427913795](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39427913795)
+and [standalone proof 39427973115](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39427973115)
+passed. The merged head's first
+[dev push run 39453177041](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39453177041)
+passed its hierarchy, five load and grade jobs; the pair jobs reported batch
+runner labels and the grader reported the light pool. That delivery used one
+hierarchy job; the current four pair matrix came later.
+
+The delivered pull request records an eight run before cohort with median
+Tests wall time about 1130 seconds and median maximum pull request and queue
+pool wait about 45 seconds. It leaves the five dev push after cohort pending.
+These records establish automatic execution and runner selection, not a
+completed before and after timing comparison or a ten minute runtime guarantee.
+
+### Troubleshooting
+
+| Symptom | Check and action |
+|---|---|
+| `Gate — Required` is green but `promote` is skipped | Read `hierarchy-cpu / grade` and all other promotion dependencies. The hierarchy proof must succeed independently of the gate |
+| A hierarchy pair or load pair fails before grading | Read the failing job's Redis readiness, dependency installation and probe logs; setup failure is not a measured CPU regression |
+| `grade` reports a CPU or response regression | Follow [hierarchy troubleshooting](ledger-load-gate.md#troubleshooting-a-hierarchy-red), retain pair artifacts and fix through a pull request into `dev` |
+| A dev push has no proof jobs | Check whether it was cancelled while pending in `promotion-dev`; inspect the running or newest admitted run. A pull request, merge group or Tests dispatch skips the proof by design |
+| Proof jobs queue while merge queue jobs run | Compare the returned labels and runner times. Batch jobs do not request queue runners; investigate the named pool's capacity before attributing the wait |
+
+A red promotion receives a fixer task under the [delivery tiers rule](#rules).
+It holds release promotion only; repeatedly rerunning a measured regression
+until it passes does not repair it.
+
 ## Checks a dev push skips
 
 `lint` and `semgrep` pass on the pull request head, and `test-count` passes on the pull request head and again on the merged tree in the merge group. A push to `dev` carries a tree whose changes already passed them, so their job `if` in `.github/workflows/test.yml` carries `github.event_name != 'push'` and the promotion run skips them. `Gate — Required` checks each event's set:
