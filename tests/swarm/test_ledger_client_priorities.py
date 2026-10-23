@@ -36,6 +36,13 @@ def test_comment_item_posts_on_the_item_thread(sent):
     ]
 
 
+def test_notice_posts_an_appended_swarm_comment_on_the_task(sent):
+    ledger_client.LedgerClient().notice("demo", "t1", "Queued again.")
+    assert without_id(sent) == [
+        ("demo", {"op": "add", "by": "swarm", "thread": "tasks/t1/comments", "text": "Queued again.", "notice": True})
+    ]
+
+
 def test_mark_done_sets_the_done_flag(sent):
     ledger_client.LedgerClient().mark_done("demo", "followups/f1")
     assert without_id(sent) == [("demo", {"op": "set", "by": "swarm", "path": "followups/f1/done", "value": True})]
