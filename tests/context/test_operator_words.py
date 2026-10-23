@@ -642,6 +642,7 @@ def test_forget_drops_only_that_swarms_shared_words(shared, tmp_path, monkeypatc
 
 
 def test_older_shared_rows_match_and_forget_drops_every_copy(shared, tmp_path, monkeypatch):
+    operator_words.record("master@a1-1", "merge the first work", now=90, swarm="demo")
     operator_words.record("master@a1-1", "merge the demo work", now=100, swarm="demo")
     operator_words.record("master@a1-1", "merge the demo work", now=100, swarm="demo")
     operator_words.record("master@a1-1", "merge the other work", now=110, swarm="other")
