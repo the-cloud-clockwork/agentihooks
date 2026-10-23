@@ -8,7 +8,6 @@ def test_receiver_binds_existing_bus_resources(monkeypatch):
     bus = Mock()
     opened = Mock(return_value=bus)
     monkeypatch.setattr(github_webhooks, "open_bus", opened)
-    monkeypatch.setattr(github_webhooks, "Pulls", Mock())
     monkeypatch.setattr(github_webhooks, "ThreadingHTTPServer", Mock())
     github_webhooks.main([])
     config = opened.call_args.args[0]
