@@ -449,6 +449,134 @@ normal pull request; never exclude the line. The ratchet's messages and
 baseline lookup are described in
 [Coverage grading](reference/delivery-tiers.md#coverage-grading).
 
+### Measure a CI run and its class over a window
+
+`agentihooks doctor <slug> measure FINDING` reads CI speed data directly for
+`ci-tier-wall-time`, `ci-runner-wait` and `ci-queue-age-unconfirmed` targets.
+Use the watched swarm or its linked Doctor ledger as `<slug>`. The command
+requires that Doctor pairing and access to the repository's Actions API
+through the existing authenticated `gh` installation.
+
+A run target prints that attempt's own value in whole seconds, followed by
+its class summary. It reads the named attempt even when that run falls
+outside the summary window:
+
+```bash
+agentihooks doctor rig-grade-swarm measure \
+  ci-tier-wall-time/39356970006-1
+agentihooks doctor rig-grade-swarm measure \
+  'ci-runner-wait/39280699907-1-["anton-oss-light"]'
+```
+
+The delivery proof recorded first lines of
+`ci-tier-wall-time/39356970006-1 952` and
+`ci-runner-wait/39280699907-1-["anton-oss-light"] 26`.
+These are historical readings, not expected values for current traffic. A
+runner wait target reports the longest confirmed wait among jobs on that
+exact label set. Without labels, a run target reports its longest wait and
+prints summaries for every label set in the window. Quote JSON label sets
+so the shell preserves the double quotes. For a run target, copy the sorted
+label set from the finding.
+
+Use a grouped target to measure one tier or label set, or a bare class name
+to print every scope present in the window:
+
+```bash
+agentihooks doctor rig-grade-swarm measure ci-tier-wall-time/pull_request
+agentihooks doctor rig-grade-swarm measure ci-tier-wall-time/merge_group
+agentihooks doctor rig-grade-swarm measure \
+  'ci-runner-wait/["anton-oss-light"]'
+agentihooks doctor rig-grade-swarm measure ci-tier-wall-time
+agentihooks doctor rig-grade-swarm measure ci-runner-wait
+agentihooks doctor rig-grade-swarm measure ci-queue-age-unconfirmed
+```
+
+Tier names in targets are `pull_request` and `merge_group`; output names them
+`pull request` and `queue`. Grouped runner targets sort and deduplicate labels
+and require an exact label set, not a match on one label within a larger set.
+
+#### Window and summary rules
+
+The default summary covers the hour ending when the command starts. Set both
+`--since` and `--until` to compare two equal windows around a fix's application:
+
+```bash
+agentihooks doctor rig-grade-swarm measure ci-tier-wall-time/merge_group \
+  --since 2026-10-20T08:00:00Z --until 2026-10-20T09:00:00Z
+agentihooks doctor rig-grade-swarm measure ci-tier-wall-time/merge_group \
+  --since 2026-10-20T11:00:00Z --until 2026-10-20T12:00:00Z
+```
+
+These illustrate equal one hour bounds; choose bounds around the actual
+application and retain both commands and outputs with the task proof. Times
+must parse as ISO timestamps, the start must precede the end and the end
+must not be in the future. Use an explicit UTC zone as above.
+
+A class line has this form; the numbers here illustrate the format:
+
+```text
+ci-tier-wall-time queue, window 2026-10-20T08:00:00Z to 2026-10-20T09:00:00Z: 2 of 3 runs over 900 seconds, median 952 seconds, worst 1100 seconds
+```
+
+The window selects runs by creation time through the CI speed reader. The
+measure read uses `active=False`: it does not add older active runs through
+the timer's active status discovery. It reads the discovered runs' current
+state, so an unfinished run can change when the same window is read later.
+This is a window count, not a count of stored findings or an automatically
+normalized per hour rate.
+
+| Class | One sample per run and scope | Over threshold |
+|---|---|---|
+| `ci-tier-wall-time` | Wall time for the run's eligible tier | Strictly more than 900 seconds |
+| `ci-runner-wait` | Longest creation to confirmed start wait for each exact label set | Strictly more than 300 seconds |
+| `ci-queue-age-unconfirmed` | Longest age for jobs without a confirmed start on each exact label set; ends at job completion if present, otherwise the command's read time | Strictly more than 900 seconds |
+
+All measurable samples contribute to the denominator, median and worst,
+including values below threshold. Counts compare milliseconds before display
+rounding. Seconds are truncated; for an even sample count the median is the
+lower middle sample. Multiple jobs on one label set in one run contribute
+one longest wait, not one sample per job. Thus a run can contribute once to
+each of several label set summaries.
+
+Wall time uses the eligibility and endpoints described in
+[Which runs count toward tier wall time](#which-runs-count-toward-tier-wall-time).
+Explicit measure also permits provisional wall time for unfinished runs,
+ending at the current time if there is no completed gate. The detector waits
+until completion before judging a wall time finding. Wait measurement reads
+job timing directly; it does not apply the detector's completed run conclusion
+filter to confirmed waits.
+
+A finished run's recorded duration cannot improve after a fix. Its value
+checks the original evidence. Compare the same class and scope over equal
+before and after windows to assess the fix, and retain sample counts so a
+quiet window is distinguishable from faster CI.
+
+#### Configuration, refusals and delivery proof
+
+No new environment variable enables measurement. Bounds are command options;
+thresholds come from the CI speed detector constants. The measure's window
+read budget is `WINDOW_BUDGET = (2000, 600)`: at most 2000 API calls and a
+600 second deadline. This differs from the timer's per pass budget above;
+changing either requires a reviewed code change.
+
+| Result | Meaning and action |
+|---|---|
+| `has no tier wall time` | The attempt has no eligible wall time, for example a completed cancelled run or missing timing data. Check the run's event, conclusion and job endpoints. |
+| `unreadable` | The attempt lookup failed. Check Actions API access and availability; do not record zero. |
+| `has no job on runner labels` or `match no job in the window` | The requested set has no matching measurable jobs for the run, or no matching jobs in the window. Use the reported known label sets and check the bounds. |
+| Window read error or incomplete snapshot | The command refuses the class result. A run value may already have printed; it does not establish a complete class read. |
+| `0 of 0 runs over ...` | No measurable samples for the selected tier or label set, or no scopes for a bare class. A label set can have jobs but no confirmed waits for `ci-runner-wait`, or no unconfirmed jobs for `ci-queue-age-unconfirmed`. Median and worst are omitted. This is no exposure, not evidence of improvement. |
+
+[Pull request 5076](https://github.com/the-cloud-clockwork/agentihooks/pull/5076)
+delivered this measurement path. Its source proof reported 818 of 818 recorded
+CI speed findings printing zero under the old generic detector collection.
+The [red CI run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39365602865)
+failed on that behavior; the
+[green CI run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39367721363)
+passed the fix and mutation checks. The two historical run readings above
+verify the new path; they do not claim a reduction in CI duration. An
+unreadable or unmeasurable run is refused instead of becoming a false zero.
+
 ### Confirmed runner waits and unconfirmed queue age
 
 The Doctor checks old queued job snapshots before calling them runner waits.
