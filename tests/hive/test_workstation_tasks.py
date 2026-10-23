@@ -16,7 +16,8 @@ def test_every_remote_hive_refuses_a_workstation_task_with_a_waits_line(setup, m
     selected = setup.launcher.select(setup.config, "eng", TASK)
     assert selected == Wait(placement.NEEDS_WORKSTATION)
     assert selected.role == "eng"
-    assert placement_waits.read(setup.store, setup.config.slug)["landing"]["reason"] == placement.NEEDS_WORKSTATION
+    row = placement_waits.read(setup.store, setup.config.slug)["landing"]
+    assert (row["lane"], row["reason"]) == ("eng", placement.NEEDS_WORKSTATION)
 
 
 def test_a_workstation_task_selects_the_workstation_hive_over_a_preferred_remote(setup, monkeypatch):

@@ -2,7 +2,7 @@ import ledger_core as core
 import pytest
 
 from scripts.swarm import prompt
-from scripts.swarm_ledger import ledger_tasks
+from scripts.swarm_ledger import ledger, ledger_tasks
 from tests.swarm_ledger import test_artifact_lifecycle as lifecycle
 from tests.swarm_ledger.test_artifact_lifecycle import AGENT, add_task, storage
 from tests.swarm_ledger.test_artifact_lifecycle import package_modules as package_modules
@@ -34,6 +34,20 @@ def test_the_master_marks_tasks_that_act_on_the_workstation():
 
 def run(argv):
     return lifecycle.TestCommands().run(argv)
+
+
+def options(parser):
+    for action in parser._actions:
+        yield action
+        if isinstance(action.choices, dict):
+            for child in action.choices.values():
+                yield from options(child)
+
+
+def test_task_add_help_names_the_workstation_flag():
+    flag = next(action for action in options(ledger.build_parser()) if "--workstation" in action.option_strings)
+    assert flag.help == "the task acts on the workstation checkout, so no remote hive runs it"
+    assert flag.default is False
 
 
 def test_task_add_workstation_marks_the_task():
