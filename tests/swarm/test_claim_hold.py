@@ -58,7 +58,9 @@ def test_clearing_a_scheduled_window_starts_a_new_hour_without_a_window(held):
     assert len(notices(store)) == 1
 
 
-@pytest.mark.parametrize("fields", [{"state": "done"}, {"state": "blocked"}, {"awaiting": "fix"}, {"out_of_scope": True}])
+@pytest.mark.parametrize(
+    "fields", [{"state": "done"}, {"state": "blocked"}, {"awaiting": "fix"}, {"out_of_scope": True}]
+)
 def test_only_open_verification_holds_need_a_master_notice(held, fields):
     from scripts.swarm import claim_hold
 
