@@ -407,8 +407,10 @@ def test_published_exit_uses_the_current_hive_and_real_execution_report(rig, mon
     from scripts.events.config import BusConfig
     from scripts.hive import account_slots
 
-    first, second, _, _, bus = rig
+    first, second, now, _, bus = rig
     assert first.take("one", "claude") == "a"
+    original = account_slots.Slots
+    monkeypatch.setattr(account_slots, "Slots", lambda bus, hive, read: original(bus, hive, read, lambda: now[0]))
     monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig(backend="nats"))
     closed = []
 
@@ -421,3 +423,44 @@ def test_published_exit_uses_the_current_hive_and_real_execution_report(rig, mon
     account_slots.publish("one", reading(), {"executions": {"one": {"pane": {"state": "exited"}}}})
     assert second.take("two", "claude") == "a"
     assert closed == [True]
+
+
+def test_public_release_returns_the_requested_hive_execution_and_closes_the_bus(rig, monkeypatch):
+    from scripts.events import factory
+    from scripts.events.config import BusConfig
+    from scripts.hive import account_slots
+
+    first, second, _, _, bus = rig
+    assert first.take("one", "claude") == "a"
+    closed = []
+
+    def opened(config):
+        assert isinstance(config, BusConfig)
+        return bus
+
+    monkeypatch.setattr(factory, "open_bus", opened)
+    monkeypatch.setattr(bus, "close", lambda: closed.append(True))
+    account_slots.release("one", "one", "claude", "a")
+    assert second.take("two", "claude") == "a"
+    assert closed == [True]
+
+
+def test_two_real_nats_clients_share_atomic_account_capacity(tmp_path):
+    from scripts.events import nats
+    from scripts.events.config import BusConfig
+    from scripts.hive import account_slots
+    from tests.events import nats_server
+
+    with nats_server.running(tmp_path / "nats") as url:
+        config = BusConfig(backend="nats", url=url)
+        first_bus, second_bus = nats.open_bus(config), nats.open_bus(config)
+        try:
+            first = account_slots.Slots(first_bus, "one", reading, lambda: 1000)
+            second = account_slots.Slots(second_bus, "two", reading, lambda: 1000)
+            assert first.take("first", "claude") == "a"
+            assert second.take("second", "claude") is None
+            first.release("first", "claude", "a")
+            assert second.take("second", "claude") == "a"
+        finally:
+            first_bus.close()
+            second_bus.close()
