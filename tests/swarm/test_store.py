@@ -239,6 +239,18 @@ def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generat
     assert store.claimant("smoke", "t1") == "second"
 
 
+def test_a_held_claim_refunds_one_life_however_many_paths_ask(store):
+    for _ in range(3):
+        store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is True
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 2
+    assert store.claimant("smoke", "t1") == "agent"
+
+
 def test_a_held_claim_refund_reads_a_missing_generation_as_zero(store):
     store.count_claim("smoke", "t1")
     store.redis.set(store.key("smoke", "claim", "t1"), "agent")
