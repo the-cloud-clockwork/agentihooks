@@ -495,7 +495,7 @@ def test_stopped_swarm_seat_mail_does_not_wait_for_an_unavailable_successor(rig)
     store.create(SwarmConfig("sw", "/repo", state="stopped"))
     rig.reactor.store = store
     item, _ = send(rig, "eng-1@sw")
-    advance(rig, 1000)
+    advance(rig, 1000 + W // 2)
     advance(rig, 1000 + W)
     assert rig.ledger.flagged == [True]
 
