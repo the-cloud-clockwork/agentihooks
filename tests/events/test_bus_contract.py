@@ -196,6 +196,7 @@ def test_a_durable_consumer_refuses_another_policy_in_the_same_bus(harness):
     own = QueuePolicy(max_deliver=harness.policy.max_deliver + 2, ack_wait_ms=harness.policy.ack_wait_ms)
     harness.bus.events.consumer("own", "swarm.>", own)
     harness.bus.events.consumer("own", "swarm.>", own)
+    harness.bus.events.consumer("other", "swarm.>")
     with pytest.raises(ValueError) as raised:
         harness.bus.events.consumer("own", "swarm.>")
     assert str(raised.value) == "durable consumer 'own' already has another policy"
