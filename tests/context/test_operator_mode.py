@@ -111,7 +111,20 @@ def test_session_restart_clears_presence_but_compaction_preserves_it(monkeypatch
     with pytest.raises(RuntimeError, match="stop after reset"):
         hook_manager.on_session_start({"session_id": "pane", "source": source})
     assert operator_mode._heard("pane") is (source == "compact")
+    assert operator_mode._load("pane")["turn_at"] == (100 if source == "compact" else None)
     assert operator_mode._heard("other")
+
+
+def test_restart_without_a_session_does_not_change_presence():
+    operator_mode.observe("pane", "operator on", True, now=100)
+    operator_mode.reset({})
+    assert operator_mode._heard("pane")
+
+
+def test_restart_clears_presence_when_no_source_is_given():
+    operator_mode.observe("pane", "operator on", True, now=100)
+    operator_mode.reset({"session_id": "pane"})
+    assert operator_mode._load("pane") == {"on": False, "at": 100, "turn_at": None}
 
 
 def test_operator_on_survives_silence_and_later_typed_messages():
@@ -554,7 +567,7 @@ def test_explicit_presence_keeps_reminders_off_past_the_supplied_clock(monkeypat
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(operator_mode.time, "time", lambda: 5000)
     assert operator_mode.notice({"session_id": "s1", "prompt": "operator on"}, True, now=100) == (
-        "Operator on: the operator is present in this pane until the idle timer expires or he types operator off."
+        "Operator on: the operator is present in this pane until he types operator off or the session restarts."
     )
     assert operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=101) == ""
     assert [operator_mode.reminder("s1", SWARM, now=102) for _ in range(2)] == ["", ""]
