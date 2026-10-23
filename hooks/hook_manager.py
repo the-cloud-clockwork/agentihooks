@@ -2845,6 +2845,10 @@ def main() -> None:
 
         unpin()
 
+        from hooks.context.claim_fence import enforce as claim_fence
+
+        claim_fence(payload)
+
         # Route to handler
         handler = EVENT_HANDLERS.get(event_name)
 
