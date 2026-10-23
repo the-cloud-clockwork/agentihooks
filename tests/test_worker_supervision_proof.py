@@ -95,6 +95,35 @@ def test_a_container_that_never_exits_still_fails_and_is_removed(container, tmp_
 
     assert (("wait", "container"), 12) in container.calls
     assert container.calls[-1][0] == ("rm", "--force", "container")
+    commands = [args for args, _ in container.calls]
+    assert ("inspect", "--format", "{{json .State}}", "container") in commands
+    assert ("top", "container", "-eo", "pid,ppid,stat,etime,args") in commands
+    assert ("logs", "--timestamps", "--tail", "500", "container") in commands
+    assert any(args[:2] == ("cp", "container:/home/worker/attempts") for args in commands)
+    [evidence] = tmp_path.glob("stalled-*")
+    assert sorted(path.name for path in evidence.glob("*.txt")) == ["attempts.txt", "logs.txt", "processes.txt"]
+    assert (evidence / "state.json").exists()
+
+
+def test_unavailable_stall_evidence_is_recorded_and_the_timeout_still_fails(container, tmp_path, monkeypatch):
+    container.wait_error = subprocess.TimeoutExpired(["docker", "wait", "container"], 12)
+    docker = proof.docker
+
+    def failing(*args, timeout=30):
+        if args[0] in ("inspect", "top", "logs") or args[1].endswith(":/home/worker/attempts"):
+            container.calls.append((args, timeout))
+            raise subprocess.CalledProcessError(1, ["docker", *args])
+        return docker(*args, timeout=timeout)
+
+    monkeypatch.setattr(proof, "docker", failing)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        proof.run_case("image", "complete", tmp_path, viewer=False)
+
+    [evidence] = tmp_path.glob("stalled-*")
+    for name in ("state.json", "processes.txt", "logs.txt", "attempts.txt"):
+        assert (evidence / name).read_text().startswith("unavailable: ")
+    assert container.calls[-1][0] == ("rm", "--force", "container")
 
 
 @pytest.mark.parametrize("error", [subprocess.CalledProcessError(1, "docker"), ValueError("bad json")])
