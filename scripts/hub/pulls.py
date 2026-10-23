@@ -102,7 +102,7 @@ def _changes(snapshot: dict, seen: Observation) -> list[tuple[str, dict]]:
     elif seen.queued is not None and seen.queued != snapshot["queued"]:
         found.append(("merge.queued" if seen.queued else "merge.dequeued", {}))
         snapshot["queued"] = seen.queued
-    if seen.checks_head == snapshot["head"]:
+    if seen.checks_head is not None and seen.checks_head == snapshot["head"]:
         found += _suites(snapshot, seen.suites)
     elif seen.checks_head is not None:
         snapshot["early"][seen.checks_head] = {**snapshot["early"].get(seen.checks_head, {}), **seen.suites}

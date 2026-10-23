@@ -62,7 +62,7 @@ class Ingress:
             for observed in seen:
                 self._pulls.observe(observed)
         except Exception:
-            print("hub: GitHub webhook could not reach the bus", file=sys.stderr)
+            print("hub: GitHub webhook could not record the event", file=sys.stderr)
             traceback.print_exc()
             return 503
         return 202

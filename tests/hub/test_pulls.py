@@ -309,6 +309,7 @@ def test_completed_check_suites_report_once_per_head():
         "conclusion": "failure",
     }
     hub.observe(Observation(URL, checks_head="a1", suites={"9": SUITE}))
+    hub.observe(Observation(URL, suites={"7": SUITE}))
     assert drain(consumer) == []
     hub.observe(Observation(URL, checks_head="a1", suites={"4": SUITE}))
     assert [(e.type, e.data["suite"], e.data["conclusion"]) for e in drain(consumer)] == [

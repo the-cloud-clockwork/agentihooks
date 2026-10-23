@@ -230,7 +230,7 @@ def test_a_bus_failure_answers_503_so_github_redelivers(capsys):
     ingress = Ingress(Down(), SECRET)
     assert deliver(ingress, "pull_request", pull_request()) == 503
     err = capsys.readouterr().err
-    assert err.startswith("hub: GitHub webhook could not reach the bus\nTraceback")
+    assert err.startswith("hub: GitHub webhook could not record the event\nTraceback")
     assert err.endswith("ConnectionError: bus down\n")
     assert deliver(ingress, "ping", {}) == 202
 
