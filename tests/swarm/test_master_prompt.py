@@ -144,17 +144,30 @@ def test_engineers_on_a_prompt_are_left_to_the_waiting_on_input_finding(swarm):
     assert runtime.dismissed == [NAME]
 
 
-def test_a_failed_dismissal_copies_nothing_and_retries_next_tick(swarm):
+def test_a_failed_dismissal_keeps_the_copy_and_retries_next_tick(swarm):
     store, runtime, ledger = swarm
     runtime.dismiss_prompt = lambda agent: "pane gone"
     run(swarm, START)
     assert run(swarm, START + 10 * MINUTE) == [
         f"could not dismiss the question prompt on {NAME}: pane gone, retrying next tick"
     ]
-    assert ledger.questions == {} and mail(store) == []
+    assert len(ledger.questions) == 1 and mail(store) == []
     runtime.dismiss_prompt = lambda agent: None
     assert len(run(swarm, START + 11 * MINUTE)) == 1
     assert len(ledger.questions) == 1 and len(mail(store)) == 1
+
+
+def test_a_failed_ledger_write_leaves_the_prompt_on_the_pane(swarm):
+    store, runtime, ledger = swarm
+
+    def refused(slug, text, by, op_id):
+        raise RuntimeError("ledger down")
+
+    ledger.question = refused
+    run(swarm, START)
+    with pytest.raises(RuntimeError, match="ledger down"):
+        run(swarm, START + 10 * MINUTE)
+    assert runtime.dismissed == [] and mail(store) == []
 
 
 def test_a_permission_dialog_is_left_alone(swarm):

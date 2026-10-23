@@ -38,13 +38,15 @@ def run(slug, store, ledger, runtime, now_ms) -> list[str]:
         state = store.redis.hgetall(key)
         if now_ms - int(state["since"]) < WINDOW_MS:
             continue
+        op_id = hashlib.sha256(f"{slug}:{agent.name}:{state['since']}:{asked}".encode()).hexdigest()[:32]
+        if "copied" not in state:
+            ledger.question(slug, _question(observed, agent.name), "swarm", op_id)
+            store.redis.hset(key, "copied", now_ms)
         if refused := runtime.dismiss_prompt(agent):
             actions.append(f"could not dismiss the question prompt on {agent.name}: {refused}, retrying next tick")
             continue
         if "moved" in state:
             continue
-        op_id = hashlib.sha256(f"{slug}:{agent.name}:{state['since']}:{asked}".encode()).hexdigest()[:32]
-        ledger.question(slug, _question(observed, agent.name), "swarm", op_id)
         InboxStore(store.redis).send(
             wake.BY,
             agent.seat or seat_address(slug, MASTER),
