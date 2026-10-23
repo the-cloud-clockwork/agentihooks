@@ -20,6 +20,7 @@ ORDER = (
     "frozen_view",
     "state",
     "sync",
+    "phase_review",
     "markdown",
     "media",
     "artifacts",

@@ -14,6 +14,7 @@ import { readWorkspace } from "./api.js";
 import { closedMore, firstPage, lazy, moreButton, wanted } from "./pages.js";
 import { frozen, held, ownFreeze, snowflake } from "./freezes.js";
 import { prepareFrozenView, viewCount, viewItems, viewVisible } from "./frozen_view.js";
+import { phaseReview } from "./phase_review.js";
 
 function scopeDot(key, item, off) {
   if (item.done) return null;
@@ -74,23 +75,6 @@ function phaseLabel(phase, doc) {
   const hidden = ((doc.closed || {}).phases || {}).ids || [];
   const waits = phase.depends_on.filter((id) => !(byId[id] || {}).done && !hidden.includes(id)).map((id) => (byId[id] || {}).title || id);
   return `Waits for phase ${waits.join(", ")}`;
-}
-
-function phaseReview(phase) {
-  const review = phase.review || {};
-  if (phaseLifecycle(phase, doc) !== "in_review" || (review.state === "sent_back" && !review.escalated)) return null;
-  const note = h("input", { class: "hl-note phase-note", type: "text", maxlength: "500", placeholder: "note for the planner", "aria-label": "Review note" });
-  const decide = (state) => {
-    const text = note.value.trim();
-    if (state === "sent_back" && !text) return note.focus();
-    queue({ op: "phase_review", id: newId("review"), by: "operator", item: `phases/${phase.id}`, state, ...(text ? { note: text } : {}) });
-  };
-  const button = (text, state) => {
-    const btn = h("button", { class: "sw-btn", type: "button", text });
-    btn.addEventListener("click", () => decide(state));
-    return btn;
-  };
-  return h("div", { class: "hl-verdict phase-review" }, note, button("Approve plan", "approved"), button("Send back", "sent_back"));
 }
 
 function phaseRow(item, n) {

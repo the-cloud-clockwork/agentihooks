@@ -1,6 +1,6 @@
 import { SLUG } from "./config.js";
 import { $, h, store, stored } from "./dom.js";
-import { snowflake, snowflakeState } from "./freezes.js";
+import { byId, snowflake, snowflakeState } from "./freezes.js";
 
 const STORAGE_KEY = `plan-ledger:${SLUG}:hide-frozen`;
 const MARKED = ["plans", "phases", "slices", "tasks", "followups"];
@@ -9,19 +9,6 @@ let hiding = stored(STORAGE_KEY, false);
 let visible = new Set();
 const revealed = new Set();
 const UP = { phases: "plan", slices: "phase", tasks: "slice" };
-const indexes = new WeakMap();
-
-function byId(list, id) {
-  let index = indexes.get(list);
-  let at = index && index.get(id);
-  if (at === undefined || list[at]?.id !== id) {
-    index = new Map();
-    for (const [i, item] of list.entries()) if (!index.has(item.id)) index.set(item.id, i);
-    indexes.set(list, index);
-    at = index.get(id);
-  }
-  return at === undefined ? undefined : list[at];
-}
 
 function ancestors(d, key, seen = new Set()) {
   if (seen.has(key)) return [];
