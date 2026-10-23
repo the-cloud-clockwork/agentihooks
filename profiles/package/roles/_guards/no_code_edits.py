@@ -49,7 +49,7 @@ def _seated(session: str, agentihooks: Path) -> bool:
 
 
 def hotfix_open(payload: dict, role: str) -> bool:
-    """The operator typed allow-master-coding in this master pane within the last thirty minutes."""
+    """The operator typed allow-master-coding in this master session and has not closed it."""
     if role != "master":
         return False
     from hooks.context import master_coding
