@@ -150,6 +150,7 @@ class _Pending:
 class MemoryConsumer:
     def __init__(self, log: "MemoryEventLog", subject: str, policy: QueuePolicy, durable: str):
         self.subject = subject
+        self.policy = policy
         self._log = log
         self._cursor = 0
         self._pending = _Pending(log.runtime, policy, self._pull, log.dead, f"events.{durable}")
@@ -181,13 +182,16 @@ class MemoryEventLog:
             self.runtime.cond.notify_all()
             return True
 
-    def consumer(self, durable: str, subject: str) -> MemoryConsumer:
+    def consumer(self, durable: str, subject: str, policy: QueuePolicy | None = None) -> MemoryConsumer:
+        policy = policy or self._config.queue
         with self.runtime.cond:
             existing = self._consumers.get(durable)
             if existing is None:
-                existing = self._consumers[durable] = MemoryConsumer(self, subject, self._config.queue, durable)
+                existing = self._consumers[durable] = MemoryConsumer(self, subject, policy, durable)
             elif existing.subject != subject:
                 raise ValueError(f"durable consumer {durable!r} filters {existing.subject!r}, not {subject!r}")
+            elif existing.policy != policy:
+                raise ValueError(f"durable consumer {durable!r} already has another policy")
             return existing
 
 

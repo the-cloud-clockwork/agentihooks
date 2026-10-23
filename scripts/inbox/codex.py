@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, TransportRecord
+from scripts.inbox.bus import FeedError, SeatFeed, feed_for
 from scripts.inbox.dispatch import Dispatcher, digest
 from scripts.inbox.receipts import MISMATCH, RELEASED, Delivery, DispatchError
 from scripts.inbox.store import NOTIFY, InboxStore, Item, now_ms, owner_ttl_s
@@ -30,6 +31,7 @@ TURN_STARTED, TURN_COMPLETED, RESOLVED = "turn/started", "turn/completed", "serv
 LOST_OWNER = "{} no longer delivers for {}"
 HELD = "thread {} waits on {}; inbox delivery is held"
 DEGRADED_LOG = "codex pump for {} degraded: {}: {}"
+BUS_LOST = "codex pump for {} lost its bus inbox, Redis reconcile delivers meanwhile: {}"
 
 
 def envelope(item: Item, delivery: Delivery) -> str:
@@ -182,9 +184,15 @@ class Binding:
 
 class Pump:
     def __init__(
-        self, store: InboxStore, binding: Binding, timing: Timing = Timing(), log: Callable[[str], None] = stderr
+        self,
+        store: InboxStore,
+        binding: Binding,
+        timing: Timing = Timing(),
+        log: Callable[[str], None] = stderr,
+        feed: SeatFeed | None = None,
     ) -> None:
         self.store = store
+        self.feed = feed
         self.dispatcher = Dispatcher(store)
         self.receipts = self.dispatcher.receipts
         self.receipts.authority = binding.transport.require
@@ -234,6 +242,8 @@ class Pump:
         finally:
             if self.subscription is not None:
                 self.subscription.close()
+            if self.feed is not None:
+                self.feed.close()
             self.binding.connection.close()
 
     def _pause(self, delay: float) -> None:
@@ -284,8 +294,9 @@ class Pump:
         self.dispatcher.own(binding.recipient, binding.owner, ttl_s=self._lease_s())
         self.leased = True
         self.receipts.recover(binding.recipient, binding.owner)
-        self.subscription = self.store.redis.pubsub()
-        self.subscription.subscribe(NOTIFY)
+        if self.feed is None:
+            self.subscription = self.store.redis.pubsub()
+            self.subscription.subscribe(NOTIFY)
         protocol.resume_thread(binding.connection, binding.thread_id)
         self._refresh()
         self.next_reconcile = self.timing.clock()
@@ -305,6 +316,8 @@ class Pump:
             self._submit_nudge()
         while self.queue and not self.state.requests and self.timing.clock() >= self.hold_until:
             self._submit(self.queue.pop(0))
+        if self.feed is not None:
+            self._fed(self.feed.settle)
 
     def _submit_nudge(self) -> None:
         nudge = next((d for d in self.queue if d.ref.startswith(stale_nudge.REF) and self._jumps(d)), None)
@@ -316,7 +329,16 @@ class Pump:
     def _jumps(self, delivery: Delivery) -> bool:
         return stale_nudge.is_nudge(self.store.get(delivery.item))
 
+    def _fed(self, read: Callable[[], object]) -> object:
+        try:
+            return read()
+        except FeedError as failure:
+            self.log(BUS_LOST.format(self.binding.recipient, failure))
+            return None
+
     def _hinted(self) -> bool:
+        if self.feed is not None:
+            return bool(self._fed(lambda: self.feed.wait(0)))
         if self.subscription.get_message(timeout=0) is None:
             return False
         while self.subscription.get_message(timeout=0) is not None:
@@ -427,7 +449,9 @@ def main(argv: list[str] | None = None) -> int:
     stopped = Event()
     for signum in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(signum, lambda number, frame: stopped.set())
-    return 0 if Pump(inbox_connect(), binding).run(stopped.is_set) == STOPPED else 1
+    store = inbox_connect()
+    feed = feed_for(store, record.agent_name, record.execution_id)
+    return 0 if Pump(store, binding, feed=feed).run(stopped.is_set) == STOPPED else 1
 
 
 if __name__ == "__main__":

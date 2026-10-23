@@ -19,7 +19,7 @@ from scripts.swarm.stack_env import BIND, client_env, read_env, settings, write_
 
 PROJECT = "agentihooks-swarm"
 BUNDLED = Path(__file__).with_name("stack")
-SERVICES = ("redis", "swarm", "controller")
+SERVICES = ("redis", "nats", "swarm", "controller")
 ADOPTION = "deploy/compose/adopt.yaml"
 PREPARED_CLIENT = "swarm-client.env"
 LEDGER_PORT = 8765
@@ -40,6 +40,8 @@ DOCKER_CHECKS = (
 FIXES = {
     "redis": "read its logs; if port {SWARM_REDIS_PORT} is in use, set SWARM_REDIS_PORT in {env} to a free port, "
     "and keep the password in {env} as it was at the first start, {again}",
+    "nats": "read its logs; NATS keeps its JetStream store on the nats-data volume, so free space there "
+    "or remove that volume to start the bus empty, {again}",
     "swarm": "read its logs; the ledger server needs Redis healthy, and if port {SWARM_PORT} is in use, "
     "set SWARM_PORT in {env} to a free port, {again}",
     "adopted": "read its logs; the adopted ledger server serves port {SWARM_PORT} on the host network, "
@@ -200,7 +202,7 @@ def failed(out: TextIO, paint: Paint, problem: str, fix: str, command: str = "")
 
 
 def ready(out: TextIO, paint: Paint, home: Path, base: str, name: str) -> None:
-    print(paint("Swarm stack ready: redis, swarm and controller are healthy.", "ready"), file=out)
+    print(paint("Swarm stack ready: redis, nats, swarm and controller are healthy.", "ready"), file=out)
     print("Next steps:", file=out)
     print(f"  1. Open the ledger: {paint(base + '/', 'link')}", file=out)
     print(f"  2. Point this shell at the stack: set -a; . {home / 'client.env'}; set +a", file=out)

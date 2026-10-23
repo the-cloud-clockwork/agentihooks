@@ -176,6 +176,32 @@ def test_a_nak_holds_the_event_until_its_delay_passes(channel, harness):
     assert channel.take() == []
 
 
+def test_a_consumer_policy_replaces_the_bus_attempt_cap(harness):
+    own = QueuePolicy(max_deliver=harness.policy.max_deliver + 2, ack_wait_ms=harness.policy.ack_wait_ms)
+    consumer = harness.bus.events.consumer("own", "swarm.>", own)
+    original = event()
+    harness.bus.events.publish("swarm.s.task", original)
+    for attempt in range(1, own.max_deliver + 1):
+        deliveries = consumer.fetch(1, harness.poll_ms)
+        assert seen(deliveries) == [("e1", attempt)]
+        deliveries[0].nak()
+    assert consumer.fetch(1, harness.poll_ms) == []
+    letters = harness.bus.dead.consumer("dead-reader", "dead.>").fetch(10, harness.poll_ms)
+    assert [letter.event.data for letter in letters] == [
+        {"event": original.to_dict(), "attempts": own.max_deliver, "source": "events.own"}
+    ]
+
+
+def test_a_durable_consumer_refuses_another_policy_in_the_same_bus(harness):
+    own = QueuePolicy(max_deliver=harness.policy.max_deliver + 2, ack_wait_ms=harness.policy.ack_wait_ms)
+    harness.bus.events.consumer("own", "swarm.>", own)
+    harness.bus.events.consumer("own", "swarm.>", own)
+    harness.bus.events.consumer("other", "swarm.>")
+    with pytest.raises(ValueError) as raised:
+        harness.bus.events.consumer("own", "swarm.>")
+    assert str(raised.value) == "durable consumer 'own' already has another policy"
+
+
 def test_a_repeated_event_id_is_refused_inside_the_dedupe_window(channel, harness):
     assert channel.offer(event("e1")) is True
     harness.advance(harness.dedupe_ms - harness.margin_ms)

@@ -1,7 +1,8 @@
 {{- if and .Values.hub.enabled (not .Values.hiveOnly) }}
 {{- $hub := .Values.hub }}
-{{- if and (eq (toString $hub.bus.backend) "nats") (not $hub.bus.url) }}
-{{- fail "hub.bus.url is required with the nats backend: the hub reads every reactor's events from that address" }}
+{{- $busUrl := include "swarm.busUrl" . }}
+{{- if and (eq (toString $hub.bus.backend) "nats") (not $busUrl) }}
+{{- fail "hub.bus.url is required with the nats backend when nats.enabled is false: the hub reads every reactor's events from that address" }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -41,7 +42,7 @@ spec:
             {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
             - name: AGENTIHOOKS_BUS
               value: {{ $hub.bus.backend | quote }}
-            {{- with $hub.bus.url }}
+            {{- with $busUrl }}
             - name: AGENTIHOOKS_BUS_URL
               value: {{ . | quote }}
             {{- end }}

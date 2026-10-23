@@ -6,7 +6,7 @@ from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
-from scripts.hive import execution_events, reports
+from scripts.hive import execution_events, presence, reports
 from scripts.hub import lease
 from scripts.hub.lifecycle import Lifecycle
 from scripts.hub.registry import Reactor
@@ -66,6 +66,18 @@ def _exited(report: dict | None, event: Envelope, agent: AgentRecord, now: int) 
     return isinstance(panes, list) and bool(agent.pane_id) and agent.pane_id not in panes
 
 
+def _ending(
+    bus: Bus, snapshots: dict[str, dict], hive: str, event: Envelope, agent: AgentRecord, now: int
+) -> Envelope | None:
+    if presence.lost(bus, hive, now):
+        data = {**event.data, "reason": "lost"}
+        return replace(event, id=f"lost:{event.id}", type="execution.exited", time=now, cause=event.id, data=data)
+    if not _exited(snapshots.get(hive), event, agent, now):
+        return None
+    time = snapshots[hive]["observed_at"]
+    return replace(event, id=f"exited:{event.id}", type="execution.exited", time=time, cause=event.id)
+
+
 class Reconciler:
     def __init__(
         self,
@@ -104,17 +116,11 @@ class Reconciler:
                 if event is None:
                     continue
                 hive = agent.hive or agent.runtime_target.get("host_id")
-                if hive != event.data.get("hive") or not _exited(snapshots.get(hive), event, agent, now):
-                    continue
-                self._lifecycle.handle(
-                    replace(
-                        event,
-                        id=f"exited:{event.id}",
-                        type="execution.exited",
-                        time=snapshots[hive]["observed_at"],
-                        cause=event.id,
-                    )
+                ending = (
+                    _ending(self._bus, snapshots, hive, event, agent, now) if hive == event.data.get("hive") else None
                 )
+                if ending is not None:
+                    self._lifecycle.handle(ending)
         if not guard():
             return
         value = str(now).encode()
