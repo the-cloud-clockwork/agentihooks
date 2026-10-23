@@ -46,6 +46,7 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
         '  [[ "$*" != "init --bundle "* ]] || printf %s "$3" > "$AGENTIHOOKS_HOME/linked-bundle"\n'
         '  [[ "$REFUSE" != init ]] || exit 7\n'
         '  [[ "$REFUSE" != bundle-init || "$*" == init ]] || exit 7\nfi\n'
+        'if [[ "$1 $2" == "hive join" ]]; then [[ "$REFUSE" != join ]] || exit 9; fi\n'
         'if [[ "$*" == "deps ensure" ]]; then [[ "$REFUSE" != deps ]] || exit 4; fi\n'
         'if [[ "$*" == "hive run" ]]; then printf %s "${LEDGER_CA_PEM:+set}" > "$AGENTIHOOKS_HOME/hive-run-ca-pem"; fi\n'
         'if [[ "$*" == "hive run" && "${GH_TOKEN:-}" == "$GITHUB_PERSONAL_ACCESS_TOKEN" ]]; then\n'
@@ -152,6 +153,21 @@ def test_mounted_member_clones_repo_and_configures_before_run(tmp_path):
     assert "AH_CC_TOKEN_quoted holds a quote or backslash" in result.stderr
     assert "AH_CC_TOKEN_escaped=" not in container_env.read_text()
     assert "SWARM_SECRET=" not in container_env.read_text()
+
+
+def test_the_mounted_invite_is_joined_before_worker_configuration(tmp_path):
+    result, commands, home, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    joined = f"hive join {home / 'hive.env'}"
+    assert joined in commands.splitlines()
+    assert commands.index(joined) < commands.index("hive set") < commands.index("hive run")
+
+
+def test_a_refused_invite_never_runs_the_worker(tmp_path):
+    result, commands, _, _ = startup(tmp_path, refuse="join")
+    assert result.returncode != 0
+    assert "hive set" not in commands
+    assert "hive run" not in commands
 
 
 def test_the_container_env_carries_the_langfuse_settings_to_sshd_sessions(tmp_path):
