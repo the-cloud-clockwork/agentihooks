@@ -4,7 +4,7 @@ parent: Reference
 nav_order: 46
 ---
 
-# Process environment reads under /proc
+# Process environment reads
 
 The credential guard refuses every read of a process environment file under
 `/proc`, such as `/proc/<pid>/environ` or `/proc/self/environ`. That file holds
