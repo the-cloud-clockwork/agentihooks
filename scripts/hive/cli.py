@@ -211,7 +211,7 @@ def _nats_trust(args: argparse.Namespace) -> str:
             f"nats-trust writes OpenBao, so {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must be set"
         )
     values, lines = nats_trust.bootstrap(bao, nats_trust.load_users(args.users), args.url)
-    Path(args.values).write_text(yaml.safe_dump(values, sort_keys=False, width=100000))
+    Path(args.values).write_text(yaml.safe_dump(values, sort_keys=False))
     return "\n".join([*lines, f"wrote the public operator trust to {args.values}"])
 
 

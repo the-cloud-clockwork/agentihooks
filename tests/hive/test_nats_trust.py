@@ -34,6 +34,7 @@ def bao(monkeypatch):
 
     def read(found, path):
         assert found.url == "https://bao.example"
+        assert path == nats_trust.SIGNER_PATH
         return dict(records.get(path, {})), len(records.get(path, {}))
 
     def merge(found, path, entries, stale=()):
@@ -283,6 +284,10 @@ def test_cli_help_names_the_trust_command_and_its_options(monkeypatch, capsys):
         assert f" {text}\n" in trust
     with pytest.raises(SystemExit):
         cli._parser().parse_args(["nats-trust", "--users", "u", "--url", "x"])
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args(["nats-trust", "--users", "u", "--values", "v"])
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args(["nats-trust", "--url", "x", "--values", "v"])
 
 
 def _opens(url: str, credentials: str | None) -> bool:
