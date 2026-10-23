@@ -137,6 +137,18 @@ docker compose --project-name "${project:-agentihooks-swarm}" exec redis grep -c
 
 The count is `1` when adoption is recorded. Redis rebuilds the ACL from its template on every start, so a stack started before `--adopt --no-start` picks up the flush deny once `agentihooks swarm init` brings Redis up again with the adoption overlay.
 
+## Workstation tailnet fronts
+
+The adopted workstation stack can expose its ledger, hive join and Redis fronts through Tailscale. The overlay, nginx template and startup script ship with the stack under `deploy/compose`. They require the existing hive certificate and key under the adopted user's `.agentihooks/hive-tls` folder. The ledger forwards to loopback port 8765 and Redis to loopback port 6379, preserving the workstation's adopted Redis service.
+
+Start or restart the three fronts with:
+
+```bash
+bash "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/swarm-stack/deploy/compose/start-tailnet.sh"
+```
+
+Every invocation reads `tailscale ip -4`, refuses a missing or invalid tailnet address and recreates only the three fronts. It overrides any old `SWARM_TAILNET_IP` value without rewriting the private settings. The nginx listener, hive listener and advertised Redis address all use that address. Run this command after reconnecting the workstation to the tailnet; `docker restart` alone retains the container's previous address. `SWARM_STACK_HOME` selects another stack folder and `SWARM_COMPOSE_PROJECT` selects another project. Arguments such as `config --format json` replace the default startup action.
+
 ## Diagnose or stop the stack
 
 ```bash
