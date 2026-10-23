@@ -1029,9 +1029,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
     order, actions = _spawn_order(slug, config, store, agents, rows, doc, runtime)
-    for _, task in order:
-        if profile_first.UNRESOLVED in task:
-            actions.append(_unresolved(slug, ledger, rows, task["id"], task[profile_first.UNRESOLVED]))
+    actions += _block_unresolved(slug, ledger, rows, order)
     order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
     begun, tried = time.monotonic(), 0
     for lane, task in order:
@@ -1300,6 +1298,14 @@ def _release_admission(slug, runtime, task):
     held = task.get("admission")
     if held:
         _admission(runtime).release(slug, task["id"], held["reservation"])
+
+
+def _block_unresolved(slug, ledger, rows, order):
+    blocked = []
+    for _, task in order:
+        if profile_first.UNRESOLVED in task:
+            blocked.append(_unresolved(slug, ledger, rows, task["id"], task[profile_first.UNRESOLVED]))
+    return blocked
 
 
 def _unresolved(slug, ledger, rows, task_id, reason):
