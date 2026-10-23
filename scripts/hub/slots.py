@@ -24,8 +24,7 @@ def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int]):
     operation = OPERATIONS.get(request.get("op"))
     if operation is None:
         raise ValueError(f"unknown slot operation {request.get('op')!r}")
-    report = request.get("report", {})
-    return operation(account_slots.Slots(bus, request["hive"], lambda: report, clock), request)
+    return operation(account_slots.Slots(bus, request["hive"], lambda: request["report"], clock), request)
 
 
 def handle(bus: Bus, subject: str, data: bytes, clock: Callable[[], int] = presence.now_ms) -> bytes:

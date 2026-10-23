@@ -68,3 +68,20 @@ def test_scoped_join_grant_enables_the_scoped_client_layout(admin, signer):
     assert "AGENTIHOOKS_BUS_SCOPED=1" in text.splitlines()
     assert "AGENTIHOOKS_BUS_SWARMS=rig" in text.splitlines()
     assert "AGENTIHOOKS_BUS_CREDENTIALS=/member/bus.creds" in text.splitlines()
+
+
+def test_an_unscoped_join_grant_names_no_swarms(admin, signer):
+    from scripts.hive import auth
+    from tests.hive.test_nats_grant import PUBLIC, _refresh
+
+    member = auth.mint(admin, "hive", PUBLIC)
+    grant = _refresh(admin, signer, member["ledger_credential"])
+    assert grant["bus_scoped"] is False
+    assert "bus_swarms" not in grant
+
+
+def test_the_join_env_lists_every_member_swarm_in_order():
+    from scripts.hive import auth
+
+    grant = {"id": "m", "ledger_credential": "c", "redis_url": "r", "bus_scoped": True, "bus_swarms": ["rig", "other"]}
+    assert "AGENTIHOOKS_BUS_SWARMS=rig,other" in auth.env_text("https://hive", grant).splitlines()

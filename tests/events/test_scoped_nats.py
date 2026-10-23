@@ -288,6 +288,42 @@ def test_a_scoped_member_reaches_the_hub_slot_service_only_through_its_own_swarm
         client.close()
 
 
+def test_a_scoped_member_view_refuses_a_request_outside_its_swarm(hub, signer):
+    client = member(signer)
+    try:
+        with pytest.raises(ValueError) as caught:
+            client.for_swarm("rig").request("swarm.other.slots", b"{}", 500)
+        assert str(caught.value) == "a scoped bus cannot request outside swarm 'rig'"
+    finally:
+        client.close()
+
+
+def test_nats_requests_wait_their_timeout_and_reach_one_replica_of_a_queue_group(hub):
+    import time
+
+    calls = []
+
+    def slow(subject, data):
+        calls.append(subject)
+        time.sleep(1)
+        return data
+
+    hub.serve("swarm.rig.slow", "replicas", slow)
+    hub.serve("swarm.rig.slow", "replicas", slow)
+    assert hub.request("swarm.rig.slow", b"echo", 5000) == b"echo"
+    assert hub.request("swarm.rig.slow", b"again", 5000) == b"again"
+    assert calls == ["swarm.rig.slow", "swarm.rig.slow"]
+
+    async def silent(msg):
+        pass
+
+    hub._loop.run(hub._nc.subscribe("swarm.rig.silent", cb=silent))
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="^no responders for 'swarm.rig.silent'$"):
+        hub.request("swarm.rig.silent", b"", 300)
+    assert time.monotonic() - started < 5
+
+
 def test_scoped_members_open_no_root_state_including_the_hub_owned_account_buckets(hub, signer):
     from scripts.hub import slots
 
