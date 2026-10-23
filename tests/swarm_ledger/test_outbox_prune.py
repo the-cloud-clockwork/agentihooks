@@ -53,6 +53,8 @@ def test_the_relay_stamps_marks_with_the_wall_clock_in_milliseconds_by_default(r
     outbox.relay(repo, bus.events)
     after = time.time_ns() // 1_000_000
     assert [before <= sent_at <= after for _, sent_at in marks(repo)] == [True, True]
+    assert {type(sent_at) for _, sent_at in marks(repo)} == {int}
+    assert type(outbox.now_ms()) is int
 
 
 def test_a_sent_row_and_its_mark_older_than_the_window_are_deleted(repo, bus):
@@ -122,15 +124,16 @@ def test_a_mark_table_without_the_sent_time_gains_it_and_its_old_marks_count_as_
 
 
 class RacedMarks:
-    def __init__(self, error):
+    def __init__(self, error, columns="id"):
         self.error = error
+        self.columns = columns
         self.statements = []
 
     def execute(self, sql):
         self.statements.append(sql)
         if sql == outbox.ADD_SENT_AT:
             raise sqlite3.OperationalError(self.error)
-        return sqlite3.connect(":memory:").execute("SELECT 1 AS id")
+        return sqlite3.connect(":memory:").execute(f"SELECT {self.columns} FROM (SELECT 1 AS id, 0 AS sent_at)")
 
 
 def test_a_sent_time_another_process_added_first_is_kept():
@@ -143,6 +146,12 @@ def test_any_other_migration_failure_is_raised():
     with pytest.raises(sqlite3.OperationalError) as caught:
         outbox.migrate(RacedMarks("database is locked"))
     assert str(caught.value) == "database is locked"
+
+
+def test_a_mark_table_that_has_the_sent_time_is_left_unaltered():
+    current = RacedMarks("database is locked", columns="id, sent_at")
+    outbox.migrate(current)
+    assert current.statements == [outbox.SENT_COLUMNS]
 
 
 def test_set_up_inside_another_repository_write_does_not_wait_for_its_lock(tmp_path):
