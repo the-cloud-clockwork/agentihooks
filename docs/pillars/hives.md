@@ -543,8 +543,9 @@ Limitations:
 ## Pulling work from the hub
 
 A swarm on the `events` engine (see [Event driven engine](swarm.md#event-driven-engine)) places no agent on a
-hive. Each hive pulls offers from the hub over NATS JetStream instead. A hive runs one spoke per swarm and lane. On
-every pass the spoke:
+hive. Hives pull offers from the hub over NATS JetStream instead, through one spoke per swarm and lane. Today only the
+workstation's master lane spoke is started for real (see [Running a spoke](#running-a-spoke)). The eng lane spoke
+runs only in the Compose task smoke and the recovery drill. On every pass a spoke:
 
 1. Recovers its own unfinished claims.
 2. Checks the hive's admission room.
@@ -554,7 +555,7 @@ The hub creates the hive buckets; members are not allowed to create them:
 
 | Bucket | Holds |
 |---|---|
-| `spoke-work` | One claim per task and generation, keyed by a hash of swarm, task and generation: `claimed`, `launching`, `started`, then `exiting`, `exited` or `dead`. |
+| `spoke-work` | One claim per task and generation, keyed by a hash of swarm, task and generation. On the main path its state goes `claimed`, `launching`, `started`, then `exiting` and `exited`. A claim can also be `ready`, `withdrawn`, `dead_pending` or `dead`. |
 | `spoke-pending` | The launch slot a spoke reserves before it starts an agent. |
 | `hive-presence` | Each hive's heartbeat. |
 | `hive-executions` | What each hive reports about its running executions. |
@@ -575,8 +576,8 @@ running. The `lifecycle` reactor releases each one and reopens its task, which r
 hive can pull the next offer.
 
 A spoke also ignores a claim or launch held by a hive that is no longer present. Every five minutes, the `reconciler`
-reactor rebuilds any missing `execution.started` from the swarm's agent records. From hive reports and presence it
-ends executions that are gone, with reason `lost`.
+reactor rebuilds any missing `execution.started` from the swarm's agent records. It ends any execution
+that a hive reports gone. An execution on a lost hive ends with reason `lost`.
 
 ### Running a spoke
 
