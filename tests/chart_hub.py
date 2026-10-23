@@ -100,22 +100,21 @@ def problems(chart: str) -> list[str]:
         found.append("a NATS hub without hub.bus.url renders instead of failing on the missing address")
     if receivers(default.stdout):
         found.append("the default release renders the GitHub webhook receiver")
-    return found + secret_url_problems(chart) + receiver_release_problems(chart)
+    return found + secret_env_problems(chart) + receiver_release_problems(chart)
 
 
-def secret_url_problems(chart: str) -> list[str]:
-    secret = ["--set", "hub.bus.urlSecret.name=hub-bus"]
-    expected = {"secretKeyRef": {"name": "hub-bus", "key": "AGENTIHOOKS_BUS_URL"}}
-    found = []
-    for extra in (["--set", "nats.enabled=false"], ENABLED[2:]):
-        rendered = render(chart, "--set", "hub.enabled=true", *secret, *extra)
-        if rendered.returncode:
-            return [f"a hub reading its bus address from a secret fails to render: {rendered.stderr.strip()}"]
-        env = hubs(rendered.stdout)[0]["spec"]["template"]["spec"]["containers"][0]["env"]
-        rows = [row for row in env if row["name"] == "AGENTIHOOKS_BUS_URL"]
-        if rows != [{"name": "AGENTIHOOKS_BUS_URL", "valueFrom": expected}]:
-            found.append(f"a hub with hub.bus.urlSecret reads its bus address from {rows}, expected {expected}")
-    return found
+def secret_env_problems(chart: str) -> list[str]:
+    secret = ["--set", "hub.secretEnv[0].name=AGENTIHOOKS_BUS_CREDENTIALS"]
+    secret += ["--set", "hub.secretEnv[0].secretName=hub-bus", "--set", "hub.secretEnv[0].key=credentials"]
+    rendered = render(chart, *ENABLED, *secret)
+    if rendered.returncode:
+        return [f"a hub with hub.secretEnv fails to render: {rendered.stderr.strip()}"]
+    env = hubs(rendered.stdout)[0]["spec"]["template"]["spec"]["containers"][0]["env"]
+    rows = [row for row in env if row["name"] == "AGENTIHOOKS_BUS_CREDENTIALS"]
+    expected = {"secretKeyRef": {"name": "hub-bus", "key": "credentials"}}
+    if rows != [{"name": "AGENTIHOOKS_BUS_CREDENTIALS", "valueFrom": expected}]:
+        return [f"a hub with hub.secretEnv reads its credential from {rows}, expected {expected}"]
+    return []
 
 
 def receiver_release_problems(chart: str) -> list[str]:
