@@ -912,7 +912,6 @@ def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch,
             return real_push(tree, branch, seconds)
         time.sleep(overhead)
         pushed = real_push(tree, branch, seconds)
-        # Runner load before the second push varies; pin what the first push left so only the budget is under test.
         rig.gate.started = time.monotonic() - (timeout - RESERVE_S - 1.0)
         return pushed
 
