@@ -1,4 +1,6 @@
 import hashlib
+import io
+import json
 import urllib.parse
 
 import pytest
@@ -290,3 +292,54 @@ def test_the_cli_invite_with_a_file_signer_stays_unscoped(monkeypatch):
     monkeypatch.setattr(invite, "invite", lambda *args: seen.append(args) or "invited")
     assert cli.main(["invite", "lab", "--url", URL]) == 0
     assert [(args[2].signer_path, args[2].swarms) for args in seen] == [(None, ())]
+
+
+def test_the_scope_parser_names_its_command_and_swarm_flag():
+    sub = next(action for action in cli._parser()._actions if action.dest == "command")
+    helps = {choice.dest: choice.help for choice in sub._choices_actions}
+    assert helps["scope"] == "List member swarms in the hub NATS signer record for every unlisted member"
+    assert [
+        (action.option_strings, action.dest, action.default, action.help)
+        for action in sub.choices["scope"]._actions[1:]
+    ] == [(["--swarm"], "swarm", [], "swarm to list; every swarm if omitted")]
+    assert cli._parser().parse_args(["scope"]).swarm == []
+
+
+def test_backfill_without_named_swarms_lists_every_swarm_for_each_member(admin):
+    admin.sadd(f"{SWARMS}:index", "rig", "alpha")
+    first, second = sorted(auth.mint(admin, name, PUBLIC)["id"] for name in ("h1", "h2"))
+    fake = Bao({SIGNER: {}})
+    outcome = member_swarms.backfill(admin, _bao(fake), SIGNER, [])
+    assert outcome == f"OpenBao secret/{SIGNER}: wrote member_swarms for {first}, {second}"
+    assert fake.records[SIGNER]["member_swarms"] == {first: ["alpha", "rig"], second: ["alpha", "rig"]}
+
+
+def test_update_writes_with_the_read_version_as_its_check_and_set():
+    bodies = []
+    fake = Bao({SIGNER: {"kept": "1"}})
+    plain = fake.__call__
+
+    def recording(request, timeout=None):
+        if request.get_method() != "GET":
+            bodies.append(json.loads(request.data))
+        return plain(request, timeout)
+
+    total = openbao_kv.update(openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, recording), SIGNER, lambda record: {"new": "2"})
+    assert total == 2
+    assert bodies == [{"options": {"cas": 1}, "data": {"kept": "1", "new": "2"}}]
+
+
+def test_update_gives_up_after_its_retries_with_the_last_conflict():
+    attempts = []
+
+    def conflicting(request, timeout=None):
+        if request.get_method() == "GET":
+            body = {"data": {"data": {}, "metadata": {"version": 3}}}
+            return io.BytesIO(json.dumps(body).encode())
+        attempts.append(True)
+        raise http_error(request.full_url, 400, b'{"errors": ["check-and-set parameter did not match"]}')
+
+    with pytest.raises(openbao_kv.OpenBaoError) as error:
+        openbao_kv.update(openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, conflicting), SIGNER, lambda record: {"new": "2"})
+    assert error.value.conflict
+    assert len(attempts) == openbao_kv.CAS_RETRIES + 1

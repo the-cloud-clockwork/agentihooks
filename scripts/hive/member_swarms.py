@@ -13,8 +13,8 @@ FIELD = "member_swarms"
 
 
 def signer_path(environ: Mapping[str, str]) -> str | None:
-    path = environ.get(nats_grant.SIGNER_ENV) or ""
-    return path if path.startswith(nats_grant.HUB_PATH) else None
+    path = environ.get(nats_grant.SIGNER_ENV)
+    return path if path is not None and path.startswith(nats_grant.HUB_PATH) else None
 
 
 def swarms(redis: "Redis", named: Iterable[str]) -> tuple[str, ...]:

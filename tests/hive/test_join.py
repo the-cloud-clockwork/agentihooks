@@ -84,6 +84,17 @@ def test_a_legacy_invite_still_joins_with_an_unscoped_bus_credential(invitation,
     assert Path(saved["AGENTIHOOKS_BUS_CREDENTIALS"]).read_text() == "fixture nats credentials\n"
 
 
+def test_a_scoped_invite_joins_with_a_scoped_bus_credential(invitation, monkeypatch):
+    invite, home = invitation
+    with invite.open("a") as stream:
+        stream.write("AGENTIHOOKS_BUS_SCOPED=1\n")
+    monkeypatch.setattr(cli, "_post", lambda *args: {**_unscoped(), "bus_scoped": True})
+    assert cli.main(["join", str(invite)]) == 0
+    saved = dotenv_values(home / auth.ENV_FILE)
+    assert saved["AGENTIHOOKS_BUS_SCOPED"] == "1"
+    assert Path(saved["AGENTIHOOKS_BUS_CREDENTIALS"]).read_text() == "fixture nats credentials\n"
+
+
 def test_join_refuses_an_unscoped_bus_credential_and_keeps_the_current_membership(invitation, monkeypatch, capsys):
     invite, home = invitation
     with invite.open("a") as stream:
