@@ -113,6 +113,9 @@ class OfferedRows(dict):
         entry = self.generations().get(key) if row is not None else None
         return row if entry is None else {**row, "claim_generation": int(entry.value)}
 
+    def values(self) -> list[dict]:
+        return [self.get(key) for key in self]
+
 
 def readiness_view(swarm: str, generations: Callable[[], StateStore]) -> Callable[[], readiness.Snapshot]:
     tasks = [

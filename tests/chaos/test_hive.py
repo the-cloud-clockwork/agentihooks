@@ -64,3 +64,14 @@ def test_a_late_reopen_of_an_older_generation_keeps_the_newer_one():
 
     assert readiness.withdrawal(_offer("t0011", 3), view) == ""
     assert readiness.withdrawal(_offer("t0011", 2), view) == "it is at generation 3"
+
+
+def test_the_rows_readiness_offers_from_carry_the_recorded_generation():
+    bus = open_bus(BusConfig(backend="memory"))
+    view = _view(bus)
+
+    runner.record(bus.state(hive.GENERATIONS), "t0011", 2)
+
+    generations = {row["id"]: row["claim_generation"] for row in view.rows.values()}
+    assert generations["t0011"] == 2
+    assert generations["t0012"] == 1
