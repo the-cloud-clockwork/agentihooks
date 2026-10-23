@@ -254,6 +254,17 @@ def test_a_failure_recorded_at_the_start_of_the_stall_is_named(stalled):
     )
 
 
+def test_a_stored_failure_without_a_time_is_not_named(stalled):
+    store, ledger, runtime, clock, _ = stalled
+    for _ in range(2):
+        with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
+            pass
+        store.redis.set(store.key("sw", "tick-failure"), '{"step": "old", "error": "RuntimeError: old"}')
+        clock[0] += 600_000
+    (finding,) = spawn_stall.findings(store, "sw")
+    assert finding.evidence == ("A lane has a free seat, quota and claimable work",)
+
+
 def test_failure_callback_is_restored_and_outer_steps_preserve_the_cause(stalled):
     from scripts.swarm import timing
 
