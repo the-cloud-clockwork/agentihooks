@@ -3,7 +3,7 @@ import json
 import os
 import sys
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
@@ -16,6 +16,7 @@ from scripts.inbox.store import InboxError
 
 FEED_BACKEND = "nats"
 FEED_BATCH = 10
+REOPEN_S = 30.0
 
 
 def _identity(*parts: str) -> str:
@@ -163,9 +164,17 @@ def _swarm_of(seat: str) -> str:
     return seat.split("@", 1)[1]
 
 
-def _nats(environ: Mapping[str, str] | None) -> BusConfig | None:
-    config = BusConfig.from_environ(os.environ if environ is None else environ)
+def _nats() -> BusConfig | None:
+    config = BusConfig.from_environ(os.environ)
     return config if config.backend == FEED_BACKEND else None
+
+
+def _drop(bus: Bus | None) -> None:
+    if bus is not None:
+        try:
+            bus.close()
+        except Exception:
+            pass
 
 
 def seat_of(store, me: str) -> str:
@@ -178,9 +187,10 @@ class SeatPublisher:
     def __init__(self, opener: Callable[[], Bus]):
         self._opener = opener
         self._bus = None
+        self._retry_at = 0.0
 
     def publish(self, item) -> None:
-        if not is_seat(item.address):
+        if not is_seat(item.address) or (self._bus is None and time.monotonic() < self._retry_at):
             return
         try:
             if self._bus is None:
@@ -188,7 +198,8 @@ class SeatPublisher:
             message = Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
             SeatInbox(self._bus, _swarm_of(item.address)).send(item.address, message)
         except Exception as exc:
-            self._bus = None
+            _drop(self._bus)
+            self._bus, self._retry_at = None, time.monotonic() + REOPEN_S
             print(
                 f"agentihooks inbox: bus publish of {item.id} failed ({exc}); the Redis recheck delivers it",
                 file=sys.stderr,
@@ -198,9 +209,9 @@ class SeatPublisher:
 _PUBLISHER: SeatPublisher | None = None
 
 
-def publish(item, environ: Mapping[str, str] | None = None) -> None:
+def publish(item) -> None:
     global _PUBLISHER
-    config = _nats(environ)
+    config = _nats()
     if config is None:
         return
     if _PUBLISHER is None:
@@ -218,9 +229,12 @@ class SeatFeed:
         self._session = session
         self._bus = None
         self._consumer = None
+        self._retry_at = 0.0
         self.held: dict[str, Receipt] = {}
 
     def _bind(self) -> SeatConsumer | None:
+        if self._bus is None and time.monotonic() < self._retry_at:
+            return None
         address = self._seat()
         if not address:
             return None
@@ -236,8 +250,7 @@ class SeatFeed:
             consumer = self._bind()
             receipts = consumer.fetch(FEED_BATCH, timeout_ms) if consumer is not None else []
         except Exception as exc:
-            self.close()
-            raise FeedError(str(exc)) from exc
+            raise self._lost(exc) from exc
         if consumer is None:
             time.sleep(timeout_ms / 1000)
         for receipt in receipts:
@@ -255,9 +268,13 @@ class SeatFeed:
                 if consumer is not None and consumer.confirm(receipt):
                     settled.append(item_id)
         except Exception as exc:
-            self.close()
-            raise FeedError(str(exc)) from exc
+            raise self._lost(exc) from exc
         return settled
+
+    def _lost(self, exc: Exception) -> FeedError:
+        self.close()
+        self._retry_at = time.monotonic() + REOPEN_S
+        return FeedError(str(exc))
 
     def _pending(self, item_id: str) -> bool:
         try:
@@ -268,15 +285,11 @@ class SeatFeed:
     def close(self) -> None:
         bus, self._bus, self._consumer = self._bus, None, None
         self.held.clear()
-        if bus is not None:
-            try:
-                bus.close()
-            except Exception:
-                pass
+        _drop(bus)
 
 
-def feed_for(store, me: str, session: str = "", environ: Mapping[str, str] | None = None) -> SeatFeed | None:
-    config = _nats(environ)
+def feed_for(store, me: str, session: str = "") -> SeatFeed | None:
+    config = _nats()
     if config is None:
         return None
     return SeatFeed(lambda: open_bus(config), store, me, session or store.session_id or me)

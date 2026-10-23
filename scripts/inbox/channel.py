@@ -11,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 
+from scripts.inbox.bus import FeedError, feed_for
 from scripts.inbox.cli import check_answer, identity
 from scripts.inbox.seen import claim
 from scripts.inbox.store import NOTIFY, InboxError, connect
@@ -173,8 +174,6 @@ async def _pull(store, me, write, ready, feed):
     import anyio
     from redis.exceptions import RedisError
 
-    from scripts.inbox.bus import FeedError
-
     delay = 1.0
     try:
         await ready.wait()
@@ -182,7 +181,7 @@ async def _pull(store, me, write, ready, feed):
         while True:
             try:
                 await _deliver(store, me, write)
-                feed.settle()
+                await anyio.to_thread.run_sync(feed.settle)
                 await anyio.to_thread.run_sync(feed.wait, int(RECHECK_S * 1000))
                 delay = 1.0
             except (RedisError, FeedError):
@@ -221,8 +220,6 @@ async def run(store, me, read, write, active=True, feed=None):
             except InboxError:
                 await anyio.sleep(delay)
                 delay = min(delay * 2, 30.0)
-        from scripts.inbox.bus import feed_for
-
         pulled = feed if feed is not None else feed_for(store, me)
         if pulled is None:
             await _push(store, me, write, ready)

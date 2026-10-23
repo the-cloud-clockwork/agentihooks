@@ -1,4 +1,5 @@
 import threading
+import time
 
 import pytest
 
@@ -79,6 +80,7 @@ def test_a_session_without_a_seat_waits_without_touching_the_bus(mcp_sdk):
 
 
 def test_a_bus_failure_becomes_a_feed_error_and_the_next_wait_reopens_the_bus(monkeypatch, mcp_sdk):
+    from scripts.inbox import bus
     from scripts.inbox.bus import FeedError, SeatConsumer, SeatFeed
 
     buses = []
@@ -97,5 +99,10 @@ def test_a_bus_failure_becomes_a_feed_error_and_the_next_wait_reopens_the_bus(mo
     with pytest.raises(FeedError, match="bus connection lost"):
         feed.wait(0)
     monkeypatch.setattr(SeatConsumer, "fetch", real_fetch)
+    assert not feed.wait(0)
+    assert feed.settle() == []
+    assert len(buses) == 1
+    later = time.monotonic() + bus.REOPEN_S + 1
+    monkeypatch.setattr(bus.time, "monotonic", lambda: later)
     assert not feed.wait(0)
     assert len(buses) == 2

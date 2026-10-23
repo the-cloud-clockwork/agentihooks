@@ -71,6 +71,6 @@ def test_a_bus_failure_leaves_the_pump_on_its_redis_reconcile(rig, monkeypatch):
     item = rig.store.send("alice", ME, "hello")
     assert rig.run(1) == codex.STOPPED
     assert rig.server.turns[0]["inputs"][0].endswith("\n\nhello")
-    assert any("bus connection lost" in line for line in rig.logged)
+    assert sum("bus connection lost" in line for line in rig.logged) == 1
     assert rig.record().state == codex.CONNECTED
     assert rig.store.get(item.id).state == "delivered"

@@ -58,7 +58,10 @@ def test_a_failed_publish_keeps_the_redis_send_and_says_so(monkeypatch, capsys):
     from scripts.inbox import bus
     from scripts.inbox.store import InboxStore
 
+    attempts = []
+
     def broken():
+        attempts.append(1)
         raise OSError("nats unreachable")
 
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
@@ -67,3 +70,7 @@ def test_a_failed_publish_keeps_the_redis_send_and_says_so(monkeypatch, capsys):
     item = store.send("alice", SEAT, "work")
     assert store.get(item.id).state == "pending"
     assert "nats unreachable" in capsys.readouterr().err
+    later = store.send("alice", SEAT, "more")
+    assert store.get(later.id).state == "pending"
+    assert attempts == [1]
+    assert capsys.readouterr().err == ""
