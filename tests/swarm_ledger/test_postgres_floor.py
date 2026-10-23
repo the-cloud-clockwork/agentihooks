@@ -132,6 +132,15 @@ def test_each_refused_writer_becomes_one_open_master_alert_on_the_next_allowed_w
     assert ledger_alerts.TARGETS[ledger_alerts.WRITER] == "master"
 
 
+def test_a_refusal_alert_starts_the_alert_list_on_a_ledger_without_one(monkeypatch):
+    calls = written(monkeypatch)
+    connection = Statements({postgres.REFUSED_WRITERS: [("10.0.0.5", 0, 1)]})
+    repository()._write(connection, "s", "old", {"_meta": {"rev": 2}}, [])
+    assert [alert["text"] for alert in calls[0][3]["alerts"]] == [
+        f"The ledger writer at 10.0.0.5 was refused: {postgres.refusal(0, 1)}"
+    ]
+
+
 def test_a_closed_refusal_alert_is_not_raised_again_while_its_writer_stays_connected(monkeypatch):
     calls = written(monkeypatch)
     text = f"The ledger writer at 10.0.0.5 was refused: {postgres.refusal(0, 1)}"

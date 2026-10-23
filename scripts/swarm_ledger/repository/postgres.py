@@ -322,7 +322,7 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
             from scripts.swarm_ledger import ledger_alerts
 
             before = [alert["text"] for alert in state.setdefault("alerts", [])]
-            raised = SimpleNamespace(rev=state["_meta"]["rev"], at=self.domain.now_ms(), dirty=False)
+            raised = SimpleNamespace(rev=state["_meta"]["rev"], at=self.domain.now_ms())
             for address, version, floor in refused:
                 text = f"The ledger writer at {address} was refused: {refusal(version, floor)}"
                 ledger_alerts.raise_warning(state, raised, (ledger_alerts.WRITER, text), before)
