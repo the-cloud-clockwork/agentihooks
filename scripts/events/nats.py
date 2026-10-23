@@ -4,6 +4,7 @@ import hashlib
 import re
 import threading
 from collections.abc import Callable, Coroutine, Iterator
+from dataclasses import dataclass
 
 import nats as nats_client
 from nats.aio.msg import Msg
@@ -233,6 +234,45 @@ class NatsEventLog:
         )
 
 
+@dataclass(frozen=True)
+class QueueNames:
+    stream: str
+    subject: str
+    filter: str
+    durable: str
+
+
+def queue_names(name: str, swarm: str | None) -> QueueNames:
+    if swarm is None:
+        stream = queue_stream(name)
+        base = f"{QUEUE_SUBJECT}.{name}"
+        return QueueNames(stream, base, base, stream.removeprefix("AGENTIHOOKS_QUEUE_"))
+    lane = queue_lane(swarm, name)
+    base = event_subject(swarm, "queue", lane)
+    return QueueNames(stream_name(swarm, f"QUEUE_{lane}"), f"{base}.work", f"{base}.>", lane)
+
+
+def require_migrated(info: api.StreamInfo) -> None:
+    if (info.config.metadata or {}).get("agentihooks_import_pending"):
+        raise RuntimeError("scoped queue migration is incomplete")
+
+
+async def provision_queue(js: JetStreamContext, names: QueueNames, config: BusConfig, scoped: bool) -> None:
+    if scoped:
+        try:
+            await js.stream_info(names.stream)
+        except NotFoundError:
+            pass
+        else:
+            return
+    await js.add_stream(
+        name=names.stream,
+        subjects=[names.filter],
+        retention=api.RetentionPolicy.WORK_QUEUE,
+        duplicate_window=_seconds(config.dedupe_window_ms),
+    )
+
+
 class NatsWorkQueue:
     def __init__(
         self,
@@ -244,40 +284,19 @@ class NatsWorkQueue:
         swarm: str | None = None,
     ):
         self.policy, self._loop, self._js, self._swarm = policy, loop, js, swarm
-        lane = queue_lane(swarm, name) if swarm is not None else None
-        self._stream = stream_name(swarm, f"QUEUE_{lane}") if swarm is not None else queue_stream(name)
-        base = event_subject(swarm, "queue", lane) if swarm is not None else f"{QUEUE_SUBJECT}.{name}"
-        self._subject = f"{base}.work" if swarm is not None else base
-        self._filter = f"{base}.>" if swarm is not None else base
+        names = queue_names(name, swarm)
+        self._stream, self._subject, self._filter = names.stream, names.subject, names.filter
         if config.provision:
-            loop.run(self._provision(config))
+            loop.run(provision_queue(js, names, config, swarm is not None))
         elif swarm is not None:
-            info = loop.run(js.stream_info(self._stream))
-            if (info.config.metadata or {}).get("agentihooks_import_pending"):
-                raise RuntimeError("scoped queue migration is incomplete")
-        durable = lane if swarm is not None else self._stream.removeprefix("AGENTIHOOKS_QUEUE_")
+            require_migrated(loop.run(js.stream_info(self._stream)))
         self._consumer = NatsConsumer(
             loop,
-            loop.run(_pull(js, self._stream, durable, self._filter, policy, config.provision)),
+            loop.run(_pull(js, self._stream, names.durable, self._filter, policy, config.provision)),
             js,
             policy,
             f"queue.{name}",
             swarm,
-        )
-
-    async def _provision(self, config: BusConfig) -> None:
-        if self._swarm is not None:
-            try:
-                await self._js.stream_info(self._stream)
-            except NotFoundError:
-                pass
-            else:
-                return
-        await self._js.add_stream(
-            name=self._stream,
-            subjects=[self._filter],
-            retention=api.RetentionPolicy.WORK_QUEUE,
-            duplicate_window=_seconds(config.dedupe_window_ms),
         )
 
     def offer(self, event: Envelope) -> bool:
