@@ -151,8 +151,8 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
   where set. Setup and checks:
   `docs/reference/observability-langfuse.md`.
 - `agentihooks swarm <slug> status` lists health findings, each naming the
-  agent or task, the evidence and the threshold crossed. The master diagnoses them; the operator decides. Thresholds
-  (`AGENTIHOOKS_HEALTH_*`, defaults in brackets): ceremony, an agent's ledger
+  agent or task, the evidence and the threshold crossed. The master diagnoses
+  them; the operator decides. Thresholds (`AGENTIHOOKS_HEALTH_*`, defaults in brackets): ceremony, an agent's ledger
   transitions at least `CEREMONY_MIN` (20) and over `CEREMONY_RATIO` (12) per
   outcome, a merged task or one closed with the proof its kind needs; scope inflation, a lane agent queued `SELF_QUEUED` (3) tasks
   itself whose stated `--gain` never rose; proof loop, a task over `RERUNS` (2)
