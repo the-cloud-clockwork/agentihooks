@@ -72,6 +72,7 @@ def preflight(monkeypatch):
         tip="first",
         base="base",
         bases={},
+        gone=(),
         scope=None,
         scope_name="scope.json",
         report_name="report.json",
@@ -107,6 +108,8 @@ def preflight(monkeypatch):
             output = json.dumps({"object": {"sha": state.tip}})
         elif "/compare/" in args[-1]:
             ref = args[-1].split("/compare/")[1].split("...")[0]
+            if ref in state.gone:
+                return subprocess.CompletedProcess(args, 1, b"", b"gh: Not Found (HTTP 404)")
             output = json.dumps({"merge_base_commit": {"sha": state.bases.get(ref, state.base)}})
         else:
             output = json.dumps(state.run)
@@ -601,14 +604,32 @@ def test_a_red_focused_proof_based_on_an_open_dependency_branch_ends_red(preflig
     )
 
 
-@pytest.mark.parametrize("base, task", [("merged", "t1"), ("stacked", ""), ("stacked", "t7")])
-def test_a_focused_proof_based_on_no_open_dependency_branch_ends_red(preflight, base, task):
+@pytest.mark.parametrize(
+    "base, task, gone",
+    [("merged", "t1", ()), ("stacked", "", ()), ("stacked", "t7", ()), ("stacked", "t1", ("engineer-0",))],
+)
+def test_a_focused_proof_based_on_no_open_dependency_branch_ends_red(preflight, base, task, gone):
     _stacked_proof(preflight)
     preflight.scope["base"] = base
+    preflight.gone = gone
     held = {**waits.on("mutation", URL, task), "head": "first"}
     assert waits.resolution(held, STACKED, None, None, None, False) == (
         f"mutation preflight {URL}, now red; the mutation report does not grade the branch head from its dev merge base"
     )
+
+
+def test_a_rate_limited_dependency_compare_holds_the_wait(preflight, monkeypatch):
+    _stacked_proof(preflight)
+    scope = mutation_wait._scope
+
+    def limited(repo, ref, run):
+        if ref == "engineer-0":
+            raise mutation_wait.RateLimited("limited")
+        return scope(repo, ref, run)
+
+    monkeypatch.setattr(mutation_wait, "_scope", limited)
+    held = {**waits.on("mutation", URL, "t1"), "head": "first"}
+    assert waits.resolution(held, STACKED, None, None, None, False) == ""
 
 
 def test_a_focused_proof_run_of_another_proof_ends_red_without_a_report(preflight):

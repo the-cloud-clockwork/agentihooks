@@ -185,11 +185,21 @@ def _covers(target, run, scope, branches):
     if run["path"] != PROOFS:
         return True
     repo = RUN_URL.fullmatch(target).group(1)
-    for ref in ("dev", *branches):
-        base = _api(f"repos/{repo}/compare/{ref}...{run['head_sha']}")["merge_base_commit"]["sha"]
-        if scope == {"base": base, "head": run["head_sha"]}:
-            return True
-    return False
+    return scope == _scope(repo, "dev", run) or any(scope == _branch_scope(repo, ref, run) for ref in branches)
+
+
+def _scope(repo, ref, run):
+    base = _api(f"repos/{repo}/compare/{ref}...{run['head_sha']}")["merge_base_commit"]["sha"]
+    return {"base": base, "head": run["head_sha"]}
+
+
+def _branch_scope(repo, ref, run):
+    try:
+        return _scope(repo, ref, run)
+    except RateLimited:
+        raise
+    except Unreachable:
+        return None
 
 
 def _report(target, started_at):
