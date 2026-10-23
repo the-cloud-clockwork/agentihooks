@@ -98,6 +98,16 @@ def rig():
     store.redis.close()
 
 
+def advance(rig, to, beating=()):
+    from scripts.hive import presence
+
+    while rig.clock() < to:
+        rig.clock.return_value = min(rig.clock() + 5_000, to)
+        for hive in beating:
+            presence.beat(rig.bus, hive, rig.clock())
+        rig.hub.run_once()
+
+
 def claim_state(rig):
     from scripts.events.envelope import Envelope
     from scripts.hive.spoke import claim_key
@@ -111,12 +121,10 @@ def test_a_killed_hive_reopens_its_running_task_for_another_claim_at_the_presenc
 
     assert rig.first.spoke.poll() == "started"
     rig.hub.run_once()
-    rig.clock.return_value = T0 + presence.TTL_MS - 1
-    rig.hub.run_once()
+    advance(rig, T0 + presence.TTL_MS - 1)
     assert rig.row["state"] == "claimed"
     assert rig.returned == []
-    rig.clock.return_value = T0 + presence.TTL_MS
-    rig.hub.run_once()
+    advance(rig, T0 + presence.TTL_MS)
     assert rig.row == {**rig.row, "state": "open", "claimed_by": ""}
     assert len(rig.returned) == 1
     assert rig.store.agents("rig") == []
@@ -132,10 +140,7 @@ def test_a_beating_hive_keeps_its_running_task(rig):
 
     assert rig.first.spoke.poll() == "started"
     rig.hub.run_once()
-    for step in range(1, 5):
-        rig.clock.return_value = T0 + step * presence.TTL_MS
-        presence.beat(rig.bus, "hive-a", rig.clock())
-        rig.hub.run_once()
+    advance(rig, T0 + 4 * presence.TTL_MS, beating=["hive-a"])
     assert rig.row["state"] == "claimed"
     assert rig.returned == []
     assert claim_state(rig) == "started"
@@ -148,17 +153,13 @@ def test_the_exit_is_the_one_exit_of_that_start_and_names_the_lost_hive(rig):
     rig.loss._emit = published
     assert rig.first.spoke.poll() == "started"
     rig.hub.run_once()
-    rig.clock.return_value = T0 + presence.TTL_MS + 5
-    handled = Mock(wraps=rig.life.handle)
-    rig.life.handle = handled
-    rig.hub.run_once()
-    rig.hub.run_once()
+    advance(rig, T0 + presence.TTL_MS + 10_000)
     exited = published.call_args.args[1]
     assert published.call_count == 1
     assert (exited.id, exited.type, exited.time, exited.cause) == (
         f"exited:{exited.cause}",
         "execution.exited",
-        T0 + presence.TTL_MS + 5,
+        T0 + presence.TTL_MS,
         exited.cause,
     )
     assert exited.cause.startswith("started:")
@@ -181,8 +182,7 @@ def test_a_start_that_already_exited_is_dropped_without_an_exit(rig):
     entry = claims.get(key)
     claims.update(key, json.dumps({**json.loads(entry.value), "state": "exited"}).encode(), entry.revision)
     rig.loss._emit = Mock()
-    rig.clock.return_value = T0 + presence.TTL_MS
-    rig.hub.run_once()
+    advance(rig, T0 + presence.TTL_MS)
     rig.loss._emit.assert_not_called()
     assert json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value) == {}
 
@@ -209,6 +209,37 @@ def test_a_live_hive_prunes_ended_starts_on_the_prune_cadence(rig):
     rig.hub.run_once()
     assert json.loads(index.get(hive_loss.INDEX).value) == {}
     assert rig.returned == []
+
+
+def test_polls_one_beat_apart_keep_the_watch(rig):
+    from scripts.hive import presence
+    from scripts.hub import hive_loss
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    while rig.clock() < T0 + presence.TTL_MS:
+        rig.clock.return_value = rig.clock() + hive_loss.GAP_MS
+        rig.hub.run_once()
+    assert rig.clock() == T0 + presence.TTL_MS
+    assert rig.row["state"] == "open"
+
+
+def test_a_gap_longer_than_a_beat_restarts_the_watch(rig):
+    from scripts.hive import presence
+    from scripts.hub import hive_loss
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    resumed = T0 + 10 * presence.TTL_MS
+    rig.clock.return_value = resumed - hive_loss.GAP_MS - 1
+    rig.hub.run_once()
+    rig.clock.return_value = resumed
+    rig.hub.run_once()
+    assert rig.row["state"] == "claimed"
+    advance(rig, resumed + presence.TTL_MS - 1)
+    assert rig.row["state"] == "claimed"
+    advance(rig, resumed + presence.TTL_MS)
+    assert rig.row["state"] == "open"
 
 
 def test_a_denied_lease_does_nothing(rig):
