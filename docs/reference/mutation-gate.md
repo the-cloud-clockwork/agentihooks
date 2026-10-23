@@ -565,7 +565,7 @@ the mutation steps use every visible CPU.
 | One worker on a multi-CPU runner | The quota is below two CPUs, or `CI` is unset or empty and the CPU count is one. |
 | Two workers in a local run | Expected: local runs cap at two. |
 
-### Delivery evidence
+### Worker sizing delivery evidence
 
 [Pull request 4979](https://github.com/the-cloud-clockwork/agentihooks/pull/4979)
 merged on 20 October 2026 at 02:48 UTC. Its
