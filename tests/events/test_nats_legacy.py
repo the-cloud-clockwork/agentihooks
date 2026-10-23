@@ -2,6 +2,7 @@ import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -65,3 +66,51 @@ def test_legacy_filters_keep_existing_cursor_subjects_and_new_wire_subjects():
     assert legacy_filters("swarm.rig.>") == ["swarm.rig.>", "legacy.swarm.rig.>"]
     assert legacy_filters(">") == [">"]
     assert legacy_target("agentihooks.queue.work", {}) == "agentihooks.queue.work"
+
+
+def test_legacy_stream_creation_keeps_the_dedupe_window():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from scripts.events.nats_legacy import LEGACY_EVENTS, provision_events
+
+    js = SimpleNamespace(add_stream=AsyncMock())
+    asyncio.run(provision_events(js, "events", 12.5))
+    js.add_stream.assert_awaited_once_with(name="events", subjects=LEGACY_EVENTS, duplicate_window=12.5)
+
+
+def test_legacy_stream_upgrade_retains_configuration_and_refuses_unexpected_errors():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from nats.js.api import StreamConfig
+    from nats.js.errors import APIError
+
+    from scripts.events.nats_legacy import LEGACY_EVENTS, provision_events
+
+    config = StreamConfig(name="events", subjects=["swarm.>"], max_msgs=123, duplicate_window=12.5)
+    js = SimpleNamespace(
+        add_stream=AsyncMock(side_effect=APIError(err_code=10058)),
+        stream_info=AsyncMock(return_value=SimpleNamespace(config=config)),
+        update_stream=AsyncMock(),
+    )
+    asyncio.run(provision_events(js, "events", 12.5))
+    js.stream_info.assert_awaited_once_with("events")
+    updated = js.update_stream.await_args.kwargs["config"]
+    assert updated.name == "events"
+    assert updated.subjects == LEGACY_EVENTS
+    assert updated.max_msgs == 123
+    assert updated.duplicate_window == 12.5
+    for code in [10058, 10059]:
+        error = APIError(err_code=code)
+        js.add_stream.side_effect = error
+        js.stream_info.return_value = SimpleNamespace(config=StreamConfig(name="events", subjects=LEGACY_EVENTS))
+        with pytest.raises(APIError) as caught:
+            asyncio.run(provision_events(js, "events", 12.5))
+        assert caught.value is error
+
+
+def test_missing_publish_allow_list_means_unrestricted_legacy_routing():
+    from scripts.events.nats_legacy import legacy_target
+
+    assert legacy_target("swarm.rig.execution.started", {}) == "legacy.swarm.rig.execution.started"

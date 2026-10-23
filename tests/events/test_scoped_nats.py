@@ -188,3 +188,68 @@ def test_nats_aggregate_consumers_preserve_configured_policy(hub):
     assert hub.events.consumer("configured-events", "swarm.>", POLICY) is consumer
     dead = hub.dead.consumer("configured-dead", "dead.>")
     assert hub.dead.consumer("configured-dead", "dead.>", POLICY) is dead
+
+
+def test_scoped_nats_root_routes_queues_and_dead_letters(hub):
+    own = hub.for_swarm("rig")
+    queue = hub.queue("swarm.rig.ready.eng", POLICY)
+    assert queue is own.queue("eng", POLICY)
+    assert queue._subject == "swarm.rig.queue.eng.work"
+    assert queue._filter == "swarm.rig.queue.eng.>"
+    assert queue.policy == POLICY
+    assert queue.offer(event())
+    assert queue.take(1000).event == event()
+    for name in ["eng", "swarm.rig.ready.eng.extra", "other.rig.ready.eng", "swarm.rig.other.eng"]:
+        with pytest.raises(ValueError) as caught:
+            hub.queue(name, POLICY)
+        assert str(caught.value) == "select a swarm before opening a scoped queue"
+    consumer = hub.dead.consumer("aggregate-dead", "dead.>")
+    assert hub.dead.publish("dead.rig", event())
+    [dead] = consumer.fetch(1, 1000)
+    assert dead.event == event()
+    dead.ack()
+
+
+def test_scoped_member_refuses_root_state_and_pending_queue_import(hub, signer):
+    from scripts.events.nats_state import IMPORT_PENDING
+    from scripts.events.subjects import stream_name
+
+    own = hub.for_swarm("rig")
+    queue = own.queue("eng", POLICY)
+    info = hub._loop.run(hub._js.stream_info(queue._stream))
+    hub._loop.run(hub._js.update_stream(config=replace(info.config, metadata={IMPORT_PENDING: "queue"})))
+    client = member(signer)
+    try:
+        with pytest.raises(PermissionError) as caught:
+            client.state("spoke-work")
+        assert str(caught.value) == "select a swarm before opening scoped state"
+        with pytest.raises(RuntimeError) as caught:
+            client.for_swarm("rig").queue("eng", POLICY)
+        assert str(caught.value) == "scoped queue migration is incomplete"
+        assert queue._stream == stream_name("rig", "QUEUE_eng")
+    finally:
+        client.close()
+    client = member(signer)
+    client.close()
+    with pytest.raises(RuntimeError) as caught:
+        client.for_swarm("rig")
+    assert str(caught.value) == "bus is closed"
+
+
+def test_scoped_event_consumers_dead_letter_within_their_own_swarm(hub, signer):
+    own = hub.for_swarm("rig")
+    own.events.consumer("capped-events", "swarm.rig.>", POLICY)
+    own.dead.consumer("capped-dead", "dead.>", POLICY)
+    client = member(signer)
+    try:
+        view = client.for_swarm("rig")
+        consumer = view.events.consumer("capped-events", "swarm.rig.>", POLICY)
+        assert view.events.publish("swarm.rig.ready", event())
+        [delivery] = consumer.fetch(1, 1000)
+        delivery.nak()
+        assert consumer.fetch(1, 1000) == []
+        [dead] = view.dead.consumer("capped-dead", "dead.>", POLICY).fetch(1, 1000)
+        assert dead.event.cause == "own"
+        dead.ack()
+    finally:
+        client.close()

@@ -100,3 +100,60 @@ def test_aggregate_fetch_rotates_sources_with_sustained_backlog():
     consumer = scope.MergedConsumer(lambda: logs, "durable", "swarm.>", None)
     assert [consumer.fetch(2, 100) for _ in range(6)] == [[0, 0], [1, 1], [2, 2]] * 2
     assert calls == [0, 1, 2, 0, 1, 2]
+
+
+def test_scoped_adapters_forward_owned_work_and_explicit_policy():
+    from unittest.mock import Mock
+
+    policy = QueuePolicy(max_deliver=2)
+    event = Envelope("id", "ready", "rig", "task", "work", 1, 0, "author", {})
+    log = Mock()
+    scoped = scope.ScopedLog(log, "rig", "events")
+    assert scoped.publish("swarm.rig.ready", event) is log.publish.return_value
+    log.publish.assert_called_once_with("swarm.rig.events.ready", event)
+    assert scoped.consumer("durable", "swarm.rig.ready", policy) is log.consumer.return_value
+    log.consumer.assert_called_once_with("durable", "swarm.rig.events.ready", policy)
+    queue = Mock()
+    owned = scope.ScopedQueue(queue, "rig", policy)
+    assert owned.offer(event) is queue.offer.return_value
+    queue.offer.assert_called_once_with(event)
+    assert owned.take(123) is queue.take.return_value
+    queue.take.assert_called_once_with(123)
+    assert scope.scoped_subject("rig", "dead", "dead.>") == "swarm.rig.dead.>"
+
+
+def test_aggregate_reuses_consumers_and_preserves_budget_and_batch(monkeypatch):
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(scope, "monotonic", lambda: 0.0)
+    policy = QueuePolicy(max_deliver=2)
+    first, second = Mock(), Mock()
+    first.consumer.return_value.fetch.return_value = ["one"]
+    second.consumer.return_value.fetch.return_value = ["two"]
+    routed = scope.RoutedLog(lambda _: first, lambda: [first, second], policy)
+    consumer = routed.consumer("durable", "swarm.>")
+    assert consumer.fetch(3, 2000) == ["one", "two"]
+    assert consumer.fetch(3, 2000) == ["one", "two"]
+    first.consumer.assert_called_once_with("durable", "swarm.>", policy)
+    second.consumer.assert_called_once_with("durable", "swarm.>", policy)
+    first.consumer.return_value.fetch.assert_called_with(3, 1000)
+    second.consumer.return_value.fetch.assert_called_with(2, 1000)
+    with pytest.raises(ValueError) as caught:
+        routed.consumer("durable", "swarm.other.>")
+    assert str(caught.value) == "durable consumer 'durable' already has another filter or policy"
+    first.consumer.return_value.fetch.reset_mock()
+    second.consumer.return_value.fetch.reset_mock()
+    consumer.fetch(3, 1)
+    first.consumer.return_value.fetch.assert_called_once_with(3, 1)
+    second.consumer.return_value.fetch.assert_called_once_with(2, 1)
+
+
+def test_aggregate_deadline_uses_milliseconds(monkeypatch):
+    from unittest.mock import Mock
+
+    moments = iter([0.0, 0.9995])
+    monkeypatch.setattr(scope, "monotonic", lambda: next(moments))
+    log = Mock()
+    log.consumer.return_value.fetch.return_value = []
+    assert scope.MergedConsumer(lambda: [log], "durable", "swarm.>", None).fetch(1, 1000) == []
+    log.consumer.return_value.fetch.assert_called_once_with(1, 1)

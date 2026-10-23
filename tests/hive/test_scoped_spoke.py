@@ -65,3 +65,4 @@ def test_scoped_join_grant_enables_the_scoped_client_layout(admin, signer):
         {**grant, "ledger_credential": member["ledger_credential"], "bus_credentials": "/member/bus.creds"},
     )
     assert "AGENTIHOOKS_BUS_SCOPED=1" in text.splitlines()
+    assert "AGENTIHOOKS_BUS_CREDENTIALS=/member/bus.creds" in text.splitlines()
