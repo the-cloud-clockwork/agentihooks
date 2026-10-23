@@ -5,7 +5,7 @@ export const PAGE_SIZE = 50;
 export const FULL_PAGE = { first: PAGE_SIZE, more: PAGE_SIZE };
 export const COMMENT_PAGE = { first: 8, more: 10, below: true };
 const shown = {};
-export const wanted = { id: null };
+export const wanted = { id: null, ids: new Set() };
 
 export function limit(key, page = FULL_PAGE) {
   return shown[key] || page.first;
@@ -17,7 +17,7 @@ export function include(key, index, page = FULL_PAGE) {
 }
 
 export function wantedIn(key, items, idOf, page = FULL_PAGE) {
-  if (wanted.id) include(key, items.findIndex((item) => idOf(item) === wanted.id), page);
+  if (wanted.id) for (const id of [wanted.id, ...wanted.ids]) include(key, items.findIndex((item) => idOf(item) === id), page);
 }
 
 export function firstPage(key, items, idOf, page = FULL_PAGE) {

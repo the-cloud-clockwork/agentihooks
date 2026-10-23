@@ -314,6 +314,69 @@ changes them; a change goes through a pull request and CI. A lagging count
 that settles leaves no trace in the action line: the read reports
 `complete` with the same counts as any other complete read.
 
+### Which runs count toward tier wall time
+
+The `ci tier wall time` finding measures how long a workflow run took on the
+pull request tier (`pull_request` event) or the queue tier (`merge_group`
+event). Runs of other events are not measured. A pull request run is measured
+only when it has a `Gate — Required` job or runs
+`.github/workflows/test.yml`.
+
+A run is judged once, after GitHub reports its status as `completed`, and
+only when its conclusion is `success` or `failure`:
+
+| Run status and conclusion | Tier wall time finding |
+|---|---|
+| `completed`, `success` | Judged |
+| `completed`, `failure` | Judged |
+| `completed`, `cancelled`, including a run cancelled because a newer push superseded it | Skipped |
+| `completed`, `skipped`, `neutral`, `timed_out`, `startup_failure`, `action_required`, `stale` or no conclusion | Skipped |
+| `queued`, `in_progress` or any other unfinished status | Not judged yet; the run stays pending and is judged when a later pass reads it completed |
+
+A cancelled run's elapsed time measures how long it ran before the newer push
+replaced it, not how long the tier takes, so it raises no finding. The
+`ci runner wait` finding follows the same rule: started jobs of a completed
+run count toward it only when the run's conclusion is `success` or
+`failure`. The `ci queue age unconfirmed` finding, for jobs with no confirmed
+start, does not use the run conclusion.
+
+Wall time runs from the earliest job creation in the run to the latest
+`Gate — Required` completion. A completed run with no completed gate job ends
+at its latest job completion instead. A finding needs more than 15 minutes
+(`WALL_MS`, 900000 milliseconds); exactly 15 minutes raises none.
+
+Each judged run over 15 minutes adds one evidence line naming its conclusion:
+
+```text
+run 39788224362, tier pull_request, conclusion success, wall time 1223 seconds
+```
+
+The timer groups the runs of each tier into one finding per detection window,
+`ci-tier-wall-time/pull_request` or `ci-tier-wall-time/merge_group`. A notice
+to the masters reads, for example:
+
+```text
+- ci-tier-wall-time/pull_request: pull request tier took up to 20.38 minutes in 1 run. Evidence: 1 run, pull request, worst 1223 seconds, median 1223 seconds, runs 39788224362; run 39788224362, tier pull_request, conclusion success, wall time 1223 seconds
+```
+
+The counted conclusions (`COUNTED`) and the threshold are module constants in
+the Doctor CI speed detector. No flag or environment variable changes them; a
+change goes through a pull request and CI.
+
+To check a run named in a finding, read its status and conclusion:
+
+```bash
+gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run id> \
+  --jq '{event, status, conclusion, created_at, updated_at}'
+```
+
+| Symptom | Interpretation and action |
+|---|---|
+| A finding's evidence names a run whose conclusion is now `cancelled` | Read the conclusion the evidence states. A notice written before the detector judged only completed runs could name a run as `in_progress` or `queued` that was cancelled later; a current notice names only `success` or `failure`. |
+| A superseded pull request run raises no finding though it ran over 15 minutes | Expected: its conclusion is `cancelled`. Measure the run that replaced it. |
+| A run over 15 minutes raises no finding yet | Check its status. An unfinished run is judged when a later pass reads it completed. |
+| A pull request run over 15 minutes never raises a finding | Check that it has a `Gate — Required` job or runs the `.github/workflows/test.yml` workflow. |
+
 ### Inspect and diagnose a read
 
 Read the existing timer actions without starting another timer:
@@ -403,6 +466,31 @@ boundaries set to 22 October 2026, 15:00–15:30 UTC, against the running
 Doctor after the merge, returned 10 reads, all `complete`, none with the budget error, the
 largest discovering 16 runs. That window had no gap to catch up and is not an
 equal-load comparison with the outage window.
+
+[Pull request 4760](https://github.com/the-cloud-clockwork/agentihooks/pull/4760)
+merged on 19 October 2026 and added the conclusion rule. Its source report was
+pull request run 39166378179, which ended cancelled with 22 jobs cancelled
+after a newer push, yet was raised as a 15.3 minute pull request tier time. Its
+[red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39237322057)
+failed 22 new assertions on the old code, covering each excluded conclusion,
+the missing conclusion in the evidence and a 22 job superseded run fixture;
+its [green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39237817270)
+passed on the merged head.
+[Pull request 5901](https://github.com/the-cloud-clockwork/agentihooks/pull/5901)
+merged on 22 October 2026 and moved judging to completed runs only, so a run
+is no longer judged while it is unfinished.
+
+The source task counted tier wall time evidence lines in Doctor timer notices
+to both masters and read each run's current conclusion. Over the 24 hours
+from 18 October 2026, 11:00 UTC, before the merge, 16 of 134 findings were on
+runs whose conclusion is now `cancelled`, run 39166378179 among them. Over
+the 24 hours from 19 October 2026, 13:15 UTC, after the merge, 47 of 198
+were, but none of the 198 evidence lines stated `cancelled`: they stated
+`in_progress` 102 times, `queued` 38, `success` 52 and `failure` 6, so the
+cancelled runs were judged while still running and cancelled afterwards.
+Over the 12 hours from 22 October 2026, 14:30 UTC, after pull request 5901
+applied, the notices held no tier wall time evidence lines. That window
+carried no findings at all and is not an equal-load comparison.
 
 ## Delivery tiers
 

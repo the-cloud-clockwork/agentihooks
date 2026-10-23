@@ -57,13 +57,13 @@ dependencies = [
     # The swarm tick imports both; the editable CLI tool install takes no extras.
     "boto3>=1.34.0",
     "psycopg2-binary>=2.9.9",
-    # The swarm event bus NATS JetStream backend (scripts/events/nats.py).
-    "nats-py>=2.9",
 ]
 
 [project.optional-dependencies]
 ledger = ["redis>=5.0.0", "jsonschema>=4.23", "orjson>=3.10", "pyyaml>=6.0", "tomlkit>=0.12", "requests>=2.31.0", "cryptography>=42", "boto3>=1.34.0", "psycopg2-binary>=2.9.9"]
 postgres = ["psycopg2-binary>=2.9.9"]
+# The swarm event bus NATS JetStream backend (scripts/events/nats.py).
+nats = ["nats-py>=2.9"]
 otel = [
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
@@ -71,6 +71,7 @@ otel = [
     "opentelemetry-exporter-otlp-proto-http>=1.20.0",
 ]
 all = [
+    "nats-py>=2.9",
     "psycopg2-binary>=2.9.9",
     "redis>=5.0.0",
     "boto3>=1.34.0",
