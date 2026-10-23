@@ -888,3 +888,33 @@ def test_an_injected_clock_controls_the_presence_timestamp(rig):
         "heartbeat_ms": 8765,
         "expires_ms": 53765,
     }
+
+
+def test_presence_keeps_renewing_while_the_runtime_blocks(rig, monkeypatch):
+    import threading
+
+    from scripts.hive import presence
+
+    renewed = threading.Event()
+    original = presence.beat
+    clock = SimpleNamespace(now=0)
+    rig.spoke.clock = lambda: clock.now
+
+    def beat(bus, hive, at_ms):
+        revision = original(bus, hive, at_ms)
+        if at_ms == 45000:
+            renewed.set()
+        return revision
+
+    def spawn(request):
+        clock.now = 45000
+        assert renewed.wait(2), "heartbeat stopped during a blocking launch"
+        assert presence.lost(rig.bus, "hive-a", clock.now) is False
+        return outcome
+
+    outcome = rig.runtime.spawn.return_value
+    monkeypatch.setattr(presence, "beat", beat)
+    monkeypatch.setattr(presence, "BEAT_SECONDS", 0.001, raising=False)
+    rig.runtime.spawn.side_effect = spawn
+    assert rig.spoke.poll() == "started"
+    rig.runtime.spawn.assert_called_once()
