@@ -64,8 +64,16 @@ def test_hive_list_leaves_out_ended_reports(store, capsys):
     assert rows(capsys) == [f"  {kept.name}\tcomplete\tmisses=none\theartbeat=1000"]
 
 
-def test_hive_list_agents_equal_the_swarm_agents_of_every_hive(store, capsys):
+class Runtime:
+    def live_names(self):
+        return set()
+
+
+def test_hive_list_agents_equal_the_swarm_agents_of_every_hive(store, capsys, monkeypatch):
     from scripts.hive import cli, join_report
+    from scripts.swarm import commands, status
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
 
     kept = running(store, "eng-1", "worker")
     finished = running(store, "eng-2", "worker")
@@ -77,7 +85,7 @@ def test_hive_list_agents_equal_the_swarm_agents_of_every_hive(store, capsys):
     store.drop_agent("sw", rolled.name)
     cli._list()
     listed = [row.split("\t")[0].strip() for row in rows(capsys)]
-    swarm = [agent.name for agent in store.agents("sw") if agent.state not in ("finished", "ended")]
+    swarm = [agent.name for agent in status.live_agents(store.agents("sw"), Runtime()) if agent.state != "finished"]
     assert listed == swarm == [kept.name]
     assert finished.name in [agent.name for agent in store.agents("sw")]
 
