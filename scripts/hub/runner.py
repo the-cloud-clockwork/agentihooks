@@ -7,7 +7,7 @@ import sys
 import traceback
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
-from scripts.events.config import BusConfig, QueuePolicy
+from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.hub import lease, registry
@@ -26,9 +26,8 @@ def handled_key(reactor: Reactor, event: Envelope) -> str:
     return f"{reactor.name}.{event.entity}.{digest}"
 
 
-def retry_ms(policy: QueuePolicy, attempt: int) -> int:
-    backoff = policy.backoff_ms
-    return backoff[min(attempt, len(backoff)) - 1] if backoff else 0
+def retry_delay(retry_ms: tuple[int, ...], attempt: int) -> int:
+    return retry_ms[min(attempt, len(retry_ms)) - 1] if retry_ms else 0
 
 
 def record(store: StateStore, key: str, version: int) -> None:
@@ -105,7 +104,7 @@ class HubRunner:
         except Exception:
             print(f"hub: reactor {reactor.name} failed on event {event.id}", file=sys.stderr)
             traceback.print_exc()
-            delivery.nak(retry_ms(reactor.policy, delivery.attempt))
+            delivery.nak(retry_delay(reactor.retry_ms, delivery.attempt))
             return "failed"
         record(self._versions, key, event.version)
         delivery.ack()

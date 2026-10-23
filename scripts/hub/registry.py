@@ -12,7 +12,9 @@ _NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 Handler = Callable[[Envelope], None]
 
 # About four hours of retries, so a reactor rides out an outage that the bus default of five attempts would not.
-REACTOR_POLICY = QueuePolicy(max_deliver=50, backoff_ms=(1_000, 5_000, 15_000, 60_000, 300_000))
+REACTOR_POLICY = QueuePolicy(max_deliver=50)
+# Nak delays, kept out of the policy because its backoff would also shorten the ack wait of a handler still running.
+RETRY_MS = (1_000, 5_000, 15_000, 60_000, 300_000)
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,7 @@ class Reactor:
     singleton: bool = False
     poll: Callable[[Callable[[], bool]], None] | None = None
     policy: QueuePolicy = REACTOR_POLICY
+    retry_ms: tuple[int, ...] = RETRY_MS
 
     def __post_init__(self):
         if not isinstance(self.name, str) or not _NAME.fullmatch(self.name):
