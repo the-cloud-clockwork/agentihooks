@@ -1428,3 +1428,91 @@ The `see` path at the end of the reason is the absolute path on the runner, show
 | The same failing test is listed for several files | All files in one mutation group share one clean baseline run | Expected; one fix clears every file in the group |
 
 The behavior is pinned by `tests/test_ci_mutation_runner.py`, which feeds a planted pytest summary through `run_gate` and checks the reason, the printed red message and `report.json`, and by `tests/test_ci_mutation_main.py`, which checks the job summary block and that a run without failing tests leaves the summary untouched.
+
+{% raw %}
+## Planner tests that check behaviour
+
+The mutation planner tests check what a plan does, never how the planner spells a command or which arguments it passes to its estimator. A harmless planner change, such as a reworded command, a reordered argument or an added step setting, leaves them green; a change that selects the wrong tests, overruns a budget or publishes a different matrix turns them red.
+
+| Test module | What it checks |
+|---|---|
+| `tests/test_ci_mutation_plan.py` | Plans built in a real Git repository with real revisions: the selected tests and mutants, the duration budgets that size shards and statistics parts, the published `plan.json` and the planner CLI's printed result. Fakes that remain for `discover_changes` and `own_bases` accept any arguments; none answers only for one exact argument tuple, and the measured CLI test reads its head from a real `git rev-parse` |
+| `tests/test_ci_mutation_preflight.py` | Each planning step in the workflow: parsed arguments that run, published selections and matrices, and only the step environment keys the test is about. Environment checks assert single keys, such as `step["env"]["BASES"]`. The four steps whose whole mapping was compared before, the reuse, sizing, refine and merge steps, now add `UNRELATED_SETTING` first and then assert their own keys, so a new setting on a step passes |
+| `tests/test_ci_mutation_scope.py` | Finds the `mutation-plan` step by its `id`, `plan`, instead of by the start of its `run` text |
+
+Two pull requests delivered this:
+
+| Pull request | Change |
+|---|---|
+| [4811](https://github.com/the-cloud-clockwork/agentihooks/pull/4811), closing [4810](https://github.com/the-cloud-clockwork/agentihooks/issues/4810) | Planner tests check selection, budgets, Git revisions and public CLI results; the scope test finds the step by `id` |
+| [5455](https://github.com/the-cloud-clockwork/agentihooks/pull/5455), closing [5452](https://github.com/the-cloud-clockwork/agentihooks/issues/5452) | Preflight step environment checks assert only their own keys, so the added `MUTATION_SHARD_CPU_QUOTA` and any later setting pass |
+
+Both changed tests only; planner code and its outputs are unchanged.
+
+### Writing a planner test
+
+- Build the project in `tmp_path`, commit it with Git and plan against that branch. Assert the selection, the shard count, the costs or the published file.
+- For a workflow step, find it by its `name` or `id`, then assert each key it needs: `step["env"]["GH_TOKEN"] == "${{ github.token }}"`. Never compare the whole `env` mapping with `==`.
+- Assert a command by running what it parses to, or compare it with the same step in another job, rather than pinning its literal text.
+
+A pull request that adds a setting to a planning step needs no test edit. A pull request that changes which tests or mutants a plan selects must update the expected selection, because that is a real behaviour change.
+
+### Measured result
+
+The failures this removed were planner tests that went red on command text or estimator arguments while the plan itself was right. Task t490 counted them in the pull request Tests runs of one day before and one day after pull request 4811 reached dev at 17:50:41 UTC on 19 October 2026, with the same scan both times ([issue 5346](https://github.com/the-cloud-clockwork/agentihooks/issues/5346)).
+
+| Window (UTC) | Pull request Tests runs | Red or cancelled, scanned | Command text or estimate failures, heads without 4811 | Same, heads with 4811 |
+|---|---|---|---|---|
+| Before: 18 October 13:38:33 to 19 October 13:38:33 | 397 | 216 | 3, all on pull request 4553 (runs 39140808827, 39141139538, 39141732266), before that branch merged dev | 0 |
+| After: 19 October 17:50:41 to 20 October 17:50:41 | 623 | 371 | 0 | 0 |
+
+The target, zero on heads that include pull request 4811, was met. Five after window runs matched the scan; every one of their heads contained the 4811 merge commit, and none was a command text or estimate failure:
+
+| Runs | Pull request | Classification |
+|---|---|---|
+| 39376506323, 39381366510 | 5140 | A preflight test compared a step's whole `env` with `==` and failed once the branch added `MUTATION_SHARD_CPU_QUOTA`. A separate class, fixed by pull request 5455 |
+| 39380533356 | 5140 | Tests first red: a new behaviour test ran before its step existed |
+| 39392961654 | 5186 | Tests first red: `scope.SHARDS` was not yet implemented |
+
+Run 39326180375 was excluded: its runner lost communication and left no log.
+
+### Repeating the scan
+
+The scan is read only. It lists the `test.yml` runs of `pull_request` events created in the window, reads the jobs of each failed or cancelled run, and fetches the log of every failed job whose name contains `unit` or `stats` or is `plan`. A job counts when a log line holds `FAILED`, `failing tests:`, `TypeError:`, `StopIteration` or `AssertionError` together with `mutation_plan`, `mutation_preflight` or `mutation_scope`.
+
+```bash
+REPO=repos/the-cloud-clockwork/agentihooks
+START=2026-10-19T17:50:41Z
+END=2026-10-20T17:50:41Z
+gh api "$REPO/actions/workflows/test.yml/runs" --paginate -X GET \
+  -f created="$START..$END" -f event=pull_request -f per_page=100 \
+  --jq '.workflow_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .id' \
+  > runs.txt
+while read -r run; do
+  gh api "$REPO/actions/runs/$run/jobs?per_page=100" --paginate \
+    --jq '.jobs[] | select(.conclusion == "failure") | select((.name | test("unit|stats")) or .name == "plan") | .id' |
+  while read -r job; do
+    hits=$(gh api "$REPO/actions/jobs/$job/logs" |
+      grep -E 'FAILED|failing tests:|TypeError:|StopIteration|AssertionError' |
+      grep -cE 'mutation_(plan|preflight|scope)' || true)
+    [[ "$hits" -gt 0 ]] && echo "$run $job $hits"
+  done
+done < runs.txt
+```
+
+Each printed line is a run, a job and its match count. Then classify each matching run by hand:
+
+1. Read the matched lines. A failure on a command string, an estimator argument or a whole `env` mapping is brittle; a tests first red, a real selection difference or a planner refusal is not.
+2. Check whether the run's head contains the 4811 merge commit, `d0e2e9de85b04213070c0aa1caae9cb65089808f`: `gh api "$REPO/compare/d0e2e9de85b04213070c0aa1caae9cb65089808f...HEAD_SHA" --jq .status` prints `ahead` or `identical` when it does, `behind` or `diverged` when it does not. Replace `HEAD_SHA` with the run's `head_sha`.
+3. Note runs whose failed job has no log, such as a lost runner, as excluded.
+
+### Troubleshooting
+
+| Symptom | Cause | What to do |
+|---|---|---|
+| A preflight test fails with `assert {...} == {...}` on a step `env` after a setting was added | A test still compares the whole mapping | Change it to add `UNRELATED_SETTING` and assert only its own keys, as `tests/test_ci_mutation_preflight.py` does |
+| A plan test fails after a planner refactor that kept the plan the same | The test pins an internal call or command text | Rewrite it to build a Git project and assert the plan's result |
+| A plan test fails because the selected tests changed | The planner's selection changed | Real behaviour change: confirm it is intended, then update the expected selection |
+| The scan prints a run on a branch that has not merged dev since 4811 | The branch head predates the change | Count it under heads without 4811; it is not a regression |
+
+{% endraw %}
