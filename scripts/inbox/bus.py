@@ -248,7 +248,7 @@ def publish(item, names=None) -> None:
 
 
 class SeatFeed:
-    """Keep durable receipts until Redis records confirmation by the receiving session or explicit settlement."""
+    """Keep durable receipts until Redis records session confirmation or explicit settlement."""
 
     def __init__(self, opener: Callable[[], Bus], store, me: str, session: str, seat: Callable[[], str] | None = None):
         self._opener = opener
@@ -312,7 +312,7 @@ class SeatFeed:
             return True
         if item.state in CLOSED:
             return False
-        return item.state not in ("read", "confirmed") or item.delivery_session != self._session
+        return item.state not in ("read", "confirmed")
 
     def close(self) -> None:
         bus, self._bus = self._bus, None
