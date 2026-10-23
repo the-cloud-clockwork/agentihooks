@@ -53,6 +53,12 @@ def _live(scheduler: Scheduler, entry_id: str) -> bool:
         return False
 
 
+def cancel(scheduler: Scheduler) -> None:
+    for entry in scheduler.owned(OWNER):
+        entry.cancel()
+    scheduler.redis.delete(scheduler.key("swarm-tick"))
+
+
 def fire(event: dict, delivery_id: str, redis: "Redis") -> None:
     directory = runtime_dir()
     directory.mkdir(parents=True, exist_ok=True)

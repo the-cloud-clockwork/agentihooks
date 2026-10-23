@@ -19,7 +19,19 @@ def systemctl(calls):
 
 
 @pytest.fixture
-def distributed(monkeypatch):
+def scheduler(monkeypatch):
+    import fakeredis
+
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm import store
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    return Scheduler(redis)
+
+
+@pytest.fixture
+def distributed(monkeypatch, scheduler):
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
     monkeypatch.setattr(timer, "schedule", lambda: pytest.fail("the swarm tick was scheduled"))
     monkeypatch.setattr(timer, "undelivered", lambda: pytest.fail("the tick delivery was read"))
@@ -52,6 +64,41 @@ def test_a_distributed_install_writes_only_the_spoke_and_schedules_no_tick(tmp_p
         ["systemctl", "--user", "daemon-reload"],
         ["systemctl", "--user", "enable", "--now", "agentihooks-spoke.service"],
     ]
+
+
+def test_a_distributed_install_cancels_a_minute_tick_registered_before_and_a_second_install_changes_nothing(
+    tmp_path, distributed, scheduler
+):
+    from scripts.swarm import scheduled_tick
+
+    scheduled_tick.ensure(scheduler)
+
+    assert timer.ensure(BINARY, tmp_path, run=systemctl([]))
+
+    owned = scheduler.owned(scheduled_tick.OWNER)
+    assert owned and [entry.state for entry in owned] == ["cancelled"] * len(owned)
+    assert scheduler.redis.get(scheduler.key("swarm-tick")) is None
+    assert scheduler.redis.zcard(scheduler.key("due")) == 0
+    records = scheduler.records()
+
+    assert timer.ensure(BINARY, tmp_path, run=systemctl([]))
+
+    assert scheduler.records() == records
+    assert scheduler.redis.get(scheduler.key("swarm-tick")) is None
+
+
+def test_a_distributed_install_without_redis_still_enables_the_spoke(tmp_path, distributed, monkeypatch, capsys):
+    from redis.exceptions import ConnectionError
+
+    from scripts.swarm import store
+
+    def refused():
+        raise ConnectionError("refused")
+
+    monkeypatch.setattr(store, "redis_client", refused)
+
+    assert timer.ensure(BINARY, tmp_path, run=systemctl([]))
+    assert "the scheduled swarm tick could not be cancelled: ConnectionError: refused" in capsys.readouterr().err
 
 
 def test_retiring_an_engine_unit_beside_a_current_spoke_still_reloads(tmp_path, distributed):
