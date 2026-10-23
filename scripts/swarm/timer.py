@@ -16,6 +16,7 @@ DROPPED = ("agentihooks-alert-intake.service",)
 PROBER = "agentihooks-quota-prober"
 WAITS = "agentihooks-swarm-waits"
 TICK_WATCH = "agentihooks-tick-watch"
+SPOKE = "agentihooks-spoke"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
 DRAIN_S = 30
@@ -94,6 +95,42 @@ def tick_units(binary):
         "[Install]\nWantedBy=timers.target\n"
     )
     return {f"{UNIT}.service": service, f"{UNIT}.timer": timer}
+
+
+def spoke_units(binary):
+    spoke = (
+        "[Unit]\nDescription=agentihooks workstation spoke for master work\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm spoke\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+    return {f"{SPOKE}.service": spoke}
+
+
+def _spoke_only(binary, unit_dir, run):
+    changed = False
+    for name in (*units(binary), *tick_units(binary), *DROPPED):
+        if (unit_dir / name).exists():
+            run(
+                ["systemctl", "--user", "disable", "--now", name],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            (unit_dir / name).unlink()
+            changed = True
+    for name, text in spoke_units(binary).items():
+        if not _current(unit_dir / name, text):
+            (unit_dir / name).write_text(text)
+            changed = True
+    if changed:
+        run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
+    enable = ["systemctl", "--user", "enable", "--now", f"{SPOKE}.service"]
+    return run(enable, capture_output=True, text=True, timeout=30).returncode == 0
 
 
 def _services(names):
@@ -307,6 +344,10 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         print(refusal, file=sys.stderr)
         return False
     unit_dir.mkdir(parents=True, exist_ok=True)
+    from scripts.hive import workstation
+
+    if not workstation.runs_engine(os.environ):
+        return _spoke_only(binary, unit_dir, run)
     kept = _kept()
     expected = units(binary)
     if kept:
