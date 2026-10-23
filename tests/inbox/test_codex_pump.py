@@ -1387,6 +1387,7 @@ def test_a_contended_submission_is_released_and_delivered_once(rig, monkeypatch)
     assert rig.server.methods().count("turn/start") == 1
     assert rig.server.turns[0]["inputs"][0].count("submitted after contention") == 1
     assert [d.state for d in deliveries(rig, item.id)].count("accepted") == 1
+    assert rig.record().state == CONNECTED
 
 
 def test_owner_loss_while_retrying_contention_still_ends_the_pump(rig, monkeypatch):
@@ -1396,7 +1397,8 @@ def test_owner_loss_while_retrying_contention_still_ends_the_pump(rig, monkeypat
         Dispatcher(rig.store).own(ME, "host:99", takeover=True)
 
     monkeypatch.setattr(rig.pump.dispatcher, "_reserve", contended(rig.pump.dispatcher._reserve, 99, takeover))
-    recorded_sleeps(rig)
+    sleeps = recorded_sleeps(rig)
     assert rig.pump.run(lambda: False) == DEGRADED
+    assert sleeps == []
     assert rig.logged[-1] == f"codex pump for {ME} degraded: DispatchError: {OWNER} no longer delivers for {ME}"
     assert rig.server.methods().count("turn/start") == 0
