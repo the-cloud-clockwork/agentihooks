@@ -488,23 +488,27 @@ class RedisStore:
 
         key, lives = self.key(slug, "claim", task), self.key(slug, "started-lives")
         guards = self._claim_guards(slug, task)
-        with self.redis.pipeline() as pipe:
-            try:
-                pipe.watch(key, f"{key}:generation", lives, *guards)
-                if (
-                    pipe.get(key) != agent
-                    or int(pipe.get(f"{key}:generation") or 0) != generation
-                    or any(pipe.exists(guard) for guard in guards)
-                ):
-                    return False
-                started = self._started_lives(slug, task)
-                pipe.multi()
-                pipe.hsetnx(lives, task, started)
-                pipe.hincrby(lives, task, -1)
-                pipe.execute()
-                return True
-            except WatchError:
-                return False
+        for _ in range(3):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key, f"{key}:generation", lives, *guards)
+                    if (
+                        pipe.get(key) != agent
+                        or int(pipe.get(f"{key}:generation") or 0) != generation
+                        or any(pipe.exists(guard) for guard in guards)
+                    ):
+                        return False
+                    started = self._started_lives(slug, task)
+                    if int(pipe.hget(lives, task) or started) <= 0:
+                        return False
+                    pipe.multi()
+                    pipe.hsetnx(lives, task, started)
+                    pipe.hincrby(lives, task, -1)
+                    pipe.execute()
+                    return True
+                except WatchError:
+                    continue
+        return False
 
     def claims(self, slug, task):
         counted = self.redis.hget(self.key(slug, "started-lives"), task)

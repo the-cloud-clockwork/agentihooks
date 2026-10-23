@@ -309,6 +309,50 @@ def test_a_held_claim_refund_refuses_while_a_claim_guard_is_set(store, guard):
     assert store.claims("smoke", "t1") == 1
 
 
+def test_a_held_claim_refund_refuses_when_no_started_life_is_left(store):
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.redis.hset(store.key("smoke", "started-lives"), "t1", 0)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.redis.hget(store.key("smoke", "started-lives"), "t1") == "0"
+
+
+def test_a_held_claim_refund_retries_after_another_task_moved_the_lives_hash(store, monkeypatch):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    started, calls = store._started_lives, []
+
+    def moved(slug, task):
+        calls.append(task)
+        if len(calls) == 1:
+            store.redis.hincrby(store.key("smoke", "started-lives"), "t2", 1)
+        return started(slug, task)
+
+    monkeypatch.setattr(store, "_started_lives", moved)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is True
+    assert (len(calls), store.claims("smoke", "t1"), store.claims("smoke", "t2")) == (2, 0, 1)
+
+
+def test_a_held_claim_refund_gives_up_after_three_watch_conflicts(store, monkeypatch):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    started, calls = store._started_lives, []
+
+    def moved(slug, task):
+        calls.append(task)
+        store.redis.hincrby(store.key("smoke", "started-lives"), "t2", 1)
+        return started(slug, task)
+
+    monkeypatch.setattr(store, "_started_lives", moved)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert (len(calls), store.claims("smoke", "t1")) == (3, 1)
+
+
 def test_launch_rows_merge_recorded_launches_with_verified_history(store):
     history, validated = store.key("smoke", "history"), {"validation": {"state": "validated"}}
     store.redis.rpush(
