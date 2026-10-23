@@ -21,6 +21,10 @@ def invitation(tmp_path, monkeypatch):
             },
         )
     )
+    with invite.open("a") as stream:
+        stream.write(
+            "AGENTIHOOKS_BUS=nats\nAGENTIHOOKS_BUS_URL=nats://bus.example.test:4222\nAGENTIHOOKS_SWARM_URL=https://ledger.example.test\n"
+        )
     return invite, home
 
 
@@ -40,6 +44,9 @@ def test_one_invite_joins_a_machine_and_saves_the_refreshed_nats_grant(invitatio
     assert cli.main(["join", str(invite)]) == 0
     assert calls == [("https://hub.example.test", "/refresh", {"ledger_credential": "fixture-invite"}, "join")]
     saved = dotenv_values(home / auth.ENV_FILE)
+    assert saved["AGENTIHOOKS_BUS"] == "nats"
+    assert saved["AGENTIHOOKS_BUS_URL"] == "nats://bus.example.test:4222"
+    assert saved["AGENTIHOOKS_SWARM_URL"] == "https://ledger.example.test"
     assert saved["AGENTIHOOKS_HIVE_ID"] == "fixture-member"
     assert saved["AGENTIHOOKS_HIVE_URL"] == "https://hub.example.test"
     assert saved["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"] == "fixture-invite"
