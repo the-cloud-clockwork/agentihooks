@@ -148,6 +148,23 @@ def test_a_receipt_read_that_raises_waits_instead_of_failing_the_launch(store, m
     assert f"{name} receipt read for t1 raised {error!r}, waiting for the hive" in capsys.readouterr().err
 
 
+def test_a_receipt_read_that_still_raises_after_the_lease_takes_the_guarded_collect(store, monkeypatch):
+    ledger, runtime, name, _ = _finished_before_ack(store, monkeypatch)
+    agent = next(a for a in store.agents("sw") if a.name == name)
+
+    def broken(config, lane, agent, task):
+        raise ConnectionError("redis went away")
+
+    runtime.launched = broken
+    doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "blocked"}]}
+    now = agent.started_at + tick_module.LEASE_MS
+    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, now - 1)
+    assert actions == [] and runtime.collected == []
+    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, now)
+    assert runtime.collected == [name]
+    assert len(actions) == 1 and actions[0].startswith("spawn failed for t1")
+
+
 def test_an_early_finished_launch_clears_its_saved_assignment(store, monkeypatch):
     ledger, runtime, name, _ = _finished_before_ack(store, monkeypatch, "t1", "t2")
     for task in ("t1", "t2"):

@@ -1236,7 +1236,7 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
         early = agent.state == "finished" and (task.get("state") == "done" or _receipt_live(config, runtime, agent))
-        if early is None:
+        if early is None and now_ms - agent.started_at < LEASE_MS:
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
             continue
         if early:
