@@ -129,8 +129,10 @@ stdin dump hook for pull request 4804. The `workdir` the model gave
 
 `normalize_payload` copies that `workdir` into `tool_input` so the hooks that
 read `tool_input.workdir` see the folder the command really runs in: the
-`one-push` gate, the prepush guard and the lifecycle guard that blocks calls
-on a worktree or scratch folder while it is being removed. For
+`one-push` gate, the prepush guard and the lifecycle guard that records the
+agent as a worktree lease holder and blocks calls on a worktree or scratch
+folder while it is being removed (see
+[Lease holders and resumed agents](cli-commands.md#lease-holders-and-resumed-agents)). For
 a `Bash` call with no `workdir` of its own it:
 
 1. Opens the rollout from `transcript_path`, or from `codex_rollout_path()` with

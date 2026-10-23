@@ -819,6 +819,59 @@ remove    pending     0.02 GB  /home/me/dev/worktrees/agentihooks/notes  (clean 
 
 `engineer-0007` is removed by this sweep. `notes` has no lease holder, so it waits for a second sweep an hour later. A worktree still listed as `keep` with `owner session alive` belongs to a running agent: finish that agent's work and run `wt.sh done <name>` from it.
 
+### Lease holders and resumed agents
+
+A worktree lease is `agentihooks-lease.json` in the worktree's git admin directory (`git rev-parse --absolute-git-dir` from inside the worktree); a scratch task dir keeps `.lease.json` at its top. The lease lists up to 8 holders, each the agent process that claimed it:
+
+| Field | Value |
+|---|---|
+| `session_id` | The hook payload's session id: the Claude session or the Codex conversation |
+| `pid` | The nearest parent of the hook process that is `claude` or `codex`, searched at most 32 levels up |
+| `start_time` | That process's start time in clock ticks, field 22 of its `/proc` stat file |
+| `boot_id` | The kernel boot id when the holder was recorded |
+
+`gc` counts a holder alive when its `pid` runs with the same `start_time` in the same boot, or when a Claude session file in `~/.claude/sessions` names the same `sessionId` with a live `pid` and matching `procStart`. Codex writes no such file, so a Codex holder is alive only while its recorded process runs.
+
+On every PreToolUse call the lifecycle guard collects candidate paths from the tool input: `file_path`, `notebook_path`, `path`, `workdir`, and every token in `command` that starts with `/` or `~`. For each managed worktree or scratch task dir those paths fall in, it records the calling agent process as a holder unless that session already has a holder whose process still runs. Holders are keyed by session id, so a new process under the same session replaces the old entry instead of adding one.
+
+This keeps a resumed agent's worktree leased. When an agent exits and resumes the same conversation in a new process (a Codex pane restart, a recovered seat), the lease still names the old `pid`, which is gone. The resumed agent's first tool call that touches the worktree replaces that holder with its live process. A Codex `Bash` call reaches the guard with its folder in `tool_input.workdir`, which `normalize_payload` copies from the rollout when the payload lacks it (see [Codex compatibility](CODEX-COMPAT.md)), so a Codex agent re-claims its worktree even when its commands name no path.
+
+Before pull request #4915 the claim skipped any session already listed in the lease, live or not, and did not read `workdir`. On 19 October a Codex engineer resumed after its pane exited; its lease still held only the process `wt.sh new` recorded, and the hourly sweep removed its clean, pushed worktree as `clean and on a remote, owner left` while its draft pull request waited on checks.
+
+Read a worktree's lease and check each holder against `/proc`:
+
+```bash
+cd ~/dev/worktrees/agentihooks/engineer-0007
+python3 -m json.tool "$(git rev-parse --absolute-git-dir)/agentihooks-lease.json"
+PID=628154                                   # a holder's pid from the lease
+awk '{print $22}' "/proc/$PID/stat"          # must equal that holder's start_time
+cat /proc/sys/kernel/random/boot_id          # must equal its boot_id
+```
+
+```json
+{
+    "kind": "worktree",
+    "created_at": 1792742140.8260634,
+    "holders": [
+        {
+            "session_id": "b0d53d40-38e3-4e82-bca1-1cb83a0d85a0",
+            "pid": 628154,
+            "start_time": 5683458,
+            "boot_id": "64f5efa7-8967-4733-916b-9fcd69669c00"
+        }
+    ]
+}
+```
+
+When `awk` prints `5683458` and the boot ids match, the holder is alive and `agentihooks gc --path <worktree>` lists the worktree as `keep` with `owner session alive`. A missing stat file or another start time means that holder is dead; a worktree whose holders are all dead is removed at the next sweep once it is clean and pushed.
+
+Troubleshooting:
+
+- **A running agent's worktree was removed as `clean and on a remote, owner left`.** Its lease named no live process at the sweep. An agent that resumed and since only waited (a checks wait, an idle pane) made no tool call naming the worktree, so its old holder stayed dead. Any tool call with a path or `workdir` inside the worktree re-claims it; `agentihooks lease <worktree>` run from the agent's shell records it directly.
+- **The lease holds a dead `pid` for a live session.** The agent has not run a tool call inside the worktree since it resumed. Its next such call replaces the entry.
+- **A tool call records no holder.** The hook found no `claude` or `codex` process among its parents, the path lies outside every `worktrees` and `scratch` root, or the worktree has no `.git` file pointing to an admin directory. A relative `workdir` never matches a root. `lifecycle pre-tool failed` in the hook log means the claim raised and the call went through unrecorded.
+- **Finding what removed a worktree.** `~/.agentihooks/gc-last.json` holds every finding of the latest `gc` run with its outcome; the next run overwrites it. `~/.agentihooks/gc-journal.json` lists only removals still in progress. A worktree gone with no finding in the run after it last existed was removed by something else, such as `wt.sh done` from another session.
+
 ### `lifecycle.json`
 
 Every layer is a JSON object with a `roots` list. Each root entry takes:
