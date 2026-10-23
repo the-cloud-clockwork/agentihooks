@@ -153,7 +153,7 @@ def test_a_member_credential_cannot_read_the_replies_of_other_members(signer):
         await nc.subscribe("_INBOX.>")
 
     assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
-        'nats: permissions violation for subscription to "_INBOX.>"'
+        'nats: permissions violation for subscription to "_inbox.>"'
     ]
 
 
@@ -165,7 +165,7 @@ def test_a_member_credential_cannot_change_a_stream(signer, verb):
         await nc.publish(subject, b"{}")
 
     assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
-        f'nats: permissions violation for publish to "{subject}"'
+        f'nats: permissions violation for publish to "{subject.lower()}"'
     ]
 
 
