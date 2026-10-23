@@ -130,10 +130,10 @@ def test_modes_page_names_the_hub_lease_and_durables():
 
 def test_modes_page_maps_each_mode_to_its_engine():
     text = _modes()
-    for mode in ("local", "compose", "distributed"):
-        engine = _row(text, mode)[0]
-        assert "`legacy`" in engine, mode
-        assert f"`{EVENTS_ENGINE}`" in engine, mode
+    for mode, default in (("local", "legacy"), ("compose", "legacy"), ("distributed", EVENTS_ENGINE)):
+        engine = _row(text, mode)[0].strip()
+        assert engine.startswith(f"`{default}`"), mode
+        assert "`legacy`" in engine and f"`{EVENTS_ENGINE}`" in engine, mode
 
 
 def test_modes_page_states_the_chart_hub_on_anton():
