@@ -946,7 +946,7 @@ Check a running unit runner and its node. Pick a pod name from
 `kubectl get pods -n arc-runners-oss -l actions.github.com/scale-set-name=anton-oss`:
 
 ```bash
-pod="$UNIT_RUNNER_POD"
+pod="${UNIT_RUNNER_POD:?set to a unit runner pod name}"
 kubectl get pod "$pod" -n arc-runners-oss -o jsonpath='{.spec.affinity.podAntiAffinity}{"\n"}'
 node=$(kubectl get pod "$pod" -n arc-runners-oss -o jsonpath='{.spec.nodeName}')
 kubectl get pods -A --field-selector "spec.nodeName=$node" \
@@ -979,14 +979,20 @@ while read -r run; do
 done | sort -n | awk '
   { d[NR] = $1; if ($1 > 540) over++ }
   END {
+    if (NR == 0) { print "shards 0"; exit }
     median = NR % 2 ? d[(NR + 1) / 2] : (d[NR / 2] + d[NR / 2 + 1]) / 2
     printf "shards %d median %.0f p90 %d over540 %d share %.3f\n",
       NR, median, d[int(NR * 0.9) + 1], over, over / NR
   }'
 ```
 
-The source task ran the same rule as `measure.sh` in its Doctor task folder;
-that script is task evidence, not an installed command.
+The source task ran the same rule, with the same median and p90 picks, as
+`measure.sh` in its Doctor task folder; that script is task evidence, not an
+installed command. The `created` filter selects runs by creation time while
+the shard rule uses job start time, so a run created shortly before `start`
+can hold shards inside the window. The table used `start` as written; to
+include those shards, move only the `created` lower bound a few hours earlier
+and keep `start` in the filter.
 
 | Symptom | Inspection |
 |---|---|
