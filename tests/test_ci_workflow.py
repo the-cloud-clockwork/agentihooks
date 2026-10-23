@@ -102,6 +102,7 @@ def test_lint_setup_python_caches_pip_keyed_on_pyproject():
     (step,) = _setup_python_steps("lint")
     assert step["with"]["cache"] == "pip"
     assert step["with"]["cache-dependency-path"] == "pyproject.toml"
+    assert step["env"]["SEGMENT_DOWNLOAD_TIMEOUT_MINS"] == "1"
 
 
 def test_unit_setup_python_restores_no_pip_cache():
