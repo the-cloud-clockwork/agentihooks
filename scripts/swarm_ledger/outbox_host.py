@@ -20,6 +20,9 @@ def relay(repository, stopped: threading.Event, config: BusConfig, interval: flo
                 outbox.relay(repository, bus.events)
             except Exception as exc:
                 sys.stderr.write(f"ledger bus relay: {exc}\n")
+                if bus is not None:
+                    bus.close()
+                    bus = None
             stopped.wait(interval)
     finally:
         if bus is not None:

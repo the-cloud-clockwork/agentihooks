@@ -62,17 +62,17 @@ def test_relay_retries_failures_on_the_next_interval_and_closes_its_bus(monkeypa
     stopped = Mock()
     stopped.is_set.side_effect = [False, False, True]
     bus = Mock()
-    opening = Mock(side_effect=[OSError("offline"), bus] if failure == "connect" else [bus])
+    opening = Mock(side_effect=[OSError("offline"), bus] if failure == "connect" else [bus, bus])
     monkeypatch.setattr(factory, "open_bus", opening)
     publish = Mock(side_effect=[OSError("offline"), 1] if failure == "publish" else [1])
     monkeypatch.setattr(outbox_host.outbox, "relay", publish)
     repository = object()
     config = BusConfig(backend="nats", url="nats://bus:4222")
     outbox_host.relay(repository, stopped, config, 0.25)
-    assert opening.call_args_list == [((config,), {})] * (2 if failure == "connect" else 1)
+    assert opening.call_args_list == [((config,), {}), ((config,), {})]
     assert publish.call_args_list == [((repository, bus.events), {})] * (2 if failure == "publish" else 1)
     assert stopped.wait.call_args_list == [((0.25,), {}), ((0.25,), {})]
-    bus.close.assert_called_once_with()
+    assert bus.close.call_args_list == [((), {})] * (2 if failure == "publish" else 1)
     assert capsys.readouterr().err == "ledger bus relay: offline\n"
 
 
@@ -162,3 +162,38 @@ def test_ledger_server_alone_drives_the_outbox_until_shutdown(tmp_path, monkeypa
     assert stopped.is_set()
     server.server_close.assert_called_once_with()
     assert [subject for subject, _ in bus.events.entries] == ["swarm.ledger.phase.p1"]
+
+
+@pytest.mark.wall_clock
+def test_a_disconnected_real_nats_client_is_reopened_and_the_row_reaches_a_consumer(tmp_path, monkeypatch):
+    from scripts.swarm_ledger import outbox_host
+    from tests.events import nats_server
+
+    repository = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
+    opening = factory.open_bus
+    opened = []
+
+    def disconnect_first(config):
+        bus = opening(config)
+        if not opened:
+            bus.close()
+        opened.append(bus)
+        return bus
+
+    with nats_server.running(tmp_path / "jetstream") as url:
+        monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+        monkeypatch.setenv("AGENTIHOOKS_BUS_URL", url)
+        observer = opening(BusConfig(backend="nats", url=url))
+        try:
+            consumer = observer.events.consumer("host-proof", "swarm.>")
+            monkeypatch.setattr(factory, "open_bus", disconnect_first)
+            with outbox_host.running(repository, interval=0.01):
+                repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]})
+                deliveries = consumer.fetch(1, 3_000)
+                assert [(delivery.event.entity, delivery.event.key) for delivery in deliveries] == [("phase", "p1")]
+            assert len(opened) == 2
+            assert all(bus._loop.closed for bus in opened)
+            with repository.connect() as connection:
+                assert connection.execute("SELECT COUNT(*) FROM outbox_sent").fetchone() == (1,)
+        finally:
+            observer.close()
