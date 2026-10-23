@@ -152,7 +152,9 @@ def test_hive_list_lists_each_live_local_agent_once_and_only_on_its_own_hive(sto
     plain = local(store, "eng-0")
     finished = local(store, "eng-1", state="finished")
     remote = local(store, "eng-2", runtime_target={"host_id": "old"})
-    pod = local(store, "eng-3", runtime_backend="kubernetes")
+    pod = local(
+        store, "eng-3", runtime_backend="kubernetes", runtime_target={"pod_namespace": "swarm", "pod_name": "eng-3"}
+    )
     reported = running(store, "eng-9", "worker")
     join_report.start(store.redis, "sw", reported, "session", checks(), {}, 1000)
     live = Herdr({agent.name for agent in (plain, finished, remote, pod, reported)})

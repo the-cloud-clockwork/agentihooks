@@ -272,6 +272,7 @@ def _list() -> None:
 
     now = now_ms()
     redis = redis_client()
+    local = _local_agents(redis)
     for record in registry.hives(redis):
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
@@ -281,6 +282,33 @@ def _list() -> None:
         )
         for report in join_report.live(redis, record["id"]):
             print("  " + join_report.summary(report))
+        for name in local.get(record["id"], []):
+            print(f"  {name}\tlocal")
+
+
+def _local_agents(redis: "Redis") -> dict[str, list[str]]:
+    from scripts.hive import join_report, reports
+    from scripts.swarm import runtime, status
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(redis)
+    candidates = [
+        agent
+        for slug in store.slugs()
+        for agent in store.agents(slug)
+        if agent.runtime_backend == "local"
+        and agent.state not in join_report.ENDED
+        and not reports.host(agent)
+        and not join_report.read(redis, agent)
+    ]
+    if not candidates:
+        return {}
+    names = runtime.HerdrRuntime().live_names()
+    found: dict[str, list[str]] = {}
+    for agent in candidates:
+        if agent.name in names:
+            found.setdefault(status.agent_hive(agent), []).append(agent.name)
+    return found
 
 
 def _registry(args: argparse.Namespace) -> None:
