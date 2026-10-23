@@ -29,7 +29,7 @@ def test_durable_receipt_waits_for_session_confirmation(state):
 
 
 @pytest.mark.parametrize("session", ["", "predecessor"])
-def test_durable_receipt_does_not_accept_another_sessions_confirmation(session):
+def test_a_successor_settles_already_confirmed_work(session):
     bus = memory.open_bus(BusConfig())
     store = Items()
     store.add("work", "confirmed")
@@ -37,8 +37,8 @@ def test_durable_receipt_does_not_accept_another_sessions_confirmation(session):
     feed = SeatFeed(lambda: bus, store, "bob", "receiver", seat=lambda: SEAT)
     SeatInbox(bus, SLUG).send(SEAT, Message("work", "alice", "hello"))
     assert feed.wait(0)
-    assert feed.settle() == []
-    assert set(feed.held) == {"work"}
+    assert feed.settle() == ["work"]
+    assert feed.held == {}
 
 
 def test_codex_acceptance_retains_the_bus_receipt_until_its_thread_confirms(recovery_deadline):
@@ -118,6 +118,25 @@ def test_successor_receives_the_same_id_and_predecessor_cannot_acknowledge_it():
     store.items["work"] = replace(store.get("work"), state="confirmed", delivery_session="new-session")
     assert old.settle() == []
     assert new.settle() == ["work"]
+
+
+def test_successor_settles_confirmation_persisted_before_the_predecessor_crashed():
+    clock = [0]
+    bus = memory.open_bus(BusConfig(), clock=lambda: clock[0])
+    store = Items()
+    store.add("work", "delivered")
+    store.items["work"] = replace(store.get("work"), delivery_session="old-session")
+    old = SeatFeed(lambda: bus, store, "bob", "old-session", seat=lambda: SEAT)
+    SeatInbox(bus, SLUG).send(SEAT, Message("work", "alice", "hello"))
+    assert old.wait(0)
+    store.items["work"] = replace(store.get("work"), state="confirmed")
+    clock[0] += 60_000
+    new = SeatFeed(lambda: bus, store, "bob", "new-session", seat=lambda: SEAT)
+    assert new.wait(0)
+    assert old.settle() == []
+    assert new.settle() == ["work"]
+    clock[0] += 60_000
+    assert SeatInbox(bus, SLUG).consumer(SEAT, "later-session").fetch(5, 0) == []
 
 
 def test_codex_unconfirmed_retry_is_not_closed_by_reference_dedup(recovery_deadline):
