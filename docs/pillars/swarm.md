@@ -1399,6 +1399,69 @@ fix ([red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs
 the corrected publication and continuation cases passed afterward
 ([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38725568065)).
 
+### Repositories recorded on another host
+
+A task's `repositories` list and its `repository_branches` keys hold absolute
+paths written on whichever host prepared the task, such as
+`/home/me/dev/agentihooks-bundle` on the workstation. When a successor runs on a
+hive whose clones live under `/srv/repos`, `prepare` and `publish` resolve each
+entry to the checkout on the host they run on:
+
+1. A recorded path that is a directory here is used as is (its primary
+   checkout when the path is a worktree).
+2. Otherwise the entry is matched by repository name: the last segment of the
+   path, URL or `host/owner/name` form, without `.git`, compared without case.
+   The candidates are the primary checkouts beside the swarm repository (the
+   other children of its parent folder) and the checkouts the hive scans under
+   `HIVE_REPO_ROOT`, default `~/dev` (see
+   [Repos and checkouts](hives.md#repos-and-checkouts)). Worktrees are not
+   candidates; a match is reduced to its primary checkout.
+3. Exactly one checkout must match. None, or several distinct checkouts with
+   the same name, is refused before any worktree is created:
+
+```text
+repository /home/me/dev/agentihooks-bundle has 0 checkouts named agentihooks-bundle on this host
+```
+
+Clone the repository under `HIVE_REPO_ROOT` or beside the swarm repository,
+or remove the duplicate clone, then repeat the command.
+
+The same name match applies to the rest of the task record:
+
+| Record | Behaviour on another host |
+|---|---|
+| `repositories` entry | Resolved by the steps above. `prepare` creates or reuses a worktree in the resolved checkout. |
+| `repository_branches` key | The key for this host's checkout path wins. Without one, a key from another host with the same repository name supplies the continuation branch, so the successor continues the predecessor's branch instead of cutting a new one. |
+| `publish` from a task worktree | The worktree's repository is accepted when its name matches any declared entry, so a declared repository not cloned on this host does not block publishing another one that is. |
+| `publish` from a primary checkout | The sole declared repository is resolved by the steps above. |
+
+After a successful `prepare` or `publish`, `repository_branches` also gains a
+key for this host's path; the other host's key stays.
+
+Example: the task was prepared on the workstation, and a hive with clones under
+`/srv/repos` continues it.
+
+```bash
+# The task records, written on the workstation:
+#   "repositories": ["/home/me/dev/agentihooks-bundle"]
+#   "repository_branches": {"/home/me/dev/agentihooks-bundle": "engineer-a"}
+
+HIVE_REPO_ROOT=/srv/repos agentihooks swarm <id> prepare
+# worktree in /srv/repos/agentihooks-bundle, continuing branch engineer-a
+```
+
+No flag or setting enables this; `HIVE_REPO_ROOT` only widens the search. The
+pushed branch lookup in `swarm block` keeps its own fallback to the launch
+checkout for a repository missing here.
+
+Delivered in [pull request 5834](https://github.com/the-cloud-clockwork/agentihooks/pull/5834).
+The [red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39758053089)
+failed with `FileNotFoundError` on a path recorded on another host; the
+[green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39758056823)
+covers sibling and `HIVE_REPO_ROOT` lookup, a recorded path present here, an
+uncloned declared repository, foreign branch records, and zero or duplicate
+matches. Tests: `tests/swarm/test_publish_repositories.py`.
+
 ### Publishing unchanged files
 
 Repeating `swarm publish` after a successful publication avoids an unnecessary
