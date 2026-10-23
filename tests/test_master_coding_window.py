@@ -15,6 +15,32 @@ def master(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.mark.parametrize("signal", ["deny-master-coding", "disallow-master-coding"])
+def test_the_window_lasts_until_typed_denial(master, monkeypatch, signal):
+    assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
+    monkeypatch.setattr(master_coding.time, "time", lambda: 100000)
+    assert master_coding.is_open(SID)
+    assert master_coding.observe(SID, signal, typed=False) == ""
+    assert master_coding.is_open(SID)
+    assert master_coding.observe(SID, signal, typed=True) == "closed"
+    assert not master_coding.is_open(SID)
+
+
+@pytest.mark.parametrize("source", ["startup", "resume", "clear", "compact", None, "unknown"])
+def test_session_start_revokes_the_window_except_during_compaction(master, monkeypatch, source):
+    from hooks import hook_manager
+
+    def stop():
+        raise RuntimeError("session event reached")
+
+    master_coding.observe(SID, "allow-master-coding", typed=True)
+    monkeypatch.setattr(hook_manager, "_inject_refocus", lambda *args: None)
+    monkeypatch.setattr("hooks.lifecycle.guard.session_event", stop)
+    with pytest.raises(RuntimeError, match="^session event reached$"):
+        hook_manager.on_session_start({"session_id": SID, "source": source})
+    assert master_coding.is_open(SID) is (source == "compact")
+
+
 def test_reopening_an_open_window_refreshes_it(master):
     assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
     assert master_coding.observe(SID, "allow-master-coding", typed=True, now=2000) == "open"
