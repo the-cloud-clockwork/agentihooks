@@ -171,7 +171,7 @@ def test_the_bus_logs_queues_dead_letters_and_keeps_state_under_a_member_credent
     )
     try:
         assert bus.events.publish(subject("s1", "task", "claimed"), event)
-        [logged] = bus.events.consumer("member", subject("s1", ">")).fetch(1, 5_000)
+        [logged] = bus.events.consumer("member", "swarm.s1.>").fetch(1, 5_000)
         logged.ack()
         queue = bus.queue("member", policy)
         assert queue.offer(event)
