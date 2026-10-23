@@ -73,3 +73,66 @@ def test_refusal_names_an_unknown_type_a_wrong_entity_missing_fields_and_data_on
         "phase.changed data lacks description done"
     )
     assert catalogue.refusal(event("phase.removed", "phase", {"id": "p1"})) == "phase.removed carries no data"
+
+
+LEGACY = {
+    "title": "Old",
+    "phases": [{"id": "p1", "title": "One", "planning": "auto"}],
+    "tasks": [{"id": "t1", "title": "first", "state": "claimed", "kind": "ops"}, {"id": "t2"}],
+    "_meta": {"rev": 3},
+}
+
+
+def test_import_fills_every_missing_catalogue_field_so_each_outbox_event_passes_the_catalogue(tmp_path):
+    repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
+    repo.import_document("ledger", LEGACY)
+    events = written(repo)
+    assert sorted((item.type, item.key) for item in events) == [
+        ("phase.changed", "p1"),
+        ("task.changed", "t1"),
+        ("task.changed", "t2"),
+    ]
+    assert [catalogue.refusal(item) for item in events] == [None, None, None]
+    stored = repo.export_document("ledger")
+    assert stored["tasks"] == [
+        {
+            "id": "t1",
+            "title": "first",
+            "state": "claimed",
+            "kind": "ops",
+            "description": "",
+            "phase": "",
+            "lane": "eng",
+            "claimed_by": "",
+            "issue_url": "",
+            "pr_url": "",
+            "done": False,
+        },
+        {
+            "id": "t2",
+            "title": "",
+            "description": "",
+            "phase": "",
+            "lane": "eng",
+            "state": "open",
+            "claimed_by": "",
+            "issue_url": "",
+            "pr_url": "",
+            "done": False,
+        },
+    ]
+    assert stored["phases"] == [{"id": "p1", "title": "One", "planning": "auto", "description": "", "done": False}]
+    assert LEGACY["tasks"][1] == {"id": "t2"}
+
+
+def test_filled_keeps_present_values_and_leaves_other_collections_and_non_items_alone():
+    task = {"id": "t1", "title": "kept", "lane": "ci", "state": "done", "done": True, "pr_url": "u"}
+    state = {"tasks": [task, "loose"], "phases": "none", "chat": [{"id": "m1"}]}
+    assert catalogue.filled(state) == {
+        "tasks": [{**catalogue.TASK_DEFAULTS, **task}, "loose"],
+        "phases": "none",
+        "chat": [{"id": "m1"}],
+    }
+    assert catalogue.filled({"title": "Bare"}) == {"title": "Bare"}
+    assert catalogue.TASK_FIELDS == frozenset(("id", *catalogue.TASK_DEFAULTS))
+    assert catalogue.PHASE_FIELDS == frozenset(("id", *catalogue.PHASE_DEFAULTS))
