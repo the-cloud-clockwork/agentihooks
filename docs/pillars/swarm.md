@@ -1903,22 +1903,12 @@ hand.
 
 #### Checking a silent red run
 
-When a red dev push run files no fixer while its alert is open, compare the held causes with the task states. Read the
-record with the swarm's own Redis connection: on this machine the hooks Redis client has returned empty keys for swarm
-records.
+When a red dev push run files no fixer while its alert is open, compare the held causes with the task states:
 
 ```bash
 SLUG="<swarm id>"
-cd ~/dev/tcc-ecosystem/agentihooks
-~/dev/tcc-ecosystem/.venv/bin/python - "$SLUG" <<'PY'
-import sys
-
-from scripts.swarm import promotion_watch, store
-
-held = store.connect().redis.hgetall(promotion_watch.key(sys.argv[1], "jobs"))
-for task_id, cause in sorted(held.items()):
-    print(task_id, cause, sep="\t")
-PY
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli HGETALL "$P:swarm:$SLUG:promotion:jobs"   # task id, then its held cause
 agentihooks ledger --slug "$SLUG" show | jq -r '.tasks[] | select(.id | startswith("promo-")) | [.id, .state] | @tsv'
 ```
 
