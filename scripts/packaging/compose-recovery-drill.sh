@@ -223,11 +223,9 @@ volume 'find /data -mindepth 1 -delete && tar -C /data -xf /backup/jetstream.tar
 up nats
 printf 'JetStream restored from the backup, losing every write after it\n'
 
-hub
-printf 'hive took after the restore: %s\n' "$(drill take 2)"
-printf 'agents died after the restore: %s\n' "$(drill die t2 t3)"
+printf 'agents died while JetStream was restored: %s\n' "$(drill die t2 t3)"
 settle '"t2": {"ledger": "open"' '"t3": {"ledger": "open"'
-printf 'hive relaunched the reopened tasks: %s\n' "$(drill take 2)"
+printf 'hive took the open and reopened tasks: %s\n' "$(drill take 4)"
 printf 'done after the restore: %s\n' "$(drill done t2 t3 t4 t5)"
 want='{"tasks": {"t1": {"ledger": "done", "claim": null, "launches": 1}, "t2": {"ledger": "done", "claim": null, "launches": 2}, '
 want+='"t3": {"ledger": "done", "claim": null, "launches": 2}, "t4": {"ledger": "done", "claim": null, "launches": 1}, '
