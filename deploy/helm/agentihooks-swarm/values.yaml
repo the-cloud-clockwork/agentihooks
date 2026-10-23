@@ -220,7 +220,7 @@ hub:
       memory: 512Mi
       ephemeral-storage: 256Mi
 
-# The official NATS chart, the swarm event bus. Set enabled false and hub.bus.url to use an external NATS.
+# Set enabled false and hub.bus.url to use an external NATS.
 nats:
   enabled: true
   config:

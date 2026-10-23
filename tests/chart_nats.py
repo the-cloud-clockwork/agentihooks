@@ -16,7 +16,7 @@ def documents(text: str) -> list[dict]:
 
 
 def nats(docs: list[dict]) -> list[dict]:
-    return [d for d in docs if d["metadata"].get("labels", {}).get("app.kubernetes.io/name") == "nats"]
+    return [d for d in docs if d["metadata"].get("labels", {}).get("helm.sh/chart", "").startswith("nats-")]
 
 
 def bus_url(docs: list[dict]) -> str | None:
@@ -27,8 +27,8 @@ def bus_url(docs: list[dict]) -> str | None:
     return None
 
 
-def bundled_problems(chart: str, release: str) -> list[str]:
-    result = render(chart, release, *HUB)
+def bundled_problems(chart: str, release: str, service: str, *extra: str) -> list[str]:
+    result = render(chart, release, *HUB, *extra)
     if result.returncode:
         return [f"release {release} with the bundled NATS fails to render: {result.stderr.strip()}"]
     docs = nats(documents(result.stdout))
@@ -36,16 +36,23 @@ def bundled_problems(chart: str, release: str) -> list[str]:
     if not any(d["kind"] == "StatefulSet" for d in docs):
         found.append(f"release {release} renders no NATS StatefulSet by default")
     services = {d["metadata"]["name"] for d in docs if d["kind"] == "Service"}
+    if service not in services:
+        found.append(f"release {release} renders NATS Services {sorted(services)}, expected {service}")
     url = bus_url(documents(result.stdout))
-    if url not in {f"nats://{name}:4222" for name in services}:
-        found.append(f"release {release} points the hub at {url}, not a bundled NATS Service among {sorted(services)}")
-    if "jetstream" not in result.stdout:
+    if url != f"nats://{service}:4222":
+        found.append(f"release {release} points the hub at {url}, expected nats://{service}:4222")
+    if not any(d["kind"] == "ConfigMap" and "jetstream" in str(d.get("data")) for d in docs):
         found.append(f"release {release} renders the bundled NATS without JetStream")
     return found
 
 
 def problems(chart: str) -> list[str]:
-    found = bundled_problems(chart, "swarm") + bundled_problems(chart, "nats")
+    found = [
+        *bundled_problems(chart, "swarm", "swarm-nats"),
+        *bundled_problems(chart, "nats", "nats"),
+        *bundled_problems(chart, "swarm", "swarm-bus", "--set", "nats.nameOverride=bus"),
+        *bundled_problems(chart, "swarm", "bus", "--set", "nats.fullnameOverride=bus"),
+    ]
     external = render(chart, "swarm", *HUB, *EXTERNAL)
     if external.returncode:
         return [*found, f"an external NATS fails to render: {external.stderr.strip()}"]
