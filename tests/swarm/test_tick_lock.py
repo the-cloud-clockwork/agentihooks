@@ -198,6 +198,113 @@ def test_read_strips_a_file_and_reads_a_missing_one_as_empty(tmp_path):
     assert controller._read(str(tmp_path / "missing")) == ""
 
 
+OWN_POD = {
+    "AGENTIHOOKS_POD_NAMESPACE": "swarm",
+    "AGENTIHOOKS_POD_NAME": "controller-new",
+    "AGENTIHOOKS_POD_UID": "uid-new",
+}
+OLD_POD = {"namespace": "swarm", "name": "controller-old", "uid": "uid-old"}
+
+
+@pytest.fixture
+def replaced_pod(monkeypatch, locked_store):
+    from scripts.swarm_v2.kubernetes import client
+
+    store, held = locked_store
+    reads = []
+    answer = {"pod": None}
+
+    def read_pod(self, name):
+        reads.append((self.namespace, name))
+        if isinstance(answer["pod"], Exception):
+            raise answer["pod"]
+        return answer["pod"]
+
+    for name, value in OWN_POD.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(controller, "_host", lambda: "boot:pid:[new]")
+    monkeypatch.setattr(client.KubeHttp, "in_cluster", classmethod(lambda cls, environ: object()))
+    monkeypatch.setattr(client.PodClient, "read_pod", read_pod)
+
+    def lock(pod):
+        raw = json.dumps(
+            {"epoch": held.epoch, "token": "old", "host": "boot:pid:[old]", "pid": 1, "start": "9", "pod": pod}
+        )
+        store.redis.set(store.key("sw", "tick-lock"), raw, px=600_000)
+        return raw
+
+    return store, held, answer, reads, lock
+
+
+@pytest.mark.parametrize(
+    "pod",
+    [
+        None,
+        {"metadata": {"uid": "uid-other"}, "status": {"phase": "Running"}},
+        {"metadata": {"uid": "uid-old"}, "status": {"phase": "Failed"}},
+        {"metadata": {"uid": "uid-old"}, "status": {"phase": "Succeeded"}},
+    ],
+)
+def test_a_lock_held_by_a_replaced_pod_is_recovered_at_once(replaced_pod, pod):
+    store, held, answer, reads, lock = replaced_pod
+    answer["pod"] = pod
+    lock(OLD_POD)
+    token = controller.take_tick_lock(store, "sw", held, 600_000)
+    assert token is not None
+    assert store.redis.get(store.key("sw", "tick-lock")) == token
+    assert json.loads(token)["pod"] == {"namespace": "swarm", "name": "controller-new", "uid": "uid-new"}
+    assert reads == [("swarm", "controller-old")]
+
+
+def test_a_lock_from_an_earlier_container_of_this_pod_is_recovered_without_asking(replaced_pod):
+    store, held, answer, reads, lock = replaced_pod
+    lock({"namespace": "swarm", "name": "controller-new", "uid": "uid-new"})
+    assert controller.take_tick_lock(store, "sw", held, 600_000) is not None
+    assert reads == []
+
+
+@pytest.mark.parametrize(
+    "pod",
+    [
+        {"metadata": {"uid": "uid-old"}, "status": {"phase": "Running"}},
+        {"metadata": {"uid": "uid-old"}, "status": {"phase": "Pending"}},
+        {"metadata": {"uid": "uid-old"}},
+        ConnectionError("API server answered 503"),
+        PermissionError("forbidden"),
+    ],
+)
+def test_a_live_holder_in_another_namespace_keeps_its_lock(replaced_pod, pod):
+    from scripts.swarm_v2.kubernetes.client import ApiRefused
+
+    store, held, answer, reads, lock = replaced_pod
+    answer["pod"] = ApiRefused(403, "Forbidden") if isinstance(pod, PermissionError) else pod
+    original = lock({"namespace": "other", "name": "controller-old", "uid": "uid-old"})
+    assert controller.take_tick_lock(store, "sw", held, 600_000) is None
+    assert store.redis.get(store.key("sw", "tick-lock")) == original
+    assert reads == [("other", "controller-old")]
+
+
+@pytest.mark.parametrize(
+    "pod",
+    [{}, {"namespace": "swarm", "name": "controller-old"}, {"namespace": "swarm", "name": "", "uid": "u"}, "pod", None],
+)
+def test_a_holder_without_a_full_pod_identity_is_not_judged_by_its_pod(replaced_pod, pod):
+    store, held, answer, reads, lock = replaced_pod
+    original = lock(pod)
+    assert controller.take_tick_lock(store, "sw", held, 600_000) is None
+    assert store.redis.get(store.key("sw", "tick-lock")) == original
+    assert reads == []
+
+
+def test_a_recovering_process_outside_a_pod_never_judges_a_pod_holder(replaced_pod, monkeypatch):
+    store, held, answer, reads, lock = replaced_pod
+    monkeypatch.delenv("AGENTIHOOKS_POD_UID")
+    original = lock(OLD_POD)
+    assert controller.take_tick_lock(store, "sw", held, 600_000) is None
+    assert store.redis.get(store.key("sw", "tick-lock")) == original
+    assert reads == []
+
+
 @pytest.mark.parametrize(
     ("machine", "lock", "dead"),
     [
