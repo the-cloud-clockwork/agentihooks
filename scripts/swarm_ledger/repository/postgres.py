@@ -54,6 +54,7 @@ REFUSAL_REASON = ", the oldest the shared database allows; update its code and r
 REFUSED_LOCK = 0x4C574652
 REFUSED_SHIFT = 65536
 FLOOR_SCHEMA = "CREATE TABLE IF NOT EXISTS writer_floor (name TEXT PRIMARY KEY, version INTEGER NOT NULL);\n"
+OUTBOX_SCHEMA = "ALTER TABLE outbox_sent ADD COLUMN IF NOT EXISTS sent_at INTEGER NOT NULL DEFAULT 0;\n"
 RAISE_FLOOR = (
     "INSERT INTO writer_floor VALUES ('ledger', ?) ON CONFLICT (name)"
     " DO UPDATE SET version = GREATEST(writer_floor.version, EXCLUDED.version)"
@@ -305,7 +306,9 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
             with connection:
                 connection.execute(BEGIN_IMMEDIATE)
                 connection.execute(SCHEMA_STATEMENTS_UNTIMED)
-                connection.executescript(SCHEMA + hierarchy.SCHEMA + ROWS_SCHEMA + refresh.SCHEMA + FLOOR_SCHEMA)
+                connection.executescript(
+                    SCHEMA + OUTBOX_SCHEMA + hierarchy.SCHEMA + ROWS_SCHEMA + refresh.SCHEMA + FLOOR_SCHEMA
+                )
                 connection.execute(RAISE_FLOOR, (REQUIRED,))
                 connection.execute(GUARD)
                 connection.execute(GUARD_TRIGGER)
