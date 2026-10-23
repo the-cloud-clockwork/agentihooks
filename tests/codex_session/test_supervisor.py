@@ -894,6 +894,7 @@ def test_an_opening_turn_ended_on_capacity_is_started_once_more(store, server, c
     opening = [started_turn, item("userMessage"), item("hookPrompt"), completed("failed", CAPACITY)]
     server.turn_events = [opening, [item("reasoning")]]
     spec, report = reported_spec(store, server, tmp_path)
+    clock.now = 100.0
 
     started = supervisor.launch(store, spec, deps(server, clock, root))
 
@@ -901,6 +902,7 @@ def test_an_opening_turn_ended_on_capacity_is_started_once_more(store, server, c
     assert server.params("turn/start") == [opening, opening]
     assert (started.record.state, started.record.active_turn_id) == (CONNECTED, "turn-opening")
     assert json.loads(report.read_text())["state"] == "pending"
+    assert set(server.polls) == {supervisor.OPENING_WATCH_S}
 
 
 def test_a_second_capacity_error_fails_the_launch_naming_it(store, server, clock, root, tmp_path):

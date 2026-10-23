@@ -65,6 +65,7 @@ class Connection:
         self.events = []
 
     def poll(self, timeout):
+        self.server.polls.append(timeout)
         if timeout <= 0 or not self.events:
             return False
         self.listener(self.events.pop(0))
@@ -112,6 +113,7 @@ class Server:
         self.refuse = set()
         self.lose = set()
         self.turn_events = []
+        self.polls = []
         self.answers = True
         self.exits = False
         self.server_start = SERVER_START
