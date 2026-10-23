@@ -221,7 +221,7 @@ python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inp
 | Setting | Value | Where it comes from |
 |---|---|---|
 | `MAX_SHARDS` | 30 | The `maxRunners` of the antoncore `anton-oss-queue` scale set, less the queue tier jobs that run during the unit stage (none today) |
-| `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import |
+| `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import; see [Step timeout limits](#step-timeout-limits) |
 | Half step timeout | 360 s | The target a plan must predict under |
 | `SLOWDOWN` | 1.15 | Factor applied to the predicted slowest shard, calibrated from recorded queue runs |
 | `STARTUP_SECONDS` | 30 | Added to every shard's prediction |
@@ -325,6 +325,103 @@ The queue pool changed after the finding: antoncore pull request [1036](https://
 ### Delivery evidence
 
 Delivered by pull request [4803](https://github.com/the-cloud-clockwork/agentihooks/pull/4803) for issue [4801](https://github.com/the-cloud-clockwork/agentihooks/issues/4801), which lowered `MAX_SHARDS` from 40 to 30. Before: merge group run [39249741419](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39249741419) planned 40 unit shards on the 30 runner pool, 10 waited for a second wave with runner waits up to 346 s, and the queue tier took 948 s. After: the first successful merge group run started after the merge, [39269601765](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39269601765), ran 30 unit shards in one wave, all started within 63 s, with a 308 s unit stage and a 574 s tier wall. Runner wait was median 29 s and worst 82 s; 8 of 30 shards still waited over 30 s, which overlapping merge groups explain. Later changes on the same planner balanced capped shards by predicted slowest shard ([4884](https://github.com/the-cloud-clockwork/agentihooks/pull/4884)), read the step timeout from the workflow ([5043](https://github.com/the-cloud-clockwork/agentihooks/pull/5043)), dropped Python 3.11 from CI ([5327](https://github.com/the-cloud-clockwork/agentihooks/pull/5327)) and calibrated `SLOWDOWN` ([5659](https://github.com/the-cloud-clockwork/agentihooks/pull/5659)).
+
+## Step timeout limits
+
+The queue shard planner and the shard budget grade shards against the time their test step may run. Both read that time from one source, the `timeout-minutes` of the step in `.github/workflows/test.yml`, so a timeout change in the workflow moves the planner target and the budget in the same commit.
+
+| Reader | Job | Step | Timeout today | Limit it sets |
+|---|---|---|---|---|
+| `tests.queue_shards` (`STEP_SECONDS`) | `unit` | `Run tests` | 12 minutes | 720 s; a queue plan must predict its slowest shard under half of it, 360 s |
+| `tests.shard_budget`, a unit shard | `unit` | `Run tests` | 12 minutes | 720 s of elapsed test step time |
+| `tests.shard_budget`, a selected leg | `unit-selected` | `Run the selected tests` | 7 minutes | 420 s of elapsed test step time |
+
+### How a limit is read
+
+`step_seconds(job)` in `tests/shard_budget.py` maps the job to its step name (`STEPS`: `unit` to `Run tests`, `unit-selected` to `Run the selected tests`), takes the workflow text from that job's header on, finds the first step of that name after it, keeps that step's text up to the next step, and returns the step's `timeout-minutes` times 60. A `timeout-minutes` line of a later step is never read. `tests.queue_shards` imports it and sets `STEP_SECONDS = step_seconds("unit")` when the module loads, so the planner needs no YAML library.
+
+The reader expects the plain form the workflow uses today:
+
+```yaml
+  unit:
+    steps:
+      - name: Run tests
+        timeout-minutes: 12
+```
+
+A renamed job or step, a step without `timeout-minutes`, or a timeout written as an expression stops the read with a Python error: `IndexError: list index out of range` when the job or step name is not found, `TypeError: 'NoneType' object is not subscriptable` when the step holds no integer `timeout-minutes` line. For the planner that error happens at import, so the merge group `split` job fails before it plans. Rename the step and its entry in `STEPS` in the same pull request.
+
+### Elapsed time records
+
+Both test steps time pytest with the shell's `SECONDS` and write `elapsed.json` next to `durations.json`, keeping pytest's exit status, so a failed shard still records its time:
+
+| Job | `elapsed.json` | Uploaded in |
+|---|---|---|
+| `unit` | `{"seconds": <n>}` | `durations-<python>-<shard>`, with `durations.json` and `durations.sha256` |
+| `unit-selected` | `{"seconds": <n>, "job": "unit-selected"}` | `durations-<python>-<leg>`, with `durations.json` |
+
+The budget grades each shard on its `elapsed.json` seconds and picks the step from its `job` field, `unit` when the field is absent. A folder with `durations.json` and no `elapsed.json` is graded on the sum of its test durations against the `Run tests` limit.
+
+### Running the shard budget
+
+`shard-check` runs it as its last step, `Check every shard's test time fits the Run tests deadline`, on every event except `merge_group`, over every downloaded `durations-3.12-*` artifact:
+
+```bash
+python -m tests.shard_budget $REPORT shard-durations/*/durations.json
+```
+
+| Event | `REPORT` | A shard over its limit |
+|---|---|---|
+| `push` to `dev` | `--report` | `::warning::`, the step stays green |
+| Full scope pull request, dispatch | empty | `::error::`, `shard-check` fails |
+| `merge_group` | step skipped | Not graded; shard budgets never hold the queue |
+
+A shard folder that holds no `durations.json` fails the step in both modes: `::error::No shard durations at <paths>, so those shards cannot be graded.`
+
+`unit-selected` runs only on pull requests of `selected` scope, and `shard-check` runs on pull requests only at `full` scope, so the workflow never grades a selected leg today. The selected limit applies when a selected leg's artifact is graded by hand. Download it and run the command from a checkout of the same workflow:
+
+```bash
+run="<pull request Tests run id>"
+gh run download "$run" --pattern 'durations-3.12-*' --dir shard-durations
+python -m tests.shard_budget shard-durations/*/durations.json
+```
+
+The first line names the slowest shard and the limit of its own step; one line per shard follows, slowest first:
+
+```text
+2 shards, slowest 431.0 s of test time against the 7 minute Run the selected tests deadline of 420 s
+durations-3.12-1 431.0 s over budget
+durations-3.12-2 120.0 s
+::error::1 of 2 shards passed the 420 s budget.
+```
+
+When shards over budget have different limits, the last line joins them, for example `passed the 420 or 720 s budget`. `--budget <seconds>` replaces every step limit with one number, and the first line then reads `against a budget of <seconds> s`.
+
+### Tests that pin the limits
+
+| Test | Pins |
+|---|---|
+| `test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout` in `tests/test_queue_shards.py` | `STEP_SECONDS` equals the `Run tests` timeout |
+| `test_the_default_budget_is_the_run_tests_step_deadline` in `tests/test_shard_budget.py` | A unit shard is graded against the `Run tests` timeout |
+| `test_a_selected_leg_is_graded_against_the_selected_tests_step_deadline` in `tests/test_shard_budget.py` | A leg whose `elapsed.json` names `unit-selected` is graded against the `Run the selected tests` timeout |
+| `test_selected_legs_record_elapsed_time_and_their_job_and_preserve_pytest_status` in `tests/test_ci_workflow.py` | The selected step writes `elapsed.json` with its job and keeps pytest's exit status |
+| `test_unit_step_records_elapsed_time_and_preserves_pytest_status` in `tests/test_ci_workflow.py` | The unit step writes `elapsed.json` and keeps pytest's exit status |
+
+### Troubleshooting step timeout limits
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `split` fails with `IndexError: list index out of range` from `step_seconds` | The `unit` job or its `Run tests` step was renamed | Update `STEPS` in `tests/shard_budget.py` with the new name |
+| `TypeError: 'NoneType' object is not subscriptable` from `step_seconds` | The step's `timeout-minutes` was removed or written as an expression | Keep a plain integer `timeout-minutes` on the step |
+| The queue plans more shards than the step timeout needs | An older planner with a fixed timeout; before pull request 5043 it assumed 420 s while the step allowed 720 s | Merge `origin/dev`; the `split` log prints `of 360s` while the timeout is 12 minutes |
+| A selected leg passes 420 s and nothing turns red | `shard-check` never runs beside `unit-selected` | Grade the leg's artifact by hand as above |
+| `KeyError` from `tests.shard_budget` | An `elapsed.json` names a job other than `unit` or `unit-selected` | Add the job and its step to `STEPS` |
+
+### Delivery evidence
+
+Delivered by pull request [5043](https://github.com/the-cloud-clockwork/agentihooks/pull/5043) for issue [5041](https://github.com/the-cloud-clockwork/agentihooks/issues/5041). Before it, the planner held a fixed 420 s timeout while `Run tests` stopped at 720 s, and the budget graded every shard, selected legs included, against a fixed twelve minutes of summed test time, though `Run the selected tests` stops at seven minutes and recorded no elapsed time. Red: Tests run [39357706899](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39357706899), on the test only commit, failed exactly the six new or changed tests. Green: Tests run [39358460209](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39358460209).
+
+Measured over completed merge group Tests runs, counting Python 3.12 unit shards per group and the slowest `Run tests` step: the last ten groups before the merge ran 20 shards each, slowest 388 s; the ten groups after 06:01 UTC on 20 October ran a mean of 13.3 shards (13 or 14), slowest 305 s, and no shard reached 720 s. Calibrating `SLOWDOWN` from 1.5 to 1.15 in pull request [5659](https://github.com/the-cloud-clockwork/agentihooks/pull/5659) later changed the plan again.
 
 ## Grouped test files in the unit shard planner
 
