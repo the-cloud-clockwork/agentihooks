@@ -108,10 +108,12 @@ def _wake_inputs(inbox, slug, items, names, config, marks):
 
 
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
-    return [
+    return maintenance(inbox, slug, agents, now_ms, window) + [
         action
         for world in inbox.worlds()
-        for action in _wake_world(world, slug, agents, herdr, ledger, _Clock(now_ms, window, quiet))
+        for action in _wake_world(
+            world, slug, agents, herdr, ledger, _Clock(now_ms, window, quiet), _ladder(world, slug)
+        )
     ]
 
 
@@ -125,7 +127,7 @@ def maintenance(inbox, slug, agents, now_ms, window):
 
 
 def wake_item(inbox, slug, agents, herdr, ledger, item, clock):
-    return _wake_world(inbox, slug, agents, herdr, ledger, clock, [item])
+    return _wake_world(inbox, slug, agents, herdr, ledger, clock, [] if outage.open_records(slug) else [item])
 
 
 @dataclass(frozen=True)
@@ -135,7 +137,7 @@ class _Clock:
     quiet: int
 
 
-def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items=None):
+def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
     now_ms, window, quiet = clock.now_ms, clock.window, clock.quiet
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
@@ -144,11 +146,7 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items=None):
     marks = SeenMarks(inbox.redis)
     statuses, prompted = {}, set()
     actions = []
-    if items is None:
-        actions = [f"redelivered message {item.id}" for item in inbox.redeliver(now_ms, redelivery_ms())]
-        actions += addresses.settle_unresolved(inbox, names, _ladder(inbox, slug), now_ms, window)
-    waiting = _ladder(inbox, slug) if items is None else ([] if outage.open_records(slug) else items)
-    reads = _wake_inputs(inbox, slug, waiting, names, config, marks)
+    reads = _wake_inputs(inbox, slug, items, names, config, marks)
     doc = None
     for item in reads.items:
         receiver, held = reads.receivers[item.address]
