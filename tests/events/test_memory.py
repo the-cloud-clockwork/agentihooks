@@ -129,6 +129,16 @@ def test_durable_consumer_refuses_a_different_subject(bus):
     assert str(raised.value) == "durable consumer 'd' filters 'swarm.>', not 'swarm.s.task'"
 
 
+def test_durable_consumer_keeps_its_policy_and_refuses_another(bus):
+    own = QueuePolicy(max_deliver=9)
+    first = bus.events.consumer("d", "swarm.>", own)
+    assert bus.events.consumer("d", "swarm.>", own) is first
+    assert bus.events.consumer("plain", "swarm.>").policy == QueuePolicy()
+    with pytest.raises(ValueError) as raised:
+        bus.events.consumer("d", "swarm.>")
+    assert str(raised.value) == "durable consumer 'd' already has another policy"
+
+
 def test_consumer_redelivers_after_ack_wait_until_acked(clock):
     bus = memory.open_bus(BusConfig(queue=QueuePolicy(ack_wait_ms=50)), clock=clock)
     bus.events.publish("swarm.s.task", event())
