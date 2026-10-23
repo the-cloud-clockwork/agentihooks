@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
 from scripts.events import nkey
-from scripts.hive import auth
+from scripts.events.dead import DEAD_STREAM
+from scripts.hive import auth, buckets
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -32,6 +33,19 @@ ACCOUNT_LIMITS = {
     "streams": -1,
     "consumer": -1,
 }
+MEMBER_PUBLISH = (
+    "swarm.*.execution.>",
+    "dead.*",
+    "dead.*.*",
+    "$JS.API.INFO",
+    f"$JS.API.STREAM.MSG.GET.{DEAD_STREAM}",
+    "$JS.API.CONSUMER.INFO.>",
+    "$JS.API.CONSUMER.MSG.NEXT.>",
+    "$JS.ACK.>",
+    *(f"$KV.{bucket}.>" for bucket in buckets.NAMES),
+    *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets.NAMES),
+    *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets.NAMES),
+)
 
 
 @dataclass(frozen=True)
@@ -67,13 +81,17 @@ def user_claims() -> dict:
     return {"type": "user", "version": 2, "pub": {}, "sub": {}, **UNLIMITED}
 
 
+def member_claims() -> dict:
+    return {**user_claims(), "pub": {"allow": list(MEMBER_PUBLISH)}, "sub": {"allow": ["_INBOX.>"]}}
+
+
 def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
     return nkey.derive(signer.account, nkey.USER, member_id)
 
 
 def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
-    return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", user_claims()), user.seed)
+    return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", member_claims()), user.seed)
 
 
 def account_jwt(signer: Signer, revocations: Mapping[str, int]) -> str:

@@ -7,7 +7,7 @@ from unittest import mock
 
 import pytest
 from nats.js import api
-from nats.js.errors import APIError
+from nats.js.errors import APIError, BucketNotFoundError
 
 from scripts.events import factory, nats
 from scripts.events.bus import Bus, Consumer, Delivery, EventLog, StateConflict, StateStore, WorkQueue
@@ -143,7 +143,7 @@ def test_a_bind_bus_creates_nothing_and_binds_what_another_bus_created(url):
         assert binder._loop.run(binder._js.streams_info()) == []
         with pytest.raises(nats.NotFoundError):
             binder.queue("work", POLICY)
-        with pytest.raises(nats.BucketNotFoundError):
+        with pytest.raises(BucketNotFoundError):
             binder.state("tasks")
         with pytest.raises(nats.NotFoundError):
             binder.events.consumer("watcher", "swarm.>")

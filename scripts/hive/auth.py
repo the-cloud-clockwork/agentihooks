@@ -234,7 +234,11 @@ def write_env(home: Path | str, url: str, grant: dict) -> Path:
 
 
 def env_text(url: str, grant: dict) -> str:
-    bus = f"AGENTIHOOKS_BUS_CREDENTIALS={grant['bus_credentials']}\n" if grant.get("bus_credentials") else ""
+    bus = (
+        f"AGENTIHOOKS_BUS_CREDENTIALS={grant['bus_credentials']}\nAGENTIHOOKS_BUS_BIND=1\n"
+        if grant.get("bus_credentials")
+        else ""
+    )
     return (
         f"AGENTIHOOKS_HIVE_ID={grant['id']}\n"
         f"AGENTIHOOKS_HIVE_URL={url}\n"

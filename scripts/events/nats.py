@@ -88,18 +88,20 @@ def _consumer_config(durable: str, subject: str, policy: QueuePolicy) -> api.Con
     )
 
 
-async def _pull(js, stream: str, durable: str, subject: str, policy: QueuePolicy):
+async def _pull(js, stream: str, durable: str, subject: str, policy: QueuePolicy, bind: bool):
     try:
         info = await js.consumer_info(stream, durable)
     except NotFoundError:
-        pass
+        if bind:
+            raise
     else:
         if info.config.filter_subject != subject:
             raise ValueError(f"durable consumer {durable!r} filters {info.config.filter_subject!r}, not {subject!r}")
-    config = _consumer_config(durable, subject, policy)
-    if stream == DEAD_STREAM:
-        config.max_deliver = policy.max_deliver
-    await js.add_consumer(stream, config=config)
+    if not bind:
+        config = _consumer_config(durable, subject, policy)
+        if stream == DEAD_STREAM:
+            config.max_deliver = policy.max_deliver
+        await js.add_consumer(stream, config=config)
     return await js.pull_subscribe_bind(durable=durable, stream=stream)
 
 
@@ -176,11 +178,12 @@ async def _publish_dead(js: JetStreamContext, event: Envelope, identity: str, at
 
 
 class NatsEventLog:
-    def __init__(self, loop: _Loop, js: JetStreamContext, policy: QueuePolicy, stream: str):
+    def __init__(self, loop: _Loop, js: JetStreamContext, policy: QueuePolicy, stream: str, bind: bool):
         self._loop = loop
         self._js = js
         self._policy = policy
         self._stream = stream
+        self._bind = bind
         self._policies: dict[str, QueuePolicy] = {}
 
     def publish(self, subject: str, event: Envelope) -> bool:
@@ -192,7 +195,7 @@ class NatsEventLog:
             raise ValueError(f"durable consumer {durable!r} already has another policy")
         return NatsConsumer(
             self._loop,
-            self._loop.run(_pull(self._js, self._stream, durable, subject, policy)),
+            self._loop.run(_pull(self._js, self._stream, durable, subject, policy, self._bind)),
             self._js,
             policy,
             f"events.{durable}",
@@ -200,23 +203,25 @@ class NatsEventLog:
 
 
 class NatsWorkQueue:
-    def __init__(self, loop: _Loop, js: JetStreamContext, name: str, policy: QueuePolicy, dedupe_window_ms: int):
+    def __init__(self, loop: _Loop, js: JetStreamContext, name: str, policy: QueuePolicy, config: BusConfig):
         self.policy = policy
         self._loop = loop
         self._js = js
         self._stream = queue_stream(name)
         self._subject = f"{QUEUE_SUBJECT}.{name}"
-        loop.run(
-            js.add_stream(
-                name=self._stream,
-                subjects=[self._subject],
-                retention=api.RetentionPolicy.WORK_QUEUE,
-                duplicate_window=_seconds(dedupe_window_ms),
+        if not config.bind:
+            loop.run(
+                js.add_stream(
+                    name=self._stream,
+                    subjects=[self._subject],
+                    retention=api.RetentionPolicy.WORK_QUEUE,
+                    duplicate_window=_seconds(config.dedupe_window_ms),
+                )
             )
-        )
+        durable = self._stream.removeprefix("AGENTIHOOKS_QUEUE_")
         self._consumer = NatsConsumer(
             loop,
-            loop.run(_pull(js, self._stream, self._stream.removeprefix("AGENTIHOOKS_QUEUE_"), self._subject, policy)),
+            loop.run(_pull(js, self._stream, durable, self._subject, policy, config.bind)),
             js,
             policy,
             f"queue.{name}",
@@ -231,11 +236,11 @@ class NatsWorkQueue:
 
 
 class NatsStateStore:
-    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str):
+    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, bind: bool):
         self._loop = loop
         self._js = js
         self._bucket = bucket
-        self._kv = loop.run(js.create_key_value(bucket=bucket, history=KV_HISTORY))
+        self._kv = loop.run(js.key_value(bucket) if bind else js.create_key_value(bucket=bucket, history=KV_HISTORY))
 
     def get(self, key: str) -> StateEntry | None:
         try:
@@ -282,31 +287,23 @@ class NatsBus:
                 nats_client.connect(url, allow_reconnect=False, **auth_options(config.credentials))
             )
             self._js = self._nc.jetstream()
-            self._loop.run(
-                self._js.add_stream(
-                    name=EVENT_STREAM,
-                    subjects=[f"{PREFIX}.>"],
-                    duplicate_window=_seconds(config.dedupe_window_ms),
+            for stream, subject in () if config.bind else ((EVENT_STREAM, f"{PREFIX}.>"), (DEAD_STREAM, DEAD_SUBJECT)):
+                self._loop.run(
+                    self._js.add_stream(
+                        name=stream, subjects=[subject], duplicate_window=_seconds(config.dedupe_window_ms)
+                    )
                 )
-            )
-            self._loop.run(
-                self._js.add_stream(
-                    name=DEAD_STREAM,
-                    subjects=[DEAD_SUBJECT],
-                    duplicate_window=_seconds(config.dedupe_window_ms),
-                )
-            )
         except BaseException:
             self._loop.close()
             raise
-        self.events = NatsEventLog(self._loop, self._js, config.queue, EVENT_STREAM)
-        self.dead = NatsEventLog(self._loop, self._js, config.queue, DEAD_STREAM)
+        self.events = NatsEventLog(self._loop, self._js, config.queue, EVENT_STREAM, config.bind)
+        self.dead = NatsEventLog(self._loop, self._js, config.queue, DEAD_STREAM, config.bind)
 
     def queue(self, name: str, policy: QueuePolicy) -> NatsWorkQueue:
         with self._lock:
             queue = self._queues.get(name)
             if queue is None:
-                queue = NatsWorkQueue(self._loop, self._js, name, policy, self._config.dedupe_window_ms)
+                queue = NatsWorkQueue(self._loop, self._js, name, policy, self._config)
                 self._queues[name] = queue
             elif queue.policy != policy:
                 raise ValueError(f"work queue {name!r} already has another policy")
@@ -316,7 +313,7 @@ class NatsBus:
         with self._lock:
             store = self._buckets.get(bucket)
             if store is None:
-                store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket)
+                store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket, self._config.bind)
             return store
 
     def close(self) -> None:
