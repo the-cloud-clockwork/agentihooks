@@ -1103,7 +1103,9 @@ on the tests only head failed only the new contract test, which found the full
 [green run 39544257187](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39544257187)
 installed 20 packages in about one second in a 54 s plan job and passed Gate
 Required. The retry wrapper came later, with
-[pull request 6020](https://github.com/the-cloud-clockwork/agentihooks/pull/6020).
+[pull request 5665](https://github.com/the-cloud-clockwork/agentihooks/pull/5665);
+[pull request 6020](https://github.com/the-cloud-clockwork/agentihooks/pull/6020)
+then took the helper from the workflow revision.
 
 Both samples are ten successful first attempts of pull request Tests runs
 whose plan job ran **Install dependencies**, with one statistics part and the
