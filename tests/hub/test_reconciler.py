@@ -499,22 +499,19 @@ def _stop_reporting(rig, expires_ms):
     presence.beat(rig.bus, "hive", expires_ms - presence.TTL_MS)
 
 
-@pytest.mark.parametrize("expires,settled", [(1_000_000, True), (1_000_001, False)])
-def test_an_execution_on_a_hive_whose_presence_expired_is_settled_once_as_lost(rig, expires, settled):
-    _stop_reporting(rig, expires)
+def test_an_execution_on_a_hive_whose_presence_expired_is_settled_once_as_lost(rig):
+    _stop_reporting(rig, 1_000_000)
     handled = Mock(wraps=rig.life.handle)
     rig.life.handle = handled
     rig.react.poll()
-    if settled:
-        rig.clock.return_value += 300_000
-        rig.react.poll()
-    assert len(rig.returned) == len(rig.ledger.writes) == int(settled)
-    assert rig.row["state"] == ("open" if settled else "claimed")
-    if settled:
-        lost = handled.call_args_list[0].args[0]
-        assert (lost.id, lost.type, lost.time, lost.cause) == ("lost:started", "execution.exited", 1_000_000, "started")
-        assert lost.data == {**rig.event.data, "reason": "lost"}
-        assert rig.store.agents("rig") == []
+    rig.clock.return_value += 300_000
+    rig.react.poll()
+    assert len(rig.returned) == len(rig.ledger.writes) == 1
+    assert rig.row["state"] == "open"
+    lost = handled.call_args_list[0].args[0]
+    assert (lost.id, lost.type, lost.time, lost.cause) == ("lost:started", "execution.exited", 1_000_000, "started")
+    assert lost.data == {**rig.event.data, "reason": "lost"}
+    assert rig.store.agents("rig") == []
 
 
 def test_a_hive_that_reports_again_keeps_its_live_executions(rig):

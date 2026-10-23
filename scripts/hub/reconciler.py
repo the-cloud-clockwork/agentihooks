@@ -66,8 +66,9 @@ def _exited(report: dict | None, event: Envelope, agent: AgentRecord, now: int) 
     return isinstance(panes, list) and bool(agent.pane_id) and agent.pane_id not in panes
 
 
-def _ending(bus: Bus, snapshots: dict[str, dict], event: Envelope, agent: AgentRecord, now: int) -> Envelope | None:
-    hive = event.data["hive"]
+def _ending(
+    bus: Bus, snapshots: dict[str, dict], hive: str, event: Envelope, agent: AgentRecord, now: int
+) -> Envelope | None:
     if presence.lost(bus, hive, now):
         data = {**event.data, "reason": "lost"}
         return replace(event, id=f"lost:{event.id}", type="execution.exited", time=now, cause=event.id, data=data)
@@ -115,7 +116,7 @@ class Reconciler:
                 if event is None:
                     continue
                 hive = agent.hive or agent.runtime_target.get("host_id")
-                ending = _ending(self._bus, snapshots, event, agent, now) if hive == event.data.get("hive") else None
+                ending = _ending(self._bus, snapshots, hive, event, agent, now) if hive == event.data.get("hive") else None
                 if ending is not None:
                     self._lifecycle.handle(ending)
         if not guard():
