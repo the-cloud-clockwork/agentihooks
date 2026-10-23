@@ -31,7 +31,7 @@ def _user_creds(account: nkey.KeyPair, name: str) -> str:
 
 
 @pytest.fixture
-def signer(tmp_path):
+def signer(tmp_path, request):
     operator, system, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT), nkey.create(nkey.ACCOUNT)
     port = nats_server.free_port()
     signed = nats_grant.Signer(
@@ -43,7 +43,7 @@ def signer(tmp_path):
     )
     config = tmp_path / "nats.conf"
     config.write_text(
-        f"host: 127.0.0.1\nport: {port}\n"
+        f"host: 127.0.0.1\nport: {port}\nmax_control_line: {getattr(request, 'param', 65536)}\n"
         f"operator: {nkey.encode_jwt(operator, operator.public, 'op', claims)}\n"
         f"system_account: {system.public}\n"
         f'jetstream: {{store_dir: "{tmp_path / "js"}"}}\n'

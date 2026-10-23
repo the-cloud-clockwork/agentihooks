@@ -348,8 +348,22 @@ start, does not use the run conclusion.
 
 Wall time runs from the earliest job creation in the run to the latest
 `Gate — Required` completion. A completed run with no completed gate job ends
-at its latest job completion instead. A finding needs more than 15 minutes
-(`WALL_MS`, 900000 milliseconds); exactly 15 minutes raises none.
+at its latest job completion instead. A completed run with no completed gate
+job and no job completion time at all has no wall time: the detector raises
+no finding for it and never substitutes the read time as its end. A finding
+needs more than 15 minutes (`WALL_MS`, 900000 milliseconds); exactly 15
+minutes raises none.
+
+The detector checks these in order, and the first that applies decides:
+
+| Order | Run shape | Wall time |
+|---|---|---|
+| 1 | Event other than `pull_request` or `merge_group`, or no jobs | None |
+| 2 | Completed with a conclusion outside `success` and `failure` | None |
+| 3 | Pull request run with no `Gate — Required` job that does not run `.github/workflows/test.yml` | None |
+| 4 | At least one completed `Gate — Required` job | Earliest job creation to latest gate completion |
+| 5 | Completed, no completed gate, at least one completed job | Earliest job creation to latest job completion |
+| 6 | Completed, no completed gate, no completed job | None |
 
 Each judged run over 15 minutes adds one evidence line naming its conclusion:
 
@@ -382,6 +396,58 @@ gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run id> \
 | A superseded pull request run raises no finding though it ran over 15 minutes | Expected: its conclusion is `cancelled`. Measure the run that replaced it. |
 | A run over 15 minutes raises no finding yet | Check its status. An unfinished run is judged when a later pass reads it completed. |
 | A pull request run over 15 minutes never raises a finding | Check that it has a `Gate — Required` job or runs the `.github/workflows/test.yml` workflow. |
+| A completed `success` or `failure` run raises no finding though its jobs were created long ago | Check that some job carries `completed_at`. With none, row 6 of the order above applies and the run has no wall time. |
+
+#### Test coverage of the wall time order
+
+Each row of the order above has a test in the Doctor CI speed detector tests
+(`tests/doctor/test_ci_speed.py`) that reaches it on every run. The test for
+a run reaching a later row must give the run a conclusion that passes the
+earlier rows. A completed run with no conclusion stops at row 2 and never
+reaches rows 4 to 6, so a fixture that leaves the conclusion out tests row 2
+whatever its name says.
+
+| Test | Run it builds | Row it reaches |
+|---|---|---|
+| `test_a_completed_run_without_any_completion_has_no_invented_wall_time`, once with `success` and once with `failure` | Completed `merge_group` run, one job created 901 seconds before the read, no completion time | 6: no wall time, no finding |
+| `test_a_completed_gate_stops_wall_time_before_later_jobs_finish` | Completed `success` pull request run; a job created 1200 seconds before the read that completes at the read; a gate created 400 seconds before the read that completes 300 seconds before it | 4: 900 seconds from first creation to gate end, not over 15 minutes, no finding |
+
+[Pull request 4760](https://github.com/the-cloud-clockwork/agentihooks/pull/4760)
+added row 2. Both tests above then built their run without a conclusion, so
+they returned at row 2. Other tests still reached row 4; no test reached
+row 6's return. The dev push of pull request 4760, commit
+`aa718a83`, failed `coverage-ratchet` in
+[run 39258465406](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39258465406)
+with one line its base `6b99f008` ran and no head test ran: the row 6 return
+in `scripts/doctor/ci_speed.py`. The next dev push,
+[run 39287154187](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39287154187)
+on commit `47913605`, failed the ratchet on the same line. The loss followed
+from the fixtures, not from test timing: every run of the suite after pull
+request 4760 skipped that line.
+
+[Pull request 4816](https://github.com/the-cloud-clockwork/agentihooks/pull/4816)
+merged on 19 October 2026 and changed only the tests: the row 6 test now runs
+once per counted conclusion, `success` and `failure`, and the gate test
+carries `success`, so the gate end is again what keeps it under budget. The
+detector is unchanged. The dev push of its merge, commit `3f70666b`, passed
+`coverage-ratchet` in
+[run 39293539609](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39293539609).
+
+When the ratchet names a line in the Doctor CI speed detector, read
+`report.txt` in the run's `coverage-ratchet` artifact for the file and line,
+then find the test meant to reach it and check that its run passes every
+earlier check of the order:
+
+```bash
+gh run download <run id> --repo the-cloud-clockwork/agentihooks \
+  --name coverage-ratchet --dir coverage-ratchet
+cat coverage-ratchet/report.txt
+```
+
+Fix it by giving that test's run the fields the earlier rows need, through a
+normal pull request; never exclude the line. The ratchet's messages and
+baseline lookup are described in
+[Coverage grading](reference/delivery-tiers.md#coverage-grading).
 
 ### Confirmed runner waits and unconfirmed queue age
 
@@ -412,6 +478,48 @@ runner supply problem. When the same run attempt and label set already has
 a confirmed long wait, that wait takes precedence over its unconfirmed age.
 The timer aggregates findings across runs; evidence names the runs, label
 sets, affected jobs, longest wait and median wait.
+
+#### One finding per wait
+
+A run attempt and label set yields at most one CI speed finding for a slow
+pickup. When any of its jobs has a confirmed start more than five minutes
+after creation, the detector raises no `ci queue age unconfirmed` finding for
+that run attempt and label set, however old its still queued siblings are.
+The confirmed wait alone stands for the group, so the masters judge one
+finding for one wait.
+
+The suppression holds whenever the confirmed wait is present in the read,
+including while the run is still in progress and the `ci runner wait`
+finding itself is not yet judged. Such a group raises nothing until the run
+completes with `success` or `failure`, then raises the runner wait. A
+confirmed wait on one label set does not suppress queue age on another label
+set or another run attempt.
+
+The 15 minute unconfirmed threshold (`UNCONFIRMED_WAIT_MS`) is the five
+minute runner wait trigger (`SHORT_WAIT_MS`) plus a fixed ten minute
+allowance for one default Doctor pass.
+A queued job that the next pass reads as started therefore raises a runner
+wait, or nothing, instead of a queue age finding that the Doctor retracts
+minutes later.
+
+| Jobs in one run attempt and label set at the read | Findings |
+|---|---|
+| One job confirmed after 304 seconds, one still queued at 936 seconds, run completed `success` | `ci runner wait` only |
+| The same jobs, run still `in_progress` | None yet |
+| One job still queued at 900 seconds or less, nothing confirmed | None |
+| One job still queued at 901 seconds, nothing confirmed | `ci queue age unconfirmed`, measure 901 |
+
+The first row comes from the regression fixture: run `39278021878`, label
+set `anton-oss-light`, read at `15:37:32Z`. The late job was created at
+`15:31:56Z` and started at `15:37:00Z`; the sibling was created at
+`15:21:56Z` and is still queued.
+
+A queue age finding raised before a sibling confirmed is retracted on the
+pass that reads the confirmation. When any job of the run attempt and label
+set has a confirmed start over five minutes, the timer removes that run
+attempt from the `ci-queue-age-unconfirmed/<labels>` group and keeps the
+runner wait. The group finding is retracted, with the notice described
+below, once no run is left in it.
 
 #### Inspect a named job
 
@@ -489,6 +597,24 @@ after application, eight runner wait findings remained and zero were in that
 false class: 0 per hour. The eight retained findings had confirmed waits of
 306 to 696 seconds. This measures removal of false findings, not increased
 runner capacity.
+
+[Pull request 5112](https://github.com/the-cloud-clockwork/agentihooks/pull/5112),
+for [issue 5109](https://github.com/the-cloud-clockwork/agentihooks/issues/5109),
+merged on 20 October 2026 at 06:48 UTC and was applied at 07:37 UTC. It added
+the confirmed wait precedence and raised the unconfirmed threshold from five
+to 15 minutes. Before it, in the hour from 20:41 UTC on 19 October, five
+unconfirmed queue age findings were raised and all five retracted within
+about five minutes once their jobs started: runs 39323176234, 39323181003,
+39325949794, 39328650183 and 39328654494. Four of those runs also carried a
+confirmed runner wait for the same jobs. With only the new tests pushed, the
+regression tests failed in
+[red Proofs run 39370571622](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39370571622):
+a confirmed wait with a queued sibling raised both findings, and a 336 second
+unconfirmed job raised queue age. The fix passed
+[Tests run 39373027273](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373027273)
+and [Mutation preflight run 39373022081](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373022081).
+The source task targeted zero retracted queue age findings per hour; no after
+window count was recorded on it.
 
 ### GitHub incident holds and grouped findings
 

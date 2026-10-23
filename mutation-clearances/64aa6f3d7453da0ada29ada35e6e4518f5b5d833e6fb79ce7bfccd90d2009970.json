@@ -1,0 +1,6 @@
+{
+  "scripts/hive/nats_grant.py:scripts.hive.nats_grant.x__member_swarms__mutmut_13:55bf2985f5f242d916a21298e53365bfb6c926d83f4e6b9f58f07567614e592f": {
+    "reader": "standards_reader",
+    "reason": "Discarded return differs; valid suffixes preserve swarm validation, exceptions, and membership output."
+  }
+}

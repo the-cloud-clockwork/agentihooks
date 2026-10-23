@@ -2073,6 +2073,7 @@ jobs:
           sparse-checkout: |
             scripts/swarm_dashboard_columns.py
             stacks/observability/provisioning/dashboards/Swarm/
+            k8s/values-overlays/agentihooks-swarm-nats/values.yaml
 
       - name: Run every Swarm Ledger dashboard query against this head's metrics tables
         if: ${{ !cancelled() }}
@@ -2101,6 +2102,18 @@ jobs:
             missing=$(grep -oP "No module named '\K[^']+" "$RUNNER_TEMP/columns.err" | sort -u | paste -sd, - || true)
             [[ -z "$missing" ]] || echo "::error::The dashboard column checker imports $missing, which its environment lacks; pin it on the pip install line of the step that prepares the checker in the background."
             exit 1
+          fi
+
+      # The base revision's copy renders this head's member claims and grades them against the antoncore dev hive user.
+      - name: Hold the hive member NATS grants equal to the antoncore hive user
+        if: ${{ !cancelled() }}
+        run: |
+          python -m pip install --quiet "cryptography>=42"
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_hive_nats_grants.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.ci_hive_nats_grants --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
+          else
+            python -m scripts.ci_hive_nats_grants --agentihooks "$GITHUB_WORKSPACE" --antoncore .antoncore
           fi
 
       - name: Select artifact browser checks

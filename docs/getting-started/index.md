@@ -29,6 +29,9 @@ Harness capabilities differ. See the [Codex reference](../reference/CODEX-COMPAT
 | Page | What it covers |
 |------|---------------|
 | [Docker Compose quick start](compose-quick-start.md) | Start the packaged swarm services and connect clients |
+| [Single machine quick start](single-machine-quick-start.md) | Run the whole swarm and its hive on one machine |
+| [Kubernetes quick start](kubernetes-quick-start.md) | Install the swarm hub from the OCI Helm chart with NATS and JetStream |
+| [Add a hive](add-hive-quick-start.md) | Join a machine or a Kubernetes hive to a running hub with one invite |
 | [Installation](installation.md) | Install native Claude Code and Codex hooks; [synchronize editable tool dependencies](installation.md#synchronize-an-editable-tool-installation) |
 | [Profiles](profiles.md) | Choose and switch agent profiles, 3-layer merge |
 | [Portability & Reusability](portability.md) | Move setups across machines, manage credentials |
