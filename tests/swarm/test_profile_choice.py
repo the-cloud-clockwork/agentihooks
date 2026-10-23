@@ -448,8 +448,8 @@ class LaterUnresolvedRuntime(PlacingRuntime):
         self.checked = []
 
     def placement_refusal(self, lane, task):
-        self.checked.append(task["id"])
-        if task["id"] == "t1" and self.checked.count("t1") > 1:
+        self.checked.append(task.get("id"))
+        if task.get("id") == "t1" and self.checked.count("t1") > 1:
             raise profile_choice.ProfileUnresolved("t1 answered unresolved later")
         return ""
 
