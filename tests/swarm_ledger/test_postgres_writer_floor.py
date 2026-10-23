@@ -91,3 +91,13 @@ def test_a_writer_on_code_without_the_check_is_refused_and_no_replica_rebuilds_i
 
     monkeypatch.setattr(sqlite, "read_rows", whole)
     assert replica.get_document(slug) == cached
+
+
+def test_a_writer_on_code_without_the_check_passes_when_it_records_its_changed_rows(ledger):
+    repository, slug = ledger
+    after = generation(slug) + 1
+    with closing(psycopg2.connect(URL)) as raw, raw, raw.cursor() as cursor:
+        cursor.execute("INSERT INTO row_changes VALUES (%s, %s, '[]')", (slug, after))
+        cursor.execute("UPDATE ledgers SET generation = %s WHERE slug = %s", (after, slug))
+    assert generation(slug) == after
+    assert postgres.PostgresLedgerRepository(URL).get_document(slug)["title"] == "Floor"
