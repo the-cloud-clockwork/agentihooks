@@ -48,6 +48,7 @@ def test_cli_wait_binds_the_branch_preflight_run(env, monkeypatch):  # noqa: F81
     assert idle.wait(store.redis, "sw", ME)["on"] == {
         "kind": "mutation",
         "target": URL,
+        "task": next(agent.task for agent in store.agents("sw") if agent.name == ME),
         "head": "first",
     }
     assert waits.resolution({"kind": "mutation", "target": URL, "head": "first"}, {}, None, None, None, False) == ""
@@ -505,7 +506,8 @@ def _bind(env, preflight):  # noqa: F811
 def test_cli_binds_a_focused_proof_run_on_the_branch_head(env, preflight):  # noqa: F811
     _focused_proof(preflight)
     assert _bind(env, preflight) == 0
-    assert idle.wait(env[0].redis, "sw", ME)["on"] == {"kind": "mutation", "target": URL, "head": "first"}
+    task = next(agent.task for agent in env[0].agents("sw") if agent.name == ME)
+    assert idle.wait(env[0].redis, "sw", ME)["on"] == {"kind": "mutation", "target": URL, "task": task, "head": "first"}
     assert preflight.requests == ["repos/org/repo/actions/runs/123", "repos/org/repo/git/ref/heads/feature/x"]
 
 
@@ -578,7 +580,9 @@ def _stacked_proof(preflight):
 
 def test_the_tick_ends_a_focused_proof_based_on_an_open_dependency_branch_green(tick, preflight):  # noqa: F811
     _stacked_proof(preflight)
-    idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on={**waits.on("mutation", URL), "head": "first"})
+    idle.declare_wait(
+        tick.store.redis, "sw", ME, 10_000_000, "", 1, on={**waits.on("mutation", URL, "t1"), "head": "first"}
+    )
     assert tick.end(STACKED) == [f"ended the wait of {ME}: mutation preflight {URL}, now green; no failing mutants"]
     assert "repos/org/repo/compare/engineer-0...first" in preflight.requests
     assert not any("engineer-9" in request for request in preflight.requests)
@@ -591,8 +595,8 @@ def test_a_red_focused_proof_based_on_an_open_dependency_branch_ends_red(preflig
     preflight.report["files"] = [
         {"path": "scripts/swarm/waits.py", "failures": [{"name": "f", "fingerprint": "x", "status": "survived"}]}
     ]
-    held = {**waits.on("mutation", URL), "head": "first"}
-    assert waits.resolution(held, STACKED, None, None, None, False, task="t1") == (
+    held = {**waits.on("mutation", URL, "t1"), "head": "first"}
+    assert waits.resolution(held, STACKED, None, None, None, False) == (
         f"mutation preflight {URL}, now red; scripts/swarm/waits.py:f:x (survived)"
     )
 
@@ -601,8 +605,8 @@ def test_a_red_focused_proof_based_on_an_open_dependency_branch_ends_red(preflig
 def test_a_focused_proof_based_on_no_open_dependency_branch_ends_red(preflight, base, task):
     _stacked_proof(preflight)
     preflight.scope["base"] = base
-    held = {**waits.on("mutation", URL), "head": "first"}
-    assert waits.resolution(held, STACKED, None, None, None, False, task=task) == (
+    held = {**waits.on("mutation", URL, task), "head": "first"}
+    assert waits.resolution(held, STACKED, None, None, None, False) == (
         f"mutation preflight {URL}, now red; the mutation report does not grade the branch head from its dev merge base"
     )
 

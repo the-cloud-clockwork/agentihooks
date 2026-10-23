@@ -181,12 +181,15 @@ def _stale(target, run):
     return _api(f"repos/{repo}/git/ref/heads/{run['head_branch']}")["object"]["sha"] != run["head_sha"]
 
 
-def _covers(target, run, scope):
+def _covers(target, run, scope, branches):
     if run["path"] != PROOFS:
         return True
     repo = RUN_URL.fullmatch(target).group(1)
-    base = _api(f"repos/{repo}/compare/dev...{run['head_sha']}")["merge_base_commit"]["sha"]
-    return scope == {"base": base, "head": run["head_sha"]}
+    for ref in ("dev", *branches):
+        base = _api(f"repos/{repo}/compare/{ref}...{run['head_sha']}")["merge_base_commit"]["sha"]
+        if scope == {"base": base, "head": run["head_sha"]}:
+            return True
+    return False
 
 
 def _report(target, started_at):
@@ -265,7 +268,7 @@ def _unfetched(outcome, conclusion, error):
     )
 
 
-def resolution(held: dict) -> str:
+def resolution(held: dict, branches: list[str]) -> str:
     try:
         if not held.get("head"):
             run = read(held["target"])
@@ -277,7 +280,7 @@ def resolution(held: dict) -> str:
                 return ""
             except SwarmError as error:
                 return f"mutation preflight {held['target']}, now red; {error}"
-        return _resolve(held)
+        return _resolve(held, branches)
     except RateLimited:
         return ""
 
@@ -292,7 +295,7 @@ def _moved(target, run, outcome):
     return f"{outcome}, now red; the branch moved past the graded head" if stale else ""
 
 
-def _resolve(held):
+def _resolve(held, branches):
     target = held["target"]
     run = read(target)
     if run is None:
@@ -308,7 +311,7 @@ def _resolve(held):
         return f"{outcome}, now red; run {run.get('conclusion')}"
     try:
         report, scope = _fetch(target, run)
-        covered = _covers(target, run, scope)
+        covered = _covers(target, run, scope, branches)
         failures = [
             f"{file['path']}:{failure['name']}:{failure['fingerprint']} ({failure['status']})"
             for file in report["files"]
