@@ -737,11 +737,19 @@ def test_a_launch_the_mean_launch_cost_would_carry_past_the_budget_waits_a_pass(
     assert ledger.rows["t3"]["state"] == "open"
 
 
-def test_one_launch_well_inside_the_budget_lets_the_next_one_start(store, monkeypatch):
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    _slow_launches(monkeypatch, runtime, 9.99)
+def test_launches_whose_mean_cost_fits_the_budget_all_start(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 6)
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2", "t3"]
+
+
+def test_a_launch_that_would_end_exactly_at_the_budget_waits_a_pass(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 10)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
 
 
 def test_a_slow_failed_launch_spends_the_budget_too(store, monkeypatch):
