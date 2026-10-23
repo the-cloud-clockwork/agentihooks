@@ -641,6 +641,15 @@ class HiveAcks(FakeRuntime):
         self.ordered, self.collected, self.acked, self.failing, self.broken = [], [], set(), set(fail), set()
         self.refused, self.collected_slugs, self.conflicted = set(), set(), set()
         self.expired, self.expire_broken, self.kept = [], {}, set()
+        self.live, self.asked = set(), []
+
+    def launched(self, config, lane, name, task):
+        from scripts.swarm.tick import ACK_LATER
+
+        assert (config.slug, task) == ("sw", {"id": task["id"], "seat": task["seat"], ACK_LATER: True})
+        assert task["seat"].startswith(f"{lane}-")
+        self.asked.append(name)
+        return name in self.live
 
     def expire(self, config, lane, name, task):
         from scripts.swarm.tick import ACK_LATER

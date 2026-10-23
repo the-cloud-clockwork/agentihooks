@@ -1449,6 +1449,69 @@ def test_a_collect_without_a_live_order_refuses_instead_of_ordering_again(setup)
     assert setup.launcher.orders_for("task-1") == order
 
 
+def test_a_finished_execution_with_a_live_receipt_counts_as_launched(setup):
+    request, order, _ = live_order(setup)
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state="finished"))
+    assert setup.launcher.launched(request) is True
+    assert setup.launcher.orders_for("task") == order
+
+
+@pytest.mark.parametrize("state", ["launching", "working", "ended"])
+def test_only_a_finished_execution_counts_as_launched_from_its_receipt(setup, state):
+    request, order, _ = live_order(setup)
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state=state))
+    assert setup.launcher.launched(request) is False
+
+
+def test_a_finished_execution_without_a_live_receipt_is_no_launch(setup):
+    from scripts.hive.orders import Ack
+
+    request, order, _ = live_order(setup)
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state="finished"))
+    setup.store.redis.delete(setup.launcher.orders.receipt(order))
+    assert setup.launcher.launched(request) is False
+    setup.launcher.orders.finish("remote", "0-1", order, Ack("failed", {}, "prompt"))
+    assert setup.launcher.launched(request) is False
+
+
+def test_a_live_receipt_of_another_claimant_or_no_order_is_no_launch(setup):
+    request, order, _ = live_order(setup)
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state="finished"))
+    other = replace(request, name=setup.store.next_name("fixture", "eng"))
+    assert setup.launcher.launched(other) is False
+    setup.store.redis.hdel(setup.store.key("fixture", "controller-launch-orders"), "task")
+    assert setup.launcher.launched(request) is False
+
+
+def test_a_controller_reads_a_launched_receipt_under_the_held_lease(setup, monkeypatch):
+    from contextlib import contextmanager
+
+    from scripts.swarm import controller
+    from scripts.swarm.tick import ACK_LATER
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    routed, kept = Mock(), []
+
+    @contextmanager
+    def keep(store, slug, held):
+        kept.append((store, slug, held))
+        yield
+
+    monkeypatch.setattr(controller.lease, "kept", keep)
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+    task = {"id": "task", "seat": "eng-1@fixture", ACK_LATER: True}
+    routed.hive_launch.launched.return_value = True
+    assert fenced.launched(setup.config, "eng", "engineer", task) is True
+    routed.hive_launch.launched.assert_called_once_with(
+        SpawnRequest(setup.config, "eng", "engineer", {**task, "controller_epoch": setup.held.epoch})
+    )
+    assert kept == [(setup.store, setup.config.slug, setup.held)]
+
+
 def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(setup, monkeypatch):
     from contextlib import contextmanager
 

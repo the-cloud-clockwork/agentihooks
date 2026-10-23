@@ -73,6 +73,58 @@ def test_an_agent_finished_before_its_acknowledgement_on_an_open_task_is_still_a
     ]
 
 
+def test_an_agent_that_blocked_before_its_live_receipt_was_collected_counts_as_launched(store, monkeypatch):
+    ledger, runtime, name, released = _finished_before_ack(store, monkeypatch)
+    runtime.live.add(name)
+    store.mark_restart("sw", "t1", "reclaimed")
+    lives = store.claims("sw", "t1")
+    doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "blocked"}]}
+    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
+    assert actions == [f"{name} finished t1 before the tick collected its hive acknowledgement"]
+    assert runtime.asked == [name]
+    assert runtime.collected == []
+    assert released == [("sw", True, name)]
+    assert [(r["agent"], r["state"], r["error"], r["after"]) for r in store.launches("sw")] == [
+        (name, "started", "", "reclaimed")
+    ]
+    assert store.claims("sw", "t1") == lives + 1
+    assert store.spawns("sw") == {"claude": 1}
+    assert [a.state for a in store.agents("sw") if a.name == name] == ["finished"]
+    assert failed_panes.held(store, "sw") == {}
+    assert _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 3_000) == []
+    assert store.claims("sw", "t1") == lives + 1
+    assert store.spawns("sw") == {"claude": 1}
+
+
+def test_a_finished_agent_without_a_live_receipt_on_a_blocked_task_is_still_a_spawn_failure(store, monkeypatch):
+    ledger, runtime, name, _ = _finished_before_ack(store, monkeypatch)
+    doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "blocked"}]}
+    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
+    assert runtime.asked == [name]
+    assert len(actions) == 1 and actions[0].startswith("spawn failed for t1")
+    assert [(r["state"], r["error"]) for r in store.launches("sw") if r["agent"] == name] == [
+        ("failed", "hive launch failed: prompt")
+    ]
+
+
+def test_a_done_task_never_reads_the_receipt(store, monkeypatch):
+    ledger, runtime, name, _ = _finished_before_ack(store, monkeypatch)
+    doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "done"}]}
+    _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
+    assert runtime.asked == []
+
+
+def test_a_working_agent_never_reads_the_receipt(store, monkeypatch):
+    ledger, runtime, name, _ = _finished_before_ack(store, monkeypatch)
+    agent = next(a for a in store.agents("sw") if a.name == name)
+    store.put_agent("sw", replace(agent, state="launching"))
+    runtime.live.add(name)
+    doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "blocked"}]}
+    _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
+    assert runtime.asked == []
+    assert runtime.collected == [name]
+
+
 def test_every_agent_finished_before_its_acknowledgement_is_collected_in_one_pass(store, monkeypatch):
     ledger, runtime, _, released = _finished_before_ack(store, monkeypatch, "t1", "t2")
     doc = {"tasks": [{"id": t, "lane": "eng", "state": "done"} for t in ("t1", "t2")]}
