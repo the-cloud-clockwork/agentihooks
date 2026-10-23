@@ -43,6 +43,12 @@ def receivers(text: str) -> list[dict]:
     return [d for d in documents if d["metadata"]["name"].endswith("-github-webhook")]
 
 
+def receiver_bus_url(text: str) -> str | None:
+    deployments = [d for d in receivers(text) if d["kind"] == "Deployment"]
+    env = deployments[0]["spec"]["template"]["spec"]["containers"][0].get("env", []) if deployments else []
+    return next((row.get("value") for row in env if row["name"] == "AGENTIHOOKS_BUS_URL"), None)
+
+
 def receiver_problems(documents: list[dict]) -> list[str]:
     kinds = sorted(d["kind"] for d in documents)
     if kinds != ["Deployment", "Service"]:
@@ -100,6 +106,11 @@ def problems(chart: str) -> list[str]:
     found += receiver_problems(receivers(beside.stdout))
     if len(hubs(beside.stdout)) != 1:
         found.append("the receiver does not render beside the hub")
+    if receiver_bus_url(beside.stdout) != "nats://nats.swarm:4222":
+        found.append(f"the receiver bus address is {receiver_bus_url(beside.stdout)}, expected hub.bus.url")
+    unset = render(chart, *RECEIVER)
+    if unset.returncode or receiver_bus_url(unset.stdout) is not None:
+        found.append("a receiver without hub.bus.url renders a bus address that overrides its secret")
     hive = render(chart, *RECEIVER, "--set", "hiveOnly=true")
     if hive.returncode or receivers(hive.stdout):
         found.append("a hive only release renders the receiver")
