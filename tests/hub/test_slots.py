@@ -108,3 +108,32 @@ def test_serve_provisions_the_hub_owned_account_buckets():
         assert opened == ["account-slots", "hive-slot-accounts"]
     finally:
         bus.close()
+
+
+def test_serve_answers_in_one_queue_group_across_hub_replicas():
+    from unittest.mock import ANY, Mock
+
+    bus = Mock()
+    slots.serve(bus)
+    bus.serve.assert_called_once_with("swarm.*.slots", "hub-slots", ANY)
+
+
+def test_a_take_without_a_reading_is_refused(hub):
+    bus, _ = hub
+    request = {"op": "take", "hive": "one", "execution": "e", "harness": "claude"}
+    answer = json.loads(slots.handle(bus, "swarm.rig.slots", json.dumps(request).encode()))
+    assert answer == {"ok": False, "error": "slot request is missing 'report'"}
+
+
+def test_a_failure_without_a_message_is_named_by_its_type(hub, monkeypatch):
+    from scripts.events.bus import StateConflict
+
+    bus, _ = hub
+
+    def conflict(*args):
+        raise StateConflict
+
+    monkeypatch.setattr(account_slots.Slots, "release", conflict)
+    request = {"op": "release", "hive": "one", "execution": "e", "harness": "claude", "account": "a"}
+    answer = json.loads(slots.handle(bus, "swarm.rig.slots", json.dumps(request).encode()))
+    assert answer == {"ok": False, "error": "StateConflict"}

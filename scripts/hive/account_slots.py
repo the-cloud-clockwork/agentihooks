@@ -162,7 +162,7 @@ def asker(bus: Any, swarm: str, timeout_ms: int = REQUEST_TIMEOUT_MS) -> Callabl
 
 
 class Remote(Slots):
-    def __init__(self, ask: Callable[[dict], Any], hive: str, read: Callable[[], dict]) -> None:
+    def __init__(self, ask: Callable[[dict], Any], hive: str, read: Callable[[], dict] | None = None) -> None:
         self.ask, self.hive, self.read = ask, hive, read
 
     def heartbeat(self, report: dict, executions: dict) -> None:
@@ -215,18 +215,10 @@ def execute(harness: str, account: str, environ: Mapping[str, str], invoke: Call
 
 
 def release(hive: str, execution: str, harness: str, account: str) -> None:
-    from scripts.events.config import BusConfig
-    from scripts.events.factory import open_bus
-
-    config = BusConfig.from_environ()
-    bus = open_bus(config)
-    try:
-        _slots(bus, config.backend, hive, lambda: {}, os.environ).release(execution, harness, account)
-    finally:
-        bus.close()
+    _remote(hive, lambda slots: slots.release(execution, harness, account))
 
 
-def publish(hive: str, report: dict, hosted: dict) -> None:
+def _remote(hive: str, act: Callable[["Remote"], None]) -> None:
     from scripts.events.config import BusConfig
     from scripts.events.factory import open_bus
 
@@ -235,6 +227,10 @@ def publish(hive: str, report: dict, hosted: dict) -> None:
         return
     bus = open_bus(config)
     try:
-        _slots(bus, config.backend, hive, lambda: report, os.environ).heartbeat(report, hosted["executions"])
+        act(Remote(asker(bus, _swarm(os.environ)), hive))
     finally:
         bus.close()
+
+
+def publish(hive: str, report: dict, hosted: dict) -> None:
+    _remote(hive, lambda slots: slots.heartbeat(report, hosted["executions"]))
