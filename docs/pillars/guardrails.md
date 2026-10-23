@@ -509,6 +509,17 @@ examples, configuration, syntax limits and troubleshooting.
 
 ---
 
+## Process environment reads
+
+The credential guard refuses every shell, `Read`, `NotebookRead` and `Grep`
+read of a process environment file under `/proc`, such as
+`/proc/<pid>/environ`, and names the leak free alternatives: a test of one
+variable or a names only listing. See
+[Process environment reads](../reference/credential-guard-proc-environ.md) for
+the refused forms, what still passes, configuration and troubleshooting.
+
+---
+
 ## All guardrails at a glance
 
 | # | Guardrail | Hook event | Default | Block or warn | Config key |
