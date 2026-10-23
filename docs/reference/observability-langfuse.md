@@ -539,6 +539,69 @@ limit has its wait history read`. The finding is absent when every agent that
 needs its wait history was read. Each scan picks the agents again, so the next
 scan retries the unread ones.
 
+#### Live agents first
+
+An agent counts as live when the watched swarm's store lists it as a working
+agent in this scan, which gives it an expected binding under
+[Active telemetry](#active-telemetry). It counts as live whether or not its
+binding's telemetry was read in that scan. Every other agent with traces is
+retired: its traces stay in the cache and can still hold a long gap.
+
+`traces.gap_agents` sorts the agents with a long gap by three keys, in order:
+
+1. live before retired
+2. inside each group, the agent whose newest long gap ends latest first
+3. then by name
+
+`traces_read.waits` reads down that list and stops at the wait budget or the
+step deadline, so the unread agents are always the tail of the list. A live
+agent is left unread only when every retired agent with a long gap was left
+unread too. For example, with 3 live and 100 retired agents with long gaps
+and time for 40 reads, the 3 live agents and the 37 retired agents whose newest
+gap ends latest are read. The 63 left unread are all retired, and the finding
+reads `live agents unread: 0`.
+
+The `live agents unread` evidence line of `wait history partial` counts every
+live agent among all unread agents, not only the five the `unread` line names.
+A value above 0 means even the live agents did not fit in the budget. Turn gap
+findings for those live agents are missing from that scan, and no retired agent
+was read at all.
+
+| `live agents unread` | Meaning | Action |
+|---|---|---|
+| `0` | every live agent with a long gap was judged; only retired agents were skipped | none for the live swarm; retired agents are retried on later scans |
+| above `0` | the wait reads covered fewer agents than the live agents with long gaps | read the trace step time below; the Langfuse reads or Redis used up the step |
+
+The finding's number, which `doctor measure wait-history-partial/<slug>`
+prints, stays the count of all unread agents, live and retired. The live count
+appears only in the evidence line.
+
+**Why live agents come first.** Pull request #5176 bounded the wait reads and
+read the agents newest gap first. The next scans on rig-grade-swarm raised
+`wait history partial` with 106 agents with turn gaps over 30 minutes not read
+in budget, and every agent the finding named was retired. A live agent whose
+newest gap ended earlier than those retired agents' gaps would have been
+skipped behind them. Pull request #5229 (issue #5226) put live agents first
+and added the `live agents unread` line.
+
+The three seam tests failed on the old order in Proofs run
+[39410184551](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39410184551)
+(order `engineer, ci, dev` where `dev, engineer, ci` was expected, and the live
+line missing) and passed on the fix in Tests run
+[39411235265](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39411235265).
+Ten passes of the trace detector on rig-grade-swarm before the fix and ten with
+it, on 20 October 2026, each found 0 live agents left unread. In both windows
+no live agent had a turn gap over 30 minutes and every wait read finished in
+budget, so the measurement could not move, and the CI tests are the proof of
+the order.
+
+The tests are in `tests/doctor/test_turn_gap_waits.py`:
+`test_live_agents_are_read_before_retired_ones_each_newest_gap_first` pins the
+order, `test_the_partial_read_counts_the_live_agents_left_unread` pins the
+count, and
+`test_an_agent_whose_wait_history_was_not_read_is_not_judged_and_the_read_is_partial`
+pins the full evidence text.
+
 #### Why the wait reads are bounded
 
 Before this change, the step read the wait history of every traced agent,
@@ -602,6 +665,7 @@ otherwise it fails with `no finding wait-history-partial/<slug> has been seen`.
 | `wait history partial` with `doctor.trace` well under 55 seconds | the wait reads themselves used the 15 seconds; many agents have long gaps, or Redis answers slowly |
 | `doctor.trace` above 60 seconds | a Langfuse request or a wait read in flight finished past its budget; read the `trace reader unavailable` failure lines for timeouts |
 | a turn gap finding disappears while `wait history partial` is present | its agent was left unread in that scan; it is judged again once its wait history is read |
+| `wait history partial` evidence reads `live agents unread` above 0 | every retired agent with a long gap was also left unread and the live agents did not fit; see [Live agents first](#live-agents-first) |
 
 ### Historical findings
 
