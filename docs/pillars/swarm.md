@@ -4969,7 +4969,7 @@ ledger sends nothing.
 | A task still in `pr` 10 minutes after its pull request merged | Its engineer, told to run `done`; at 20 minutes the master |
 | A task's pull request closed without merging | Its engineer |
 | A task's pull request with red checks and no push for 20 minutes | Its engineer, once per push |
-| A master pane open on a question prompt for 10 minutes | The operator's Priorities as a ledger question with its options; the tick dismisses the prompt and tells the master's seat it was moved. Past three ticks on the prompt, `swarm status` shows a `master blocked on prompt` finding |
+| A master asks the question tool when the operator has not typed in its pane for 10 minutes | The operator's Priorities: a hook before the tool denies it and adds each question with its options as a ledger question, and the denial tells the master they moved. A prompt that still sits open past three ticks shows as a `master blocked on prompt` finding in `swarm status` |
 
 A follow up already closed or flagged for the operator is not raised. Pull request state comes from `gh pr view`;
 a pull request `gh` cannot read is skipped until a later tick. An engineer that is gone falls back to the master.

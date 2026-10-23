@@ -51,7 +51,6 @@ from scripts.swarm import (
     lost_runner,
     master_alarm,
     master_move,
-    master_prompt,
     master_retire,
     master_start,
     master_wake,
@@ -175,7 +174,6 @@ class Runtime(Protocol):
     def status(self, agent: AgentRecord) -> str: ...
     def observe(self, agent: AgentRecord) -> PaneObservation: ...
     def nudge(self, agent: AgentRecord, text: str) -> str | None: ...
-    def dismiss_prompt(self, agent: AgentRecord) -> str | None: ...
     def name_pane(self, agent: AgentRecord) -> bool: ...
     def conversations(self) -> dict[str, str] | None: ...
     def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...
@@ -219,7 +217,6 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(_strays, slug, config, store, runtime)
     actions += skip_refused(failed_panes.sweep, slug, store, runtime, now_ms)
     if config.state not in {"stopped", "stopping"}:
-        actions += skip_refused(master_prompt.run, slug, store, ledger, runtime, now_ms)
         actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
     actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
     sleeping = lifetime.sleeping(slug, store, rows)
