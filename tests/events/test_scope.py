@@ -51,6 +51,20 @@ def test_routed_log_keeps_the_event_log_keyword_interface_and_default_policy():
         bus.close()
 
 
+def test_routed_log_preserves_the_configured_default_policy():
+    policy = QueuePolicy(max_deliver=2, ack_wait_ms=1234, backoff_ms=(0, 50))
+    bus = open_bus(BusConfig(scoped=True, queue=policy))
+    try:
+        consumer = bus.events.consumer("configured", "swarm.>")
+        assert bus.events.consumer("configured", "swarm.>", policy) is consumer
+        assert consumer._policy == policy
+        dead = bus.dead.consumer("dead-configured", "swarm.>")
+        assert bus.dead.consumer("dead-configured", "swarm.>", policy) is dead
+        assert dead._policy == policy
+    finally:
+        bus.close()
+
+
 def test_aggregate_fetch_honors_the_budget_and_rotates_empty_sources(monkeypatch):
     clock = SimpleNamespace(now=0.0)
     monkeypatch.setattr(scope, "monotonic", lambda: clock.now, raising=False)
