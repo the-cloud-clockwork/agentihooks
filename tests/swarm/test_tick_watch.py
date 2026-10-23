@@ -498,6 +498,36 @@ def test_a_stuck_first_check_does_not_stop_the_second_pass_from_alerting(store, 
     assert len(alerts(store)) == 1
 
 
+def test_a_stuck_check_that_ends_after_the_next_pass_saw_the_tick_recover_never_alerts(store, monkeypatch):
+    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 0.3)
+    monkeypatch.setattr(tick_watch, "BEAT_S", 0.05)
+    beat(store, START - LIMIT)
+    gate, stuck, real = threading.Event(), [], tick_heartbeat.stale
+
+    def stale(*args, **kwargs):
+        found = real(*args, **kwargs)
+        if not stuck:
+            stuck.append(threading.current_thread())
+            gate.wait(30)
+        return found
+
+    monkeypatch.setattr(tick_heartbeat, "stale", stale)
+    clock = [START]
+
+    def wait(seconds):
+        clock[0] += MINUTE
+        beat(store, clock[0], rev=2)
+
+    try:
+        tick_watch.run(store, lambda: clock[0], None, wait, passes=2, beat=capped([], 200))
+    finally:
+        gate.set()
+        stuck[0].join(5)
+
+    assert not stuck[0].is_alive()
+    assert alerts(store) == []
+
+
 def test_a_check_that_ends_after_a_newer_check_decided_is_dropped(store):
     beat(store, START - LIMIT)
     guard = tick_watch.Guard()
