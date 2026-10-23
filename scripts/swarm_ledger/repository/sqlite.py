@@ -566,6 +566,7 @@ class SQLiteLedgerRepository:
         previous = connection.execute(GENERATION, (slug,)).fetchone()
         now = self.domain.now_ms()
         generation = now << GENERATION_SHIFT if previous is None else max(now << GENERATION_SHIFT, previous[0] + 1)
+        before = {} if previous is None else self._entry(connection, slug).state
         for table in PER_LEDGER:
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         stored = {**state, "_meta": {**state["_meta"]}}
@@ -575,6 +576,7 @@ class SQLiteLedgerRepository:
         write_rows(connection, slug, {}, flatten(stored))
         write_events(connection, slug, events)
         write_seeds(connection, slug, seeds or {})
+        outbox.write(connection, slug, state["_meta"]["rev"], before, state)
         connection.execute(
             INSERT,
             (
