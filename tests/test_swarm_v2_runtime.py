@@ -695,3 +695,22 @@ def test_routed_reads_the_process_environment_and_builds_a_herdr_runtime(monkeyp
     assert runtime.router.disabled == frozenset({LOCAL})
     assert isinstance(runtime.router.runtimes[LOCAL], LocalHerdrRuntime)
     assert runtime.router.runtimes[LOCAL].herdr is runtime.herdr_runtime
+
+
+@pytest.mark.parametrize(("live", "found"), [({"agent-a", "agent-b"}, "agent-a"), ({"agent-b"}, None)])
+def test_the_local_runtime_finds_a_live_agent_by_its_launch_name(live, found):
+    adapter = LocalHerdrRuntime(SimpleNamespace(live_names=lambda: live))
+    assert adapter.find("agent-a") == Outcome("find", Status.OK, LOCAL, found)
+
+
+@pytest.mark.parametrize("reaped", [True, False])
+def test_the_local_runtime_ends_every_process_carrying_a_launch_name(reaped):
+    names = []
+    adapter = LocalHerdrRuntime(SimpleNamespace(reap_name=lambda name: names.append(name) or reaped))
+    expected = (
+        Outcome("reap", Status.OK, LOCAL)
+        if reaped
+        else Outcome("reap", Status.REFUSED, LOCAL, detail="a process carrying agent-a still runs")
+    )
+    assert adapter.reap("agent-a") == expected
+    assert names == ["agent-a"]

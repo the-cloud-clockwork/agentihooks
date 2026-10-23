@@ -34,7 +34,6 @@ ROWS = [
     "hives-box",
     "overlays-box",
     "agents-box",
-    "health-box",
     "handoff-box",
 ]
 
@@ -181,7 +180,7 @@ def open_page(browser):
         page.context.close()
 
 
-def test_rows_run_header_alert_capacity_quota_overlays_agents_health_handoffs():
+def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_with_no_health_panel():
     page = page_source()
     box = page.split('<div id="swarm-box">', 1)[1].split('<aside id="stats-column"', 1)[0]
     positions = [box.index(f'id="{row}"') for row in ROWS]
@@ -198,6 +197,7 @@ def test_rows_run_header_alert_capacity_quota_overlays_agents_health_handoffs():
         "swarm-row-work",
         "swarm-row-accounts",
         "doctor-box",
+        'id="health',
         "<section",
     ):
         assert gone not in box, gone
@@ -213,7 +213,6 @@ def test_every_swarm_row_stays_full_width_at_every_viewport(open_page):
             "hives-box",
             "overlays-box",
             "agents-box",
-            "health-box",
             "handoff-box",
         ):
             assert abs(page.box(row)["width"] - full) < 1, row
@@ -919,27 +918,6 @@ def test_doctor_row_shows_off_or_on_and_toggles_its_own_button(open_page):
     assert not on.tab.locator("[data-swarm=doctor_start]").is_visible()
 
 
-def test_health_rows_carry_evidence_threshold_seen_verdict_and_note(open_page):
-    finding = {
-        "id": "ceremony/eng-59",
-        "kind": "ceremony",
-        "subject": "eng-59",
-        "evidence": ["24 moves", "1 outcome"],
-        "threshold": "20 · ratio 12",
-        "seen_at": NOW_MS - 540_000,
-        "verdict": {"value": "false-positive", "note": "pr open"},
-    }
-    page = open_page(status(findings=[finding]))
-    row = page.table("health")[0]
-    assert row[:5] == ["ceremony", "eng-59", "24 moves · 1 outcome", "20 · ratio 12", "9m ago"]
-    assert page.tab.locator("#health .hl-pick").input_value() == "false-positive"
-    assert page.tab.locator("#health .hl-note").input_value() == "pr open"
-    page.tab.locator("#health .hl-note").fill("still open")
-    page.tab.locator("#health .hl-pick").select_option("resolved")
-    page.tab.wait_for_function("() => !document.querySelector('#swarm-modes button').disabled")
-    assert page.puts == [{"action": "verdict", "id": "ceremony/eng-59", "verdict": "resolved", "note": "still open"}]
-
-
 def test_handoff_rows_show_each_seat_and_offer_the_restore_decision(open_page):
     handoffs = [
         {
@@ -974,7 +952,7 @@ def test_handoff_rows_show_each_seat_and_offer_the_restore_decision(open_page):
 
 def test_swarm_tab_styles_use_only_palette_tokens():
     page = page_source()
-    rules = re.findall(r"^\s*(?:\.sw-|#swarm|\.lbl|#health-table|#agents-table|#quota-table)[^{]*\{[^}]*\}", page, re.M)
+    rules = re.findall(r"^\s*(?:\.sw-|#swarm|\.lbl|#agents-table|#quota-table)[^{]*\{[^}]*\}", page, re.M)
     assert len(rules) > 30
     for rule in rules:
         assert not re.search(

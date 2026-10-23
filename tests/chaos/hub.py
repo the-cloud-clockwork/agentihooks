@@ -9,6 +9,7 @@ from scripts.events.subjects import subject
 from scripts.hub import hive_loss, runner
 from scripts.hub.registry import Reactor, Registry
 from scripts.swarm import readiness
+from tests.chaos.hive import GENERATIONS
 from tests.chaos.journal import Journal, now_ms
 
 LANE = "eng"
@@ -42,6 +43,7 @@ def main(argv: list[str]) -> int:
             author="chaos",
             data={"lane": LANE, "generation": generation},
         )
+        runner.record(bus.state(GENERATIONS), task, generation)
         bus.queue(readiness.queue_name(args.swarm, LANE), QueuePolicy()).offer(offer)
         journal.write("reopened", task=task, generation=generation)
 

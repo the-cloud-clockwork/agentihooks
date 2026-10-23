@@ -433,7 +433,6 @@ class SwarmPanel(unittest.TestCase):
             "swarm-overlays",
             "swarm-quota",
             "doctor-row",
-            "health",
             "swarm-handoffs",
             "capacity-box",
             "swarm-tick",
@@ -699,18 +698,12 @@ if __name__ == "__main__":
 
 
 class HealthPanel(unittest.TestCase):
-    def test_a_verdict_pick_sends_the_picked_verdict_and_the_row_note(self):
+    def test_the_swarm_page_has_no_health_panel(self):
+        self.assertNotIn("renderNeedsYou", function_source("renderSwarm"))
         page = page_source()
-        self.assertIn('$("health").addEventListener("change"', page)
-        self.assertIn('swarmControl({ action: "verdict", id: pick.dataset.verdict, verdict: pick.value, note:', page)
-
-    def test_the_swarm_health_renders_findings_with_the_swarm(self):
-        source = function_source("renderSwarm")
-        self.assertIn("renderHealth(sw.findings, now)", source)
-        self.assertNotIn("renderNeedsYou", source)
-        page = page_source()
-        self.assertNotIn("needs-you", page)
-        self.assertNotIn("Needs you", page)
+        self.assertNotIn("renderHealth", page)
+        for gone in ('id="health', '$("health")', "No health findings", "needs-you", "Needs you"):
+            self.assertNotIn(gone, page)
 
     def test_health_styles_use_only_palette_tokens(self):
         page = page_source()

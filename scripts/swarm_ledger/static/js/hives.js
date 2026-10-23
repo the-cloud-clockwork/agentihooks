@@ -17,8 +17,7 @@ function loadHives() {
 
 export function quotaCount(sw, count, now) {
   const at = (sw.quota || {}).probed_at, accounts = `${count} ${count === 1 ? "account" : "accounts"}`;
-  const counts = (hives || []).map((hive) => `${hive.name || hive.id} ${hive.agents}/${hive.max_agents}`).join(" · ");
-  return [accounts, at ? `probed ${age(now - at * 1000)} ago` : "", counts].filter(Boolean).join(" · ");
+  return [accounts, at ? `probed ${age(now - at * 1000)} ago` : ""].filter(Boolean).join(" · ");
 }
 
 function flag(hive, field) {
@@ -39,11 +38,6 @@ function preferText(prefer) {
   return Object.entries(prefer || {}).map(([role, rank]) => `${role}:${rank}`).join(",");
 }
 
-function slots(hive) {
-  return h("div", { class: "hv-slots" }, ...(hive.slots || []).map((slot) =>
-    h("div", { text: `${slot.harness} ${slot.account} ${slot.agents}` })));
-}
-
 function moveButton(hive) {
   const here = hive.master && swarm && hive.master.slug === swarm.config.slug;
   return h("button", { class: "sw-btn", type: "button", "data-move-master": hive.id, disabled: !swarm || !!pending || !hive.live || !!here,
@@ -53,7 +47,7 @@ function moveButton(hive) {
 function hiveRow(hive) {
   const values = [h("span", { class: "sw-id", title: hive.id, text: hive.name || hive.id }), label(hive.live ? "live" : "quiet", hive.live ? "live" : "stalled"),
     flag(hive, "ui"), flag(hive, "ephemeral"), text(hive, "excluded", (hive.excluded || []).join(",")), text(hive, "prefer", preferText(hive.prefer)),
-    text(hive, "max_agents", String(hive.max_agents), true), `${hive.agents}/${hive.max_agents}`, slots(hive),
+    text(hive, "max_agents", String(hive.max_agents), true), `${hive.agents}/${hive.max_agents}`,
     hive.master ? h("span", { class: "sw-id", title: hive.master.name, text: hive.master.name }) : "—", moveButton(hive)];
   return h("tr", { id: `hive-${hive.id}` }, ...values.map((v) => (v.nodeType ? h("td", {}, v) : h("td", { text: v }))));
 }
@@ -64,7 +58,7 @@ export function renderHives(force) {
   const list = hives || [];
   $("hives-count").textContent = hivesFailed ? "—" : `${list.filter((hive) => hive.live).length} live · ${list.length} ${list.length === 1 ? "hive" : "hives"}`;
   $("swarm-hives").replaceChildren(...(list.length ? list.map(hiveRow)
-    : [h("tr", { class: "sw-empty" }, h("td", { colspan: "11", text: hivesFailed ? "Could not read hives." : hives ? "No hives registered." : "Reading hives…" }))]));
+    : [h("tr", { class: "sw-empty" }, h("td", { colspan: "10", text: hivesFailed ? "Could not read hives." : hives ? "No hives registered." : "Reading hives…" }))]));
 }
 
 function value(input) {

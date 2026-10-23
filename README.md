@@ -64,11 +64,12 @@ agentihooks swarm init my-swarm --plan ~/plans/my-plan.md --repo ~/dev/my-repo \
 ```
 
 This copies the Compose files packaged with AgentiHooks into
-`~/.agentihooks/swarm-stack` and starts three services:
+`~/.agentihooks/swarm-stack` and starts four services:
 
 | Service | What it does |
 |---|---|
 | `redis` | Swarm state, claims, leases and the inbox, behind a generated password |
+| `nats` | The swarm event bus with JetStream, reachable only inside the stack |
 | `swarm` | The ledger server and its web page |
 | `controller` | Holds the swarm lease and reconciles every swarm each minute |
 
@@ -86,6 +87,12 @@ agentihooks swarm my-swarm start                            # run it
 `swarm init` never starts a swarm by itself. A missing Docker, daemon or
 Compose plugin, or an unhealthy service, is named with its fix. Details:
 [Docker Compose quick start](docs/getting-started/compose-quick-start.md).
+
+Other install paths:
+
+- [Single machine quick start](docs/getting-started/single-machine-quick-start.md): the stack and this machine as its hive.
+- [Kubernetes quick start](docs/getting-started/kubernetes-quick-start.md): the hub from the OCI Helm chart on ghcr, with NATS and JetStream.
+- [Add a hive](docs/getting-started/add-hive-quick-start.md): join another machine or a Kubernetes worker hive with one invite.
 
 ## What ships
 
