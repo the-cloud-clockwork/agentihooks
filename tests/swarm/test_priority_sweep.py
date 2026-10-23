@@ -577,7 +577,7 @@ def test_a_cleared_priority_is_not_judged_again_in_the_same_pass():
     events = [write(1, "tasks/t1", "Ship it."), write(2, "tasks/t1", "Really, ship it.")]
     _, calls = dict_pass([row("tasks/t1")], events, judge, tasks=tasks)
     assert asked_texts(judge) == [("Ship", "Ship it.")]
-    assert [c[0] for c in calls] == ["clear_priority", "comment_item"]
+    assert [c[0] for c in calls] == ["comment_item", "clear_priority"]
 
 
 def test_an_even_answer_counts_as_a_yes():
