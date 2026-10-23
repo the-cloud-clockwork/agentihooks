@@ -745,6 +745,15 @@ def test_park_names_the_ssh_error_when_the_origin_url_cannot_be_read(parked, mon
     assert [c for c in shell.calls if c[:2] == PROMPTLESS] == []
 
 
+def test_park_refuses_an_unverified_fetch_from_an_address_with_no_https_form(parked, monkeypatch, capsys):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["a"]["branch_repo"] = OTHER
+    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "--", OTHER, "eng-a"]]))
+    assert park(doc) == 1
+    assert capsys.readouterr().err == f"swarm: cannot fetch eng-a from {OTHER}: {UNVERIFIED}\n"
+    assert [c for c in shell.calls if c[:2] == PROMPTLESS] == []
+
+
 def test_park_never_retries_over_https_when_the_ssh_failure_is_not_verification(parked, capsys):
     _, ledger, _, shell, doc = parked
     ledger.rows["a"]["branch_repo"] = "git@github.com:O/bundle.git"
@@ -763,6 +772,15 @@ def test_park_never_retries_over_https_when_the_ssh_failure_is_not_verification(
         ("/srv/repos/docs.git", ""),
         ("./a:b/docs.git", ""),
         ("file:///srv/docs.git", ""),
+        ("git+ssh://git@github.com/O/bundle", "https://github.com/O/bundle"),
+        ("ssh://git@github.com/O/r://x", "https://github.com/O/r://x"),
+        ("git@github.com:O/a:b.git", "https://github.com/O/a:b.git"),
+        ("git@github.com:/O/bundle.git/", "https://github.com/O/bundle.git/"),
+        ("deploy@ops@github.com:O/bundle.git", "https://github.com/O/bundle.git"),
+        ("ssh://deploy@ops@github.com/O/bundle", "https://github.com/O/bundle"),
+        ("git@github.com:Xen/bundle.git", "https://github.com/Xen/bundle.git"),
+        ("ssh://git@github.com", ""),
+        ("git@github.com:", ""),
     ],
 )
 def test_https_url_maps_only_ssh_addresses(url, https):
