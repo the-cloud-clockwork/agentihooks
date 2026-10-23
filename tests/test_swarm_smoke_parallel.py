@@ -12,6 +12,7 @@ SCENARIOS = [
     "scripts/packaging/hive-join-smoke.sh",
     "scripts/packaging/compose-hive-smoke.sh",
     "scripts/packaging/compose-task-smoke.sh",
+    "scripts/packaging/compose-recovery-drill.sh",
 ]
 
 

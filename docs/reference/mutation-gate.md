@@ -95,7 +95,7 @@ mutation reports are retained for seven days.
 | Symptom | Meaning and action |
 |---|---|
 | `No dev test dependency manifest found; tests are selected by import only.` | Lookup completed without a usable record. Import selection still applies; inspect dev Tests record production and lookup diagnostics before assuming indirect callers were included |
-| `Mutation selection fallback` warning | Current code retries a coverage read failure once, then selects every test module for each changed file. Read the preceding attempt errors and repair the record or GitHub access failure; expect more statistics work |
+| `Mutation selection fallback` warning | Current code retries a coverage read failure once, then selects every test module for each changed file. Read the preceding attempt errors and repair the record or GitHub access failure; expect more statistics work. See [Unreadable coverage record](#unreadable-coverage-record) |
 | Expected helper test is absent | Check the recorded dev run, containing function identity and test file's continued existence. A new call path or renamed function may have no historical execution record; import selection remains available but recorded coverage cannot invent that execution |
 | File reports `not mutated, no matching or importing test modules` | Neither selection route supplied a test for a changed file containing functions. Planning fails; supply covering tests and inspect their recorded coverage |
 | Candidate file appears as individual node ids | Current drift checks allowed narrowing. Compare those ids with the function's recorded coverage instead of requiring the whole file |
@@ -122,6 +122,128 @@ That head also removed a fallback, so this supports the selection diagnosis but
 is not an identical-head replay proving all 27 original mutants killed.
 The helper regression fixture and saved-selection refinement regression are
 maintained in `tests/test_ci_mutation_planned_selection.py`.
+
+## Unreadable coverage record
+
+When the planner cannot read the recorded dev coverage, it plans with every
+test module rather than failing the planning job. A GitHub or artifact hiccup
+then costs extra statistics work, never a failed pull request check. The
+behavior lives in `read_record` in `scripts/ci_mutation/plan.py` and applies
+wherever the planner runs with `--repository`: the `plan` job of the mutation
+preflight and the `mutation-plan` job of the Tests run, both in the step
+**Size mutation shards from stored timings**.
+
+### Retry and fallback
+
+The planner reads the record through `find_record` in `scripts/ci_test_plan.py`,
+which lists completed dev push Tests runs, lists each candidate's artifacts,
+reads its unit shard jobs and downloads its `dep-manifest` zip, all through
+`gh api`. One read can end three ways:
+
+| Read outcome | Planner behavior | Log |
+|---|---|---|
+| A usable record | Import selection plus the tests whose recorded coverage reaches the change, narrowed as described in [Individual tests for statistics](#individual-tests-for-statistics) | `Recorded coverage from dev run RUN_ID adds the tests that executed a changed function.` |
+| No usable record, every request answered | Import selection only. No retry; a missing record is an answer, not a failure | `No dev test dependency manifest found; tests are selected by import only.` |
+| The read raised a read error | Wait `RECORD_RETRY_SECONDS` (10), read again with the same cutoff time. A second success plans normally; a second failure falls back | `Reading the recorded dev coverage failed on attempt N: REASON` per failed attempt |
+
+A read error is any exception in `RECORD_ERRORS`: a failed or timed out `gh api`
+call (`subprocess.SubprocessError`), `OSError`, `ValueError` (unparsable JSON and
+an unusable manifest zip or schema included), `KeyError` and
+`zipfile.BadZipFile`. Any other exception still fails the step.
+
+After the second failure the planner prints one warning annotation, which
+appears on the run summary:
+
+```text
+::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every test module is selected for each changed file: CalledProcessError: gh: Server Error (HTTP 502)
+```
+
+`REASON` is the exception class and the `gh` stderr text, decoded with
+replacement characters for undecodable bytes; without stderr it is the
+exception message. `find_record` wraps a corrupt `dep-manifest` zip, a missing
+`manifest.json` or an invalid schema as `UnusableRecord`, so those reasons read
+`UnusableRecord: Dev run RUN_ID: File is not a zip file` or
+`UnusableRecord: Dev run RUN_ID: "There is no item named 'manifest.json' in the archive"`.
+The planner keeps the reason from the second attempt.
+
+In the fallback, every changed source file gets every `test_*.py` file under
+`tests/`, at any depth, as its selection. No recorded coverage is consulted and
+no narrowing runs, so the selection is a superset of what a readable record
+would have produced. The plan still validates the selection, writes
+`.mutation-selection.json`, sizes shards and statistics parts from it and
+continues. Statistics then collect the whole suite for those files, so expect
+more statistics parts and a longer statistics phase on that run.
+
+### Configuration
+
+The fallback has no switch. The planner command is the existing CI step:
+
+```bash
+python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+```
+
+The step needs `GH_TOKEN` for `gh api`. The retry delay is the
+`RECORD_RETRY_SECONDS` constant, one retry is fixed, and each `gh api` call
+times out after 60 seconds. Without `--repository` the planner reads no record
+and uses import selection.
+
+### Inspect a run
+
+Find the planner step's lines in the job log:
+
+```bash
+gh run view RUN_ID --log | grep -E "Reading the recorded dev coverage failed|Mutation selection fallback|Recorded coverage from dev run|No dev test dependency manifest"
+```
+
+A recovered read shows one `attempt 1` line followed by `Recorded coverage from
+dev run`. A fallback shows both attempt lines and the warning. Confirm the
+selection with the planner artifact, downloaded as in
+[Inspect the selection](#inspect-the-selection):
+
+```bash
+jq -r '.[] | length' EVIDENCE_DIR/selection/.mutation-selection.json | sort -u
+```
+
+In a fallback every changed file lists the same count, the number of test
+modules in the tree.
+
+### Limits and troubleshooting
+
+| Symptom | Meaning and action |
+|---|---|
+| `Mutation selection fallback` warning on one run | The record read failed twice. Read the reason; a transient `HTTP 5xx` or timeout needs nothing, and the next run reads the record again |
+| The same warning on every run | The failure is persistent. A `gh` authentication or permission error points at `GH_TOKEN`; a reason starting `UnusableRecord: Dev run RUN_ID:` (raised by `_usable` in `scripts/ci_test_plan.py`) names a dev run whose `dep-manifest` zip or schema is unusable, which the planner reads again on every attempt; repair the record production on dev |
+| Statistics take much longer than usual | Expected after a fallback: the whole suite runs for each changed file. Check the warning before diagnosing the statistics shards |
+| Planning step fails with a traceback | The exception is outside `RECORD_ERRORS`, or the failure is elsewhere in planning; read the traceback |
+| `attempt 1` line followed by a normal plan | The retry recovered; the selection is the coverage based one |
+
+The fallback covers reading the record only. A failed upload or download of
+the planner's own selection artifact between jobs is a separate transfer
+failure; see [Reused and empty pull request runs](#reused-and-empty-pull-request-runs).
+
+### Delivery evidence
+
+[Pull request 5201](https://github.com/the-cloud-clockwork/agentihooks/pull/5201)
+delivered the retry and fallback on 2026-10-20 for
+[issue 5199](https://github.com/the-cloud-clockwork/agentihooks/issues/5199).
+
+| Evidence | Result |
+|---|---|
+| [Mutation preflight 39263117668](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39263117668), 2026-10-19 | Planning failed downloading the `dep-manifest` artifact zip with a `gh api` `CalledProcessError` |
+| [Mutation preflight 39227109213](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39227109213), 2026-10-19 | Planning failed listing dev runs with a `gh api` `CalledProcessError` |
+| [Red Proofs 39399678910](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39399678910) | Tests only: 6 failed, 50 passed on the old planner |
+| [Green Proofs 39400480288](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39400480288) | 149 passed across the planned selection, plan and preflight test modules on the delivered head |
+
+The source investigation found the artifact unexpired and downloadable
+afterwards, and the run listing reads no artifact. Nothing observed showed that
+the organization's private artifact storage quota, reported over its included
+amount the same day, caused either failure; the old planner discarded the `gh`
+stderr, which the fallback reason now carries. The regression cases are
+`test_plan_retries_an_unreadable_record_once_then_selects_every_test` and
+`test_record_failure_names_the_gh_error_text` in
+`tests/test_ci_mutation_planned_selection.py`: one failure then a recovered
+read keeps the coverage selection, and two failures from a 502, a timeout, a
+bad zip, unparsable JSON or a missing manifest select every test module.
 
 ## Individual tests for statistics
 

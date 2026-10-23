@@ -378,6 +378,10 @@ and hives with their hive tokens.
 ## Related pages
 
 - [Docker Compose quick start](../getting-started/compose-quick-start.md)
+- [Single machine quick start](../getting-started/single-machine-quick-start.md)
+- [Kubernetes quick start](../getting-started/kubernetes-quick-start.md)
+- [Add a hive](../getting-started/add-hive-quick-start.md)
 - [Hives](../pillars/hives.md)
 - [Swarm](../pillars/swarm.md)
 - [Hosted ledger auth](hosted-ledger-auth.md)
+- [Shared ledger database sessions](shared-ledger-database.md)

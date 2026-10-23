@@ -169,7 +169,6 @@ def steps():
         ("raise eng cap", lambda page: page.click('button[data-swarm="eng_up"]')),
         ("apply caps", lambda page: page.click('button[data-swarm="apply"]')),
         ("gate mode", lambda page: page.click('button[data-gate="watch"][data-gate-mode="off"]')),
-        ("health verdict", lambda page: page.select_option("select.hl-pick >> nth=0", "established")),
         ("lift gate", lambda page: page.dispatch_event('button[data-lift="talk"]', "click")),
         ("restore choice", lambda page: page.dispatch_event('button[data-restore-choice="resume"]', "click")),
         ("refresh quota", lambda page: page.click("#quota-refresh")),

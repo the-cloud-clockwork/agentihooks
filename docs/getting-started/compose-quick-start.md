@@ -7,7 +7,7 @@ permalink: /docs/getting-started/compose-quick-start/
 
 # Docker Compose Quick Start
 
-Start the packaged swarm service bundle for **Claude Code and Codex**. It provides Redis, a NATS server with JetStream, the ledger web service and a controller. Independent agent sessions can use [native installation](installation.md) without these services.
+Start the packaged swarm service bundle for **Claude Code and Codex**. It provides Redis, a NATS server with JetStream, the ledger web service and a controller. Independent agent sessions can use [native installation](installation.md) without these services. For the shortest path to a started swarm with this machine as its hive, follow the [single machine quick start](single-machine-quick-start.md); for a cluster, the [Kubernetes quick start](kubernetes-quick-start.md); to join further machines, [add a hive](add-hive-quick-start.md).
 
 ## Prerequisites
 
