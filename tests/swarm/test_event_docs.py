@@ -84,11 +84,12 @@ def test_swarm_page_lists_what_the_tick_skips_for_event_swarms():
     text = " ".join(_swarm().split())
     for skipped in (
         "spawns no lane agent",
-        "reaps no lane agent",
         "runs no orphan pass",
         "collects no acknowledgement",
+        "reaps only agents the bus holds no execution start for",
     ):
         assert skipped in text, skipped
+    assert "reaps no lane agent" not in text
 
 
 def test_every_subject_the_pages_name_comes_from_code():

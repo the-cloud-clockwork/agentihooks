@@ -78,10 +78,11 @@ When a hive disappears its agents end as if they had exited; see
 
 ### What the minute tick still does
 
-For an `events` swarm the tick spawns no lane agent, reaps no lane agent, runs no orphan pass and collects no
-acknowledgement: those moved to the hub and the hives. It still runs master failover and recovery, pane evidence,
-exits, verification, the dispatcher, the lane split, master scaling and the promotion and release watches for both
-engines. Master agents are reaped by the tick under either engine.
+For an `events` swarm the tick spawns no lane agent, runs no orphan pass and collects no acknowledgement: those
+moved to the hub and the hives. It still runs master failover and recovery, pane evidence, exits, verification, the
+dispatcher, the lane split, master scaling and the promotion and release watches for both engines. Under either
+engine the tick reaps only agents the bus holds no execution start for, so an agent a hub offer launched is never
+reaped by the tick.
 
 The hub offers eng, ci and plan tasks, and the spoke code is the same for every lane. With
 `AGENTIHOOKS_DEPLOYMENT=distributed`, a workstation runs the master lane spoke with `agentihooks swarm spoke`. That
