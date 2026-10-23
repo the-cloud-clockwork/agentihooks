@@ -9,7 +9,7 @@ from scripts.hub import lease
 from scripts.hub.registry import Reactor
 from scripts.inbox import wake
 from scripts.inbox.bus import Message, SeatInbox
-from scripts.inbox.pool import slug_of
+from scripts.inbox.seats import is_seat
 from scripts.inbox.store import REDELIVERED, REDELIVERER, InboxStore, redelivery_ms
 from scripts.swarm import outage
 from scripts.swarm.delivery import HerdrMessenger
@@ -57,7 +57,7 @@ class InboxWake:
                 if not guard():
                     return
                 item = inbox.get(item_id)
-                swarm = slug_of(item.address) or inbox.names.slug_of(item.address)
+                swarm = item.address.partition("@")[2] if is_seat(item.address) else inbox.names.slug_of(item.address)
                 if swarm:
                     SeatInbox(self.bus, swarm).send(
                         item.address, Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)

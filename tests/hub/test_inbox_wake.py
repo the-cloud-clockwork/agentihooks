@@ -5,6 +5,7 @@ import pytest
 
 from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
+from scripts.inbox import wake
 from scripts.inbox.bus import Message, SeatInbox
 from tests.inbox.test_wake import FakeHerdr, FakeLedger
 
@@ -151,7 +152,7 @@ def test_hive_mail_is_resolved_from_its_own_world(rig, monkeypatch):
     assert rig.herdr.prompts == [
         (
             "p1",
-            "Run agentihooks msg inbox and answer through agentihooks msg reply or the swarm commands, never as text in the terminal.",
+            wake.WAKE_TEXT,
         )
     ]
 
