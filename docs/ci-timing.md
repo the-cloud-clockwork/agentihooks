@@ -345,7 +345,7 @@ Wall time runs from the earliest job creation in the run to the latest
 at its latest job completion instead. A finding needs more than 15 minutes
 (`WALL_MS`, 900000 milliseconds); exactly 15 minutes raises none.
 
-Each judged run over 15 minutes adds one evidence line that names its conclusion:
+Each judged run over 15 minutes adds one evidence line naming its conclusion:
 
 ```text
 run 39788224362, tier pull_request, conclusion success, wall time 1223 seconds
