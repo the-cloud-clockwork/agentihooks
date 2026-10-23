@@ -1061,8 +1061,8 @@ def cmd_set(store, args):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server, engine=legacy|events "
-                f"or {', '.join(LANE_KEYS)}=<value>"
+                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
+                f"or {', '.join(LANE_KEYS)}=<value>, engine=legacy|events"
             )
         changes[SETTABLE[key]] = int(value)
     config = ledger_cutover.settings(store, args.slug, {**changes, **_pinned(changes)})
