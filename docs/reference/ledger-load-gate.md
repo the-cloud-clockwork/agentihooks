@@ -380,16 +380,102 @@ this result; it now has its own paired grader and record.
 
 ### Ledger load compare mode
 
-The `compare` dispatch of the `Ledger server load` workflow shares
-`tests.ledger_load.paired`. Its `compare-grade` job states its own
-`SAME_CODE_MARGIN: '1.4'` and passes its own record,
-`tests/ledger_load/compare_same_code_pairs.json`, which holds runs 39536032269,
-39536034637 and 39536036977. `test_compare_mode_records_its_own_same_code_runs_inside_the_margin_its_grade_states`
-holds that record within that margin. Run it with:
+The `compare` dispatch of the `Ledger server load` workflow runs the full load
+gate on base and head and grades head against base with the same grader as the
+hierarchy paired check, `tests.ledger_load.paired`. Swarm task t517 moved it
+onto that grading in
+[pull request 5108](https://github.com/the-cloud-clockwork/agentihooks/pull/5108).
+Before it, compare mode ran two base and head pairs, base always first, and
+graded them at the default 1.1 times margin with no same code record, while its
+own same code runs differed by up to 2.2 times.
+
+Dispatch it on a branch, naming the base:
 
 ```bash
 gh workflow run ledger-load.yml --ref "<branch>" -f compare=true -f base="<base sha>"
 ```
+
+A compare dispatch skips the `load` job and runs these instead:
+
+| Job | What it does |
+|---|---|
+| `compare` | A five job matrix, `pair: [1, 2, 3, 4, 5]`, one runner per pair. Each job extracts the base tree with `git archive`, copies the head's `tests/ledger_load/gate.py` into it so both sides run the same harness, and starts both load windows together on its runner, each with its own Redis database. Pairs 1, 3 and 5 start base first; pairs 2 and 4 start head first. The job fails when either side's own load gate fails, and uploads `compare-pair-N` holding `base.log`, `head.log` and both server logs either way |
+| `compare-grade` | Runs after every pair job that was not cancelled. It downloads the five artifacts and runs `tests.ledger_load.paired` on them with `--margin "$SAME_CODE_MARGIN"` and `--same-code tests/ledger_load/compare_same_code_pairs.json` |
+
+The grade reads the last measure line of each log, takes the head over base
+ratio of write p50 and of the busiest CPU window for every pair, and combines
+each measure as the geometric mean of the base first median and the head first
+median, so the start order cancels out. In the calibration runs of pull
+request 5108 the side that ran first was slower in most pairs. The run is red when either combined ratio exceeds the margin, when
+head's failed requests summed over the pairs exceed base's, or when any log has
+no measure. The messages are listed under
+[What the paired grade turns red](#what-the-paired-grade-turns-red).
+
+#### Compare margin and its record
+
+| Setting | Value |
+|---|---|
+| Margin | `SAME_CODE_MARGIN: '1.4'` in the `compare-grade` job, separate from the 1.25 load margin of the `Hierarchy CPU proof` |
+| Record | `tests/ledger_load/compare_same_code_pairs.json`, in the [same code record](#the-same-code-record) format: five pairs per run, base first in each pair |
+| Recorded runs | [39536032269](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39536032269), [39536034637](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39536034637) and [39536036977](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39536036977), base equal to head |
+| Bound | 1.18, the widest single pair ratio in either direction across those fifteen pairs; write p50 pairs ran from 0.84 to 1.08 and busiest CPU from 0.95 to 1.05 |
+| Floor | A margin below the bound turns the grade red with `the margin Mx is below Bx, the widest pair ratio of the same code runs` before any ratio is judged |
+
+`test_compare_mode_records_its_own_same_code_runs_inside_the_margin_its_grade_states`
+in `tests/ledger_load/test_paired.py` reads the margin from `compare-grade`,
+requires at least three recorded runs, each with as many pairs as the matrix,
+a bound within the margin and the `--same-code` argument on the grade step.
+Shrinking the matrix, lowering the margin or recording a noisier run fails it
+in the unit suite.
+
+Pull request 5108 first calibrated the margin on runs 39369348206, 39369353196
+and 39369357901, when each pair ran base and head one after the other. Their
+widest pair was 0.74, a 1.35 times bound, and the 1.4 margin was set above it.
+[Pull request 5424](https://github.com/the-cloud-clockwork/agentihooks/pull/5424)
+then started both windows of a pair together and replaced the record with the
+three runs above, keeping the margin.
+
+To recalibrate after the runners or the workload change, dispatch three same
+code controls with the branch head as its own base:
+
+```bash
+for n in 1 2 3; do
+  gh workflow run ledger-load.yml --ref "<branch>" -f compare=true -f base="$(git rev-parse "origin/<branch>")"
+done
+```
+
+Then append each run's pairs to the record from its artifacts, in matrix order:
+
+```bash
+gh run download "<run-id>" --dir compare-evidence --pattern 'compare-pair-*'
+for n in 1 2 3 4 5; do
+  for side in base head; do
+    grep -h '^{"seconds"' "compare-evidence/compare-pair-$n/$side.log" | tail -1 \
+      | python3 -c 'import json, sys; m = json.load(sys.stdin); print({k: m[k] for k in ("errors", "write_p50_s", "busiest_cores")})'
+  done
+done
+```
+
+#### Compare mode evidence
+
+Recorded in pull request 5108 and, for the current record, pull request 5424:
+
+| Run | Change | Result |
+|---|---|---|
+| Proofs [39369170619](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39369170619) | Red, the new tests on the old two pair layout | One same code pair 2 times apart gave a 1.50 median over two pairs against 1.1 times; the record test failed because the record was missing |
+| Proofs [39370359889](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39370359889) | Green, head 6ec380b | The 2 times apart pair passed at a 1.00 ratio over five pairs, five 3 times slower writes failed at 3.00, and the record fit inside 1.4 times |
+| Ledger server load [39370362664](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39370362664) | Same code compare on head 6ec380b | Green. Write p50 1.11 (pairs 0.88 to 1.31), CPU 0.91 (0.89 to 1.25) |
+| Ledger server load [39370365317](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39370365317) | 0.2 s planted on every ledger API write, branch `diffcheck/t517-write-slowdown` against 6ec380b | Red. Write p50 4.21 against the 1.4 margin, pair ratios 3.88 to 4.28; every pair's own load gate passed |
+| Ledger server load 39536032269, 39536034637, 39536036977 | Same code compare after pull request 5424 | Green. Fifteen compare jobs with a median of 138 seconds, against 235 seconds before ([39394339989](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39394339989)) |
+
+#### Troubleshooting compare mode
+
+| Observation | Meaning and next step |
+|---|---|
+| `head write p50 order balanced pair ratio R exceeds the 1.4x margin` | Head is slower beyond recorded same code noise. Dispatch a same code control on the base; if it also crosses 1.4, the noise grew and the record needs new runs before the margin is judged |
+| A `compare` job red with `load gate failed on base` or `on head` | That side's own load gate failed. Read the side's log in `compare-pair-N`; the grade job still runs and grades every uploaded log |
+| `the base run of pair N printed no load measure` | The pair job ended before that side measured, often a runner lost mid run. Rerun the whole dispatch so every pair comes from the same runners and code |
+| `the margin 1.4x is below Bx, the widest pair ratio of the same code runs` | A recorded run is noisier than the margin. Check the runner class of the recorded runs, then raise the margin or replace the noisy run |
 
 ### Reproducing a same code control
 
@@ -512,7 +598,7 @@ gh workflow run ledger-load.yml --ref <branch> -f base=origin/dev
 | Input | Default | Effect |
 |---|---|---|
 | `base` | `origin/dev` | revision whose constants grade the run |
-| `compare` | `false` | run base and head gates interleaved twice on one runner, then `tests.ledger_load.paired` fails when the head's best write p95 or busiest CPU window exceeds the base's by more than 10%, or the head had more failed requests. Each of the four gate runs still applies its own resource growth check |
+| `compare` | `false` | run base and head gates together on each of five runners, then `tests.ledger_load.paired` fails when the head's order balanced write p50 or busiest CPU window ratio exceeds the 1.4 times margin, or the head had more failed requests; see [Ledger load compare mode](#ledger-load-compare-mode). Each of the ten gate runs still applies its own budgets and resource growth check |
 | `streams` | `false` | compare page stream publication CPU between base and head instead of running the gate |
 
 A dispatch never saves the input key unless the gate ran and passed.
