@@ -356,12 +356,18 @@ def _drop(slug, store, ledger, rows, agent, refund=False):
     store.drop_agent(slug, agent.name)
     held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
     held = held and not awaiting_merge(rows[agent.task])
-    if refund and held and store.claims(slug, agent.task) > 0:
-        store.refund_claim(slug, agent.task)
     expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}
+    if refund and held and _still_held(ledger.task(slug, agent.task), expected) and store.claims(slug, agent.task) > 0:
+        store.refund_claim(slug, agent.task)
     reopen = held and _reopen(slug, ledger, rows, agent.task, expected)
     exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
     return f", task {agent.task} reopened" if reopen else ""
+
+
+def _still_held(row, expected):
+    return bool(row) and row.get("state") in ACTIVE and all(
+        row.get(key, 0 if key == "claim_generation" else "") == value for key, value in expected.items()
+    )
 
 
 def _verify(slug, store, ledger, runtime, rows, now_ms):
