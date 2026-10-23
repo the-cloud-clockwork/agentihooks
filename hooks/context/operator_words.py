@@ -211,9 +211,9 @@ def _load(name):
 
 def recorded(pattern: str) -> list[str]:
     with _store() as connection:
-        names = {name for (name,) in connection.execute("SELECT DISTINCT name FROM entries")}
-    names |= _shared_call(lambda redis: redis.smembers(_shared_key()), set())
-    return sorted(name for name in names if fnmatchcase(name, pattern))
+        names = connection.execute("SELECT DISTINCT name FROM entries").fetchall()
+    shared = _shared_call(lambda redis: redis.smembers(_shared_key()), set())
+    return sorted(name for name in {name for (name,) in names} | shared if fnmatchcase(name, pattern))
 
 
 def _save(name, data):

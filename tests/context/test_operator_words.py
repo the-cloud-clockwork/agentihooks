@@ -607,6 +607,10 @@ def test_swarm_words_reach_a_server_without_the_local_store_and_unowned_words_st
     assert operator_words.record("master@a1-1", "Scale the hive  up", now=100, swarm="demo")
     assert operator_words.record("master@a1-1", "Hold the release", now=150, swarm="demo")
     assert operator_words.record("master@b2-1", "Local only words", now=150)
+    from scripts.swarm.store import PREFIX
+
+    assert shared.smembers(f"{PREFIX}:operator-words") == {"master@a1-1"}
+    assert shared.llen(f"{PREFIX}:operator-words:master@a1-1") == 2
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "scale the hive up", now=200) == "Scale the hive  up"
     assert operator_words.matching("master@a1-1", "hold the", now=200) == "Hold the release"
@@ -628,8 +632,8 @@ def test_the_newest_shared_words_win_and_only_the_latest_are_kept(shared, tmp_pa
 
 
 def test_forget_drops_only_that_swarms_shared_words(shared, tmp_path, monkeypatch):
-    operator_words.record("master@a1-1", "merge the demo work", now=100, swarm="demo")
-    operator_words.record("master@a1-1", "merge the other work", now=110, swarm="other")
+    operator_words.record("master@a1-1", "merge the other work", now=100, swarm="other")
+    operator_words.record("master@a1-1", "merge the demo work", now=110, swarm="demo")
     operator_words.forget("demo")
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "merge the demo work", within=None) == ""
