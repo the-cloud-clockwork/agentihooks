@@ -28,11 +28,9 @@ def test_running_host_publishes_a_later_ledger_write_and_stops_its_relay(tmp_pat
     opening = Mock(return_value=bus)
     monkeypatch.setattr(factory, "open_bus", opening)
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
-    with outbox_host.running(repository, interval=0.01) as worker:
-        assert worker.is_alive()
+    with outbox_host.running(repository, interval=0.01):
         repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]})
         assert published.wait(2), "the host did not publish the committed ledger change"
-    assert not worker.is_alive()
     assert [subject for subject, _ in bus.events.entries] == ["swarm.ledger.phase.p1"]
     opening.assert_called_once_with(BusConfig(backend="nats"))
     close.assert_called_once_with()
@@ -59,66 +57,72 @@ def test_memory_default_preserves_outbox_rows(tmp_path, monkeypatch):
 def test_relay_retries_failures_on_the_next_interval_and_closes_its_bus(monkeypatch, capsys, failure):
     from scripts.swarm_ledger import outbox_host
 
-    stopped = Mock()
-    stopped.is_set.side_effect = [False, False, True]
     bus = Mock()
     opening = Mock(side_effect=[OSError("offline"), bus] if failure == "connect" else [bus, bus])
     monkeypatch.setattr(factory, "open_bus", opening)
-    publish = Mock(side_effect=[OSError("offline"), 1] if failure == "publish" else [1])
+    publish = Mock(side_effect=[OSError("offline"), 1, 1] if failure == "publish" else [1, 1])
     monkeypatch.setattr(outbox_host.outbox, "relay", publish)
     prune = Mock(return_value=0)
     monkeypatch.setattr(outbox_host.outbox, "prune", prune)
     repository = object()
     config = BusConfig(backend="nats", url="nats://bus:4222", dedupe_window_ms=7_000)
-    outbox_host.relay(repository, stopped, config, 0.25)
+    relay = outbox_host.Relay(repository, config)
+    relay.publish()
+    assert relay.bus is None
+    relay.publish()
+    assert relay.bus is bus
+    relay.publish()
+    relay.close()
+    relay.close()
+    assert relay.bus is None
     assert opening.call_args_list == [((config,), {}), ((config,), {})]
-    assert publish.call_args_list == [((repository, bus.events), {})] * (2 if failure == "publish" else 1)
-    assert prune.call_args_list == [((repository, 7_000), {})]
-    assert stopped.wait.call_args_list == [((0.25,), {}), ((0.25,), {})]
+    assert publish.call_args_list == [((repository, bus.events), {})] * (3 if failure == "publish" else 2)
+    assert prune.call_args_list == [((repository, 7_000), {})] * 2
     assert bus.close.call_args_list == [((), {})] * (2 if failure == "publish" else 1)
     assert capsys.readouterr().err == "ledger bus relay: offline\n"
 
 
-def test_relay_does_not_open_a_bus_after_stop_and_handles_failed_open(monkeypatch, capsys):
+def test_closing_a_relay_without_a_connection_is_safe(monkeypatch):
     from scripts.swarm_ledger import outbox_host
 
-    opening = Mock(side_effect=OSError("offline"))
+    opening = Mock()
     monkeypatch.setattr(factory, "open_bus", opening)
-    stopped = Mock()
-    stopped.is_set.side_effect = [False, True]
-    outbox_host.relay(object(), stopped, BusConfig(backend="nats"), 3)
-    opening.assert_called_once_with(BusConfig(backend="nats"))
-    stopped.wait.assert_called_once_with(3)
-    assert capsys.readouterr().err == "ledger bus relay: offline\n"
-    opening.reset_mock()
-    stopped.is_set.side_effect = [True]
-    outbox_host.relay(object(), stopped, BusConfig(backend="nats"), 3)
+    relay = outbox_host.Relay(object(), BusConfig(backend="nats"))
+    relay.close()
+    relay.close()
+    assert relay.bus is None
     opening.assert_not_called()
 
 
-def test_host_signals_and_joins_worker_even_when_serving_raises(monkeypatch):
+@pytest.mark.parametrize("close_error", [False, True])
+def test_host_stops_the_scheduled_interval_before_closing_the_bus(monkeypatch, close_error):
     from scripts.swarm_ledger import outbox_host
 
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
-    stopped = Mock()
-    monkeypatch.setattr(outbox_host.threading, "Event", Mock(return_value=stopped))
-    worker = Mock()
-    thread = Mock(return_value=worker)
-    monkeypatch.setattr(outbox_host.threading, "Thread", thread)
+    scheduled = Mock()
+    interval = Mock(return_value=scheduled)
+    monkeypatch.setattr(outbox_host, "Interval", interval)
+    bus = Mock()
+    opening = Mock(return_value=bus)
+    monkeypatch.setattr(factory, "open_bus", opening)
+    monkeypatch.setattr(outbox_host.outbox, "relay", Mock())
+    monkeypatch.setattr(outbox_host.outbox, "prune", Mock())
+    scheduled.close.side_effect = ValueError("stop") if close_error else None
     repository = object()
-    with pytest.raises(ValueError, match="serving"):
-        with outbox_host.running(repository) as running:
-            assert running is worker
-            worker.start.assert_called_once_with()
-            stopped.set.assert_not_called()
+    with pytest.raises(ValueError, match="stop" if close_error else "serving"):
+        with outbox_host.running(repository):
+            scheduled.start.assert_called_once_with()
+            scheduled.close.assert_not_called()
+            callback = interval.call_args.args[0]
+            callback()
+            bus.close.assert_not_called()
             raise ValueError("serving")
-    thread.assert_called_once_with(
-        target=outbox_host.relay,
-        args=(repository, stopped, BusConfig(backend="nats"), 1.0),
-        daemon=True,
-    )
-    stopped.set.assert_called_once_with()
-    worker.join.assert_called_once_with()
+    assert interval.call_args.kwargs == {"every": 1.0}
+    scheduled.close.assert_called_once_with()
+    bus.close.assert_called_once_with()
+    assert callback.__self__.bus is None
+    assert callback.__self__.repository is repository
+    opening.assert_called_once_with(BusConfig(backend="nats"))
 
 
 @pytest.mark.wall_clock
@@ -242,7 +246,7 @@ def test_server_gives_its_repository_to_the_relay_and_stops_it_before_closing(mo
     assert lifecycle == ["relay started", "serving", "relay stopped", "server closed"]
 
 
-def test_relay_loop_prunes_sent_rows_outside_the_dedupe_window_and_keeps_the_rest(tmp_path, monkeypatch):
+def test_relay_prunes_sent_rows_outside_the_dedupe_window_and_keeps_the_rest(tmp_path, monkeypatch):
     from scripts.swarm_ledger import outbox_host
 
     repository = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
@@ -268,8 +272,6 @@ def test_relay_loop_prunes_sent_rows_outside_the_dedupe_window_and_keeps_the_res
     assert [len(stale), len(recent), len(unsent)] == [1, 1, 1]
     monkeypatch.setattr(factory, "open_bus", Mock(return_value=bus))
     monkeypatch.setattr(outbox_host.outbox, "relay", Mock(return_value=0))
-    stopped = Mock()
-    stopped.is_set.side_effect = [False, True]
-    outbox_host.relay(repository, stopped, config, 0.01)
+    outbox_host.Relay(repository, config).publish()
     assert ids() == recent | unsent
     assert marks() == recent
