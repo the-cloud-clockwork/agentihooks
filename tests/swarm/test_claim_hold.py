@@ -1,4 +1,3 @@
-import fakeredis
 import pytest
 
 from scripts.inbox.store import InboxStore
@@ -9,6 +8,8 @@ from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 @pytest.fixture
 def held():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0, state="paused"))
     ledger = FakeLedger([{"id": "t1", "title": "Hive telemetry", "awaiting": "verify", "contract": {"after_at": ""}}])
