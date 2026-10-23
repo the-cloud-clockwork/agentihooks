@@ -560,6 +560,8 @@ The hub creates the hive buckets; members are not allowed to create them:
 | `hive-presence` | Each hive's heartbeat. |
 | `hive-executions` | What each hive reports about its running executions. |
 | `execution-starts` | Every `execution.started`. The tick and the reconciler use it to tell hub launched agents from tick launched ones. |
+| `account-slots` | One row per harness and account: the executions holding a slot on it and each hive's cap and live sessions, so no account runs past its cap across hives. |
+| `hive-slot-accounts` | The harness and account pairs each hive has reported, so its heartbeat renews or drops its slots on every one of them. |
 
 A hive beats `hive-presence` every 15 seconds. A beat expires after 45 seconds.
 
