@@ -198,7 +198,9 @@ def _branch_scope(repo, ref, run):
         return _scope(repo, ref, run)
     except RateLimited:
         raise
-    except Unreachable:
+    except Unreachable as error:
+        if "HTTP 404" not in str(error):
+            raise
         return None
 
 

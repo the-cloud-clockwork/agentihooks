@@ -73,6 +73,7 @@ def preflight(monkeypatch):
         base="base",
         bases={},
         gone=(),
+        gone_error=b"gh: Not Found (HTTP 404)",
         scope=None,
         scope_name="scope.json",
         report_name="report.json",
@@ -109,7 +110,7 @@ def preflight(monkeypatch):
         elif "/compare/" in args[-1]:
             ref = args[-1].split("/compare/")[1].split("...")[0]
             if ref in state.gone:
-                return subprocess.CompletedProcess(args, 1, b"", b"gh: Not Found (HTTP 404)")
+                return subprocess.CompletedProcess(args, 1, b"", state.gone_error)
             output = json.dumps({"merge_base_commit": {"sha": state.bases.get(ref, state.base)}})
         else:
             output = json.dumps(state.run)
@@ -628,6 +629,14 @@ def test_a_rate_limited_dependency_compare_holds_the_wait(preflight, monkeypatch
         return scope(repo, ref, run)
 
     monkeypatch.setattr(mutation_wait, "_scope", limited)
+    held = {**waits.on("mutation", URL, "t1"), "head": "first"}
+    assert waits.resolution(held, STACKED, None, None, None, False) == ""
+
+
+def test_a_failed_dependency_compare_other_than_not_found_holds_the_wait(preflight):
+    _stacked_proof(preflight)
+    preflight.gone = ("engineer-0",)
+    preflight.gone_error = b"gh: Server Error (HTTP 502)"
     held = {**waits.on("mutation", URL, "t1"), "head": "first"}
     assert waits.resolution(held, STACKED, None, None, None, False) == ""
 
