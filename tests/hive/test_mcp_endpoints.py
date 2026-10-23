@@ -106,3 +106,15 @@ def test_hive_setup_publishes_mcp_bearer_environment_references(tmp_path):
     kept, skipped = setup.entries({"AGENTIHOOKS_MCP_BEARER_ENV": references}, tmp_path)
     assert kept["AGENTIHOOKS_MCP_BEARER_ENV"] == references
     assert skipped == {}
+
+
+def test_mcp_bearer_reference_works_without_existing_headers(world, monkeypatch):
+    from scripts.profiles import render
+
+    original = remote_profile(world)
+    del original["memory"]["headers"]
+    (world["role"] / ".claude/.mcp.json").write_text(json.dumps({"mcpServers": original}))
+    monkeypatch.setenv("AGENTIHOOKS_MCP_BEARER_ENV", json.dumps({"memory": "HIVE_MEMORY_TOKEN"}))
+    out = render.render_claude("rb-role")
+    servers = json.loads((out / ".claude.json").read_text())["mcpServers"]
+    assert servers["memory"] == {**original["memory"], "headers": {"Authorization": "Bearer ${HIVE_MEMORY_TOKEN}"}}
