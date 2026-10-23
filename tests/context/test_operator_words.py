@@ -662,3 +662,24 @@ def test_an_unreachable_or_failing_shared_redis_keeps_the_local_words(tmp_path, 
     operator_words.forget("demo")
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "keep the local words", within=None) == ""
+
+
+def test_the_shared_client_connects_once_per_process_and_retries_after_a_refusal(monkeypatch):
+    import redis
+
+    from scripts.swarm import store
+
+    calls = []
+
+    def connect(environ=None):
+        calls.append(environ)
+        if len(calls) == 1:
+            raise redis.exceptions.ConnectionError("refused")
+        return "client"
+
+    monkeypatch.setattr(operator_words, "_SHARED", [])
+    monkeypatch.setattr(store, "redis_client", connect)
+    assert operator_words._shared() is None
+    assert operator_words._shared() == "client"
+    assert operator_words._shared() == "client"
+    assert len(calls) == 2

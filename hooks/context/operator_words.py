@@ -19,6 +19,7 @@ from hooks.context.swarm_heartbeat import is_operator_prompt
 TTL_SEC = 3600
 KEPT = 50
 SHARED_KEPT = 500
+_SHARED = []
 
 
 def _dir():
@@ -81,10 +82,12 @@ def _shared():
 
     from scripts.swarm import store
 
-    try:
-        return store.redis_client()
-    except (RedisError, OSError):
-        return None
+    if not _SHARED:
+        try:
+            _SHARED.append(store.redis_client())
+        except (RedisError, OSError):
+            return None
+    return _SHARED[0]
 
 
 def _shared_key(*parts):
@@ -109,7 +112,8 @@ def _mirror(swarm, name, at, words):
     def push(redis):
         row = json.dumps({"swarm": swarm, "at": at, "words": words})
         key = _shared_key(name)
-        redis.pipeline().sadd(_shared_key(), name).lpush(key, row).ltrim(key, 0, SHARED_KEPT - 1).execute()
+        with redis.pipeline() as pipe:
+            pipe.sadd(_shared_key(), name).lpush(key, row).ltrim(key, 0, SHARED_KEPT - 1).execute()
 
     _shared_call(push, None)
 
