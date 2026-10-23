@@ -205,9 +205,10 @@ def _branchless_ops(ledger):
     ledger.rows["a"].update({"kind": "ops", "branch": "", "state": "claimed"})
 
 
-def test_park_refuses_a_branchless_code_dependency_beside_a_branchless_ops_one(parked, capsys):
+@pytest.mark.parametrize("kind", [{}, {"kind": "ci"}, {"kind": "plan"}])
+def test_park_refuses_a_branchless_code_ci_or_plan_dependency_beside_a_branchless_ops_one(parked, capsys, kind):
     _branchless_ops(parked[1])
-    parked[1].rows["c"] = {"id": "c", "title": "Ship the queue", "state": "claimed", "lane": "eng"}
+    parked[1].rows["c"] = {"id": "c", "title": "Ship the queue", "state": "claimed", "lane": "eng", **kind}
     parked[1].rows["t1"]["depends_on"] = ["a", "b", "c"]
     _refused(parked, capsys, "no open dependency records a branch, so there is nothing to stack on")
 
@@ -219,7 +220,7 @@ def test_park_stacks_on_dev_when_every_open_dependency_is_a_branchless_non_code_
     ledger.rows["a"]["kind"] = kind
     assert park(doc) == 0
     assert ("t1", {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": []}, AGENT) in ledger.updates
-    body = f"Parked on branch `eng-t1` until a merges. Stacked base `{BASE}`. {NOTE}"
+    body = f"Parked on branch `eng-t1` until a is done. Stacked base `{BASE}`. {NOTE}"
     assert shell.calls == [
         ["git", "ls-remote", "--heads", "origin", "eng-t1"],
         ["git", "rev-parse", "HEAD"],

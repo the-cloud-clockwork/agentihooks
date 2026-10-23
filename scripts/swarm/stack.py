@@ -10,6 +10,7 @@ from scripts.swarm import apply_wait
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
+WORK_KINDS = ("ops", "tune", "troubleshoot", "research")
 READ_ONLY_NOTE = "Released its seat while it waits on {names}. The next engineer continues it from the recorded window."
 WT_SCRIPT = Path(__file__).resolve().parents[2] / "profiles" / "package" / "skills" / "worktree" / "scripts" / "wt.sh"
 
@@ -90,7 +91,7 @@ def _open_dependencies(row, rows):
     open_ = [b for b in blockers if not b.get("done") and b.get("state") != "done"]
     if not open_:
         raise SwarmError("the task has no open dependency to park on; finish it instead")
-    if not any(b.get("branch") for b in open_) and not all(ledger_kinds.read_only(b) for b in open_):
+    if not any(b.get("branch") for b in open_) and not all(ledger_kinds.kind(b) in WORK_KINDS for b in open_):
         raise SwarmError("no open dependency records a branch, so there is nothing to stack on")
     return open_
 
@@ -182,8 +183,9 @@ def _blocker(dep, foreign):
 
 def _issue_body(row, open_, base, foreign):
     blockers = ", ".join(_blocker(b, foreign) for b in open_)
+    ends = "merges" if any(b.get("branch") for b in open_) else "is done"
     return (
-        f"Parked on branch `{row['branch']}` until {blockers} merges. Stacked base `{base}`. "
+        f"Parked on branch `{row['branch']}` until {blockers} {ends}. Stacked base `{base}`. "
         "The next engineer restacks it onto dev and finishes it."
     )
 
