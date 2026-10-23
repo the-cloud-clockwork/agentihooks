@@ -107,8 +107,9 @@ def test_an_agent_that_blocked_before_its_live_receipt_was_collected_counts_as_l
 def test_a_finished_agent_without_a_live_receipt_on_a_blocked_task_is_still_a_spawn_failure(store, monkeypatch):
     ledger, runtime, name, _ = _finished_before_ack(store, monkeypatch)
     doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "blocked"}]}
+    request = _receipt_request(store, name)
     actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
-    assert runtime.asked == [(name, _receipt_request(store, name))]
+    assert runtime.asked == [(name, request)]
     assert len(actions) == 1 and actions[0].startswith("spawn failed for t1")
     assert [(r["state"], r["error"]) for r in store.launches("sw") if r["agent"] == name] == [
         ("failed", "hive launch failed: prompt")
