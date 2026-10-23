@@ -32,7 +32,7 @@ def enroll(path: Path, environ: Mapping[str, str]) -> str:
     selected = {name: values[name] for name in (*REQUIRED, *SETTINGS) if values.get(name)}
     if any("\n" in value or "\r" in value for value in selected.values()):
         raise auth.HiveError("invite settings must each fit on one line")
-    url = environ.get("AGENTIHOOKS_HIVE_URL") or selected["AGENTIHOOKS_HIVE_URL"]
+    url = selected["AGENTIHOOKS_HIVE_URL"]
     credential = selected["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"]
     grant = cli._post(url, server.REFRESH_PATH, {"ledger_credential": credential}, "join", environ)
     if grant["id"] != selected["AGENTIHOOKS_HIVE_ID"]:
