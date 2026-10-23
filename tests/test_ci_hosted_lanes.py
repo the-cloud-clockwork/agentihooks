@@ -31,6 +31,7 @@ DIRECT = {
     "startup-stages.yml": ("Startup stages", "startup-stages"),
 }
 LANE_USERS = {
+    "chaos.yml",
     "mutation-line-selection-proof.yml",
     "mutation-refinement-proof.yml",
     "test.yml",

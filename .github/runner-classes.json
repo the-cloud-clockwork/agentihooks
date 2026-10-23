@@ -3,6 +3,7 @@
   "actions-storage.yml/prune": "light",
   "brain-smoke.yml/smoke": "standard",
   "branch-lanes.yml/grade": "light",
+  "chaos.yml/chaos": "standard",
   "chart-release.yml/publish": "light",
   "ci-templates.yml/actionlint": "hosted",
   "codex-cache.yml/seed": "standard",
