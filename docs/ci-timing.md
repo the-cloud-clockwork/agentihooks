@@ -430,7 +430,8 @@ confirmed wait on one label set does not suppress queue age on another label
 set or another run attempt.
 
 The 15 minute unconfirmed threshold (`UNCONFIRMED_WAIT_MS`) is the five
-minute runner wait trigger (`SHORT_WAIT_MS`) plus one ten minute Doctor pass.
+minute runner wait trigger (`SHORT_WAIT_MS`) plus a fixed ten minute
+allowance for one default Doctor pass.
 A queued job that the next pass reads as started therefore raises a runner
 wait, or nothing, instead of a queue age finding that the Doctor retracts
 minutes later.
@@ -449,9 +450,10 @@ set `anton-oss-light`, read at `15:37:32Z`. The late job was created at
 
 A queue age finding raised before a sibling confirmed is retracted on the
 pass that reads the confirmation. When any job of the run attempt and label
-set has a confirmed start over five minutes, the timer retracts the
-`ci-queue-age-unconfirmed/<run>-<attempt>-<labels>` finding and keeps the
-runner wait, with the retraction notice described below.
+set has a confirmed start over five minutes, the timer removes that run
+attempt from the `ci-queue-age-unconfirmed/<labels>` group and keeps the
+runner wait. The group finding is retracted, with the notice described
+below, once no run is left in it.
 
 #### Inspect a named job
 
@@ -538,7 +540,8 @@ to 15 minutes. Before it, in the hour from 20:41 UTC on 19 October, five
 unconfirmed queue age findings were raised and all five retracted within
 about five minutes once their jobs started: runs 39323176234, 39323181003,
 39325949794, 39328650183 and 39328654494. Four of those runs also carried a
-confirmed runner wait for the same jobs. The tests only head failed in
+confirmed runner wait for the same jobs. With only the new tests pushed, the
+regression tests failed in
 [red Proofs run 39370571622](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39370571622):
 a confirmed wait with a queued sibling raised both findings, and a 336 second
 unconfirmed job raised queue age. The fix passed
