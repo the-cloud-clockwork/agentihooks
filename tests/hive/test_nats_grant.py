@@ -122,10 +122,11 @@ def test_removing_a_member_revokes_its_bus_credential(admin, signer):
     assert set(admin.hgetall(nats_grant.REVOKED)) == {nats_grant.member_user(signer, member["id"]).public}
 
 
-def test_a_revoke_the_server_refuses_raises(admin, signer):
+def test_a_revoke_the_server_refuses_raises_and_keeps_the_revocation_for_the_next_push(admin, signer):
     forged = nats_grant.Signer(nkey.create(nkey.OPERATOR), signer.account, signer.system_credentials, signer.url)
     with pytest.raises(auth.HiveError, match="^NATS refused the account update"):
         nats_grant.revoke(admin, forged, "m1")
+    assert set(admin.hgetall(nats_grant.REVOKED)) == {nats_grant.member_user(signer, "m1").public}
 
 
 def test_a_role_credential_named_in_openbao_opens_the_bus(signer, monkeypatch):
