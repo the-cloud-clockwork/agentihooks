@@ -1,5 +1,5 @@
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from unittest.mock import MagicMock
 
 import pytest
@@ -103,6 +103,35 @@ def test_set_pane_retries_when_its_agent_is_dropped_during_the_write(store, monk
     assert reads == [True, False]
     assert store.execution("fixture", current.execution_id).pane_id == "pane-9"
     assert not store.redis.hexists(store.key("fixture", "agents"), current.name)
+
+
+def test_set_pane_retries_when_its_run_record_changes_during_the_write(store, monkeypatch):
+    current = started(store, "eng-1@fixture")
+    original = store.redis.pipeline
+    reads = []
+    key = store.key("fixture", "executions")
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        hexists = pipe.hexists
+
+        def racing(name, field):
+            found = hexists(name, field)
+            reads.append(found)
+            if len(reads) == 1:
+                raced = replace(store.execution("fixture", current.execution_id), pane_id="pane-race")
+                store.redis.hset(key, current.execution_id, json.dumps(asdict(raced)))
+            return found
+
+        monkeypatch.setattr(pipe, "hexists", racing)
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+
+    store.execution_registry.set_pane("fixture", current.execution_id, "pane-9")
+
+    assert reads == [True, True]
+    assert store.execution("fixture", current.execution_id).pane_id == "pane-9"
 
 
 def test_set_pane_on_an_earlier_run_of_a_live_name_keeps_the_latest_projection(store):
