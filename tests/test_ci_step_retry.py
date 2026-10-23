@@ -1,3 +1,7 @@
+import os
+import subprocess
+import time
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -21,35 +25,93 @@ def _steps(job):
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"][job]["steps"]
 
 
-def test_the_download_is_tried_three_times_and_only_the_last_failure_is_red():
-    steps = _action()["runs"]["steps"]
-    downloads = [s for s in steps if s.get("uses", "").startswith("actions/download-artifact@")]
-    assert len(downloads) == 3
-    assert [s.get("continue-on-error", False) for s in downloads] == [True, True, False]
-    assert "if" not in downloads[0]
-    for before, after in zip(downloads, downloads[1:]):
-        assert after["if"] == f"steps.{before['id']}.outcome == 'failure'"
-    for download in downloads:
-        assert download["with"] == {"name": "${{ inputs.name }}", "path": "${{ inputs.path || github.workspace }}"}
+_APP = {"client-id": "${{ secrets.TCC_CI_CLIENT_ID }}", "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}"}
 
 
-def test_every_absorbed_failure_waits_and_warns_before_the_next_attempt():
-    steps = _action()["runs"]["steps"]
-    downloads = [i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/download-artifact@")]
-    for before, after, wait in zip(downloads, downloads[1:], ("sleep 10", "sleep 20")):
-        waits = steps[before + 1 : after]
-        assert len(waits) == 1
-        assert waits[0]["if"] == steps[after]["if"]
-        assert "::warning title=Retried download::" in waits[0]["run"]
-        assert wait in waits[0]["run"]
-        assert "${{" not in waits[0]["run"]
+def _fallback():
+    return next(s for s in _action()["runs"]["steps"] if s.get("name") == "Download through the REST artifacts API")
+
+
+def test_one_download_then_a_rest_fallback_only_when_it_fails():
+    primary, mint, fallback = _action()["runs"]["steps"]
+    assert primary["uses"] == "actions/download-artifact@v4"
+    assert primary["continue-on-error"] is True and "if" not in primary
+    assert primary["with"] == {"name": "${{ inputs.name }}", "path": "${{ inputs.path || github.workspace }}"}
+    assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
+    assert mint["if"].startswith("steps.primary.outcome == 'failure'")
+    assert mint["with"]["permission-actions"] == "read"
+    assert fallback["if"] == "steps.primary.outcome == 'failure'"
+    assert fallback["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert "continue-on-error" not in fallback
+    assert "actions/artifacts/$id/zip" in fallback["run"]
+    assert "${{" not in fallback["run"]
+
+
+def _run_fallback(tmp_path, gh, token="app-token", attempt="1"):
+    tools = tmp_path / "bin"
+    tools.mkdir(exist_ok=True)
+    (tools / "gh").write_text(f'#!/usr/bin/env bash\necho "$*" >> {tmp_path}/calls\n{gh}\n')
+    (tools / "gh").chmod(0o755)
+    env = {
+        **os.environ,
+        **_fallback()["env"],
+        "PATH": f"{tools}:{os.environ['PATH']}",
+        "GH_TOKEN": token,
+        "ARTIFACT": "split-3.12",
+        "DEST": str(tmp_path / "out"),
+        "ATTEMPT_SECONDS": attempt,
+        "WAIT_SECONDS": "0",
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_RUN_ID": "7",
+    }
+    started = time.monotonic()
+    done = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", _fallback()["run"]],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return done, time.monotonic() - started
+
+
+def test_a_stalled_rest_attempt_ends_within_its_timeout(tmp_path):
+    done, elapsed = _run_fallback(tmp_path, "sleep 300")
+    assert done.returncode == 1
+    assert done.stdout.count("::warning title=Retried download::REST attempt") == 3
+    assert "exceeded 1s" in done.stdout
+    assert elapsed < 15
+
+
+def test_the_rest_fallback_fetches_the_artifact_by_id(tmp_path):
+    archive = tmp_path / "artifact.zip"
+    with zipfile.ZipFile(archive, "w") as packed:
+        packed.writestr(".test_durations", "{}")
+    gh = f'case "$*" in *"/artifacts?name="*) echo 42 ;; *"/artifacts/42/zip"*) cat {archive} ;; *) exit 1 ;; esac'
+    done, _ = _run_fallback(tmp_path, gh, attempt="30")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (tmp_path / "out/.test_durations").read_text() == "{}"
+    calls = (tmp_path / "calls").read_text().splitlines()
+    assert calls[0].startswith("api repos/o/r/actions/runs/7/artifacts?name=split-3.12&per_page=100 --jq")
+    assert calls[1] == "api repos/o/r/actions/artifacts/42/zip"
+
+
+def test_the_rest_fallback_without_an_app_token_stays_red(tmp_path):
+    done, _ = _run_fallback(tmp_path, "exit 0", token="")
+    assert done.returncode == 1
+    assert "no App token was minted" in done.stdout
+    assert not (tmp_path / "calls").exists()
 
 
 @pytest.mark.parametrize(
     "job, name, given",
     [
-        ("split", "Download the queued run's dev durations", {"name": "dev-durations", "path": "~/dev-durations"}),
-        ("unit", "Download the durations this run splits on", {"name": "split-${{ matrix.python-version }}"}),
+        (
+            "split",
+            "Download the queued run's dev durations",
+            {"name": "dev-durations", "path": "~/dev-durations", **_APP},
+        ),
+        ("unit", "Download the durations this run splits on", {"name": "split-${{ matrix.python-version }}", **_APP}),
     ],
 )
 def test_the_durations_downloads_retry_in_place(job, name, given):

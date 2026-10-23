@@ -705,7 +705,7 @@ def test_unit_shards_read_the_suite_the_split_job_collected():
     upload = next(step for step in jobs["split"]["steps"] if step.get("name") == "Upload collected tests")
     _, download = _unit_step_index(lambda s: s.get("name") == "Download the suite the split job collected")
     assert download["uses"] == "./.github/actions/retry-download"
-    assert download["with"] == {"name": upload["with"]["name"]}
+    assert download["with"]["name"] == upload["with"]["name"]
     assert download["if"] in (upload["if"], f"needs.split.outputs.source == '' && {upload['if']}")
 
 
@@ -1036,7 +1036,7 @@ def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
     assert upload["with"]["path"].split() == [".test_durations", "durations.sha256"]
     assert upload["with"]["include-hidden-files"] is True
     _, download = _unit_step_index(lambda s: s.get("name") == "Download the durations this run splits on")
-    assert download["with"] == {"name": upload["with"]["name"]}
+    assert download["with"]["name"] == upload["with"]["name"]
     _, store = _unit_step_index(lambda s: s.get("name") == "Upload durations")
     assert "durations.sha256" in store["with"]["path"].split()
 

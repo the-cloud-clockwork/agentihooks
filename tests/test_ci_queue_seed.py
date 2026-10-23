@@ -138,7 +138,12 @@ def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     producer = "durations" if "durations" in jobs else "select"
     assert download["if"] == f"needs.{producer}.outputs.source == '' && needs.{producer}.outputs.queued == 'true'"
     assert download["uses"] == "./.github/actions/retry-download"
-    assert download["with"] == {"name": "dev-durations", "path": "~/dev-durations"}
+    assert download["with"] == {
+        "name": "dev-durations",
+        "path": "~/dev-durations",
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+    }
     assert steps.index(download) < steps.index(adopt)
 
 
