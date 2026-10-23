@@ -231,7 +231,7 @@ class InboxStore:
         else:
             from scripts.inbox import bus
 
-            bus.publish(item, self.names.slug_of(item.address))
+            bus.publish(item, self.names)
         return item
 
     def get(self, item_id):
@@ -380,9 +380,11 @@ class InboxStore:
         size_prefix = self.key("open-size", "")
         seen.update(key[len(size_prefix) :] for key in self.redis.scan_iter(match=size_prefix + "*"))
         addresses = sorted(a for a in seen if belongs(a))
-        keys = []
+        keys, wake_ids = [], []
+        waiting_wakes = self.redis.smembers(self.key("wake-outbox"))
         for address in addresses:
             ids = self.redis.zrange(self.key("address", address), 0, -1)
+            wake_ids.extend(item_id for item_id in ids if item_id in waiting_wakes)
             keys += [self.key(kind, address) for kind in ("address", "pending", "open", "open-size", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
             keys += [key for key in (self.key("entry", item_id) for item_id in ids) if self.redis.exists(key)]
@@ -391,6 +393,7 @@ class InboxStore:
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
             for shared in ("waiting", "indexed", "open-indexed")
         }
+        members[self.key("wake-outbox")] = wake_ids
         return keys, {key: found for key, found in members.items() if found}
 
     def read(self, item_id, reader):

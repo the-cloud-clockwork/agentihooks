@@ -240,9 +240,10 @@ def _publisher(config: BusConfig) -> SeatPublisher:
     return SeatPublisher(lambda: open_bus(config))
 
 
-def publish(item, swarm="") -> None:
+def publish(item, names=None) -> None:
     config = _nats()
     if config is not None:
+        swarm = names.slug_of(item.address) if names is not None and not is_seat(item.address) else ""
         _publisher(config).publish(item, swarm)
 
 
