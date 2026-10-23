@@ -77,7 +77,7 @@ agentihooks hive install          # user service that runs agentihooks hive run
   the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step skips a
   piece that is already gone, so a rerun finishes an interrupted remove. `OPENBAO_URL` and `OPENBAO_TOKEN` must
   be set.
-- `agentihooks hive list` prints one line per hive: id, `live` or `stale`, ui, max agents, excluded (`none` when
+- `agentihooks hive list` prints one line per hive: id, `name=<name>` when the hive carries a readable name, `live` or `stale`, ui, max agents, excluded (`none` when
   empty) and its [headroom](#headroom) reading.
   `agentihooks hive show <id>` prints the full record as JSON.
 
