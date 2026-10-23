@@ -1958,6 +1958,7 @@ def test_wait_record_retries_a_conflicting_writer(setup, monkeypatch):
         "lane": "eng",
         "reason": placement.NO_UI_HIVE,
         "started_at": 1000,
+        "seen_at": 1000,
     }
 
 

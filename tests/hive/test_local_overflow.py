@@ -128,10 +128,13 @@ def local_refusal(setup, since=0):
 
 @pytest.mark.parametrize("deployment", ["hybrid", "local"])
 def test_a_local_cap_refusal_is_recorded_for_the_spawn_stall_alarm(setup, monkeypatch, deployment):
-    from scripts.swarm import lease
+    from scripts.swarm import controller, lease
     from scripts.swarm.health import spawn_stall
 
-    fenced = hybrid(setup, monkeypatch, deployment)
+    if deployment == "local":
+        fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, deployment)
+    else:
+        fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
     local_agents(setup, 8)
     since = lease.now_ms(setup.store)
