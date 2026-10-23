@@ -315,6 +315,8 @@ the member's own keys.
 
 Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 [Hives panel](#ledger-hives-panel), which writes through `PATCH /api/v1/hives/<id>` and needs the operator.
+`hive set --keep` writes only the settings the hive does not hold yet, so a re-registration leaves stored
+values in place.
 
 | Setting | Values | Default | Meaning |
 |---|---|---|---|
@@ -733,7 +735,8 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
 5. Sets itself `ui=no ephemeral=yes excluded=<workers.excluded> max-agents=<workers.maxAgents>`, by default
-   `excluded=master max-agents=20`.
+   `excluded=master max-agents=20`, with `--keep`: a restarted pod keeps the settings its hive already holds,
+   such as a `max-agents` the master set.
 6. Runs `agentihooks hive run`.
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
