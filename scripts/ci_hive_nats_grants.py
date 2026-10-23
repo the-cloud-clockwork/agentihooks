@@ -32,8 +32,8 @@ def _direction(rules) -> dict[str, frozenset[str]]:
     return {"allow": allow or EVERYTHING, "deny": _subjects(rules.get("deny"))}
 
 
-def member_grants(agentihooks: Path) -> dict[str, dict[str, frozenset[str]]]:
-    rendered = subprocess.run([sys.executable, "-c", RENDER_MEMBER, str(agentihooks)], capture_output=True, text=True)
+def member_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
+    rendered = subprocess.run([sys.executable, "-c", RENDER_MEMBER, agentihooks], capture_output=True, text=True)
     if rendered.returncode:
         raise ValueError(f"{MEMBER_SOURCE} did not render member_claims: {rendered.stderr.strip()}")
     claims = json.loads(rendered.stdout)
@@ -73,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Fail when hive member NATS grants differ from the antoncore hive user."
     )
-    parser.add_argument("--agentihooks", type=Path, default=Path.cwd())
+    parser.add_argument("--agentihooks", required=True)
     parser.add_argument("--antoncore", type=Path, required=True)
     args = parser.parse_args(argv)
     try:

@@ -142,17 +142,11 @@ def test_a_missing_antoncore_checkout_is_red(tmp_path, capsys):
     assert lines[0].startswith("::error::The hive member NATS grants cannot be read (FileNotFoundError: ")
 
 
-def test_the_member_checkout_defaults_to_the_working_directory(tmp_path, capsys, monkeypatch):
-    agentihooks, antoncore = _matching(tmp_path)
-    monkeypatch.chdir(agentihooks)
-    assert grants.main(["--antoncore", str(antoncore)]) == 0
-
-
-def test_the_antoncore_checkout_is_required(capsys):
+def test_both_checkouts_are_required(capsys):
     with pytest.raises(SystemExit) as exit_info:
         grants.main([])
     assert exit_info.value.code == 2
-    assert "the following arguments are required: --antoncore" in capsys.readouterr().err
+    assert "the following arguments are required: --agentihooks, --antoncore" in capsys.readouterr().err
 
 
 def test_the_help_states_what_the_check_fails_on(capsys):
@@ -164,7 +158,7 @@ def test_the_help_states_what_the_check_fails_on(capsys):
 
 def test_the_member_grants_render_the_minted_member_claims():
     claims = nats_grant.member_claims()
-    rendered = grants.member_grants(ROOT)
+    rendered = grants.member_grants(str(ROOT))
     assert rendered["publish"] == {"allow": frozenset(nats_grant.MEMBER_PUBLISH), "deny": frozenset()}
     assert rendered["subscribe"] == {"allow": frozenset(claims["sub"]["allow"]), "deny": frozenset()}
 
