@@ -285,3 +285,141 @@ def test_unfenced_agents_remain_owned_by_legacy_tick(rig, monkeypatch):
     monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
     monkeypatch.setattr(reconciler, "open_bus", lambda _: rig.bus)
     assert reconciler.legacy_agents(rig.store, "rig") == [rig.agent]
+
+
+@pytest.mark.parametrize("field", ["type", "swarm", "key", "version", "name", "task", "claim_key"])
+def test_a_mismatched_stored_start_cannot_authorize_recovery(rig, field):
+    from scripts.hive import execution_events
+
+    raw = rig.event.to_dict()
+    if field in {"name", "task", "claim_key"}:
+        raw["data"][field] = "" if field == "claim_key" else "successor"
+    else:
+        raw[field] = 4 if field == "version" else "other"
+    state = rig.bus.state(execution_events.STARTS)
+    key = execution_events.identity("rig", "engineer", 3)
+    entry = state.get(key)
+    state.update(key, json.dumps(raw).encode(), entry.revision)
+    rig.react.poll()
+    assert rig.returned == []
+    assert rig.row["state"] == "claimed"
+
+
+@pytest.mark.parametrize("field", ["started_at", "launched_at", "event_time"])
+def test_report_must_follow_every_recorded_launch_boundary(rig, field):
+    from scripts.hive import execution_events
+
+    if field == "event_time":
+        event = replace(rig.event, time=960_000)
+        state = rig.bus.state(execution_events.STARTS)
+        key = execution_events.identity("rig", "engineer", 3)
+        entry = state.get(key)
+        state.update(key, json.dumps(event.to_dict()).encode(), entry.revision)
+    else:
+        agent = replace(rig.agent, **{field: 960_000})
+        rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    rig.report["observed_at"] = 950_000
+    rig.save()
+    rig.react.poll()
+    assert rig.returned == []
+
+
+@pytest.mark.parametrize("age,settled", [(300_000, True), (300_001, False)])
+def test_report_freshness_has_a_five_minute_boundary(rig, age, settled):
+    from scripts.hive import execution_events
+
+    agent = replace(rig.agent, started_at=0, launched_at=0)
+    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    state = rig.bus.state(execution_events.STARTS)
+    key = execution_events.identity("rig", "engineer", 3)
+    entry = state.get(key)
+    state.update(key, json.dumps(replace(rig.event, time=0).to_dict()).encode(), entry.revision)
+    rig.report["observed_at"] = rig.clock() - age
+    rig.save()
+    rig.react.poll()
+    assert bool(rig.returned) is settled
+
+
+def test_another_hive_cannot_report_this_execution_dead(rig):
+    agent = replace(rig.agent, hive="other", runtime_target={"host_id": "other"})
+    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    rig.react.poll()
+    assert rig.returned == []
+
+
+def test_host_target_identifies_a_hive_without_the_legacy_hive_field(rig):
+    agent = replace(rig.agent, hive="")
+    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    rig.react.poll()
+    assert len(rig.returned) == 1
+
+
+def test_absent_pane_without_recorded_pane_identity_is_not_an_exit(rig):
+    agent = replace(rig.agent, pane_id="")
+    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    rig.report.update(executions={}, pane_ids=[])
+    rig.save()
+    rig.react.poll()
+    assert rig.returned == []
+
+
+def test_a_denied_lease_performs_no_scan(rig):
+    scan = Mock(wraps=rig.store.slugs)
+    rig.store.slugs = scan
+    rig.react.poll(lambda: False)
+    scan.assert_not_called()
+    assert rig.returned == []
+
+
+def test_loss_of_lease_before_completion_does_not_record_the_pass(rig):
+    rig.react.poll(Mock(side_effect=[True, True, False]))
+    assert len(rig.returned) == 1
+    scan = Mock(wraps=rig.store.slugs)
+    rig.store.slugs = scan
+    rig.react.poll()
+    scan.assert_called_once_with()
+    assert len(rig.returned) == 1
+
+
+def test_a_request_delivery_cannot_repair_without_the_guarded_poll(rig):
+    request = replace(rig.event, type="reconcile.requested")
+    assert rig.react.reactor().handler(request) is None
+    assert rig.returned == []
+    rig.react.poll(lambda: False)
+    assert rig.returned == []
+
+
+def test_memory_default_registry_does_not_open_live_redis(rig, monkeypatch):
+    from scripts.hub import reconciler
+
+    connect = Mock(side_effect=AssertionError("must not open live Redis"))
+    monkeypatch.setattr(reconciler, "connect", connect)
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="memory"))
+    reconciler.Reconciler(rig.bus, clock=rig.clock).poll()
+    connect.assert_not_called()
+
+
+def test_default_reconciler_connects_lazily_for_the_due_pass(rig, monkeypatch):
+    from scripts.hub import reconciler
+
+    connect = Mock(return_value=rig.store)
+    monkeypatch.setattr(reconciler, "connect", connect)
+    monkeypatch.setattr(reconciler, "Lifecycle", Mock(return_value=rig.life))
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
+    react = reconciler.Reconciler(rig.bus, clock=rig.clock)
+    connect.assert_not_called()
+    react.poll()
+    assert len(rig.returned) == 1
+    react.poll()
+    connect.assert_called_once_with()
+
+
+def test_an_empty_legacy_projection_never_opens_the_bus(rig, monkeypatch):
+    from scripts.hub import reconciler
+
+    monkeypatch.setattr(rig.store, "agents", lambda _: [])
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
+    opening = Mock(side_effect=AssertionError("must not connect without agents"))
+    monkeypatch.setattr(reconciler, "open_bus", opening)
+    assert reconciler.legacy_agents(rig.store, "rig") == []
+    opening.assert_not_called()
