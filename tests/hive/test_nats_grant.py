@@ -122,10 +122,17 @@ def test_removing_a_member_revokes_its_bus_credential(admin, signer):
     assert set(admin.hgetall(nats_grant.REVOKED)) == {nats_grant.member_user(signer, member["id"]).public}
 
 
-def test_a_revoke_the_server_refuses_raises_and_keeps_the_revocation_for_the_next_push(admin, signer):
-    forged = nats_grant.Signer(nkey.create(nkey.OPERATOR), signer.account, signer.system_credentials, signer.url)
-    with pytest.raises(auth.HiveError, match="^NATS refused the account update"):
-        nats_grant.revoke(admin, forged, "m1")
+def test_a_claims_update_the_server_refuses_raises(signer):
+    with pytest.raises(auth.HiveError, match=r"^NATS refused the account update \(jwt update resulted in error"):
+        nats_grant.push(signer, "not.a.jwt")
+
+
+def test_a_failed_push_keeps_the_revocation_for_the_next_push(admin, signer):
+    unreachable = nats_grant.Signer(
+        signer.operator, signer.account, signer.system_credentials, f"nats://127.0.0.1:{nats_server.free_port()}"
+    )
+    with pytest.raises(Exception):
+        nats_grant.revoke(admin, unreachable, "m1")
     assert set(admin.hgetall(nats_grant.REVOKED)) == {nats_grant.member_user(signer, "m1").public}
 
 
