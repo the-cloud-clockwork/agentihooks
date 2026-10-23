@@ -269,12 +269,32 @@ def test_a_held_claim_refund_refuses_after_the_same_claimant_claimed_again(store
     assert store.claims("smoke", "t1") == 1
 
 
+def test_a_held_claim_refund_refuses_a_second_refund_for_the_same_claimant_and_generation(store):
+    for _ in range(3):
+        store.count_claim("smoke", "t1")
+    store.count_claim("smoke", "t2")
+    store.claim("smoke", "t1", "agent", 60_000)
+    store.claim("smoke", "t2", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is True
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claimant("smoke", "t1") == "agent"
+    assert store.claims("smoke", "t1") == 2
+    assert store.refund_held_claim("smoke", "t2", "agent", store.claim_generation("smoke", "t2")) is True
+    store.release("smoke", "t1", "agent")
+    store.claim("smoke", "t1", "agent", 60_000)
+    assert store.refund_held_claim("smoke", "t1", "agent", generation + 1) is True
+    assert store.claims("smoke", "t1") == 1
+
+
 @pytest.mark.parametrize(
     ("moved_key", "move", "lives"),
     [
         ("claim", lambda redis, key: redis.set(key, "other"), 1),
         ("claim", lambda redis, key: redis.incr(f"{key}:generation"), 1),
         ("started-lives", lambda redis, key: redis.hset(key, "t1", 5), 5),
+        ("refunded-claims", lambda redis, key: redis.hset(key, "t1", "agent:1"), 1),
         ("task-authority", lambda redis, key: redis.set(key, "hub"), 1),
         ("claim-journal", lambda redis, key: redis.set(key, "hub"), 1),
     ],
@@ -286,7 +306,8 @@ def test_a_held_claim_refund_refuses_when_a_watched_key_moves_during_the_watch(
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
     started = store._started_lives
-    key = store.key("smoke", moved_key) if moved_key == "started-lives" else store.key("smoke", moved_key, "t1")
+    hashes = ("started-lives", "refunded-claims")
+    key = store.key("smoke", moved_key) if moved_key in hashes else store.key("smoke", moved_key, "t1")
 
     def moved(slug, task):
         move(store.redis, key)
