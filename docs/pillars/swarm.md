@@ -3641,6 +3641,10 @@ systemctl --user status agentihooks-swarm-waits.service --no-pager
 # to give the window in UTC
 TZ=UTC journalctl --user -t agentihooks-swarm --since "<YYYY-MM-DD HH:MM:SS>" --until "<YYYY-MM-DD HH:MM:SS>" \
   --no-pager | grep -c "stopped by the service"
+
+# Recycles in the same window, so a zero above covers syncs that did happen
+TZ=UTC journalctl --user -u agentihooks-swarm-waits.service --since "<YYYY-MM-DD HH:MM:SS>" \
+  --until "<YYYY-MM-DD HH:MM:SS>" --no-pager | grep -c "recycling the scheduler supervisor"
 ```
 
 The first command prints `KillMode=process`. The cgroup line ends in `agentihooks-swarm-waits.service`, and
