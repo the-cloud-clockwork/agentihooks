@@ -184,11 +184,11 @@ class Recorder:
         return self.status
 
 
-def request(ingress, path="/github", body=b"{}", length=None, cls=None):
+def request(ingress, path="/github", body=b"{}", length=None, cls=None, headers=None):
     cls = cls or github_webhooks.handler(ingress)
     handler = cls.__new__(cls)
     handler.path = path
-    handler.headers = {"X-GitHub-Event": "ping"}
+    handler.headers = headers or {"X-GitHub-Event": "ping"}
     if length is not False:
         handler.headers["Content-Length"] = str(len(body)) if length is None else length
     handler.rfile = io.BytesIO(body)
@@ -219,6 +219,8 @@ def test_http_handler_refuses_other_paths_and_bad_lengths():
     body = b"x" * 3
     assert request(ingress, body=body, length=str(limit))[0] == ("status", 202)
     assert ingress.calls == [({"Content-Length": str(limit), "X-GitHub-Event": "ping"}, body)]
+    assert request(ingress, body=b"abcdef", length="3")[0] == ("status", 202)
+    assert ingress.calls[-1][1] == b"abc"
 
 
 def test_http_handler_times_out_slow_clients():
@@ -270,6 +272,7 @@ def test_main_serves_the_ingress_on_the_given_address(monkeypatch):
             served.append(("bus", config.backend))
             self.inner = open_bus(BusConfig())
             self.events = self.inner.events
+            Pulls(self.inner, clock=lambda: 1000).track("crew", URL)
 
         def state(self, bucket):
             return self.inner.state(bucket)
@@ -281,6 +284,9 @@ def test_main_serves_the_ingress_on_the_given_address(monkeypatch):
         def __init__(self, address, handler):
             served.append(("init", address, handler.__name__))
             served.append(("unsigned", request(None, cls=handler)[0]))
+            body = json.dumps(pull_request()).encode()
+            signed = {"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": sign(body, b"s")}
+            served.append(("signed", request(None, body=body, cls=handler, headers=signed)[0]))
 
         def serve_forever(self):
             served.append(("serve",))
@@ -298,6 +304,7 @@ def test_main_serves_the_ingress_on_the_given_address(monkeypatch):
         ("bus", "memory"),
         ("init", ("0.0.0.0", 9001), "Webhook"),
         ("unsigned", ("status", 401)),
+        ("signed", ("status", 202)),
         ("serve",),
         ("close",),
         ("bus closed",),
