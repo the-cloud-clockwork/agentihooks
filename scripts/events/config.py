@@ -23,6 +23,7 @@ class QueuePolicy:
     max_deliver: int = 5
     ack_wait_ms: int = 30_000
     backoff_ms: tuple[int, ...] = ()
+    inactive_ms: int | None = None
 
     def __post_init__(self):
         if not _positive(self.max_deliver):
@@ -33,6 +34,8 @@ class QueuePolicy:
             raise ValueError("queue backoff must be a tuple of non negative integers")
         if len(self.backoff_ms) > self.max_deliver:
             raise ValueError(f"queue backoff has {len(self.backoff_ms)} steps for {self.max_deliver} deliveries")
+        if self.inactive_ms is not None and not _positive(self.inactive_ms):
+            raise ValueError("queue inactive threshold must be a positive integer")
 
 
 @dataclass(frozen=True)
