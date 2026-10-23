@@ -267,3 +267,33 @@ def test_scoped_event_consumers_dead_letter_within_their_own_swarm(hub, signer):
         dead.ack()
     finally:
         client.close()
+
+
+def test_scoped_members_share_only_the_two_approved_account_slot_buckets(hub, signer):
+    from scripts.hive import account_slots
+
+    for bucket in ("account-slots", "hive-slot-accounts"):
+        hub.state(bucket)
+    first, second = member(signer, "rig"), member(signer, "other")
+    report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+    try:
+        own = account_slots.Slots(first, "first", lambda: report, lambda: 1000)
+        peer = account_slots.Slots(second, "second", lambda: report, lambda: 1000)
+        assert own.take("one", "claude") == "a"
+        assert peer.take("two", "claude") is None
+        own.release("one", "claude", "a")
+        assert peer.take("two", "claude") == "a"
+        for bucket in (
+            "spoke-work",
+            "spoke-pending",
+            "hive-presence",
+            "hive-executions",
+            "execution-starts",
+            "unlisted",
+        ):
+            with pytest.raises(PermissionError) as caught:
+                first.state(bucket)
+            assert str(caught.value) == "select a swarm before opening scoped state"
+    finally:
+        first.close()
+        second.close()
