@@ -28,14 +28,18 @@ def test_the_recovery_drill_restores_the_cold_backup_before_the_hub_reconciles()
     script = drill()
     backup = script.index("volume 'tar -C /data -cf /backup/jetstream.tar .'")
     restore = script.index("volume 'find /data -mindepth 1 -delete && tar -C /data -xf /backup/jetstream.tar'")
-    assert script.index("drill seed t1 t2 t3 t4") < backup < script.index("drill done t1") < restore
-    assert restore < script.index("drill die t2 t3") < script.index('settle "$want"')
+    assert script.index("drill seed t1 t2 t3 t4 t5") < backup < script.index("drill done t1") < restore
+    assert restore < script.index("drill beat") < script.index("drill die t2 t4") < script.index('settle "$want"')
     assert script.count("docker compose stop nats") == 2
 
 
-def test_the_recovery_drill_requires_every_task_done_once_per_launch_with_no_claim_or_agent():
+def test_the_recovery_drill_requires_every_task_done_with_its_recorded_claims_and_no_agent():
     script = drill()
-    for task, launches in (("t1", 1), ("t2", 2), ("t3", 2), ("t4", 1), ("t5", 1)):
-        assert f'"{task}": {{"ledger": "done", "claim": null, "launches": {launches}}}' in script
-    assert '"agents": []}' in script
+    expected = (
+        '$(task t1 1 \'"started"\'), $(task t2 2 \'"exited", "exited"\'), $(task t3 1 \'"exited"\'), ',
+        '$(task t4 2 \'"exited", "exited"\'), $(task t5 1 \'"exited"\'), $(task t6 1 \'"exited"\')',
+    )
+    assert all(part in script for part in expected)
+    assert '"ledger": "done", "claim": null, "launches": %s, "executions": %s, "jetstream": [%s]' in script
+    assert '\\"agents\\": []}' in script
     assert script.index('settle "$want"') < script.index("printf 'Recovery drill passed")

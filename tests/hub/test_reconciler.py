@@ -489,6 +489,58 @@ def test_a_launch_still_in_progress_is_not_rebuilt(rig, restored):
     assert rig.returned == []
 
 
+def test_a_launch_placeholder_older_than_a_pass_interval_is_rebuilt(rig, restored):
+    from scripts.hive import execution_events
+
+    execution_events.prepare(restored.bus, "rig", "engineer", 3)
+    rig.clock.return_value = 900_000 + 300_000
+    rig.report["observed_at"] = rig.clock()
+    rig.save()
+    restored.react.poll()
+    assert _stored_start(restored.bus)["data"]["claim_key"] == execution_events.identity("rig", "engineer", 3)
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
+
+
+def test_a_placeholder_one_millisecond_inside_the_interval_is_left(rig, restored):
+    from scripts.hive import execution_events
+
+    execution_events.prepare(restored.bus, "rig", "engineer", 3)
+    rig.clock.return_value = 900_000 + 299_999
+    rig.report["observed_at"] = rig.clock()
+    rig.save()
+    restored.react.poll()
+    assert _stored_start(restored.bus) is None
+    assert rig.returned == []
+
+
+def test_a_rebuild_interrupted_after_its_claim_reuses_that_claim(rig, restored):
+    from scripts.hive import execution_events
+
+    key = execution_events.identity("rig", "engineer", 3)
+    revision = restored.bus.state("spoke-work").create(key, json.dumps({"owner": "hive", "state": "claimed"}).encode())
+    restored.react.poll()
+    assert _stored_start(restored.bus)["data"]["claim_revision"] == revision
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
+
+
+def test_a_rebuild_interrupted_before_its_start_records_the_claimed_start(rig, restored):
+    from scripts.hive import execution_events
+
+    key = execution_events.identity("rig", "engineer", 3)
+    claims = restored.bus.state("spoke-work")
+    revision = claims.create(key, b"{}")
+    event = replace(rig.event, id="rebuilt", data={**rig.event.data, "claim_key": key, "claim_revision": revision})
+    claims.update(
+        key, json.dumps({"state": "started", "claim_revision": revision, "event": event.to_dict()}).encode(), revision
+    )
+    restored.react.poll()
+    assert _stored_start(restored.bus) == event.to_dict()
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
+
+
 def test_default_reconciler_connects_lazily_for_the_due_pass(rig, monkeypatch):
     from scripts.hub import reconciler
 

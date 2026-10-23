@@ -45,7 +45,7 @@ from types import SimpleNamespace
 
 from scripts.events.config import BusConfig
 from scripts.events.factory import open_bus
-from scripts.hive import execution_events, registry, reports
+from scripts.hive import execution_events, presence, registry, reports
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.swarm import freeze, readiness
 from scripts.swarm.ledger_client import LedgerClient
@@ -54,7 +54,7 @@ from scripts.swarm_ledger.new_ledger import create
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 
-TASKS = ("t1", "t2", "t3", "t4", "t5")
+TASKS = ("t1", "t2", "t3", "t4", "t5", "t6")
 HIVE = "recovery-hive"
 LAUNCHES = "/data/recovery-launches.jsonl"
 store, slug, ledger = connect(), os.environ["SLUG"], LedgerClient(service=True)
@@ -101,7 +101,7 @@ class Tasks:
         ledger.update_task(slug, event.key, {"state": "claimed", "claimed_by": name})
         generation = ledger.task(slug, event.key)["claim_generation"]
         with open(LAUNCHES, "a") as launches:
-            launches.write(json.dumps({"task": event.key, "name": name}) + "\n")
+            launches.write(json.dumps({"task": event.key, "name": name, "generation": agent.generation}) + "\n")
         task = {"id": event.key, "execution_id": agent.execution_id,
                 "execution_generation": agent.generation, "claim_generation": generation}
         return SpawnRequest(store.config(slug), "eng", name, task)
@@ -119,7 +119,7 @@ def launched():
     if not os.path.exists(LAUNCHES):
         return []
     with open(LAUNCHES) as launches:
-        return [json.loads(line)["task"] for line in launches if line.strip()]
+        return [json.loads(line) for line in launches if line.strip()]
 
 
 def take(count):
@@ -132,7 +132,7 @@ def take(count):
         outcomes.append(spoke.poll(1_000))
         empty = empty + 1 if outcomes[-1] == "empty" else 0
     bus.close()
-    return {"took": launched()[before:], "outcomes": outcomes}
+    return {"took": [launch["task"] for launch in launched()[before:]], "outcomes": outcomes}
 
 
 def exit_report(agents):
@@ -162,20 +162,41 @@ def die(tasks):
     return exit_report([agent for agent in store.agents(slug) if agent.task in tasks and agent.state != "finished"])
 
 
+def recorded(bus, launch):
+    start = bus.state(execution_events.STARTS).get(execution_events.identity(slug, launch["name"], launch["generation"]))
+    event = json.loads(start.value) if start else None
+    claim = bus.state("spoke-work").get(event["data"]["claim_key"]) if event else None
+    return json.loads(claim.value)["state"] if claim else "unrecorded"
+
+
 def state():
     rows = {task["id"]: task for task in ledger.state(slug)["tasks"]}
-    counts = launched()
-    return {
-        "tasks": {task: {"ledger": rows[task]["state"], "claim": store.claimant(slug, task),
-                         "launches": counts.count(task)} for task in TASKS},
-        "agents": sorted(agent.task for agent in store.agents(slug) if agent.state != "finished"),
+    launches = launched()
+    bus = open_bus(BusConfig.from_environ())
+    found = {
+        task: {
+            "ledger": rows[task]["state"],
+            "claim": store.claimant(slug, task),
+            "launches": sum(launch["task"] == task for launch in launches),
+            "executions": len({launch["name"] for launch in launches if launch["task"] == task}),
+            "jetstream": [recorded(bus, launch) for launch in launches if launch["task"] == task],
+        }
+        for task in TASKS
     }
+    bus.close()
+    return {"tasks": found, "agents": sorted(agent.task for agent in store.agents(slug) if agent.state != "finished")}
+
+
+def beat():
+    bus = open_bus(BusConfig.from_environ())
+    presence.beat(bus, HIVE, int(time.time() * 1000))
+    bus.close()
+    return HIVE
 
 
 step, args = sys.argv[1], sys.argv[2:]
 result = {"seed": lambda: seed(args), "take": lambda: take(int(args[0])), "done": lambda: done(args),
-          "die": lambda: die(args),
-          "state": state}[step]()
+          "die": lambda: die(args), "beat": beat, "state": state}[step]()
 print(json.dumps(result))
 PY
 )"
@@ -205,8 +226,8 @@ settle() {
   exit 1
 }
 
-printf 'offered before the backup: %s\n' "$(drill seed t1 t2 t3 t4)"
-printf 'hive took before the backup: %s\n' "$(drill take 2)"
+printf 'offered before the backup: %s\n' "$(drill seed t1 t2 t3 t4 t5)"
+printf 'hive took before the backup: %s\n' "$(drill take 3)"
 
 docker compose stop nats >/dev/null
 volume 'tar -C /data -cf /backup/jetstream.tar .'
@@ -215,7 +236,7 @@ printf 'JetStream backed up cold from the stopped NATS volume: %s bytes\n' "$(st
 
 printf 'done after the backup: %s\n' "$(drill done t1)"
 settle '"t1": {"ledger": "done"'
-printf 'hive took after the backup: %s\n' "$(drill take 1)"
+printf 'hive took after the backup: %s\n' "$(drill take 2)"
 printf 'state before the restore: %s\n' "$(drill state)"
 
 docker compose stop nats >/dev/null
@@ -223,13 +244,18 @@ volume 'find /data -mindepth 1 -delete && tar -C /data -xf /backup/jetstream.tar
 up nats
 printf 'JetStream restored from the backup, losing every write after it\n'
 
-printf 'agents died while JetStream was restored: %s\n' "$(drill die t2 t3)"
-settle '"t2": {"ledger": "open"' '"t3": {"ledger": "open"'
-printf 'hive took the open and reopened tasks: %s\n' "$(drill take 4)"
-printf 'done after the restore: %s\n' "$(drill done t2 t3 t4 t5)"
-want='{"tasks": {"t1": {"ledger": "done", "claim": null, "launches": 1}, "t2": {"ledger": "done", "claim": null, "launches": 2}, '
-want+='"t3": {"ledger": "done", "claim": null, "launches": 2}, "t4": {"ledger": "done", "claim": null, "launches": 1}, '
-want+='"t5": {"ledger": "done", "claim": null, "launches": 1}}, "agents": []}'
+printf 'hive heartbeat resumed: %s\n' "$(drill beat)"
+hub
+printf 'state after the first hub pass: %s\n' "$(drill state)"
+printf 'agents died after the restore: %s\n' "$(drill die t2 t4)"
+settle '"t2": {"ledger": "open"' '"t4": {"ledger": "open"'
+printf 'hive took the open and reopened tasks: %s\n' "$(drill take 3)"
+printf 'done after the restore: %s\n' "$(drill done t2 t3 t4 t5 t6)"
+task() {
+  printf '"%s": {"ledger": "done", "claim": null, "launches": %s, "executions": %s, "jetstream": [%s]}' "$1" "$2" "$2" "$3"
+}
+want="{\"tasks\": {$(task t1 1 '"started"'), $(task t2 2 '"exited", "exited"'), $(task t3 1 '"exited"'), "
+want+="$(task t4 2 '"exited", "exited"'), $(task t5 1 '"exited"'), $(task t6 1 '"exited"')}, \"agents\": []}"
 settle "$want"
 printf 'ledger against the recorded state after reconcile: %s\n' "$found"
 
@@ -241,4 +267,4 @@ if [[ -n "$left" ]]; then
   exit 1
 fi
 printf 'stack removed with its volumes and network\n'
-printf 'Recovery drill passed: after a JetStream restore the hub reconciled every task to done, each launched once\n'
+printf 'Recovery drill passed: after a JetStream restore the hub reconciled every task to done with none lost\n'
