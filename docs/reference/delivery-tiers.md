@@ -284,7 +284,7 @@ The same planner serves every sharded unit run:
 
 | Caller | Runs on | What it plans |
 |---|---|---|
-| `--shard N/M` collection, `_shard_files` and `pytest_collection_modifyitems` in `tests/conftest.py` | Each `unit (<python>, <shard>)` job, with `--dist loadgroup` and four workers | Which test files the shard collects and which collected tests it keeps |
+| `--shard N/M` collection, `_shard_files` and `pytest_collection_modifyitems` in `tests/conftest.py` | Each `unit (<python>, <shard>)` job, with `--dist loadgroup` and one worker per usable CPU (`scripts.ci_cpu_quota`); the plan itself assumes four | Which test files the shard collects and which collected tests it keeps |
 | `tests.queue_shards` | The merge group `split` job | The predicted slowest shard used for [queue shard sizing](#queue-shard-sizing) |
 
 ### How a grouped file is placed
@@ -362,7 +362,7 @@ for i, part in enumerate(parts, 1):
 EOF
 ```
 
-On `dev` at `eef49b2f30` this reported a 280.4 s share over 5607.4 s of stored 3.12 time, ten grouped files, the largest 41.7 s (`tests/inbox/test_channel_server.py`), and no grouped file on more than one shard. The remote control mutation file sat whole on shard 2 at 40.0 s. Its stored id still named the single test that existed before the split, so its two current tests are unmeasured and follow it there.
+On `dev` at `eef49b2f30` this reported a 280.4 s share over 5607.4 s of stored 3.12 time, 17 grouped files, 10 of them with stored durations, the largest 41.7 s (`tests/inbox/test_channel_server.py`), and no grouped file on more than one shard. The remote control mutation file sat whole on shard 2 at 40.0 s. Its stored id still named the single test that existed before the split, so its two current tests are unmeasured and follow it there.
 
 To see what a CI shard ran, read the `unit (3.12, <shard>)` job log: the Run tests step prints each test id with `-v`, and every grouped test id ends in `@<group>`.
 
@@ -375,7 +375,7 @@ To see what a CI shard ran, read the `unit (3.12, <shard>)` job log: the Run tes
 | One shard runs long while carrying a grouped file | The group runs on one worker, so its summed time is that shard's floor | Split the file's work so that it reuses less, or move tests that need no shared state out of the file |
 | `shard-check` reports a test run more than once or not at all | A change to the planner's placement or fallback rules broke the exactly once rule | Read `tests/test_shards.py` and the shard check log; the planner returns every planned test exactly once |
 
-### Grouped file delivery evidence
+### Delivery evidence
 
 Delivered by pull request [5032](https://github.com/the-cloud-clockwork/agentihooks/pull/5032) for issue [5031](https://github.com/the-cloud-clockwork/agentihooks/issues/5031), after pull request [4909](https://github.com/the-cloud-clockwork/agentihooks/pull/4909) split the remote control mutation baseline test into two tests of one group and made `slowest_first` keep a group in collection order. Red: Tests run [39353180256](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39353180256), test only, failed the new contract test on both Python versions. Run [39353833681](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39353833681), on a first fix that kept every grouped file whole, failed the queue sizing tests and the exactly once shard test, which the share cap fixed. Green: Tests run [39355391107](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39355391107), with every unit shard and `shard-check` passing.
 
