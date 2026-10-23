@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from pathlib import Path
 
 import yaml
 
@@ -24,6 +25,41 @@ def matches(found: list[tuple[str, str]], kind: str, suffix: str) -> bool:
     return any(k == kind and name.endswith(suffix) for k, name in found)
 
 
+def example_problems(chart: str) -> list[str]:
+    example = Path(chart) / "examples/hive-only.yaml"
+    values = yaml.safe_load(example.read_text())
+    rendered = subprocess.run(
+        ["helm", "template", "invited", chart, "-f", str(example)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    documents = [item for item in yaml.safe_load_all(rendered) if item]
+    if sorted(item["kind"] for item in documents) != ["ConfigMap", "Deployment"]:
+        return ["the hive only invite example must render only its worker and configuration"]
+    pod = next(item for item in documents if item["kind"] == "Deployment")["spec"]["template"]["spec"]
+    worker = pod["containers"][0]
+    env = {item["name"]: item.get("value") for item in worker["env"]}
+    secret = next(item["secret"] for item in pod["volumes"] if item["name"] == "join")
+    mounted = next(item for item in worker["volumeMounts"] if item["name"] == "join")
+    expected = values["workers"]["credentialSecret"]
+    if (
+        secret["secretName"],
+        secret["items"],
+        env["HIVE_CREDENTIAL_FILE"],
+        mounted["mountPath"],
+        mounted["readOnly"],
+    ) != (
+        expected["name"],
+        [{"key": expected["key"], "path": "credential"}],
+        "/run/hive-join/credential",
+        "/run/hive-join",
+        True,
+    ):
+        return ["the hive only example must mount the same invite into worker enrollment"]
+    return []
+
+
 def problems(chart: str) -> list[str]:
     alone = render(
         chart,
@@ -39,7 +75,7 @@ def problems(chart: str) -> list[str]:
     found += [
         f"the default release lost its {kind} {suffix}" for kind, suffix in SWARM if not matches(swarm, kind, suffix)
     ]
-    return found
+    return found + example_problems(chart)
 
 
 if __name__ == "__main__":

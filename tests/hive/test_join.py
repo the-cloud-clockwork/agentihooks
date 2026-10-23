@@ -42,7 +42,7 @@ def test_one_invite_joins_a_machine_and_saves_the_refreshed_nats_grant(invitatio
 
     monkeypatch.setattr(cli, "_post", refresh)
     assert cli.main(["join", str(invite)]) == 0
-    assert calls == [("https://hub.example.test", "/refresh", {"ledger_credential": "fixture-invite"}, "join")]
+    assert calls == [("https://hub.example.test", "/hive/refresh", {"ledger_credential": "fixture-invite"}, "join")]
     saved = dotenv_values(home / auth.ENV_FILE)
     assert saved["AGENTIHOOKS_BUS"] == "nats"
     assert saved["AGENTIHOOKS_BUS_URL"] == "nats://bus.example.test:4222"
