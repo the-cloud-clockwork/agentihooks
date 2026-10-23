@@ -51,6 +51,9 @@ The ledger server is slow: <slug> pass <n>: read <s> seconds and write <s> secon
 The clearing notice, `The ledger server answers fast again: …`, names the
 passes only; it carries no `Newest on dev` part.
 
+When the ledger watchdog could not restart the server, each pass also says
+`restart failed` and the notice ends with the watchdog's own text.
+
 When the swarm cannot tell, the parts read `CPU unknown over pass`,
 `start time unknown` and `Newest on dev unknown`.
 
