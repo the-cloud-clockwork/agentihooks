@@ -2,12 +2,14 @@ import itertools
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from .bus import EventLog, StateConflict, StateEntry
+from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import dead_letter
 from .envelope import Envelope
+from .scope import RoutedLog, ScopedLog, ScopedQueue, queue_lane
+from .subjects import subject as event_subject
 
 Clock = Callable[[], int]
 
@@ -259,22 +261,60 @@ class MemoryStateStore:
 
 
 class MemoryBus:
-    def __init__(self, config: BusConfig, clock: Clock):
-        self._config = config
-        self._runtime = _Runtime(clock)
-        self.dead = MemoryEventLog(self._runtime, config, None)
-        self.events = MemoryEventLog(self._runtime, config, self.dead)
-        self._queues: dict[str, MemoryWorkQueue] = {}
+    def __init__(self, config: BusConfig, clock: Clock, runtime: _Runtime | None = None, swarm: str | None = None):
+        self._config, self._swarm = config, swarm
+        self._owned = runtime is None
+        self._runtime = runtime if runtime is not None else _Runtime(clock)
+        self._views: dict[str, Bus] = {}
+        raw_dead = MemoryEventLog(self._runtime, config, None)
+        self._legacy_dead = raw_dead
+        self.dead = ScopedLog(raw_dead, swarm, "dead") if swarm is not None else raw_dead
+        raw_events = MemoryEventLog(self._runtime, config, self.dead)
+        self._legacy_events = raw_events
+        self.events = ScopedLog(raw_events, swarm, "events") if swarm is not None else raw_events
+        if config.scoped:
+            self.events = RoutedLog(lambda owner: self.for_swarm(owner).events, lambda: self._logs("events"))
+            self.dead = RoutedLog(lambda owner: self.for_swarm(owner).dead, lambda: self._logs("dead"))
+        self._queues: dict[str, MemoryWorkQueue | ScopedQueue] = {}
         self._buckets: dict[str, MemoryStateStore] = {}
 
-    def queue(self, name: str, policy: QueuePolicy) -> MemoryWorkQueue:
+    def for_swarm(self, swarm: str) -> Bus:
+        event_subject(swarm, "events")
+        with self._runtime.cond:
+            self._runtime.require_open()
+            if self._swarm is not None and self._swarm != swarm:
+                raise ValueError("a scoped bus cannot change its swarm")
+            if not self._config.scoped:
+                return self
+            view = self._views.get(swarm)
+            if view is None:
+                view = self._views[swarm] = MemoryBus(
+                    replace(self._config, scoped=False), self._runtime.clock, self._runtime, swarm
+                )
+            return view
+
+    def _logs(self, kind: str) -> list[EventLog]:
+        with self._runtime.cond:
+            self._runtime.require_open()
+            return [getattr(self, f"_legacy_{kind}"), *[getattr(view, kind) for view in self._views.values()]]
+
+    def queue(self, name: str, policy: QueuePolicy) -> WorkQueue:
+        if self._config.scoped:
+            parts = name.split(".")
+            if len(parts) != 4 or parts[0] != "swarm" or parts[2] != "ready":
+                raise ValueError("select a swarm before opening a scoped queue")
+            return self.for_swarm(parts[1]).queue(name, policy)
+        if self._swarm is not None:
+            name = queue_lane(self._swarm, name)
         with self._runtime.cond:
             self._runtime.require_open()
             queue = self._queues.get(name)
             if queue is None:
-                queue = self._queues[name] = MemoryWorkQueue(
-                    self._runtime, policy, self._config.dedupe_window_ms, self.dead, name
-                )
+                identity = f"swarm.{self._swarm}.ready.{name}" if self._swarm is not None else name
+                queue = MemoryWorkQueue(self._runtime, policy, self._config.dedupe_window_ms, self.dead, identity)
+                if self._swarm is not None:
+                    queue = ScopedQueue(queue, self._swarm, policy)
+                self._queues[name] = queue
             elif queue.policy != policy:
                 raise ValueError(f"work queue {name!r} already has another policy")
             return queue
@@ -285,9 +325,10 @@ class MemoryBus:
             return self._buckets.setdefault(bucket, MemoryStateStore(self._runtime))
 
     def close(self) -> None:
-        with self._runtime.cond:
-            self._runtime.closed = True
-            self._runtime.cond.notify_all()
+        if self._owned:
+            with self._runtime.cond:
+                self._runtime.closed = True
+                self._runtime.cond.notify_all()
 
 
 def open_bus(config: BusConfig, clock: Clock = _monotonic_ms) -> MemoryBus:

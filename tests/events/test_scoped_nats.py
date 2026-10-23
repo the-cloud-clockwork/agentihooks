@@ -50,6 +50,7 @@ def test_member_scoped_bus_logs_queues_and_keeps_state(hub, signer):
     own = hub.for_swarm("rig")
     assert hub.for_swarm("rig") is own
     own.queue("eng", POLICY)
+    own.state("spoke-work")
     own.events.consumer("member-events", "swarm.rig.>")
     own.dead.consumer("member-dead", "dead.>")
     client = member(signer)

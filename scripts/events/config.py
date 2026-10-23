@@ -9,6 +9,7 @@ BACKEND_ENV = "AGENTIHOOKS_BUS"
 URL_ENV = "AGENTIHOOKS_BUS_URL"
 CREDENTIALS_ENV = "AGENTIHOOKS_BUS_CREDENTIALS"
 BIND_ENV = "AGENTIHOOKS_BUS_BIND"
+SCOPED_ENV = "AGENTIHOOKS_BUS_SCOPED"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
 DEFAULT_BACKEND = "memory"
@@ -43,6 +44,7 @@ class BusConfig:
     queue: QueuePolicy = field(default_factory=QueuePolicy)
     credentials: str | None = field(default=None, repr=False)
     provision: bool = True
+    scoped: bool = False
 
     def __post_init__(self):
         if not isinstance(self.backend, str) or not self.backend:
@@ -61,6 +63,7 @@ class BusConfig:
             url=environ.get(URL_ENV) or None,
             credentials=credentials_from(environ),
             provision=environ.get(BIND_ENV) != "1",
+            scoped=environ.get(SCOPED_ENV) == "1",
         )
 
 
