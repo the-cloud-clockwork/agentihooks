@@ -13,6 +13,7 @@
     ["#tab-swarm", "Show the swarm: controls, caps, agents, quota, Doctor, health findings and seat handoffs."],
     ["#sections-all", "Open or fold every section of the ledger at once."],
     ["#comments-all", "Show or hide the comments under every item on the page."],
+    ["#frozen-view", "Hide frozen plans, phases, slices, tasks and follow ups, or show them all again."],
     ["[data-comments]", "Show or hide the comments under every item in this section."],
     ["#outline-all", "Open or fold every group in the outline."],
     ["#prio-clear-all", "Clear every priority from the list. The items they point at stay as they are."],

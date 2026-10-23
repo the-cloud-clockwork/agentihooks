@@ -273,6 +273,8 @@ const wired = [];
 function collapsible(box) { wired.push(box.attrs.id); }
 function closedLeft() { return 0; }
 function closedMore() { return null; }
+function viewItems(list, items) { return items; }
+function viewCount() { return ""; }
 function shape(el) { return { tag: el.tag, attrs: el.attrs, text: el.textContent, kids: el.kids.map(shape) }; }
 """
 

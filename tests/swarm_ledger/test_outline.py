@@ -28,6 +28,8 @@ HEADS = [
     {"id": "sec-followups", "title": "Follow-ups or blockers", "list": "followups"},
 ]
 
+VIEW_STUBS = "function viewItems(list, items) { return items; }\nfunction viewCount() { return ''; }\n"
+
 
 def function_source(name):
     page = page_source()
@@ -39,6 +41,7 @@ class Outline(unittest.TestCase):
         doc = new_ledger.build_doc(CONTENT)
         script = (
             "function closedLeft() { return 0; }\n"
+            + VIEW_STUBS
             + function_source("itemState")
             + "\n"
             + function_source("outlineOf")
@@ -125,6 +128,7 @@ class Outline(unittest.TestCase):
             "const document = { querySelectorAll: () => SECS.map((s) => ({ id: s.id, hidden: false,"
             " dataset: { outline: s.list }, querySelector: () => ({ firstChild: { textContent: s.title } }) })) };\n"
             "function closedLeft() { return 0; }\n"
+            + VIEW_STUBS
         )
         script = (
             shim
