@@ -138,12 +138,12 @@ def test_an_incomplete_or_unsafe_holder_pod_is_never_read(held):
 
 @pytest.mark.parametrize("name", ["a", "controller-7f9.x", "o" * 253])
 def test_a_dns_named_holder_pod_is_read(name):
-    assert holder_pod.gone({**HELD, "name": name}, OWN, lambda namespace, found: None) is True
+    assert holder_pod.gone({**HELD, "name": name}, OWN, lambda namespace, name: None) is True
 
 
 @pytest.mark.parametrize("namespace", ["a", "agentihooks-swarm", "o" * 63])
 def test_a_holder_in_a_dns_label_namespace_is_read(namespace):
-    assert holder_pod.gone({**HELD, "namespace": namespace}, OWN, lambda found, name: None) is True
+    assert holder_pod.gone({**HELD, "namespace": namespace}, OWN, lambda namespace, name: None) is True
 
 
 def test_a_recovering_process_outside_a_pod_never_judges():
