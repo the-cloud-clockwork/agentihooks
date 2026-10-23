@@ -1,0 +1,79 @@
+{{- if and .Values.githubWebhook.enabled (not .Values.hiveOnly) }}
+{{- $receiver := .Values.githubWebhook }}
+{{- if not $receiver.secretName }}
+{{- fail "githubWebhook.secretName is required: the receiver refuses to start without AGENTIHOOKS_GITHUB_WEBHOOK_SECRET" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "swarm.fullname" . }}-github-webhook
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: github-webhook
+spec:
+  replicas: {{ int $receiver.replicas }}
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "github-webhook") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: github-webhook
+    spec:
+      {{- include "swarm.podSecurity" . | nindent 6 }}
+      {{- with $receiver.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $receiver.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: github-webhook
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command: [agentihooks, github-webhook, --host, 0.0.0.0, --port, {{ $receiver.port | quote }}]
+          env:
+            - name: AGENTIHOOKS_BUS
+              value: {{ .Values.hub.bus.backend | quote }}
+            {{- with .Values.hub.bus.url }}
+            - name: AGENTIHOOKS_BUS_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- include "swarm.extraEnv" $receiver.env | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: {{ $receiver.secretName }}
+          ports:
+            - name: http
+              containerPort: {{ int $receiver.port }}
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            {{- toYaml $receiver.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "swarm.fullname" . }}-github-webhook
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: github-webhook
+spec:
+  selector:
+    {{- include "swarm.selector" (dict "root" . "component" "github-webhook") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ int $receiver.port }}
+      targetPort: http
+{{- end }}
