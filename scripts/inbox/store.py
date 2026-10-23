@@ -230,7 +230,7 @@ class InboxStore:
         else:
             from scripts.inbox import bus
 
-            bus.publish(item)
+            bus.publish(item, self.names.slug_of(item.address))
         return item
 
     def get(self, item_id):

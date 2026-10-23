@@ -15,14 +15,15 @@ W = 300_000
 @pytest.fixture
 def rig(monkeypatch):
     import fakeredis
-    from scripts.hub.inbox_wake import InboxWake
 
+    from scripts.hub.inbox_wake import InboxWake
     from scripts.hub.timers import Timers
     from scripts.inbox.store import InboxStore
     from scripts.swarm.store import AgentRecord
 
     clock = SimpleNamespace(now=1000)
     monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: clock.now)
+    monkeypatch.setattr("scripts.inbox.bus.time.time_ns", lambda: clock.now * 1_000_000)
     inbox = InboxStore(fakeredis.FakeRedis(decode_responses=True))
     worker = AgentRecord("worker", "eng", "task", pane_id="p1", harness="codex")
     master = AgentRecord("boss", "master", "master", seat="master@sw")
@@ -109,7 +110,6 @@ def test_master_mail_uses_timer_to_escalate_straight_to_operator(rig):
 
 def test_timer_restart_and_duplicate_arrival_do_not_repeat_wakes(rig):
     from scripts.hub.inbox_wake import InboxWake
-
     from scripts.hub.timers import Timers
 
     item, event = send(rig)

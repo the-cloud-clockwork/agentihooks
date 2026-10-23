@@ -5,7 +5,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
 from scripts.events.config import BusConfig
@@ -76,12 +76,25 @@ class SeatInbox:
             if (event.swarm, event.key, event.data) != (self.swarm, address, asdict(message)):
                 raise ValueError("item id already belongs to a different message") from None
         self.bus.events.publish(_subject(self.swarm, address), event)
+        publish_wake(self.bus, event)
         return event
 
     def consumer(self, address: str, session: str) -> "SeatConsumer":
         if not address or not session:
             raise ValueError("a consumer needs a seat address and receiving session")
         return SeatConsumer(self.bus, self.state, self.swarm, address, session)
+
+
+def publish_wake(bus: Bus, event: Envelope) -> None:
+    request = replace(
+        event,
+        id=f"wake-{event.id}",
+        type="inbox.wake",
+        entity="inbox-wake",
+        key=event.data["id"],
+        data={"address": event.key},
+    )
+    bus.events.publish(subject(event.swarm, "inbox-wake", "requested"), request)
 
 
 def _subject(swarm: str, address: str) -> str:
@@ -190,14 +203,29 @@ class SeatPublisher:
         self._bus = None
         self._retry_at = 0.0
 
-    def publish(self, item) -> None:
-        if not is_seat(item.address) or (self._bus is None and time.monotonic() < self._retry_at):
+    def publish(self, item, swarm="") -> None:
+        swarm = _swarm_of(item.address) if is_seat(item.address) else swarm
+        if not swarm or (self._bus is None and time.monotonic() < self._retry_at):
             return
         try:
             if self._bus is None:
                 self._bus = self._opener()
             message = Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
-            SeatInbox(self._bus, _swarm_of(item.address)).send(item.address, message)
+            if is_seat(item.address):
+                SeatInbox(self._bus, swarm).send(item.address, message)
+            else:
+                event = Envelope(
+                    id=item.id,
+                    type="inbox.sent",
+                    swarm=swarm,
+                    entity="inbox",
+                    key=item.address,
+                    version=1,
+                    time=item.created_at,
+                    author=item.sender,
+                    data=asdict(message),
+                )
+                publish_wake(self._bus, event)
         except Exception as exc:
             _drop(self._bus)
             self._bus, self._retry_at = None, time.monotonic() + REOPEN_S
@@ -212,10 +240,10 @@ def _publisher(config: BusConfig) -> SeatPublisher:
     return SeatPublisher(lambda: open_bus(config))
 
 
-def publish(item) -> None:
+def publish(item, swarm="") -> None:
     config = _nats()
     if config is not None:
-        _publisher(config).publish(item)
+        _publisher(config).publish(item, swarm)
 
 
 class SeatFeed:
