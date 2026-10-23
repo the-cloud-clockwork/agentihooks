@@ -411,7 +411,7 @@ head's failed requests summed over the pairs exceed base's, or when any log has
 no measure. The messages are listed under
 [What the paired grade turns red](#what-the-paired-grade-turns-red).
 
-#### Compare margin and its record
+### Compare margin and its record
 
 | Setting | Value |
 |---|---|
@@ -444,10 +444,11 @@ for n in 1 2 3; do
 done
 ```
 
-Then append each run's pairs to the record from its artifacts, in matrix order:
+Then, for each of the three run ids, append that run's pairs to the record from
+its artifacts, in matrix order, under the run id as its key:
 
 ```bash
-gh run download "<run-id>" --dir compare-evidence --pattern 'compare-pair-*'
+gh run download "<run-id>" --dir compare-evidence
 for n in 1 2 3 4 5; do
   for side in base head; do
     grep -h '^{"seconds"' "compare-evidence/compare-pair-$n/$side.log" | tail -1 \
@@ -456,7 +457,7 @@ for n in 1 2 3 4 5; do
 done
 ```
 
-#### Compare mode evidence
+### Compare mode evidence
 
 Recorded in pull request 5108 and, for the current record, pull request 5424:
 
@@ -468,7 +469,7 @@ Recorded in pull request 5108 and, for the current record, pull request 5424:
 | Ledger server load [39370365317](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39370365317) | 0.2 s planted on every ledger API write, branch `diffcheck/t517-write-slowdown` against 6ec380b | Red. Write p50 4.21 against the 1.4 margin, pair ratios 3.88 to 4.28; every pair's own load gate passed |
 | Ledger server load 39536032269, 39536034637, 39536036977 | Same code compare after pull request 5424 | Green. Fifteen compare jobs with a median of 138 seconds, against 235 seconds before ([39394339989](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39394339989)) |
 
-#### Troubleshooting compare mode
+### Troubleshooting compare mode
 
 | Observation | Meaning and next step |
 |---|---|
