@@ -11,6 +11,7 @@ SCENARIOS = [
     "scripts/packaging/swarm-smoke.sh",
     "scripts/packaging/hive-join-smoke.sh",
     "scripts/packaging/compose-hive-smoke.sh",
+    "scripts/packaging/compose-task-smoke.sh",
 ]
 
 

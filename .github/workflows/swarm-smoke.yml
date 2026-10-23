@@ -37,7 +37,7 @@ jobs:
           wait "$redis" || status=$?
           wait "$build" || status=$?
           exit "$status"
-      - name: Run the hive launch, Compose install, hive join and Compose hive scenarios in parallel
+      - name: Run the hive launch, Compose install, hive join, Compose hive and Compose task scenarios in parallel
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           SWARM_SMOKE_RUNTIME_IMAGES_READY: 'true'
@@ -47,6 +47,7 @@ jobs:
           scripts/packaging/swarm-smoke.sh
           scripts/packaging/hive-join-smoke.sh
           scripts/packaging/compose-hive-smoke.sh
+          scripts/packaging/compose-task-smoke.sh
       - uses: actions/setup-python@v5
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:

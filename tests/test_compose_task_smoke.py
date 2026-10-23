@@ -32,5 +32,5 @@ def test_the_compose_task_smoke_settles_one_task_to_done_through_the_hub_on_nats
     assert "readiness.publish(bus" in script
     assert "agentihooks hub run --once" in script
     assert "execution_events.publish(bus" in script
-    assert 'agentihooks swarm "$SLUG" done' in script
+    assert '["agentihooks", "swarm", slug, "done"' in script
     assert script.index("agentihooks hub run --once") < script.index("printf 'Compose task smoke passed")
