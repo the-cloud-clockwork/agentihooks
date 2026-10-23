@@ -81,11 +81,7 @@ class Reconciler:
         self._clock = clock
 
     def reactor(self) -> Reactor:
-        return Reactor("reconciler", "swarm.*.reconcile.requested", self.handle, singleton=True, poll=self.poll)
-
-    def handle(self, event: Envelope) -> None:
-        if event.type == "reconcile.requested":
-            self.poll()
+        return Reactor("reconciler", "swarm.*.reconcile.requested", lambda _: None, singleton=True, poll=self.poll)
 
     def poll(self, guard: Callable[[], bool] = lambda: True) -> None:
         if not guard():
