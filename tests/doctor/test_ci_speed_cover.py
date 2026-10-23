@@ -155,5 +155,9 @@ def test_a_rejudge_keeps_the_earlier_verdicts_and_bounds_them(store):  # noqa: F
     for step in range(VerdictStore.HISTORY + 2):
         judgments.judge(original.id, "established", "again", "reader", back + step + 1)
     earlier = json.loads(store.redis.hget(judgments.key, original.id))["verdict"]["earlier"]
-    assert len(earlier) == VerdictStore.HISTORY
+    assert len(earlier) == VerdictStore.HISTORY == 24
     assert earlier[-1]["at"] == back + VerdictStore.HISTORY + 1
+
+
+def test_the_judged_span_is_one_day():
+    assert ci_speed.JUDGED_SPAN_MS == 86_400_000

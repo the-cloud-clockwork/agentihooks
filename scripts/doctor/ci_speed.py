@@ -281,7 +281,6 @@ def _scope(identity):
 
 
 def _judged_worst(identity, verdict, judgments):
-    """The highest worst judged on this verdict's kind and scope since the span before it."""
     worsts = [verdict["measure"]]
     for other, judged in judgments.items():
         if judged and _scope(other) == _scope(identity):
