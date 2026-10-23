@@ -445,7 +445,6 @@ def test_redelivery_window_uses_the_reactors_environment(rig, redelivery):
         assert pending[0]["reason"] == "redelivered: never confirmed inside the redelivery window"
 
 
-
 def test_late_first_expiry_keeps_a_delivery_inside_its_custom_confirmation_window(rig):
     rig.reactor.environ = {"AGENTIHOOKS_INBOX_REDELIVER_S": "1000"}
     item, _ = send(rig)
