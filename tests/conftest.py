@@ -265,6 +265,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     monkeypatch.delenv("REDIS_URL", raising=False)
     monkeypatch.setattr("hooks._redis._redis_client", None)
     monkeypatch.setattr("hooks._redis._redis_checked", False)
+    monkeypatch.setattr("hooks.context.operator_words._SHARED", [])
     monkeypatch.setenv("REDIS_KEY_PREFIX", swarm_v2_isolation.RUN_PREFIX)
     for _prefixed in (
         "hooks._redis._KEY_PREFIX",
