@@ -152,6 +152,23 @@ def test_a_second_stop_refund_for_the_same_claim_is_refused(store):  # noqa: F81
     assert store.refund_held_claim("sw", "t1", agent.name, generation) is False
 
 
+@pytest.mark.parametrize(("state", "finished", "refunded"), [("pr", False, 1), ("claimed", True, 0)])
+def test_stop_refunds_a_pull_request_claim_and_never_a_finished_agent(store, state, finished, refunded):  # noqa: F811
+    from scripts.swarm.cli import stop_now
+
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    agent = workers(store)[0]
+    store.count_claim("sw", "t1")
+    lives = store.claims("sw", "t1")
+    ledger.rows["t1"]["state"] = state
+    if finished:
+        store.put_agent("sw", replace(agent, state="finished"))
+    stop_now(store, "sw", runtime, ledger)
+    assert store.claims("sw", "t1") == lives - refunded
+    assert ledger.rows["t1"]["state"] == ("open" if refunded else state)
+
+
 def test_a_dev_red_block_refunds_the_held_claim_once(env, monkeypatch):  # noqa: F811
     from types import SimpleNamespace
 
