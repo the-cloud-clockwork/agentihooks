@@ -1967,17 +1967,17 @@ changes them.
 
 #### What the watch files
 
-When at least one failed job lost its runner, the lost jobs become one cause, `runner outage`. Every other failed job
-keeps its own cause. `refresh-durations` is folded into the outage cause when it kept no samples
-from a durations artifact. When a lost job is a unit shard, a shard consumer job (`sonar`, `shard-check`,
-`coverage-ratchet`, `coverage-baseline`, `flake-budget`) whose failure names the missing shard output is folded too. The watch then
-files as for any red run:
+When at least one failed job lost its runner, the lost jobs become one cause, `runner outage`. A failed job whose own
+error is the output a lost unit shard never produced joins that cause, as set out in
+[Jobs that failed for want of shard output](#jobs-that-failed-for-want-of-shard-output). Every other failed job keeps
+its own cause. The watch then files as for any red run:
 
 - One urgent `ci` task titled `Promotion red: runner outage`, in the `ci` lane, or `eng` while the `ci` lane has no
   effective seats. Its id is `promo-<run id>-<n>` like any promotion task; it is `promo-<run id>-0` unless the run also
   has failing unit tests, whose grouped fixers are numbered first.
 - Its description names the run, the commit, the run link, every lost job and every sign found. With no annotation
-  sign it reads `Set up job failed or Run tests never ran`. It ends `No code change is due` instead of `Fix it on dev`.
+  sign it reads `Set up job failed or Run tests never ran`. When consumer jobs joined, it adds `the jobs <names>
+  failed for want of their unit shard output`. It ends `No code change is due` instead of `Fix it on dev`.
 - One fixer task per cause that failed on its own. Failing unit tests are grouped into one fixer per test.
 - One promotion alert for the run, replacing a live one, and one inbox item for the master naming the new tasks.
 
@@ -1989,6 +1989,58 @@ https://github.com/<owner>/<repo>/actions/runs/900. Its cause: the jobs unit (3.
 runner infrastructure (Failed to resolve action download info; The operation was canceled). No code change is due;
 the swarm closes this task when a later dev push run passes.
 ```
+
+#### Jobs that failed for want of shard output
+
+Each unit shard job, `unit (<python>, <shard>)`, uploads coverage, durations and flake reports that later jobs of the
+run read. When a shard loses its runner, those readers fail on the missing input, not on code. On the recorded dev push
+run 39226179257, intake filed the outage task plus five fixers: `refresh-durations`, `shard-check (3.11)`,
+`shard-check (3.12)`, `sonar`, and the real test failure in `unit (3.12, 10)`. With the folding, the same run files the
+outage task, which names the four consumers, and the `unit (3.12, 10)` fixer.
+
+In a run with at least one lost job, a failed job joins the outage cause in either case:
+
+- Its name before ` (` is one of the shard consumers `sonar`, `shard-check`, `coverage-ratchet`, `coverage-baseline`,
+  `flake-budget`; at least one lost job's name before ` (` is exactly `unit`; and its cause, its failed step names and
+  failure annotations, contains a missing shard sign from the table below.
+- Its name is `refresh-durations` and its cause contains `kept no samples from durations-`. This case needs no lost
+  unit shard, because the refresh line itself names the shard artifacts that never arrived.
+
+A consumer that lost its own runner is a lost job and is named once, among the lost jobs. Any other failed job,
+including a consumer whose error carries no sign, files its own fixer.
+
+| Missing shard sign | Printed by | Example failure annotation |
+|---|---|---|
+| `Missing coverage for shard ` | `.github/coverage/combine.sh`, the coverage merge before `sonar` | `Missing coverage for shard 4` |
+| `No shard durations at ` | `tests/shard_check.py` in `shard-check` | `No shard durations at shard-durations/*/durations.json, so those shards cannot be graded.` |
+| `collected tests did not run in exactly one of ` | `tests/shard_check.py` in `shard-check` | `<n> collected tests did not run in exactly one of <shards> shards.` |
+| `head shard coverage missing: ` | `tests/coverage_ratchet.py` in `coverage-ratchet` | `The coverage ratchet cannot grade: head shard coverage missing: <path>` |
+| `baseline shard coverage missing: ` | `tests/coverage_baseline.py` in `coverage-baseline` | `Cannot record the coverage baseline: baseline shard coverage missing: <path>` |
+| `No flake reports under ` | `tests/flake_budget.py` in `flake-budget` | `No flake reports under <folder>` |
+| `kept no samples from durations-` | `tests/refresh_durations.py` in `refresh-durations` | `refresh durations: ...; run 900 kept no samples from durations-3.11-2, durations-3.11-6` |
+
+The consumer names and signs are fixed in `scripts.swarm.promotion_watch` (`SHARD_JOB`, `SHARD_CONSUMERS`,
+`MISSING_SHARD_SIGNS`, `REFRESH_JOB`, `LOST_SAMPLES_SIGN`). No setting changes them. A consumer error that changes its
+wording stops folding until the sign in the watch changes with it.
+
+For the recorded run, the outage task reads:
+
+```text
+The dev push run 39226179257 of Tests lost its runner infrastructure at commit <sha>:
+https://github.com/<owner>/<repo>/actions/runs/39226179257. Its cause: the jobs unit (3.11, 1), unit (3.11, 4),
+unit (3.11, 5), unit (3.12, 4), unit (3.12, 9) lost their runner infrastructure (Failed to resolve action download
+info); the jobs refresh-durations, shard-check (3.11), shard-check (3.12), sonar failed for want of their unit shard
+output. No code change is due; the swarm closes this task when a later dev push run passes.
+```
+
+Limits:
+
+- A consumer whose own regression prints a missing shard sign beside a lost unit shard is folded. It files its fixer
+  on the next red run without a runner outage, because the outage task closes only on a green run.
+- `coverage-baseline` first compares the downloaded shard folders with the split. A missing folder fails there with
+  `downloaded shard coverage [...] is not the <n> shards the run split`, which carries no sign, so that failure files
+  its own fixer.
+- `stage-budget` reads no shard output and always files its own fixer.
 
 #### Later outages and the green run
 
@@ -2026,6 +2078,9 @@ agentihooks ledger --slug "<id>" show | jq -r --arg run "promo-$RUN-" \
 | A real failure was folded into the outage task | Its annotations contain a sign, for example a test that prints `The operation was canceled` | Read the cause in the task description. Fix the test output, or file the fixer by hand |
 | A red run with lost runners filed no outage task | An outage task that is not done already holds `runner outage` | Expected. A green dev push run closes it and the next outage files a new one |
 | A skipped `Run tests` step still got a fixer | Another step of the job failed first | Expected. The failed step is the cause |
+| `sonar`, `shard-check` or another consumer got a fixer beside a lost unit shard | Its annotations carry no missing shard sign, or the lost job's name is not exactly `unit` before ` (` | Read its annotations. A real error stays a fixer; a reworded missing input message needs a matching change to `MISSING_SHARD_SIGNS` with a test |
+| `refresh-durations` got a fixer in an outage run | Its line has no `kept no samples from durations-`, so it failed on its own cause | Read its annotation and fix that cause |
+| A consumer's real regression sits inside the outage task | It printed a missing shard sign in the same run as a lost unit shard | Expected. Read the outage task's consumer list; the next red run without an outage files its fixer |
 
 Delivered in [pull request 4829](https://github.com/the-cloud-clockwork/agentihooks/pull/4829), with
 [issue 4827](https://github.com/the-cloud-clockwork/agentihooks/issues/4827) as the spec. Its tests cover each sign,
@@ -2036,6 +2091,19 @@ download resolution, the code before the change filed seventeen tasks and the ch
 failed all seven new tests. Green: Tests run
 [39287821375](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39287821375) passed on the final head.
 No live dev outage run has been counted since the change.
+
+The shard output folding came in four pull requests:
+
+| Pull request | Change | Red | Green |
+|---|---|---|---|
+| [4955](https://github.com/the-cloud-clockwork/agentihooks/pull/4955), [issue 4953](https://github.com/the-cloud-clockwork/agentihooks/issues/4953) | Shard output consumers of a lost unit shard join the outage task. On the fixture of run 39226179257 the fixers fell from five to one, the real `unit (3.12, 10)` failure | Tests run [39336131070](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39336131070) | Tests run [39337492386](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39337492386) |
+| [5185](https://github.com/the-cloud-clockwork/agentihooks/pull/5185), [issue 5183](https://github.com/the-cloud-clockwork/agentihooks/issues/5183) | `refresh-durations` joins only when its line names shards that kept no samples | Proofs run [39392500128](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39392500128) | Proofs run [39392652550](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39392652550) |
+| [5417](https://github.com/the-cloud-clockwork/agentihooks/pull/5417), [issue 5416](https://github.com/the-cloud-clockwork/agentihooks/issues/5416) | A consumer joins only when its own error is the missing shard output | Tests run [39529046356](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39529046356) | Tests run [39530006213](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39530006213) |
+| [5646](https://github.com/the-cloud-clockwork/agentihooks/pull/5646), [issue 5645](https://github.com/the-cloud-clockwork/agentihooks/issues/5645) | `flake-budget` prints its missing reports error as an annotation and joins; `stage-budget` leaves the consumers | Tests run [39685347970](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39685347970) | Tests run [39688498915](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39688498915) |
+
+The tests in `tests/swarm/test_promotion_watch.py` cover the recorded run, a job outside the consumers, a consumer with
+no lost unit shard, each consumer and its sign, a consumer failing on its own error, a job named like a unit shard, a
+consumer that lost its own runner, and the three `refresh-durations` cases.
 
 ### Checking the owner
 
