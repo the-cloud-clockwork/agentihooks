@@ -165,6 +165,13 @@ def test_an_unknown_account_names_both_absent_places(capsys):
     ]
 
 
+def test_a_raw_name_with_shell_characters_is_never_echoed(capsys):
+    _registered()
+    assert _logout(["ghost;x", "--no-openbao"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[-1] == f"no export of AH_CX_TOKEN_ghost_x in the token block of {aicode_tokens.rc_file()}"
+
+
 def test_refusals_go_to_stderr_with_the_command_name_and_the_reason(capsys):
     assert _logout(["default"]) == 2
     err = capsys.readouterr()

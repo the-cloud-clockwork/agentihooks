@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import shutil
 import sys
 from collections.abc import Callable, Mapping
@@ -47,7 +48,7 @@ def main(
     except aicode_tokens.SlugError as exc:
         _fail(str(exc))
         return 2
-    slugs = tuple(dict.fromkeys((slug, options.slug)))
+    slugs = tuple(dict.fromkeys((slug, options.slug) if re.fullmatch(r"[A-Za-z0-9_-]+", options.slug) else (slug,)))
     tokens = tuple(f"{CODEX_TOKEN_PREFIX}{each}" for each in slugs)
     refresh = tuple(f"{codex_login.REFRESH_PREFIX}{each}" for each in slugs)
     try:
