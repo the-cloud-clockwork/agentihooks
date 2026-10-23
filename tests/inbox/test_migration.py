@@ -262,14 +262,17 @@ def test_destination_aliases_cannot_use_the_rehearsal_store_as_the_live_store(so
             bus.close()
 
 
-def test_snapshot_retains_long_histories_and_handles_repeated_key_separators(source):
+@pytest.mark.parametrize("item_id", ["pending", "part:two"])
+def test_snapshot_retains_long_histories_and_handles_repeated_key_separators(source, item_id):
     store = InboxStore(source, world="nested:inbox:item:world")
     item = source.hgetall(InboxStore(source, world="").key("item", "pending"))
-    source.hset(store.key("item", "pending"), mapping=item)
+    item["id"] = item_id
+    source.hset(store.key("item", item_id), mapping=item)
     history = [json.dumps({"event": "wake", "at": number}) for number in range(5)]
-    source.rpush(store.key("history", "pending"), *history)
+    source.rpush(store.key("history", item_id), *history)
     records = migration.snapshot(source)
     record = next(record for record in records if record["world"] == "nested:inbox:item:world")
+    assert record["item"]["id"] == item_id
     assert record["history"] == history
 
 
@@ -310,9 +313,8 @@ def test_cli_help_explains_the_scheduled_cutover(capsys):
     with pytest.raises(SystemExit) as error:
         migration.main(["--help"])
     assert error.value.code == 0
-    assert "Copy and rehearse open Redis inbox items before a scheduled NATS cutover" in " ".join(
-        capsys.readouterr().out.split()
-    )
+    description = " ".join(capsys.readouterr().out.split("\n\n")[1].split())
+    assert description == "Copy and rehearse open Redis inbox items before a scheduled NATS cutover"
 
 
 def test_the_copy_url_is_refused_even_with_a_fresh_destination_store(source, bus):
@@ -353,3 +355,11 @@ def test_cli_carries_the_configured_destination_into_the_cutover_guard(source, b
             with patch.object(migration.BusConfig, "from_environ", return_value=BusConfig(backend="nats", url=url)):
                 with pytest.raises(ValueError, match=r"^live migration requires a separate copy destination$"):
                     migration.main(["apply", str(receipt), "--enable-live"])
+
+
+def test_snapshot_ignores_item_shaped_keys_outside_the_configured_inbox_namespace(source):
+    records = migration.snapshot(source)
+    item = dict(records[0]["item"], id="foreign")
+    source.hset("unrelated:inbox:item:foreign", mapping=item)
+    source.rpush("unrelated:inbox:history:foreign", '{"event":"foreign"}')
+    assert migration.snapshot(source) == records
