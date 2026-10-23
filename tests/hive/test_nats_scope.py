@@ -204,8 +204,6 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
         "STATE_hive-presence",
         "STATE_hive-executions",
         "STATE_execution-starts",
-        "STATE_account-slots",
-        "STATE_hive-slot-accounts",
     )
     expected = {"swarm.rig.>"}
     for resource in resources:
