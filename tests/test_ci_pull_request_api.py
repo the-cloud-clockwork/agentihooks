@@ -163,6 +163,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_dependency_audit.py",
         "scripts/ci_dev_reuse.py",
         "scripts/ci_gate_summary.py",
+        "scripts/ci_hive_nats_grants.py",
         "scripts/ci_input_key.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/plan.py",
