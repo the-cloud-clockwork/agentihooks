@@ -46,6 +46,18 @@ def test_an_item_sent_to_an_agent_name_stays_off_the_bus(mail):
     assert shared.events.entries == []
 
 
+def test_direct_swarm_mail_publishes_a_message_keyed_wake_event(mail, monkeypatch):
+    store, shared = mail
+    monkeypatch.setattr(store.names, "slug_of", lambda name: "swarm")
+    first = store.send("alice", "engineer@323133-0001", "first")
+    second = store.send("alice", "engineer@323133-0001", "second")
+    reader = shared.events.consumer("wake-proof", "swarm.swarm.inbox-wake.requested")
+    events = [delivery.event for delivery in reader.fetch(10, 0)]
+    assert [event.key for event in events] == [first.id, second.id]
+    assert [event.type for event in events] == ["inbox.wake", "inbox.wake"]
+    assert [event.data["address"] for event in events] == [first.address, second.address]
+
+
 def test_without_the_nats_bus_nothing_is_published(mail, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_BUS")
     store, shared = mail

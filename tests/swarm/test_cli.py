@@ -935,10 +935,10 @@ def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(env, mon
     calls = []
     monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
     monkeypatch.setenv(cli.wake.WINDOW_ENV, "60")
-    monkeypatch.setenv(cli.wake.QUIET_ENV, "7")
-    monkeypatch.setattr(cli.wake, "wake_pass", lambda *args: calls.append(args[-3:]) or [])
+    monkeypatch.setattr(cli.wake, "maintenance", lambda *args: calls.append(args[-2:]) or [])
+    monkeypatch.setattr(cli.wake, "wake_pass", lambda *args: pytest.fail("tick swept the wake ladder"))
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert calls == [(9_000_000, 60_000, 7_000)]
+    assert calls == [(9_000_000, 60_000)]
 
 
 def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
