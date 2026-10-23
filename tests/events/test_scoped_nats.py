@@ -36,8 +36,10 @@ def hub(signer):
 
 
 def member(signer, swarm="rig"):
+    from tests.events.test_nats_state import guard_state_reads
+
     configured = replace(signer, member_swarms={"m1": (swarm,)})
-    return nats.open_bus(
+    client = nats.open_bus(
         BusConfig(
             backend="nats",
             url=signer.url,
@@ -47,6 +49,8 @@ def member(signer, swarm="rig"):
             queue=POLICY,
         )
     )
+    guard_state_reads(client._js)
+    return client
 
 
 def test_member_scoped_bus_logs_queues_and_keeps_state(hub, signer):
