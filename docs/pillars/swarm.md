@@ -1858,7 +1858,8 @@ watch files one runner outage task for all such jobs of a run and keeps a fixer 
 
 On 19 October cluster node `k8s-worker-1` went `NotReady` during dev push run 39226179257. Its unit jobs failed with
 the annotation `Failed to resolve action download info` and `Resource temporarily unavailable
-(launch.actions.githubusercontent.com:443)`, and intake filed seventeen urgent fixer tasks for one outage.
+(launch.actions.githubusercontent.com:443)`. Twenty jobs failed besides `Gate — Required`, and intake filed seventeen
+urgent fixer tasks, `promo-39226179257-<n>` in the Doctor ledger, for one outage.
 
 #### How a job is judged lost
 
@@ -1945,11 +1946,14 @@ agentihooks ledger --slug "<id>" show | jq -r --arg run "promo-$RUN-" \
 | A skipped `Run tests` step still got a fixer | Another step of the job failed first | Expected. The failed step is the cause |
 
 Delivered in [pull request 4829](https://github.com/the-cloud-clockwork/agentihooks/pull/4829), with
-[issue 4827](https://github.com/the-cloud-clockwork/agentihooks/issues/4827) as the spec. Red: Tests run
+[issue 4827](https://github.com/the-cloud-clockwork/agentihooks/issues/4827) as the spec. Its tests cover each sign,
+the skipped test step after a real failure, a real failure beside an outage, the exact description, and an open
+outage task holding a later outage until a green run closes it. In the test of seventeen unit jobs all lost to
+download resolution, the code before the change filed seventeen tasks and the change files one. Red: Tests run
 [39276851003](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39276851003) on the tests only commit
-failed all seven new tests, and the case of seventeen jobs all lost to download resolution filed seventeen tasks.
-Green: Tests run [39287821375](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39287821375) on the
-final head, where the same case files one outage task. Tasks filed for that outage run: 17 before, 1 after, in the test.
+failed all seven new tests. Green: Tests run
+[39287821375](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39287821375) passed on the final head.
+No live dev outage run has been counted since the change.
 
 ### Checking the owner
 
