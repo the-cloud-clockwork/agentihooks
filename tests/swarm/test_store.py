@@ -239,6 +239,15 @@ def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generat
     assert store.claimant("smoke", "t1") == "second"
 
 
+def test_a_held_claim_refund_reads_a_missing_generation_as_zero(store):
+    store.count_claim("smoke", "t1")
+    store.redis.set(store.key("smoke", "claim", "t1"), "agent")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", 1) is False
+    assert store.refund_held_claim("smoke", "t1", "agent", 0) is True
+    assert store.claims("smoke", "t1") == 0
+
+
 def test_a_held_claim_refund_refuses_after_the_hub_released_the_claim(store):
     store.count_claim("smoke", "t1")
     store.claim("smoke", "t1", "agent", 60_000)
