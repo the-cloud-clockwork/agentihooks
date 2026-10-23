@@ -1,0 +1,6 @@
+{
+  "scripts/hive/account_slots.py:scripts.hive.account_slots.x_publish__mutmut_13:7f3ea14dd3522916ee85a386813e51d3604e39bf5f49cc71957e7d348362ceca": {
+    "reader": "standards-reader",
+    "reason": "This Slots construction calls only heartbeat or release. The constructor stores read, and neither method nor _change accesses or invokes it. None or a callback returning None changes no operation or output."
+  }
+}

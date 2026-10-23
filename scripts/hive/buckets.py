@@ -2,7 +2,15 @@
 
 from scripts.events.bus import Bus
 
-NAMES = ("spoke-work", "spoke-pending", "hive-presence", "hive-executions", "execution-starts")
+NAMES = (
+    "spoke-work",
+    "spoke-pending",
+    "hive-presence",
+    "hive-executions",
+    "execution-starts",
+    "account-slots",
+    "hive-slot-accounts",
+)
 
 
 def provision(bus: Bus) -> None:

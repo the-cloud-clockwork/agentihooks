@@ -83,6 +83,9 @@ def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive.execution_events import observe as publish_executions
 
     publish_executions(local_id, hosted)
+    from scripts.hive import account_slots
+
+    account_slots.publish(local_id, report, hosted)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
 
@@ -289,6 +292,7 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     _claude_snapshots(observed)
     claude = {credential.account for credential in balancer.discover_credentials(environ)}
+    claude.update(_native_accounts(environ, observed))
     claude.update(counts["claude"])
     claude.discard(account_sessions.API_ACCOUNT)
     if claude_signed_in():
@@ -327,6 +331,36 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
     return slots, quota
+
+
+def _native_accounts(environ, observed: dict) -> set[str]:
+    from hooks.context import quota_usage
+    from scripts.routing import master_account
+
+    accounts = {account for account in master_claude_login.logins().values() if account}
+    declared = master_account.load(environ).get("claude")
+    if declared:
+        accounts.add(declared.slug)
+    for account in accounts:
+        snapshot = quota_usage.latest_snapshot(account)
+        if not snapshot:
+            continue
+        at, windows = snapshot
+        if at <= observed.get(account, (0, None))[0]:
+            continue
+        five, week = windows.get("five_hour") or {}, windows.get("seven_day") or {}
+        observed[account] = (
+            at,
+            balancer.ProbeResult(
+                account,
+                "allowed",
+                "UNKNOWN",
+                None,
+                balancer.QuotaWindow(five.get("used_percentage"), five.get("resets_at")),
+                balancer.QuotaWindow(week.get("used_percentage"), week.get("resets_at")),
+            ),
+        )
+    return accounts
 
 
 def repositories() -> list[str]:
