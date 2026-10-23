@@ -1,6 +1,8 @@
 x-swarm-env: &swarm-env
   AGENTIHOOKS_DEPLOYMENT: ${AGENTIHOOKS_DEPLOYMENT:-compose}
   AGENTIHOOKS_SWARM_DATABASE_URL: ${AGENTIHOOKS_SWARM_DATABASE_URL:-}
+  AGENTIHOOKS_BUS: ${AGENTIHOOKS_BUS:-nats}
+  AGENTIHOOKS_BUS_URL: ${AGENTIHOOKS_BUS_URL:-nats://nats:4222}
   AGENTIHOOKS_SWARM_REDIS_URL: ${AGENTIHOOKS_SWARM_REDIS_URL:-${SWARM_REDIS_SCHEME:-redis}://swarm:${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}@redis:6379/0}
   SSL_CERT_FILE: ${SWARM_CA_FILE:-/etc/ssl/certs/ca-certificates.crt}
 
@@ -24,6 +26,8 @@ services:
       - ${SWARM_TLS_DIR:-./deploy/compose/tls}:/tls:ro
     depends_on:
       redis:
+        condition: service_healthy
+      nats:
         condition: service_healthy
     restart: unless-stopped
   controller:
@@ -60,6 +64,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      nats:
+        condition: service_healthy
       swarm:
         condition: service_healthy
     restart: unless-stopped
@@ -91,6 +97,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      nats:
+        condition: service_healthy
     restart: unless-stopped
   redis:
     image: mirror.gcr.io/library/redis:7
@@ -114,6 +122,20 @@ services:
       start_period: 30s
       start_interval: 1s
     restart: unless-stopped
+  nats:
+    image: mirror.gcr.io/library/nats:2.15.1-alpine
+    command: [--jetstream, --store_dir=/data, --http_port=8222]
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: [CMD, wget, -q, -O-, "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+      start_interval: 1s
+    restart: unless-stopped
 volumes:
   swarm-data:
   redis-data:
+  nats-data:

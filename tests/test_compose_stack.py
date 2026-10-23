@@ -103,6 +103,8 @@ def test_nats_service_runs_the_pinned_server_with_jetstream_on_a_volume():
         "http://127.0.0.1:8222/healthz?js-enabled-only=true",
     ]
     assert nats["restart"] == "unless-stopped"
+    smoke = (ROOT / "scripts/packaging/compose-hive-smoke.sh").read_text()
+    assert "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/nats:2.15.1-alpine\n" in smoke
 
 
 def test_swarm_services_reach_nats_through_the_bus_setting():
