@@ -68,6 +68,32 @@ def test_hive_heartbeat_renews_account_counters_from_its_own_quota_and_execution
     publish.assert_called_once_with("machine", report, hosted)
 
 
+def test_cold_native_accounts_use_their_own_fresh_quota_before_the_first_launch(monkeypatch):
+    from hooks.context import quota_usage
+    from scripts.routing import master_account
+
+    monkeypatch.setattr(daemon.balancer, "cached_observations", lambda **kwargs: [])
+    monkeypatch.setattr(daemon.balancer, "discover_credentials", lambda env: [])
+    monkeypatch.setattr(daemon, "_claude_snapshots", lambda observed: None)
+    monkeypatch.setattr(daemon.master_claude_login, "logins", lambda: {1: "login"})
+    monkeypatch.setattr(
+        master_account, "load", lambda environ: {"claude": master_account.MasterAccount("claude", "native")}
+    )
+    monkeypatch.setattr(daemon, "claude_signed_in", lambda: False)
+    monkeypatch.setattr(daemon.codex_router, "accounts", lambda env: [])
+    monkeypatch.setattr(daemon.codex_router, "quotas", lambda *args: {})
+    monkeypatch.setattr(
+        quota_usage,
+        "latest_snapshot",
+        lambda account: (99, {"five_hour": {"used_percentage": 1}, "seven_day": {"used_percentage": 2}}),
+    )
+    slots, readings = daemon._subscriptions({}, {"claude": {}, "codex": {}}, 100)
+    assert {slot["account"] for slot in slots} == {"login", "native"}
+    assert all(slot["cap"] > 0 for slot in slots)
+    assert readings["claude:login"]["observed_at"] == 99
+    assert readings["claude:native"]["observed_at"] == 99
+
+
 def test_three_missed_beats_expire_both_keys(redis, monkeypatch):
     import time
 

@@ -160,6 +160,41 @@ def test_a_launch_admits_one_server_binds_its_thread_and_opens_once(store, serve
     assert all(connection.closed for connection in server.connections)
 
 
+def test_a_hive_app_server_reserves_its_resolved_account_before_the_subprocess(
+    store, server, clock, root, tmp_path, monkeypatch
+):
+    from dataclasses import replace
+    from scripts.hive import account_slots
+
+    spec = launch_spec(store, server, tmp_path)
+    spec = replace(
+        spec, environ={**spec.environ, account_slots.HIVE_ENV: "hive-a", account_slots.EXECUTION_ENV: "pending"}
+    )
+    admitted = []
+
+    def execute(harness, account, environ, invoke):
+        assert server.spawns == []
+        assert harness == "codex"
+        assert account == "default"
+        assert environ[account_slots.HIVE_ENV] == "hive-a"
+        assert environ[account_slots.EXECUTION_ENV] != "pending"
+        admitted.append(environ[account_slots.EXECUTION_ENV])
+        return invoke(
+            {
+                key: value
+                for key, value in environ.items()
+                if key not in (account_slots.HIVE_ENV, account_slots.EXECUTION_ENV)
+            }
+        )
+
+    monkeypatch.setattr(account_slots, "execute", execute)
+    started = supervisor.launch(store, spec, deps(server, clock, root))
+    assert admitted == [started.agent.execution_id]
+    assert len(server.spawns) == 1
+    assert account_slots.HIVE_ENV not in server.spawns[0]["env"]
+    assert account_slots.EXECUTION_ENV not in server.spawns[0]["env"]
+
+
 def test_local_codex_app_server_admission_records_the_root_hive(store, server, clock, root, tmp_path, monkeypatch):
     from scripts.swarm import commands
 
