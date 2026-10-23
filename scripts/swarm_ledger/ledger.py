@@ -32,7 +32,12 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   edit chat|ITEM ENTRY TEXT           rewrite an entry (yours; the orchestrator: any agent's)
   delete chat|ITEM ENTRY...           delete entries (yours; the orchestrator: any agent's)
   audit                               list every agent text the filter refuses, the cleanup worklist
-  show                                print the whole ledger as JSON: every task, note, answer and comment (no --as needed)
+  show                                print the whole ledger as JSON: every task, note, answer and comment (no --as needed);
+                                      masters never run it, it slows every write
+  get ITEM                            print one item through the ledger API: tasks/<id>, phases/<id>, followups/<id>
+                                      or priorities/<id> (no --as needed)
+  tasks [--state S] [--lane L] [--text T]
+                                      list open tasks, one line each, by state, lane or title text (no --as needed)
   priority add ITEM TEXT              ask the operator: only what blocks on his answer, at most 20 words; ITEM may
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
@@ -411,6 +416,29 @@ def cmd_show(args):
 def cmd_tree(args):
     for row in resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy", collection=True):
         print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
+
+
+def cmd_get(args):
+    print(SHOW_JSON(resource(args.slug, args.item)))
+
+
+def cmd_tasks(args):
+    text = (args.text or "").lower()
+    for task in resource(args.slug, "tasks", collection=True):
+        state = task.get("state") or "open"
+        if state == "done" or task.get("out_of_scope"):
+            continue
+        if args.state not in (None, state) or args.lane not in (None, task.get("lane")):
+            continue
+        if text in (task.get("title") or "").lower():
+            print(f"{task['id']}  {state}  {task.get('lane', '')}  {task.get('title', '')}")
+
+
+def ledger_item(value: str) -> str:
+    kind, _, item = value.partition("/")
+    if kind not in ("tasks", "phases", "followups", "priorities") or not item or "/" in item:
+        raise argparse.ArgumentTypeError("name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>")
+    return value
 
 
 def cmd_status(args):
@@ -973,6 +1001,12 @@ def build_parser():
     sub.add_parser("tree", help="print a plan, phase, slice or task and everything under it, with states").add_argument(
         "node", nargs="?", help="plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger"
     )
+    sub.add_parser("get", help="print one task, phase, follow up or priority through the ledger API").add_argument(
+        "item", type=ledger_item, help="tasks/<id>, phases/<id>, followups/<id> or priorities/<id>"
+    )
+    tasks = sub.add_parser("tasks", help="list open tasks, one line each, filtered by state, lane or title text")
+    for flag in ("--state", "--lane", "--text"):
+        tasks.add_argument(flag)
     priority = sub.add_parser("priority")
     priority.add_argument("action", choices=["add", "clear"])
     priority.add_argument("values", nargs="*")
@@ -1066,7 +1100,7 @@ def main():
     if text := refusal(args.name, Who.from_env()):
         sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
-    if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy")):
+    if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy", "get", "tasks")):
         sys.exit("--slug and --as are required")
     with ledger_route.session(args.slug):
         globals()[f"cmd_{args.command.replace('-', '_')}"](args)
