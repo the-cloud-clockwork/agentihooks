@@ -197,7 +197,7 @@ def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_with_no_h
         "swarm-row-work",
         "swarm-row-accounts",
         "doctor-box",
-        "health",
+        'id="health',
         "<section",
     ):
         assert gone not in box, gone

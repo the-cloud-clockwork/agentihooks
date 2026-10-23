@@ -196,6 +196,25 @@ def test_local_storage_paints_the_layout_while_the_server_is_unreachable(visit):
     assert page.box("handoff-box")["height"] == pytest.approx(height, abs=1)
 
 
+def test_a_stored_layout_with_a_retired_row_saves_without_it(browser, visit):
+    retired = '{"health-box": {"height": 200}, "agents-box": {"height": 300}}'
+    context = browser.new_context(viewport={"width": 1440, "height": 1000})
+    context.add_init_script(f"Date.now = () => {NOW_MS};")
+    context.add_init_script(f"localStorage.setItem('plan-ledger:swarm-layout', '{retired}');")
+    context.route(
+        "**/api/v1/layout", lambda route: route.abort() if route.request.method == "GET" else route.fallback()
+    )
+    try:
+        page = visit(context=context)
+        assert page.box("agents-box")["height"] == pytest.approx(300, abs=1)
+        page.drag("height", "handoff-box", dy=-40)
+        server_side = saved(("agents-box", "handoff-box"))
+        assert server_side["agents-box"] == {"height": 300}
+        assert "health-box" not in page.tab.evaluate("() => localStorage.getItem('plan-ledger:swarm-layout')")
+    finally:
+        context.close()
+
+
 def test_panel_content_scrolls_inside_a_panel_smaller_than_its_content(visit):
     page = visit()
     page.drag("height", "handoff-box", dy=-120)

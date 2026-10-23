@@ -699,10 +699,9 @@ if __name__ == "__main__":
 
 class HealthPanel(unittest.TestCase):
     def test_the_swarm_page_has_no_health_panel(self):
-        source = function_source("renderSwarm")
-        self.assertNotIn("renderHealth", source)
-        self.assertNotIn("renderNeedsYou", source)
+        self.assertNotIn("renderNeedsYou", function_source("renderSwarm"))
         page = page_source()
+        self.assertNotIn("renderHealth", page)
         for gone in ('id="health', '$("health")', "No health findings", "needs-you", "Needs you"):
             self.assertNotIn(gone, page)
 
