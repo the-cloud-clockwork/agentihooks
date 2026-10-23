@@ -228,8 +228,7 @@ class SeatFeed:
         self._seat = seat or (lambda: seat_of(store, me))
         self._session = session
         self._bus = None
-        self._consumer = None
-        self._address = ""
+        self._consumers: dict[str, SeatConsumer] = {}
         self._retry_at = 0.0
         self.held: dict[str, Receipt] = {}
 
@@ -239,12 +238,13 @@ class SeatFeed:
         address = self._seat()
         if not address:
             return None
-        if address != self._address:
+        consumer = self._consumers.get(address)
+        if consumer is None:
             if self._bus is None:
                 self._bus = self._opener()
-            self._consumer = SeatInbox(self._bus, _swarm_of(address)).consumer(address, self._session)
-            self._address = address
-        return self._consumer
+            consumer = SeatInbox(self._bus, _swarm_of(address)).consumer(address, self._session)
+            self._consumers[address] = consumer
+        return consumer
 
     def wait(self, timeout_ms: int) -> bool:
         try:
@@ -284,7 +284,8 @@ class SeatFeed:
             return False
 
     def close(self) -> None:
-        bus, self._bus, self._consumer, self._address = self._bus, None, None, ""
+        bus, self._bus = self._bus, None
+        self._consumers.clear()
         self.held.clear()
         _drop(bus)
 

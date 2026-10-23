@@ -79,14 +79,26 @@ def test_a_feed_without_a_seat_reader_follows_the_receivers_seat(seated):
     assert set(feed.held) == {"first"}
 
 
-def test_a_feed_rebinds_when_its_receiver_changes_seat():
+def test_a_feed_binds_each_seat_once_and_rebinds_when_its_receiver_changes_seat(monkeypatch):
     shared = memory.open_bus(BusConfig())
+    bound = []
+    real_consumer = SeatInbox.consumer
+
+    def consumer(inbox, address, session):
+        bound.append(address)
+        return real_consumer(inbox, address, session)
+
+    monkeypatch.setattr(SeatInbox, "consumer", consumer)
     seat = [SEAT]
     feed = SeatFeed(lambda: shared, Items(), "bob", "session-1", seat=lambda: seat[0])
     assert not feed.wait(0)
+    assert not feed.wait(0)
+    assert bound == [SEAT]
     seat[0] = OTHER
     mailed(shared, OTHER, "moved")
     assert feed.wait(0)
+    assert not feed.wait(0)
+    assert bound == [SEAT, OTHER]
     assert set(feed.held) == {"moved"}
 
 
@@ -150,6 +162,8 @@ def test_a_lost_feed_reopens_only_once_its_cooldown_has_passed(monkeypatch):
     clock.now = 0.5 + bus.REOPEN_S
     assert not feed.wait(0)
     assert len(opened) == 2
+    mailed(opened[1].inner, SEAT, "after")
+    assert feed.wait(0)
     feed.close()
     assert opened[1].closed == 1
 
