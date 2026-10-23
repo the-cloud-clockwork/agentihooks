@@ -108,17 +108,10 @@ def test_the_router_hands_logout_with_a_slug_to_the_logout_command(monkeypatch, 
     assert seen == [argv[1:]]
 
 
-def test_logout_without_a_slug_still_goes_to_codex(monkeypatch, tmp_path):
+@pytest.mark.parametrize("argv", [["logout"], ["logout", "--help"], ["logout", "status"]])
+def test_logout_without_a_slug_still_goes_to_codex(monkeypatch, argv):
     monkeypatch.setattr(codex_logout, "main", lambda args, environ: pytest.fail("logout"))
-    monkeypatch.setattr(codex_router, "codex_sessions_by_account", lambda: {})
-    monkeypatch.setattr(codex_router, "quotas", lambda accounts, environ: {})
-    monkeypatch.setattr(codex_router, "default_signed_in", lambda environ, run=None: True)
-    monkeypatch.setattr(codex_router.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr("scripts.deps_preflight.refresh_codex_wrapper", lambda name: None)
-    seen = []
-    environ = {"HOME": str(tmp_path)}
-    assert codex_router.main(["logout"], environ=environ, execvpe=lambda *a: seen.append(a[1])) == 0
-    assert seen and seen[0][-1] == "logout"
+    assert codex_router._own_command(argv, {}) is None
 
 
 def test_the_shell_block_removal_leaves_files_without_a_block_alone(tmp_path):

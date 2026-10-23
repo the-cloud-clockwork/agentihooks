@@ -141,7 +141,8 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     counts = account_sessions.codex_sessions_by_account()
     found = source.readings(pool, environ, now)
     known = {account.name for account in pool}
-    live = codex_router.live_accounts(pool, counts)
+    repeated = codex_router.duplicates(codex_router.token_accounts(environ), environ)
+    live = [account for account in codex_router.live_accounts(pool, counts) if account.name not in repeated]
     found.update(codex_router.quotas(live, environ))
     rows = []
     for account in pool + live:
