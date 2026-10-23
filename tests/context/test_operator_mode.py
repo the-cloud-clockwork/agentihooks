@@ -65,6 +65,49 @@ def test_only_a_prompt_that_opens_with_the_words_switches():
     for text in ('"operator on" was typed in the master pane', "the operator on call said ship", "operator one", ""):
         assert operator_mode.switch(text) == ""
 
+@pytest.mark.parametrize("word", ["on", "off"])
+def test_typed_sentence_switches_only_its_session(word):
+    operator_mode.observe("other", "operator on", True, now=100)
+    operator_mode.observe("pane", "operator on", True, now=100)
+    assert operator_mode.observe("pane", f"Keep working, operator {word}, please.", True, now=110) == word
+    assert operator_mode._heard("pane") is (word == "on")
+    assert operator_mode._heard("other")
+
+
+@pytest.mark.parametrize("word", ["on", "off"])
+def test_relayed_sentence_does_not_switch_presence(word):
+    operator_mode.observe("pane", "operator on", True, now=100)
+    assert operator_mode.observe("pane", f"Keep working, operator {word}, please.", False, now=110) == ""
+    assert operator_mode._heard("pane")
+
+
+def test_idle_scheduler_does_not_end_explicit_presence():
+    from scripts.inbox.store import InboxStore
+    from scripts.scheduler import Scheduler
+    from scripts.swarm.store import redis_client
+
+    redis = redis_client()
+    operator_mode.observe("pane", "operator on", True, now=100)
+    Scheduler(redis).run_due(now=100000)
+    assert operator_mode._heard("pane")
+    assert operator_mode.question_block("AskUserQuestion", "pane") == ""
+    assert InboxStore(redis).inbox("pane") == []
+    operator_mode.observe("pane", "operator off", True, now=100001)
+    assert not operator_mode._heard("pane")
+
+
+@pytest.mark.parametrize("source", ["startup", "resume", "compact"])
+def test_session_restart_clears_presence_but_compaction_preserves_it(monkeypatch, source):
+    operator_mode.observe("pane", "operator on", True, now=100)
+    operator_mode.observe("other", "operator on", True, now=100)
+    monkeypatch.setattr(hook_manager, "_inject_refocus", Mock())
+    monkeypatch.setattr("hooks.lifecycle.guard.session_event", Mock())
+    monkeypatch.setattr(hook_manager, "_run_start_conditions", Mock(side_effect=RuntimeError("stop after reset")))
+    with pytest.raises(RuntimeError, match="stop after reset"):
+        hook_manager.on_session_start({"session_id": "pane", "source": source})
+    assert operator_mode._heard("pane") is (source == "compact")
+    assert operator_mode._heard("other")
+
 
 def test_operator_on_survives_silence_and_later_typed_messages():
     operator_mode.observe("s1", "operator on", True, now=100)
