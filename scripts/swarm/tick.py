@@ -1214,8 +1214,8 @@ def _receipt_live(config, runtime, agent):
     try:
         return runtime.launched(config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True})
     except Exception as exc:
-        print(f"{agent.name} receipt read for {agent.task} raised {exc!r}", file=sys.stderr)
-        return False
+        print(f"{agent.name} receipt read for {agent.task} raised {exc!r}, waiting for the hive", file=sys.stderr)
+        return None
 
 
 def _finished_early(slug, store, doc, agent):
@@ -1235,7 +1235,11 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     rows, actions = {t["id"]: t for t in doc["tasks"]}, []
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
-        if agent.state == "finished" and (task.get("state") == "done" or _receipt_live(config, runtime, agent)):
+        early = agent.state == "finished" and (task.get("state") == "done" or _receipt_live(config, runtime, agent))
+        if early is None:
+            store.refresh(slug, agent.task, agent.name, LEASE_MS)
+            continue
+        if early:
             actions.append(_finished_early(slug, store, doc, agent))
             continue
         try:

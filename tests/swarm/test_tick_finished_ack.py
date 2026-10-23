@@ -1,7 +1,10 @@
 from dataclasses import replace
 
+import pytest
+
 from scripts.swarm import failed_panes
 from scripts.swarm import tick as tick_module
+from scripts.swarm.store import SwarmError
 from scripts.swarm.tick import _acknowledging, _collect_acks, tick
 from tests.swarm.test_tick import HiveAcks, tasks
 from tests.swarm.test_tick import store as store
@@ -125,18 +128,24 @@ def test_a_working_agent_never_reads_the_receipt(store, monkeypatch):
     assert runtime.collected == [name]
 
 
-def test_a_receipt_read_that_raises_falls_back_to_the_guarded_collect(store, monkeypatch, capsys):
-    ledger, runtime, name, _ = _finished_before_ack(store, monkeypatch)
+@pytest.mark.parametrize(
+    "error", [ConnectionError("redis went away"), SwarmError("the controller lease is stale")], ids=repr
+)
+def test_a_receipt_read_that_raises_waits_instead_of_failing_the_launch(store, monkeypatch, capsys, error):
+    ledger, runtime, name, released = _finished_before_ack(store, monkeypatch)
+    refreshed = []
+    monkeypatch.setattr(store, "refresh", lambda *args: refreshed.append(args))
 
     def broken(config, lane, agent, task):
-        raise ConnectionError("redis went away")
+        raise error
 
     runtime.launched = broken
     doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "blocked"}]}
-    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
-    assert runtime.collected == [name]
-    assert len(actions) == 1 and actions[0].startswith("spawn failed for t1")
-    assert f"{name} receipt read for t1 raised ConnectionError('redis went away')" in capsys.readouterr().err
+    assert _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000) == []
+    assert runtime.collected == [] and released == []
+    assert refreshed == [("sw", "t1", name, tick_module.LEASE_MS)]
+    assert [r["state"] for r in store.launches("sw") if r["agent"] == name] == ["acknowledging"]
+    assert f"{name} receipt read for t1 raised {error!r}, waiting for the hive" in capsys.readouterr().err
 
 
 def test_an_early_finished_launch_clears_its_saved_assignment(store, monkeypatch):
