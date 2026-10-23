@@ -273,12 +273,15 @@ def test_snapshot_retains_long_histories_and_handles_repeated_key_separators(sou
     assert record["history"] == history
 
 
-def test_standalone_addresses_remain_deliverable_in_the_standalone_inbox(source, bus):
+@pytest.mark.parametrize(
+    "address,swarm", [("standalone-session", "standalone"), ("session@with@nested", "with@nested")]
+)
+def test_standalone_addresses_remain_deliverable_in_the_standalone_inbox(source, bus, address, swarm):
     records = migration.snapshot(source)[:1]
-    records[0]["item"]["address"] = "standalone-session"
+    records[0]["item"]["address"] = address
     migration.import_snapshot(records, bus)
-    receipt = SeatInbox(bus, "standalone").consumer("standalone-session", "receiver").fetch(1, 0)[0]
-    assert receipt.event.key == "standalone-session"
+    receipt = SeatInbox(bus, swarm).consumer(address, "receiver").fetch(1, 0)[0]
+    assert receipt.event.key == address
     assert receipt.event.data["id"] == records[0]["item"]["id"]
 
 
@@ -313,3 +316,20 @@ def test_the_copy_url_is_refused_even_with_a_fresh_destination_store(source, bus
             migration.apply(source, live, proof, "copy", enabled=True)
     finally:
         live.close()
+
+
+def test_snapshot_command_uses_the_configured_redis_source(source, tmp_path, capsys):
+    with patch("scripts.swarm.store.redis_client", return_value=source) as connector:
+        target = tmp_path / "snapshot.json"
+        assert migration.main(["snapshot", str(target)]) == 0
+    connector.assert_called_once_with()
+    assert json.loads(target.read_text()) == migration.snapshot(source)
+    assert json.loads(capsys.readouterr().out)["items"] == 4
+
+
+def test_import_refuses_an_item_without_identity_before_writing(bus):
+    with patch.object(bus.events, "publish") as publisher:
+        with pytest.raises(KeyError) as error:
+            migration.import_snapshot([{"item": {}}], bus)
+    assert error.value.args == ("id",)
+    publisher.assert_not_called()
