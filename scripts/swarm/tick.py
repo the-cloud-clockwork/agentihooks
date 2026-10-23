@@ -1232,7 +1232,7 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
             continue
         try:
             placed = runtime.collect(
-                config, agent.lane, agent.name, {**task, "id": agent.task, "seat": agent.seat, ACK_LATER: True}
+                config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True}
             )
             if agent.state == "finished" and task.get("state") == "blocked":
                 actions.append(_finished_launch(slug, store, doc, agent))
