@@ -110,7 +110,12 @@ def rejudged(store, gap_ms, worst=1859, again=1166):  # noqa: F811
 
 
 def test_a_rejudged_scope_keeps_its_highest_judged_worst(store):  # noqa: F811
-    original, records, back = rejudged(store, COOLDOWN_MS + 60000)
+    original, _, back = rejudged(store, COOLDOWN_MS + 60000)
+    pending = Finding(
+        "ci runner wait", f"17-{SCOPE}", "slow", ("text",), "runner wait", 900, evidence_identity=("8", 900)
+    )
+    loop.record(store, DOCTOR, [pending], back, COOLDOWN_MS)
+    records = store.redis.hgetall(loop.verdicts(store, DOCTOR).key)
     now = back + 180000
     assert ci_speed.unjudged([later(original, "3", 1402)], records, now, COOLDOWN_MS) == []
     grown = later(original, "3", 2300)

@@ -12,6 +12,7 @@ SHORT_WAIT_MS = 300000
 WALL_MS = 900000
 UNCONFIRMED_WAIT_MS = SHORT_WAIT_MS + 600000
 GROWTH_MARGIN = 0.2
+JUDGED_SPAN_MS = 86400000
 JOB_FIELDS = ("id", "name", "status", "conclusion", "labels", "created_at", "started_at", "completed_at", "runner_name")
 SUMMARIES = {
     "ci runner wait": "{text} runners waited up to {minutes} minutes for {count} jobs",
@@ -274,23 +275,40 @@ def scope_of(subject: str) -> str:
     return rest if head.isdigit() else subject
 
 
-def _covered(finding, identity, verdict):
+def _scope(identity):
     kind, _, subject = identity.partition("/")
-    if kind != finding.kind.replace(" ", "-") or scope_of(subject) != scope_of(finding.subject):
+    return kind, scope_of(subject)
+
+
+def _judged_worst(identity, verdict, judgments):
+    """The highest worst judged on this verdict's kind and scope since the span before it."""
+    worsts = [verdict["measure"]]
+    for other, judged in judgments.items():
+        if judged and _scope(other) == _scope(identity):
+            for entry in (judged, *judged.get("earlier", ())):
+                if entry["at"] >= verdict["at"] - JUDGED_SPAN_MS:
+                    worsts.append(entry["measure"])
+    return max(worsts)
+
+
+def _covered(finding, identity, bar):
+    if _scope(identity) != (finding.kind.replace(" ", "-"), scope_of(finding.subject)):
         return False
-    return finding.evidence_identity[-1] <= verdict["measure"] * (1 + GROWTH_MARGIN)
+    return finding.evidence_identity[-1] <= bar * (1 + GROWTH_MARGIN)
 
 
 def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int) -> list[Finding]:
     judgments = {identity: json.loads(raw)["verdict"] for identity, raw in records.items()}
-    recent = {
-        identity: verdict for identity, verdict in judgments.items() if verdict and now_ms < verdict["at"] + cooldown_ms
+    bars = {
+        identity: _judged_worst(identity, verdict, judgments)
+        for identity, verdict in judgments.items()
+        if verdict and now_ms < verdict["at"] + cooldown_ms
     }
     return [
         finding
         for finding in found
         if finding.evidence_identity is None
-        or not any(_covered(finding, identity, verdict) for identity, verdict in recent.items())
+        or not any(_covered(finding, identity, bar) for identity, bar in bars.items())
     ]
 
 
