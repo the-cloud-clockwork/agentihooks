@@ -140,6 +140,16 @@ def test_without_like_the_flags_and_this_hosts_redis_and_ca_fill_the_record(admi
     assert _redis(admin, env) == ("redis", f"hive-{env['AGENTIHOOKS_HIVE_ID']}", "127.0.0.1", 6379, "/0")
 
 
+def test_one_invite_carries_the_member_event_bus_address(admin):
+    fake = Bao()
+    request = invite.Request("lab", RECORD, url=URL, swarm_url=SWARM, bus_url="nats://bus.example.test:4222")
+    invite.invite(admin, _bao(fake), request, LOCAL)
+    env = _env(fake.records[RECORD]["credential"])
+    assert env["AGENTIHOOKS_BUS"] == "nats"
+    assert env["AGENTIHOOKS_BUS_URL"] == "nats://bus.example.test:4222"
+    assert env["AGENTIHOOKS_SWARM_URL"] == SWARM
+
+
 def test_a_like_record_without_a_credential_still_lends_its_ledger_address(admin):
     fake = Bao({LIKE: {"swarm_url": SWARM, "ca_pem": CA}})
 
