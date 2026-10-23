@@ -134,6 +134,7 @@ PY
 fi
 bundle=()
 [[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
+python3 -m scripts.hive.linked_profiles
 if (( ${#bundle[@]} )) && ! agentihooks init "${bundle[@]}"; then
   echo "worker-hive: agentihooks init with the bundle failed; init runs on the package roles alone" >&2
   bundle=()

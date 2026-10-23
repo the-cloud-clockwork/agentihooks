@@ -8,7 +8,7 @@ import pytest
 from psycopg2 import extensions
 
 from scripts.swarm_ledger import storage
-from scripts.swarm_ledger.repository import hierarchy, legacy, postgres, sqlite
+from scripts.swarm_ledger.repository import hierarchy, legacy, postgres, refresh, sqlite
 
 ADDRESS = "postgresql://ledger@db.test/ledger"
 IDLE = extensions.TRANSACTION_STATUS_IDLE
@@ -424,7 +424,8 @@ def test_the_repository_sets_its_schema_up_once_under_the_writer_lock(opened):
     raw = opened.raws[0]
     statements = [sql for sql, _ in raw.log]
     assert statements[0] == "SELECT pg_advisory_xact_lock(1279607879)"
-    assert statements[1:] == postgres.ddl(sqlite.SCHEMA + hierarchy.SCHEMA + sqlite.ROWS_SCHEMA)
+    assert statements[1] == "SET LOCAL statement_timeout = 0"
+    assert statements[2:] == postgres.ddl(sqlite.SCHEMA + hierarchy.SCHEMA + sqlite.ROWS_SCHEMA + refresh.SCHEMA)
     assert raw.commits == 1
     assert repository._ready == {ADDRESS}
     with repository.connect():

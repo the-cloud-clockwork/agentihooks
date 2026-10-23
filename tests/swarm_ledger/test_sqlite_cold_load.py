@@ -23,21 +23,22 @@ def test_concurrent_readers_share_one_generation_load(tmp_path, monkeypatch, sta
     entered, duplicate, release = threading.Event(), threading.Event(), threading.Event()
     start = threading.Barrier(8)
     loads = []
-    original = sqlite.read_rows
+    owner, name = (sqlite.refresh, "refreshed") if state == "external_write" else (sqlite, "read_rows")
+    original = getattr(owner, name)
 
-    def blocked_load(connection, slug):
+    def blocked_load(connection, slug, *rest):
         loads.append(slug)
         entered.set()
         if len(loads) > 1:
             duplicate.set()
         assert release.wait(5)
-        return original(connection, slug)
+        return original(connection, slug, *rest)
 
     def read(repo):
         start.wait(timeout=5)
         return repo.get_document("ledger")
 
-    monkeypatch.setattr(sqlite, "read_rows", blocked_load)
+    monkeypatch.setattr(owner, name, blocked_load)
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = [pool.submit(read, repo) for repo in [reader, twin] * 4]
         try:
