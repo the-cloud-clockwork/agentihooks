@@ -71,13 +71,22 @@ def launched(store, slug: str) -> int:
 def observe(store, slug: str, ledger, at: int, runtime) -> dict:
     state = read(store, slug)
     last = launched(store, slug)
-    if not eligible(store, slug, ledger, at, runtime):
+    if capped(store, slug, state.get("at", 0)) or not eligible(store, slug, ledger, at, runtime):
         state = {}
     elif "since" not in state or last > state["launch"]:
         state = {"since": at, "launch": last}
     state["at"] = at
     save(store, slug, state)
     return state
+
+
+def capped(store, slug: str, since: int) -> bool:
+    local = json.loads(store.redis.get(store.key(slug, LOCAL_REFUSAL)) or "{}")
+    if local.get("at", -1) < since:
+        return False
+    from scripts.swarm import local_slots
+
+    return local_slots.occupancy(store, local["machine"])[1] >= local["maximum"]
 
 
 def refuse_local(store, slug: str, machine: str, taken: int, maximum: int, at: int) -> None:

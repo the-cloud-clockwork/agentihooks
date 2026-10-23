@@ -621,6 +621,15 @@ def test_a_local_cap_refusal_before_the_last_observation_does_not_hold_the_lane(
     assert finding.kind == "spawn stall"
 
 
+def test_a_local_cap_refusal_at_the_last_observation_holds_the_lane(stalled, monkeypatch):
+    store, _, _, clock, _ = stalled
+    monkeypatch.setattr(local_slots, "live", lambda: {f"w{n}" for n in range(8)})
+    assert not spawn_stall.capped(store, "sw", 0)
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0])
+    assert spawn_stall.capped(store, "sw", clock[0])
+    assert not spawn_stall.capped(store, "sw", clock[0] + 1)
+
+
 def test_admission_refusals_without_a_failed_launch_are_named_in_the_alarm(stalled):
     store, _, _, clock, _ = stalled
     quiet_watch(stalled)
