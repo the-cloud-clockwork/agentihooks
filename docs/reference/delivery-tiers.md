@@ -728,6 +728,80 @@ A stalled run is cancelled, then force cancelled if a plain cancel does not end 
 
 GitHub can list a dead runner online for over a minute, and the scheduled workflow starts at most every ten minutes, so the swarm tick also runs the watchdog with `--cluster` on the tick host, where `kubectl` can read the cluster; CI runners cannot. The tick step `lost_runner.sweep` starts it at most once a minute per repository, only where `kubectl` exists and the repository has the Tests workflow, and a file lock under the AgentiHooks home keeps one watchdog acting at a time; a later tick finding it held exits and the next free minute looks again. The watchdog runs isolated (`python -I`), so it imports the installed AgentiHooks package, and a change to it reaches the tick when the installed checkout pulls `dev`. In cluster mode a runner is lost when its pod ended (phase Failed or Succeeded, or its `runner` container terminated), sits on a node NotReady for at least sixty seconds or on a node the cluster no longer lists, is in phase Unknown on a Ready node, or is missing from a scale set the cluster lists. There is no job age grace and the second read comes thirty seconds after the first. The only reads are `kubectl get autoscalingrunnersets --all-namespaces`, `kubectl get pods --all-namespaces -l actions.github.com/scale-set-name` and `kubectl get nodes`, so the tick host's kubeconfig needs list rights on those three. A refused cluster read reports `error` and never counts as a loss, and a runner whose scale set the cluster does not list is never counted lost. Its output goes to `lost-runner.log` under the AgentiHooks home.
 
+#### Recovery timestamps
+
+Recovery records include the following ISO 8601 UTC times, delivered by [pull request 5389](https://github.com/the-cloud-clockwork/agentihooks/pull/5389). Recording needs no extra setting and applies to both the scheduled workflow and the tick's cluster watchdog.
+
+| Field | Meaning |
+|---|---|
+| `run`, `attempt` | GitHub run ID and the attempt examined; keep both when comparing recoveries. |
+| `detected_at` | Time the second assessment confirms the stall, before the run attempt is checked again. It is not the first suspicion or the time the runner disappeared. |
+| `cancel_requested_at` | Time immediately before the plain cancel API request. It records an attempted request, including one GitHub refuses. |
+| `force_cancel_requested_at` | Time immediately before the force cancel API request; `null` when that request was not attempted. |
+| `completed_observed_at` | Time of the first poll, or follow-up read after a cancel API error, that reports the run `completed`; `null` when completion was not observed. |
+
+For example, this illustrative recovery attempted both cancellation methods and then reran failed jobs:
+
+```json
+{"run":123456,"attempt":1,"action":"rerun","reason":"lost runner; first attempt without an independent job failure","detected_at":"2026-10-20T12:00:00+00:00","cancel_requested_at":"2026-10-20T12:00:01+00:00","force_cancel_requested_at":"2026-10-20T12:03:01+00:00","completed_observed_at":"2026-10-20T12:03:11+00:00"}
+```
+
+After each cancellation request, the watchdog sleeps ten seconds before each of up to eighteen status reads. If plain cancel ends the run, force cancel is skipped. Otherwise force cancel gets the same polling budget. API time adds to these waits. The completion observation can therefore lag GitHub's state change by the polling interval and API time. GitHub's workflow run REST response supplies no `completed_at`; `updated_at` is not a completion time.
+
+Read retained tick recovery records without triggering cancellation:
+
+```bash
+jq -c 'select(.detected_at != null) |
+  {run, attempt, action, reason, detected_at, cancel_requested_at,
+   force_cancel_requested_at, completed_observed_at}' \
+  "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/lost-runner.log"
+```
+
+For the scheduled workflow, read the JSON lines in the **Cancel stalled Tests runs and rerun their failed jobs once** step of the Lost runner run. The tick writes its output to the log above; the workflow writes to its job log.
+
+To calculate observed seconds after each request, pipe the selected JSON records above into this command. It accepts fractional seconds as well as the example's whole seconds:
+
+```bash
+python3 -c '
+import json
+import sys
+from datetime import datetime
+
+for line in sys.stdin:
+    row = json.loads(line)
+    end = row.get("completed_observed_at")
+    if not end:
+        continue
+    elapsed = {
+        field: (datetime.fromisoformat(end) - datetime.fromisoformat(row[field])).total_seconds()
+        for field in ("detected_at", "cancel_requested_at", "force_cancel_requested_at")
+        if row.get(field)
+    }
+    print(json.dumps({"run": row["run"], "attempt": row["attempt"], "seconds_since": elapsed}))
+'
+```
+
+The example gives 191 seconds since detection, 190 since plain cancel and 10 since force cancel. A record with both requests includes the plain cancel wait before force cancel; it cannot prove how fast force cancel alone would have ended the run. Compare complete records over a named window, retain records without completion as unmeasured, and keep error outcomes separate.
+
+#### Running and configuring recovery
+
+The timestamp fields need no environment flag. To run recovery manually from a checkout with dependencies installed, use an authenticated `gh` with Actions write access and organization self-hosted runner read access. `GH_TOKEN` can supply the token; keep its value outside commands and logs. This command can cancel the selected run and rerun its failed jobs under the policy above:
+
+```bash
+python -m scripts.ci_lost_runner \
+  --repo The-Cloud-Clockwork/agentihooks \
+  --workflow test.yml --run-id 123456 --grace-minutes 10
+```
+
+Replace the example run ID with the intended run. Repeat `--run-id` to select several runs; omit it to examine all unfinished runs of `--workflow` (default `test.yml`). The workflow file is read from the checkout to resolve job dependencies. `--grace-minutes` sets the minimum job age, default ten minutes, or zero with `--cluster`. Cluster mode also switches to the cluster evidence and thirty second confirmation described above. `--lock <path>` optionally holds a file lock for the invocation; a held lock prints `action: none` and exits successfully. Cancellation polling has no CLI override.
+
+| Observation | Interpretation and action |
+|---|---|
+| Force cancel time is `null`, completion is present | The run completed before force cancel was attempted. Read `action` and `reason` to distinguish a rerun, cancellation or a run that completed meanwhile. |
+| Completion is `null`, reason says the run did not end after force cancel | Both polling budgets expired without observing completion. Read the run's current status before treating it as freed. |
+| `action: error` with timestamps | Recovery began and an API operation failed. Attempted cancel times and any observed completion survive the error, including a failed rerun request. Read `reason`; a request timestamp does not prove GitHub accepted it. |
+| No timing fields | Older records and decisions made before recovery, including early read errors, have no recovery timings. A run rerun meanwhile is also left alone without these fields. Do not fill gaps with zero or `updated_at`. |
+
 ## Queue rebuild records
 
 GitHub rebuilds a merge group whenever an entry ahead of it changes: an enqueue or priority insertion ahead, a dequeue, a requeue, a removal ahead or a push to the base. The rebuilt group gets a new head commit, and the Tests run still building the old head is cancelled. On 16 October a priority insertion rebuilt three group chains and cancelled 195.550 runner minutes, and no record named the action that caused it ([issue 4282](https://github.com/the-cloud-clockwork/agentihooks/issues/4282)). Two records now keep that link:
