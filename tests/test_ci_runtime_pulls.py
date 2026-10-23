@@ -206,6 +206,46 @@ def test_runtime_pull_fails_with_the_timeout_status_after_three_stalled_attempts
     assert not tags
 
 
+def test_runtime_pull_falls_back_to_the_mirror_when_public_ecr_throttles(tmp_path):
+    image = "public.ecr.aws/docker/library/redis:7"
+    log = tmp_path / "docker.log"
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+if [[ "$1" == manifest ]]; then
+  if [[ "$3" == public.ecr.aws/* ]]; then
+    echo 'toomanyrequests: Rate exceeded' >&2
+    exit 1
+  fi
+  printf '%s\\n' '{"manifests":[{"digest":"sha256:runtime","platform":{"os":"linux","architecture":"amd64"}}]}'
+fi
+""",
+    )
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts/packaging/pull-runtime-image.sh"), image],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "PULL_LOG": str(log),
+            "WAITS": str(tmp_path / "waits.log"),
+            "PULL_ATTEMPT_SECONDS": "1",
+        },
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    calls = log.read_text().splitlines()
+    assert [call.split()[-1] for call in calls if call.startswith("manifest inspect ")] == [
+        image,
+        "mirror.gcr.io/library/redis:7",
+    ]
+    assert [call for call in calls if " pull " in f" {call} "][-1].endswith(" pull mirror.gcr.io/library/redis:7@sha256:runtime")
+    assert calls[-1].endswith(f" tag mirror.gcr.io/library/redis:7@sha256:runtime {image}")
+
+
 @pytest.mark.parametrize(
     "image,architecture,expected",
     [
