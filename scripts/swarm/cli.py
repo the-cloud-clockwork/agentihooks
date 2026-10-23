@@ -213,7 +213,6 @@ ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
 PARKED_NEXT = "stop now; the task waits on its branch"
 CONTROLLER_TICKS = "the controller tick spawns and reaps agents"
-EVENTS_ENGINE = "the event engine runs this swarm; the tick leaves it alone"
 READ_ONLY_PARKED_NEXT = "stop now; the task waits on its dependencies and the next engineer continues it"
 CLOSE_ASK = (
     "The operator pressed Close on the ledger page. Write one short paragraph in plain words on where the work "
@@ -286,8 +285,6 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
 
     if not ledger_link.local_mode(os.environ) and not scheduled:
         return [CONTROLLER_TICKS]
-    if store.redis.hget(store.key(slug, "config"), "engine") == "events":
-        return [EVENTS_ENGINE]
     tick_stop.check()
     ledger = ledger or LedgerClient()
     outbox.flush(InboxStore(store.redis))
