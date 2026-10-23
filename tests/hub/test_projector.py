@@ -1,10 +1,12 @@
 import threading
+import time
+from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
 
-from scripts.events import envelope, factory, memory
-from scripts.events.config import BusConfig
+from scripts.events import envelope, factory, memory, nats
+from scripts.events.config import BusConfig, QueuePolicy
 from scripts.hub import projector, registry
 from scripts.swarm_ledger.events.hub import Hub
 from scripts.swarm_ledger.events.publishing import Publishing
@@ -29,6 +31,10 @@ def make(repository=None, hub=None, name="pod", clock=lambda: 0.0):
     return projector.Projector(repository or Mock(), hub or Hub(), name, NATS, clock)
 
 
+def durables(bus) -> list[str]:
+    return sorted(info.name for info in bus._loop.run(bus._js.consumers_info(nats.EVENT_STREAM)))
+
+
 @pytest.mark.parametrize(
     ("host", "name"), [("Ledger_Pod.0", "ledger-pod-0-8765"), ("_pod.", "pod-8765"), ("..", "8765")]
 )
@@ -40,6 +46,30 @@ def test_identity_is_a_valid_reactor_name(host, name):
 def test_reactor_follows_every_swarm_subject_under_a_durable_per_process():
     reactor = make(name="pod-8765").reactor
     assert (reactor.name, reactor.subject, reactor.singleton) == ("projector-pod-8765", "swarm.>", False)
+
+
+def test_reactor_durable_is_reaped_after_ten_idle_minutes_with_the_reactor_deliveries():
+    assert make().reactor.policy == QueuePolicy(max_deliver=50, inactive_ms=600_000)
+
+
+def test_a_rollout_leaves_only_the_live_projector_durable_on_the_bus(monkeypatch, tmp_path):
+    from tests.events import nats_server
+
+    monkeypatch.setattr(projector, "POLICY", replace(projector.POLICY, inactive_ms=500))
+    with nats_server.running(tmp_path / "jetstream") as url:
+        config = BusConfig(backend="nats", url=url)
+        old = projector.Projector(Mock(), Hub(), "pod-a-8765", config)
+        old.pull()
+        old.close()
+        live = projector.Projector(Mock(), Hub(), "pod-b-8765", config)
+        try:
+            live.pull()
+            deadline = time.monotonic() + 15
+            while durables(live.bus) != ["hub-projector-pod-b-8765"] and time.monotonic() < deadline:
+                live.pull()
+            assert durables(live.bus) == ["hub-projector-pod-b-8765"]
+        finally:
+            live.close()
 
 
 def test_a_ledger_event_refreshes_only_a_watched_ledger():
@@ -140,7 +170,7 @@ def test_pull_opens_its_durable_once_and_naks_a_failed_refresh_with_the_reactor_
     project.pull()
     project.pull()
     opening.assert_called_once_with(NATS)
-    bus.events.consumer.assert_called_once_with("hub-projector-pod", "swarm.>", registry.REACTOR_POLICY)
+    bus.events.consumer.assert_called_once_with("hub-projector-pod", "swarm.>", projector.POLICY)
     assert failed.nak.call_args_list == [((registry.RETRY_MS[0],),)] * 2
     bus.close.assert_not_called()
 

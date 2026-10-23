@@ -45,6 +45,10 @@ def _consumer_config(bus, stream: str, durable: str):
     return bus._loop.run(bus._js.consumer_info(stream, durable)).config
 
 
+def _durables(bus) -> list[str]:
+    return sorted(info.name for info in bus._loop.run(bus._js.consumers_info(nats.EVENT_STREAM)))
+
+
 def test_the_loop_runs_every_coroutine_on_one_private_thread():
     loop = nats._Loop()
 
@@ -122,6 +126,17 @@ def test_a_consumer_carries_the_queue_policy(bus):
     work = _consumer_config(bus, nats.queue_stream("work"), "work")
     assert (log.max_deliver, log.ack_wait, log.backoff) == (-1, 1.0, None)
     assert (work.max_deliver, work.backoff) == (-1, [0.2, 0.4])
+
+
+def test_a_durable_without_an_inactive_threshold_stays_and_one_with_it_is_reaped_once_idle(bus):
+    bus.events.consumer("kept", "swarm.>", LOG_POLICY)
+    bus.events.consumer("idle", "swarm.>", QueuePolicy(max_deliver=3, ack_wait_ms=1_000, inactive_ms=500))
+    assert _consumer_config(bus, nats.EVENT_STREAM, "kept").inactive_threshold is None
+    assert _consumer_config(bus, nats.EVENT_STREAM, "idle").inactive_threshold == 0.5
+    deadline = time.monotonic() + 15
+    while "idle" in _durables(bus) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert _durables(bus) == ["kept"]
 
 
 def test_a_durable_consumer_refuses_another_filter(bus):
