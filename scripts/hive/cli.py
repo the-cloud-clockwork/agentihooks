@@ -155,8 +155,8 @@ def _scope(args: argparse.Namespace) -> str:
     path = member_swarms.signer_path(os.environ)
     if bao is None or path is None:
         raise auth.HiveError(
-            f"{openbao_kv.URL_ENV}, {openbao_kv.TOKEN_ENV} and {nats_grant.SIGNER_ENV} must all be set "
-            "to list member swarms"
+            f"{openbao_kv.URL_ENV}, {openbao_kv.TOKEN_ENV} and {nats_grant.SIGNER_ENV} naming an OpenBao record "
+            f"under {nats_grant.HUB_PATH} must all be set to list member swarms"
         )
     return member_swarms.backfill(redis_client(), bao, path, args.swarm)
 

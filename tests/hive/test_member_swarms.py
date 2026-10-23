@@ -42,10 +42,8 @@ def test_the_signer_path_is_the_hub_openbao_record_or_nothing():
 
 
 @pytest.mark.parametrize("path", ["file:/run/signer", "k8s/other"])
-def test_member_swarms_are_written_only_to_a_hub_openbao_record(path):
-    with pytest.raises(auth.HiveError) as error:
-        member_swarms.signer_path({nats_grant.SIGNER_ENV: path})
-    assert str(error.value) == "member swarms are written only to an OpenBao signer record under agentihooks/hub/"
+def test_a_signer_outside_the_hub_openbao_path_has_no_member_swarms_record(path):
+    assert member_swarms.signer_path({nats_grant.SIGNER_ENV: path}) is None
 
 
 def test_named_swarms_win_and_no_name_means_every_swarm(admin):
@@ -118,9 +116,29 @@ def test_backfill_lists_every_joined_member_from_the_hive_list(admin):
     outcome = member_swarms.backfill(admin, _bao(fake), SIGNER, ["rig"])
     assert outcome == f"OpenBao secret/{SIGNER}: wrote member_swarms for {second}"
     assert fake.records[SIGNER]["member_swarms"] == {first: ["rig"], second: ["rig"]}
+    writes = list(fake.written)
     assert member_swarms.backfill(admin, _bao(fake), SIGNER, ["rig"]) == (
         f"OpenBao secret/{SIGNER}: wrote member_swarms for no member"
     )
+    assert fake.written == writes
+
+
+def test_backfill_with_no_member_still_turns_scoping_on():
+    import fakeredis
+
+    fake = Bao({SIGNER: {"account_seed": "kept"}})
+    redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    member_swarms.backfill(redis, _bao(fake), SIGNER, ["rig"])
+    assert fake.records[SIGNER] == {"account_seed": "kept", "member_swarms": {}}
+
+
+def test_listing_reports_an_openbao_failure_as_a_hive_error():
+    def sealed(request, timeout=None):
+        raise http_error(request.full_url, 503, b'{"errors": ["sealed"]}')
+
+    with pytest.raises(auth.HiveError) as error:
+        member_swarms.listing(openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, sealed), SIGNER)
+    assert str(error.value) == "OpenBao HTTP 503: sealed"
 
 
 def _scoped_line(fake):
@@ -159,7 +177,7 @@ def test_an_invite_whose_member_swarms_write_fails_revokes_the_new_member(admin)
         invite.invite(admin, _bao(fake), request, PUBLIC)
     assert str(error.value).startswith("member_swarms contains an invalid swarm name")
     assert auth_members(admin) == []
-    assert RECORD not in fake.records
+    assert fake.records[SIGNER] == {"member_swarms": {}}
 
 
 def auth_members(admin):
@@ -241,8 +259,8 @@ def test_hive_scope_refuses_without_a_signer_record(monkeypatch, capsys):
     monkeypatch.delenv(nats_grant.SIGNER_ENV, raising=False)
     assert cli.main(["scope"]) == 1
     assert capsys.readouterr().err == (
-        "hive scope refused: OPENBAO_URL, OPENBAO_TOKEN and AGENTIHOOKS_NATS_SIGNER must all be set "
-        "to list member swarms\n"
+        "hive scope refused: OPENBAO_URL, OPENBAO_TOKEN and AGENTIHOOKS_NATS_SIGNER naming an OpenBao record "
+        "under agentihooks/hub/ must all be set to list member swarms\n"
     )
 
 
@@ -259,3 +277,16 @@ def test_the_cli_invite_names_the_signer_record_and_its_swarms(monkeypatch, admi
     assert cli.main(["invite", "lab", "--url", URL]) == 0
     assert cli.main(["invite", "lab", "--url", URL, "--swarm", "named"]) == 0
     assert [(args[2].signer_path, args[2].swarms) for args in seen] == [(SIGNER, ("rig",)), (SIGNER, ("named",))]
+
+
+def test_the_cli_invite_with_a_file_signer_stays_unscoped(monkeypatch):
+    seen = []
+    monkeypatch.setenv(openbao_kv.URL_ENV, BAO_URL)
+    monkeypatch.setenv(openbao_kv.TOKEN_ENV, BAO_TOKEN)
+    monkeypatch.setenv(nats_grant.SIGNER_ENV, "file:/run/signer")
+    monkeypatch.setattr(cli, "redis_client", lambda: "redis")
+    monkeypatch.setattr(cli.ledger_ca, "served", lambda: None)
+    monkeypatch.setattr("scripts.swarm.store.redis_url", lambda environ: PUBLIC)
+    monkeypatch.setattr(invite, "invite", lambda *args: seen.append(args) or "invited")
+    assert cli.main(["invite", "lab", "--url", URL]) == 0
+    assert [(args[2].signer_path, args[2].swarms) for args in seen] == [(None, ())]

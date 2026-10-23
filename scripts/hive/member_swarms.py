@@ -13,10 +13,8 @@ FIELD = "member_swarms"
 
 
 def signer_path(environ: Mapping[str, str]) -> str | None:
-    path = environ.get(nats_grant.SIGNER_ENV)
-    if path and not path.startswith(nats_grant.HUB_PATH):
-        raise auth.HiveError(f"member swarms are written only to an OpenBao signer record under {nats_grant.HUB_PATH}")
-    return path or None
+    path = environ.get(nats_grant.SIGNER_ENV) or ""
+    return path if path.startswith(nats_grant.HUB_PATH) else None
 
 
 def swarms(redis: "Redis", named: Iterable[str]) -> tuple[str, ...]:
@@ -26,6 +24,13 @@ def swarms(redis: "Redis", named: Iterable[str]) -> tuple[str, ...]:
     if not chosen:
         raise auth.HiveError("no swarm to list: pass --swarm or create a swarm first")
     return chosen
+
+
+def listing(bao: openbao_kv.OpenBao, path: str) -> bool:
+    try:
+        return FIELD in openbao_kv.read(bao, path)[0]
+    except openbao_kv.OpenBaoError as exc:
+        raise auth.HiveError(str(exc)) from None
 
 
 def assign(
@@ -39,6 +44,8 @@ def assign(
             return {}
         listed = dict(record.get(FIELD) or {})
         added.extend(member for member in members if member not in listed)
+        if not added and FIELD in record:
+            return {}
         merged = {**listed, **{member: list(chosen) for member in added}}
         nats_grant.member_swarms(merged)
         return {FIELD: merged}
