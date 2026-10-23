@@ -246,10 +246,12 @@ def test_snapshot_preserves_swarm_scope_and_admission_arguments(monkeypatch):
 
 
 def test_configured_readiness_publishes_through_its_bus_and_clock(monkeypatch):
+    from scripts.hub import readiness as hub_readiness
+
     _, store, ledger = source()
     provider = readiness.Source(store, ledger)
     monkeypatch.setattr(readiness, "Source", lambda: provider)
-    monkeypatch.setattr("scripts.hub.readiness.BusConfig.from_environ", lambda: BusConfig(backend="nats"))
+    monkeypatch.setattr(hub_readiness.BusConfig, "from_environ", lambda: BusConfig(backend="nats"))
     monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
     monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
     with backend("memory", None) as bus:
