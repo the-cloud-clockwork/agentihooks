@@ -53,23 +53,24 @@ def child_rows(connection: Connection, slug: str, parent: str) -> list:
     return sorted(rows, key=lambda row: row[2])
 
 
-def build(connection: Connection, slug: str, path: str, kind: str, old: object, dirty: set) -> object:
-    """The container at path as stored now, reusing each child of its old value that no change reached."""
+def build(connection: Connection, slug: str, path: str, old: object, dirty: set) -> list:
+    """The children of the container at path as stored now, reusing each child of its old value that no change reached."""
     known = {encode(parts): child for child, parts, *_ in children(old, json.loads(path), None)}
     items = []
     for child, key, _, child_kind, value in child_rows(connection, slug, path):
         if child_kind == "value":
             item = json.loads(value)
         elif child in dirty:
-            item = build(connection, slug, child, child_kind, known.get(child), dirty)
+            pairs = build(connection, slug, child, known.get(child), dirty)
+            item = [item for _, item in pairs] if child_kind == "array" else dict(pairs)
         else:
             item = known[child]
         items.append((json.loads(key), item))
-    return [item for _, item in items] if kind == "array" else dict(items)
+    return items
 
 
 def refreshed(connection: Connection, slug: str, state: dict, paths: set) -> dict | None:
     try:
-        return build(connection, slug, ROOT, "object", state, touched(paths))
+        return dict(build(connection, slug, ROOT, state, touched(paths)))
     except KeyError:
         return None
