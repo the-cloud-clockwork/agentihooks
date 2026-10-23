@@ -35,6 +35,7 @@ def test_one_invite_joins_a_machine_and_saves_the_refreshed_nats_grant(invitatio
     calls = []
 
     def refresh(url, path, body, action, environ):
+        assert environ is os.environ
         calls.append((url, path, body, action))
         return {
             "id": "fixture-member",
@@ -58,6 +59,8 @@ def test_one_invite_joins_a_machine_and_saves_the_refreshed_nats_grant(invitatio
     assert creds.stat().st_mode & 0o777 == 0o600
     assert (home / auth.ENV_FILE).stat().st_mode & 0o777 == 0o600
     output = capsys.readouterr()
+    assert output.out == f"joined hive member fixture-member; it is in {home / auth.ENV_FILE}\n"
+    assert output.err == ""
     assert "fixture-invite" not in output.out + output.err
     assert "fixture nats credentials" not in output.out + output.err
 
@@ -101,14 +104,15 @@ def test_a_grant_for_another_member_does_not_replace_membership(invitation, monk
     saved.write_text("previous membership\n")
     monkeypatch.setattr(cli, "_post", lambda *args: {"id": "another-member"})
     assert cli.main(["join", str(invite)]) == 1
-    assert "different invited member" in capsys.readouterr().err
+    assert capsys.readouterr().err == "hive join refused: the hive answered for a different invited member\n"
     assert saved.read_text() == "previous membership\n"
 
 
-def test_multiline_invite_settings_are_refused_before_refresh(invitation, monkeypatch, capsys):
+@pytest.mark.parametrize("separator", [r"\n", r"\r"])
+def test_multiline_invite_settings_are_refused_before_refresh(invitation, monkeypatch, capsys, separator):
     invite, home = invitation
     with invite.open("a") as stream:
-        stream.write('AGENTIHOOKS_BUS_URL="nats://bus.example.test\\nINJECTED=value"\n')
+        stream.write(f'AGENTIHOOKS_BUS_URL="nats://bus.example.test{separator}INJECTED=value"\n')
     monkeypatch.setattr(cli, "_post", lambda *args: pytest.fail("invalid invite reached hub"))
     assert cli.main(["join", str(invite)]) == 1
     assert capsys.readouterr().err == "hive join refused: invite settings must each fit on one line\n"
@@ -161,6 +165,7 @@ def test_join_help_names_the_single_invite_file(capsys):
     assert exited.value.code == 0
     assert "private member invite file shared with Kubernetes workers" in capsys.readouterr().out
     command = next(action for action in cli._parser()._actions if action.dest == "command")
+    assert command.choices["join"]._actions[1].help == "private member invite file shared with Kubernetes workers"
     assert next(choice.help for choice in command._choices_actions if choice.dest == "join") == (
         "Join this host with one invite file from hive invite"
     )

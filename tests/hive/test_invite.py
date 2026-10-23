@@ -151,6 +151,20 @@ def test_one_invite_carries_the_member_event_bus_address(admin):
     assert env["AGENTIHOOKS_SWARM_URL"] == SWARM
 
 
+def test_like_copies_the_member_event_bus_address_and_an_explicit_address_wins(admin):
+    sample = _sample()
+    sample["credential"] += "AGENTIHOOKS_BUS=nats\nAGENTIHOOKS_BUS_URL=nats://copied.example.test:4222\n"
+    fake = Bao({LIKE: sample})
+    invite.invite(admin, _bao(fake), invite.Request("lab", RECORD, like=LIKE), LOCAL)
+    assert _env(fake.records[RECORD]["credential"])["AGENTIHOOKS_BUS_URL"] == "nats://copied.example.test:4222"
+    invite.invite(
+        admin, _bao(fake), invite.Request("lab", RECORD, like=LIKE, bus_url="nats://override.example.test:4222"), LOCAL
+    )
+    env = _env(fake.records[RECORD]["credential"])
+    assert env["AGENTIHOOKS_BUS"] == "nats"
+    assert env["AGENTIHOOKS_BUS_URL"] == "nats://override.example.test:4222"
+
+
 def test_a_like_record_without_a_credential_still_lends_its_ledger_address(admin):
     fake = Bao({LIKE: {"swarm_url": SWARM, "ca_pem": CA}})
 
