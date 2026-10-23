@@ -54,7 +54,7 @@ def _publish(tmp_path, version, fail=""):
         "    stream.write(json.dumps([tool, *args]) + '\\n')\n"
         "if tool == 'helm' and args[:2] == ['registry', 'login']:\n"
         "    assert sys.stdin.read() == os.environ['GHCR_TOKEN']\n"
-        "if os.environ['FAIL_COMMAND'] == (tool if tool == 'git' else args[0]):\n"
+        "if os.environ['FAIL_COMMAND'] == (tool if tool in ('git', 'sha256sum') else args[0]):\n"
         "    sys.exit(23)\n"
         "if tool == 'helm' and args[0] == 'package':\n"
         "    destination = Path(args[args.index('--destination') + 1])\n"
@@ -66,6 +66,7 @@ def _publish(tmp_path, version, fail=""):
     )
     stub.chmod(0o755)
     (tmp_path / "git").symlink_to(stub)
+    (tmp_path / "sha256sum").symlink_to(stub)
     calls = tmp_path / "calls"
     env = {
         **os.environ,
@@ -92,7 +93,7 @@ def test_the_published_chart_uses_the_release_version_and_a_separate_oci_namespa
     assert calls == [
         ["git", "merge-base", "--is-ancestor", "promoted-release-commit", "origin/main"],
         ["helm", "registry", "login", "ghcr.io", "--username", "release-bot", "--password-stdin"],
-        ["helm", "dependency", "build", "deploy/helm/agentihooks-swarm"],
+        ["sha256sum", "-c", "deploy/helm/agentihooks-swarm-deps.sha256"],
         [
             "helm",
             "package",
@@ -114,7 +115,7 @@ def test_the_published_chart_uses_the_release_version_and_a_separate_oci_namespa
     assert "fixture" not in result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("fail,count", [("git", 1), ("registry", 2), ("dependency", 3), ("package", 4), ("push", 5)])
+@pytest.mark.parametrize("fail,count", [("git", 1), ("registry", 2), ("sha256sum", 3), ("package", 4), ("push", 5)])
 def test_off_main_releases_and_registry_or_packaging_failures_stop_publication(tmp_path, fail, count):
     result, calls = _publish(tmp_path, "2.10.1", fail)
     assert result.returncode == 23
