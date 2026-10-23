@@ -417,6 +417,31 @@ def test_tick_still_reopens_on_an_ordinary_spawn_failure(swarm):
     assert ledger.rows["t1"]["state"] == "open"
 
 
+class PlacingRuntime(FakeRuntime):
+    router = SimpleNamespace(placement=object())
+
+    def placement_refusal(self, lane, task):
+        profile_choice.pick("sw", lane, {}, task)
+        return ""
+
+
+def test_an_unresolved_task_is_skipped_and_the_ready_task_behind_it_launches(swarm, monkeypatch):
+    def classify(slug, task, environ):
+        if task["id"] == "t1":
+            raise profile_choice.ProfileUnresolved("t1 profile unresolved: set it")
+        return profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
+
+    monkeypatch.setattr(profile_choice, "classify", classify)
+    ledger = _commenting(tasks(("t1", "eng"), ("t2", "eng")))
+    rt = PlacingRuntime()
+    actions = tick.tick("sw", swarm, ledger, rt, now_ms=1_000)
+    assert [task_id for _, _, task_id in rt.spawned] == ["t2"]
+    assert ledger.rows["t1"]["state"] == "blocked" and swarm.claimant("sw", "t1") is None
+    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
+    assert comments == [("sw", "t1", "t1 profile unresolved: set it", "swarm")]
+    assert "blocked t1: t1 profile unresolved: set it" in actions
+
+
 def test_a_fresh_spawn_keeps_its_handoff_without_the_original_run_options():
     complete = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high"}
     lost = {"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": {"profile": "engineer"}}}
