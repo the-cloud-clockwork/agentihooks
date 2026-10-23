@@ -177,7 +177,8 @@ def hosted_controls(live, hive, monkeypatch):
 
     store = RedisStore(hive)
     store.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=1, state="running"))
-    store.put_agent(SLUG, AgentRecord(MASTER, "master", "master", seat=f"master@{SLUG}", hive="member-1"))
+    hive.hset(store.names.key("name", MASTER), mapping={"swarm": SLUG, "code": "323133"})
+    store.start_execution(SLUG, AgentRecord(MASTER, "master", "master", seat=f"master@{SLUG}", hive="member-1"))
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "compose")
     monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", MASTER)
