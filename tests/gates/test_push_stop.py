@@ -892,38 +892,38 @@ def test_a_push_slower_than_the_budget_is_cut_off_inside_the_stop_condition(monk
     assert rig.ledger.comments == []
 
 
-@pytest.mark.parametrize("overhead", [0, 1.0])
+@pytest.mark.parametrize(("spent", "late"), [(1.0, False), (2.5, True)])
 @pytest.mark.wall_clock
-def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch, rig, overhead):
+def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch, rig, spent, late):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     second_tree_with_work(rig)
     rig.commit()
     hook = rig.origin / "hooks" / "pre-receive"
-    hook.write_text(
-        f'#!/bin/sh\nread old new ref\nif [ "$ref" = "refs/heads/{BRANCH}-2" ]; then sleep 1.2; else sleep 8; fi\n'
-    )
+    hook.write_text(f'#!/bin/sh\nread old new ref\nif [ "$ref" != "refs/heads/{BRANCH}-2" ]; then sleep 8; fi\n')
     hook.chmod(0o755)
-    timeout = RESERVE_S + 2
-    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
-    real_push = push_stop.push
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + 2)
+    clock, real_push, pushes = [0.0], push_stop.push, []
 
-    def first_push_leaves_one_second(tree, branch, seconds):
-        if branch != f"{BRANCH}-2":
-            return real_push(tree, branch, seconds)
-        time.sleep(overhead)
+    def charged_push(tree, branch, seconds):
+        began = time.monotonic()
         pushed = real_push(tree, branch, seconds)
-        rig.gate.started = time.monotonic() - (timeout - RESERVE_S - 1.0)
+        pushes.append((seconds, pushed, time.monotonic() - began))
+        clock[0] += spent
         return pushed
 
-    monkeypatch.setattr(push_stop, "push", first_push_leaves_one_second)
-    decision = rig.stop()
-    took = time.monotonic() - rig.gate.started
+    monkeypatch.setattr(rig.gate, "_clock", lambda: clock[0])
+    monkeypatch.setattr(push_stop, "push", charged_push)
+    decision = rig.stop(started=0.0)
     assert not decision.allowed
-    assert took < timeout
     assert rig.remote_head() == ""
     assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
     assert len(rig.ledger.comments) == 1
-    assert PUSH_LATE.format(path=rig.tree) not in decision.reason
+    assert (PUSH_LATE.format(path=rig.tree) in decision.reason) is late
+    if not late:
+        seconds, pushed, took = pushes[1]
+        assert (seconds, pushed) == (pytest.approx(2 - spent + RESERVE_S - FLOOR_S), False)
+        assert took < 8
+    assert len(pushes) == (1 if late else 2)
 
 
 @pytest.mark.parametrize(("seconds", "expected"), [(75, 60), (2, 2)])
