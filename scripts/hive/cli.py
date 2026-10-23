@@ -22,6 +22,8 @@ LOCK_FILE = "hive.lock"
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.hive.nats_grant import Signer
+
 
 def redis_client() -> "Redis":
     from scripts.swarm.store import redis_client as connect
@@ -163,14 +165,18 @@ def _remove(args: argparse.Namespace) -> list[str]:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
     store = RedisStore(redis_client())
     label = args.label or remove.label(store.redis, args.id)
-    plan = remove.Plan(args.id, label, args.path or invite.default_path(label), args.antoncore, args.wait)
+    plan = remove.Plan(args.id, label, args.path or invite.default_path(label), args.antoncore, args.wait, _signer())
     return remove.remove(store, bao, plan, remove.Host())
 
 
 def _retire(args: argparse.Namespace) -> str:
     if args.command == "revoke":
-        auth.revoke(redis_client(), args.id)
-        return f"revoked {args.id}"
+        from scripts.hive import nats_grant
+
+        redis, signer = redis_client(), _signer()
+        bus = [nats_grant.revoke(redis, signer, args.id)] if signer is not None else []
+        auth.revoke(redis, args.id)
+        return "\n".join([*bus, f"revoked {args.id}"])
     if args.command == "drain":
         return _drain(args.wait)
     return "\n".join(_remove(args))
@@ -184,6 +190,12 @@ def _drain(wait_s: int) -> str:
     return remove.settle(RedisStore(redis_client()), hive_id(), wait_s, remove.Host())
 
 
+def _signer() -> "Signer | None":
+    from scripts.hive import nats_grant
+
+    return nats_grant.from_environ(os.environ)
+
+
 def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
@@ -193,7 +205,13 @@ def _serve(args: argparse.Namespace) -> int:
     redis = redis_client()
     auth.regrant(redis)
     httpd = server.make_server(
-        redis, args.redis_url or redis_url(os.environ), args.host, args.port, tls, ledger_ca=ledger_ca.served()
+        redis,
+        args.redis_url or redis_url(os.environ),
+        args.host,
+        args.port,
+        tls,
+        ledger_ca=ledger_ca.served(),
+        signer=_signer(),
     )
     scheme = "https" if tls else "http"
     print(f"hive endpoint on {scheme}://{args.host}:{httpd.server_address[1]}{server.REFRESH_PATH}", flush=True)

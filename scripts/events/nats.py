@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import re
 import threading
@@ -10,6 +11,7 @@ from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
 from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
 
+from . import nkey
 from .bus import StateConflict, StateEntry
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
@@ -34,6 +36,16 @@ def queue_stream(name: str) -> str:
 
 def _seconds(ms: int) -> float:
     return ms / 1000
+
+
+def auth_options(credentials: str | None) -> dict:
+    if credentials is None:
+        return {}
+    jwt, user = nkey.parse_creds(credentials)
+    return {
+        "user_jwt_cb": lambda: jwt.encode(),
+        "signature_cb": lambda nonce: base64.b64encode(user.sign(nonce.encode())),
+    }
 
 
 class _Loop:
@@ -266,7 +278,9 @@ class NatsBus:
         self._queues: dict[str, NatsWorkQueue] = {}
         self._buckets: dict[str, NatsStateStore] = {}
         try:
-            self._nc = self._loop.run(nats_client.connect(url, allow_reconnect=False))
+            self._nc = self._loop.run(
+                nats_client.connect(url, allow_reconnect=False, **auth_options(config.credentials))
+            )
             self._js = self._nc.jetstream()
             self._loop.run(
                 self._js.add_stream(

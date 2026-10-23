@@ -1,11 +1,15 @@
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .envelope import _count
 
 BACKEND_ENV = "AGENTIHOOKS_BUS"
 URL_ENV = "AGENTIHOOKS_BUS_URL"
+CREDENTIALS_ENV = "AGENTIHOOKS_BUS_CREDENTIALS"
+OPENBAO_SCHEME = "openbao:"
+CREDENTIALS_FIELD = "credentials"
 DEFAULT_BACKEND = "memory"
 
 
@@ -36,6 +40,7 @@ class BusConfig:
     url: str | None = None
     dedupe_window_ms: int = 120_000
     queue: QueuePolicy = field(default_factory=QueuePolicy)
+    credentials: str | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if not isinstance(self.backend, str) or not self.backend:
@@ -49,4 +54,27 @@ class BusConfig:
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str] = os.environ) -> "BusConfig":
-        return cls(backend=environ.get(BACKEND_ENV) or DEFAULT_BACKEND, url=environ.get(URL_ENV) or None)
+        return cls(
+            backend=environ.get(BACKEND_ENV) or DEFAULT_BACKEND,
+            url=environ.get(URL_ENV) or None,
+            credentials=credentials_from(environ),
+        )
+
+
+def credentials_from(environ: Mapping[str, str]) -> str | None:
+    reference = environ.get(CREDENTIALS_ENV)
+    if not reference:
+        return None
+    if not reference.startswith(OPENBAO_SCHEME):
+        return Path(reference).read_text()
+    from scripts import openbao_kv
+
+    bao = openbao_kv.from_env(environ)
+    if bao is None:
+        raise ValueError(
+            f"{CREDENTIALS_ENV} names an OpenBao record, so {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must be set"
+        )
+    record, _ = openbao_kv.read(bao, reference.removeprefix(OPENBAO_SCHEME))
+    if not record.get(CREDENTIALS_FIELD):
+        raise ValueError(f"the OpenBao record {reference} holds no {CREDENTIALS_FIELD}")
+    return record[CREDENTIALS_FIELD]
