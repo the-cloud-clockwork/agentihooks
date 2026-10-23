@@ -7,6 +7,7 @@ from scripts.events.bus import Bus
 
 TTL_MS = 45_000
 BEAT_SECONDS = 15
+STOP_SECONDS = 15
 
 
 def now_ms() -> int:
@@ -52,7 +53,7 @@ class Heartbeat:
 
     def __exit__(self, *_args: object) -> None:
         self._stop.set()
-        self._worker.join(timeout=BEAT_SECONDS)
+        self._worker.join(timeout=STOP_SECONDS)
         if self._worker.is_alive():
             raise RuntimeError("hive heartbeat did not stop")
         self.check()

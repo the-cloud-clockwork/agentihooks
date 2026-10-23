@@ -929,9 +929,11 @@ def test_failed_renewal_during_request_loading_prevents_spawn_and_releases_claim
     failed = threading.Event()
     original = presence.beat
     failure = RuntimeError("presence lost")
+    workers = []
 
     def beat(bus, hive, at_ms):
         if loading.is_set():
+            workers.append(threading.current_thread())
             failed.set()
             raise failure
         return original(bus, hive, at_ms)
@@ -939,6 +941,8 @@ def test_failed_renewal_during_request_loading_prevents_spawn_and_releases_claim
     def request(event):
         loading.set()
         assert failed.wait(2)
+        workers[0].join(2)
+        assert not workers[0].is_alive()
         return rig.request
 
     loading = threading.Event()
