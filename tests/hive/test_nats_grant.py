@@ -100,7 +100,7 @@ def test_hive_serve_mints_a_member_credential_the_bus_opens_with(admin, signer):
     assert _opens(signer, grant["nats_credentials"])
 
 
-def _violations(signer: nats_grant.Signer, credentials: str, act) -> list[str]:
+def _violations(signer: nats_grant.Signer, credentials: str, act, refused: bool = False) -> list[str]:
     import asyncio
 
     import nats as nats_client
@@ -108,10 +108,11 @@ def _violations(signer: nats_grant.Signer, credentials: str, act) -> list[str]:
     from scripts.events.nats import auth_options
 
     async def run() -> list[str]:
-        seen = []
+        seen, violated = [], asyncio.Event()
 
         async def error_cb(exc):
             seen.append(str(exc))
+            violated.set()
 
         nc = await nats_client.connect(
             signer.url, allow_reconnect=False, error_cb=error_cb, **auth_options(credentials)
@@ -119,6 +120,9 @@ def _violations(signer: nats_grant.Signer, credentials: str, act) -> list[str]:
         try:
             await act(nc)
             await nc.flush()
+            if refused:
+                # nats-py writes the flush PING ahead of buffered commands, so the -ERR can follow its PONG.
+                await asyncio.wait_for(violated.wait(), 5)
         finally:
             await nc.close()
         return seen
@@ -130,7 +134,7 @@ def test_a_member_credential_cannot_publish_outside_the_swarm_prefix(signer):
     async def act(nc):
         await nc.publish("outside.events", b"x")
 
-    assert _violations(signer, nats_grant.mint(signer, "m1"), act) == [
+    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
         'nats: permissions violation for publish to "outside.events"'
     ]
 
@@ -139,7 +143,7 @@ def test_a_member_credential_cannot_subscribe_outside_the_swarm_prefix(signer):
     async def act(nc):
         await nc.subscribe("outside.>")
 
-    assert _violations(signer, nats_grant.mint(signer, "m1"), act) == [
+    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
         'nats: permissions violation for subscription to "outside.>"'
     ]
 
