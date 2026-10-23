@@ -752,7 +752,9 @@ def test_a_live_worker_on_a_blocked_task_still_collects_its_runtime(setup, task_
     routed.hive_launch = setup.launcher
     runtime = controller.FencedRuntime(store, slug, setup.held, routed, "compose")
 
-    actions = _collect_acks(slug, setup.config, store, Mock(), runtime, {"tasks": [task]}, 2_000)
+    actions = _collect_acks(
+        slug, replace(setup.config, autonomy="manual"), store, Mock(), runtime, {"tasks": [task]}, 2_000
+    )
 
     assert actions == [f"spawned {worker.name} for task"]
     live = store.execution_registry.get(slug, order.execution_id)
