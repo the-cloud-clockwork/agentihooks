@@ -60,14 +60,16 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
    generation or lane, or held.
 4. **Claim and launch.** The spoke records its claim in the hive buckets and launches the agent. It publishes
    `execution.started` with the claim, the task generation, the hive and the pane, then acknowledges the offer.
-5. **Redelivery.**
+5. **Lease.** The claim has no timer of its own. It holds for as long as the hive's presence keeps beating. When the
+   presence expires, the hub treats the hive as lost and ends the claim.
+6. **Redelivery.**
    - An offer that is not acknowledged within 30 seconds comes back, up to 5 deliveries.
    - A claim conflict, or another live hive holding the claim, sends the offer back for later.
    - After the last delivery the spoke writes a `dead_lettered` event to `AGENTIHOOKS_DEAD` and reopens the task.
-6. **Exit.** When the agent ends, `execution.exited` reaches the hub's `lifecycle` reactor. Only for the claim and
+7. **Exit.** When the agent ends, `execution.exited` reaches the hub's `lifecycle` reactor. Only for the claim and
    generation it started, it releases the slot and the claim, then settles the task: `done`, or back to `open` with no
    claimant.
-7. **Reopen.** A reopen clears the claimant, which raises the claim generation. The next offer and claim therefore
+8. **Reopen.** A reopen clears the claimant, which raises the claim generation. The next offer and claim therefore
    carry new ids, and nothing from the old generation can block them.
 
 When a hive disappears its agents end as if they had exited; see
@@ -82,8 +84,7 @@ engines. Master agents are reaped by the tick under either engine.
 
 The hub offers eng, ci and plan tasks, and the spoke code is the same for every lane. With
 `AGENTIHOOKS_DEPLOYMENT=distributed`, a workstation runs the master lane spoke with `agentihooks swarm spoke`. That
-spoke launches only master offers that carry an execution identity. The Compose task smoke and recovery drill also run
-an eng lane spoke, against a stand-in agent.
+spoke launches only master offers that carry an execution identity.
 
 ## Agent names
 
