@@ -1429,7 +1429,6 @@ The `see` path at the end of the reason is the absolute path on the runner, show
 
 The behavior is pinned by `tests/test_ci_mutation_runner.py`, which feeds a planted pytest summary through `run_gate` and checks the reason, the printed red message and `report.json`, and by `tests/test_ci_mutation_main.py`, which checks the job summary block and that a run without failing tests leaves the summary untouched.
 
-{% raw %}
 ## Planner tests that check behaviour
 
 The mutation planner tests check what a plan does, never how the planner spells a command or which arguments it passes to its estimator. A harmless planner change, such as a reworded command, a reordered argument or an added step setting, leaves them green; a change that selects the wrong tests, overruns a budget or publishes a different matrix turns them red.
@@ -1447,12 +1446,12 @@ Two pull requests delivered this:
 | [4811](https://github.com/the-cloud-clockwork/agentihooks/pull/4811), closing [4810](https://github.com/the-cloud-clockwork/agentihooks/issues/4810) | Planner tests check selection, budgets, Git revisions and public CLI results; the scope test finds the step by `id` |
 | [5455](https://github.com/the-cloud-clockwork/agentihooks/pull/5455), closing [5452](https://github.com/the-cloud-clockwork/agentihooks/issues/5452) | Preflight step environment checks assert only their own keys, so the added `MUTATION_SHARD_CPU_QUOTA` and any later setting pass |
 
-Both changed tests only; planner code and its outputs are unchanged.
+Both pull requests changed tests only; planner code and its outputs are unchanged.
 
 ### Writing a planner test
 
 - Build the project in `tmp_path`, commit it with Git and plan against that branch. Assert the selection, the shard count, the costs or the published file.
-- For a workflow step, find it by its `name` or `id`, then assert each key it needs: `step["env"]["GH_TOKEN"] == "${{ github.token }}"`. Never compare the whole `env` mapping with `==`.
+- For a workflow step, find it by its `name` or `id`, then assert each key it needs: {% raw %}`step["env"]["GH_TOKEN"] == "${{ github.token }}"`{% endraw %}. Never compare the whole `env` mapping with `==`.
 - Assert a command by running what it parses to, or compare it with the same step in another job, rather than pinning its literal text.
 
 A pull request that adds a setting to a planning step needs no test edit. A pull request that changes which tests or mutants a plan selects must update the expected selection, because that is a real behaviour change.
@@ -1514,5 +1513,3 @@ Each printed line is a run, a job and its match count. Then classify each matchi
 | A plan test fails after a planner refactor that kept the plan the same | The test pins an internal call or command text | Rewrite it to build a Git project and assert the plan's result |
 | A plan test fails because the selected tests changed | The planner's selection changed | Real behaviour change: confirm it is intended, then update the expected selection |
 | The scan prints a run on a branch that has not merged dev since 4811 | The branch head predates the change | Count it under heads without 4811; it is not a regression |
-
-{% endraw %}
