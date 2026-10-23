@@ -14,6 +14,7 @@ TASK_FIELDS = frozenset(
 )
 PHASE_FIELDS = frozenset(("id", "title", "description", "done"))
 
+# Fields every ledger write path builds; a document imported as it is keeps whatever fields it had.
 LEDGER = {
     "task.changed": EventType("task", TASK_FIELDS),
     "task.removed": EventType("task", frozenset()),
