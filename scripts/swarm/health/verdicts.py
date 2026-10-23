@@ -8,7 +8,7 @@ VERDICTS = ("false-positive", "early-real", "established", "insufficient-evidenc
 
 
 class VerdictStore:
-    HISTORY = 24
+    HISTORY_MS = 7 * 86400000
 
     def __init__(self, redis, key):
         self.redis, self.key = redis, key
@@ -71,7 +71,7 @@ class VerdictStore:
         prior = record.get("verdict")
         if prior:
             earlier = [*prior.get("earlier", []), {"at": prior["at"], "measure": prior["measure"]}]
-            verdict["earlier"] = earlier[-self.HISTORY :]
+            verdict["earlier"] = [entry for entry in earlier if entry["at"] >= now_ms - self.HISTORY_MS]
         record.update(verdict=verdict, returned=False)
         self.redis.hset(self.key, finding_id, json.dumps(record))
         return verdict
