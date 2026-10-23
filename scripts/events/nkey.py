@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
 import time
@@ -69,7 +70,7 @@ def from_raw(prefix: int, raw: bytes) -> KeyPair:
 
 
 def create(prefix: int) -> KeyPair:
-    return from_raw(prefix, secrets.token_bytes(32))
+    return from_raw(prefix, os.urandom(32))
 
 
 def from_seed(seed: str) -> KeyPair:
@@ -83,15 +84,18 @@ def derive(parent: KeyPair, prefix: int, label: str) -> KeyPair:
     return from_raw(prefix, hmac.new(_decode(parent.seed)[2:], label.encode(), hashlib.sha256).digest())
 
 
+def b64(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
 def _segment(value: dict) -> str:
-    return base64.urlsafe_b64encode(json.dumps(value, separators=(",", ":")).encode()).decode().rstrip("=")
+    return b64(json.dumps(value, separators=(",", ":")).encode())
 
 
 def encode_jwt(signer: KeyPair, subject: str, name: str, nats: dict) -> str:
     claims = {"jti": secrets.token_hex(16), "iat": int(time.time()), "iss": signer.public, "name": name}
     signing = f"{_segment(HEADER)}.{_segment({**claims, 'sub': subject, 'nats': nats})}"
-    signature = base64.urlsafe_b64encode(signer.sign(signing.encode())).decode().rstrip("=")
-    return f"{signing}.{signature}"
+    return f"{signing}.{b64(signer.sign(signing.encode()))}"
 
 
 def creds(jwt: str, seed: str) -> str:

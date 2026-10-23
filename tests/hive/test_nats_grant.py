@@ -156,7 +156,8 @@ def test_a_role_credential_named_in_openbao_opens_the_bus(signer, monkeypatch):
 def test_the_signer_comes_from_the_openbao_record_named_by_reference(monkeypatch):
     operator, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)
     record = {"operator_seed": operator.seed, "account_seed": account.seed, "system_credentials": "c", "url": "u"}
-    monkeypatch.setattr(openbao_kv, "read", lambda bao, path: (record, 1) if path == "k8s/nats-signer" else None)
+    expected = (openbao_kv.OpenBao("https://bao.example", "t"), "k8s/nats-signer")
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, path: (record, 1) if (bao, path) == expected else None)
     environ = {nats_grant.SIGNER_ENV: "k8s/nats-signer", "OPENBAO_URL": "https://bao.example", "OPENBAO_TOKEN": "t"}
     assert nats_grant.from_environ(environ) == nats_grant.Signer(operator, account, "c", "u")
     assert nats_grant.from_environ({}) is None
@@ -194,7 +195,7 @@ def wired(admin, monkeypatch):
     monkeypatch.setattr(cli, "redis_client", lambda: admin)
     monkeypatch.setattr(nats_grant, "from_environ", lambda environ: signed)
     monkeypatch.setattr(
-        nats_grant, "revoke", lambda redis, signer, member: (revoked.append((signer, member)), "bus")[1]
+        nats_grant, "revoke", lambda redis, signer, member: (revoked.append((redis, signer, member)), "bus")[1]
     )
     return cli, signed, revoked
 
@@ -204,7 +205,7 @@ def test_hive_revoke_revokes_the_bus_credential_then_the_member(admin, wired, ca
     member = auth.mint(admin, "h1", PUBLIC)
     assert cli.main(["revoke", member["id"]]) == 0
     assert capsys.readouterr().out == f"bus\nrevoked {member['id']}\n"
-    assert revoked == [(signed, member["id"])]
+    assert revoked == [(admin, signed, member["id"])]
     assert not admin.exists(remove.member_key(member["id"]))
 
 
@@ -225,3 +226,82 @@ def test_hive_remove_and_serve_carry_the_signer(admin, wired, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://own:6379/0")
     assert cli.main(["serve"]) == 0
     assert served == [signed]
+
+
+def test_remove_revokes_with_the_plan_signer(admin, monkeypatch):
+    signed, calls = object(), []
+    for step in ("drain", "forget", "unbank", "unmanifest"):
+        monkeypatch.setattr(remove, step, lambda *args: [])
+    monkeypatch.setattr(remove.machine, "forget", lambda *args: [])
+    monkeypatch.setattr(remove, "revoke", lambda *args: (calls.append(args), ["revoked"])[1])
+    store = SimpleNamespace(redis=admin)
+    plan = remove.Plan("m1", "h1", "k8s/agentihooks-hive-h1", signer=signed)
+    assert remove.remove(store, None, plan, remove.Host()) == ["revoked"]
+    assert calls == [(admin, "m1", signed)]
+
+
+def _claims(jwt: str) -> dict:
+    import base64
+
+    segment = jwt.split(".")[1]
+    return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+
+
+def _offline_signer() -> nats_grant.Signer:
+    return nats_grant.Signer(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT), "creds", "nats://hub:4222")
+
+
+def test_a_member_credential_carries_exactly_the_user_claims():
+    signed = _offline_signer()
+    jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
+    claims = _claims(jwt)
+    assert (claims["iss"], claims["sub"], claims["name"]) == (signed.account.public, user.public, "hive-m1")
+    assert claims["nats"] == {"type": "user", "version": 2, "pub": {}, "sub": {}, "subs": -1, "data": -1, "payload": -1}
+
+
+@pytest.mark.parametrize("revocations", [{}, {"UA": 7}])
+def test_the_account_jwt_carries_exactly_the_account_claims(revocations):
+    signed = _offline_signer()
+    claims = _claims(nats_grant.account_jwt(signed, revocations))
+    assert (claims["iss"], claims["sub"], claims["name"]) == (signed.operator.public, signed.account.public, "SWARM")
+    assert claims["nats"] == {
+        "type": "account",
+        "version": 2,
+        "limits": nats_grant.ACCOUNT_LIMITS,
+        "default_permissions": {"pub": {}, "sub": {}},
+        **({"revocations": revocations} if revocations else {}),
+    }
+    assert nats_grant.ACCOUNT_LIMITS["disk_storage"] == nats_grant.ACCOUNT_LIMITS["mem_storage"] == -1
+
+
+def test_a_push_connects_once_without_reconnecting_and_bounds_both_waits(monkeypatch):
+    import nats as nats_client
+
+    signed = nats_grant.Signer(
+        nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT), _user_creds(nkey.create(nkey.ACCOUNT), "sys"), "nats://x"
+    )
+    seen = {}
+
+    class Client:
+        async def request(self, subject, payload, **kwargs):
+            seen["request"] = (subject, payload, kwargs)
+            return SimpleNamespace(data=b'{"data": {"code": 200}}')
+
+        async def close(self):
+            seen["closed"] = True
+
+    async def connect(url, **kwargs):
+        seen["connect"] = (url, {key: kwargs[key] for key in ("allow_reconnect", "connect_timeout")}, sorted(kwargs))
+        return Client()
+
+    monkeypatch.setattr(nats_client, "connect", connect)
+    nats_grant.push(signed, "a.b.c")
+    assert seen == {
+        "connect": (
+            "nats://x",
+            {"allow_reconnect": False, "connect_timeout": 10},
+            ["allow_reconnect", "connect_timeout", "signature_cb", "user_jwt_cb"],
+        ),
+        "request": ("$SYS.REQ.CLAIMS.UPDATE", b"a.b.c", {"timeout": 10}),
+        "closed": True,
+    }
