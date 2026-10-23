@@ -70,11 +70,13 @@ Runner pool isolation does not imply zero waits or independent physical hosts.
 
 The promotion call has no operator setting to enable. Its workflow wiring is:
 
+{% raw %}
 ```yaml
 hierarchy-cpu:
   if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
   uses: ./.github/workflows/hierarchy-cpu.yml
 ```
+{% endraw %}
 
 The reusable proof accepts one optional string input, `base`, for both
 `workflow_call` and `workflow_dispatch`:
