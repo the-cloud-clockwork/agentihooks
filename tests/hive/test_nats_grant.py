@@ -9,7 +9,7 @@ import pytest
 from scripts import openbao_kv
 from scripts.events import nkey
 from scripts.events.config import BusConfig
-from scripts.hive import auth, nats_grant, remove, server
+from scripts.hive import auth, nats_grant, nats_permissions, remove, server
 from tests.events import nats_server
 
 pytestmark = pytest.mark.unit
@@ -27,7 +27,8 @@ def admin():
 
 def _user_creds(account: nkey.KeyPair, name: str) -> str:
     user = nkey.create(nkey.USER)
-    return nkey.creds(nkey.encode_jwt(account, user.public, name, nats_grant.user_claims()), user.seed)
+    claims = {"type": "user", "version": 2, "pub": {}, "sub": {}, **nats_grant.UNLIMITED}
+    return nkey.creds(nkey.encode_jwt(account, user.public, name, claims), user.seed)
 
 
 @pytest.fixture
@@ -256,7 +257,16 @@ def test_a_member_credential_carries_exactly_the_user_claims():
     jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
     claims = _claims(jwt)
     assert (claims["iss"], claims["sub"], claims["name"]) == (signed.account.public, user.public, "hive-m1")
-    assert claims["nats"] == {"type": "user", "version": 2, "pub": {}, "sub": {}, "subs": -1, "data": -1, "payload": -1}
+    assert claims["nats"] == {
+        "type": "user",
+        "version": 2,
+        **nats_permissions.MEMBER,
+        "subs": -1,
+        "data": -1,
+        "payload": -1,
+    }
+    assert claims["nats"]["sub"] == {"allow": ["_INBOX.>"]}
+    assert "swarm.*.execution.>" in claims["nats"]["pub"]["allow"]
 
 
 @pytest.mark.parametrize("revocations", [{}, {"UA": 7}])
