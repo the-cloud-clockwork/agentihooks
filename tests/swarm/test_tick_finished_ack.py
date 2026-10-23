@@ -125,6 +125,30 @@ def test_a_working_agent_never_reads_the_receipt(store, monkeypatch):
     assert runtime.collected == [name]
 
 
+def test_a_receipt_read_that_raises_falls_back_to_the_guarded_collect(store, monkeypatch, capsys):
+    ledger, runtime, name, _ = _finished_before_ack(store, monkeypatch)
+
+    def broken(config, lane, agent, task):
+        raise ConnectionError("redis went away")
+
+    runtime.launched = broken
+    doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "blocked"}]}
+    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
+    assert runtime.collected == [name]
+    assert len(actions) == 1 and actions[0].startswith("spawn failed for t1")
+    assert f"{name} receipt read for t1 raised ConnectionError('redis went away')" in capsys.readouterr().err
+
+
+def test_an_early_finished_launch_clears_its_saved_assignment(store, monkeypatch):
+    ledger, runtime, name, _ = _finished_before_ack(store, monkeypatch, "t1", "t2")
+    for task in ("t1", "t2"):
+        store.redis.hset(store.key("sw", "launch-assignments"), task, "{}")
+    runtime.live.update(runtime.ordered)
+    doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "blocked"}, {"id": "t2", "lane": "eng", "state": "done"}]}
+    _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
+    assert store.redis.hgetall(store.key("sw", "launch-assignments")) == {}
+
+
 def test_every_agent_finished_before_its_acknowledgement_is_collected_in_one_pass(store, monkeypatch):
     ledger, runtime, _, released = _finished_before_ack(store, monkeypatch, "t1", "t2")
     doc = {"tasks": [{"id": t, "lane": "eng", "state": "done"} for t in ("t1", "t2")]}

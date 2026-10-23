@@ -416,9 +416,12 @@ class HiveLaunch:
         return self.spawn(request)
 
     def launched(self, request: SpawnRequest) -> bool:
+        lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
         order = self.orders_for(request.task["id"])
         previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
-        if not previous or previous.name != request.name or previous.state != "finished":
+        if not previous or previous.state != "finished" or previous.generation != order.generation:
+            return False
+        if (previous.name, previous.seat) != (request.name, request.task["seat"]):
             return False
         ack = self.orders.ack(order)
         return ack is not None and ack.status == "live"

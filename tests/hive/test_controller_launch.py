@@ -1487,6 +1487,28 @@ def test_a_live_receipt_of_another_claimant_or_no_order_is_no_launch(setup):
     assert setup.launcher.launched(request) is False
 
 
+def test_a_live_receipt_for_another_seat_or_generation_is_no_launch(setup):
+    request, order, _ = live_order(setup)
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state="finished"))
+    moved = replace(request, task={**request.task, "seat": "eng-2@fixture"})
+    assert setup.launcher.launched(moved) is False
+    stale = replace(order, generation=order.generation + 1)
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(stale.__dict__))
+    assert setup.launcher.launched(request) is False
+
+
+def test_a_stale_controller_never_reads_a_launched_receipt(setup):
+    from scripts.swarm.store import SwarmError
+
+    request, order, _ = live_order(setup)
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state="finished"))
+    stale = replace(request, task={**request.task, "controller_epoch": setup.held.epoch + 1})
+    with pytest.raises(SwarmError, match="the controller lease is stale"):
+        setup.launcher.launched(stale)
+
+
 def test_a_controller_reads_a_launched_receipt_under_the_held_lease(setup, monkeypatch):
     from contextlib import contextmanager
 

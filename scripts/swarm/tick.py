@@ -1210,23 +1210,33 @@ def _expire_launch(config, runtime, agent, error):
     return error if kept is False else SpawnError(ACK_EXPIRED)
 
 
+def _receipt_live(config, runtime, agent):
+    try:
+        return runtime.launched(config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True})
+    except Exception as exc:
+        print(f"{agent.name} receipt read for {agent.task} raised {exc!r}", file=sys.stderr)
+        return False
+
+
+def _finished_early(slug, store, doc, agent):
+    _release_hive_launch(slug, store, agent)
+    store.redis.hdel(store.key(slug, "launch-assignments"), agent.task)
+    store.count_claim(slug, agent.task)
+    store.count_spawn(slug, agent.harness)
+    store.record_launch(
+        slug, agent, "started", after=store.take_restart(slug, agent.task) or _master_set(doc, agent.task)
+    )
+    return f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement"
+
+
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     from scripts.swarm_v2.runtime import codex
 
     rows, actions = {t["id"]: t for t in doc["tasks"]}, []
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
-        if agent.state == "finished" and (
-            task.get("state") == "done"
-            or runtime.launched(config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True})
-        ):
-            _release_hive_launch(slug, store, agent)
-            store.count_claim(slug, agent.task)
-            store.count_spawn(slug, agent.harness)
-            store.record_launch(
-                slug, agent, "started", after=store.take_restart(slug, agent.task) or _master_set(doc, agent.task)
-            )
-            actions.append(f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement")
+        if agent.state == "finished" and (task.get("state") == "done" or _receipt_live(config, runtime, agent)):
+            actions.append(_finished_early(slug, store, doc, agent))
             continue
         try:
             placed = runtime.collect(
