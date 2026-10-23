@@ -5456,6 +5456,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         route_requires_fable,
         select_credential,
     )
+    from scripts.hive.account_slots import execute
 
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
@@ -5504,25 +5505,24 @@ def cmd_claude(extra_args: list[str]) -> None:
             _write_route_report(report, status="bare", error=str(exc))
             os.environ.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
             cmd = _claude_command(claude_bin, extra_args)
-            os.execvpe(claude_bin, cmd, os.environ)
+            execute("claude", "unrouted", os.environ, lambda env: os.execvpe(claude_bin, cmd, env))
         print(f"agentihooks: {exc}", file=sys.stderr)
         if exc.results:
             print(render_table(exc.results, include_fable=include_fable), file=sys.stderr)
         _write_route_report(report, status="failed", error=str(exc))
         raise SystemExit(3) from exc
-    _write_route_report(
-        report,
-        status="routed",
-        account=decision.account,
-        placement="forced" if route else "open",
-    )
+    _write_route_report(report, status="routed", account=decision.account, placement="forced" if route else "open")
     print(
         f"[agenti] account={decision.account} route=forced" if route else format_selection(decision, include_fable),
         flush=True,
     )
-    cmd = _claude_command(claude_bin, extra_args)
     # nosemgrep: python.lang.security.audit.dangerous-os-exec-tainted-env-args.dangerous-os-exec-tainted-env-args
-    os.execvpe(claude_bin, cmd, launch_environment(decision, os.environ))
+    execute(
+        "claude",
+        decision.account,
+        launch_environment(decision, os.environ),
+        lambda env: os.execvpe(claude_bin, _claude_command(claude_bin, extra_args), env),
+    )
 
 
 def cmd_balance(
