@@ -6,7 +6,9 @@ from scripts.inbox import outbox
 OPS = ("alert_claim", "alert_close", "alert_raise")
 SIZE, SYNC, PROMOTION, RELEASE = "size", "sync", "promotion", "release"
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
+WRITER = "writer"
 TARGETS = {
+    WRITER: "master",
     SIZE: "master",
     SYNC: "master",
     PROMOTION: "master",

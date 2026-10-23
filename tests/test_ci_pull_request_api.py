@@ -223,6 +223,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/shards.py",
         "tests/swarm_ledger/test_postgres_writer_lock.py",
         "tests/swarm_ledger/test_postgres_outbox.py",
+        "tests/swarm_ledger/test_postgres_writer_floor.py",
         "tests/test_suite_speed.py",
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",

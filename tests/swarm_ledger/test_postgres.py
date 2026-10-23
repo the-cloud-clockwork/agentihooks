@@ -243,7 +243,8 @@ def test_a_new_connection_bounds_lock_waits_idle_transactions_and_statements_and
     postgres.Pool(ADDRESS).take()
     assert opened.settings == [
         {
-            "options": "-c lock_timeout=10s -c idle_in_transaction_session_timeout=15s -c statement_timeout=60s",
+            "options": "-c lock_timeout=10s -c idle_in_transaction_session_timeout=15s -c statement_timeout=60s"
+            " -c agentihooks.ledger_writer_version=1",
             "keepalives": 1,
             "keepalives_idle": 30,
             "keepalives_interval": 10,
@@ -425,7 +426,13 @@ def test_the_repository_sets_its_schema_up_once_under_the_writer_lock(opened):
     statements = [sql for sql, _ in raw.log]
     assert statements[0] == "SELECT pg_advisory_xact_lock(1279607879)"
     assert statements[1] == "SET LOCAL statement_timeout = 0"
-    assert statements[2:] == postgres.ddl(sqlite.SCHEMA + hierarchy.SCHEMA + sqlite.ROWS_SCHEMA + refresh.SCHEMA)
+    assert statements[2:] == [
+        *postgres.ddl(sqlite.SCHEMA + hierarchy.SCHEMA + sqlite.ROWS_SCHEMA + refresh.SCHEMA + postgres.FLOOR_SCHEMA),
+        postgres.translate(postgres.RAISE_FLOOR),
+        postgres.GUARD,
+        postgres.GUARD_TRIGGER,
+    ]
+    assert raw.log[-3][1] == (postgres.REQUIRED,)
     assert raw.commits == 1
     assert repository._ready == {ADDRESS}
     with repository.connect():
