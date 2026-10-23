@@ -89,3 +89,11 @@ def test_in_range_runs_stay_silent_and_an_out_of_range_run_notifies(store, monke
     loop.speed(store, DOCTOR, WATCHED, AFTER + 21 * 60000)
     for texts in items(store).values():
         assert len(texts) == 2
+
+
+def test_a_returned_finding_is_keyed_by_its_verdict(store):  # noqa: F811
+    original, records = judged(store)
+    grown = later(original, "2", 2000)
+    at = json.loads(records[original.id])["verdict"]["at"]
+    assert ci_speed.notice_key(grown, records) == json.dumps([original.id, at])
+    assert ci_speed.notice_key(grown, {}) == original.id
