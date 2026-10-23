@@ -248,3 +248,40 @@ def test_default_registry_preserves_timers_and_lifecycle_and_registers_reconcile
     assert {"timers", "lifecycle", "reconciler"} <= reactors.keys()
     assert reactors["reconciler"].singleton is True
     assert callable(reactors["reconciler"].poll)
+
+
+@pytest.mark.parametrize("sweep", ["_verify", "_reap"])
+def test_legacy_tick_leaves_event_owned_execution_recovery_to_the_reconciler(rig, monkeypatch, sweep):
+    from scripts.hub import reconciler
+    from scripts.swarm import tick
+
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
+    monkeypatch.setattr(reconciler, "open_bus", lambda _: rig.bus)
+    runtime = Mock()
+    runtime.live_names.return_value = set()
+    runtime.bindings.return_value = {}
+    assert getattr(tick, sweep)("rig", rig.store, rig.ledger, runtime, {"task": rig.row}, rig.clock()) == []
+    runtime.observe.assert_not_called()
+    runtime.retire.assert_not_called()
+    assert rig.store.agents("rig") == [rig.agent]
+    assert rig.row["state"] == "claimed"
+
+
+def test_legacy_agents_are_unchanged_on_the_memory_backend(rig, monkeypatch):
+    from scripts.hub import reconciler
+
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="memory"))
+    assert reconciler.legacy_agents(rig.store, "rig") == [rig.agent]
+
+
+def test_unfenced_agents_remain_owned_by_legacy_tick(rig, monkeypatch):
+    from scripts.hive import execution_events
+    from scripts.hub import reconciler
+
+    key = execution_events.identity("rig", "engineer", 3)
+    state = rig.bus.state(execution_events.STARTS)
+    entry = state.get(key)
+    state.update(key, b"null", entry.revision)
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
+    monkeypatch.setattr(reconciler, "open_bus", lambda _: rig.bus)
+    assert reconciler.legacy_agents(rig.store, "rig") == [rig.agent]
