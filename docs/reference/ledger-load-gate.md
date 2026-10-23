@@ -156,7 +156,8 @@ attempts per image. Each attempt reads the image manifest, picks the
 ten seconds; the third failure exits with the pull's status. For a
 `public.ecr.aws/docker/library/<image>` name, the second attempt reads and
 pulls `mirror.gcr.io/library/<image>` instead, so a public ECR
-`toomanyrequests` answer does not fail the pull; the result is still tagged
+`toomanyrequests` answer on the first attempt does not by itself fail the
+pull; the result is still tagged
 under the requested name.
 
 Each `docker tag` runs only after its own pull succeeds, so a failed pull never
