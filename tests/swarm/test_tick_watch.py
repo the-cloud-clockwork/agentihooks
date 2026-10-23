@@ -514,7 +514,7 @@ def test_a_check_at_the_same_moment_as_the_last_decision_still_decides(store):
     beat(store, START - LIMIT)
     guard = tick_watch.Guard()
     assert tick_watch.watch_pass(store, "sw", START, START, guard=guard) == [f"told {FRONT_DOOR} the tick is stale"]
-    beat(store, START)
+    beat(store, START, rev=2)
 
     assert tick_watch.watch_pass(store, "sw", START, START, guard=guard) == [f"told {FRONT_DOOR} the tick runs again"]
     assert guard.decided == START
