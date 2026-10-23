@@ -1472,7 +1472,9 @@ def _master(slug, config, store, runtime, now_ms, past_host=False):
                 {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug), "transfer": transfer},
             )
         )
-        task = master_move.pinned(store, slug, task, transfer)
+        from scripts.swarm import master_launch
+
+        task = master_launch._filled(master_move.pinned(store, slug, task, transfer), config)
         master_start.begin(store, slug, record.name, task, now_ms)
         affinity.handed_off(store, slug)
         launched.update(task)
