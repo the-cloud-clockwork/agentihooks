@@ -1,15 +1,18 @@
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from scripts.events.bus import Bus, StateConflict
 from scripts.hive import presence
-from scripts.scheduler.process_interval import Interval
 
 TTL_MS = presence.TTL_MS
 LIVE = frozenset({"working", "running", "idle", "waiting", "blocked"})
 ENDED = frozenset({"exited", "dead"})
+
+
+HIVE_ENV = "AGENTIHOOKS_SLOT_HIVE"
+EXECUTION_ENV = "AGENTIHOOKS_SLOT_EXECUTION"
 
 
 class Unavailable(RuntimeError):
@@ -68,16 +71,17 @@ class Slots:
                 now = self.clock()
                 _live(value, now)
                 owned = {name: row for name, row in value["holders"].items() if row["hive"] == self.hive}
-                observed = [name for name in value["hives"].get(self.hive, {}).get("observed", []) if name in owned]
                 for execution, row in owned.items():
                     state = executions.get(execution, {}).get("pane", {}).get("state")
                     if state in ENDED:
                         del value["holders"][execution]
-                        observed = [name for name in observed if name != execution]
                     elif state in LIVE:
                         row["expires_ms"] = now + TTL_MS
-                        if execution not in observed:
-                            observed.append(execution)
+                observed = [
+                    name
+                    for name in report["sessions"].get("_executions", {}).get(f"{harness}:{account}", [])
+                    if name in value["holders"] and value["holders"][name]["hive"] == self.hive
+                ]
                 slot = slots.get((harness, account))
                 if slot is not None or any(row["hive"] == self.hive for row in value["holders"].values()):
                     value["hives"][self.hive] = {
@@ -129,42 +133,37 @@ class Slots:
             raise Unavailable("Account slot admission failed") from exc
         if account is None:
             raise Unavailable("No account slot available")
-        interval = Interval(
-            lambda: self.heartbeat(self.read(), {execution: {"pane": {"state": "working"}}}),
-            every=presence.BEAT_SECONDS,
-        )
         try:
-            interval.start()
             return invoke(account)
         except Exception as exc:
             if getattr(exc, "status", "") != "ambiguous":
                 self.release(execution, harness, account)
             raise
-        finally:
-            interval.close()
 
 
-def launch(hive: str, execution: str, argv: list[str], invoke: Callable[[list[str]], Any]) -> Any:
+def _reading(hive: str) -> dict:
+    from hooks.context import account_sessions
+    from scripts.hive import daemon
+    from scripts.swarm.store import connect
+
+    processes = account_sessions.local_processes()
+    report = daemon.observe(processes=processes)
+    report["sessions"]["_executions"] = daemon._executions(connect(), hive, processes)
+    return report
+
+
+def execute(harness: str, account: str, environ: Mapping[str, str], invoke: Callable[[dict[str, str]], Any]) -> Any:
     from scripts.events.config import BusConfig
     from scripts.events.factory import open_bus
-    from scripts.hive.daemon import observe
 
-    split = argv.index("--") + 1
-    passed = argv[split:]
-    route = passed.index("--route") if "--route" in passed else None
-    preferred = passed[route + 1] if route is not None else ""
-    tail = passed[:route] + passed[route + 2 :] if route is not None else passed
+    child = {name: value for name, value in environ.items() if name not in (HIVE_ENV, EXECUTION_ENV)}
+    hive = environ.get(HIVE_ENV)
+    if not hive:
+        return invoke(child)
     bus = open_bus(BusConfig.from_environ())
     try:
-        slots = Slots(bus, hive, observe)
-        return slots.launch(
-            execution,
-            argv[argv.index("--agent") + 1],
-            "unrouted" if preferred == "interactive" else preferred,
-            lambda account: invoke(
-                [*argv[:split], "--route", "interactive" if account == "unrouted" else account, *tail]
-            ),
-        )
+        slots = Slots(bus, hive, lambda: _reading(hive))
+        return slots.launch(environ[EXECUTION_ENV], harness, account, lambda selected: invoke(child))
     finally:
         bus.close()
 

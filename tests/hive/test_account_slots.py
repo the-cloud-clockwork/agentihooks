@@ -75,7 +75,10 @@ def test_local_manual_sessions_and_reserved_slots_are_counted_once(rig):
     first, second, _, report, _ = rig
     report[0] = reading(cap=3, sessions=1)
     assert first.take("one", "claude") == "a"
-    first.heartbeat(reading(cap=3, sessions=2), {"one": {"pane": {"state": "working"}}})
+    first.heartbeat(
+        {**reading(cap=3, sessions=2), "sessions": {"claude:a": 2, "_executions": {"claude:a": ["one"]}}},
+        {"one": {"pane": {"state": "working"}}},
+    )
     second.read = lambda: reading(cap=3)
     assert second.take("two", "claude") == "a"
     assert second.take("three", "claude") is None
@@ -180,35 +183,15 @@ def test_a_missing_observation_does_not_extend_the_execution_lease(rig):
     assert second.take("two", "claude") == "a"
 
 
-def test_the_launch_heartbeat_keeps_the_slot_occupied_during_a_blocking_start(rig, monkeypatch):
+def test_the_launch_heartbeat_keeps_the_slot_occupied_during_a_blocking_start(rig):
     from scripts.hive import account_slots
 
     first, second, now, _, _ = rig
-    intervals = []
-
-    class Interval:
-        def __init__(self, callback, *, every):
-            self.callback, self.every, self.closed = callback, every, False
-            intervals.append(self)
-
-        def start(self):
-            assert first.take("one", "claude") == "a"
-
-        def close(self):
-            self.closed = True
-
-    monkeypatch.setattr(account_slots, "Interval", Interval)
-
-    def launch(account):
-        now[0] += account_slots.TTL_MS - 1
-        intervals[0].callback()
-        now[0] += 2
-        assert second.take("two", "claude") is None
-        return account
-
-    assert first.launch("one", "claude", "", launch) == "a"
-    assert intervals[0].every == account_slots.presence.BEAT_SECONDS
-    assert intervals[0].closed is True
+    assert first.launch("one", "claude", "", lambda account: account) == "a"
+    now[0] += account_slots.TTL_MS - 1
+    first.heartbeat(reading(), {"one": {"pane": {"state": "working"}}})
+    now[0] += 2
+    assert second.take("two", "claude") is None
 
 
 def test_an_ambiguous_launch_retains_its_slot(rig):
@@ -242,36 +225,24 @@ def test_contended_state_retries_are_bounded_and_fail_admission_closed(rig, monk
     assert len(calls) == 4
 
 
-@pytest.mark.parametrize(
-    "route,account", [([], "a"), (["--route", "a"], "a"), (["--route", "interactive"], "unrouted")]
-)
-def test_runtime_launch_pins_the_reserved_route_and_closes_the_bus(rig, monkeypatch, route, account):
+@pytest.mark.parametrize("account", ["a", "unrouted", "resolved-login"])
+def test_runtime_launch_pins_the_reserved_route_and_closes_the_bus(rig, monkeypatch, account):
     from scripts.events import factory
-    from scripts.hive import account_slots, daemon
+    from scripts.hive import account_slots
 
     _, _, _, _, bus = rig
     report = reading()
     report["slots"][0]["account"] = account
-    monkeypatch.setattr(daemon, "observe", lambda: report)
+    monkeypatch.setattr(account_slots, "_reading", lambda hive: report)
     monkeypatch.setattr(factory, "open_bus", lambda config: bus)
     closed = []
     monkeypatch.setattr(bus, "close", lambda: closed.append(True))
-    argv = ["launcher", "--agent", "claude", "--dir", "repo", "--", *route, "--model", "model"]
-    expected_route = "interactive" if account == "unrouted" else account
-    result = account_slots.launch("one", "execution", argv, lambda args: args)
-    assert result == [
-        "launcher",
-        "--agent",
-        "claude",
-        "--dir",
-        "repo",
-        "--",
-        "--route",
-        expected_route,
-        "--model",
-        "model",
-    ]
+    env = {account_slots.HIVE_ENV: "one", account_slots.EXECUTION_ENV: "execution", "KEEP": "yes"}
+    result = account_slots.execute("claude", account, env, lambda child: child)
+    assert result == {"KEEP": "yes"}
     assert closed == [True]
+    entry = bus.state("account-slots").get(account_slots.key("claude", account))
+    assert json.loads(entry.value)["holders"]["execution"]["hive"] == "one"
 
 
 def test_distributed_heartbeat_publishes_even_without_any_executions(rig, monkeypatch):
@@ -288,27 +259,74 @@ def test_distributed_heartbeat_publishes_even_without_any_executions(rig, monkey
     assert second.take("two", "claude") is None
 
 
-def test_pending_launch_renewal_does_not_hide_a_manual_session(rig, monkeypatch):
-    from scripts.hive import account_slots
-
+def test_pending_launch_renewal_does_not_hide_a_manual_session(rig):
     first, second, _, report, _ = rig
     report[0] = reading(cap=2, sessions=1)
     second.read = lambda: reading(cap=2)
 
-    class Interval:
-        def __init__(self, callback, **kwargs):
-            self.callback = callback
-
-        def start(self):
-            self.callback()
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(account_slots, "Interval", Interval)
-
     def launch(account):
+        first.heartbeat(report[0], {"first": {"pane": {"state": "working"}}})
         assert second.take("second", "claude") is None
         return account
 
     assert first.launch("first", "claude", "", launch) == "a"
+
+
+def test_local_reading_correlates_the_same_process_sample_to_its_own_hive(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts.hive import account_slots, daemon
+    from scripts.swarm import store
+
+    processes = {"claude": {10: "a"}, "codex": {}}
+    report = reading()
+    seen = []
+    connection = object()
+    monkeypatch.setattr(account_sessions, "local_processes", lambda: processes)
+    monkeypatch.setattr(daemon, "observe", lambda **kwargs: (seen.append(kwargs), report)[1])
+    monkeypatch.setattr(store, "connect", lambda: connection)
+
+    def executions(redis, hive, sample):
+        assert redis is connection
+        assert hive == "one"
+        assert sample is processes
+        return {"claude:a": ["execution"]}
+
+    monkeypatch.setattr(daemon, "_executions", executions)
+    assert account_slots._reading("one") == {
+        **reading(),
+        "sessions": {"claude:a": 0, "_executions": {"claude:a": ["execution"]}},
+    }
+    assert seen == [{"processes": processes}]
+
+
+def test_an_unmanaged_exec_keeps_its_environment_without_opening_the_bus(monkeypatch):
+    from scripts.events import factory
+    from scripts.hive import account_slots
+
+    def refused(*args):
+        pytest.fail("unmanaged exec opened a bus")
+
+    monkeypatch.setattr(factory, "open_bus", refused)
+    assert account_slots.execute("claude", "a", {"KEEP": "yes"}, lambda child: child) == {"KEEP": "yes"}
+
+
+def test_exec_failure_returns_capacity_and_closes_the_connection(rig, monkeypatch):
+    from scripts.events import factory
+    from scripts.hive import account_slots
+
+    _, second, _, _, bus = rig
+    monkeypatch.setattr(account_slots, "_reading", lambda hive: reading())
+    monkeypatch.setattr(factory, "open_bus", lambda config: bus)
+    closed = []
+    monkeypatch.setattr(bus, "close", lambda: closed.append(True))
+
+    def failed(child):
+        assert child == {"KEEP": "yes"}
+        assert second.take("other", "claude") is None
+        raise OSError("exec refused")
+
+    env = {account_slots.HIVE_ENV: "one", account_slots.EXECUTION_ENV: "execution", "KEEP": "yes"}
+    with pytest.raises(OSError, match="^exec refused$"):
+        account_slots.execute("claude", "a", env, failed)
+    assert second.take("other", "claude") == "a"
+    assert closed == [True]

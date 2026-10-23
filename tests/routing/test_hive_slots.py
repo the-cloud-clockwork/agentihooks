@@ -16,7 +16,7 @@ def test_hive_admission_happens_after_the_route_resolves_and_before_exec(tmp_pat
         assert account == "resolved"
         assert harness == ("codex" if route == "codex" else "claude")
         calls.append("slot")
-        return invoke()
+        return invoke(dict(environ))
 
     monkeypatch.setattr(account_slots, "execute", admitted)
     monkeypatch.setattr(install.os, "execvpe", lambda *args: calls.append("exec"))

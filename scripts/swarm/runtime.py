@@ -770,26 +770,25 @@ class HerdrRuntime:
         return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
 
     def _account_launch(self, config, lane, task, name, argv):
-        from functools import partial
+        if task.get("account_slot_hive"):
+            from scripts.hive.account_slots import EXECUTION_ENV, HIVE_ENV
 
-        invoke = partial(
-            timing.call,
+            argv = [
+                "env",
+                f"{HIVE_ENV}={task['account_slot_hive']}",
+                f"{EXECUTION_ENV}={task['execution_id']}",
+                *argv,
+            ]
+        return timing.call(
             self._launch,
             config,
             lane,
             task["id"],
             name,
+            argv,
             predecessor=_predecessor(task),
             controller_epoch=task.get("controller_epoch"),
         )
-        if not task.get("account_slot_hive"):
-            return invoke(argv)
-        from scripts.hive import account_slots
-
-        try:
-            return account_slots.launch(task["account_slot_hive"], task["execution_id"], argv, invoke)
-        except account_slots.Unavailable as exc:
-            raise SpawnError(str(exc), "unavailable") from exc
 
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):
