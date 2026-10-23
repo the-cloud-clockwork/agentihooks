@@ -211,6 +211,9 @@ hub:
   tolerations: []
   terminationGracePeriodSeconds: 30
   env: {}
+  # Secret keys as hub env, such as AGENTIHOOKS_BUS_CREDENTIALS for a NATS that signs its users:
+  # [{name, secretName, key, optional}].
+  secretEnv: []
   resources:
     requests:
       cpu: 50m
