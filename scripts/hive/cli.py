@@ -298,17 +298,22 @@ def _local_agents(redis: "Redis", reported: set[tuple[str, str]]) -> dict[str, l
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(redis)
-    herdr = None
+    candidates = [
+        agents
+        for slug in store.slugs()
+        if (
+            agents := [
+                agent
+                for agent in store.agents(slug)
+                if agent.runtime_backend == "local" and not reports.host(agent) and (slug, agent.name) not in reported
+            ]
+        )
+    ]
+    if not candidates:
+        return {}
+    herdr = runtime.HerdrRuntime()
     found: dict[str, list[str]] = {}
-    for slug in store.slugs():
-        agents = [
-            agent
-            for agent in store.agents(slug)
-            if agent.runtime_backend == "local" and not reports.host(agent) and (slug, agent.name) not in reported
-        ]
-        if not agents:
-            continue
-        herdr = herdr or runtime.HerdrRuntime()
+    for agents in candidates:
         for agent in status.live_agents(agents, herdr):
             found.setdefault(status.agent_hive(agent), []).append(agent.name)
     return found

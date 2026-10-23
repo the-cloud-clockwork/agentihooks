@@ -162,8 +162,10 @@ def test_hive_list_lists_each_live_local_agent_once_and_only_on_its_own_hive(sto
     live = Herdr({agent.name for agent in (plain, finished, remote, pod, moved, reported)})
     monkeypatch.setattr(runtime, "HerdrRuntime", lambda: live)
     cli._list()
-    listed = listed_by_hive(capsys.readouterr().out)
+    out = capsys.readouterr().out
+    listed = listed_by_hive(out)
     assert listed == {"worker": [reported.name, plain.name, finished.name], "elsewhere": [moved.name]}
+    assert [line for line in out.splitlines() if line.endswith("\tunregistered")] == ["elsewhere\tunregistered"]
     assert [status.agent_hive(agent) for agent in (plain, remote, pod)] == ["worker", "old", ""]
     placed = {}
     for row in status.status_report(store, "sw", {"tasks": []}, runtime=live)["agents"]:
