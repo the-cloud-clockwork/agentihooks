@@ -182,3 +182,12 @@ def test_placeable_marks_an_unresolved_task_without_spending_a_slot(store, asked
         task_id: f"{task_id} profile is unresolved" if task_id.startswith("u") else None for task_id in taken
     }
     assert waited == []
+
+
+def test_placeable_lets_any_other_placement_error_through(store, asked):
+    def broken(lane, task):
+        raise RuntimeError("hive registry down")
+
+    runtime = SimpleNamespace(router=SimpleNamespace(placement=object()), placement_refusal=broken)
+    with pytest.raises(RuntimeError, match="^hive registry down$"):
+        profile_first.placeable("sw", store.config("sw"), store, runtime, "eng", [{"id": "e1"}], 1)
