@@ -597,6 +597,42 @@ def test_own_launching_recovery_releases_the_claim_and_takes_new_work(rig, attem
     rig.runtime.spawn.assert_not_called()
 
 
+@pytest.mark.parametrize("leftover", ["agent-a", None])
+def test_own_launching_recovery_ends_a_leftover_agent_in_the_same_pass(rig, leftover):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    pending = seed_pending(rig, {"state": "launching", "owner": "hive-a", "name": "agent-a"})
+    rig.spoke.measure = lambda: None
+    rig.runtime.find.return_value = Outcome("find", Status.OK, "local", leftover)
+    rig.runtime.reap.return_value = Outcome("reap", Status.OK, "local")
+    assert rig.spoke.poll() == "held"
+    rig.runtime.find.assert_called_once_with("agent-a")
+    if leftover:
+        rig.runtime.reap.assert_called_once_with("agent-a")
+    else:
+        rig.runtime.reap.assert_not_called()
+    assert claim(rig) == {"state": "ready"}
+    assert pending.get(rig.spoke._pending_key).value == b"{}"
+    rig.runtime.spawn.assert_not_called()
+
+
+@pytest.mark.parametrize("refused", ["find", "reap"])
+def test_own_launching_recovery_keeps_the_claim_while_a_leftover_agent_cannot_be_ended(rig, refused):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    state = {"state": "launching", "owner": "hive-a", "name": "agent-a"}
+    pending = seed_pending(rig, state)
+    before = pending.get(rig.spoke._pending_key)
+    found = Status.UNAVAILABLE if refused == "find" else Status.OK
+    rig.runtime.find.return_value = Outcome("find", found, "local", "agent-a")
+    rig.runtime.reap.return_value = Outcome("reap", Status.REFUSED, "local")
+    rig.spoke.measure = Mock(side_effect=AssertionError("must not measure"))
+    assert rig.spoke.poll() == "uncertain"
+    assert claim(rig) == state
+    assert pending.get(rig.spoke._pending_key).revision == before.revision
+    rig.runtime.spawn.assert_not_called()
+
+
 def test_uncertain_recovery_retains_ownership_and_does_not_measure_or_take(rig):
     pending = seed_pending(rig, {"state": "launching", "owner": "hive-b", "name": "agent-a"})
     before = pending.get(rig.spoke._pending_key)
