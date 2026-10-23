@@ -289,7 +289,7 @@ def scheduled_wait(delay: float) -> None:
     try:
         timer_wait(delay)
     except (ConnectionError, TimeoutError):
-        pass
+        time.sleep(delay)
 
 
 def supervise(

@@ -1104,6 +1104,36 @@ def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tm
     assert scheduler.retire.call_count == len(clients)
 
 
+@pytest.mark.parametrize("failure", ["timeout", "connection"])
+def test_scheduler_connection_failures_back_off_before_retrying(monkeypatch, failure):
+    from unittest.mock import Mock, call
+
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    clock = Clock()
+    error = TimeoutError if failure == "timeout" else ConnectionError
+    wait = Mock(side_effect=[error("offline"), error("offline"), None])
+    monkeypatch.setattr(trace_flush, "timer_wait", wait)
+    monkeypatch.setattr(trace_flush.time, "sleep", clock.sleep)
+    for _ in range(3):
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    assert clock.now == 2
+    assert wait.call_args_list == [call(trace_flush.POLL_SEC)] * 3
+
+
+def test_scheduler_wait_preserves_interruption(monkeypatch):
+    from unittest.mock import Mock
+
+    wait = Mock(side_effect=KeyboardInterrupt)
+    sleep = Mock()
+    monkeypatch.setattr(trace_flush, "timer_wait", wait)
+    monkeypatch.setattr(trace_flush.time, "sleep", sleep)
+    with pytest.raises(KeyboardInterrupt):
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    wait.assert_called_once_with(trace_flush.POLL_SEC)
+    sleep.assert_not_called()
+
+
 IDENTITY = {
     "AGENTIHOOKS_SWARM": "watched",
     "AGENTIHOOKS_AGENT_NAME": "engineer@owner",
