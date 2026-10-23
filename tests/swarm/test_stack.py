@@ -639,26 +639,28 @@ def test_park_refuses_when_the_antoncore_checkout_cannot_fetch(parked, monkeypat
 
 
 UNVERIFIED = "Host key verification failed.\nfatal: Could not read from remote repository."
+KEY_REFUSED = "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository."
+PROMPTLESS = ["env", "GIT_TERMINAL_PROMPT=0"]
 
 
-def _ssh_refused(shell, refused, inner=None):
+def _ssh_refused(shell, refused, inner=None, stderr=UNVERIFIED):
     def answer(argv):
         if argv in refused:
             shell.calls.append(argv)
-            return subprocess.CompletedProcess(argv, 128, stdout="", stderr=UNVERIFIED)
+            return subprocess.CompletedProcess(argv, 128, stdout="", stderr=stderr)
         return (inner or shell)(argv)
 
     return answer
 
 
-def test_park_fetches_an_ssh_dependency_over_https_when_the_host_key_cannot_be_verified(parked, monkeypatch):
+@pytest.mark.parametrize("stderr", [UNVERIFIED, KEY_REFUSED])
+def test_park_fetches_an_ssh_dependency_over_https_when_the_host_key_cannot_be_verified(parked, monkeypatch, stderr):
     _, ledger, _, shell, doc = parked
     ledger.rows["a"]["branch_repo"] = "git@github.com:O/bundle.git"
-    monkeypatch.setattr(
-        stack, "shell", _ssh_refused(shell, [["git", "fetch", "--", "git@github.com:O/bundle.git", "eng-a"]])
-    )
+    refused = [["git", "fetch", "--", "git@github.com:O/bundle.git", "eng-a"]]
+    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, refused, stderr=stderr))
     assert park(doc) == 0
-    assert ["git", "fetch", "--", "https://github.com/O/bundle.git", "eng-a"] in shell.calls
+    assert [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/bundle.git", "eng-a"] in shell.calls
     assert ledger.rows["t1"]["parked_on"] == ["a"]
 
 
@@ -667,7 +669,7 @@ def test_park_fetches_a_same_repository_dependency_over_https_when_origin_is_unv
     monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]]))
     assert park(doc) == 0
     refspec = "+refs/heads/eng-a:refs/remotes/origin/eng-a"
-    assert ["git", "fetch", "--", "https://github.com/O/r.git", refspec] in shell.calls
+    assert [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/r.git", refspec] in shell.calls
     assert ["git", "merge-base", "HEAD", "origin/eng-a"] in shell.calls
 
 
@@ -678,13 +680,22 @@ def test_park_fetches_through_an_unverified_checkout_origin_over_https(parked, m
     monkeypatch.setattr(stack, "shell", _ssh_refused(shell, refused, stack.shell))
     assert park(doc) == 0
     refspec = "+refs/heads/eng-a:refs/remotes/origin/eng-a"
-    assert ["git", "-C", CHECKOUT, "fetch", "--", "https://github.com/O/antoncore.git", refspec] in shell.calls
+    assert [
+        *PROMPTLESS,
+        "git",
+        "-C",
+        CHECKOUT,
+        "fetch",
+        "--",
+        "https://github.com/O/antoncore.git",
+        refspec,
+    ] in shell.calls
 
 
 def test_park_refuses_naming_both_errors_when_the_https_retry_fails(parked, monkeypatch, capsys):
     _, ledger, _, shell, doc = parked
     ledger.rows["a"]["branch_repo"] = "ssh://git@github.com:22/O/bundle"
-    https = ["git", "fetch", "--", "https://github.com/O/bundle", "eng-a"]
+    https = [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/bundle", "eng-a"]
     monkeypatch.setattr(
         stack, "shell", _ssh_refused(shell, [["git", "fetch", "--", "ssh://git@github.com:22/O/bundle", "eng-a"]])
     )
@@ -696,6 +707,26 @@ def test_park_refuses_naming_both_errors_when_the_https_retry_fails(parked, monk
     )
     assert capsys.readouterr().err == says
     assert https in shell.calls
+    assert "parked_on" not in ledger.rows["t1"]
+
+
+def test_park_names_the_ssh_error_when_the_https_retry_cannot_run(parked, monkeypatch, capsys):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["a"]["branch_repo"] = "git@github.com:O/bundle.git"
+    inner = _ssh_refused(shell, [["git", "fetch", "--", "git@github.com:O/bundle.git", "eng-a"]])
+
+    def answer(argv):
+        if argv[:2] == PROMPTLESS:
+            raise SwarmError("env GIT_TERMINAL_PROMPT=0 could not run: timed out")
+        return inner(argv)
+
+    monkeypatch.setattr(stack, "shell", answer)
+    assert park(doc) == 1
+    says = (
+        f"swarm: cannot fetch eng-a from git@github.com:O/bundle.git: {UNVERIFIED}; "
+        "over https://github.com/O/bundle.git: env GIT_TERMINAL_PROMPT=0 could not run: timed out\n"
+    )
+    assert capsys.readouterr().err == says
     assert "parked_on" not in ledger.rows["t1"]
 
 
@@ -1133,13 +1164,13 @@ def test_restack_fetches_origin_over_https_when_its_ssh_host_cannot_be_verified(
             return subprocess.CompletedProcess(argv, 128, stdout="", stderr=UNVERIFIED)
         if argv == ["git", "remote", "get-url", "origin"]:
             return subprocess.CompletedProcess(argv, 0, stdout="git@github.com:O/r.git\n", stderr="")
-        if argv == ["git", "fetch", "--", "https://github.com/O/r.git", whole]:
-            return real(["git", "fetch", "origin"])
+        if argv == [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/r.git", whole]:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         return real(argv)
 
     monkeypatch.setattr(stack, "shell", answer)
     assert restack() == 0
-    assert ["git", "fetch", "--", "https://github.com/O/r.git", whole] in calls
+    assert [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/r.git", whole] in calls
     assert ledger.rows["t1"]["parked_on"] == []
 
 
