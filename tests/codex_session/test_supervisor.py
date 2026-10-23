@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import socket
@@ -861,3 +862,96 @@ def test_finish_marks_the_stored_record_exited_and_frees_the_endpoint(store, ser
 
 def test_the_protocol_module_is_the_default_connector():
     assert supervisor.Deps().connect is protocol.connect
+
+
+CAPACITY = "Selected model is at capacity. Please try a different model."
+
+
+def item(kind):
+    return {"method": "item/started", "params": {"item": {"type": kind, "id": kind}}}
+
+
+def completed(status, message=""):
+    turn = {"id": "turn-opening", "status": status, "error": {"message": message} if message else None}
+    return {"method": "turn/completed", "params": {"turn": turn}}
+
+
+def reported_spec(store, server, tmp_path):
+    from scripts.profiles import binding
+
+    profile = Path(server.codex_home)
+    (profile / "AGENTS.md").write_text(binding.persona("Engineer instructions.\n"))
+    (profile.parent / "codex.sources.json").write_text("[]")
+    binding.write(profile, "engineer", "codex")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", profile)
+    spec = launch_spec(store, server, tmp_path)
+    return replace(spec, environ={**spec.environ, binding.REPORT: str(report)}), report
+
+
+def test_an_opening_turn_ended_on_capacity_is_started_once_more(store, server, clock, root, tmp_path):
+    server.turn_events = [[item("userMessage"), completed("failed", CAPACITY)], [item("reasoning")]]
+    spec, report = reported_spec(store, server, tmp_path)
+
+    started = supervisor.launch(store, spec, deps(server, clock, root))
+
+    opening = {"threadId": "thread-new", "input": [{"type": "text", "text": "Start the task."}]}
+    assert server.params("turn/start") == [opening, opening]
+    assert (started.record.state, started.record.active_turn_id) == (CONNECTED, "turn-opening")
+    assert json.loads(report.read_text())["state"] == "pending"
+
+
+def test_a_second_capacity_error_fails_the_launch_naming_it(store, server, clock, root, tmp_path):
+    server.turn_events = [[completed("failed", CAPACITY)], [completed("failed", CAPACITY)]]
+    spec, report = reported_spec(store, server, tmp_path)
+
+    failure = failed(store, server, clock, root, spec, "capacity")
+
+    assert len(server.params("turn/start")) == 2
+    reason = f"the opening Codex turn ended twice on a provider capacity error: {CAPACITY}"
+    assert str(failure) == reason
+    assert json.loads(report.read_text())["state"] == "failed"
+    assert json.loads(report.read_text())["reason"] == reason
+    record = only_record(store)
+    assert (record.state, record.last_error_class) == (FAILED, "capacity")
+    assert server.processes[-1].poll() is not None
+    from scripts.profiles import binding
+
+    with pytest.raises(ValueError, match="ended twice on a provider capacity error: Selected model is at capacity"):
+        binding.wait(report, 1)
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        [completed("failed", "stream disconnected before completion")],
+        [completed("completed")],
+        [completed("failed")],
+        [item("agentMessage"), completed("failed", CAPACITY)],
+    ],
+)
+def test_an_opening_turn_without_a_capacity_failure_is_not_started_again(store, server, clock, root, tmp_path, events):
+    server.turn_events = [events, [completed("failed", CAPACITY)]]
+
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+
+    assert len(server.params("turn/start")) == 1
+    assert started.record.state == CONNECTED
+
+
+def test_a_capacity_retry_without_a_profile_report_still_fails_the_launch(store, server, clock, root, tmp_path):
+    server.turn_events = [[completed("failed", CAPACITY)], [completed("failed", CAPACITY)]]
+
+    failed(store, server, clock, root, launch_spec(store, server, tmp_path), "capacity")
+
+    assert len(server.params("turn/start")) == 2
+
+
+def test_the_opening_watch_ends_at_its_deadline(store, server, clock, root, tmp_path, monkeypatch):
+    server.turn_events = [[completed("failed", CAPACITY)]]
+    monkeypatch.setattr(supervisor, "OPENING_WATCH_S", 0.0)
+
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+
+    assert len(server.params("turn/start")) == 1
+    assert started.record.state == CONNECTED
