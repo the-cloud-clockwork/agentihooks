@@ -15,6 +15,8 @@ from scripts.hive import auth
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.hive.nats_grant import Signer
+
 MAX_BODY = 4096
 REQUEST_TIMEOUT_S = 10
 MAX_HANDLERS = 32
@@ -54,7 +56,11 @@ class _TLSHandler(BaseHTTPRequestHandler):
 
 
 def _handler(
-    redis: "Redis", redis_url: str, context: ssl.SSLContext | None, ledger_ca: str | None = None
+    redis: "Redis",
+    redis_url: str,
+    context: ssl.SSLContext | None,
+    ledger_ca: str | None = None,
+    signer: "Signer | None" = None,
 ) -> type[BaseHTTPRequestHandler]:
     class Join(_TLSHandler):
         timeout = REQUEST_TIMEOUT_S
@@ -72,6 +78,10 @@ def _handler(
 
             try:
                 grant = getattr(auth, operation)(redis, value, redis_url)
+                if signer is not None:
+                    from scripts.hive import nats_grant
+
+                    grant["nats_credentials"] = nats_grant.mint(signer, grant["id"])
                 return self._answer(200, {**grant, "ledger_ca": ledger_ca} if ledger_ca else grant)
             except auth.HiveError as exc:
                 if not isinstance(exc.__cause__, (Stalled, Unreachable)):
@@ -175,6 +185,7 @@ def make_server(
     port: int,
     tls: tuple[str, str] | None = None,
     ledger_ca: str | None = None,
+    signer: "Signer | None" = None,
 ) -> ThreadingHTTPServer:
     if tls is None and not is_loopback(host):
         raise auth.HiveError("a hive endpoint off loopback hands out credentials, so it needs --tls-cert and --tls-key")
@@ -185,7 +196,7 @@ def make_server(
             context.load_cert_chain(*tls)
         except (OSError, ssl.SSLError) as exc:
             raise auth.HiveError(f"the TLS certificate or key cannot be loaded ({exc})") from exc
-    return JoinServer((host, port), _handler(bounded(redis), redis_url, context, ledger_ca))
+    return JoinServer((host, port), _handler(bounded(redis), redis_url, context, ledger_ca, signer))
 
 
 def bounded(redis: "Redis") -> "Redis":

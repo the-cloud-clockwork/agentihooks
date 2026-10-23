@@ -47,6 +47,7 @@ INDEX = f"{ROOT}:hives"
 # A Redis started without --aclfile keeps users in memory only; there is nothing to save.
 NO_ACL_FILE = "not configured to use an ACL file"
 ENV_FILE = "hive.env"
+NATS_CREDS_FILE = "hive.creds"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
 
@@ -224,15 +225,22 @@ def revoke(redis: "Redis", member_id: str) -> None:
 
 
 def write_env(home: Path | str, url: str, grant: dict) -> Path:
+    if grant.get("nats_credentials"):
+        grant = {
+            **grant,
+            "bus_credentials": str(_write_private(Path(home) / NATS_CREDS_FILE, grant["nats_credentials"])),
+        }
     return _write_private(Path(home) / ENV_FILE, env_text(url, grant))
 
 
 def env_text(url: str, grant: dict) -> str:
+    bus = f"AGENTIHOOKS_BUS_CREDENTIALS={grant['bus_credentials']}\n" if grant.get("bus_credentials") else ""
     return (
         f"AGENTIHOOKS_HIVE_ID={grant['id']}\n"
         f"AGENTIHOOKS_HIVE_URL={url}\n"
         f"AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL={grant['ledger_credential']}\n"
         f"AGENTIHOOKS_HIVE_REDIS_URL={grant['redis_url']}\n"
+        f"{bus}"
     )
 
 
