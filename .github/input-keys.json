@@ -13,7 +13,7 @@
     "tools": ["python 3.12", "uv 0.12.23", "redis 7-alpine"]
   },
   "helm-kind": {
-    "paths": ["deploy/helm/agentihooks-swarm", ".github/workflows/helm-kind.yml", "Dockerfile", ".dockerignore", "pyproject.toml", "README.md", "docker/swarm/requirements.lock", "docker/swarm-node", "hooks", "scripts", "profiles", "media", "docs/swarm-v2/schemas", "docs/swarm-v2/architecture.json", "tests/kind_request.py", "tests/chart_hive_home.py", "tests/chart_hive_join.py", "tests/chart_network.py", "tests/chart_redis.py", "tests/chart_secrets.py", "tests/chart_workers.py", "tests/fixtures/swarm_v2"],
+    "paths": ["deploy/helm/agentihooks-swarm", ".github/workflows/helm-kind.yml", "Dockerfile", ".dockerignore", "pyproject.toml", "README.md", "docker/swarm/requirements.lock", "docker/swarm-node", "hooks", "scripts", "profiles", "media", "docs/swarm-v2/schemas", "docs/swarm-v2/architecture.json", "tests/kind_request.py", "tests/chart_github_auth.py", "tests/chart_hive_home.py", "tests/chart_hive_join.py", "tests/chart_hive_only.py", "tests/chart_hub.py", "tests/chart_nats.py", "tests/chart_network.py", "tests/chart_redis.py", "tests/chart_secrets.py", "tests/chart_workers.py", "tests/fixtures/swarm_v2"],
     "tools": ["kind v0.33.0", "kindest/node v1.37.0"]
   }
 }
