@@ -259,6 +259,8 @@ def test_a_signer_needs_the_trusted_operator_from_the_environment(monkeypatch, t
         "agentihooks/hub/./s",
         "agentihooks/hub//s",
         "agentihooks/hub/s/",
+        "agentihooks/hub/%2e%2e/k8s/x",
+        "agentihooks/hub/%2e%2e%2fk8s%2fx",
     ],
 )
 def test_a_signer_record_outside_the_hub_path_is_refused(monkeypatch, path):

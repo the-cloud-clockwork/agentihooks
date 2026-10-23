@@ -50,7 +50,7 @@ def from_environ(environ: Mapping[str, str]) -> Signer | None:
     if not path:
         return None
     hub, _, name = path.partition(HUB_PATH)
-    if hub or any(part in ("", ".", "..") for part in name.split("/")):
+    if hub or "%" in name or any(part in ("", ".", "..") for part in name.split("/")):
         raise auth.HiveError(
             f"the NATS signer record {path} holds the system account credential, "
             f"so it must live under the OpenBao path {HUB_PATH} that only the hub role reads"
