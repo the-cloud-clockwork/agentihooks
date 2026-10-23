@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import sys
+import threading
 import traceback
 from collections.abc import Mapping
 from dataclasses import replace
@@ -52,10 +53,12 @@ class LazyPulls:
     def __init__(self, bus: Bus):
         self._bus = bus
         self._pulls: Pulls | None = None
+        self._lock = threading.Lock()
 
     def observe(self, seen: Observation) -> None:
-        if self._pulls is None:
-            self._pulls = Pulls(self._bus)
+        with self._lock:
+            if self._pulls is None:
+                self._pulls = Pulls(self._bus)
         self._pulls.observe(seen)
 
 
