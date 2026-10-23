@@ -373,7 +373,8 @@ class ExecutionRegistry:
                         pipe.unwatch()
                         self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
                     current = AgentRecord(**json.loads(raw))
-                    listed = pipe.hexists(agents, current.name)
+                    heads = {head.execution_id for head in self.occupants(slug, pipe).values()}
+                    listed = execution_id in heads and pipe.hexists(agents, current.name)
                     pipe.multi()
                     if not live:
                         pipe.hdel(archived, execution_id)
