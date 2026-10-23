@@ -51,9 +51,10 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
    `task.changed`, `task.removed`, `phase.changed` or `phase.removed` event on `swarm.<slug>.task.<id>` or
    `swarm.<slug>.phase.<id>`. All events live in the `AGENTIHOOKS_EVENTS` stream. Each time `claimed_by` changes, the
    task's `claim_generation` goes up by one.
-2. **Offer.** The hub's `readiness` reactor offers each claimable task of an `events` swarm once per claim generation.
-   The offer is a `task.ready` event, with id `ready:<slug>:<task>:<generation>`, on the lane work queue
-   `swarm.<slug>.ready.<lane>`. The bus drops a repeated id that arrives within 120 seconds. Each work queue is its own
+2. **Offer.** The hub's `readiness` reactor offers each claimable task of an `events` swarm on every pass. The
+   offer is a `task.ready` event, with id `ready:<slug>:<task>:<generation>`, on the lane work queue
+   `swarm.<slug>.ready.<lane>`. The bus drops a repeat of the same id that arrives within 120 seconds, so a task
+   nobody claims is offered again after that window. Each work queue is its own
    stream on `agentihooks.queue.<name>`.
 3. **Pull.** A hive's spoke takes an offer only when it has room. Before it acts, it checks the offer against a fresh
    ledger read. It terminates an offer that is stale: the task is gone, claimed, no longer open, on a different

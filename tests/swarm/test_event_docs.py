@@ -11,7 +11,7 @@ from scripts.events.nats import EVENT_STREAM, QUEUE_SUBJECT
 from scripts.events.subjects import PREFIX
 from scripts.hive import presence
 from scripts.hive.buckets import NAMES
-from scripts.hub import lease, registry
+from scripts.hub import hive_loss, lease, registry
 from scripts.swarm.store import EVENTS_ENGINE
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -109,7 +109,7 @@ def test_hives_page_states_presence_timing_and_hive_loss():
     text = _hives()
     assert f"every {presence.BEAT_SECONDS} seconds" in text
     assert f"{presence.TTL_MS // 1000} seconds" in text
-    assert "`hive-lost`" in text
+    assert f"`{hive_loss.REASON}`" in text
     assert "agentihooks swarm spoke" in text
 
 
