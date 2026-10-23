@@ -125,7 +125,7 @@ def test_a_missing_hive_user_is_red(tmp_path, capsys):
 
 
 def _operator_antoncore(tmp_path: Path, permissions: dict, user: str = grants.HIVE_USER) -> Path:
-    root = tmp_path / "antoncore"
+    root = tmp_path / "operator" / "antoncore"
     values = root / grants.HIVE_VALUES
     values.parent.mkdir(parents=True)
     values.write_text(yaml.safe_dump({"config": {"merge": {"operator": "eyJ", "resolver": {"type": "full"}}}}))
