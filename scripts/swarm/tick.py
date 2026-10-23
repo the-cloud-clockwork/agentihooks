@@ -223,7 +223,8 @@ def tick(slug, store, ledger, runtime, now_ms):
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    actions += skip_refused(_orphans, slug, store, ledger, rows)
+    if config.engine != EVENTS_ENGINE:
+        actions += skip_refused(_orphans, slug, store, ledger, rows)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
@@ -1230,6 +1231,8 @@ def _finished_early(slug, store, doc, agent):
 
 
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
+    if config.engine == EVENTS_ENGINE:
+        return []
     from scripts.swarm_v2.runtime import codex
 
     rows, actions = {t["id"]: t for t in doc["tasks"]}, []

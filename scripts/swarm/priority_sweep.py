@@ -186,13 +186,13 @@ RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"resolves": (True, Fals
 
 
 def _resolve(ledger, slug, row, write, reason):
+    ledger.comment_item(slug, row["item"], CLEARED.format(reason=reason))
     ledger.clear_priority(slug, row["id"], reason)
     name = _split(row["item"])[0]
     if name == "followups":
         ledger.mark_done(slug, row["item"])
     if name == "questions" and write.by == OPERATOR and write.kind == "comment":
         ledger.answer_as_operator(slug, row["item"], write.text)
-    ledger.comment_item(slug, row["item"], CLEARED.format(reason=reason))
 
 
 def _cleared(row, reason):
