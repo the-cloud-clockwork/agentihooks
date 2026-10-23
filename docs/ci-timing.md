@@ -1327,6 +1327,176 @@ and keep `start` in the filter.
   carried the preferred term and no required term, four `anton-oss-batch` pods
   scheduled at creation, and no batch `FailedScheduling` event followed.
 
+## Registry lookups lost to a node address conflict (20 October 2026)
+
+From 10:39 to 12:24 UTC on 20 October 2026 the on premises node
+`k8s-worker-1` could not resolve `ghcr.io`. The home router had leased the
+node's fixed address, `10.10.30.141`, to a phone. While the phone was on Wi-Fi
+the router sent traffic for `.141`, DNS answers included, to the phone. The
+node's own resolver configuration was correct. The router was fixed by hand at
+12:23 UTC, and
+[antoncore pull request 997](https://github.com/the-cloud-clockwork/antoncore/pull/997)
+keeps the LAN address plan in git and alerts on any future conflict.
+
+### What CI saw
+
+- The kubelet on `k8s-worker-1` failed every pull of
+  `ghcr.io/the-cloud-clockwork/arc-runner:dev` with
+  `failed to resolve reference`, `dial tcp: lookup ghcr.io: Try again` and a
+  cancelled token fetch. Only `ghcr.io` lookups failed.
+- At about 11:45 UTC 13 pods on the node sat in `ImagePullBackOff`, 10 of them
+  `anton-oss-light` runners out of a pool of 20. Merge group `select` and queue
+  fail fast jobs waited about eight minutes for a runner, in Tests runs
+  [39415747711](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39415747711)
+  and [39415749847](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39415749847).
+- At 11:55 UTC the ARC listeners for `anton-oss-queue`, `anton-oss-batch` and
+  `anton-oss-light`, all on `k8s-worker-1`, logged `request failed` on their
+  GitHub calls, so those scale sets could not scale. The `agentihooks-swarm`
+  controller pod on the node was also in `ImagePullBackOff`.
+- Runner pods on the `anton-oci` nodes pulled and ran. Prometheus showed no
+  pull errors on `k8s-worker-2` for the whole window.
+
+### Cause
+
+The router's DHCP pool was `10.10.30.130` to `.254`. That range covered the
+Anton host, every Kubernetes node, the automation VM and the MetalLB service
+addresses. The nodes use static addresses and had no router reservations, so
+the router could hand `.141` to any device that joined.
+
+`k8s-worker-1` resolves through the systemd stub at `127.0.0.53`, whose uplinks
+are `10.10.30.1` (the router) and `8.8.8.8`. Its netplan sets static
+`10.10.30.141/24` with the router as default gateway. Both DNS paths therefore
+leave through the router, and the router's ARP entry for `.141` decides whether
+the answers reach the node or the phone.
+
+The failures follow the phone's Wi-Fi sessions in the router log. Times are UTC;
+the router clock runs one hour ahead and is corrected here.
+
+| UTC | Phone on the router | `k8s-worker-1` |
+|---|---|---|
+| 10:37:54 | Associates | 21 lookup failures at 10:39; node `Ready` 0 at the 10:40 sample |
+| 10:47:59 | Leaves Wi-Fi | No failures from 10:40 to 11:09 |
+| 11:09:10 | Associates | Failures from 11:10, peak 131 a minute at 11:19, 45 to 90 a minute until 12:05; node `Ready` 0 at the 11:10 sample |
+| 12:06 to 12:14 | Still associated | A dip to 10 to 28 failures a minute, then 34 to 80 a minute from 12:15 to 12:22 |
+| 12:20:59 to 12:23:07 | Router reconfigured: pool moved, node addresses reserved, dnsmasq restarted | `NodeNotReady` event at about 12:23 |
+| 12:22:30, 12:23:14, 12:24:24 | Router deauthenticates the phone | Last failure at 12:24:56, none since |
+| 12:30:05 | Phone returns with lease `10.10.30.128` | At 12:51 `ghcr.io` resolves through `10.10.30.1`, `8.8.8.8` and `127.0.0.53` |
+
+The partial recovery seen around 12:00 to 12:10 UTC was the dip in the table,
+not a fix. Lookups failed again until the phone left `.141`.
+
+The Redis timeouts from 11:20 to 11:30 UTC the same day had a separate cause.
+They lasted ten minutes while the DNS failures ran from 11:10 to 12:24, and
+neither the swarm Redis nor the Langfuse Redis sits on `.141`. They match the
+Anton host memory stall in
+[antoncore issue 998](https://github.com/the-cloud-clockwork/antoncore/issues/998).
+Doctor task t539 found that `k8s-worker-1` had left the cluster earlier that
+day because the Unraid host shut its VM off for memory; it turned `Ready` again
+at 11:10:30 UTC.
+
+### The LAN address plan
+
+The plan lives in the `lan-plan` ConfigMap in namespace `anton-ops`, file
+`k8s/manifests/ops/lan-plan.yaml` in antoncore. The ArgoCD application
+`ops-config` syncs `k8s/manifests/ops` from antoncore `dev`.
+
+| Range or address | Use |
+|---|---|
+| `10.10.30.1` | Router |
+| `10.10.30.2` to `.129` | DHCP pool for home devices |
+| `10.10.30.130` | Anton host, reserved to its MAC |
+| `10.10.30.140` to `.143` | `k8s-master`, `k8s-worker-1`, `k8s-worker-2`, `k8s-worker-001`, each reserved to its MAC |
+| `10.10.30.150` | Automation VM, reserved to its MAC |
+| `10.10.30.184` | Workbench, reserved to its MAC |
+| `10.10.30.200` to `.210` | MetalLB service addresses, answered only by node MACs |
+
+Infra and MetalLB addresses stay outside the DHCP pool. To add a host, add a
+`host` or `node` row with its address, MAC and name to `lan-plan.txt`, merge
+the change into antoncore `dev`, then write it to the router as below.
+
+### Router drift check
+
+`automation/router_lan.py` in antoncore compares the router's `dhcp_start`,
+`dhcp_end`, `dhcp_staticlist` and `dhcp_static_x` settings with the plan. It
+runs from the workbench through the `router` SSH host alias.
+
+```bash
+python3 automation/router_lan.py           # report drift, exit 1 if any
+python3 automation/router_lan.py --apply   # write the plan, commit, restart dnsmasq
+```
+
+A matching router prints `router matches the LAN plan` and exits 0. Drift
+prints one line per difference, such as
+`reservation missing on router: <MAC> 10.10.30.141` or
+`dhcp_end: router='10.10.30.254' plan='10.10.30.129'`, and exits 1. `--apply` writes every setting, reads the router back and prints
+`applied; router matches the LAN plan`. Run it with `--apply` after a router
+reset or a plan change.
+
+### Conflict alert
+
+The `lan-ip-conflict` CronJob in `anton-ops` runs every ten minutes on an on
+premises worker: a node without the `anton.io/node-pool` label and without the
+control plane role. It uses the host network and `NET_RAW`, so its ARP probes
+leave the node's LAN interface. Cloud nodes are not on `10.10.30.0/24` and never
+run it.
+
+Each run sends `arping` to the router, then to every `host` and `node` address
+and every MetalLB address, 18 in all with the current plan:
+
+| Result | Output and exit | Alert to ntfy `anton-critical` |
+|---|---|---|
+| Every address answered only by its own MAC, or by any node MAC for MetalLB | `{"checked": 18, "conflicts": []}`, exit 0 | None |
+| A MAC that does not own an address answers for it | Conflict list such as `10.10.30.141 (k8s-worker-1) answered by <MAC>`, exit 1 | `LAN IP conflict on infra address`, urgent, with the MAC and the address |
+| The router gives no ARP reply, or the check itself fails | `lan-ip-conflict DEGRADED: <reason>; the LAN is unchecked.`, exit 2 | `LAN check degraded`, urgent |
+
+The alert asks the reader to find the MAC in the router's client list and move
+that device off the address. A conflict on a node address can stop image pulls
+and GitHub calls on that node, as on 20 October.
+
+### Read only checks
+
+```bash
+kubectl get cronjob lan-ip-conflict -n anton-ops
+kubectl get jobs -n anton-ops | grep lan-ip-conflict
+kubectl logs -n anton-ops job/<latest lan-ip-conflict job>
+kubectl get pods -A -o wide --field-selector spec.nodeName=k8s-worker-1 | grep -E 'ImagePullBackOff|ErrImagePull'
+```
+
+Pull errors by node in Prometheus:
+
+```promql
+sum by (node) (increase(kubelet_runtime_operations_errors_total{operation_type="pull_image"}[5m]))
+```
+
+On 23 October 2026 the latest run logged `{"checked": 18, "conflicts": []}`.
+
+### Troubleshooting
+
+| Symptom | Inspection |
+|---|---|
+| Runner pods on one on premises node fail with `lookup ghcr.io: Try again` while other nodes pull | Read the latest `lan-ip-conflict` log and the router's client list for a device on the node's address; run `router_lan.py` for drift |
+| `LAN IP conflict on infra address` alert | Find the named MAC in the router's client list, move the device off the address, then run `router_lan.py --apply` if a reservation is missing |
+| `LAN check degraded` alert | The router did not answer ARP or the check failed; read the job log for the reason. No conflicts are checked until it passes |
+| `router_lan.py` reports `dhcp_end` or reservation drift | The router was reset or edited by hand; run it with `--apply` |
+| A new infra host gets a pool address | Add its row to `lan-plan.txt`, merge into antoncore `dev`, then run `router_lan.py --apply` |
+| Lookups recover for a few minutes and fail again | Expected while a conflict lasts: the failures follow the other device's Wi-Fi sessions. Wait for the conflict to clear rather than reading a dip as recovery |
+| ARC listeners on the node log `request failed` | Same cause as the pull failures when the node's address is in conflict; listeners recover once the node's traffic returns |
+
+### Delivery evidence
+
+- Diagnosis: Doctor task t577, read only. Node resolver config, k3s agent
+  journal, router Wi-Fi log and lease table and Prometheus pull errors, posted
+  on [antoncore issue 978](https://github.com/the-cloud-clockwork/antoncore/issues/978#issuecomment-6291273482).
+- Fix: router changed by hand from 12:20:59 to 12:23:07 UTC on 20 October.
+  [antoncore pull request 997](https://github.com/the-cloud-clockwork/antoncore/pull/997)
+  merged into `dev` at 12:53:30 UTC with the plan, `router_lan.py`, the
+  CronJob and `tests/unit/automation/test_lan_plan.py`. Its evidence:
+  `router_lan.py` against the live router printed
+  `router matches the LAN plan`; an `arping` from a host network pod on `k8s-worker-2` returned
+  `k8s-worker-1`'s MAC for `.141` and the phone's MAC for `.128`.
+- After: no `lookup ghcr.io` failure on `k8s-worker-1` after 12:24:56 UTC, and
+  zero pull errors for the node in Prometheus from 12:20.
+
 ## Resource sampling and stop condition regression checks
 
 Two regression checks cover live process tree sampling and a pre push gate that overruns its stop condition budget. Their checks distinguish sampling leaks from inherited garbage, and condition execution time from hook startup and exit time.
