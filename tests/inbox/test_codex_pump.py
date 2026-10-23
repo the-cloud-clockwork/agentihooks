@@ -1368,7 +1368,8 @@ def test_a_contended_reservation_retries_with_backoff_and_delivers_on_the_same_s
     item = rig.store.send("alice", ME, "after contention")
     monkeypatch.setattr(rig.pump.dispatcher, "_reserve", contended(rig.pump.dispatcher._reserve, 2))
     sleeps = recorded_sleeps(rig)
-    assert rig.pump.run(lambda: rig.store.get(item.id).state == "delivered") == codex.STOPPED
+    assert rig.run(6) == codex.STOPPED
+    assert rig.store.get(item.id).state == "delivered"
     assert sleeps == [codex.BACKOFF_S, codex.BACKOFF_S * 2]
     assert rig.logged == [codex.CONTENDED_LOG.format(ME, "the inbox changed meanwhile; run it again")] * 2
     assert rig.server.methods().count("thread/resume") == 1
@@ -1381,7 +1382,8 @@ def test_a_contended_submission_is_released_and_delivered_once(rig, monkeypatch)
     item = rig.store.send("alice", ME, "submitted after contention")
     monkeypatch.setattr(rig.pump.receipts, "_submit", contended(rig.pump.receipts._submit, 1))
     sleeps = recorded_sleeps(rig)
-    assert rig.pump.run(lambda: rig.store.get(item.id).state == "delivered") == codex.STOPPED
+    assert rig.run(4) == codex.STOPPED
+    assert rig.store.get(item.id).state == "delivered"
     assert sleeps == [codex.BACKOFF_S]
     assert rig.server.methods().count("thread/resume") == 1
     assert rig.server.methods().count("turn/start") == 1
@@ -1398,7 +1400,7 @@ def test_owner_loss_while_retrying_contention_still_ends_the_pump(rig, monkeypat
 
     monkeypatch.setattr(rig.pump.dispatcher, "_reserve", contended(rig.pump.dispatcher._reserve, 99, takeover))
     sleeps = recorded_sleeps(rig)
-    assert rig.pump.run(lambda: False) == DEGRADED
+    assert rig.run(20) == DEGRADED
     assert sleeps == []
     assert rig.logged[-1] == f"codex pump for {ME} degraded: DispatchError: {OWNER} no longer delivers for {ME}"
     assert rig.server.methods().count("turn/start") == 0

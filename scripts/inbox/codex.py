@@ -35,6 +35,10 @@ CONTENDED_LOG = "codex pump for {} retries inbox contention: {}"
 BUS_LOST = "codex pump for {} lost its bus inbox, Redis reconcile delivers meanwhile: {}"
 
 
+def steady() -> None:
+    pass
+
+
 def envelope(item: Item, delivery: Delivery) -> str:
     return delivery_envelope(item, delivery.id, delivery.recipient)
 
@@ -217,9 +221,8 @@ class Pump:
                     if pause:
                         self._pause(pause)
                         pause = 0.0
-                    if resume is not None:
-                        resume()
-                        resume = None
+                    resume()
+                    resume = steady
                     if stop():
                         return STOPPED
                     self.step()
@@ -228,7 +231,7 @@ class Pump:
                     return DEGRADED
                 except InboxContention as failure:
                     self.log(CONTENDED_LOG.format(self.binding.recipient, failure))
-                    resume = resume or self._resync
+                    resume = self._resync if resume is steady else resume
                 except DispatchError as failure:
                     self._degrade(failure)
                     return DEGRADED
