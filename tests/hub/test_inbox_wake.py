@@ -311,6 +311,7 @@ def test_configured_hub_routes_arrivals_and_expiry_using_its_clock(rig, monkeypa
     from scripts.hub.runner import HubRunner
 
     monkeypatch.setattr(inbox_wake, "connect", lambda: rig.reactor.store)
+    monkeypatch.setattr("scripts.inbox.bus.time.time_ns", lambda: 999_000_000)
     monkeypatch.setattr(inbox_wake, "HerdrMessenger", lambda: rig.herdr)
     monkeypatch.setattr(inbox_wake, "LedgerClient", lambda service: rig.ledger)
     reactors = registry.configured(rig.bus, clock=lambda: rig.clock.now)
@@ -444,6 +445,17 @@ def test_redelivery_window_uses_the_reactors_environment(rig, redelivery):
         assert pending[0]["reason"] == "redelivered: never confirmed inside the redelivery window"
 
 
+
+def test_late_first_expiry_keeps_a_delivery_inside_its_custom_confirmation_window(rig):
+    rig.reactor.environ = {"AGENTIHOOKS_INBOX_REDELIVER_S": "1000"}
+    item, _ = send(rig)
+    rig.inbox.deliver(item.id, "worker")
+    advance(rig, 1000 + W)
+    assert rig.inbox.get(item.id).state == "delivered"
+    assert steps(rig, item) == []
+    assert rig.herdr.prompts == []
+
+
 def test_custom_quiet_window_protects_a_recent_operator_prompt(rig):
     from scripts.swarm import idle
 
@@ -522,8 +534,8 @@ def test_non_inbox_deadlines_and_wrong_arrival_entities_are_ignored(rig):
     [arrival] = rig.bus.events.consumer("wrong-arrival-proof", "swarm.*.inbox-wake.requested").fetch(10, 0)
     [request] = rig.bus.events.consumer("wrong-kind-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
     before = len(rig.bus.events.entries)
-    rig.reactor.handle(replace(arrival.event, entity="other", key="other-item"))
-    rig.reactor.handle(replace(arrival.event, type="execution.changed", key="another-item"))
+    rig.reactor.handle(replace(arrival.event, id="wrong-entity", entity="other", key="other-item"))
+    rig.reactor.handle(replace(arrival.event, id="wrong-type", type="execution.changed", key="another-item"))
     expired = deadlines.expired(request.event)
     rig.reactor.handle(replace(expired, data={**expired.data, "kind": "idle"}))
     assert len(rig.bus.events.entries) == before
