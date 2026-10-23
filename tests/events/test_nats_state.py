@@ -142,3 +142,18 @@ def test_retained_legacy_state_requires_authoritative_key_ownership():
         ScopedStateStore(backend, "rig", "work")
     assert str(caught.value) == "legacy state requires explicit key ownership"
     backend._js.add_stream.assert_not_awaited()
+
+
+def guard_state_reads(js):
+    original = js.get_msg
+
+    async def get_msg(stream, **kwargs):
+        if "_STATE_" in stream:
+            assert isinstance(kwargs.get("seq"), int) and kwargs["seq"] >= 1
+            assert kwargs.get("next") is True
+        result = await original(stream, **kwargs)
+        if "_STATE_" in stream:
+            assert result.seq >= kwargs["seq"]
+        return result
+
+    js.get_msg = get_msg

@@ -26,6 +26,9 @@ def hub(signer):
             backend="nats", url=signer.url, scoped=True, credentials=_user_creds(signer.account, "hub"), queue=POLICY
         )
     )
+    from tests.events.test_nats_state import guard_state_reads
+
+    guard_state_reads(bus._js)
     try:
         yield bus
     finally:
@@ -160,6 +163,13 @@ def test_legacy_bus_and_scoped_bus_keep_working_on_the_same_server(signer):
 
 
 def test_hub_fans_in_scoped_event_streams_with_existing_reactor_filters(hub):
+    inventory = hub._js.streams_info_iterator
+
+    async def bounded_inventory(*, offset):
+        assert isinstance(offset, int) and offset >= 0
+        return await inventory(offset=offset)
+
+    hub._js.streams_info_iterator = bounded_inventory
     consumer = hub.events.consumer("aggregate", "swarm.*.execution.started")
     assert hub.events.publish(subject("rig", "execution", "started"), event())
     assert hub.events.publish(subject("other", "execution", "started"), event("other", "second"))

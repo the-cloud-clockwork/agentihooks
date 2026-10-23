@@ -50,6 +50,8 @@ def test_scope_provisions_dedupe_and_buckets_then_reuses_owned_resources(monkeyp
         _config=config, _loop=SimpleNamespace(run=asyncio.run), _js=SimpleNamespace(add_stream=AsyncMock())
     )
     view = nats_scope.NatsScopedBus(root, "rig")
+    assert view.events._log._swarm == "rig"
+    assert view.dead._log._swarm == "rig"
     assert [call.kwargs for call in root._js.add_stream.await_args_list] == [
         {"name": stream_name("rig", "EVENTS"), "subjects": ["swarm.rig.events.>"], "duplicate_window": 12.345},
         {"name": stream_name("rig", "DEAD"), "subjects": ["swarm.rig.dead.>"], "duplicate_window": 12.345},

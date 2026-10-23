@@ -14,6 +14,9 @@ def buses(signer):
     credential = _user_creds(signer.account, "migration")
     legacy = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credential))
     scoped = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credential, scoped=True))
+    from tests.events.test_nats_state import guard_state_reads
+
+    guard_state_reads(scoped._js)
     try:
         yield legacy, scoped
     finally:
@@ -65,7 +68,17 @@ def test_dead_letter_migration_keeps_retained_letters(buses):
     foreign = Envelope("foreign", "dead_lettered", "other", "task", "work", 1, 0, "hub", {})
     legacy.dead.publish("dead.rig", letter)
     legacy.dead.publish("dead.other", foreign)
+    read = hub._js.get_msg
+    seen = []
+
+    async def advancing_read(stream, *, seq):
+        assert seq == len(seen) + 1
+        seen.append(seq)
+        return await read(stream, seq=seq)
+
+    hub._js.get_msg = advancing_read
     hub.migrate_dead("rig")
+    assert seen == [1, 2]
     target = hub.for_swarm("rig").dead.consumer("migrated", "dead.>")
     deliveries = target.fetch(10, 1000)
     assert [delivery.event for delivery in deliveries] == [letter]

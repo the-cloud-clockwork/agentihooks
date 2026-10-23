@@ -77,6 +77,11 @@ def test_scoped_memory_queue_root_routing_and_immutable_views():
         assert queue.policy == policy
         assert queue.offer(work("rig"))
         assert queue.take(10).event == work("rig")
+        other_lane = own.queue("ci", policy)
+        assert other_lane is not queue
+        assert other_lane.offer(work("rig"))
+        assert queue.take(1) is None
+        assert other_lane.take(10).event == work("rig")
         assert own.for_swarm("rig") is own
         with pytest.raises(ValueError) as caught:
             own.for_swarm("other")
