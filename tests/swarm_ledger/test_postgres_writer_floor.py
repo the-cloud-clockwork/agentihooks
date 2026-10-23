@@ -95,7 +95,8 @@ def test_a_writer_on_code_without_the_check_is_refused_and_no_replica_rebuilds_i
         monkeypatch.undo()
         repository.apply_ops(slug, changes=[DONE])
     texts = [a["text"] for a in repository.get_document(slug)["alerts"] if a["source"] == "writer"]
-    assert f"The ledger writer at 127.0.0.1 was refused: {refusal(0, postgres.REQUIRED)}" in texts
+    old_writer = [t for t in texts if t.endswith(f" was refused: {refusal(0, postgres.REQUIRED)}")]
+    assert len(old_writer) == 1 and old_writer[0].startswith("The ledger writer at ")
 
 
 def test_a_writer_on_code_without_the_check_passes_when_it_records_its_changed_rows(ledger):
