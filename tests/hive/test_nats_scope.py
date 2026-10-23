@@ -233,13 +233,22 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
     assert claims["sub"] == {"allow": ["swarm.rig.>", f"_INBOX.{user.public}.>"]}
 
 
-@pytest.mark.parametrize("memberships", [{}, {"another": ("rig",)}, {"m1": ()}])
-def test_unlisted_or_empty_membership_carries_an_explicit_publish_deny(signer, memberships):
-    scoped = replace(signer, member_swarms=memberships)
+def test_empty_membership_carries_an_explicit_publish_deny(signer):
+    scoped = replace(signer, member_swarms={"m1": ()})
     jwt, user = nkey.parse_creds(nats_grant.mint(scoped, "m1"))
     claims = nkey.claims(jwt)["nats"]
     assert claims["pub"] == {"deny": [">"]}
     assert claims["sub"] == {"allow": [f"_INBOX.{user.public}.>"]}
+
+
+@pytest.mark.parametrize("memberships", [{}, {"another": ("rig",)}])
+def test_unlisted_membership_mints_no_credential(signer, memberships):
+    scoped = replace(signer, member_swarms=memberships)
+    with pytest.raises(auth.HiveError) as error:
+        nats_grant.mint(scoped, "m1")
+    assert str(error.value) == (
+        "the hub record lists no member swarms for hive member m1; it mints no unscoped bus credential"
+    )
 
 
 @pytest.mark.parametrize(
