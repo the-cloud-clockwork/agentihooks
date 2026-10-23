@@ -181,7 +181,7 @@ def test_run_tick_slower_than_the_lease_finishes(env, clock, monkeypatch):  # no
         return []
 
     monkeypatch.setattr(cli.phase_planning, "planning_pass", slow)
-    monkeypatch.setattr(cli.wake, "wake_pass", slow)
+    monkeypatch.setattr(cli.wake, "maintenance", slow)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert clock[0] - started > lease.ttl_ms()
     assert lease.current(store, "sw").epoch == 1

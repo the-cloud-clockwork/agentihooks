@@ -5,7 +5,7 @@ from dataclasses import replace
 from scripts.events.envelope import Envelope
 from scripts.events.subjects import subject as event_subject
 
-KINDS = frozenset({"idle", "stale", "handoff"})
+KINDS = frozenset({"idle", "stale", "handoff", "inbox"})
 REQUESTS = frozenset({"deadline.scheduled", "deadline.cancelled"})
 SUBJECT = "swarm.*.deadline.*"
 
