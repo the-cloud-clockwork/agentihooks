@@ -128,6 +128,12 @@ def running_executions(redis: "Redis", reports: list[dict]) -> set[tuple[str, st
     }
 
 
+def live(redis: "Redis", hive: str) -> list[dict]:
+    reports = [report for report in listing(redis, hive) if "ended_at" not in report]
+    running = running_executions(redis, reports)
+    return [report for report in reports if (report["slug"], report["execution_id"], report["generation"]) in running]
+
+
 def end_gone(redis: "Redis", hive: str, reports: list[dict], at: int) -> list[dict]:
     running = running_executions(redis, reports)
     kept = []
