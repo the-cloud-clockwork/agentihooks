@@ -147,4 +147,6 @@ def test_a_parked_retirement_refunds_nothing_once_the_agent_no_longer_holds_its_
     lives, spawned = store.claims("sw", "t1"), len(runtime.spawned)
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert agent.name in runtime.killed
-    assert store.claims("sw", "t1") == lives + len(runtime.spawned) - spawned
+    new_claims = len(runtime.spawned) - spawned
+    refunded = lives + new_claims - store.claims("sw", "t1")
+    assert refunded == 0
