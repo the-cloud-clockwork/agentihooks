@@ -503,8 +503,10 @@ def test_a_check_that_ends_after_a_newer_check_decided_is_dropped(store):
     guard = tick_watch.Guard()
     guard.decided = START + MINUTE
 
-    assert tick_watch.watch_pass(store, "sw", START, START, guard=guard) == []
-    assert alerts(store) == []
+    repaired = []
+
+    assert tick_watch.watch_pass(store, "sw", START, START, lambda slug, now: repaired.append(slug), guard) == []
+    assert (alerts(store), repaired) == ([], [])
     assert guard.decided == START + MINUTE
 
 

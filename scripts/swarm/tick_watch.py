@@ -37,7 +37,10 @@ def recipients(store: RedisStore, slug: str) -> list[str]:
 
 
 class Guard:
-    """One swarm's checks decide one at a time, and a check older than the last decision is dropped."""
+    """One swarm's checks decide one at a time, and a check older than the last decision is dropped.
+
+    A check stuck while it decides holds the later ones back until the blocked limit exits the watcher.
+    """
 
     def __init__(self):
         self.lock, self.decided, self.stuck = Lock(), None, []
@@ -65,7 +68,7 @@ def watch_pass(
         if not evidence:
             return _resolve(store, slug, now, episode, RESOLVED, "runs again") if episode else []
         told = _alert(store, slug, now, episode, evidence)
-    return told + (repair(slug, now) if repair and not tick_heartbeat.halted(store, slug) else [])
+        return told + (repair(slug, now) if repair and not tick_heartbeat.halted(store, slug) else [])
 
 
 class Repair:
@@ -138,7 +141,7 @@ def run(
 
 
 def _judge(store, slug, now, since, repair, held, beat) -> None:
-    guard = held.setdefault(slug, Guard())
+    guard = held[slug] = held.get(slug) or Guard()
     worker = Thread(target=_pass, args=(store, slug, now, since, repair, guard), daemon=True)
     worker.start()
     guard.stuck = [thread for thread in guard.stuck if thread.is_alive()]
