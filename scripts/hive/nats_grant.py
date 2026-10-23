@@ -40,6 +40,7 @@ ACCOUNT_LIMITS = {
 }
 MEMBER_PUBLISH = (
     "swarm.*.execution.>",
+    "swarm.*.slots",
     "dead.*",
     "dead.*.*",
     "$JS.API.INFO",
