@@ -242,7 +242,7 @@ def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> N
 
 def opening_end(connection: protocol.Connection, events: list[dict], deadline: float, clock: Callable) -> dict:
     """The opening turn as it completed; empty once the model answers or the watch ends first."""
-    while True:
+    for _ in range(MAX_POLLS):
         while events:
             message = events.pop(0)
             params = message.get("params") or {}
@@ -252,6 +252,7 @@ def opening_end(connection: protocol.Connection, events: list[dict], deadline: f
                 return {}
         if not connection.poll(deadline - clock()):
             return {}
+    return {}
 
 
 def open_turn(connection: protocol.Connection, thread_id: str, launch: Launch, deps: Deps) -> str:
