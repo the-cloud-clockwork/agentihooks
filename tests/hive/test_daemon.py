@@ -1301,6 +1301,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
                 "pane": {
                     "state": "idle",
                     "prompt_title": "",
+                    "prompt_options": [],
                     "typed": "half",
                     "provider_error": "",
                     "provider_checked": False,
