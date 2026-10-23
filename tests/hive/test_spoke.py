@@ -918,3 +918,33 @@ def test_presence_keeps_renewing_while_the_runtime_blocks(rig, monkeypatch):
     rig.runtime.spawn.side_effect = spawn
     assert rig.spoke.poll() == "started"
     rig.runtime.spawn.assert_called_once()
+
+
+def test_failed_renewal_during_request_loading_prevents_spawn_and_releases_claim(rig, monkeypatch):
+    import json
+    import threading
+
+    from scripts.hive import presence, spoke
+
+    failed = threading.Event()
+    original = presence.beat
+    failure = RuntimeError("presence lost")
+
+    def beat(bus, hive, at_ms):
+        if loading.is_set():
+            failed.set()
+            raise failure
+        return original(bus, hive, at_ms)
+
+    def request(event):
+        loading.set()
+        assert failed.wait(2)
+        return rig.request
+
+    loading = threading.Event()
+    rig.tasks.request.side_effect = request
+    monkeypatch.setattr(presence, "BEAT_SECONDS", 0.001)
+    monkeypatch.setattr(presence, "beat", beat)
+    assert rig.spoke.poll() == "retry"
+    rig.runtime.spawn.assert_not_called()
+    assert json.loads(rig.bus.state("spoke-work").get(spoke.claim_key(rig.event)).value) == {"state": "ready"}

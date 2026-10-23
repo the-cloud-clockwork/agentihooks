@@ -60,12 +60,16 @@ class Spoke:
 
     def poll(self, timeout_ms: int = 0) -> str:
         try:
-            presence.beat(self.bus, self.config.hive, self.clock())
-            recovered = self._recover()
+            with presence.Heartbeat(self.bus, self.config.hive, self.clock) as heartbeat:
+                return self._poll(timeout_ms, heartbeat)
         except Exception:
             return "retry"
+
+    def _poll(self, timeout_ms: int, heartbeat: presence.Heartbeat) -> str:
+        recovered = self._recover()
         if recovered in ("busy", "uncertain"):
             return recovered
+        heartbeat.check()
         if admission.room(self.measure()).room < 1:
             return recovered or "held"
         try:
@@ -76,7 +80,8 @@ class Spoke:
         if delivery is None:
             return recovered or "empty"
         try:
-            return self._apply(delivery)
+            heartbeat.check()
+            return self._apply(delivery, heartbeat)
         except Exception:
             return self._retry(delivery)
 
@@ -133,7 +138,7 @@ class Spoke:
         self._clear_pending(pending.revision)
         return None if status == "ready" else status
 
-    def _apply(self, delivery: Delivery) -> str:
+    def _apply(self, delivery: Delivery, heartbeat: presence.Heartbeat) -> str:
         event = delivery.event
         claims = self.bus.state("spoke-work")
         key = claim_key(event)
@@ -167,7 +172,7 @@ class Spoke:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
             raise
         try:
-            started = self._spawn(event, key, revision)
+            started = self._spawn(event, key, revision, heartbeat)
         except Exception:
             current = json.loads(claims.get(key).value)
             if current["state"] == "ready" and delivery.attempt < self.config.policy.max_deliver:
@@ -182,7 +187,7 @@ class Spoke:
         delivery.ack()
         return "started"
 
-    def _spawn(self, event: Envelope, key: str, revision: int) -> Envelope | None:
+    def _spawn(self, event: Envelope, key: str, revision: int, heartbeat: presence.Heartbeat) -> Envelope | None:
         claims = self.bus.state("spoke-work")
         try:
             request = self.tasks.request(event)
@@ -190,6 +195,7 @@ class Spoke:
                 execution_id = request.task["execution_id"]
                 generation = request.task["execution_generation"]
                 task_generation = request.task["claim_generation"]
+            heartbeat.check()
         except Exception:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
             raise
