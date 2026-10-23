@@ -890,7 +890,8 @@ def reported_spec(store, server, tmp_path):
 
 
 def test_an_opening_turn_ended_on_capacity_is_started_once_more(store, server, clock, root, tmp_path):
-    server.turn_events = [[item("userMessage"), completed("failed", CAPACITY)], [item("reasoning")]]
+    started_turn = {"method": "turn/started", "params": {"turn": {"id": "turn-opening", "status": "inProgress"}}}
+    server.turn_events = [[started_turn, item("userMessage"), completed("failed", CAPACITY)], [item("reasoning")]]
     spec, report = reported_spec(store, server, tmp_path)
 
     started = supervisor.launch(store, spec, deps(server, clock, root))

@@ -40,6 +40,11 @@ OMITTED_STATE = (*SHARED_ROLLOUTS, "bin", "history.jsonl", "session_index.jsonl"
 RUNTIME_SUBDIR = "cx"
 HOME_SUBDIR = ".agentihooks"
 CODEX_HOME_KEY = "codexHome"
+OPENING_ATTEMPTS = 2
+OPENING_WATCH_S = 30.0
+TURN_COMPLETED = "turn/completed"
+USER_MESSAGE = "userMessage"
+CAPACITY = "Selected model is at capacity"
 
 LONG_SOCKET = f"socket path is longer than {SOCKET_PATH_MAX} bytes"
 DAEMON_REFUSED = "app-server takes no --no-daemon flag"
@@ -54,6 +59,7 @@ OTHER_HOME = "the server runs from another Codex home than the rendered profile"
 OTHER_ACCOUNT = "the server is not signed in with a {} account"
 NO_THREAD = "the server returned no thread id"
 SPAWN_FAILED = "app-server could not start: {}"
+OPENING_CAPACITY = "the opening Codex turn ended twice on a provider capacity error: {}"
 
 
 class LaunchFailure(RuntimeError):
@@ -233,6 +239,35 @@ def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> N
         protocol.set_thread_name(connection, thread_id, name)
 
 
+def opening_end(connection: protocol.Connection, events: list[dict], deadline: float, clock: Callable) -> dict:
+    """The opening turn as it completed; empty once the model answers or the watch ends first."""
+    while True:
+        while events:
+            message = events.pop(0)
+            params = message.get("params") or {}
+            if message["method"] == TURN_COMPLETED:
+                return params["turn"]
+            if params.get("item", {}).get("type", USER_MESSAGE) != USER_MESSAGE:
+                return {}
+        if not connection.poll(deadline - clock()):
+            return {}
+
+
+def open_turn(connection: protocol.Connection, thread_id: str, launch: Launch, deps: Deps) -> str:
+    events: list[dict] = []
+    connection.listener = events.append
+    for _ in range(OPENING_ATTEMPTS):
+        turn_id = protocol.start_turn(connection, thread_id, launch.opening)
+        turn = opening_end(connection, events, deps.clock() + OPENING_WATCH_S, deps.clock)
+        error = str((turn.get("error") or {}).get("message"))
+        if CAPACITY not in error:
+            return turn_id
+    reason = OPENING_CAPACITY.format(error)
+    if launch.environ.get(binding.REPORT):
+        binding.refuse(Path(launch.environ[binding.REPORT]), reason)
+    raise LaunchFailure("capacity", reason)
+
+
 def stop(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
@@ -281,7 +316,7 @@ def _connect_bound(store, bindings, launch, agent, record, process, deps) -> tup
         store.put_agent(launch.slug, agent)
         name_thread(connection, thread["id"], shown_name(launch, agent))
         if launch.opening and bindings.claim_opening(launch.slug, agent.execution_id, deps.now_ms()):
-            record = replace(record, active_turn_id=protocol.start_turn(connection, thread["id"], launch.opening))
+            record = replace(record, active_turn_id=open_turn(connection, thread["id"], launch, deps))
             bindings.put(launch.slug, record)
         return record, agent
     except (OSError, TimeoutError, protocol.ProtocolError) as exc:
