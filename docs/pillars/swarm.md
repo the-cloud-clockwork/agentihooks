@@ -92,6 +92,57 @@ retired and its successor starts from the document; one that does not is retired
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
 `swarm status` flags it as a live binding finding, and it never retires the agent.
 
+### Adopting a live master with no agent record
+
+A master pane can keep running after its agent record is gone, for example when the record was dropped while the
+process lived on. Master recovery binds such a pane back into the master seat. It runs on every tick, after the pane
+sweep, execution reconciliation and master failover, and again before every forced master launch, so a live master is
+adopted before a new one is started.
+
+Recovery does nothing while any lead master record that is not finished names a live process. Otherwise its
+candidates are live processes with no master record in the swarm that are either the master seat's current occupant,
+named as a master of this swarm (`master@<code>-<n>`), or named with the prefix `<id>-master-`. It takes the seat occupant when it
+is a candidate, else the first candidate by name.
+
+| Seat's current execution | Record written for the live master |
+|---|---|
+| Names the chosen master | That execution: its execution id, generation and start time are kept. |
+| Names another master, or the seat has none | A fresh record with no execution id, started at the tick time. The other master's execution row is left unchanged. |
+
+The live pane's placement (pane, harness, account, model, profile) is copied onto that record and it is marked
+working. Lead master records whose process is gone are dropped, the seat is occupied by the adopted name when it held
+another name or none, and the tick returns the action `adopted live master <name>`, which the tick journal prints as `<id>: adopted live master <name>`.
+
+Before pull request [5335](https://github.com/the-cloud-clockwork/agentihooks/pull/5335), recovery always wrote a fresh
+record with the tick time. When the registry already held an execution for that name, it compared the start time and
+execution id with the seat's execution, refused the write with `stale or changed execution identity` and counted an
+identity conflict, so the master was never adopted and the seat stayed empty.
+
+The registry identity check itself is unchanged. Any later write that changes an immutable field of the adopted
+execution (execution id, generation, name, lane, task, seat, start time, runtime backend, transport) is still refused
+with the same message and counted. A live master never takes over another master's execution.
+
+To check adoption on a swarm, read the tick journal and the seat's current execution. The second command prints the
+swarm's identity conflict count and the master seat's execution name, id, generation and start time; run it with the
+Python environment agentihooks is installed in, from its checkout:
+
+```bash
+journalctl --user -t agentihooks-swarm --since "-1 day" --no-pager \
+  | grep -E "adopted live master|stale or changed execution identity"
+python -c '
+from scripts.swarm.store import connect
+s, slug = connect(), "my-swarm"
+print(s.execution_identity_conflicts_total(slug))
+m = s.execution_occupants(slug).get(f"master@{slug}")
+print(m and (m.name, m.execution_id, m.generation, m.started_at))'
+```
+
+| Symptom | Check |
+|---|---|
+| A master pane is live but the seat has no master record and no `adopted live master` line appears | Read the `scripts.swarm.tick._recover_master` step records in the journal. An `outcome` of `error` with `scripts.swarm.store.SwarmError` means a registry refusal; a `success` with no adoption means the pane's name is not a candidate. |
+| The identity conflict count rises on every tick | Another writer is changing an immutable field. The journal line next to the count names the step, such as `outage resume for <agent> refused: stale or changed execution identity`. |
+| The adopted master has a fresh start time | The seat's current execution named another master, so the live one got a fresh record. This is expected. |
+
 ### Interactive masters and Remote Control
 
 Claude masters prefer a valid native claude.ai login at launch and handoff;
@@ -230,6 +281,57 @@ binds, or the swarm stops, the tick ends the promotion and tells the engineer to
 promotion, prompt and hand back is a tick journal line and an event on the seat history of the master seat and the
 engineer's seat. `swarm status` prints a `promoted` line, `status --json` carries `promotion` and a `promoted` flag
 per agent, and the ledger page marks the agent row promoted.
+
+#### Orphan executions on a seat
+
+Every seat has one current execution in the swarm's execution registry. A new launch on a seat names the
+execution it replaces, and the registry refuses it with `replacement does not match the current execution` when
+that differs from the current one. An execution whose agent record is gone but which was never marked ended stays
+the seat's current execution. On a master seat this showed as forced launches that never bound: refused first
+with `replacement does not match the current execution`, then as
+`master launch refused: startup pending for <name>` in the tick journal.
+
+Each tick, before step 1 of [the minute tick](#the-minute-tick), the execution reconcile ends such an orphan. It ends the current execution of
+a seat when all of these hold:
+
+| Condition | Read from |
+|---|---|
+| Its state is `working`, or `starting` with its start at least the master startup window (two minutes) ago | The execution record |
+| The swarm has no agent record under its name | The agent records |
+| No live pane carries its name and its hook has not reported | The runtime |
+| On a remote hive, a latest report exists and omits the name; with no report the seat is kept | The hive report |
+| On a non-local backend, the runtime observes it dead | The runtime |
+| On the local machine, the checks above suffice | The runtime |
+
+The ending is atomic: under a Redis watch on the executions and agent records it requires the seat's current
+record to equal the one the reconcile read, repeats the state and window check, and writes that record with state
+`ended`. When the record changed, an agent record appeared, or a write raced it, the tick leaves the execution
+alone and tries again on the next tick. A `starting` execution inside its startup window, one with a live pane or
+a reported hook, and one a remote hive still lists are kept. Each ended orphan is a tick journal line:
+
+```text
+ended orphan execution <execution id> for <agent name>
+```
+
+With the occupant ended, the next launch on the seat replaces it and the forced master launch binds. The startup
+window applies to a `starting` execution on any seat, engineer seats included; inside it the execution is kept. A
+`working` orphan is ended with no window. To check a stuck seat:
+
+```bash
+# Launch refusals and orphan endings for the master in the last hour
+journalctl --user -t agentihooks-swarm --since "1 hour ago" \
+  | grep -E "ended orphan execution|startup pending|replacement does not match"
+# The master line lists a live master once the seat binds
+agentihooks swarm <id> status
+```
+
+A refusal that keeps repeating with no `ended orphan execution` line has one of two causes. Either a condition
+above still holds (an agent record with that name, a pane or hook report under it, or a remote hive report that
+still lists it or no report at all), or the launch is refused for another reason its error names:
+`master launch refused: unfinished lead`, `current execution publication is in flight`,
+`the controller lease is stale`, `execution history kept changing` or
+`canonical agent already belongs to another execution seat`. Read the seat history before acting; never end an
+execution by writing to Redis by hand.
 
 ### Several master seats
 
@@ -2107,6 +2209,38 @@ Limits:
   its own fixer.
 - `stage-budget` reads no shard output and always files its own fixer.
 
+#### Independent consumer failures beside a lost shard
+
+Judge each failed consumer from its own cause. A lost unit shard in the run is only one prerequisite for folding;
+the consumer must also have a recognized name and print one of the missing shard signs above. For example, assume
+`unit (3.12, 1)` lost its runner with `Failed to resolve action download info`. The following are alternative
+consumer failures in that same run:
+
+| Failed consumer | Its own failure | Tasks filed for this pair of jobs |
+|---|---|---|
+| `sonar (3.12)` | `Missing coverage for shard 1` | `Promotion red: runner outage`, naming Sonar among the jobs missing shard output |
+| `sonar` | `Quality gate failed: 1 new bug on new code` | `Promotion red: runner outage` and `Promotion red: sonar` |
+| `shard-check (3.11)` | `No shard durations at shard-durations/1/durations.json, so those shards cannot be graded.` | `Promotion red: runner outage`, naming the shard check among the jobs missing shard output |
+| `shard-check (3.12)` | `Shards split on different stored durations, so their test sets overlap or leave gaps: a: x, b: y` | `Promotion red: runner outage` and `Promotion red: shard check (3.12)` |
+| `stage-budget` | Failed `Grade` step with no failure annotation | `Promotion red: runner outage` and `Promotion red: stage budget` |
+
+These task counts assume no earlier task holds either cause. An unrelated Sonar or shard check failure is absent
+from the outage task's consumer list; its separate fixer carries its own failed step and annotation evidence. If
+Sonar reports missing coverage but no job named exactly `unit` before ` (` lost its runner, Sonar keeps its own
+fixer too. A lost `unit-selected` job does not meet that prerequisite.
+
+To inspect the mixed failure case, use [Checking a run](#checking-a-run) to read both the lost unit job and each
+consumer's annotations, then compare the task titles with the table. A failed step with no useful annotation does
+not establish missing shard output. Fix a quality gate or shard split error through its own fixer even while the
+outage task remains open.
+
+This behavior is automatic in promotion intake. There is no environment variable or swarm setting to enable
+folding, broaden it to every consumer, or add signatures. The configurable `AGENTIHOOKS_SWARM_KEY_PREFIX` in the
+inspection commands selects the Redis key namespace only; it does not change the decision. For example, with the
+default namespace, `P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}` reads the same held causes the watch uses.
+Changes to consumer names or failure wording require a matching code change and CI proof. See the existing
+[limits](#jobs-that-failed-for-want-of-shard-output) for errors that themselves print a missing shard sign.
+
 #### Later outages and the green run
 
 The outage task holds the cause `runner outage` in `promotion:jobs`, without the run, job names or signs. While that
@@ -3511,7 +3645,8 @@ lock, so a minute that fires while a tick still runs starts no second tick; the 
 minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
 again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
 An outage holds the affected idle and delivery decisions until recovery (see
-[Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm:
+[Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm, before step 1 the tick ends any orphan
+execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)), then:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 20 ticks. A stale agent is nudged through its inbox
