@@ -147,6 +147,15 @@ def test_notify_takes_the_named_caller_before_the_environment(controls):
     assert ledger.said == [] and ledger.notes == []
 
 
+def test_notify_names_the_operator_when_no_caller_is_known(controls, monkeypatch):
+    store, ledger, master = controls
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    control_notifications.notify(store, Namespace(slug="demo"), ledger, master, "pause")
+    items = InboxStore(store.redis).mailbox(master.name)
+    assert [item.sender for item in items] == ["operator"]
+    assert items[0].text.startswith("The operator paused the swarm")
+
+
 def test_an_operator_verdict_notice_names_the_finding(controls):
     store, ledger, master = controls
     _idle_finding(store)
