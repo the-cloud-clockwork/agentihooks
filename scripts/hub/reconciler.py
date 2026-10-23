@@ -116,7 +116,9 @@ class Reconciler:
                 if event is None:
                     continue
                 hive = agent.hive or agent.runtime_target.get("host_id")
-                ending = _ending(self._bus, snapshots, hive, event, agent, now) if hive == event.data.get("hive") else None
+                ending = (
+                    _ending(self._bus, snapshots, hive, event, agent, now) if hive == event.data.get("hive") else None
+                )
                 if ending is not None:
                     self._lifecycle.handle(ending)
         if not guard():
