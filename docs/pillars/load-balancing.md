@@ -486,8 +486,8 @@ $ agentihooks swarm <slug> status | grep "quota account claude home"
 quota account claude home  closed  routing 39% left, reserved for 2 live masters: workers stop at 60% of the week, read 0m ago  sessions 1
 ```
 
-`agentihooks balance` reads the live rule only, so for the same reading it can show `home` open while the tick
-still refuses workers there.
+`agentihooks balance` reads the live rule only, so for the same reading it
+can show `home` open while the tick still refuses workers there.
 
 Inspect or end a stored closure:
 
@@ -525,13 +525,15 @@ Troubleshooting:
 
 Evidence: on 19 October the Doctor tick's capacity line showed the declared
 Claude master account closed at 12:07 and 12:17 UTC and open at 12:13 and
-12:15, and at 12:13:52 the tick started engineer@d44a5a-0683 on it with 39% of
-its week left. The agent then handed off through `init-agent --handoff` into
+12:15, and at 12:13:52 the tick started engineer@d44a5a-0683 on it. The task
+record noted `balance` showing that account `CLOSED` for workers with 39% of
+its week left and workers stopping at 60%. The agent then handed off through `init-agent --handoff` into
 an unseated session. Pull request
 [#5044](https://github.com/the-cloud-clockwork/agentihooks/pull/5044) added
-the stored closure and the seat handoff directive; its red Mutation preflight
-run 39357837089 failed the four new cases and Tests run 39363775886 passed on the final pull request head. Cases live in `tests/swarm/test_reserved_latch.py` and
-`tests/context/test_quota_policy.py`.
+the stored closure and the seat handoff directive; its red Mutation
+preflight run 39357837089 failed the four new cases and Tests run
+39363775886 passed on the final pull request head. Cases live in
+`tests/swarm/test_reserved_latch.py` and `tests/context/test_quota_policy.py`.
 
 ## Skill evaluations
 
