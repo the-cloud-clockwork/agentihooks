@@ -85,8 +85,8 @@ loosen the limits it is graded by.
    entry.
 3. The branch changes only `scripts/beta.py` and runs the gate.
 
-Before pull request
-[4770](https://github.com/the-cloud-clockwork/agentihooks/pull/4770), the gate
+Before
+[PR #4770](https://github.com/the-cloud-clockwork/agentihooks/pull/4770), the gate
 read the allowlist from current `origin/dev`, so the branch's older 340 line
 copy failed with
 `scripts/reconcile.py::reconcile_unit breaks function-lines at 340; it is not on the base allowlist`
