@@ -410,7 +410,7 @@ whatever its name says.
 | Test | Run it builds | Row it reaches |
 |---|---|---|
 | `test_a_completed_run_without_any_completion_has_no_invented_wall_time`, once with `success` and once with `failure` | Completed `merge_group` run, one job created 901 seconds before the read, no completion time | 6: no wall time, no finding |
-| `test_a_completed_gate_stops_wall_time_before_later_jobs_finish` | Completed `success` pull request run; a job created 1200 seconds before the read that completes at the read; a gate created 400 seconds before the read that completes 300 seconds later | 4: 900 seconds from first creation to gate end, not over 15 minutes, no finding |
+| `test_a_completed_gate_stops_wall_time_before_later_jobs_finish` | Completed `success` pull request run; a job created 1200 seconds before the read that completes at the read; a gate created 400 seconds before the read that completes 300 seconds before it | 4: 900 seconds from first creation to gate end, not over 15 minutes, no finding |
 
 [Pull request 4760](https://github.com/the-cloud-clockwork/agentihooks/pull/4760)
 added row 2. Both tests above then built their run without a conclusion, so
