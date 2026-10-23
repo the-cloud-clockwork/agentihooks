@@ -176,7 +176,7 @@ def hosted_controls(live, hive, monkeypatch):
     from tests.swarm_ledger.test_ledger_authority import MASTER
 
     store = RedisStore(hive)
-    store.create(SwarmConfig(SLUG, "/repo", state="running"))
+    store.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=1, state="running"))
     store.put_agent(SLUG, AgentRecord(MASTER, "master", "master", seat=f"master@{SLUG}"))
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "compose")
     monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
