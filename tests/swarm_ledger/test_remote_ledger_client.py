@@ -177,11 +177,11 @@ def hosted_controls(live, hive, monkeypatch):
 
     store = RedisStore(hive)
     store.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=1, state="running"))
-    store.put_agent(SLUG, AgentRecord(MASTER, "master", "master", seat=f"master@{SLUG}"))
+    store.put_agent(SLUG, AgentRecord(MASTER, "master", "master", seat=f"master@{SLUG}", hive="member-1"))
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "compose")
     monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", MASTER)
-    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", authority.agent_token(live["admin"], SLUG, MASTER))
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", authority.hive_agent_token("member-1", SLUG, MASTER))
     monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_CREDENTIAL", raising=False)
     monkeypatch.delenv("SWARM_SECRET", raising=False)
     monkeypatch.setattr(cli, "connect", lambda: store)
