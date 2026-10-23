@@ -63,8 +63,8 @@ def test_master_admission_records_fallback_auth_and_ui_placement(setup):
     assert stored.profile_decision["master_placement"] == admitted.profile_decision["master_placement"]
 
 
-@pytest.mark.parametrize(("fallback", "kept"), [("the task is pinned to remote", True), ("", False)])
-def test_an_acknowledged_and_ended_execution_keeps_its_placement_fallback(setup, fallback, kept):
+@pytest.mark.parametrize("fallback", ["the task is pinned to remote", ""])
+def test_an_acknowledged_and_ended_execution_keeps_its_placement_fallback(setup, fallback):
     from dataclasses import replace
 
     from scripts.hive import orders
@@ -93,7 +93,7 @@ def test_an_acknowledged_and_ended_execution_keeps_its_placement_fallback(setup,
         hive="remote",
     )
     ack = orders.Ack("live", {"host_id": "remote"}, execution={"profile_decision": {"validation": {"pid": 12}}})
-    expected = {"validation": {"pid": 12}, **({"placement_fallback": fallback} if kept else {})}
+    expected = {"validation": {"pid": 12}, **({"placement_fallback": fallback} if fallback else {})}
     acked = setup.launcher.record(admitted, order, ack)
     assert acked.profile_decision == expected
     registry = setup.store.execution_registry
