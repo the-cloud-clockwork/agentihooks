@@ -3,7 +3,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 
-from scripts.events import envelope, subjects
+from scripts.events import catalogue, envelope, subjects
 
 ENTITIES = {"tasks": "task", "phases": "phase"}
 INSERT = "INSERT INTO outbox VALUES (?, ?, ?, ?, ?)"
@@ -47,7 +47,7 @@ def write(connection, slug: str, revision: int, before: dict, after: dict) -> No
             key=key,
             version=revision,
             author=AUTHOR,
-            data=item or {},
+            data={} if item is None else catalogue.filled(entity, item),
         )
         connection.execute(
             INSERT, (event.id, slug, revision, subjects.subject(slug, entity, token(key)), event.encode().decode())

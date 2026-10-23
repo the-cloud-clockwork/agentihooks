@@ -9,12 +9,23 @@ class EventType:
     fields: frozenset[str]
 
 
-TASK_FIELDS = frozenset(
-    ("id", "title", "description", "phase", "lane", "state", "claimed_by", "issue_url", "pr_url", "done")
-)
-PHASE_FIELDS = frozenset(("id", "title", "description", "done"))
+TASK_DEFAULTS = {
+    "title": "",
+    "description": "",
+    "phase": "",
+    "lane": "eng",
+    "state": "open",
+    "claimed_by": "",
+    "issue_url": "",
+    "pr_url": "",
+    "done": False,
+}
+PHASE_DEFAULTS = {"title": "", "description": "", "done": False}
+TASK_FIELDS = frozenset(("id", *TASK_DEFAULTS))
+PHASE_FIELDS = frozenset(("id", *PHASE_DEFAULTS))
+DEFAULTS = {"task": TASK_DEFAULTS, "phase": PHASE_DEFAULTS}
 
-# Fields every ledger write path builds; a document imported as it is keeps whatever fields it had.
+# Fields every changed event carries: the writer fills those a stored task or phase lacks.
 LEDGER = {
     "task.changed": EventType("task", TASK_FIELDS),
     "task.removed": EventType("task", frozenset()),
@@ -34,3 +45,8 @@ def refusal(event: Envelope) -> str | None:
     if not kind.fields and event.data:
         return f"{event.type} carries no data"
     return None
+
+
+def filled(entity: str, item: dict) -> dict:
+    """The item with each catalogued field it lacks set to its default; present values are kept."""
+    return {**DEFAULTS[entity], **item}
