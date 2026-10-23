@@ -1,3 +1,5 @@
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -186,3 +188,21 @@ def test_lint_grades_the_member_grants_against_the_antoncore_dev_hive_user():
     assert steps.index(checkout) < steps.index(check)
     assert '--agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"' in check["run"]
     assert 'cd "$RUNNER_TEMP/grader"' in check["run"]
+
+
+def test_lint_refuses_a_grader_without_the_grant_check(tmp_path):
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    check = next(s for s in steps if "scripts.ci_hive_nats_grants" in s.get("run", ""))
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "ci_hive_nats_grants.py").write_text(
+        "from pathlib import Path\nPath('head-graded').touch()\n"
+    )
+    (tmp_path / "runner" / "grader").mkdir(parents=True)
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path / "runner"), GITHUB_WORKSPACE=str(tmp_path))
+    result = subprocess.run(["bash", "-e", "-c", check["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert (
+        "::error::The protected grader carries no scripts/ci_hive_nats_grants.py,"
+        " so nothing trusted can grade the hive member grants."
+    ) in result.stdout
+    assert not (tmp_path / "head-graded").exists()

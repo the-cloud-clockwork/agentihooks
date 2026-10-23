@@ -2090,16 +2090,16 @@ jobs:
             exit 1
           fi
 
-      # The base revision's copy grades this head's member grants against the antoncore dev hive user.
+      # The protected grader's copy grades this head's member grants against the antoncore dev hive user.
       - name: Hold the hive member NATS grants equal to the antoncore hive user
         if: ${{ !cancelled() }}
         run: |
-          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_hive_nats_grants.py" ]]; then
-            cd "$RUNNER_TEMP/grader"
-            python -m scripts.ci_hive_nats_grants --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
-          else
-            python -m scripts.ci_hive_nats_grants --antoncore .antoncore
+          if [[ ! -f "$RUNNER_TEMP/grader/scripts/ci_hive_nats_grants.py" ]]; then
+            echo "::error::The protected grader carries no scripts/ci_hive_nats_grants.py, so nothing trusted can grade the hive member grants."
+            exit 1
           fi
+          cd "$RUNNER_TEMP/grader"
+          python -m scripts.ci_hive_nats_grants --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
 
       - name: Select artifact browser checks
         if: ${{ !cancelled() }}
