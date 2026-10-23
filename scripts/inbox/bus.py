@@ -13,7 +13,7 @@ from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.events.subjects import subject
 from scripts.inbox.seats import is_seat
-from scripts.inbox.store import InboxError
+from scripts.inbox.store import CLOSED, InboxError
 
 FEED_BACKEND = "nats"
 FEED_BATCH = 10
@@ -248,7 +248,7 @@ def publish(item, names=None) -> None:
 
 
 class SeatFeed:
-    """Bus deliveries of one receiver's seat; a receipt is confirmed once the Redis item it names leaves pending."""
+    """Keep durable receipts until Redis records confirmation by the receiving session or explicit settlement."""
 
     def __init__(self, opener: Callable[[], Bus], store, me: str, session: str, seat: Callable[[], str] | None = None):
         self._opener = opener
@@ -293,8 +293,8 @@ class SeatFeed:
             for item_id, receipt in list(self.held.items()):
                 if self._pending(item_id):
                     continue
-                del self.held[item_id]
                 if consumer is not None and consumer.confirm(receipt):
+                    del self.held[item_id]
                     settled.append(item_id)
         except Exception as exc:
             raise self._lost(exc) from exc
@@ -307,9 +307,12 @@ class SeatFeed:
 
     def _pending(self, item_id: str) -> bool:
         try:
-            return self._store.get(item_id).state == "pending"
+            item = self._store.get(item_id)
         except InboxError:
+            return True
+        if item.state in CLOSED:
             return False
+        return item.state not in ("read", "confirmed") or item.delivery_session != self._session
 
     def close(self) -> None:
         bus, self._bus = self._bus, None

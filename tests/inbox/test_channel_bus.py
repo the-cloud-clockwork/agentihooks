@@ -70,6 +70,8 @@ def test_a_seat_item_still_pending_keeps_its_bus_receipt_open(mcp_sdk):
     assert feed.settle() == []
     assert set(feed.held) == {item.id}
     store.deliver(item.id, "bob")
+    assert feed.settle() == []
+    store.items[item.id] = replace(store.get(item.id), state="confirmed", delivery_session="session-1")
     assert feed.settle() == [item.id]
     assert feed.held == {}
 

@@ -116,7 +116,7 @@ class Dispatcher:
                 continue
             if not self.store.acts_for(recipient, item.address, pipe):
                 continue
-            state = self._ref_state(pipe, recipient, item.ref, taken)
+            state = self._ref_state(pipe, recipient, item.ref, taken, replayed=bool(item.delivery_session))
             if state == "held":
                 continue
             if state == "free":
@@ -124,7 +124,7 @@ class Dispatcher:
             plan.append((item, state, state == "shown" and self.store.last_pending(pipe, item)))
         return plan
 
-    def _ref_state(self, pipe, recipient, ref, taken):
+    def _ref_state(self, pipe, recipient, ref, taken, *, replayed=False):
         """free, held by an open delivery, or shown: seen, or held by an accepted one."""
         if not ref:
             return "free"
@@ -132,7 +132,7 @@ class Dispatcher:
             return "held"
         holder_key = self.key("ref-reservation", recipient, ref)
         pipe.watch(SeenMarks.key(recipient), holder_key)
-        if pipe.sismember(SeenMarks.key(recipient), ref):
+        if not replayed and pipe.sismember(SeenMarks.key(recipient), ref):
             return "shown"
         holder = pipe.get(holder_key)
         if not holder:
