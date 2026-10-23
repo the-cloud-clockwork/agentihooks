@@ -75,7 +75,6 @@ SWARM_PANELS = {
     "hives-fold",
     "overlays-fold",
     "agents-fold",
-    "health-fold",
     "handoff-fold",
     "freeze-fold",
     "architecture-fold",

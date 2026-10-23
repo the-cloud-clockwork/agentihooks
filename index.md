@@ -167,7 +167,7 @@ agentihooks init --profile coding,infra-ops
 pip install agentihooks
 ```
 
-For the service stack, start with the [Docker Compose bundle quick start]({{ site.baseurl }}/docs/getting-started/compose-quick-start/). For native agents, install hooks for Claude Code and Codex:
+For the service stack, start with the [Docker Compose bundle quick start]({{ site.baseurl }}/docs/getting-started/compose-quick-start/). To run the whole swarm on one machine, follow the [single machine quick start]({{ site.baseurl }}/docs/getting-started/single-machine-quick-start/); to install the hub on a cluster, the [Kubernetes quick start]({{ site.baseurl }}/docs/getting-started/kubernetes-quick-start/); to join more machines or worker pods, [add a hive]({{ site.baseurl }}/docs/getting-started/add-hive-quick-start/). For native agents, install hooks for Claude Code and Codex:
 
 ```bash
 agentihooks init
