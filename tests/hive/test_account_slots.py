@@ -240,7 +240,12 @@ def test_runtime_launch_pins_the_reserved_route_and_closes_the_bus(rig, monkeypa
         return report
 
     monkeypatch.setattr(account_slots, "_reading", local_reading)
-    monkeypatch.setattr(factory, "open_bus", lambda config: bus)
+
+    def opened(config):
+        assert isinstance(config, BusConfig)
+        return bus
+
+    monkeypatch.setattr(factory, "open_bus", opened)
     closed = []
     monkeypatch.setattr(bus, "close", lambda: closed.append(True))
     env = {account_slots.HIVE_ENV: "one", account_slots.EXECUTION_ENV: "execution", "KEEP": "yes"}
