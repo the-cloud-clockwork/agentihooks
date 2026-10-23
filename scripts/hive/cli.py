@@ -411,18 +411,13 @@ def main(argv: list[str]) -> int:
             print(f"added {args.target} to herdr as {label}; its hive member is {grant['id']}")
         elif args.command in ("invite", "create"):
             print((_invite if args.command == "invite" else _create)(args))
-        elif args.command == "join":
+        elif args.command in ("join", "refresh"):
             from scripts.hive import join
 
             with refresh_lock(os.environ):
-                member_id = join.enroll(args.invite, os.environ)
-            print(f"joined hive member {member_id}; its configuration is in {registry.home() / auth.ENV_FILE}")
-        elif args.command == "refresh":
-            with refresh_lock(os.environ):
-                member_id = refresh_env(os.environ)
-            print(
-                f"refreshed the Redis credential of hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}"
-            )
+                member_id = join.enroll(args.invite, os.environ) if args.command == "join" else refresh_env(os.environ)
+            action = "joined" if args.command == "join" else "refreshed the Redis credential of"
+            print(f"{action} hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}")
         elif args.command in ("revoke", "remove", "drain"):
             print(_retire(args))
         elif args.command in ("run", "install"):
