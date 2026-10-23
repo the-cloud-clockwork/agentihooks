@@ -100,6 +100,91 @@ def test_hive_serve_mints_a_member_credential_the_bus_opens_with(admin, signer):
     assert _opens(signer, grant["nats_credentials"])
 
 
+def _violations(signer: nats_grant.Signer, credentials: str, act) -> list[str]:
+    import asyncio
+
+    import nats as nats_client
+
+    from scripts.events.nats import auth_options
+
+    async def run() -> list[str]:
+        seen = []
+
+        async def error_cb(exc):
+            seen.append(str(exc))
+
+        nc = await nats_client.connect(
+            signer.url, allow_reconnect=False, error_cb=error_cb, **auth_options(credentials)
+        )
+        try:
+            await act(nc)
+            await nc.flush()
+        finally:
+            await nc.close()
+        return seen
+
+    return asyncio.run(run())
+
+
+def test_a_member_credential_cannot_publish_outside_the_swarm_prefix(signer):
+    async def act(nc):
+        await nc.publish("outside.events", b"x")
+
+    assert _violations(signer, nats_grant.mint(signer, "m1"), act) == [
+        'nats: permissions violation for publish to "outside.events"'
+    ]
+
+
+def test_a_member_credential_cannot_subscribe_outside_the_swarm_prefix(signer):
+    async def act(nc):
+        await nc.subscribe("outside.>")
+
+    assert _violations(signer, nats_grant.mint(signer, "m1"), act) == [
+        'nats: permissions violation for subscription to "outside.>"'
+    ]
+
+
+def test_a_member_credential_publishes_and_subscribes_under_the_swarm_prefix(signer):
+    received = []
+
+    async def act(nc):
+        subscription = await nc.subscribe("swarm.s1.probe")
+        await nc.publish("swarm.s1.probe", b"x")
+        received.append((await subscription.next_msg(timeout=5)).data)
+
+    assert _violations(signer, nats_grant.mint(signer, "m1"), act) == []
+    assert received == [b"x"]
+
+
+def test_the_bus_logs_queues_dead_letters_and_keeps_state_under_a_member_credential(signer):
+    from scripts.events import nats
+    from scripts.events.config import QueuePolicy
+    from scripts.events.envelope import Envelope
+    from scripts.events.subjects import subject
+
+    policy = QueuePolicy(max_deliver=3, ack_wait_ms=1_000)
+    event = Envelope(
+        id="e1", type="task.claimed", swarm="s1", entity="task", key="t1", version=1, time=0, author="a", data={}
+    )
+    bus = nats.open_bus(
+        BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, "m1"), queue=policy)
+    )
+    try:
+        assert bus.events.publish(subject("s1", "task", "claimed"), event)
+        [logged] = bus.events.consumer("member", subject("s1", ">")).fetch(1, 5_000)
+        logged.ack()
+        queue = bus.queue("member", policy)
+        assert queue.offer(event)
+        taken = queue.take(5_000)
+        taken.ack()
+        assert bus.dead.publish("dead.s1", event)
+        state = bus.state("member")
+        revision = state.create("k", b"v")
+        assert (logged.event, taken.event, state.get("k").revision) == (event, event, revision)
+    finally:
+        bus.close()
+
+
 def test_a_hive_endpoint_without_a_signer_mints_no_bus_credential(admin):
     member = auth.mint(admin, "h1", PUBLIC)
     grant = _refresh(admin, None, member["ledger_credential"])
@@ -256,7 +341,15 @@ def test_a_member_credential_carries_exactly_the_user_claims():
     jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
     claims = _claims(jwt)
     assert (claims["iss"], claims["sub"], claims["name"]) == (signed.account.public, user.public, "hive-m1")
-    assert claims["nats"] == {"type": "user", "version": 2, "pub": {}, "sub": {}, "subs": -1, "data": -1, "payload": -1}
+    assert claims["nats"] == {
+        "type": "user",
+        "version": 2,
+        "pub": {"allow": ["swarm.>", "dead.>", "agentihooks.queue.>", "$KV.>", "$JS.API.>", "$JS.ACK.>"]},
+        "sub": {"allow": ["swarm.>", "_INBOX.>"]},
+        "subs": -1,
+        "data": -1,
+        "payload": -1,
+    }
 
 
 @pytest.mark.parametrize("revocations", [{}, {"UA": 7}])
