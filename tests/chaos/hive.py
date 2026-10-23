@@ -89,7 +89,7 @@ def work(bus, spoke: Spoke, runtime: ChaosRuntime, journal: Journal, hive: str) 
             journal.write("poll", outcome=outcome)
         previous = outcome
         if outcome == "retry":
-            bus.state("hive-presence").get(hive)
+            bus.state("spoke-pending").get(hive)
         if outcome not in QUIET | {"started"}:
             time.sleep(0.5)
         elif outcome == "held":

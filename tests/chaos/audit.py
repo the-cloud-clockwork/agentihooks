@@ -1,5 +1,5 @@
 import math
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 ENDS = frozenset({"exited", "exit-unrecorded"})
 SETTLE_GRACE_MS = 60_000
@@ -13,7 +13,7 @@ def executions(records: list[dict]) -> list[dict]:
     deaths = killed(records)
     found, open_runs = [], defaultdict(list)
     for record in records:
-        if record["kind"] == "launched":
+        if record["kind"] == "launching":
             run = {"task": record["task"], "hive": record["proc"], "start": record["t"], "end": math.inf, "how": ""}
             run["end"] = deaths.get(run["hive"], math.inf)
             run["how"] = "killed" if run["end"] < math.inf else "running"
@@ -25,7 +25,7 @@ def executions(records: list[dict]) -> list[dict]:
     return found
 
 
-def duplicates(runs: list[dict], at: float = math.inf) -> list[dict]:
+def duplicates(runs: list[dict], after: float = -math.inf, at: float = math.inf) -> list[dict]:
     by_task = defaultdict(list)
     for run in runs:
         if run["start"] <= at:
@@ -35,7 +35,7 @@ def duplicates(runs: list[dict], at: float = math.inf) -> list[dict]:
         held.sort(key=lambda run: run["start"])
         for index, first in enumerate(held):
             for second in held[index + 1 :]:
-                if second["start"] < first["end"]:
+                if after <= second["start"] < first["end"]:
                     pairs.append({"task": task, "hives": [first["hive"], second["hive"]], "at": second["start"]})
     return pairs
 
@@ -59,12 +59,15 @@ def orphans(records: list[dict], runs: list[dict], before: int, at: int) -> dict
     return {task: why for task, why in found.items() if why not in ("completed", "running")}
 
 
-def settles(records: list[dict], at: int) -> dict:
-    counts = Counter(r["claim"] for r in records if r["kind"] == "settled" and r["t"] <= at)
-    exits = {r["claim"]: r["t"] for r in records if r["kind"] == "exited" and r["t"] <= at - SETTLE_GRACE_MS}
+def settles(records: list[dict], after: float, at: int) -> dict:
+    handled = defaultdict(list)
+    for record in records:
+        if record["kind"] == "settled" and record["t"] <= at:
+            handled[record["claim"]].append(record["t"])
+    exits = {r["claim"] for r in records if r["kind"] in ENDS and after <= r["t"] <= at - SETTLE_GRACE_MS}
     return {
-        "handled_twice": sorted(claim for claim, count in counts.items() if count > 1),
-        "never_handled": sorted(claim for claim in exits if claim not in counts),
+        "handled_twice": sorted(claim for claim, times in handled.items() if len(times) > 1 and times[1] >= after),
+        "never_handled": sorted(claim for claim in exits if claim not in handled),
     }
 
 
@@ -117,7 +120,7 @@ def hub_reclaim(records: list[dict], fault: dict, until: int) -> dict:
         (
             r["t"]
             for r in records
-            if r["kind"] == "lease" and fault["t"] <= r["t"] <= until and r["holder"] != fault["target"]
+            if r["kind"] == "lease" and fault["t"] <= r["t"] <= until and r["holder"] not in (None, fault["target"])
         ),
         None,
     )
@@ -133,14 +136,23 @@ def hub_reclaim(records: list[dict], fault: dict, until: int) -> dict:
 
 
 RECLAIM = {"hive-kill": hive_reclaim, "nats-restart": nats_reclaim, "hub-kill": hub_reclaim}
+MEASURED = {
+    "hive-kill": ("max_s",),
+    "nats-restart": ("first_launch_s", "first_settle_s"),
+    "hub-kill": ("takeover_s", "first_settle_s"),
+}
+
+
+def measured(window: dict) -> bool:
+    return all(window["reclaim"][name] is not None for name in MEASURED[window["fault"]])
 
 
 def window(records: list[dict], fault: dict, until: int) -> dict:
     runs = executions(records)
     seen = [record for record in records if record["t"] <= until]
     lost = orphans(seen, runs, fault["t"], until)
-    doubled = duplicates(runs, until)
-    handled = settles(seen, until)
+    doubled = duplicates(runs, fault["t"], until)
+    handled = settles(seen, fault["t"], until)
     return {
         "fault": fault["fault"],
         "target": fault.get("target"),
@@ -162,7 +174,7 @@ def report(records: list[dict]) -> dict:
     final_at = records[-1]["t"]
     runs = executions(records)
     lost = orphans(records, runs, final_at, final_at)
-    handled = settles(records, final_at + SETTLE_GRACE_MS)
+    handled = settles(records, -math.inf, final_at + SETTLE_GRACE_MS)
     final = {
         "offered": sum(1 for r in records if r["kind"] == "offered"),
         "launches": len(runs),
@@ -172,5 +184,7 @@ def report(records: list[dict]) -> dict:
         "exit_events_handled_twice": len(handled["handled_twice"]),
         "exit_events_never_handled": len(handled["never_handled"]),
     }
-    clean = all(w["duplicate_claims"] == 0 and w["orphans"] == 0 for w in windows)
+    clean = len(windows) == len(MEASURED) and all(
+        w["duplicate_claims"] == 0 and w["orphans"] == 0 and measured(w) for w in windows
+    )
     return {"windows": windows, "final": final, "contract_met": clean and not final["duplicate_claims"] and not lost}

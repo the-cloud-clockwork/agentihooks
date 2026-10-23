@@ -131,7 +131,8 @@ class Chaos:
 
     def kill_hive(self) -> None:
         target = "hive-1"
-        self.run_for(30, lambda: last_kind(self.folder / f"{target}.jsonl") == "launching")
+        if not self.run_for(30, lambda: last_kind(self.folder / f"{target}.jsonl") == "launching"):
+            raise RuntimeError(f"{target} started no launch within 30 s, so its kill would hold no work")
         self.fleet.kill(target)
         self.journal.write("fault", fault="hive-kill", target=target)
         self.run_for(self.args.window_s)
@@ -150,7 +151,8 @@ class Chaos:
         self.journal.write("window-end", fault="nats-restart")
 
     def kill_hub(self) -> None:
-        self.run_for(30, lambda: self.holder is not None)
+        if not self.run_for(30, lambda: self.holder is not None):
+            raise RuntimeError("no hub replica held the singleton lease within 30 s")
         target = self.holder
         self.fleet.kill(target)
         self.journal.write("fault", fault="hub-kill", target=target)
@@ -165,13 +167,13 @@ class Chaos:
         self.journal.write("drained")
 
     def run(self) -> dict:
-        self.server.start()
-        for name in HUBS:
-            self.fleet.spawn(name, "tests.chaos.hub", "--name", name)
-        for index in range(1, self.args.hives + 1):
-            hive = f"hive-{index}"
-            self.fleet.spawn(hive, "tests.chaos.hive", "--hive", hive, "--capacity", str(self.args.capacity))
         try:
+            self.server.start()
+            for name in HUBS:
+                self.fleet.spawn(name, "tests.chaos.hub", "--name", name)
+            for index in range(1, self.args.hives + 1):
+                hive = f"hive-{index}"
+                self.fleet.spawn(hive, "tests.chaos.hive", "--hive", hive, "--capacity", str(self.args.capacity))
             self.run_for(self.args.warmup_s)
             self.kill_hive()
             self.restart_nats()
@@ -188,7 +190,7 @@ def summary(found: dict) -> str:
     for window in found["windows"]:
         lines.append(
             f"{window['fault']} ({window['target']}): duplicate claims {window['duplicate_claims']}, "
-            f"orphans {window['orphans']}, exit events handled twice {window['exit_events_handled_twice']}, "
+            f"orphans at window end {window['orphans']}, exit events handled twice {window['exit_events_handled_twice']}, "
             f"never handled {window['exit_events_never_handled']}, reclaim {json.dumps(window['reclaim'])}"
         )
     final = found["final"]
