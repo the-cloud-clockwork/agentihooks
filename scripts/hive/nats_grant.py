@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.events import nkey
+from scripts.events import nkey, subjects
 from scripts.events.dead import DEAD_STREAM
 from scripts.hive import auth, buckets
 
@@ -96,8 +96,8 @@ def user_claims() -> dict:
     return {"type": "user", "version": 2, "pub": {}, "sub": {}, **UNLIMITED}
 
 
-def member_claims() -> dict:
-    return {**user_claims(), "pub": {"allow": list(MEMBER_PUBLISH)}, "sub": {"allow": ["_INBOX.>"]}}
+def member_claims(user: str) -> dict:
+    return {**user_claims(), "pub": {"allow": list(MEMBER_PUBLISH)}, "sub": {"allow": [f"{subjects.inbox(user)}.>"]}}
 
 
 def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
@@ -106,7 +106,8 @@ def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
 
 def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
-    return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", member_claims()), user.seed)
+    claims = member_claims(user.public)
+    return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 
 
 def account_jwt(signer: Signer, revocations: Mapping[str, int]) -> str:

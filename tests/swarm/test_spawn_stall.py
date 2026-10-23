@@ -3,7 +3,7 @@ import pytest
 from scripts.hive import admission, placement, placement_waits
 from scripts.inbox import store as inbox_store
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, cli, commands, status, tick
+from scripts.swarm import capacity, cli, commands, lease, local_slots, status, tick
 from scripts.swarm.health import spawn_stall
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from tests.swarm.test_cli import env as env
@@ -33,6 +33,7 @@ def stalled(env, monkeypatch):
     monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
     monkeypatch.setattr(inbox_store, "now_ms", lambda: clock[0])
     monkeypatch.setattr(status, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(local_slots, "live", set)
     error = RuntimeError("forced phase failure")
 
     def broken(*args):
@@ -588,6 +589,63 @@ def quiet_watch(stalled):
     store, ledger, runtime, clock, _ = stalled
     with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
         pass
+
+
+def capped_watch(stalled, refused=True):
+    store, ledger, runtime, clock, _ = stalled
+    with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
+        if refused:
+            spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0])
+
+
+@pytest.mark.parametrize("workers, raised", [(8, False), (7, True)])
+def test_a_full_local_cap_holds_the_lane_without_a_spawn_stall(stalled, monkeypatch, workers, raised):
+    store, _, _, clock, _ = stalled
+    monkeypatch.setattr(local_slots, "live", lambda: {f"w{n}" for n in range(workers)})
+    capped_watch(stalled)
+    clock[0] += 600_000
+    capped_watch(stalled)
+    assert bool(spawn_stall.findings(store, "sw")) is raised
+    assert bool(InboxStore(store.redis).pending_mail("master@sw")) is raised
+
+
+def test_a_local_cap_refusal_before_the_last_observation_does_not_hold_the_lane(stalled, monkeypatch):
+    store, _, _, clock, _ = stalled
+    monkeypatch.setattr(local_slots, "live", lambda: {f"w{n}" for n in range(8)})
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0] - 1)
+    capped_watch(stalled, refused=False)
+    clock[0] += 60_000
+    capped_watch(stalled, refused=False)
+    clock[0] += 600_000
+    capped_watch(stalled, refused=False)
+    (finding,) = spawn_stall.findings(store, "sw")
+    assert finding.kind == "spawn stall"
+
+
+def test_a_local_cap_refusal_at_the_last_observation_holds_the_lane(stalled, monkeypatch):
+    store, _, _, clock, _ = stalled
+    monkeypatch.setattr(local_slots, "live", lambda: {f"w{n}" for n in range(8)})
+    assert not spawn_stall.capped(store, "sw", 0)
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0])
+    assert spawn_stall.capped(store, "sw", clock[0])
+    assert not spawn_stall.capped(store, "sw", clock[0] + 1)
+
+
+def test_a_local_cap_refusal_holds_the_first_observation(stalled, monkeypatch):
+    store, ledger, runtime, clock, _ = stalled
+    monkeypatch.setattr(local_slots, "live", lambda: {f"w{n}" for n in range(8)})
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, 0)
+    assert "since" not in spawn_stall.observe(store, "sw", ledger, clock[0], runtime)
+
+
+def test_a_local_cap_refusal_reads_the_refusing_machine(stalled, monkeypatch):
+    store, _, _, clock, _ = stalled
+    monkeypatch.setattr(local_slots, "live", lambda: {f"w{n}" for n in range(7)})
+    store.redis.hset(local_slots.key("ws"), "other/t9", lease.now_ms(store))
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0])
+    assert spawn_stall.capped(store, "sw", clock[0])
+    spawn_stall.refuse_local(store, "sw", "elsewhere", 8, 8, clock[0])
+    assert not spawn_stall.capped(store, "sw", clock[0])
 
 
 def test_admission_refusals_without_a_failed_launch_are_named_in_the_alarm(stalled):
