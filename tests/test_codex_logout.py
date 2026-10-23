@@ -202,8 +202,9 @@ def test_without_a_flag_a_terminal_is_asked_and_the_answer_is_used():
     assert bao.data == {"AH_CX_TOKEN_other": OTHER}
 
 
-def test_without_a_console_off_a_terminal_openbao_is_skipped(monkeypatch):
+def test_without_a_console_off_a_terminal_openbao_is_skipped(monkeypatch, capsys):
     _registered()
     monkeypatch.setattr(openbao_step.sys.stdin, "isatty", lambda: False, raising=False)
     assert codex_logout.main(["team"], {}) == 0
     assert "AH_CX_TOKEN_team=" not in aicode_tokens.rc_file().read_text()
+    assert "OpenBao skipped: its Codex record still holds this account" in capsys.readouterr().out.splitlines()

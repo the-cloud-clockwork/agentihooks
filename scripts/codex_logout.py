@@ -55,7 +55,9 @@ def main(
     except StoreRefused as exc:
         _fail(str(exc))
         return 1
-    if bao is not None and not _forget(bao, openbao_kv.codex_creds(environ), tokens + refresh):
+    if bao is None:
+        print("OpenBao skipped: its Codex record still holds this account")
+    elif not _forget(bao, openbao_kv.codex_creds(environ), tokens + refresh):
         return 1
     home = codex_login.homes() / slug
     if home.is_dir():
