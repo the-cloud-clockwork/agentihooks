@@ -38,7 +38,7 @@ from types import SimpleNamespace
 
 from scripts.events.config import BusConfig
 from scripts.events.factory import open_bus
-from scripts.hive import execution_events
+from scripts.hive import admission, execution_events
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.swarm import freeze, readiness
 from scripts.swarm.ledger_client import LedgerClient
@@ -98,7 +98,12 @@ class StandIn:
         return Outcome("spawn", Status.OK, "compose-task", SimpleNamespace(pane_id="stand-in", harness="claude", account=""))
 
 
-spoke = Spoke(SpokeConfig(config, "eng", hive), bus, StandIn(), Tasks())
+probe = Spoke(SpokeConfig(config, "eng", hive), bus, StandIn(), Tasks())
+for _ in range(2):
+    reading = probe.measure()
+print(f"runner headroom for a real agent: {admission.room(reading)}", file=sys.stderr)
+stand_in = {"cpus": 1, "load5": 0.0}
+spoke = Spoke(SpokeConfig(config, "eng", hive), bus, StandIn(), Tasks(), measure=lambda: stand_in)
 outcomes = []
 for _ in range(30):
     outcomes.append(spoke.poll(1_000))
