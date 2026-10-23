@@ -41,6 +41,7 @@ def test_one_invite_joins_a_machine_and_saves_the_refreshed_nats_grant(invitatio
             "id": "fixture-member",
             "redis_url": "redis://refreshed.example.test/0",
             "nats_credentials": "fixture nats credentials\n",
+            "bus_scoped": True,
         }
 
     monkeypatch.setattr(cli, "_post", refresh)
@@ -54,6 +55,7 @@ def test_one_invite_joins_a_machine_and_saves_the_refreshed_nats_grant(invitatio
     assert saved["AGENTIHOOKS_HIVE_URL"] == "https://hub.example.test"
     assert saved["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"] == "fixture-invite"
     assert saved["AGENTIHOOKS_HIVE_REDIS_URL"] == "redis://refreshed.example.test/0"
+    assert saved["AGENTIHOOKS_BUS_SCOPED"] == "1"
     creds = Path(saved["AGENTIHOOKS_BUS_CREDENTIALS"])
     assert creds.read_text() == "fixture nats credentials\n"
     assert creds.stat().st_mode & 0o777 == 0o600
@@ -63,6 +65,28 @@ def test_one_invite_joins_a_machine_and_saves_the_refreshed_nats_grant(invitatio
     assert output.err == ""
     assert "fixture-invite" not in output.out + output.err
     assert "fixture nats credentials" not in output.out + output.err
+
+
+def test_join_refuses_an_unscoped_bus_credential_and_keeps_the_current_membership(invitation, monkeypatch, capsys):
+    invite, home = invitation
+    home.mkdir()
+    saved = home / auth.ENV_FILE
+    saved.write_text("previous membership\n")
+
+    def unscoped(*args):
+        return {
+            "id": "fixture-member",
+            "redis_url": "redis://refreshed.example.test/0",
+            "nats_credentials": "fixture nats credentials\n",
+        }
+
+    monkeypatch.setattr(cli, "_post", unscoped)
+    assert cli.main(["join", str(invite)]) == 1
+    assert saved.read_text() == "previous membership\n"
+    assert not (home / auth.NATS_CREDS_FILE).exists()
+    err = capsys.readouterr().err
+    assert "the hive offered an unscoped bus credential" in err
+    assert "fixture nats credentials" not in err
 
 
 def test_a_refused_invite_keeps_the_current_membership(invitation, monkeypatch, capsys):

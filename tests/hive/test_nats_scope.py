@@ -72,17 +72,14 @@ def test_scoped_join_credentials_allow_each_hub_configured_swarm(admin, signer, 
     assert _violations(scoped, credentials, act) == []
 
 
-def test_unlisted_member_gets_no_swarm_permissions(admin, signer):
+def test_the_hive_endpoint_refuses_to_mint_for_a_member_the_hub_record_does_not_list(admin, signer):
     member = auth.mint(admin, "h1", PUBLIC)
     scoped = replace(signer, member_swarms={"another-member": ("rig",)})
-    credentials = _refresh(admin, scoped, member["ledger_credential"])["nats_credentials"]
-
-    async def act(nc):
-        await nc.publish("swarm.rig.queue.eng", b"{}")
-
-    assert _violations(scoped, credentials, act, refused=True) == [
-        'nats: permissions violation for publish to "swarm.rig.queue.eng"'
-    ]
+    grant = _refresh(admin, scoped, member["ledger_credential"])
+    assert grant == {
+        "error": f"the hub record lists no member swarms for hive member {member['id']}; "
+        "it mints no unscoped bus credential"
+    }
 
 
 def test_scoped_claims_keep_the_member_reply_inbox(signer):
