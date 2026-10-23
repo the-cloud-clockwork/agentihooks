@@ -82,7 +82,7 @@ def findings(store, slug: str) -> list[Finding]:
         return []
     failure = json.loads(store.redis.get(store.key(slug, "tick-failure")) or "{}")
     evidence = ("A lane has a free seat, quota and claimable work",)
-    if failure:
+    if "at" in failure and failure["at"] >= state["since"]:
         evidence += (f"Last failed step {failure['step']}: {failure['error']}",)
     return [Finding("spawn stall", slug, "No agent has launched for ten minutes", evidence, "ten minutes", 1)]
 
@@ -116,7 +116,7 @@ def watch(store, slug: str, ledger, clock: Callable[[], int], runtime) -> Iterat
         if error is previous:
             return
         previous = error
-        failure = {"step": step, "error": f"{type(error).__name__}: {error}"}
+        failure = {"step": step, "error": f"{type(error).__name__}: {error}", "at": clock()}
         timing.keep()
         store.redis.set(store.key(slug, "tick-failure"), json.dumps(failure))
 
