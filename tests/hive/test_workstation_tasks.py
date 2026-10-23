@@ -28,6 +28,7 @@ def test_a_workstation_task_selects_the_workstation_hive_over_a_preferred_remote
 
 
 def test_a_hybrid_controller_spawns_a_workstation_task_on_the_local_machine(setup, monkeypatch):
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     fenced = hybrid(setup, monkeypatch)
     assert fenced.placement_refusal("eng", TASK) == ""
     assert fenced.spawn(setup.config, "eng", "eng name", TASK) == "placed on the workstation"

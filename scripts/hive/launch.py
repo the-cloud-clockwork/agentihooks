@@ -213,13 +213,13 @@ class HiveLaunch:
         hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
         hives = _by_origin(hives, config.repo)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
-        hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
-        if task.get("workstation"):
-            from scripts.swarm.commands import hive_id
+        from scripts.swarm.commands import hive_id
 
+        if task.get("workstation"):
             hives = [hive for hive in hives if hive["id"] == hive_id()]
             if not hives:
                 return self._record_wait(lane, task, placement.Wait(placement.NEEDS_WORKSTATION, role))
+        hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
         moved = ""
         if (saved.get("harness") or "claude") not in ("claude", "auto"):
             moved = f"no hive places the saved {saved['harness']} harness"
@@ -233,7 +233,6 @@ class HiveLaunch:
             selected = self._master_selection(config, decision, hives, now, rows, front)
             return self._record_wait(lane, task, selected)
         from scripts.swarm import local_slots
-        from scripts.swarm.commands import hive_id
 
         if lane != placement.MASTER:
             for hive in hives:
