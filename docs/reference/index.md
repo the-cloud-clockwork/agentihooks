@@ -18,6 +18,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 |------|---------------|
 | [Local test guard](local-test-guard.md) | Source and symbol inspection, prose mentioning runners, execution refusals, configuration and troubleshooting |
 | [Process environment reads](credential-guard-proc-environ.md) | Credential guard refusals of process environment files under `/proc`, commands that still pass, leak free alternatives, configuration and troubleshooting |
+| [Host process guard](host-process-guard.md) | Which piled up processes the workstation guard ends, the agent session wrapper and tick exclusions, configuration, install and drift check, log lines and troubleshooting several agent sessions ending together |
 | [Configuration](configuration.md) | All environment variables across every integration, in one place |
 | [Deployed swarm host capacity](../pillars/swarm.md#deployed-host-capacity) | Worker namespace quota and pool budgets, autoscale inspection, configuration and disabled host pressure alerts |
 | [Git maintenance and object counts](cli-commands.md#git-maintenance-and-object-counts) | Register managed primary checkouts, repair missing registrations, configure discovery, read loose object and pack counts and diagnose failures |
