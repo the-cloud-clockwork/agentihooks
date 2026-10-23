@@ -733,7 +733,7 @@ def test_a_blocked_worker_receipt_is_collected_once_without_reviving_it(setup):
     assert _collect_acks(slug, setup.config, store, ledger, runtime, doc, 3_000) == []
     assert store.claims(slug, worker.task) == lives + 1
     assert store.spawns(slug) == {"claude": 1}
-    assert setup.launcher.slots.rows("claude:account") == {}
+    assert setup.launcher.slots.counts() == {}
     ledger.task_set.assert_not_called()
 
 
@@ -749,7 +749,9 @@ def test_a_finished_blocked_worker_without_a_successful_receipt_is_refused(setup
     if receipt == "missing":
         setup.store.redis.hdel(setup.launcher.orders.receipt(order), "ack")
     else:
-        setup.launcher.orders.finish("remote", "0-0", order, replace(ack, status="failed", failure="identity"))
+        setup.store.redis.hset(
+            setup.launcher.orders.receipt(order), "ack", replace(ack, status="failed", failure="identity").encode()
+        )
     assert setup.launcher.collect(request) == Outcome("spawn", Status.REFUSED, "hive", detail=GONE)
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "finished"
 
@@ -772,7 +774,9 @@ def test_a_finished_blocked_worker_receipt_keeps_the_launch_fences(setup, bad):
             setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__)
         )
     elif bad == "ack host":
-        setup.launcher.orders.finish("remote", "0-0", order, replace(ack, target={"host_id": "other"}))
+        setup.store.redis.hset(
+            setup.launcher.orders.receipt(order), "ack", replace(ack, target={"host_id": "other"}).encode()
+        )
     elif bad == "request epoch":
         request = replace(request, task={**request.task, "controller_epoch": setup.held.epoch + 1})
     else:
@@ -782,7 +786,7 @@ def test_a_finished_blocked_worker_receipt_keeps_the_launch_fences(setup, bad):
         )
     with pytest.raises(SwarmError) as raised:
         setup.launcher.collect(request)
-    assert ("epoch" if bad.endswith("epoch") else bad) in str(raised.value)
+    assert ("the controller lease is stale" if bad.endswith("epoch") else bad) in str(raised.value)
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "finished"
 
 
