@@ -143,14 +143,23 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
 
 def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     record = {}
-    present = [value for value in task.get("repositories") or [] if Path(value).is_dir()]
-    candidates = [value for value in present or [repo] if Path(value).is_dir()]
-    for repository in dict.fromkeys(repository_root(Path(value)) for value in candidates):
+    present = local_repositories(task.get("repositories") or [], repo)
+    for repository in dict.fromkeys(present or local_repositories([repo], repo)):
         scoped = repository_task(repository, task)
         root = existing(repository, scoped, agent)
         if root and stack.pushed(root, scoped["branch"]):
             record = branch_record(checkout_fields(root), repository, {**task, **record})
     return record
+
+
+def local_repositories(values: list[str], repo: str) -> list[Path]:
+    found = []
+    for value in values:
+        try:
+            found.append(local_repository(value, repo))
+        except SwarmError:
+            continue
+    return found
 
 
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
