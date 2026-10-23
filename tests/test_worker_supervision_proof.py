@@ -95,14 +95,20 @@ def test_a_container_that_never_exits_still_fails_and_is_removed(container, tmp_
 
     assert (("wait", "container"), 12) in container.calls
     assert container.calls[-1][0] == ("rm", "--force", "container")
-    commands = [args for args, _ in container.calls]
-    assert ("inspect", "--format", "{{json .State}}", "container") in commands
-    assert ("top", "container", "-eo", "pid,ppid,stat,etime,args") in commands
-    assert ("logs", "--timestamps", "--tail", "500", "container") in commands
-    assert any(args[:2] == ("cp", "container:/home/worker/attempts") for args in commands)
+    attempt = "container:/home/worker/attempts/fixture"
+    for args in (
+        ("inspect", "--format", "{{json .State}}", "container"),
+        ("top", "container", "-eo", "pid,ppid,stat,etime,args"),
+        ("logs", "--timestamps", "--tail", "500", "container"),
+    ):
+        assert (args, 10) in container.calls
+    copies = [(args[1], timeout) for args, timeout in container.calls if args[0] == "cp"]
+    assert copies == [(f"{attempt}/launch.json", 10), (f"{attempt}/run/supervision", 10)]
     [evidence] = tmp_path.glob("stalled-*")
-    assert sorted(path.name for path in evidence.glob("*.txt")) == ["attempts.txt", "logs.txt", "processes.txt"]
-    assert (evidence / "state.json").exists()
+    assert sorted(path.name for path in evidence.iterdir()) == ["attempts", "logs.txt", "processes.txt", "state.json"]
+    captured = evidence / "attempts" / "fixture"
+    assert (captured / "launch.json").exists()
+    assert (captured / "run" / "supervision" / "incarnation" / "result.json").exists()
 
 
 def test_unavailable_stall_evidence_is_recorded_and_the_timeout_still_fails(container, tmp_path, monkeypatch):
@@ -110,7 +116,7 @@ def test_unavailable_stall_evidence_is_recorded_and_the_timeout_still_fails(cont
     docker = proof.docker
 
     def failing(*args, timeout=30):
-        if args[0] in ("inspect", "top", "logs") or args[1].endswith(":/home/worker/attempts"):
+        if args[0] in ("inspect", "top", "logs", "cp"):
             container.calls.append((args, timeout))
             raise subprocess.CalledProcessError(1, ["docker", *args])
         return docker(*args, timeout=timeout)
@@ -121,8 +127,13 @@ def test_unavailable_stall_evidence_is_recorded_and_the_timeout_still_fails(cont
         proof.run_case("image", "complete", tmp_path, viewer=False)
 
     [evidence] = tmp_path.glob("stalled-*")
-    for name in ("state.json", "processes.txt", "logs.txt", "attempts.txt"):
+    for name in ("state.json", "processes.txt", "logs.txt"):
         assert (evidence / name).read_text().startswith("unavailable: ")
+    lines = (evidence / "unavailable.txt").read_text().splitlines()
+    assert [line.split(": ")[0] for line in lines] == [
+        "/home/worker/attempts/fixture/launch.json",
+        "/home/worker/attempts/fixture/run/supervision",
+    ]
     assert container.calls[-1][0] == ("rm", "--force", "container")
 
 
