@@ -12,8 +12,12 @@ if [[ ${SWARM_SMOKE_RUNTIME_IMAGES_READY:-} == true &&
    [[ "$(timeout "$limit" docker --host "$docker_host" image inspect --format '{{.Architecture}}' "$image" 2>/dev/null)" == amd64 ]]; then
   exit 0
 fi
+fallback="$image"
+if [[ "$image" == public.ecr.aws/docker/library/* ]]; then
+  fallback="mirror.gcr.io/library/${image#public.ecr.aws/docker/library/}"
+fi
 acquire() {
-  manifest="$(timeout "$limit" docker manifest inspect "$@" "$image")" && digest="$(python3 -c '
+  manifest="$(timeout "$limit" docker manifest inspect "$@" "$source")" && digest="$(python3 -c '
 import json
 import sys
 
@@ -21,9 +25,11 @@ index = json.load(sys.stdin)
 print(next(manifest["digest"] for manifest in index["manifests"]
            if manifest.get("platform", {}).get("os") == "linux"
            and manifest["platform"].get("architecture") == "amd64"))
-' <<<"$manifest")" && timeout "$limit" docker --host "$docker_host" pull "$image@$digest"
+' <<<"$manifest")" && timeout "$limit" docker --host "$docker_host" pull "$source@$digest"
 }
 for attempt in $(seq "$attempts"); do
+  source="$image"
+  if (( attempt % 2 == 0 )); then source="$fallback"; fi
   if acquire "$@"; then
     break
   else
@@ -35,4 +41,4 @@ for attempt in $(seq "$attempts"); do
   printf 'Pull of %s failed on attempt %s of %s; retrying in 10 seconds\n' "$image" "$attempt" "$attempts" >&2
   sleep 10
 done
-docker --host "$docker_host" tag "$image@$digest" "$image"
+docker --host "$docker_host" tag "$source@$digest" "$image"
