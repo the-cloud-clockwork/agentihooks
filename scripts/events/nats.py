@@ -358,12 +358,12 @@ class NatsBus:
         )
         self._legacy_dead = NatsEventLog(self._loop, self._js, config.queue, DEAD_STREAM, config.provision)
         self.events = (
-            RoutedLog(lambda swarm: self.for_swarm(swarm).events, lambda: self._logs("events"))
+            RoutedLog(lambda swarm: self.for_swarm(swarm).events, lambda: self._logs("events"), config.queue)
             if config.scoped
             else self._legacy_events
         )
         self.dead = (
-            RoutedLog(lambda swarm: self.for_swarm(swarm).dead, lambda: self._logs("dead"))
+            RoutedLog(lambda swarm: self.for_swarm(swarm).dead, lambda: self._logs("dead"), config.queue)
             if config.scoped
             else self._legacy_dead
         )

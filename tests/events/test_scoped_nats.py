@@ -181,3 +181,10 @@ def test_member_state_exists_before_its_first_event(hub, signer):
         assert own.state("hive-presence").create("hive-a", b"present")
     finally:
         client.close()
+
+
+def test_nats_aggregate_consumers_preserve_configured_policy(hub):
+    consumer = hub.events.consumer("configured-events", "swarm.>")
+    assert hub.events.consumer("configured-events", "swarm.>", POLICY) is consumer
+    dead = hub.dead.consumer("configured-dead", "dead.>")
+    assert hub.dead.consumer("configured-dead", "dead.>", POLICY) is dead

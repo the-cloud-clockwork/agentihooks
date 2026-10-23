@@ -88,15 +88,16 @@ class MergedConsumer:
 
 
 class RoutedLog:
-    def __init__(self, owner: Callable[[str], EventLog], logs: Callable[[], list[EventLog]]):
+    def __init__(self, owner: Callable[[str], EventLog], logs: Callable[[], list[EventLog]], policy: QueuePolicy):
         self._owner, self._logs = owner, logs
+        self._policy = policy
         self._consumers: dict[str, tuple[str, QueuePolicy, Consumer]] = {}
 
     def publish(self, subject: str, event: Envelope) -> bool:
         return self._owner(event.swarm).publish(subject, event)
 
     def consumer(self, durable: str, subject: str, policy: QueuePolicy | None = None) -> Consumer:
-        policy = policy or QueuePolicy()
+        policy = policy or self._policy
         existing = self._consumers.get(durable)
         if existing is not None:
             if existing[:2] != (subject, policy):

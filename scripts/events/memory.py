@@ -273,8 +273,10 @@ class MemoryBus:
         self._legacy_events = raw_events
         self.events = ScopedLog(raw_events, swarm, "events") if swarm is not None else raw_events
         if config.scoped:
-            self.events = RoutedLog(lambda owner: self.for_swarm(owner).events, lambda: self._logs("events"))
-            self.dead = RoutedLog(lambda owner: self.for_swarm(owner).dead, lambda: self._logs("dead"))
+            self.events = RoutedLog(
+                lambda owner: self.for_swarm(owner).events, lambda: self._logs("events"), config.queue
+            )
+            self.dead = RoutedLog(lambda owner: self.for_swarm(owner).dead, lambda: self._logs("dead"), config.queue)
         self._queues: dict[str, MemoryWorkQueue | ScopedQueue] = {}
         self._buckets: dict[str, MemoryStateStore] = {}
 
