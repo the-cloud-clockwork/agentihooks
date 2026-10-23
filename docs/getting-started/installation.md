@@ -131,8 +131,7 @@ agentihooks deps check
 
 `deps sync` selects the checkout containing the running `agentihooks` code,
 regardless of your current directory. It requires that checkout to be on `dev`
-and runs `git fetch origin dev`, then `git merge --ff-only origin/dev`, so a
-fetch head that lists dev twice cannot fail it. It compares `[project].dependencies`
+and runs `git fetch origin dev`, then `git merge --ff-only origin/dev`. It compares `[project].dependencies`
 from the committed revision before and after the pull, then installs added or
 changed requirement strings and any still missing declared distributions.
 Installation uses `uv pip install --python` with the Python executing the CLI;
