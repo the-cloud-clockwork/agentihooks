@@ -314,8 +314,10 @@ def test_the_cli_delegates_github_webhook_to_this_module():
     assert DELEGATED_CLIS["github-webhook"] == "scripts.hub.github_webhooks"
 
 
-def test_the_hub_registry_runs_the_pulls_reactor():
+def test_the_hub_registry_runs_the_pulls_reactor_on_the_hub_clock():
     from scripts.hub import registry
 
-    names = [reactor.name for reactor in registry.configured(open_bus(BusConfig()))]
-    assert "pulls" in names
+    bus = open_bus(BusConfig())
+    reactors = {reactor.name: reactor for reactor in registry.configured(bus, lambda: 4242)}
+    reactors["pulls"].poll(lambda: True)
+    assert json.loads(bus.state("hub-github").get("polled").value) == 4242
