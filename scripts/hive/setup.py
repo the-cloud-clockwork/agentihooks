@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from scripts import openbao_kv
-from scripts.hive import auth, bundle_origin, registry
+from scripts.hive import auth, bundle_origin, linked_profiles, registry
 from scripts.hive.config import TOKEN_PREFIXES
 
 NOT_SETTINGS = (auth.ENV_FILE, "hive-container.env")
@@ -57,7 +57,11 @@ def entries(environ: Mapping[str, str], home: Path) -> tuple[dict[str, str], dic
             left_out[name] = reason
         else:
             kept[name] = value
-    return kept | bundle_origin.origin(home, environ), left_out
+    if "AGENTIHOOKS_MCP_URLS" in environ:
+        kept["AGENTIHOOKS_MCP_URLS"] = environ["AGENTIHOOKS_MCP_URLS"]
+    return kept | bundle_origin.origin(home, environ) | {
+        linked_profiles.ENV_KEY: linked_profiles.sources(home)
+    }, left_out
 
 
 def publish(environ: Mapping[str, str], path: str, dry_run: bool, opener: Callable | None = None) -> str:

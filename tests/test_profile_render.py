@@ -2263,6 +2263,7 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "chain": chain,
         "overlays": [],
         "enabled_plugins": {},
+        "mcp_urls": {},
         "corrections": "",
     }
     assert render._stamp(None, []) == {
@@ -2272,6 +2273,7 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "chain": [],
         "overlays": [],
         "enabled_plugins": {},
+        "mcp_urls": {},
         "corrections": "",
     }
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]
