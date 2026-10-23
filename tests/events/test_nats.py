@@ -112,7 +112,8 @@ def test_the_event_log_and_queue_create_only_pull_consumers(bus):
     log = _consumer_config(bus, nats.EVENT_STREAM, "watcher")
     work = _consumer_config(bus, nats.queue_stream("work"), "work")
     assert (log.deliver_subject, work.deliver_subject) == (None, None)
-    assert (log.filter_subject, work.filter_subject) == ("swarm.>", "agentihooks.queue.work")
+    assert log.filter_subjects == ["swarm.>", "legacy.swarm.>"]
+    assert work.filter_subject == "agentihooks.queue.work"
 
 
 def test_a_consumer_carries_the_queue_policy(bus):

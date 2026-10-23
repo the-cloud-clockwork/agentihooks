@@ -11,13 +11,12 @@ from .config import QueuePolicy
 from .dead import DEAD_STREAM
 from .envelope import Envelope
 from .nats import ATTEMPT_BASE, MSG_ID, NatsWorkQueue, _attempt
-from .nats_state import IMPORT_PENDING, LAST_SUBJECT_SEQUENCE, REVISION, REVISION_BASE
+from .nats_state import IMPORT_PENDING, LAST_SUBJECT_SEQUENCE, REVISION, REVISION_BASE, ScopedStateStore
 from .scope import queue_lane
 from .subjects import subject
 
 if TYPE_CHECKING:
     from .nats import NatsBus
-    from .nats_state import ScopedStateStore
 
 IMPORT_PLAN = "agentihooks_import_plan"
 
@@ -82,7 +81,7 @@ def migrate_state(root: "NatsBus", swarm: str, bucket: str, keys: Sequence[str])
         ).encode()
     ).hexdigest()
     highwater = root._loop.run(root._js.stream_info(f"KV_{bucket}")).state.last_seq
-    target = root.for_swarm(swarm).state(bucket)
+    target = ScopedStateStore(root, swarm, bucket, importing=True)
     metadata = _begin_state(root, target, plan, highwater)
     if metadata is None:
         return

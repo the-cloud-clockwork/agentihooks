@@ -70,3 +70,19 @@ def test_aggregate_fetch_honors_the_budget_and_rotates_empty_sources(monkeypatch
     assert calls == [0, 1]
     assert consumer.fetch(10, 20) == []
     assert calls == [0, 1, 2, 3]
+
+
+def test_aggregate_fetch_rotates_sources_with_sustained_backlog():
+    calls = []
+
+    def log(index):
+        def fetch(batch, timeout_ms):
+            calls.append(index)
+            return [index] * batch
+
+        return SimpleNamespace(consumer=lambda *_: SimpleNamespace(fetch=fetch))
+
+    logs = [log(index) for index in range(3)]
+    consumer = scope.MergedConsumer(lambda: logs, "durable", "swarm.>", None)
+    assert [consumer.fetch(2, 100) for _ in range(6)] == [[0, 0], [1, 1], [2, 2]] * 2
+    assert calls == [0, 1, 2, 0, 1, 2]

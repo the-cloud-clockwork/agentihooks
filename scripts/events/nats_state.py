@@ -16,25 +16,32 @@ LAST_SUBJECT_SEQUENCE = "Nats-Expected-Last-Subject-Sequence"
 
 
 class ScopedStateStore:
-    def __init__(self, root: "NatsBus", swarm: str, bucket: str):
+    def __init__(self, root: "NatsBus", swarm: str, bucket: str, *, importing: bool = False):
         self._root, self._swarm, self._bucket = root, swarm, bucket
         self._stream = stream_name(swarm, f"STATE_{bucket}")
         if root._config.provision:
-            root._loop.run(self._provision())
+            root._loop.run(self._provision(importing))
         info = root._loop.run(root._js.stream_info(self._stream))
         metadata = info.config.metadata or {}
         if metadata.get(IMPORT_PENDING) and not root._config.provision:
             raise RuntimeError("scoped state migration is incomplete")
         self._revision_base = int(metadata.get(REVISION_BASE, "0"))
 
-    async def _provision(self) -> None:
+    async def _provision(self, importing: bool) -> None:
         try:
             await self._root._js.stream_info(self._stream)
         except NotFoundError:
+            try:
+                legacy = await self._root._js.stream_info(f"KV_{self._bucket}")
+            except NotFoundError:
+                legacy = None
+            if legacy is not None and legacy.state.messages and not importing:
+                raise RuntimeError("legacy state requires explicit key ownership")
             await self._root._js.add_stream(
                 name=self._stream,
                 subjects=[f"{subject(self._swarm, 'state', self._bucket)}.>"],
                 max_msgs_per_subject=64,
+                metadata={IMPORT_PENDING: "true"} if importing else None,
             )
 
     def _subject(self, key: str) -> str:

@@ -102,7 +102,9 @@ class HubRunner:
             delivery.ack()
             return "skipped"
         try:
-            buckets.provision(self._bus.for_swarm(event.swarm))
+            view = self._bus.for_swarm(event.swarm)
+            if view is not self._bus:
+                buckets.provision(view)
             reactor.handler(event)
         except Exception:
             print(f"hub: reactor {reactor.name} failed on event {event.id}", file=sys.stderr)

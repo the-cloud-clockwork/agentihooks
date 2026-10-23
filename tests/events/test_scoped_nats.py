@@ -140,6 +140,7 @@ def test_legacy_bus_and_scoped_bus_keep_working_on_the_same_server(signer):
         BusConfig(backend="nats", url=signer.url, scoped=True, credentials=_user_creds(signer.account, "modern"))
     )
     try:
+        modern.migrate_state("rig", "spoke-work", [])
         scoped = modern.for_swarm("rig")
         scoped.queue("eng", POLICY).offer(event())
         scoped.state("spoke-work").create("old", b"scoped")
