@@ -767,8 +767,10 @@ def test_a_finished_blocked_worker_receipt_keeps_the_launch_fences(setup, bad):
     elif bad == "seat":
         request = replace(request, task={**request.task, "seat": "eng-2@fixture"})
     elif bad == "generation":
-        worker = replace(worker, state="finished", generation=worker.generation + 1)
-        setup.store.execution_registry.update("fixture", worker)
+        order = replace(order, generation=order.generation + 1)
+        setup.store.redis.hset(
+            setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__)
+        )
     elif bad == "ack host":
         setup.launcher.orders.finish("remote", "0-0", order, replace(ack, target={"host_id": "other"}))
     elif bad == "request epoch":
