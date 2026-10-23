@@ -1914,8 +1914,11 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
+      # A failed cache download leaves the segment timer holding the step open until it fires.
       - name: Set up Python
         uses: actions/setup-python@v5
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           python-version: "3.12"
           cache: pip
