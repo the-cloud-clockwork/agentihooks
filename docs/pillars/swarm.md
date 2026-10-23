@@ -1401,21 +1401,23 @@ the corrected publication and continuation cases passed afterward
 
 ### Repositories recorded on another host
 
-A task's `repositories` list and its `repository_branches` keys hold absolute
-paths written on whichever host prepared the task, such as
-`/home/me/dev/agentihooks-bundle` on the workstation. When a successor runs on a
-hive whose clones live under `/srv/repos`, `prepare` and `publish` resolve each
-entry to the checkout on the host they run on:
+A task's `repositories` entries and its `repository_branches` keys are
+written on whichever host prepared the task: an absolute path such as
+`/home/me/dev/agentihooks-bundle` on the workstation, or a URL or origin
+identity. When a successor runs on a hive whose clones live under
+`/srv/repos`, `prepare` and `publish` resolve each entry to a checkout on the
+host they run on:
 
-1. A recorded path that is a directory here is used as is (its primary
-   checkout when the path is a worktree).
-2. Otherwise the entry is matched by repository name: the last segment of the
+1. An entry that is a directory here is used, reduced to its primary
+   checkout when it is a worktree. It never falls through to the name search.
+2. Any other entry is matched by repository name: the last segment of the
    path, URL or `host/owner/name` form, without `.git`, compared without case.
-   The candidates are the primary checkouts beside the swarm repository (the
-   other children of its parent folder) and the checkouts the hive scans under
-   `HIVE_REPO_ROOT`, default `~/dev` (see
-   [Repos and checkouts](hives.md#repos-and-checkouts)). Worktrees are not
-   candidates; a match is reduced to its primary checkout.
+   The candidates are the checkouts in the swarm repository's parent folder,
+   the swarm repository included, and the checkouts the hive scans under
+   `HIVE_REPO_ROOT` (default `~/dev`): its direct children and the children of
+   any child that is not itself a checkout (see
+   [Repos and checkouts](hives.md#repos-and-checkouts)). Only primary
+   checkouts are candidates; worktrees, whose `.git` is a file, are skipped.
 3. Exactly one checkout must match. None, or several distinct checkouts with
    the same name, is refused before any worktree is created:
 
@@ -1424,22 +1426,25 @@ repository /home/me/dev/agentihooks-bundle has 0 checkouts named agentihooks-bun
 ```
 
 Clone the repository under `HIVE_REPO_ROOT` or beside the swarm repository,
-or remove the duplicate clone, then repeat the command.
+or remove the duplicate clone, then repeat the command. Setting
+`HIVE_REPO_ROOT` replaces the default `~/dev` scan root; the search beside the
+swarm repository always applies. No other flag or setting changes this.
 
-The same name match applies to the rest of the task record:
+The rest of the task record follows the same name match:
 
-| Record | Behaviour on another host |
+| Record or command | Behaviour on another host |
 |---|---|
-| `repositories` entry | Resolved by the steps above. `prepare` creates or reuses a worktree in the resolved checkout. |
-| `repository_branches` key | The key for this host's checkout path wins. Without one, a key from another host with the same repository name supplies the continuation branch, so the successor continues the predecessor's branch instead of cutting a new one. |
-| `publish` from a task worktree | The worktree's repository is accepted when its name matches any declared entry, so a declared repository not cloned on this host does not block publishing another one that is. |
-| `publish` from a primary checkout | The sole declared repository is resolved by the steps above. |
+| `repository_branches` | The key for this host's checkout path wins. Without one, the first key from another host with the same repository name supplies the continuation branch. With neither, the task's `branch` is used, unless `branch_repo` names another repository, or the task declares several repositories and has no `branch_repo`; then a new branch is cut. |
+| `prepare` | Creates or reuses one worktree per resolved checkout. Worktrees go under the worktree root, default `~/dev/worktrees/<repo>/<name>`, never inside the checkout folder. A continuation branch is cut from `origin/<branch>`, so the predecessor must have pushed it. |
+| `publish` from a task worktree | The worktree's repository is accepted when its name matches any declared entry, so a declared repository not cloned here does not block another that is. Otherwise it is refused with `current worktree <path> is not in the task repositories`. The worktree's branch must be the agent's own or the task's scoped branch, else `current worktree <path> does not belong to this task`. |
+| `publish` from a primary checkout | With one declared repository (or none, meaning the swarm repository), resolves it by the steps above and uses its prepared worktree; without one it fails with `task worktree missing` and names `prepare`. With several it refuses: `publish from the task worktree to select one of its repositories`. |
+| `block` | Records the pushed branch of each declared repository that resolves here and skips the ones that do not. Only when none resolves does it fall back to the launch checkout. |
 
-After a successful `prepare` or `publish`, `repository_branches` also gains a
-key for this host's path; the other host's key stays.
+A successful `prepare`, `publish` or `block` adds a `repository_branches` key
+for this host's path; the other host's key stays.
 
-Example: the task was prepared on the workstation, and a hive with clones under
-`/srv/repos` continues it.
+Example: the task was prepared on the workstation, its branch `engineer-a` is
+pushed, and a hive with clones under `/srv/repos` continues it.
 
 ```bash
 # The task records, written on the workstation:
@@ -1447,12 +1452,9 @@ Example: the task was prepared on the workstation, and a hive with clones under
 #   "repository_branches": {"/home/me/dev/agentihooks-bundle": "engineer-a"}
 
 HIVE_REPO_ROOT=/srv/repos agentihooks swarm <id> prepare
-# worktree in /srv/repos/agentihooks-bundle, continuing branch engineer-a
+# resolves /srv/repos/agentihooks-bundle and returns a worktree from it
+# under ~/dev/worktrees/agentihooks-bundle/, continuing origin/engineer-a
 ```
-
-No flag or setting enables this; `HIVE_REPO_ROOT` only widens the search. The
-pushed branch lookup in `swarm block` keeps its own fallback to the launch
-checkout for a repository missing here.
 
 Delivered in [pull request 5834](https://github.com/the-cloud-clockwork/agentihooks/pull/5834).
 The [red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39758053089)

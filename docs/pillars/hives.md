@@ -108,7 +108,7 @@ When a launch names the repo by origin identity, the hive starts the agent in it
 the first by path when it holds several. A repo given as a path launches in that path.
 
 `swarm prepare` and `swarm publish` search the same `HIVE_REPO_ROOT` checkouts by repository name when a task
-records a repository path from another host; see
+repository entry is not a directory on this host, such as a path recorded on another host; see
 [Repositories recorded on another host](swarm.md#repositories-recorded-on-another-host).
 
 ## Hive endpoint limits
