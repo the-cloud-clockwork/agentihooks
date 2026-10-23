@@ -1080,6 +1080,7 @@ def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tm
 
     scheduler = Mock()
     scheduler.key.side_effect = lambda key: key
+    scheduler.timer.return_value.scheduler = scheduler
     monkeypatch.setattr(process_timer, "blocking_client", connect)
     monkeypatch.setattr(process_timer, "Scheduler", Mock(return_value=scheduler))
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
