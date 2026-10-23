@@ -176,6 +176,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_wiring.py",
         "scripts/hive/nats_grant.py",
         "scripts/packaging/compose-hive-smoke.sh",
+        "scripts/packaging/compose-recovery-drill.sh",
         "scripts/packaging/compose-task-smoke.sh",
         "scripts/packaging/hive-join-smoke.sh",
         "scripts/packaging/hive-launch-attestation-proof.sh",

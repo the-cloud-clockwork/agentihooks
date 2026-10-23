@@ -14,6 +14,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, connect
 
 INTERVAL_MS = 300_000
 BUCKET = "hub-reconciler"
+CLAIMS = "spoke-work"
 COMPLETED = "completed"
 
 
@@ -78,6 +79,32 @@ def _ending(
     return replace(event, id=f"exited:{event.id}", type="execution.exited", time=time, cause=event.id)
 
 
+def _rebuilt(slug: str, agent: AgentRecord, hive: str, key: str, revision: int, task_generation: int) -> Envelope:
+    return Envelope(
+        id=f"started:{key}",
+        type="execution.started",
+        swarm=slug,
+        entity="execution",
+        key=agent.execution_id,
+        version=agent.generation,
+        time=max(agent.started_at, agent.launched_at),
+        author=BUCKET,
+        data={
+            "task": agent.task,
+            "task_generation": task_generation,
+            "claim_key": key,
+            "claim_revision": revision,
+            "generation": agent.generation,
+            "lane": agent.lane,
+            "hive": hive,
+            "name": agent.name,
+            "pane_id": agent.pane_id,
+            "harness": agent.harness,
+            "account": agent.account,
+        },
+    )
+
+
 class Reconciler:
     def __init__(
         self,
@@ -112,7 +139,7 @@ class Reconciler:
             for agent in self._store.execution_registry.records(slug):
                 if not guard():
                     return
-                event = _start(self._bus, slug, agent)
+                event = _start(self._bus, slug, agent) or self._restore(slug, agent, now)
                 if event is None:
                     continue
                 hive = agent.hive or agent.runtime_target.get("host_id")
@@ -128,3 +155,32 @@ class Reconciler:
             self._state.create(COMPLETED, value)
         else:
             self._state.update(COMPLETED, value, entry.revision)
+
+    def _restore(self, slug: str, agent: AgentRecord, now: int) -> Envelope | None:
+        # Only spokes beat presence, so a hive without one launched by push and its executions stay with the tick.
+        hive = agent.hive or agent.runtime_target.get("host_id")
+        key = execution_events.identity(slug, agent.name, agent.generation)
+        if not hive or self._bus.state(presence.BUCKET).get(hive) is None or self._launching(key, agent, now):
+            return None
+        row = self._lifecycle.ledger.task(slug, agent.task)
+        if not row or row.get("state") not in {"claimed", "pr"} or row.get("claimed_by") != agent.name:
+            return None
+        claims = self._bus.state(CLAIMS)
+        entry = claims.get(key)
+        value = json.loads(entry.value) if entry else {}
+        if "event" in value:
+            event = Envelope.from_dict(value["event"])
+        else:
+            claimed = json.dumps({"owner": hive, "state": "claimed"}).encode()
+            revision = entry.revision if entry else claims.create(key, claimed)
+            event = _rebuilt(slug, agent, hive, key, revision, row.get("claim_generation", 0))
+            value = {"state": "started", "claim_revision": revision, "event": event.to_dict()}
+            claims.update(key, json.dumps(value).encode(), revision)
+        execution_events.started(self._bus, event)
+        return event
+
+    def _launching(self, key: str, agent: AgentRecord, now: int) -> bool:
+        entry = self._bus.state(execution_events.STARTS).get(key)
+        if entry is None:
+            return False
+        return json.loads(entry.value) is not None or now - max(agent.started_at, agent.launched_at) < INTERVAL_MS
