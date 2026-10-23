@@ -1,10 +1,10 @@
-from scripts.swarm_ledger import ledger_artifacts, ledger_server
-from scripts.swarm_ledger import ledger_core as core
+from scripts.swarm_ledger import ledger_server
 
 
-def test_the_server_adopts_every_ledger_folder_past_a_failing_one(monkeypatch, capsys):
+def test_the_server_adopts_every_ledger_folder_past_a_failing_one(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
     for name in ("b.media", "a.media", "c.txt"):
-        (core.LEDGER_DIR / name).mkdir(parents=True)
+        (tmp_path / name).mkdir()
     seen = []
 
     def adopt(slug):
@@ -12,7 +12,7 @@ def test_the_server_adopts_every_ledger_folder_past_a_failing_one(monkeypatch, c
         if slug == "a":
             raise OSError("unreadable")
 
-    monkeypatch.setattr(ledger_artifacts, "adopt_disk", adopt)
+    monkeypatch.setattr(ledger_server.ledger_artifacts, "adopt_disk", adopt)
     ledger_server.adopt_disk_files()
     assert seen == ["a", "b"]
     assert capsys.readouterr().err == "disk adoption a: unreadable\n"
