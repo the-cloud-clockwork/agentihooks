@@ -2683,9 +2683,16 @@ jobs:
           PYTHONPATH="$RUNNER_TEMP/grader" python -P -m scripts.ci_mutation.reuse "$BRANCH" "$GITHUB_RUN_ID" \
             --head "$HEAD_SHA" --base "$base" --grader "$GRADER"
 
+      - name: Take the helper scripts from the workflow revision
+        if: steps.reuse.outputs.reused != 'true'
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/workflow"
+          git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"
+
       - name: Install dependencies
         if: steps.reuse.outputs.reused != 'true'
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
 
       - name: Size mutation shards from stored timings
         id: plan
@@ -2766,9 +2773,22 @@ jobs:
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
+      - name: Take the helper scripts from the workflow revision
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/workflow"
+          git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"
+
+      - name: Take the local actions from the workflow revision
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          mkdir -p .workflow-revision
+          git archive "$GITHUB_SHA" .github/actions | tar -x -C .workflow-revision
+
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
@@ -2777,15 +2797,15 @@ jobs:
           name: mutation-selection
 
       - name: Install the pinned nats server for the bus backend tests
-        if: needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.github/actions/nats-server/action.yml') != ''
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         timeout-minutes: 3
-        uses: ./.github/actions/nats-server
+        uses: ./.workflow-revision/.github/actions/nats-server
 
       - name: Install the browser that page tests drive
         id: browser
         if: needs.mutation-plan.outputs.browser == 'true'
         timeout-minutes: 6
-        uses: ./.github/actions/browser-cache
+        uses: ./.workflow-revision/.github/actions/browser-cache
 
       - name: Report browser setup failure
         if: failure() && steps.browser.outcome == 'failure'
@@ -2870,9 +2890,22 @@ jobs:
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
+      - name: Take the helper scripts from the workflow revision
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/workflow"
+          git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"
+
+      - name: Take the local actions from the workflow revision
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          mkdir -p .workflow-revision
+          git archive "$GITHUB_SHA" .github/actions | tar -x -C .workflow-revision
+
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
@@ -2881,15 +2914,15 @@ jobs:
           name: mutation-selection
 
       - name: Install the pinned nats server for the bus backend tests
-        if: needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.github/actions/nats-server/action.yml') != ''
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         timeout-minutes: 3
-        uses: ./.github/actions/nats-server
+        uses: ./.workflow-revision/.github/actions/nats-server
 
       - name: Install the browser that page tests drive
         id: browser
         if: needs.mutation-plan.outputs.browser == 'true'
         timeout-minutes: 6
-        uses: ./.github/actions/browser-cache
+        uses: ./.workflow-revision/.github/actions/browser-cache
 
       - name: Report browser setup failure
         if: failure() && steps.browser.outcome == 'failure'

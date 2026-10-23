@@ -1,5 +1,6 @@
+from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock
 
 import pytest
 
@@ -54,7 +55,12 @@ def rig():
     bus = open_bus(BusConfig(), clock=lambda: clock.now)
     config = SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a", policy)
     tasks, runtime = Mock(), Mock()
-    request = SpawnRequest(config.swarm, "eng", "agent-a", {"id": "task-a"})
+    request = SpawnRequest(
+        config.swarm,
+        "eng",
+        "agent-a",
+        {"id": "task-a", "execution_id": "execution-a", "execution_generation": 7, "claim_generation": 3},
+    )
     tasks.request.return_value = request
     runtime.spawn.return_value = Outcome(
         "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a")
@@ -98,7 +104,7 @@ def test_only_one_spoke_can_claim_duplicate_offers_of_the_same_task_generation(r
     assert raced == ["busy"]
     rig.tasks.request.assert_called_once_with(rig.event)
     other_tasks.request.assert_not_called()
-    rig.runtime.spawn.assert_called_once_with(rig.request)
+    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
 
 
 def test_a_withdrawn_task_is_terminated_without_launching(rig):
@@ -135,7 +141,7 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
     rig.runtime.spawn.side_effect = lambda request: (observed.append("spawn"), rig.runtime.spawn.return_value)[1]
 
     assert rig.spoke.poll() == "started"
-    rig.runtime.spawn.assert_called_once_with(rig.request)
+    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
     assert observed[0] == "spawn"
     subject, event = observed[1]
     assert subject == "swarm.rig.execution.started"
@@ -144,13 +150,18 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
         "execution.started",
         "rig",
         "execution",
-        "agent-a",
-        0,
+        "execution-a",
+        7,
         "hive-a",
         "ready-a",
     )
+    request = rig.runtime.spawn.call_args.args[0]
     assert event.data == {
         "task": "task-a",
+        "task_generation": 3,
+        "claim_key": request.task["claim_fence"]["key"],
+        "claim_revision": request.task["claim_fence"]["revision"],
+        "generation": 7,
         "lane": "eng",
         "hive": "hive-a",
         "name": "agent-a",
@@ -201,7 +212,7 @@ def test_a_publication_retry_reuses_the_started_execution_after_a_spoke_restart(
     rig.clock.now = 10
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, reading)
     assert restarted.poll() == "started"
-    rig.runtime.spawn.assert_called_once_with(rig.request)
+    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
     rig.tasks.request.assert_called_once_with(rig.event)
     rig.tasks.reopen.assert_not_called()
     assert published[0] == published[1]
@@ -274,7 +285,12 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
         try:
             config = SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a")
             tasks, runtime = Mock(), Mock()
-            tasks.request.return_value = SpawnRequest(config.swarm, "eng", "agent-a", {"id": "task-a"})
+            tasks.request.return_value = SpawnRequest(
+                config.swarm,
+                "eng",
+                "agent-a",
+                {"id": "task-a", "execution_id": "execution-a", "execution_generation": 7, "claim_generation": 3},
+            )
             runtime.spawn.return_value = Outcome(
                 "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a")
             )
@@ -294,10 +310,13 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
             )
             spoke = Spoke(config, bus, runtime, tasks, reading)
             assert spoke.poll(500) == "started"
-            runtime.spawn.assert_called_once_with(tasks.request.return_value)
+            runtime.spawn.assert_called_once_with(
+                replace(tasks.request.return_value, task={**tasks.request.return_value.task, "claim_fence": ANY})
+            )
             found = bus.events.consumer("audit", "swarm.rig.execution.started").fetch(1, 500)
             assert len(found) == 1
-            assert found[0].event.key == "agent-a"
+            assert found[0].event.key == "execution-a"
+            assert found[0].event.version == 7
             assert queue.take(10) is None
         finally:
             bus.close()
@@ -330,7 +349,7 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, lambda: None)
     assert restarted.poll() == ("started" if boundary == "started" else "dead")
     if boundary == "started":
-        rig.runtime.spawn.assert_called_once_with(rig.request)
+        rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
         rig.tasks.reopen.assert_not_called()
     else:
         assert rig.runtime.spawn.call_count == 3
@@ -354,7 +373,7 @@ def test_an_ambiguous_spawn_keeps_its_identity_and_never_launches_again(rig):
     rig.clock.now = 10
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, reading)
     assert restarted.poll() == "uncertain"
-    rig.runtime.spawn.assert_called_once_with(rig.request)
+    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
     rig.tasks.reopen.assert_not_called()
 
 
@@ -368,7 +387,7 @@ def test_pending_publication_is_recovered_before_taking_new_work_from_a_busy_lan
         rig.queue.offer(replace(rig.event, id=f"offer-{index}", key=f"new-{index}"))
         rig.clock.now += 10
         assert rig.spoke.poll() == "retry"
-    rig.runtime.spawn.assert_called_once_with(rig.request)
+    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
     rig.tasks.reopen.assert_not_called()
     rig.bus.events.publish = real_publish
     assert rig.spoke.poll() == "started"
@@ -618,3 +637,88 @@ def test_withdrawn_work_retains_its_terminal_state_and_cannot_be_loaded_again(ri
     rig.queue.offer(replace(rig.event, id="withdrawn-duplicate"))
     assert rig.spoke.poll() == "withdrawn"
     rig.tasks.request.assert_called_once_with(rig.event)
+
+
+def test_spawned_agent_keeps_the_launch_claim_revision_after_started_publication(rig):
+    from scripts.hive.spoke import claim_key
+
+    assert rig.spoke.poll() == "started"
+    request = rig.runtime.spawn.call_args.args[0]
+    entry = rig.bus.state("spoke-work").get(claim_key(rig.event))
+    import json
+
+    state = json.loads(entry.value)
+    assert request.task["claim_fence"] == {"key": claim_key(rig.event), "revision": state["claim_revision"]}
+    assert entry.revision > state["claim_revision"]
+
+
+@pytest.mark.parametrize("state", ["dead", "exited"])
+def test_hive_observations_end_the_same_execution_the_spoke_started(rig, state):
+    from scripts.hive.execution_events import publish
+
+    assert rig.spoke.poll() == "started"
+    request = rig.runtime.spawn.call_args.args[0]
+    report = {
+        "observed_at": 1234,
+        "executions": {
+            "registered-execution": {
+                "slug": "rig",
+                "name": request.name,
+                "generation": rig.request.task["execution_generation"],
+                "pane": {"state": "working"},
+            }
+        },
+    }
+    publish(rig.bus, "hive-a", report)
+    report["executions"]["registered-execution"]["pane"]["state"] = state
+    publish(rig.bus, "hive-a", report)
+    events = rig.bus.events.consumer("audit", "swarm.rig.execution.*").fetch(10, 0)
+    assert [item.event.type for item in events] == ["execution.started", "execution.exited"]
+    started, exited = [item.event for item in events]
+    assert (exited.key, exited.version, exited.cause) == (started.key, started.version, started.id)
+    assert exited.data == started.data
+    assert exited.data["task_generation"] == rig.request.task["claim_generation"]
+    assert exited.data["generation"] == rig.request.task["execution_generation"]
+    assert {key: exited.data[key] for key in ("claim_key", "claim_revision")} == {
+        "claim_key": request.task["claim_fence"]["key"],
+        "claim_revision": request.task["claim_fence"]["revision"],
+    }
+
+
+def test_a_heartbeat_during_spawn_waits_for_the_canonical_started_envelope(rig):
+    from scripts.hive.execution_events import publish
+
+    outcome = rig.runtime.spawn.return_value
+    report = {
+        "observed_at": 1234,
+        "executions": {
+            "registered-execution": {
+                "slug": "rig",
+                "name": rig.request.name,
+                "generation": rig.request.task["execution_generation"],
+                "pane": {"state": "working"},
+            }
+        },
+    }
+
+    def spawn(request):
+        publish(rig.bus, "hive-a", report)
+        assert rig.bus.events.consumer("during-spawn", "swarm.rig.execution.*").fetch(10, 0) == []
+        return outcome
+
+    rig.runtime.spawn.side_effect = spawn
+    assert rig.spoke.poll() == "started"
+    publish(rig.bus, "hive-a", report)
+    events = rig.bus.events.consumer("audit", "swarm.rig.execution.*").fetch(10, 0)
+    assert len(events) == 1
+    assert events[0].event.data["claim_revision"] == rig.runtime.spawn.call_args.args[0].task["claim_fence"]["revision"]
+
+
+@pytest.mark.parametrize("missing", ["execution_id", "execution_generation", "claim_generation"])
+def test_a_request_without_admitted_execution_identity_is_retried_without_spawning(rig, missing):
+    task = dict(rig.request.task)
+    del task[missing]
+    rig.tasks.request.return_value = replace(rig.request, task=task)
+    assert rig.spoke.poll() == "retry"
+    rig.runtime.spawn.assert_not_called()
+    assert claim(rig) == {"state": "ready"}

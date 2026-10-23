@@ -257,15 +257,78 @@ def test_every_mutation_dependency_install_runs_uv_through_the_retry():
         ("mutation-preflight.yml", "refine"),
         ("mutation-preflight.yml", "mutation-shard"),
     }
+    helper = {
+        "test.yml": 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh"',
+        "mutation-preflight.yml": "bash .github/scripts/pypi-retry.sh",
+    }
     for (workflow, job, _), lines in installs.items():
         for line in lines:
-            assert line.startswith(
-                'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system '
-            ), (
+            assert line.startswith(f'{helper[workflow]} "Install dependencies" -- uv pip install --system '), (
                 workflow,
                 job,
                 line,
             )
+
+
+@pytest.mark.parametrize("job", ["mutation-plan", "mutation-stats", "mutation"])
+def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job):
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"][job]["steps"]
+    names = [step.get("name") for step in steps]
+    take = steps[names.index("Take the helper scripts from the workflow revision")]
+    install = steps[names.index("Install dependencies")]
+    assert names.index("Take the helper scripts from the workflow revision") < names.index("Install dependencies")
+    assert take["if"] == install["if"]
+    assert take["run"].splitlines() == [
+        'git fetch --no-tags origin "$GITHUB_SHA"',
+        'mkdir -p "$RUNNER_TEMP/workflow"',
+        'git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"',
+    ]
+
+
+def test_a_head_that_predates_the_helper_still_runs_it_from_the_workflow_revision(tmp_path):
+    origin = tmp_path / "origin"
+    repo = tmp_path / "repo"
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t"}
+    env["GIT_COMMITTER_EMAIL"] = "t@t"
+
+    def git(cwd, *args):
+        command = ["git", "-c", "commit.gpgsign=false", *args]
+        return subprocess.run(command, cwd=cwd, env=env, check=True, capture_output=True, text=True).stdout
+
+    origin.mkdir()
+    git(origin, "init", "-q", "-b", "dev")
+    (origin / "README").write_text("old\n")
+    git(origin, "add", ".")
+    git(origin, "commit", "-qm", "head without the helper")
+    head = git(origin, "rev-parse", "HEAD").strip()
+    git(tmp_path, "clone", "-q", str(origin), str(repo))
+    git(repo, "checkout", "-q", "--detach", head)
+    (origin / ".github/scripts").mkdir(parents=True)
+    shutil.copy(RETRY, origin / ".github/scripts/pypi-retry.sh")
+    git(origin, "add", ".")
+    git(origin, "commit", "-qm", "workflow revision")
+    workflow_sha = git(origin, "rev-parse", "HEAD").strip()
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation-plan"]["steps"]
+    take = next(s for s in steps if s.get("name") == "Take the helper scripts from the workflow revision")
+    install = next(s for s in steps if s.get("name") == "Install dependencies")
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
+    run_env = {**env, "GITHUB_SHA": workflow_sha, "RUNNER_TEMP": str(runner_temp)}
+
+    legacy = subprocess.run(
+        ["bash", "-c", 'bash .github/scripts/pypi-retry.sh "Install dependencies" -- true'],
+        cwd=repo,
+        env=run_env,
+        capture_output=True,
+        text=True,
+    )
+    assert legacy.returncode == 127, legacy.stderr
+
+    subprocess.run(["bash", "-euo", "pipefail", "-c", take["run"]], cwd=repo, env=run_env, check=True)
+    assert not (repo / ".github/scripts/pypi-retry.sh").exists()
+    command = install["run"].split(" -- ", 1)[0] + " -- true"
+    result = subprocess.run(["bash", "-c", command], cwd=repo, env=run_env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_the_test_planner_installs_its_pinned_pyyaml_with_uv_through_the_retry():

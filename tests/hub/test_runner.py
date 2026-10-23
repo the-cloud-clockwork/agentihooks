@@ -205,7 +205,12 @@ def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatc
     declared = registry.Registry([registry.Reactor("lifecycle", "swarm.*.task.>", handler, singleton=True)])
     opened = memory.open_bus(BusConfig())
     opened.events.publish(SUBJECT, event("e1", 1))
-    monkeypatch.setattr(registry, "REACTORS", declared)
+
+    def configured(bus):
+        assert bus is opened
+        return declared
+
+    monkeypatch.setattr(registry, "configured", configured)
     monkeypatch.setattr(runner, "open_bus", lambda config: opened if config == BusConfig(backend="memory") else None)
     monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
     monkeypatch.delenv("AGENTIHOOKS_BUS_URL", raising=False)
@@ -243,7 +248,12 @@ def test_sigterm_ends_the_hub_with_143_and_releases_its_leases(monkeypatch):
     declared = registry.Registry([registry.Reactor("timers", "swarm.*.task.>", terminate, singleton=True)])
     opened = memory.open_bus(BusConfig())
     opened.events.publish(SUBJECT, event("e1", 1))
-    monkeypatch.setattr(registry, "REACTORS", declared)
+
+    def configured(bus):
+        assert bus is opened
+        return declared
+
+    monkeypatch.setattr(registry, "configured", configured)
     monkeypatch.setattr(runner, "open_bus", lambda config: opened)
     monkeypatch.setenv("HOSTNAME", "hub-1")
     leases = opened.state(lease.BUCKET)

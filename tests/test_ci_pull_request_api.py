@@ -56,7 +56,7 @@ def _all_steps():
             if isinstance(values, dict) and TOKEN.search(_values(values)):
                 yield name, {"name": f"job {key}", "env": values}, ROOT
         for step in job.get("steps", []):
-            action = step.get("uses", "")
+            action = step.get("uses", "").replace("./.workflow-revision/", "./", 1)
             if action.startswith("./.github/actions/"):
                 folder = ROOT / action
                 for inner in yaml.safe_load((folder / "action.yml").read_text())["runs"]["steps"]:

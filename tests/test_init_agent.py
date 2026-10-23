@@ -676,6 +676,27 @@ def test_a_tick_spawn_keeps_its_swarm_identity_without_the_mark(monkeypatch, tmp
     assert "AGENTIHOOKS_SWARM_SPAWN" not in text
 
 
+def test_a_claimed_launch_exports_the_pinned_claim_from_its_option(monkeypatch, tmp_path):
+    fence = json.dumps({"key": "claim-a", "revision": 7})
+    text = _dry_launcher(
+        monkeypatch,
+        tmp_path,
+        "engineer@abcdef-0002",
+        {**AGENT_ENV, "AGENTIHOOKS_SWARM_SPAWN": "1"},
+        "--claim-fence",
+        fence,
+    )
+    assert "export AGENTIHOOKS_CLAIM_FENCE=" in text
+    assert fence in text
+
+
+def test_the_claim_fence_option_documents_its_identity_and_defaults_to_no_claim():
+    parser = init_agent._parser()
+    assert parser.parse_args([]).claim_fence == ""
+    action = next(item for item in parser._actions if item.dest == "claim_fence")
+    assert action.help == "Pinned event bus claim identity for this execution"
+
+
 @pytest.mark.parametrize("name", ["engineer@abcdef-0002", "master@abcdef-0001"])
 def test_swarm_launch_replaces_only_the_inherited_gateway_key(monkeypatch, tmp_path, capsys, name):
     state = tmp_path / ".agentihooks"

@@ -80,6 +80,9 @@ def beat(redis: "Redis", local_id: str) -> None:
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+    from scripts.hive.execution_events import observe as publish_executions
+
+    publish_executions(local_id, hosted)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
 

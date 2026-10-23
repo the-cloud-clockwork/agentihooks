@@ -1246,7 +1246,14 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         ready, refused = profile_first.placeable(slug, config, store, runtime, lane, ready, max(cap - busy, 0))
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
-    return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])], waits
+    queue.sort(
+        key=lambda entry: (
+            dispatched(entry[2])[0] if dispatched else ledger_rank.order(entry[2]),
+            bool(store.launch_failure(slug, entry[2]["id"])),
+            entry[0],
+        )
+    )
+    return [(lane, task) for _, lane, task in queue], waits
 
 
 def _room_wait(runtime, lane, task):
@@ -1465,7 +1472,9 @@ def _master(slug, config, store, runtime, now_ms, past_host=False):
                 {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug), "transfer": transfer},
             )
         )
-        task = master_move.pinned(store, slug, task, transfer)
+        from scripts.swarm import master_launch
+
+        task = master_launch._filled(master_move.pinned(store, slug, task, transfer), config)
         master_start.begin(store, slug, record.name, task, now_ms)
         affinity.handed_off(store, slug)
         launched.update(task)

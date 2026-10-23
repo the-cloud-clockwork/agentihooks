@@ -12,6 +12,7 @@ IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "star
 WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
 PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
+ARCHIVE = "executions-archive"
 
 
 if TYPE_CHECKING:
@@ -79,6 +80,29 @@ for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
 end
 return 0
 """
+_ARCHIVE = """
+local rows = redis.call('HGETALL', KEYS[1])
+local head, decoded = {}, {}
+for i = 1, #rows, 2 do
+    local row = cjson.decode(rows[i + 1])
+    if type(row.name) == 'string' and type(row.seat) == 'string' and type(row.generation) == 'number' then
+        decoded[i] = row
+        if not head[row.seat] or row.generation > head[row.seat] then
+            head[row.seat] = row.generation
+        end
+    end
+end
+local moved = 0
+for i = 1, #rows, 2 do
+    local row = decoded[i]
+    if row and row.generation < head[row.seat] and redis.call('HEXISTS', KEYS[2], row.name) == 0 then
+        redis.call('HSET', KEYS[3], rows[i], rows[i + 1])
+        redis.call('HDEL', KEYS[1], rows[i])
+        moved = moved + 1
+    end
+end
+return moved
+"""
 _HIVE = """
 if redis.call('HEXISTS', KEYS[2], ARGV[1]) == 0 then
     return ''
@@ -110,8 +134,13 @@ class ExecutionRegistry:
     def records(self, slug: str, reader: Redis | Pipeline | None = None) -> list[AgentRecord]:
         from scripts.swarm.store import AgentRecord
 
-        rows = (reader if reader is not None else self.redis).hvals(self.store.key(slug, "executions"))
-        return sorted((AgentRecord(**json.loads(row)) for row in rows), key=lambda a: (a.seat, a.generation))
+        source = reader if reader is not None else self.redis
+        rows = {}
+        for key in (self.store.key(slug, "executions"), self.store.key(slug, ARCHIVE)):
+            for raw in source.hvals(key):
+                row = AgentRecord(**json.loads(raw))
+                rows.setdefault(row.execution_id, row)
+        return sorted(rows.values(), key=lambda a: (a.seat, a.generation))
 
     def occupants(self, slug: str, reader: Redis | Pipeline | None = None) -> dict[str, AgentRecord]:
         from scripts.swarm.store import AgentRecord
@@ -123,9 +152,14 @@ class ExecutionRegistry:
         return {agent.seat: agent for agent in agents}
 
     def managed(self, slug: str, name: str, reader: Redis | Pipeline | None = None) -> bool:
-        return bool(
-            (reader if reader is not None else self.redis).eval(_MANAGED, 1, self.store.key(slug, "executions"), name)
-        )
+        source = reader if reader is not None else self.redis
+        if source.eval(_MANAGED, 1, self.store.key(slug, "executions"), name):
+            return True
+        return any(json.loads(raw)["name"] == name for raw in source.hvals(self.store.key(slug, ARCHIVE)))
+
+    def archive(self, slug: str) -> int:
+        keys = (self.store.key(slug, "executions"), self.store.key(slug, "agents"), self.store.key(slug, ARCHIVE))
+        return self.redis.eval(_ARCHIVE, len(keys), *keys)
 
     def hive(self, slug: str, name: str) -> str:
         return self.redis.eval(
@@ -190,7 +224,9 @@ class ExecutionRegistry:
     def get(self, slug: str, execution_id: str) -> AgentRecord:
         from scripts.swarm.store import AgentRecord
 
-        raw = self.redis.hget(self.store.key(slug, "executions"), execution_id)
+        raw = self.redis.hget(self.store.key(slug, "executions"), execution_id) or self.redis.hget(
+            self.store.key(slug, ARCHIVE), execution_id
+        )
         if not raw:
             self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
         return AgentRecord(**json.loads(raw))
@@ -328,13 +364,17 @@ class ExecutionRegistry:
         for _ in range(WRITE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
+                    archived = self.store.key(slug, ARCHIVE)
                     pipe.watch(key)
-                    raw = pipe.hget(key, execution_id)
+                    live = pipe.hget(key, execution_id)
+                    raw = live or pipe.hget(archived, execution_id)
                     if not raw:
                         pipe.unwatch()
                         self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
                     current = AgentRecord(**json.loads(raw))
                     pipe.multi()
+                    if not live:
+                        pipe.hdel(archived, execution_id)
                     self.write(pipe, slug, replace(current, pane_id=pane_id), current)
                     pipe.execute()
                     return
@@ -343,6 +383,7 @@ class ExecutionRegistry:
         raise SwarmError("execution history kept changing; pane was not committed")
 
     def reconcile(self, slug: str, runtime: Runtime, now_ms: int) -> list[str]:
+        self.archive(slug)
         recorded = {agent.name for agent in self.agents(slug)}
         live, actions = runtime.live_names(), []
         for agent in self.occupants(slug).values():
