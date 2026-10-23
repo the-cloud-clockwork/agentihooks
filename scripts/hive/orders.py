@@ -65,6 +65,7 @@ DONE, FAILED = "done", "failed"
 REFUSED = Ack(FAILED, {}, "refused")
 FOREIGN = Ack(FAILED, {}, "identity")
 UNKNOWN_ACTION = Ack(FAILED, {}, "unknown_action")
+REAP_EXECUTION = "reap_execution"
 COMMAND_BATCH = 32
 SENT = {"sent": "1"}
 OPENING, DIGEST, SEEDS = prompt.CARRIED, "hive_opening_digest", "hive_seeds"
@@ -98,7 +99,10 @@ class Orders:
         return f"{registry.key(hive)}:orders"
 
     def receipt(self, order: LaunchOrder) -> str:
-        return f"{registry.key(order.hive)}:launch-orders:{order.slug}:{order.execution_id}:{order.generation}"
+        return self.launch_receipt(order.hive, order.slug, order.execution_id, order.generation)
+
+    def launch_receipt(self, hive: str, slug: str, execution_id: str, generation: int) -> str:
+        return f"{registry.key(hive)}:launch-orders:{slug}:{execution_id}:{generation}"
 
     def send(self, hive: str, order: LaunchOrder) -> str:
         return self.redis.xadd(self.stream(hive), {"order": json.dumps(asdict(order))})
@@ -220,6 +224,8 @@ class Consumer:
     def command(self, order: CommandOrder) -> Ack:
         if order.action == "reap":
             return _done(self.runtime.herdr.reap_name(order.name))
+        if order.action == REAP_EXECUTION:
+            return self.reap_execution(order)
         try:
             agent = self.store.execution_registry.get(order.slug, order.execution_id)
         except SwarmError:
@@ -237,6 +243,24 @@ class Consumer:
         if outcome.ok:
             return Ack(DONE, agent.runtime_target)
         return Ack(FAILED, agent.runtime_target, outcome.detail or outcome.status.value)
+
+    def reap_execution(self, order: CommandOrder) -> Ack:
+        receipt = self.orders.launch_receipt(self.hive, order.slug, order.execution_id, order.generation)
+        raw = self.store.redis.hget(receipt, "ack")
+        if raw is None:
+            return FOREIGN
+        try:
+            agent = self.store.execution_registry.get(order.slug, order.execution_id)
+        except SwarmError:
+            return FOREIGN
+        launched = Ack(**json.loads(raw))
+        if launched.status != "live":
+            return Ack(DONE, launched.target)
+        reported = replace(agent, runtime_target=launched.target, pane_id=launched.execution["pane_id"])
+        outcome = self.runtime.terminate(reported)
+        if outcome.ok:
+            return Ack(DONE, reported.runtime_target)
+        return Ack(FAILED, reported.runtime_target, outcome.detail or outcome.status.value)
 
     def apply(self, order: LaunchOrder) -> Ack | None:
         now = lease.now_ms(self.store)

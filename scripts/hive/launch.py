@@ -246,6 +246,16 @@ class HiveLaunch:
     def reap(self, order: LaunchOrder, agent: AgentRecord) -> None:
         self.orders.command(order.hive, CommandOrder(f"reap:{agent.name}", "reap", name=agent.name))
 
+    def reap_execution(self, order: LaunchOrder) -> None:
+        reap = CommandOrder(
+            f"{orders.REAP_EXECUTION}:{order.execution_id}:{order.generation}",
+            orders.REAP_EXECUTION,
+            order.slug,
+            execution_id=order.execution_id,
+            generation=order.generation,
+        )
+        self.orders.command(order.hive, reap)
+
     def spawn(self, request: SpawnRequest) -> Outcome:
         lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
         if order := self.orders_for(request.task["id"]):
@@ -403,8 +413,12 @@ class HiveLaunch:
             status = Status.AMBIGUOUS if ack.failure == "ambiguous" else Status.REFUSED
             return Outcome("spawn", status, HIVE, detail=f"hive launch failed: {ack.failure}")
         current = self.store.execution_occupants(self.slug).get(agent.seat)
-        _match("seat occupant", order.execution_id, current.execution_id if current else None)
-        _match("generation", order.generation, agent.generation)
+        try:
+            _match("seat occupant", order.execution_id, current.execution_id if current else None)
+            _match("generation", order.generation, agent.generation)
+        except SwarmError:
+            self.reap_execution(order)
+            raise
         if agent.state == "launching":
             agent = self.record(agent, order, ack)
         _match("runtime target", agent.runtime_target, ack.target)
