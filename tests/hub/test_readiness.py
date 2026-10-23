@@ -147,3 +147,26 @@ def test_hub_respects_its_lease_and_passes_clock_to_ready_offers(monkeypatch):
         delivery.ack()
         reactor.poll()
         assert queue.take(1) is None
+
+
+def test_freeze_while_hive_waits_withdraws_the_delivered_offer(monkeypatch):
+    from scripts.hub.readiness import Readiness
+
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
+    _, store, ledger = source()
+    provider = readiness.Source(store, ledger)
+    with backend("memory", None) as bus:
+        Readiness(bus, provider).poll()
+        queue = bus.queue(readiness.queue_name("rig", "eng"))
+        take = queue.take
+
+        def freeze_during_take(timeout_ms):
+            delivery = take(timeout_ms)
+            ledger.state.return_value["freezes"] = [{"verb": "freeze", "target": "tasks/task-a"}]
+            return delivery
+
+        monkeypatch.setattr(queue, "take", freeze_during_take)
+        worker, runtime = spoke(bus, provider, "hive")
+        assert worker.poll(1) == "empty"
+        runtime.spawn.assert_not_called()

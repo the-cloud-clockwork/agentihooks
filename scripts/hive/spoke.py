@@ -77,7 +77,7 @@ class Spoke:
             return recovered or "held"
         try:
             queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
-            delivery = readiness.take(queue, self.view(), timeout_ms)
+            delivery = readiness.take(queue, self.view, timeout_ms)
         except Exception:
             return "retry"
         if delivery is None:

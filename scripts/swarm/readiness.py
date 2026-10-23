@@ -131,9 +131,10 @@ def withdrawal(event: Envelope, view: Snapshot) -> str:
     return "" if view.admits(task) else "a release or apply wait holds it"
 
 
-def take(queue: WorkQueue, view: Snapshot, timeout_ms: int) -> Delivery | None:
+def take(queue: WorkQueue, view: Snapshot | Callable[[], Snapshot], timeout_ms: int) -> Delivery | None:
     while (delivery := queue.take(timeout_ms)) is not None:
-        if not withdrawal(delivery.event, view):
+        current = view() if callable(view) else view
+        if not withdrawal(delivery.event, current):
             return delivery
         delivery.term()
     return None
