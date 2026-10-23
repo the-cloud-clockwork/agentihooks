@@ -425,7 +425,7 @@ each limit, and the smallest limit wins.
   the next reconnect; the beat still publishes on its own path, but a launch longer than 30 seconds then lapses the
   reading.
 
-`hive list` appends the reading to each hive's line, its fields separated by tabs:
+`hive list` appends the reading to each hive's line, its fields separated by tabs (shown aligned here):
 
 ```bash
 agentihooks hive list
