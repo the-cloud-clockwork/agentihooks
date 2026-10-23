@@ -47,7 +47,7 @@ def test_invalid_engine_is_rejected_without_changing_config(env, capsys, engine)
     before = store.redis.hgetall(store.key("sw", "config"))
     capsys.readouterr()
     assert run("sw", "set", f"engine={engine}") == 1
-    assert capsys.readouterr().err.strip() == "engine must be one of legacy, events"
+    assert capsys.readouterr().err.strip() == "swarm: engine must be one of legacy, events"
     assert store.redis.hgetall(store.key("sw", "config")) == before
     with pytest.raises(SwarmError) as caught:
         store.update("sw", engine=engine)

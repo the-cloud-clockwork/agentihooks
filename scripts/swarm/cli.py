@@ -199,6 +199,7 @@ CONFIG_KEYS = {
     **default_models.KEYS,
     **TRANSPORT_KEYS,
     HIVE_PLACEMENT: "hive_placement",
+    "engine": "engine",
 }
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
@@ -979,7 +980,7 @@ def api_address(value):
 
 
 def config_value(key, value):
-    if key in default_models.KEYS or key in TRANSPORT_KEYS:
+    if key in default_models.KEYS or key in TRANSPORT_KEYS or key == "engine":
         return value
     if key == HIVE_PLACEMENT:
         return on_off(value)
@@ -1060,7 +1061,7 @@ def cmd_set(store, args):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
+                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server, engine=legacy|events "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
@@ -1097,6 +1098,7 @@ def cmd_set(store, args):
                 "local_max_agents": config.local_max_agents,
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,
+                "engine": config.engine,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
                 "masters": masters.MasterSeats(store.redis).count(args.slug),
                 "master_per": master_scale.rule(store.redis, args.slug) or master_scale.OFF,
