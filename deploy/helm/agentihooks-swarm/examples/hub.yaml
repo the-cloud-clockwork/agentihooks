@@ -1,0 +1,10 @@
+# A hub install: the ledger, Redis and controller with the event hub on the bundled NATS.
+hub:
+  enabled: true
+  replicas: 2
+
+nats:
+  enabled: true
+  config:
+    jetstream:
+      enabled: true

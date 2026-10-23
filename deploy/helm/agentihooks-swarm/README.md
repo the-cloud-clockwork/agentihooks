@@ -1,3 +1,13 @@
+# Example values
+
+`examples/` holds a values file for each way to install the chart, each rendered and checked by the chart proof:
+
+| File | Installs |
+|---|---|
+| `hub.yaml` | the ledger, Redis and controller with the event hub on the bundled NATS |
+| `hive-only.yaml` | one worker hive that joins a swarm installed elsewhere, without NATS |
+| `external-nats.yaml` | the hub on a NATS outside the release, with JetStream enabled |
+
 # Worker GitHub authentication
 
 Choose `workers.githubAuth.mode` and an existing Secret. GitHub credentials are selected by key reference; never put their values in Helm values.

@@ -1,0 +1,20 @@
+# A hive only install: one worker hive that joins a swarm installed elsewhere. One release is one hive,
+# because one member credential is one hive id; `agentihooks hive invite` writes the member Secret's keys.
+hiveOnly: true
+
+nats:
+  enabled: false
+
+workers:
+  replicas: 1
+  maxAgents: 4
+  credentialSecret:
+    name: hive-member
+    key: credential
+  caSecret:
+    name: hive-member
+    key: ca_pem
+  githubAuth:
+    mode: token
+    secretName: hive-github
+    tokenKey: token
