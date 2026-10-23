@@ -1,6 +1,7 @@
 import ledger_core as core
 import pytest
 
+from scripts.swarm import prompt
 from scripts.swarm_ledger import ledger_tasks
 from tests.swarm_ledger import test_artifact_lifecycle as lifecycle
 from tests.swarm_ledger.test_artifact_lifecycle import AGENT, add_task, storage
@@ -23,6 +24,12 @@ def test_the_workstation_flag_must_be_a_boolean():
     for bad in ({**task, "workstation": "yes"}, update):
         with pytest.raises(ValueError, match="^workstation must be true or false$"):
             core.check_op(bad)
+
+
+def test_the_master_marks_tasks_that_act_on_the_workstation():
+    text = prompt.build("demo", "/repo", "master", "agent", {"id": "one", "title": "One"})
+    assert f"- {prompt.WORKSTATION_LINE}" in text
+    assert "--workstation" in prompt.WORKSTATION_LINE and "workstation=yes" in prompt.WORKSTATION_LINE
 
 
 def run(argv):
