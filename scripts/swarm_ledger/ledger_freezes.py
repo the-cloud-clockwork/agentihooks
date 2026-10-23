@@ -63,9 +63,10 @@ def author(op, ctx) -> tuple[str, str] | None:
         return "operator", op.get("quote")
     if ports.swarm().naming.lane_of(resolve_name(by)) == DISPATCH:
         return (by, "") if autonomy(ctx.slug) == FULL else None
-    master = ctx.meta["members"].get(by, {}).get("role") == "orchestrator"
-    words = ledger_relay.verified(by, op["quote"]) if master and op.get("quote") else ""
-    return (by, words) if words else None
+    if ctx.meta["members"].get(by, {}).get("role") != "orchestrator":
+        return None
+    words = ledger_relay.verified(by, op["quote"]) if op.get("quote") else ""
+    return by, words
 
 
 def _set(doc, op, ctx, by, words):
