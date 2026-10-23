@@ -98,6 +98,14 @@ def test_a_master_spoke_spawns_offered_master_work_on_the_workstation(monkeypatc
     assert (request.lane, request.name, request.task["execution_id"]) == ("master", "master@rig-1", "execution-a")
 
 
+def test_each_pass_polls_every_spoke_with_the_given_timeout(monkeypatch):
+    polled = [Mock(**{"poll.return_value": "empty"}), Mock(**{"poll.return_value": "held"})]
+    monkeypatch.setattr(workstation, "spokes", lambda *args: polled)
+
+    assert workstation.run_once("store", "bus", "runtime", "hive", 17, {}) == ["empty", "held"]
+    assert [spoke.poll.call_args.args for spoke in polled] == [(17,), (17,)]
+
+
 def test_the_spoke_loop_waits_only_after_a_pass_with_nothing_started(monkeypatch):
     outcomes = iter([["empty", "held"], ["started", "empty"], []])
     seen = []

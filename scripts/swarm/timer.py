@@ -110,27 +110,24 @@ def spoke_units(binary):
     return {f"{SPOKE}.service": spoke}
 
 
+ENGINE = (*units(""), *tick_units(""), *DROPPED)
+SYSTEMCTL = {"capture_output": True, "text": True, "timeout": 30}
+UNCHECKED = {**SYSTEMCTL, "check": False}
+SPOKE_ENABLE = ["systemctl", "--user", "enable", "--now", f"{SPOKE}.service"]
+RELOAD = ["systemctl", "--user", "daemon-reload"]
+
+
 def _spoke_only(binary, unit_dir, run):
-    changed = False
-    for name in (*units(binary), *tick_units(binary), *DROPPED):
-        if (unit_dir / name).exists():
-            run(
-                ["systemctl", "--user", "disable", "--now", name],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
-            (unit_dir / name).unlink()
-            changed = True
-    for name, text in spoke_units(binary).items():
-        if not _current(unit_dir / name, text):
-            (unit_dir / name).write_text(text)
-            changed = True
-    if changed:
-        run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
-    enable = ["systemctl", "--user", "enable", "--now", f"{SPOKE}.service"]
-    return run(enable, capture_output=True, text=True, timeout=30).returncode == 0
+    retired = [name for name in ENGINE if (unit_dir / name).exists()]
+    for name in retired:
+        run(["systemctl", "--user", "disable", "--now", name], **UNCHECKED)
+        (unit_dir / name).unlink()
+    stale = {name: text for name, text in spoke_units(binary).items() if not _current(unit_dir / name, text)}
+    for name, text in stale.items():
+        (unit_dir / name).write_text(text)
+    if retired or stale:
+        run(RELOAD, **UNCHECKED)
+    return run(SPOKE_ENABLE, **SYSTEMCTL).returncode == 0
 
 
 def _services(names):
