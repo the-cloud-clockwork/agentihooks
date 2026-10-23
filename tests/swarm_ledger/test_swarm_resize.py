@@ -196,16 +196,21 @@ def test_local_storage_paints_the_layout_while_the_server_is_unreachable(visit):
     assert page.box("handoff-box")["height"] == pytest.approx(height, abs=1)
 
 
-def test_a_stored_layout_with_a_retired_row_saves_without_it(browser, visit):
+def test_a_stored_layout_with_a_retired_row_saves_without_it(browser, visit, monkeypatch):
+    from scripts.swarm_ledger.api.errors import APIError
+
+    def unreachable():
+        raise APIError(503, "unavailable", "layout unreadable")
+
     retired = '{"health-box": {"height": 200}, "agents-box": {"height": 300}}'
     context = browser.new_context(viewport={"width": 1440, "height": 1000})
     context.add_init_script(f"Date.now = () => {NOW_MS};")
     context.add_init_script(f"localStorage.setItem('plan-ledger:swarm-layout', '{retired}');")
-    context.route(
-        "**/api/v1/layout", lambda route: route.abort() if route.request.method == "GET" else route.fallback()
-    )
+    read = layout.read
+    monkeypatch.setattr(layout, "read", unreachable)
     try:
         page = visit(context=context)
+        monkeypatch.setattr(layout, "read", read)
         assert page.box("agents-box")["height"] == pytest.approx(300, abs=1)
         page.drag("height", "handoff-box", dy=-40)
         server_side = saved(("agents-box", "handoff-box"), page)
