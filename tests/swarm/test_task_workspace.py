@@ -106,3 +106,12 @@ def test_tails_of_an_empty_or_missing_folder_are_empty():
 def test_a_slug_or_task_id_that_is_not_a_plain_name_is_refused(slug, task_id):
     with pytest.raises(ValueError):
         ledger_workspace.scaffold(slug, {"id": task_id, "title": "x"})
+
+
+def test_rewrite_resolves_a_portable_work_folder_and_skips_an_absent_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "work").mkdir()
+    ledger_workspace.rewrite({"id": "t1", "title": "Kind proof", "workspace": "~/work"})
+    ledger_workspace.rewrite({"id": "t2", "title": "Elsewhere", "workspace": "~/gone"})
+    assert (tmp_path / "work" / "steering.md").read_text() == "# t1: Kind proof\n"
+    assert not (tmp_path / "gone").exists()
