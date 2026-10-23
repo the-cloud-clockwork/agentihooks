@@ -82,7 +82,7 @@ def observe(store, slug: str, ledger, at: int, runtime) -> dict:
 
 def capped(store, slug: str, since: int) -> bool:
     local = json.loads(store.redis.get(store.key(slug, LOCAL_REFUSAL)) or "{}")
-    if local.get("at", -1) < since:
+    if not local or local["at"] < since:
         return False
     from scripts.swarm import local_slots
 

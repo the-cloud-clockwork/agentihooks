@@ -3,7 +3,7 @@ import pytest
 from scripts.hive import admission, placement, placement_waits
 from scripts.inbox import store as inbox_store
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, cli, commands, local_slots, status, tick
+from scripts.swarm import capacity, cli, commands, lease, local_slots, status, tick
 from scripts.swarm.health import spawn_stall
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from tests.swarm.test_cli import env as env
@@ -629,6 +629,23 @@ def test_a_local_cap_refusal_at_the_last_observation_holds_the_lane(stalled, mon
     spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0])
     assert spawn_stall.capped(store, "sw", clock[0])
     assert not spawn_stall.capped(store, "sw", clock[0] + 1)
+
+
+def test_a_local_cap_refusal_holds_the_first_observation(stalled, monkeypatch):
+    store, ledger, runtime, clock, _ = stalled
+    monkeypatch.setattr(local_slots, "live", lambda: {f"w{n}" for n in range(8)})
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, 0)
+    assert "since" not in spawn_stall.observe(store, "sw", ledger, clock[0], runtime)
+
+
+def test_a_local_cap_refusal_reads_the_refusing_machine(stalled, monkeypatch):
+    store, _, _, clock, _ = stalled
+    monkeypatch.setattr(local_slots, "live", lambda: {f"w{n}" for n in range(7)})
+    store.redis.hset(local_slots.key("ws"), "other/t9", lease.now_ms(store))
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0])
+    assert spawn_stall.capped(store, "sw", clock[0])
+    spawn_stall.refuse_local(store, "sw", "elsewhere", 8, 8, clock[0])
+    assert not spawn_stall.capped(store, "sw", clock[0])
 
 
 def test_admission_refusals_without_a_failed_launch_are_named_in_the_alarm(stalled):
