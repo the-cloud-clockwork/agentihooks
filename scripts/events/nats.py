@@ -287,12 +287,13 @@ class NatsBus:
                 nats_client.connect(url, allow_reconnect=False, **auth_options(config.credentials))
             )
             self._js = self._nc.jetstream()
-            for stream, subject in () if config.bind else ((EVENT_STREAM, f"{PREFIX}.>"), (DEAD_STREAM, DEAD_SUBJECT)):
-                self._loop.run(
-                    self._js.add_stream(
-                        name=stream, subjects=[subject], duplicate_window=_seconds(config.dedupe_window_ms)
+            if not config.bind:
+                for stream, subject in ((EVENT_STREAM, f"{PREFIX}.>"), (DEAD_STREAM, DEAD_SUBJECT)):
+                    self._loop.run(
+                        self._js.add_stream(
+                            name=stream, subjects=[subject], duplicate_window=_seconds(config.dedupe_window_ms)
+                        )
                     )
-                )
         except BaseException:
             self._loop.close()
             raise

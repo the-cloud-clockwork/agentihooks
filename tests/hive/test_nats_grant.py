@@ -124,7 +124,10 @@ def _refused(signer: nats_grant.Signer, credentials: str) -> list[str]:
             ):
                 with pytest.raises(nats_client.errors.TimeoutError):
                     await create
-            await nc.flush()
+            for _ in range(100):
+                if len(errors) >= 2:
+                    break
+                await asyncio.sleep(0.05)
         finally:
             await nc.close()
 
