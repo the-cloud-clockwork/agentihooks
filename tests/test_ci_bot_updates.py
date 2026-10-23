@@ -65,7 +65,11 @@ def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run
     assert step["env"] == ADOPT_ENV
     steps = jobs["unit"]["steps"]
     download = next(s for s in steps if s.get("name") == "Download the durations this run splits on")
-    assert download["with"] == {"name": "split-${{ matrix.python-version }}"}
+    assert download["with"] == {
+        "name": "split-${{ matrix.python-version }}",
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+    }
     assert steps.index(download) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
 
