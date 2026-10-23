@@ -21,7 +21,7 @@ class FakeGit:
 
     def __call__(self, argv):
         self.calls.append(argv)
-        if "pull" in argv:
+        if "merge" in argv:
             self.text = self.after
         return self.text if "show" in argv else ""
 
@@ -30,8 +30,8 @@ def show(repo):
     return ["git", "-C", repo, "show", "HEAD:pyproject.toml"]
 
 
-def pull(repo):
-    return ["git", "-C", repo, "pull", "--ff-only", "origin", "dev"]
+def sync(repo):
+    return [["git", "-C", repo, "fetch", "origin", "dev"], ["git", "-C", repo, "merge", "--ff-only", "origin/dev"]]
 
 
 def test_declared_reads_the_project_dependencies():
@@ -73,7 +73,7 @@ def test_pull_that_adds_a_declared_dependency_installs_it_into_the_tool_environm
     assert tool_deps.pull(repo, git, "/tool/python", source=tmp_path) == ["croniter>=6.2.4,<7"]
     assert git.calls == [
         show(repo),
-        pull(repo),
+        *sync(repo),
         show(repo),
         ["uv", "pip", "install", "--python", "/tool/python", "croniter>=6.2.4,<7"],
     ]
@@ -88,7 +88,7 @@ def test_pull_that_changes_a_declared_version_installs_the_new_spec(tmp_path):
 def test_pull_with_unchanged_dependencies_installs_nothing(tmp_path):
     git, repo = FakeGit(BEFORE, BEFORE), str(tmp_path)
     assert tool_deps.pull(repo, git, "/tool/python", source=tmp_path) == []
-    assert git.calls == [show(repo), pull(repo), show(repo)]
+    assert git.calls == [show(repo), *sync(repo), show(repo)]
 
 
 def test_pull_with_unchanged_dependencies_installs_a_declared_spec_still_missing(tmp_path):
@@ -114,13 +114,13 @@ def test_pull_installs_a_new_spec_once_even_when_it_is_also_missing(tmp_path):
 def test_pull_that_only_removes_a_dependency_installs_nothing(tmp_path):
     git, repo = FakeGit(AFTER, BEFORE), str(tmp_path)
     assert tool_deps.pull(repo, git, "/tool/python", source=tmp_path) == []
-    assert git.calls == [show(repo), pull(repo), show(repo)]
+    assert git.calls == [show(repo), *sync(repo), show(repo)]
 
 
 def test_pull_of_another_repository_never_installs_its_dependencies(tmp_path):
     git, repo = FakeGit(BEFORE, AFTER), str(tmp_path / "other")
     assert tool_deps.pull(repo, git, "/tool/python", source=tmp_path) == []
-    assert git.calls == [pull(repo)]
+    assert git.calls == sync(repo)
 
 
 def test_call_returns_stdout_and_raises_with_stderr_on_failure():
@@ -217,3 +217,41 @@ def test_a_real_sync_that_adds_a_declared_dependency_leaves_it_importable(tmp_pa
     installed = tool_deps.pull(str(checkout), tool_deps.call, python, source=checkout.resolve())
     assert installed == ["fakedep-t442>=1.0"]
     assert subprocess.run(probe, capture_output=True, text=True).stdout == "442\n"
+
+
+def _upstream_and_checkout(tmp_path, monkeypatch):
+    for key in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(key, "t")
+    upstream, checkout = tmp_path / "upstream", tmp_path / "checkout"
+    _git("init", "-q", "-b", "dev", str(upstream))
+    _git("-C", str(upstream), "commit", "-q", "--allow-empty", "-m", "before")
+    _git("clone", "-q", "-b", "dev", str(upstream), str(checkout))
+    _git("-C", str(upstream), "commit", "-q", "--allow-empty", "-m", "after")
+    return upstream, checkout
+
+
+def _rev(repo, ref):
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", ref], capture_output=True, text=True).stdout.strip()
+
+
+def test_a_fetch_that_records_dev_twice_still_fast_forwards_the_checkout(tmp_path, monkeypatch):
+    upstream, checkout = _upstream_and_checkout(tmp_path, monkeypatch)
+
+    def twice(argv):
+        if argv[-2:] == ["origin", "dev"]:
+            argv = [*argv, "dev"]
+        return tool_deps.call(argv)
+
+    assert tool_deps.pull(str(checkout), twice, "/tool/python") == []
+    assert (checkout / ".git" / "FETCH_HEAD").read_text().count("branch 'dev'") == 2
+    assert _rev(checkout, "HEAD") == _rev(upstream, "HEAD")
+
+
+def test_a_checkout_that_already_contains_origin_dev_pulls_as_success(tmp_path, monkeypatch):
+    upstream, checkout = _upstream_and_checkout(tmp_path, monkeypatch)
+    _git("-C", str(checkout), "pull", "-q", "--ff-only", "origin", "dev")
+    _git("-C", str(checkout), "commit", "-q", "--allow-empty", "-m", "local")
+    local = _rev(checkout, "HEAD")
+    assert tool_deps.pull(str(checkout), tool_deps.call, "/tool/python") == []
+    assert _rev(checkout, "HEAD") == local
+    assert _rev(checkout, "origin/dev") == _rev(upstream, "HEAD")
