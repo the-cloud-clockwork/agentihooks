@@ -1,0 +1,254 @@
+import json
+from dataclasses import asdict, replace
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
+
+pytestmark = pytest.mark.unit
+
+T0 = 1_000_000
+
+
+def reading():
+    return {"cpus": 32, "load5": 0, "available_mb": 60000, "total_mb": 64000}
+
+
+@pytest.fixture
+def rig():
+    import fakeredis
+
+    from scripts.events import memory
+    from scripts.events.config import BusConfig, QueuePolicy
+    from scripts.events.envelope import Envelope
+    from scripts.hive.spoke import Spoke, SpokeConfig
+    from scripts.hub import hive_loss, lifecycle, registry, runner
+    from scripts.swarm.store import PREFIX, AgentRecord, RedisStore
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    clock = Mock(return_value=T0)
+    bus = memory.open_bus(BusConfig(), clock=clock)
+    policy = QueuePolicy(max_deliver=3, backoff_ms=(10, 20))
+    queue = bus.queue("swarm.rig.ready.eng", policy)
+
+    def spoke(hive, name, execution, generation):
+        tasks, runtime = Mock(), Mock()
+        task = {"id": "task", "execution_id": execution, "execution_generation": generation, "claim_generation": 3}
+        tasks.request.return_value = SpawnRequest(SimpleNamespace(slug="rig"), "eng", name, task)
+        runtime.spawn.return_value = Outcome(
+            "spawn", Status.OK, "local", SimpleNamespace(pane_id=f"{hive}:{name}", harness="claude", account="a")
+        )
+        config = SpokeConfig(SimpleNamespace(slug="rig"), "eng", hive, policy)
+        return SimpleNamespace(spoke=Spoke(config, bus, runtime, tasks, reading, clock=clock), runtime=runtime)
+
+    def offer(version):
+        queue.offer(
+            Envelope(
+                f"ready-{version}", "task.ready", "rig", "task", "task", version, T0, "readiness", {"lane": "eng"}
+            )
+        )
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    agent = AgentRecord(
+        name="agent-a",
+        lane="eng",
+        task="task",
+        execution_id="execution-a",
+        generation=7,
+        seat="eng-1",
+        account="a",
+        hive="hive-a",
+        runtime_target={"host_id": "hive-a"},
+        started_at=T0,
+        launched_at=T0,
+        pane_id="hive-a:agent-a",
+    )
+    store.redis.sadd(f"{PREFIX}:index", "rig")
+    store.redis.hset(store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    store.redis.hset(store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
+    store.redis.set(store.key("rig", "claim", agent.task), agent.name)
+    row = {"id": "task", "state": "claimed", "claimed_by": agent.name, "claim_generation": 3, "done": False}
+    ledger = SimpleNamespace(task=lambda *_: dict(row), writes=[])
+
+    def update(*args, **kwargs):
+        ledger.writes.append((args, kwargs))
+        row.update(args[2])
+
+    ledger.update_task = update
+    returned = []
+    life = lifecycle.Lifecycle(bus, store, ledger, release=lambda *args: returned.append(args))
+    loss = hive_loss.HiveLoss(bus, clock)
+    hub = runner.HubRunner(bus, registry.Registry([loss.reactor(), life.reactor()]), "hub", clock)
+    first = spoke("hive-a", "agent-a", "execution-a", 7)
+    offer(0)
+    yield SimpleNamespace(
+        bus=bus,
+        clock=clock,
+        hub=hub,
+        loss=loss,
+        life=life,
+        row=row,
+        returned=returned,
+        store=store,
+        first=first,
+        spoke=spoke,
+        offer=offer,
+        queue=queue,
+    )
+    hub.stop()
+    bus.close()
+    store.redis.close()
+
+
+def claim_state(rig):
+    from scripts.hive.spoke import claim_key
+    from scripts.events.envelope import Envelope
+
+    key = claim_key(Envelope("ready-0", "task.ready", "rig", "task", "task", 0, T0, "readiness", {}))
+    return json.loads(rig.bus.state("spoke-work").get(key).value)["state"]
+
+
+def test_a_killed_hive_reopens_its_running_task_for_another_claim_at_the_presence_timeout(rig):
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    rig.clock.return_value = T0 + presence.TTL_MS - 1
+    rig.hub.run_once()
+    assert rig.row["state"] == "claimed"
+    assert rig.returned == []
+    rig.clock.return_value = T0 + presence.TTL_MS
+    rig.hub.run_once()
+    assert rig.row == {**rig.row, "state": "open", "claimed_by": ""}
+    assert len(rig.returned) == 1
+    assert rig.store.agents("rig") == []
+    assert claim_state(rig) == "exited"
+    rig.offer(1)
+    second = rig.spoke("hive-b", "agent-b", "execution-b", 8)
+    assert second.spoke.poll() == "started"
+    second.runtime.spawn.assert_called_once()
+
+
+def test_a_beating_hive_keeps_its_running_task(rig):
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    for step in range(1, 5):
+        rig.clock.return_value = T0 + step * presence.TTL_MS
+        presence.beat(rig.bus, "hive-a", rig.clock())
+        rig.hub.run_once()
+    assert rig.row["state"] == "claimed"
+    assert rig.returned == []
+    assert claim_state(rig) == "started"
+
+
+def test_the_exit_is_the_one_exit_of_that_start_and_names_the_lost_hive(rig):
+    from scripts.hive import execution_events, presence
+
+    published = Mock(wraps=execution_events.emit)
+    rig.loss._emit = published
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    rig.clock.return_value = T0 + presence.TTL_MS + 5
+    handled = Mock(wraps=rig.life.handle)
+    rig.life.handle = handled
+    rig.hub.run_once()
+    rig.hub.run_once()
+    exited = published.call_args.args[1]
+    assert published.call_count == 1
+    assert (exited.id, exited.type, exited.time, exited.cause) == (
+        f"exited:{exited.cause}",
+        "execution.exited",
+        T0 + presence.TTL_MS + 5,
+        exited.cause,
+    )
+    assert exited.cause.startswith("started:")
+    assert (exited.swarm, exited.key, exited.version) == ("rig", "execution-a", 7)
+    assert exited.data["reason"] == "hive-lost"
+    assert exited.data["hive"] == "hive-a"
+
+
+def test_a_start_that_already_exited_is_dropped_without_an_exit(rig):
+    from scripts.hive import presence
+    from scripts.hub import hive_loss
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    claims = rig.bus.state("spoke-work")
+    from scripts.hive.spoke import claim_key
+    from scripts.events.envelope import Envelope
+
+    key = claim_key(Envelope("ready-0", "task.ready", "rig", "task", "task", 0, T0, "readiness", {}))
+    entry = claims.get(key)
+    claims.update(key, json.dumps({**json.loads(entry.value), "state": "exited"}).encode(), entry.revision)
+    rig.loss._emit = Mock()
+    rig.clock.return_value = T0 + presence.TTL_MS
+    rig.hub.run_once()
+    rig.loss._emit.assert_not_called()
+    assert json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value) == {}
+
+
+def test_a_live_hive_prunes_ended_starts_on_the_prune_cadence(rig):
+    from scripts.hive import presence
+    from scripts.hive.spoke import claim_key
+    from scripts.events.envelope import Envelope
+    from scripts.hub import hive_loss
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    claims = rig.bus.state("spoke-work")
+    key = claim_key(Envelope("ready-0", "task.ready", "rig", "task", "task", 0, T0, "readiness", {}))
+    entry = claims.get(key)
+    claims.update(key, json.dumps({**json.loads(entry.value), "claim_revision": 99}).encode(), entry.revision)
+    index = rig.bus.state(hive_loss.BUCKET)
+    rig.clock.return_value = T0 + hive_loss.PRUNE_MS - 1
+    presence.beat(rig.bus, "hive-a", rig.clock())
+    rig.hub.run_once()
+    assert list(json.loads(index.get(hive_loss.INDEX).value)) == [key]
+    rig.clock.return_value = T0 + hive_loss.PRUNE_MS
+    presence.beat(rig.bus, "hive-a", rig.clock())
+    rig.hub.run_once()
+    assert json.loads(index.get(hive_loss.INDEX).value) == {}
+    assert rig.returned == []
+
+
+def test_a_denied_lease_does_nothing(rig):
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    rig.clock.return_value = T0 + presence.TTL_MS
+    rig.loss._emit = Mock()
+    rig.loss.poll(lambda: False)
+    rig.loss._emit.assert_not_called()
+
+
+def test_starts_without_a_claim_or_hive_are_not_indexed(rig):
+    from scripts.events.envelope import Envelope
+    from scripts.hub import hive_loss
+
+    start = Envelope(
+        "started:x", "execution.started", "rig", "execution", "x", 1, T0, "hive-a", {"claim_key": "c", "hive": ""}
+    )
+    rig.loss.handle(start)
+    rig.loss.handle(replace(start, data={"hive": "hive-a"}))
+    rig.loss.handle(replace(start, type="execution.exited", data={"claim_key": "c", "hive": "hive-a"}))
+    assert rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX) is None
+    rig.loss.handle(replace(start, data={"claim_key": "c", "hive": "hive-a"}))
+    rig.loss.handle(replace(start, id="started:y", data={"claim_key": "c", "hive": "hive-b"}))
+    rows = json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value)
+    assert rows == {"c": replace(start, data={"claim_key": "c", "hive": "hive-a"}).to_dict()}
+
+
+def test_default_registry_runs_hive_loss_before_lifecycle(rig):
+    from scripts.hub import registry
+
+    names = [reactor.name for reactor in registry.configured(rig.bus, rig.clock)]
+    assert names.index("hive-loss") < names.index("lifecycle")
+    reactor = next(r for r in registry.configured(rig.bus, rig.clock) if r.name == "hive-loss")
+    assert (reactor.subject, reactor.singleton, callable(reactor.poll)) == (
+        "swarm.*.execution.started",
+        True,
+        True,
+    )
