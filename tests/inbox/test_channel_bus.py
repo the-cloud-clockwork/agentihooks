@@ -1,5 +1,6 @@
 import threading
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -39,6 +40,10 @@ def test_the_channel_pushes_a_seat_item_the_bus_delivers_and_confirms_its_receip
         SeatInbox(bus, "swarm").send(SEAT, Message(item.id, "alice", "hello"))
         with anyio.fail_after(10):
             pushed = await receive()
+            await anyio.sleep(0.05)
+            assert set(feed.held) == {item.id}
+            assert store.get(item.id).state == "delivered"
+            store.items[item.id] = replace(store.get(item.id), state="confirmed", delivery_session="session-1")
             while feed.held:
                 await anyio.sleep(0.01)
         clock[0] += 60_000
@@ -48,7 +53,7 @@ def test_the_channel_pushes_a_seat_item_the_bus_delivers_and_confirms_its_receip
 
     _, _, (item, pushed, leftover) = session(store, scenario, feed=feed)
     assert pushed == {"jsonrpc": "2.0", **channel.event(store.get(item.id))}
-    assert store.get(item.id).state == "delivered"
+    assert store.get(item.id).state == "confirmed"
     assert leftover == []
     assert store.subs == []
 
