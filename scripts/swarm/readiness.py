@@ -9,7 +9,7 @@ from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.swarm import apply_wait, claim_hold, freeze, release_wait
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import RedisStore, connect
+from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmError, connect
 from scripts.swarm_ledger.repository import hierarchy
 
 AUTHOR = "readiness"
@@ -26,6 +26,13 @@ class Snapshot:
     admits: Callable[[dict], bool]
 
 
+def _on_events(store: RedisStore, slug: str) -> bool:
+    try:
+        return store.config(slug).engine == EVENTS_ENGINE
+    except SwarmError:
+        return False
+
+
 class Source:
     def __init__(self, store: RedisStore | None = None, ledger: LedgerClient | None = None):
         self._store = store
@@ -33,7 +40,7 @@ class Source:
 
     def slugs(self) -> list[str]:
         self._store = self._store or connect()
-        return self._store.slugs()
+        return [slug for slug in self._store.slugs() if _on_events(self._store, slug)]
 
     def snapshot(self, slug: str) -> Snapshot:
         self._store = self._store or connect()

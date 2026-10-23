@@ -190,6 +190,8 @@ def _swarm_exports(environ: dict[str, str]) -> str:
         "AGENTIHOOKS_CLAIM_FENCE",
         "AGENTIHOOKS_BUS",
         "AGENTIHOOKS_BUS_URL",
+        "AGENTIHOOKS_SLOT_HIVE",
+        "AGENTIHOOKS_SLOT_EXECUTION",
     )
     exports = {name: environ[name] for name in names if environ.get(name)}
     exports["AGENTIHOOKS_LANGFUSE_ENABLED"] = "1"

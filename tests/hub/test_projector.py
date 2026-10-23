@@ -1,4 +1,6 @@
 import threading
+import time
+from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
@@ -40,6 +42,31 @@ def test_identity_is_a_valid_reactor_name(host, name):
 def test_reactor_follows_every_swarm_subject_under_a_durable_per_process():
     reactor = make(name="pod-8765").reactor
     assert (reactor.name, reactor.subject, reactor.singleton) == ("projector-pod-8765", "swarm.>", False)
+
+
+def test_reactor_policy_carries_a_ten_minute_inactive_threshold_with_the_reactor_deliveries():
+    assert make().reactor.policy == replace(registry.REACTOR_POLICY, inactive_ms=600_000)
+
+
+def test_a_rollout_leaves_only_the_live_projector_durable_on_the_bus(monkeypatch, tmp_path):
+    from tests.events import nats_server
+
+    monkeypatch.setattr(projector, "POLICY", replace(projector.POLICY, inactive_ms=2000))
+    with nats_server.running(tmp_path / "jetstream") as url:
+        config = BusConfig(backend="nats", url=url)
+        old = projector.Projector(Mock(), Hub(), "pod-a-8765", config)
+        old.pull()
+        assert nats_server.durables(old.bus) == ["hub-projector-pod-a-8765"]
+        old.close()
+        live = projector.Projector(Mock(), Hub(), "pod-b-8765", config)
+        try:
+            live.pull()
+            deadline = time.monotonic() + 15
+            while nats_server.durables(live.bus) != ["hub-projector-pod-b-8765"] and time.monotonic() < deadline:
+                live.pull()
+            assert nats_server.durables(live.bus) == ["hub-projector-pod-b-8765"]
+        finally:
+            live.close()
 
 
 def test_a_ledger_event_refreshes_only_a_watched_ledger():
@@ -140,7 +167,7 @@ def test_pull_opens_its_durable_once_and_naks_a_failed_refresh_with_the_reactor_
     project.pull()
     project.pull()
     opening.assert_called_once_with(NATS)
-    bus.events.consumer.assert_called_once_with("hub-projector-pod", "swarm.>", registry.REACTOR_POLICY)
+    bus.events.consumer.assert_called_once_with("hub-projector-pod", "swarm.>", projector.POLICY)
     assert failed.nak.call_args_list == [((registry.RETRY_MS[0],),)] * 2
     bus.close.assert_not_called()
 

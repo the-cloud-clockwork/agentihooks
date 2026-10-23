@@ -373,6 +373,82 @@ question fails or names no project. A refusal fails the `trace` detector: its
 error is printed on stderr and the measure counts it among the failed
 detectors. The caller's terminal keys never change what `doctor measure` reads.
 
+### Internal ingress for Doctor reads
+
+The reader chooses its route from `LANGFUSE_HOST` after removing trailing
+slashes. The default needs no route setting:
+
+| Reader host | Connection |
+|---|---|
+| Unset, empty, or `https://langfuse.homeofanton.com` (also with a trailing slash) | HTTPS to `10.10.30.200:443`, with `langfuse.homeofanton.com` as HTTP `Host` and TLS server name |
+| Another hostname, scheme or explicit port, such as `https://langfuse.example.com` or `https://langfuse.homeofanton.com:8443` | Directly to the configured URL |
+
+TLS verification stays enabled. Keep the hostname in `LANGFUSE_HOST`: setting
+it to the ingress IP selects a direct request and loses the hostname used for
+certificate verification. The ingress address comes from the built-in
+`langfuse_route({})` default; changing the exporter's `OTEL_LANGFUSE_ENDPOINT`
+does not change this reader route. The project key pair is passed unchanged as
+HTTP Basic authentication, and the [read budget](#read-budget) still applies.
+
+For a manual reader pass on Anton, use a shell with the watched project's keys
+already supplied, then run:
+
+```bash
+cd ~/dev/tcc-ecosystem/agentihooks
+LANGFUSE_HOST=https://langfuse.homeofanton.com \
+  LANGFUSE_PUBLIC_KEY="$SWARM_LANGFUSE_PUBLIC_KEY" \
+  LANGFUSE_SECRET_KEY="$SWARM_LANGFUSE_SECRET_KEY" \
+  ~/dev/tcc-ecosystem/.venv/bin/python -m scripts.doctor.traces_read rig-grade-swarm
+```
+
+`SWARM_LANGFUSE_PUBLIC_KEY` and `SWARM_LANGFUSE_SECRET_KEY` above are references
+to keys supplied by your secret manager. This command uses the internal route,
+prints `measures` and `findings`, and updates the reader's watermarks and cache.
+For another installation, replace the host and key references with that
+installation's HTTPS origin and project pair; that origin is read directly.
+The manual reader does not validate the project. For a measurement with the
+installed keys and the `agent-swarm` project check described above, use:
+
+```bash
+agentihooks doctor rig-grade-swarm measure trace-reader-unavailable
+```
+
+This measure command always uses the default host, regardless of the caller's
+`LANGFUSE_HOST`.
+
+#### Checking the internal connection
+
+Run this read-only probe from the host that runs the Doctor. It needs no
+project keys and keeps the same hostname and certificate verification:
+
+```bash
+curl --noproxy '*' --resolve langfuse.homeofanton.com:443:10.10.30.200 \
+  --connect-timeout 5 --max-time 10 --silent --show-error \
+  --output /dev/null --write-out 'status=%{http_code} tls=%{ssl_verify_result}\n' \
+  https://langfuse.homeofanton.com/api/public/health
+```
+
+`status=200 tls=0` confirms a healthy response and a verified certificate from
+the ingress. It does not confirm that the reader's keys open the right project
+or that trace queries finish within their budget.
+
+| Symptom | Check |
+|---|---|
+| Public URL returns a tunnel 502, internal health probe succeeds | Default-origin Doctor reads bypass the tunnel. Compare the finding's request URL and time with the internal path before attributing it to the tunnel. |
+| Internal connection times out or refuses the connection | The Doctor host must reach `10.10.30.200:443`; check that path and the ingress. There is no fallback to the public tunnel. |
+| Certificate verification fails | Check the certificate served for `langfuse.homeofanton.com`; keep verification enabled and the hostname configured. |
+| Langfuse returns 5xx through the internal path, or trace requests time out | These remain read failures and can raise `trace reader unavailable`; inspect the [failure lines](#read-budget) and backend health. |
+| Health succeeds but measurement refuses the project | Follow [Finding where a trace went](#finding-where-a-trace-went); health alone does not validate project identity. |
+
+Pull request [#5353](https://github.com/the-cloud-clockwork/agentihooks/pull/5353)
+proved the route with a public tunnel returning 502 and an internal endpoint
+returning 200. Its CI proofs went from
+[red](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39486962592)
+to [green](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39487595146),
+including checks that internal 503 responses and timeouts still raise the
+reader finding. Host memory paging was a hypothesis, not an established cause
+of that incident.
+
 ### Active telemetry
 
 Every working agent record of the watched swarm is an expected binding: name,
