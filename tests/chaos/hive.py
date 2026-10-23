@@ -2,6 +2,7 @@ import argparse
 import json
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,10 +12,13 @@ from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.hive import execution_events
 from scripts.hive.spoke import Spoke, SpokeConfig
+from scripts.swarm import readiness
+from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 from tests.chaos.journal import Journal, now_ms
 
 LANE = "eng"
+OFFERS = 10_000
 POLL_MS = 500
 QUIET = frozenset({"empty", "held"})
 # admission.room grants (80 * cpus - 100 * load5) // 50 launches, so these readings leave capacity minus running.
@@ -97,11 +101,23 @@ def work(bus, spoke: Spoke, runtime: ChaosRuntime, journal: Journal, hive: str) 
             time.sleep(0.2)
 
 
+def readiness_view(swarm: str) -> Callable[[], readiness.Snapshot]:
+    tasks = [
+        {"id": f"t{n:04d}", "phase": "chaos", "state": "open", "lane": LANE, "claim_generation": 1}
+        for n in range(1, OFFERS + 1)
+    ]
+    doc = {"tasks": tasks, "phases": [{"id": "chaos", "title": "chaos", "depends_on": []}]}
+    rows = {task["id"]: task for task in tasks}
+    view = readiness.Snapshot(swarm, rows, doc, hierarchy.project(doc)[0], "", lambda _: False, lambda _: True)
+    return lambda: view
+
+
 def serve(args: argparse.Namespace) -> None:
     journal = Journal(Path(args.journal), args.hive)
     runtime = ChaosRuntime(journal, args.hive, args.launch_ms, args.work_ms)
     tasks = ChaosTasks(journal)
     config = SpokeConfig(swarm=SimpleNamespace(slug=args.swarm), lane=LANE, hive=args.hive)
+    view = readiness_view(args.swarm)
 
     def measure() -> dict:
         return {"cpus": args.capacity * CPUS_PER_SLOT, "load5": len(runtime.agents) * LOAD_PER_AGENT}
@@ -114,7 +130,8 @@ def serve(args: argparse.Namespace) -> None:
             continue
         journal.write("connected")
         try:
-            work(bus, Spoke(config, bus, runtime, tasks, measure=measure), runtime, journal, args.hive)
+            spoke = Spoke(config, bus, runtime, tasks, measure=measure, view=view)
+            work(bus, spoke, runtime, journal, args.hive)
         except Exception as exc:
             journal.write("disconnected", error=type(exc).__name__)
         try:

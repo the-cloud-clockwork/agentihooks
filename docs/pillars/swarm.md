@@ -1399,6 +1399,71 @@ fix ([red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs
 the corrected publication and continuation cases passed afterward
 ([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38725568065)).
 
+### Repositories recorded on another host
+
+A task's `repositories` entries and its `repository_branches` keys are
+written on whichever host prepared the task: an absolute path such as
+`/home/me/dev/agentihooks-bundle` on the workstation, or a URL or origin
+identity. When a successor runs on a hive whose clones live under
+`/srv/repos`, `prepare` and `publish` resolve each entry to a checkout on the
+host they run on:
+
+1. An entry that is a directory here is used, reduced to its primary
+   checkout when it is a worktree. It never falls through to the name search.
+2. Any other entry is matched by repository name: the last segment of the
+   path, URL or `host/owner/name` form, without `.git`, compared without case.
+   The candidates are the checkouts in the swarm repository's parent folder,
+   the swarm repository included, and the checkouts the hive scans under
+   `HIVE_REPO_ROOT` (default `~/dev`): its direct children and the children of
+   any child that is not itself a checkout (see
+   [Repos and checkouts](hives.md#repos-and-checkouts)). Only primary
+   checkouts are candidates; worktrees, whose `.git` is a file, are skipped.
+3. Exactly one checkout must match. None, or several distinct checkouts with
+   the same name, is refused before any worktree is created:
+
+```text
+repository /home/me/dev/agentihooks-bundle has 0 checkouts named agentihooks-bundle on this host
+```
+
+Clone the repository under `HIVE_REPO_ROOT` or beside the swarm repository,
+or remove the duplicate clone, then repeat the command. Setting
+`HIVE_REPO_ROOT` replaces the default `~/dev` scan root; the search beside the
+swarm repository always applies. No other flag or setting changes this.
+
+The rest of the task record follows the same name match:
+
+| Record or command | Behaviour on another host |
+|---|---|
+| `repository_branches` | The key for this host's checkout path wins. Without one, the first key from another host with the same repository name supplies the continuation branch. With neither, the task's `branch` is used, unless `branch_repo` names another repository, or the task declares several repositories and has no `branch_repo`; then a new branch is cut. |
+| `prepare` | Creates or reuses one worktree per resolved checkout. Worktrees go under the worktree root, default `~/dev/worktrees/<repo>/<name>`, never inside the checkout folder. A continuation branch is cut from `origin/<branch>`, so the predecessor must have pushed it. |
+| `publish` from a task worktree | The worktree's repository is accepted when its name matches any declared entry, so a declared repository not cloned here does not block another that is. Otherwise it is refused with `current worktree repository <path> is not in the task repositories`. The worktree's branch must be the agent's own or the task's scoped branch, else `current worktree <path> does not belong to this task`. |
+| `publish` from a primary checkout | With one declared repository (or none, meaning the swarm repository), resolves it by the steps above and uses its prepared worktree; without one it fails with `task worktree missing` and names `prepare`. With several it refuses: `publish from the task worktree to select one of its repositories`. |
+| `block` | Records the pushed branch of each declared repository that resolves here and skips the ones that do not. Only when none resolves does it fall back to the launch checkout. |
+
+A successful `prepare` or `publish`, and a `block` that finds a pushed branch,
+adds a `repository_branches` key for this host's path; the other host's key stays.
+
+Example: the task was prepared on the workstation, its branch `engineer-a` is
+pushed, and a hive with clones under `/srv/repos` continues it.
+
+```bash
+# The task records, written on the workstation:
+#   "repositories": ["/home/me/dev/agentihooks-bundle"]
+#   "repository_branches": {"/home/me/dev/agentihooks-bundle": "engineer-a"}
+
+HIVE_REPO_ROOT=/srv/repos agentihooks swarm <id> prepare
+# resolves /srv/repos/agentihooks-bundle and returns a worktree from it
+# under ~/dev/worktrees/agentihooks-bundle/, continuing origin/engineer-a
+```
+
+Delivered in [pull request 5834](https://github.com/the-cloud-clockwork/agentihooks/pull/5834).
+The [red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39758053089)
+failed with `FileNotFoundError` on a path recorded on another host; the
+[green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39758056823)
+covers sibling and `HIVE_REPO_ROOT` lookup, a recorded path present here, an
+uncloned declared repository, foreign branch records, and zero or duplicate
+matches. Tests: `tests/swarm/test_publish_repositories.py`.
+
 ### Publishing unchanged files
 
 Repeating `swarm publish` after a successful publication avoids an unnecessary
@@ -2725,6 +2790,63 @@ The command prints 0 once the finding is gone.
 [Pull request #4024](https://github.com/the-cloud-clockwork/agentihooks/pull/4024) delivered the pin and the
 detector; its red Proofs run reproduced a stripped identity master whose directive returned nothing.
 
+### Doctor handoff detectors
+
+The Doctor's handoff detectors (`scripts.doctor.handoffs`) run with the other detectors on every Doctor detection
+pass, timed as the `doctor.handoff` step. They read two kinds of handoff record from the watched swarm:
+
+- **A started successor.** A prompt the tick wrote for a successor carries the handoff document, its seat and its
+  task. The sender is the seat's previous occupant in the seat history, and the successor is the prompt's agent.
+- **A waiting handoff.** A handoff document stored for a task whose successor has not started yet. The seat is the
+  one stored with the handoff, and the sender is the `agent` field of its envelope.
+
+Each record is checked by `missing_recap`, then by `reasked`:
+
+| Record | Finding id | Raised when |
+|---|---|---|
+| A seat or a sender, or both | `missing-recap/<sender, else seat>` | No recap on the seat comes from the sender |
+| No seat and no sender | `unattributed-handoff/<task>` | Always: there is no seat or sender to name |
+| A started successor | `reasked-handoff/<successor>` | The successor sent a message with a question mark and at least four distinct words of four or more characters, at least 60% of them in the handoff document or the sender's recaps |
+
+A record with an empty seat and an empty sender is reported apart, as an `unattributed handoff` naming its task.
+Before [pull request #5126](https://github.com/the-cloud-clockwork/agentihooks/pull/5126) the same record raised
+`missing-recap/` with an empty subject: the finding named nothing to judge, and every such record shared that one
+id. A record with only a seat or only a sender stays a missing recap, named by what it has.
+
+An unattributed handoff finding has this summary, evidence and threshold, and its number is 1:
+
+```text
+unattributed-handoff/doc-79030d0c5613b0f2
+  handoff record names no seat and no sender
+  task doc-79030d0c5613b0f2 with no seat on record
+  no sender on record
+  successor not started yet
+  threshold: every handoff names its seat or its sender
+```
+
+The successor line reads `successor <agent>` once a successor has been recorded. Measure one finding, or every
+current finding of the class, the same way before and after a fix:
+
+```bash
+agentihooks doctor rig-grade-swarm measure unattributed-handoff/doc-79030d0c5613b0f2
+agentihooks doctor rig-grade-swarm measure unattributed-handoff
+```
+
+The first command prints the finding id and 1 while the finding stands and 0 once it is gone. The second prints
+`unattributed-handoff count <n> unknown <failed detectors> max <largest number>`; it refuses with `no finding of the
+class unattributed-handoff has been seen` until the Doctor has seen one.
+
+| Symptom | Check | Cause and action |
+|---|---|---|
+| An `unattributed-handoff` finding names a task | `agentihooks ledger --slug <watched slug> show`, the task's claim history | The task's waiting handoff was stored without a seat, and its envelope names no agent. Judge the finding against the task's last claimant; the handoff itself still reaches the successor. |
+| A `missing-recap` finding names a seat, not an agent | The evidence line `handed off by an occupant the seat history predates` | The seat history has no previous occupant for that generation, so the seat is the only name on record. |
+| A finding id ends in `/` with nothing after it | `git -C <agentihooks checkout> merge-base --is-ancestor 8cdc1475c1 HEAD` | The Doctor runs code from before pull request #5126; apply it with `agentihooks doctor <watched slug> intervene pull-dev`. |
+
+The red [Tests run 39373109267](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373109267) on the
+test only head failed on the empty subject; the green
+[Tests run 39373777928](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373777928) passed with
+the fix.
+
 ## One task per agent life
 
 An agent is spawned for one task, told that task in its opening prompt, and ends when the task is done or
@@ -3656,6 +3778,96 @@ percentile 703 seconds from ready to a delivered verdict
 verdict was on disk at launch and the ready to verdict wait was zero. `tests/gates/test_intent_timing.py` pins
 `persisted_at`: a slow classifier leaves `at` at the pass start and `persisted_at` after the delay, and a kept verdict
 keeps its `persisted_at`.
+
+### Pull requests a task names
+
+A task's work can land in more than one repository. The intent check reads the other repository pull requests a
+task names and judges the task's own pull request together with them. The named pulls come from three texts:
+
+- the task description,
+- the task's pull request body, without the generated Parent intent section that `swarm pr` writes between
+  `<!-- agentihooks intent -->` and `<!-- /agentihooks intent -->`,
+- every comment on the task.
+
+Each text is searched for full `github.com/<owner>/<repo>/pull/<n>` links and for short `<owner>/<repo>#<n>`
+references whose owner is the owner of the task's own pull request. Links to the task's own repository are skipped,
+and each pull request counts once. Texts are read in the order above; within one text, its full links come before
+its short references. The Parent intent section is skipped because it
+carries the project overview, and a Doctor overview lists every fix it merged: one antoncore pull request body named
+about 140 agentihooks pull requests that way, none of them part of the task.
+
+The check reads the first three named pulls (`NAMED_LIMIT`) with `gh pr view` and `gh pr diff`. A named pull that
+cannot be read, and every named pull past the first three, is unread. The classifier state carries:
+
+| Field | Content |
+|---|---|
+| `pull_requests` | The task's own pull request and each named pull that was read, with its title, body, files and diff |
+| `judged_pull_requests` | The URLs of `pull_requests`, at most 10 (`URL_COUNT`) |
+| `unread_pull_requests` | The unread URLs, failed reads first, at most 10 |
+| `unread_overflow` | How many unread URLs were left off the list; absent when none were |
+
+Both URL lists stay lists of at most 10 entries; the 8192 character bound that shortens other state fields
+never applies to them. The verdict reason ends with the pull requests it was judged on and the ones it could not
+read, each naming at most four (`LISTED`) and counting the rest:
+
+```text
+the phase can use it; judged on https://github.com/acme/app/pull/980, https://github.com/acme/api/pull/11,
+https://github.com/acme/api/pull/12 and https://github.com/acme/api/pull/13; could not read
+https://github.com/acme/api/pull/14, https://github.com/acme/api/pull/15, https://github.com/acme/api/pull/16,
+https://github.com/acme/api/pull/17 and 133 more
+```
+
+That reason comes from a body naming 140 pull requests in another repository whose first three were read: 137
+unread, ten listed in `unread_pull_requests`, `unread_overflow` 127, four named in the reason and the other 133
+counted. When none of the 140 can be read, as in the regression test below, `judged_pull_requests` holds only the
+task's own pull request, `unread_overflow` is 130 and the reason ends `and 136 more`.
+
+Read the lists the classifier saw from the intent history of the swarm:
+
+```bash
+jq -c 'select(.task == "<task>") | .classifier_input | fromjson | .state
+  | {judged_pull_requests, unread_pull_requests, unread_overflow}' \
+  ~/.agentihooks/swarm/<swarm>/gates/intent/history.jsonl
+```
+
+#### One task's failure stays with that task
+
+The check runs each task's two steps, queueing it for judgment and settling its verdict, on their own. An exception
+in either step is caught for that task alone: the swarm gate log gets a row with gate `intent`, kind `fail-open`, the
+task's claimant and task, and the reason `<exception type>: <message>`. The tick reports the action
+`task <task> intent check failed: <exception type>`, the task gets no verdict from that pass, and every other task
+is still judged. The next tick tries the task again. A `LedgerRefused` error is not caught and still ends the pass.
+
+```bash
+jq -c 'select(.gate == "intent" and .kind == "fail-open")' ~/.agentihooks/swarm/<swarm>/gates/log.jsonl
+```
+
+```json
+{"at": 1792650000000, "gate": "intent", "kind": "fail-open", "agent": "engineer@d44a5a-12", "task": "t536", "tool": "", "reason": "KeyError: slice(None, -1, None)"}
+```
+
+Before [pull request 5148](https://github.com/the-cloud-clockwork/agentihooks/pull/5148), the unread list of that
+140 link body passed the 8192 character bound and became a truncated record, the reason text sliced it as a list, and
+the `KeyError: slice(None, -1, None)` ended every Doctor tick run; the swarm journal of 20 October shows it from
+06:06 UTC until the fix merged.
+The red run on dev code with the new tests,
+[39380494294](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39380494294), failed six of them; the
+green runs, [39380496940](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39380496940) and
+[39380878177](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39380878177) after review, passed.
+`tests/gates/test_intent_cross_repo.py` pins the behaviour:
+`test_a_body_naming_over_a_hundred_other_pull_requests_keeps_lists_and_names_a_few`,
+`test_exactly_the_count_of_unread_pull_requests_carries_no_overflow`,
+`test_the_reason_names_four_pull_requests_in_full_and_counts_a_fifth`,
+`test_prepare_keeps_long_url_lists_as_lists_capped_by_count`,
+`test_named_pulls_skip_links_inside_the_generated_parent_intent_section`,
+`test_one_task_failing_in_the_intent_check_never_ends_the_tick_run` and
+`test_one_task_failing_before_it_is_judged_never_ends_the_tick_run`.
+
+| Symptom | Cause and action |
+|---|---|
+| The tick prints `task <task> intent check failed: <exception type>` | One task's queueing or settling step raised. Read its `fail-open` row in the gate log for the message; the other tasks were judged. Fix the cause in code; the task is retried every tick. |
+| A verdict reason says `could not read` a pull request | `gh pr view` failed for it, or it came after the first three named pulls. Read it with `gh pr view <url>`; name only the pull requests that belong to the task in its description or comments. |
+| A reason names pull requests the task never touched | They are in the task description, a comment, or the pull request body outside the Parent intent section. Remove them from that text; the next judgment no longer reads them. |
 
 ### Tick heartbeat and stale watcher
 
