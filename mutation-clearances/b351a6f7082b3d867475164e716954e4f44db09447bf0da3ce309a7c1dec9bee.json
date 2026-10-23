@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_workspace.py:scripts.swarm_ledger.ledger_workspace.x_rewrite__mutmut_14:7056a5ac1257440cb206b33b8542fc674a860b2648790c7d53054fb2b43359d6": {
+    "reader": "standards_reader",
+    "reason": "Changes only the case of the encoding name: codecs.lookup('UTF-8').name and codecs.lookup('utf-8').name both resolve to utf-8, so write_text writes identical bytes and the mutant changes no output."
+  }
+}

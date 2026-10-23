@@ -514,7 +514,7 @@ def test_guarded_task_update_returns_only_the_requested_row(live):
     assert "comments" not in row
 
 
-def test_a_kind_change_succeeds_when_the_work_folder_lives_on_another_host(live, tmp_path):
+def test_a_kind_change_succeeds_when_the_work_folder_is_missing(live, tmp_path):
     from scripts.swarm.ledger_client import LedgerClient
     from tests.swarm_ledger.test_ledger_authority import ledger
 
