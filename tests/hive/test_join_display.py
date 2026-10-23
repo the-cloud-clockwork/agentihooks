@@ -97,3 +97,42 @@ def test_hive_list_leaves_out_a_report_from_an_earlier_generation(store, capsys)
     join_report.start(store.redis, "sw", replace(agent, generation=agent.generation - 1), "old", checks(), {}, 900)
     cli._list()
     assert rows(capsys) == []
+
+
+class Herdr:
+    def __init__(self, names):
+        self.names = names
+
+    def live_names(self):
+        return self.names
+
+
+def listed_by_hive(out):
+    hive, found = "", {}
+    for line in out.splitlines():
+        if line.startswith("  "):
+            found.setdefault(hive, []).append(line.split("\t")[0].strip())
+        else:
+            hive = line.split("\t")[0]
+    return found
+
+
+def test_hive_list_shows_the_local_agents_swarm_status_places_on_this_hive(store, capsys, monkeypatch):
+    from scripts.hive import cli
+    from scripts.swarm import commands, runtime, status
+    from scripts.swarm.store import AgentRecord
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "worker")
+    claude = [AgentRecord(store.next_name("sw", "eng"), "eng", f"t{n}") for n in range(2)]
+    codex = replace(AgentRecord(store.next_name("sw", "eng"), "eng", "t2"), hive="worker", runtime_target={"pid": 1})
+    stopped = AgentRecord(store.next_name("sw", "eng"), "eng", "t3")
+    for agent in (*claude, codex, stopped):
+        store.put_agent("sw", agent)
+    live = Herdr({agent.name for agent in (*claude, codex)})
+    monkeypatch.setattr(runtime, "HerdrRuntime", lambda: live)
+    cli._list()
+    listed = listed_by_hive(capsys.readouterr().out)
+    placed = {a["name"]: a["hive"] for a in status.status_report(store, "sw", {"tasks": []}, runtime=live)["agents"]}
+    names = sorted(agent.name for agent in (*claude, codex))
+    assert placed == dict.fromkeys(names, "worker")
+    assert listed == {"worker": names}
