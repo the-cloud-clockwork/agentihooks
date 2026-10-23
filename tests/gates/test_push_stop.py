@@ -892,8 +892,9 @@ def test_a_push_slower_than_the_budget_is_cut_off_inside_the_stop_condition(monk
     assert rig.ledger.comments == []
 
 
+@pytest.mark.parametrize("overhead", [0, 1.0])
 @pytest.mark.wall_clock
-def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch, rig):
+def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch, rig, overhead):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     second_tree_with_work(rig)
     rig.commit()
@@ -904,6 +905,14 @@ def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch,
     hook.chmod(0o755)
     timeout = RESERVE_S + 2
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
+    real_push = push_stop.push
+
+    def slow_runner_push(tree, branch, seconds):
+        if branch == f"{BRANCH}-2":
+            time.sleep(overhead)
+        return real_push(tree, branch, seconds)
+
+    monkeypatch.setattr(push_stop, "push", slow_runner_push)
     started = time.monotonic()
     decision = rig.stop(started=started)
     took = time.monotonic() - started
