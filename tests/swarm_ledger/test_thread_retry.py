@@ -18,24 +18,38 @@ class Stop(BaseException):
     pass
 
 
-def test_the_follow_thread_recovers_after_the_first_redis_connect_fails_on_name_resolution(monkeypatch, capsys):
-    waits, slept = [], []
+@pytest.fixture
+def quiet_watch(monkeypatch):
+    for name in ("bin_closed_without_swarm", "expire_alerts", "sample_streams"):
+        monkeypatch.setattr(ledger_server, name, lambda: None)
+    monkeypatch.setattr(ledger_server.ledger_bin, "tidy", lambda: None)
+    monkeypatch.setattr(ledger_server, "reloading", lambda *args: False)
+    monkeypatch.setattr(ledger_server, "unrelayed", lambda: {})
+    monkeypatch.setattr(ledger_server, "metrics_journal", lambda *args: None)
+    monkeypatch.setattr(ledger_server.HUB, "watched", lambda: [])
 
-    def wait(interval):
-        waits.append(interval)
-        if len(waits) == 1:
+
+@pytest.mark.parametrize("loop", ["follow_shared", "watch_ledgers"])
+def test_a_thread_recovers_after_the_first_redis_connect_fails_on_name_resolution(
+    quiet_watch, monkeypatch, capsys, loop
+):
+    connects, slept = [], []
+
+    def blocking_client():
+        connects.append(1)
+        if len(connects) == 1:
             raise UNRESOLVED
         raise Stop
 
     monkeypatch.setattr(ledger_server, "SCHEDULER_UNAVAILABLE", threading.Event())
-    monkeypatch.setattr(ledger_server.HUB, "watched", lambda: [])
-    monkeypatch.setattr(process_timer, "wait", wait)
+    monkeypatch.setattr(process_timer, "blocking_client", blocking_client)
     with pytest.raises(Stop):
-        ledger_server.retrying(ledger_server.follow_shared, sleep=slept.append)()
-    assert waits == [ledger_server.FOLLOW_S, ledger_server.FOLLOW_S]
+        ledger_server.retrying(getattr(ledger_server, loop), sleep=slept.append)()
+    assert connects == [1, 1]
     assert slept == [1.0]
+    assert not ledger_server.SCHEDULER_UNAVAILABLE.is_set()
     assert capsys.readouterr().err == (
-        "follow_shared stopped, retrying in 1s: Error -3 connecting to swarm-internal.homeofanton.com:6379."
+        f"{loop} stopped, retrying in 1s: Error -3 connecting to swarm-internal.homeofanton.com:6379."
         " Temporary failure in name resolution.\n"
     )
 
