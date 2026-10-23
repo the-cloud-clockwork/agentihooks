@@ -92,7 +92,8 @@ def test_a_question_asked_again_after_the_operator_returned_gets_a_new_operation
 
 
 def test_operator_on_with_no_typing_for_ten_minutes_still_moves_the_question(master):
-    operator_mode.observe(SID, "operator on", typed=True, now=NOW - master_question.WINDOW_SEC)
+    typed_at(NOW - master_question.WINDOW_SEC)
+    assert operator_mode._heard(SID)
     assert master_question.move(ask(FOCUS), master, now=NOW)
     assert len(master.questions) == 1
 
