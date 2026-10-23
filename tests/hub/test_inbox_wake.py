@@ -240,3 +240,67 @@ def test_production_reactors_drive_wakes_through_hub_delivery(rig):
     for _ in range(6):
         hub.run_once(timeout_ms=0)
     assert steps(rig, item) == ["woken", "woken"]
+
+
+def test_outage_time_is_excluded_before_timer_retry(rig):
+    from scripts.swarm import outage
+
+    item, _ = send(rig)
+    advance(rig, 1000)
+    outage.observe("sw", "provider", ["worker (codex): stream disconnected before completion"], 1100)
+    advance(rig, 1000 + W)
+    assert steps(rig, item) == ["woken"]
+    outage.observe("sw", "provider", [], 1100 + W)
+    advance(rig, 1000 + 2 * W - 1)
+    assert steps(rig, item) == ["woken"]
+    advance(rig, 1000 + 2 * W)
+    assert steps(rig, item) == ["woken", "woken"]
+
+
+def test_unoccupied_seat_waits_for_binding_before_wake_and_escalation(rig):
+    item, _ = send(rig, "eng-1@sw")
+    advance(rig, 1000)
+    advance(rig, 1000 + W)
+    assert steps(rig, item) == []
+    rig.inbox.seats.occupy("eng-1@sw", "worker", at=1000 + W)
+    advance(rig, 1000 + 2 * W - 1)
+    assert steps(rig, item) == []
+    advance(rig, 1000 + 2 * W)
+    assert steps(rig, item) == ["woken"]
+
+
+def test_stale_expiry_and_duplicate_arrival_preserve_the_next_timer(rig):
+    from scripts.events import deadlines
+
+    item, _ = send(rig)
+    [arrival] = rig.bus.events.consumer("arrival-proof", "swarm.*.inbox-wake.requested").fetch(10, 0)
+    [request] = rig.bus.events.consumer("request-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
+    advance(rig, 1000)
+    rig.reactor.handle(arrival.event)
+    rig.reactor.handle(deadlines.expired(request.event))
+    rig.reactor.handle(replace(deadlines.expired(request.event), version=99))
+    pump(rig)
+    assert steps(rig, item) == ["woken"]
+    advance(rig, 1000 + W)
+    assert steps(rig, item) == ["woken", "woken"]
+
+
+def test_pooled_master_arrival_is_recovered_by_the_outbox_and_escalates(rig):
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(rig.inbox.redis)
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
+    masters = [
+        AgentRecord("sw-master-1", "master", "master", seat="master@sw"),
+        AgentRecord("sw-master-2", "master", "master", seat="master-2@sw"),
+    ]
+    for master in masters:
+        store.put_agent("sw", master)
+        store.seats.occupy(master.seat, master.name, at=1000)
+    rig.reactor.store = store
+    item = rig.inbox.send("worker", "master@sw", "request to the pool")
+    rig.reactor.flush()
+    pump(rig)
+    advance(rig, 1000 + W)
+    assert steps(rig, item) == ["escalated_operator"]
+    assert rig.ledger.flagged == [True]
