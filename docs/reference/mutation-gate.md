@@ -236,7 +236,8 @@ belongs to that other test. A `tests` entry with no `lines` entry is selected
 whenever planning considers it, never dropped.
 
 Download the record a dev run produced and count the tests that execute each
-line of one function. Replace `DEV_RUN_ID` and `EVIDENCE_DIR`:
+line of one function. Replace `DEV_RUN_ID` and `EVIDENCE_DIR` with the dev run
+and a task evidence folder:
 
 ```bash
 gh run download DEV_RUN_ID --name dep-manifest --dir EVIDENCE_DIR/manifest
@@ -296,7 +297,9 @@ merge commit `328ddd3` as the sample, copies the dispatched branch's
 | `after` | The same against the `after` selection; writes `after-verdicts.json` |
 | `verify` | Fails on any mutant whose verdict differs and prints `Identical verdicts for N sample pull request mutants` |
 
-Dispatch it on a branch that carries a selection change and read the result:
+Dispatch it on a branch that carries a selection change and read the result.
+Replace `BRANCH` with the dispatched branch and, after dispatch, `RUN_ID` and
+`EVIDENCE_DIR` with the run and a task evidence folder:
 
 ```bash
 gh workflow run mutation-line-selection-proof.yml --ref BRANCH
@@ -327,7 +330,7 @@ after; 788 recorded tests reached `VerdictStore.visible`. The source request's
 figures, not the delivered replay's result.
 
 The later [pull request 4809](https://github.com/the-cloud-clockwork/agentihooks/pull/4809)
-delivered the current line coverage selection, closing
+delivered the current line coverage selection requested in
 [issue 4792](https://github.com/the-cloud-clockwork/agentihooks/issues/4792).
 Red Proofs runs
 [39251990627](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39251990627)
