@@ -69,7 +69,7 @@ class Runtime:
         return set()
 
 
-def test_hive_list_agents_equal_the_swarm_agents_of_every_hive(store, capsys, monkeypatch):
+def test_hive_list_agents_equal_the_swarm_agents_on_every_other_hive(store, capsys, monkeypatch):
     from scripts.hive import cli, join_report
     from scripts.swarm import commands, status
 
