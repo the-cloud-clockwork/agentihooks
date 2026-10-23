@@ -25,7 +25,11 @@ app.kubernetes.io/component: {{ .component }}
 {{- if or (contains "@" .Values.image.repository) (eq $floating "") (contains "@" $floating) (contains "sha256" $floating) (regexMatch "^[0-9a-f]{40}$" $floating) -}}
 {{- fail "image.tag must be a floating tag such as dev, never a digest or commit hash; only the image updater appends @sha256 to it" -}}
 {{- end -}}
+{{- if eq $floating $tag -}}
 {{- printf "%s:%s" .Values.image.repository $tag -}}
+{{- else -}}
+{{- printf "%s%s" .Values.image.repository (trimPrefix $floating $tag) -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "swarm.ledgerUrl" -}}

@@ -156,8 +156,12 @@ printf 'only the ledger container reads the ledger secret env\n'
 printf 'the TLS ledger rolls when its TLS secret renews and a plain ledger watches no secret\n'
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
 rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
-if [[ $rendered != *":dev@$digest"* ]]; then
-  printf 'the chart did not render the image updater tag dev@%s\n' "$digest" >&2
+if [[ $rendered != *"agentihooks-swarm@$digest"* || $rendered == *":dev@"* ]]; then
+  printf 'the chart did not render the image updater tag dev@%s by its digest alone\n' "$digest" >&2
+  exit 1
+fi
+if [[ "$(helm template "$release" "$chart" --set image.tag="latest@$digest")" != "$rendered" ]]; then
+  printf 'the image updater tag name before @%s changed the rendered chart\n' "$digest" >&2
   exit 1
 fi
 for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
