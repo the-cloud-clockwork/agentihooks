@@ -8,6 +8,8 @@ from scripts.events.config import BusConfig
 from scripts.swarm_ledger.repository import sqlite
 
 
+
+
 @pytest.mark.wall_clock
 def test_running_host_publishes_a_later_ledger_write_and_stops_its_relay(tmp_path, monkeypatch):
     from scripts.swarm_ledger import outbox_host
@@ -197,3 +199,43 @@ def test_a_disconnected_real_nats_client_is_reopened_and_the_row_reaches_a_consu
                 assert connection.execute("SELECT COUNT(*) FROM outbox_sent").fetchone() == (1,)
         finally:
             observer.close()
+
+
+def test_server_gives_its_repository_to_the_relay_and_stops_it_before_closing(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+
+    from scripts.swarm_ledger import ledger_server, outbox_host
+
+    lifecycle = []
+
+    @contextmanager
+    def running(repository):
+        assert repository is ledger_server.stored
+        lifecycle.append("relay started")
+        try:
+            yield
+        finally:
+            lifecycle.append("relay stopped")
+
+    def serving():
+        lifecycle.append("serving")
+        raise ValueError("serving failed")
+
+    monkeypatch.setattr(outbox_host, "running", running)
+    monkeypatch.setattr(ledger_server, "PIDFILE", tmp_path / "server.pid")
+    monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(ledger_server.storage, "shared", lambda: None)
+    monkeypatch.setattr(ledger_server.ports, "swarm", Mock(return_value=Mock()))
+    monkeypatch.setattr(ledger_server.legacy, "adopt", Mock())
+    monkeypatch.setattr(ledger_server.threading, "Thread", Mock())
+    for name in ("adopt_unrelayed", "metrics_journal"):
+        monkeypatch.setattr(ledger_server, name, Mock())
+    monkeypatch.setattr(ledger_server.server_code, "record", Mock())
+    monkeypatch.setattr(ledger_server.server_lifetime, "watch", Mock())
+    server = Mock()
+    server.serve_forever.side_effect = serving
+    server.server_close.side_effect = lambda: lifecycle.append("server closed")
+    monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
+    with pytest.raises(ValueError, match="serving failed"):
+        ledger_server.serve()
+    assert lifecycle == ["relay started", "serving", "relay stopped", "server closed"]
