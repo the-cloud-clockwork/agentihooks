@@ -156,7 +156,11 @@ def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_dur
         assert delivery.event.id == "offer-1"
         delivery.ack()
         for bucket in buckets.NAMES:
-            assert member.state(bucket).create("k", b"v") == 1
+            store = member.state(bucket)
+            assert store.create("k", b"v") == 1
+            assert store.update("k", b"w", 1) == 2
+            assert store.get("k").value == b"w"
+            assert [entry.value for entry in store.watch("k")] == [b"v", b"w"]
         assert member.events.publish("swarm.rig.execution.started", event)
         assert member.dead.publish("dead.rig", event)
     finally:
