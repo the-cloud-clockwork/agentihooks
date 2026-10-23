@@ -11,13 +11,13 @@ pytestmark = [pytest.mark.unit, pytest.mark.xdist_group(name="fakeredis")]
 @pytest.fixture
 def rig():
     import fakeredis
-    from scripts.bus import memory
-    from scripts.bus.config import BusConfig
 
+    from scripts.events import memory
+    from scripts.events.config import BusConfig
     from scripts.events.envelope import Envelope
     from scripts.hive import execution_events, registry, reports
     from scripts.hub import lifecycle, reconciler
-    from scripts.swarm.store import AgentRecord, RedisStore
+    from scripts.swarm.store import PREFIX, AgentRecord, RedisStore
 
     clock = Mock(return_value=1_000_000)
     bus = memory.open_bus(BusConfig())
@@ -36,7 +36,7 @@ def rig():
         launched_at=900_000,
         pane_id="pane",
     )
-    store.redis.sadd("agentihooks:swarm:index", "rig")
+    store.redis.sadd(f"{PREFIX}:index", "rig")
     store.redis.hset(store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
     store.redis.hset(store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
     store.redis.set(store.key("rig", "claim", agent.task), agent.name)
