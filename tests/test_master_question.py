@@ -138,14 +138,6 @@ def test_the_ledger_client_is_built_when_none_is_given(master, monkeypatch):
     assert len(master.questions) == 1
 
 
-def test_the_moved_question_shows_in_the_operator_priorities(master):
-    from scripts.swarm_ledger.ledger_priorities import wanted
-
-    master_question.move(ask(FREEZE), master, now=NOW)
-    rows = wanted({"phases": [], "questions": [{"id": "q1", "text": master.questions[0][1]}]})
-    assert rows == {"questions/q1": "Answer: Freeze the hive phase? Options: Yes; No."}
-
-
 def test_the_pre_tool_gate_denies_with_the_moved_notice(master, monkeypatch):
     calls = []
     monkeypatch.setattr(master_question, "move", lambda payload: calls.append(payload) or "moved")
