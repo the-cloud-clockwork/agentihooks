@@ -22,6 +22,7 @@ class Relay:
             if self.bus is None:
                 self.bus = factory.open_bus(self.config)
             outbox.relay(self.repository, self.bus.events)
+            outbox.prune(self.repository, self.config.dedupe_window_ms)
         except Exception as exc:
             sys.stderr.write(f"ledger bus relay: {exc}\n")
             self.close()
