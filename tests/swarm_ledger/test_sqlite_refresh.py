@@ -25,7 +25,7 @@ def test_a_foreign_write_refreshes_only_changed_rows_and_serves_the_whole_rebuil
     reader, writer = store(tmp_path), store(tmp_path)
     reader.create("ledger", CONTENT)
     reader.apply_ops("ledger", ops=[chat(0)])
-    reader.current("ledger")
+    cached = reader.current("ledger")
     for ops in writes:
         writer.apply_ops("ledger", ops=ops)
     rebuilds = []
@@ -37,6 +37,7 @@ def test_a_foreign_write_refreshes_only_changed_rows_and_serves_the_whole_rebuil
     assert served.generation == expected.generation
     assert served.text == expected.text
     assert served.state == expected.state
+    assert served.fragments.parts["phases"] is cached.fragments.parts["phases"]
     state, _ = reader.apply_ops("ledger", ops=[chat(9)])
     assert state == whole(tmp_path).state
 
