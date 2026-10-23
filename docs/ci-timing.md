@@ -449,6 +449,134 @@ normal pull request; never exclude the line. The ratchet's messages and
 baseline lookup are described in
 [Coverage grading](reference/delivery-tiers.md#coverage-grading).
 
+### Measure a CI run and its class over a window
+
+`agentihooks doctor <slug> measure FINDING` reads CI speed data directly for
+`ci-tier-wall-time`, `ci-runner-wait` and `ci-queue-age-unconfirmed` targets.
+Use the watched swarm or its linked Doctor ledger as `<slug>`. The command
+requires that Doctor pairing and access to the repository's Actions API
+through the existing authenticated `gh` installation.
+
+A run target prints that attempt's own value in whole seconds, followed by
+its class summary. It reads the named attempt even when that run falls
+outside the summary window:
+
+```bash
+agentihooks doctor rig-grade-swarm measure \
+  ci-tier-wall-time/39356970006-1
+agentihooks doctor rig-grade-swarm measure \
+  'ci-runner-wait/39280699907-1-["anton-oss-light"]'
+```
+
+The delivery proof recorded first lines of
+`ci-tier-wall-time/39356970006-1 952` and
+`ci-runner-wait/39280699907-1-["anton-oss-light"] 26`.
+These are historical readings, not expected values for current traffic. A
+runner wait target reports the longest confirmed wait among jobs on that
+exact label set. Without labels, a run target reports its longest wait and
+prints summaries for every label set in the window. Quote JSON label sets
+so the shell preserves the double quotes. For a run target, copy the sorted
+label set from the finding.
+
+Use a grouped target to measure one tier or label set, or a bare class name
+to print every scope present in the window:
+
+```bash
+agentihooks doctor rig-grade-swarm measure ci-tier-wall-time/pull_request
+agentihooks doctor rig-grade-swarm measure ci-tier-wall-time/merge_group
+agentihooks doctor rig-grade-swarm measure \
+  'ci-runner-wait/["anton-oss-light"]'
+agentihooks doctor rig-grade-swarm measure ci-tier-wall-time
+agentihooks doctor rig-grade-swarm measure ci-runner-wait
+agentihooks doctor rig-grade-swarm measure ci-queue-age-unconfirmed
+```
+
+Tier names in targets are `pull_request` and `merge_group`; output names them
+`pull request` and `queue`. Grouped runner targets sort and deduplicate labels
+and require an exact label set, not a match on one label within a larger set.
+
+#### Window and summary rules
+
+The default summary covers the hour ending when the command starts. Set both
+`--since` and `--until` to compare two equal windows around a fix's application:
+
+```bash
+agentihooks doctor rig-grade-swarm measure ci-tier-wall-time/merge_group \
+  --since 2026-10-20T08:00:00Z --until 2026-10-20T09:00:00Z
+agentihooks doctor rig-grade-swarm measure ci-tier-wall-time/merge_group \
+  --since 2026-10-20T11:00:00Z --until 2026-10-20T12:00:00Z
+```
+
+These illustrate equal one hour bounds; choose bounds around the actual
+application and retain both commands and outputs with the task proof. Times
+must parse as ISO timestamps, the start must precede the end and the end
+must not be in the future. Use an explicit UTC zone as above.
+
+A class line has this form; the numbers here illustrate the format:
+
+```text
+ci-tier-wall-time queue, window 2026-10-20T08:00:00Z to 2026-10-20T09:00:00Z: 2 of 3 runs over 900 seconds, median 952 seconds, worst 1100 seconds
+```
+
+The window selects runs by creation time through the CI speed reader. The
+measure read uses `active=False`: it does not add older active runs through
+the timer's active status discovery. It reads the discovered runs' current
+state, so an unfinished run can change when the same window is read later.
+This is a window count, not a count of stored findings or an automatically
+normalized per hour rate.
+
+| Class | One sample per run and scope | Over threshold |
+|---|---|---|
+| `ci-tier-wall-time` | Wall time for the run's eligible tier | Strictly more than 900 seconds |
+| `ci-runner-wait` | Longest creation to confirmed start wait for each exact label set | Strictly more than 300 seconds |
+| `ci-queue-age-unconfirmed` | Longest age for jobs without a confirmed start on each exact label set; ends at job completion if present, otherwise the command's read time | Strictly more than 900 seconds |
+
+All measurable samples contribute to the denominator, median and worst,
+including values below threshold. Counts compare milliseconds before display
+rounding. Seconds are truncated; for an even sample count the median is the
+lower middle sample. Multiple jobs on one label set in one run contribute
+one longest wait, not one sample per job. Thus a run can contribute once to
+each of several label set summaries.
+
+Wall time uses the eligibility and endpoints described in
+[Which runs count toward tier wall time](#which-runs-count-toward-tier-wall-time).
+Explicit measure also permits provisional wall time for unfinished runs,
+ending at the current time if there is no completed gate. The detector waits
+until completion before judging a wall time finding. Wait measurement reads
+job timing directly; it does not apply the detector's completed run conclusion
+filter to confirmed waits.
+
+A finished run's recorded duration cannot improve after a fix. Its value
+checks the original evidence. Compare the same class and scope over equal
+before and after windows to assess the fix, and retain sample counts so a
+quiet window is distinguishable from faster CI.
+
+#### Configuration, refusals and delivery proof
+
+No new environment variable enables measurement. Bounds are command options;
+thresholds come from the CI speed detector constants. The measure's window
+read budget is `WINDOW_BUDGET = (2000, 600)`: at most 2000 API calls and a
+600 second deadline. This differs from the timer's per pass budget above;
+changing either requires a reviewed code change.
+
+| Result | Meaning and action |
+|---|---|
+| `has no tier wall time` | The attempt has no eligible wall time, for example a completed cancelled run or missing timing data. Check the run's event, conclusion and job endpoints. |
+| `unreadable` | The attempt lookup failed. Check Actions API access and availability; do not record zero. |
+| `has no job on runner labels` or `match no job in the window` | The requested set has no matching measurable jobs for the run, or no matching jobs in the window. Use the reported known label sets and check the bounds. |
+| Window read error or incomplete snapshot | The command refuses the class result. A run value may already have printed; it does not establish a complete class read. |
+| `0 of 0 runs over ...` | No measurable samples for the selected tier or label set, or no scopes for a bare class. A label set can have jobs but no confirmed waits for `ci-runner-wait`, or no unconfirmed jobs for `ci-queue-age-unconfirmed`. Median and worst are omitted. This is no exposure, not evidence of improvement. |
+
+[Pull request 5076](https://github.com/the-cloud-clockwork/agentihooks/pull/5076)
+delivered this measurement path. Its source proof reported 818 of 818 recorded
+CI speed findings printing zero under the old generic detector collection.
+The [red CI run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39365602865)
+failed on that behavior; the
+[green CI run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39367721363)
+passed the fix and mutation checks. The two historical run readings above
+verify the new path; they do not claim a reduction in CI duration. An
+unreadable or unmeasurable run is refused instead of becoming a false zero.
+
 ### Confirmed runner waits and unconfirmed queue age
 
 The Doctor checks old queued job snapshots before calling them runner waits.
@@ -1326,6 +1454,176 @@ and keep `start` in the filter.
 - Read only checks after the apply: new template pods on all three unit sets
   carried the preferred term and no required term, four `anton-oss-batch` pods
   scheduled at creation, and no batch `FailedScheduling` event followed.
+
+## Registry lookups lost to a node address conflict (20 October 2026)
+
+From 10:39 to 12:24 UTC on 20 October 2026 the on premises node
+`k8s-worker-1` could not resolve `ghcr.io`. The home router had leased the
+node's fixed address, `10.10.30.141`, to a phone. While the phone was on Wi-Fi
+the router sent traffic for `.141`, DNS answers included, to the phone. The
+node's own resolver configuration was correct. The router was fixed by hand at
+12:23 UTC, and
+[antoncore pull request 997](https://github.com/the-cloud-clockwork/antoncore/pull/997)
+keeps the LAN address plan in git and alerts on any future conflict.
+
+### What CI saw
+
+- The kubelet on `k8s-worker-1` failed every pull of
+  `ghcr.io/the-cloud-clockwork/arc-runner:dev` with
+  `failed to resolve reference`, `dial tcp: lookup ghcr.io: Try again` and a
+  cancelled token fetch. Only `ghcr.io` lookups failed.
+- At about 11:45 UTC 13 pods on the node sat in `ImagePullBackOff`, 10 of them
+  `anton-oss-light` runners out of a pool of 20. Merge group `select` and queue
+  fail fast jobs waited about eight minutes for a runner, in Tests runs
+  [39415747711](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39415747711)
+  and [39415749847](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39415749847).
+- At 11:55 UTC the ARC listeners for `anton-oss-queue`, `anton-oss-batch` and
+  `anton-oss-light`, all on `k8s-worker-1`, logged `request failed` on their
+  GitHub calls, so those scale sets could not scale. The `agentihooks-swarm`
+  controller pod on the node was also in `ImagePullBackOff`.
+- Runner pods on the `anton-oci` nodes pulled and ran. Prometheus showed no
+  pull errors on `k8s-worker-2` for the whole window.
+
+### Cause
+
+The router's DHCP pool was `10.10.30.130` to `.254`. That range covered the
+Anton host, every Kubernetes node, the automation VM and the MetalLB service
+addresses. The nodes use static addresses and had no router reservations, so
+the router could hand `.141` to any device that joined.
+
+`k8s-worker-1` resolves through the systemd stub at `127.0.0.53`, whose uplinks
+are `10.10.30.1` (the router) and `8.8.8.8`. Its netplan sets static
+`10.10.30.141/24` with the router as default gateway. Both DNS paths therefore
+leave through the router, and the router's ARP entry for `.141` decides whether
+the answers reach the node or the phone.
+
+The failures follow the phone's Wi-Fi sessions in the router log. Times are UTC;
+the router clock runs one hour ahead and is corrected here.
+
+| UTC | Phone on the router | `k8s-worker-1` |
+|---|---|---|
+| 10:37:54 | Associates | 21 lookup failures at 10:39; node `Ready` 0 at the 10:40 sample |
+| 10:47:59 | Leaves Wi-Fi | No failures from 10:40 to 11:09 |
+| 11:09:10 | Associates | Failures from 11:10, peak 131 a minute at 11:19, 45 to 90 a minute until 12:05; node `Ready` 0 at the 11:10 sample |
+| 12:06 to 12:14 | Still associated | A dip to 10 to 28 failures a minute, then 34 to 80 a minute from 12:15 to 12:22 |
+| 12:20:59 to 12:23:07 | Router reconfigured: pool moved, node addresses reserved, dnsmasq restarted | `NodeNotReady` event at about 12:23 |
+| 12:22:30, 12:23:14, 12:24:24 | Router deauthenticates the phone | Last failure at 12:24:56, none since |
+| 12:30:05 | Phone returns with lease `10.10.30.128` | At 12:51 `ghcr.io` resolves through `10.10.30.1`, `8.8.8.8` and `127.0.0.53` |
+
+The partial recovery seen around 12:00 to 12:10 UTC was the dip in the table,
+not a fix. Lookups failed again until the phone left `.141`.
+
+The Redis timeouts from 11:20 to 11:30 UTC the same day had a separate cause.
+They lasted ten minutes while the DNS failures ran from 11:10 to 12:24, and
+neither the swarm Redis nor the Langfuse Redis sits on `.141`. They match the
+Anton host memory stall in
+[antoncore issue 998](https://github.com/the-cloud-clockwork/antoncore/issues/998).
+Doctor task t539 found that `k8s-worker-1` had left the cluster earlier that
+day because the Unraid host shut its VM off for memory; it turned `Ready` again
+at 11:10:30 UTC.
+
+### The LAN address plan
+
+The plan lives in the `lan-plan` ConfigMap in namespace `anton-ops`, file
+`k8s/manifests/ops/lan-plan.yaml` in antoncore. The ArgoCD application
+`ops-config` syncs `k8s/manifests/ops` from antoncore `dev`.
+
+| Range or address | Use |
+|---|---|
+| `10.10.30.1` | Router |
+| `10.10.30.2` to `.129` | DHCP pool for home devices |
+| `10.10.30.130` | Anton host, reserved to its MAC |
+| `10.10.30.140` to `.143` | `k8s-master`, `k8s-worker-1`, `k8s-worker-2`, `k8s-worker-001`, each reserved to its MAC |
+| `10.10.30.150` | Automation VM, reserved to its MAC |
+| `10.10.30.184` | Workbench, reserved to its MAC |
+| `10.10.30.200` to `.210` | MetalLB service addresses, answered only by node MACs |
+
+Infra and MetalLB addresses stay outside the DHCP pool. To add a host, add a
+`host` or `node` row with its address, MAC and name to `lan-plan.txt`, merge
+the change into antoncore `dev`, then write it to the router as below.
+
+### Router drift check
+
+`automation/router_lan.py` in antoncore compares the router's `dhcp_start`,
+`dhcp_end`, `dhcp_staticlist` and `dhcp_static_x` settings with the plan. It
+runs from the workbench through the `router` SSH host alias.
+
+```bash
+python3 automation/router_lan.py           # report drift, exit 1 if any
+python3 automation/router_lan.py --apply   # write the plan, commit, restart dnsmasq
+```
+
+A matching router prints `router matches the LAN plan` and exits 0. Drift
+prints one line per difference, such as
+`reservation missing on router: <MAC> 10.10.30.141` or
+`dhcp_end: router='10.10.30.254' plan='10.10.30.129'`, and exits 1. `--apply` writes every setting, reads the router back and prints
+`applied; router matches the LAN plan`. Run it with `--apply` after a router
+reset or a plan change.
+
+### Conflict alert
+
+The `lan-ip-conflict` CronJob in `anton-ops` runs every ten minutes on an on
+premises worker: a node without the `anton.io/node-pool` label and without the
+control plane role. It uses the host network and `NET_RAW`, so its ARP probes
+leave the node's LAN interface. Cloud nodes are not on `10.10.30.0/24` and never
+run it.
+
+Each run sends `arping` to the router, then to every `host` and `node` address
+and every MetalLB address, 18 in all with the current plan:
+
+| Result | Output and exit | Alert to ntfy `anton-critical` |
+|---|---|---|
+| Every address answered only by its own MAC, or by any node MAC for MetalLB | `{"checked": 18, "conflicts": []}`, exit 0 | None |
+| A MAC that does not own an address answers for it | Conflict list such as `10.10.30.141 (k8s-worker-1) answered by <MAC>`, exit 1 | `LAN IP conflict on infra address`, urgent, with the MAC and the address |
+| The router gives no ARP reply, or the check itself fails | `lan-ip-conflict DEGRADED: <reason>; the LAN is unchecked.`, exit 2 | `LAN check degraded`, urgent |
+
+The alert asks the reader to find the MAC in the router's client list and move
+that device off the address. A conflict on a node address can stop image pulls
+and GitHub calls on that node, as on 20 October.
+
+### Read only checks
+
+```bash
+kubectl get cronjob lan-ip-conflict -n anton-ops
+kubectl get jobs -n anton-ops | grep lan-ip-conflict
+kubectl logs -n anton-ops job/<latest lan-ip-conflict job>
+kubectl get pods -A -o wide --field-selector spec.nodeName=k8s-worker-1 | grep -E 'ImagePullBackOff|ErrImagePull'
+```
+
+Pull errors by node in Prometheus:
+
+```promql
+sum by (node) (increase(kubelet_runtime_operations_errors_total{operation_type="pull_image"}[5m]))
+```
+
+On 23 October 2026 the latest run logged `{"checked": 18, "conflicts": []}`.
+
+### Troubleshooting
+
+| Symptom | Inspection |
+|---|---|
+| Runner pods on one on premises node fail with `lookup ghcr.io: Try again` while other nodes pull | Read the latest `lan-ip-conflict` log and the router's client list for a device on the node's address; run `router_lan.py` for drift |
+| `LAN IP conflict on infra address` alert | Find the named MAC in the router's client list, move the device off the address, then run `router_lan.py --apply` if a reservation is missing |
+| `LAN check degraded` alert | The router did not answer ARP or the check failed; read the job log for the reason. No conflicts are checked until it passes |
+| `router_lan.py` reports `dhcp_end` or reservation drift | The router was reset or edited by hand; run it with `--apply` |
+| A new infra host gets a pool address | Add its row to `lan-plan.txt`, merge into antoncore `dev`, then run `router_lan.py --apply` |
+| Lookups recover for a few minutes and fail again | Expected while a conflict lasts: the failures follow the other device's Wi-Fi sessions. Wait for the conflict to clear rather than reading a dip as recovery |
+| ARC listeners on the node log `request failed` | Same cause as the pull failures when the node's address is in conflict; listeners recover once the node's traffic returns |
+
+### Delivery evidence
+
+- Diagnosis: Doctor task t577, read only. Node resolver config, k3s agent
+  journal, router Wi-Fi log and lease table and Prometheus pull errors, posted
+  on [antoncore issue 978](https://github.com/the-cloud-clockwork/antoncore/issues/978#issuecomment-6291273482).
+- Fix: router changed by hand from 12:20:59 to 12:23:07 UTC on 20 October.
+  [antoncore pull request 997](https://github.com/the-cloud-clockwork/antoncore/pull/997)
+  merged into `dev` at 12:53:30 UTC with the plan, `router_lan.py`, the
+  CronJob and `tests/unit/automation/test_lan_plan.py`. Its evidence:
+  `router_lan.py` against the live router printed
+  `router matches the LAN plan`; an `arping` from a host network pod on `k8s-worker-2` returned
+  `k8s-worker-1`'s MAC for `.141` and the phone's MAC for `.128`.
+- After: no `lookup ghcr.io` failure on `k8s-worker-1` after 12:24:56 UTC, and
+  zero pull errors for the node in Prometheus from 12:20.
 
 ## Resource sampling and stop condition regression checks
 
