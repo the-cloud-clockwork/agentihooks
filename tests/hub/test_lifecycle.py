@@ -184,6 +184,27 @@ def test_a_ledger_outage_retries_settlement_without_returning_the_slot_again(rig
     assert len(rig.returned) == 1
 
 
+def test_a_crash_after_slot_return_settles_once_on_redelivery(rig, monkeypatch):
+    saved = memory.MemoryStateStore.update
+    written = []
+
+    def update(self, key, value, revision):
+        written.append(json.loads(value))
+        if written[-1].get("returned") and len(written) == 2:
+            raise OSError("bus unavailable")
+        return saved(self, key, value, revision)
+
+    monkeypatch.setattr(memory.MemoryStateStore, "update", update)
+    with pytest.raises(OSError, match="bus unavailable"):
+        rig.react.handle(rig.event)
+    assert rig.ledger.writes == []
+    rig.react.handle(rig.event)
+    assert rig.row["state"] == "open"
+    assert len(rig.ledger.writes) == 1
+    assert rig.store.redis.llen(rig.store.key("rig", "history")) == 1
+    assert written[-1]["state"] == "exited"
+
+
 def test_exit_accepts_the_launching_entry_revision_before_started_is_written(rig):
     claims = rig.bus.state("spoke-work")
     entry = claims.get("claim")
