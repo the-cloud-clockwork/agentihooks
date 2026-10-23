@@ -402,15 +402,15 @@ A reading holds:
 | `cpus`, `load5` | CPU count and the five minute load average from `/proc/loadavg`. |
 | `available_mb`, `total_mb` | Available and total memory from `/proc/meminfo`. |
 | `pod_total_mb`, `pod_available_mb` | The cgroup v2 `memory.max` limit and that limit minus current use less inactive file pages, only when the limit is set. |
-| `pod_cpus`, `pod_cpu_usec`, `pod_load` | The cgroup v2 `cpu.max` quota and usage; `pod_load` needs the previous reading. |
-| `pending` | Launch orders waiting in the hive's order stream. |
+| `pod_cpus`, `pod_cpu_usec`, `pod_load` | The cgroup v2 `cpu.max` quota and usage; `pod_load` needs a previous reading under 30 seconds old, so the pod CPU limit does not apply to the first reading after a start or a gap. |
+| `pending` | Launch orders waiting in the hive's order stream, shown by `hive list`. Room counts the hive's pending launch reservations instead. |
 | `measured_at` | Milliseconds when the reading was taken. |
 
 The reading expires after 30 seconds, and a reader treats one older than that as absent. With no fresh reading the
 hive's room is 0, the refusal reads `missing telemetry: no fresh headroom reading`, and `hive list` shows
 `headroom=missing`. Otherwise each limit fits whole agents at 0.5 CPU and 700 MB each under 80 percent of the host,
-and of the pod when the cgroup sets a limit; pending launches reserved on the hive count against it, and the
-smallest limit wins.
+and of the pod when the cgroup sets a limit; launches reserved on the hive in the last fifteen minutes count against
+each limit, and the smallest limit wins.
 
 `hive run` publishes headroom on two paths:
 
@@ -419,20 +419,22 @@ smallest limit wins.
 - **Every 10 seconds on its own thread,** started for each Redis connection. A launch inside a beat can run
   `init-agent` for minutes; the thread keeps the reading fresh while it does, and also renews the daemon's order
   consumer marker (45 seconds), so a launch it still holds is not taken for an orphan. The thread paces with the
-  scheduler process timer, like the beat. A failed publish prints
-  `hive headroom publish failed (<error>: <detail>)` to stderr and the thread keeps going. When the connection is
-  lost the thread ends, and the reconnect starts a new one.
+  scheduler process timer, like the beat. A Redis error, or a reading that cannot be parsed, prints
+  `hive headroom publish failed (<error>: <detail>)` to stderr and the thread keeps going. When its timer connection
+  is lost the thread ends, and the reconnect starts a new one. Any other error ends the thread with a traceback until
+  the next reconnect; the beat still publishes on its own path, but a launch longer than 30 seconds then lapses the
+  reading.
 
-`hive list` appends the reading to each hive's line:
+`hive list` appends the reading to each hive's line, its fields separated by tabs:
 
 ```bash
 agentihooks hive list
 # vm  live  ui=no  max-agents=20  excluded=none  cpus=8  load5=1.42  available-mb=21034  pending=0
 ```
 
-Hive workers load code at start. A hive still on code from before the 10 second publisher writes headroom only after the
-beat's launch poll, so its reading lapses during a long launch; restart its `agentihooks-hive` service, or roll its
-pod, to pick up the publisher.
+Hive workers load code at start. A hive still on code from before the 10 second publisher writes headroom only
+after the beat's launch poll, so its reading lapses during a long launch; restart its `agentihooks-hive` service,
+or roll its pod, to pick up the publisher.
 
 | Symptom | Check | Fix |
 |---|---|---|
