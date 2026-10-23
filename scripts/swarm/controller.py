@@ -147,6 +147,7 @@ class FencedRuntime:
             else local_slots.held(self.store, machine, self.slug, task["id"])
         )
         if taken >= maximum:
+            self._local_full(machine, taken, maximum)
             return f"{LOCAL_FULL}{taken} of its {maximum} agents"
         if name:
             admission.record(self.store.redis, machine, f"{self.slug}/{name}")
@@ -176,16 +177,25 @@ class FencedRuntime:
         refused = f": {found.reason}: {found.detail}"
         chosen = overflow(waited.role, waited, held, local_max)
         if not isinstance(chosen, Choice):
-            return chosen.reason + (refused if LOCAL_FULL in chosen.reason else "")
+            if LOCAL_FULL not in chosen.reason:
+                return chosen.reason
+            self._local_full(machine, held, local_max)
+            return chosen.reason + refused
         if (
             claim
             and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, local_max)) >= local_max
         ):
+            self._local_full(machine, taken, local_max)
             return f"{waited.reason}{LOCAL_FULL}{taken} of its {local_max} agents{refused}"
         if claim:
             admission.record(self.store.redis, machine, f"{self.slug}/{claim}")
         self.store.redis.hdel(self.store.key(self.slug, placement_waits.WAITS), task["id"])
         return OVERFLOW.format(lane=lane)
+
+    def _local_full(self, machine: str, taken: int, maximum: int) -> None:
+        from scripts.swarm.health import spawn_stall
+
+        spawn_stall.refuse_local(self.store, self.slug, machine, taken, maximum, lease.now_ms(self.store))
 
     def has_capacity(self, config) -> bool:
         lease.renew(self.store, self.slug, self.held)
