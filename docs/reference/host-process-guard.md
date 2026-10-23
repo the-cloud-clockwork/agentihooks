@@ -70,15 +70,15 @@ before matching it. The shipped `excludeCommands`:
 
 | Pattern | Keeps alive | Added by |
 |---------|-------------|----------|
-| `agentihooks swarm tick` and `scripts.swarm.scheduled_tick` | The swarm tick | #4962 |
-| `agentihooks select-profile` | Every agent session wrapper, masters included | #5006 |
-| `agentihooks swarm tick-watch`, `prober`, `waker` | The tick watcher, provider prober and waker | #5107 |
+| `agentihooks swarm tick` and `scripts.swarm.scheduled_tick` | The swarm tick | [#4962](https://github.com/the-cloud-clockwork/agentihooks/pull/4962) |
+| `agentihooks select-profile` | Every agent session wrapper, masters included | [#5006](https://github.com/the-cloud-clockwork/agentihooks/pull/5006) |
+| `agentihooks swarm tick-watch`, `prober`, `waker` | The tick watcher, provider prober and waker | [#5107](https://github.com/the-cloud-clockwork/agentihooks/pull/5107) |
 
 Any other `agentihooks` command, such as an old `ledger watch`, can still be
 ended once its group stays over the threshold.
 
 `claude` is in `excludes`, but that does not protect an agent session. The
-guard counts the wrapper under the name `agentihooks`. Before #5006 a
+guard counts the wrapper under the name `agentihooks`. Before [#5006](https://github.com/the-cloud-clockwork/agentihooks/pull/5006) a
 wrapper ended with status 143 (`SIGTERM`), the `claude` it launched kept
 running without its wrapper, and that session ended some time later.
 
@@ -150,7 +150,7 @@ done
 4. `TICK_COMPLETE` lines that stop appearing mean the guard is no longer
    running. Run `agentihooks host-guard check`.
 
-## Evidence for #5006
+## Evidence for pull request 5006
 
 - On 19 October the guard logged `KILLED ... name=agentihooks reason=ghost_detected count=31`
   at 09:11 UTC. The session exit records of six watched launches carry
@@ -162,9 +162,9 @@ done
 - `tests/test_host_guard.py::test_guard_skips_a_long_lived_tick_and_agent_wrapper_and_still_reaps_the_other_old_processes`
   runs the real guard script against long lived probes. The tick and wrapper
   probes must survive and be logged `SKIPPED`, and the other probes must be
-  `KILLED`. Without the pattern the wrapper probe was ended (Proofs run
-  39349226304).
+  `KILLED`. Without the pattern the wrapper probe was ended ([Proofs run
+  39349226304](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39349226304)).
 - The host log counted 30 to 66 `agentihooks` kills a day from 13 to 20
-  October. The last was at 00:06 UTC on 20 October. #5006 merged at 03:40 UTC.
+  October. The last was at 00:06 UTC on 20 October. [#5006](https://github.com/the-cloud-clockwork/agentihooks/pull/5006) merged at 03:40 UTC.
   The log holds no `agentihooks` kill after it: later flags reached
   54 minutes before the group fell below the threshold.
