@@ -120,7 +120,7 @@ def test_set_pane_on_an_earlier_run_of_a_live_name_keeps_the_latest_projection(s
 def test_archive_keeps_every_row_of_a_live_name_and_seat_head_ties(store):
     agent = AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-3@fixture")
     one = store.start_execution("fixture", agent)
-    store.start_execution("fixture", agent, one.execution_id)
+    two = store.start_execution("fixture", agent, one.execution_id)
     three = store.start_execution("fixture", agent, two.execution_id)
     tie = {**json.loads(store.redis.hget(store.key("fixture", "executions"), three.execution_id))}
     tie.update(name="gone@fixture", execution_id="exe-tie")
