@@ -43,11 +43,14 @@ class Spoke:
         tasks: Tasks,
         measure: Callable[[], dict | None] | None = None,
         clock: Callable[[], int] | None = None,
+        view: Callable[[], readiness.Snapshot] | None = None,
     ):
         self.config, self.bus, self.runtime, self.tasks = config, bus, runtime, tasks
         self._previous = None
         self.measure = measure or self._measure
         self.clock = clock or presence.now_ms
+        source = readiness.Source()
+        self.view = view or (lambda: source.snapshot(config.swarm.slug))
         self._pending_key = hashlib.sha256(
             json.dumps([config.swarm.slug, config.lane, config.hive]).encode()
         ).hexdigest()
@@ -74,7 +77,7 @@ class Spoke:
             return recovered or "held"
         try:
             queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
-            delivery = queue.take(timeout_ms)
+            delivery = readiness.take(queue, self.view(), timeout_ms)
         except Exception:
             return "retry"
         if delivery is None:

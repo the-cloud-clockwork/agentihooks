@@ -7,7 +7,10 @@ from scripts.events import subjects
 from scripts.events.bus import Bus, Delivery, WorkQueue
 from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
-from scripts.swarm import claim_hold
+from scripts.swarm import apply_wait, claim_hold, freeze, release_wait
+from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.store import RedisStore, connect
+from scripts.swarm_ledger.repository import hierarchy
 
 AUTHOR = "readiness"
 
@@ -21,6 +24,34 @@ class Snapshot:
     fix: str
     claimed: Callable[[str], bool]
     admits: Callable[[dict], bool]
+
+
+class Source:
+    def __init__(self, store: RedisStore | None = None, ledger: LedgerClient | None = None):
+        self._store = store
+        self._ledger = ledger or LedgerClient(service=True)
+
+    def slugs(self) -> list[str]:
+        self._store = self._store or connect()
+        return self._store.slugs()
+
+    def snapshot(self, slug: str) -> Snapshot:
+        self._store = self._store or connect()
+        config = self._store.config(slug)
+        doc = self._ledger.state(slug)
+        rows = {task["id"]: task for task in doc["tasks"]}
+        owned = {agent.task for agent in self._store.agents(slug) if agent.state != "finished"}
+        released = release_wait.checker(config.repo)
+        applied = apply_wait.checker(config, rows)
+        return Snapshot(
+            slug,
+            rows,
+            doc,
+            hierarchy.project(doc)[0],
+            freeze.fix_phase(config),
+            lambda task_id: task_id in owned or self._store.claimant(slug, task_id) is not None,
+            lambda task: config.state == "running" and released(task) and applied(task),
+        )
 
 
 def ready(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> bool:

@@ -41,7 +41,7 @@ def source():
     document = doc([row])
     store, ledger = Mock(), Mock()
     store.slugs.return_value = ["rig"]
-    store.config.return_value = SimpleNamespace(slug="rig", state="running", repo="", frozen_fix_phase="")
+    store.config.return_value = SimpleNamespace(slug="rig", state="running", repo="", template="")
     store.agents.return_value = []
     store.claimant.return_value = None
     ledger.state.return_value = document
@@ -86,11 +86,11 @@ def test_hub_offers_are_taken_once_and_withdrawn_when_frozen_or_claimed(kind, tm
 
             row["claim_generation"] += 1
             hub.run_once(timeout_ms=1)
-            row["frozen"] = True
+            ledger.state.return_value["freezes"] = [{"verb": "freeze", "target": "tasks/task-a"}]
             assert first.poll(10) == "empty"
             assert runtime.spawn.call_count == 1
 
-            row["frozen"] = False
+            ledger.state.return_value["freezes"] = []
             row["claim_generation"] += 1
             hub.run_once(timeout_ms=1)
             store.claimant.return_value = "other"
@@ -125,8 +125,25 @@ def test_snapshot_uses_live_owners_and_release_and_apply_admission(monkeypatch):
     assert not readiness.claimable(row, "eng", provider.snapshot("rig"))
     store.agents.return_value = [SimpleNamespace(task="task-a", state="finished")]
     assert readiness.claimable(row, "eng", provider.snapshot("rig"))
-    store.config.return_value = replace_config = SimpleNamespace(
-        **{**vars(store.config.return_value), "state": "paused"}
-    )
+    store.config.return_value = SimpleNamespace(**{**vars(store.config.return_value), "state": "paused"})
     assert not readiness.claimable(row, "eng", provider.snapshot("rig"))
-    assert replace_config.state == "paused"
+
+
+def test_hub_respects_its_lease_and_passes_clock_to_ready_offers(monkeypatch):
+    from scripts.hub.readiness import Readiness
+
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
+    row, store, ledger = source()
+    provider = readiness.Source(store, ledger)
+    with backend("memory", None) as bus:
+        reactor = Readiness(bus, provider, clock=lambda: 73)
+        reactor.poll(lambda: False)
+        store.slugs.assert_not_called()
+        reactor.poll()
+        queue = bus.queue(readiness.queue_name("rig", "eng"))
+        delivery = queue.take(1)
+        assert delivery.event == readiness.offer(row, provider.snapshot("rig"), 73)
+        delivery.ack()
+        reactor.poll()
+        assert queue.take(1) is None

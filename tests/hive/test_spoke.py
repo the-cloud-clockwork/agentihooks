@@ -9,6 +9,16 @@ def reading(**changes):
     return {"cpus": 32, "load5": 0, "available_mb": 60000, "total_mb": 64000, **changes}
 
 
+@pytest.fixture(autouse=True)
+def live_readiness(monkeypatch):
+    from scripts.swarm import readiness
+    from tests.swarm.test_readiness import doc, snapshot, task
+
+    document = doc([task(key) for key in ("task-a", "task-b", "new-0", "new-1", "new-2")])
+    monkeypatch.setattr(readiness.Source, "snapshot", lambda _, slug: snapshot(document))
+    return document
+
+
 @pytest.mark.parametrize(
     "measured",
     [None, reading(pod_cpus=1, pod_load=1), reading(pod_available_mb=0, pod_total_mb=4096)],
