@@ -15,7 +15,6 @@ OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
 INLINE_CREDENTIALS = "-----BEGIN NATS USER JWT-----"
 DEFAULT_BACKEND = "memory"
-SHARED_SLOT_BUCKETS = ("account-slots", "hive-slot-accounts")
 SCOPED_STATE_BUCKETS = (
     "spoke-work",
     "spoke-pending",
