@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
 from scripts.events.factory import open_bus
 from scripts.hub.pulls import Observation, Pulls, suite_result
@@ -47,8 +48,19 @@ def observations(name: str | None, payload: dict) -> list[Observation]:
     return []
 
 
+class LazyPulls:
+    def __init__(self, bus: Bus):
+        self._bus = bus
+        self._pulls: Pulls | None = None
+
+    def observe(self, seen: Observation) -> None:
+        if self._pulls is None:
+            self._pulls = Pulls(self._bus)
+        self._pulls.observe(seen)
+
+
 class Ingress:
-    def __init__(self, pulls: Pulls, secret: bytes):
+    def __init__(self, pulls: Pulls | LazyPulls, secret: bytes):
         if not secret:
             raise ValueError(NO_SECRET)
         self._pulls = pulls
@@ -107,7 +119,7 @@ def main(argv: list[str]) -> int:
         print(f"agentihooks github-webhook: {NO_SECRET}", file=sys.stderr)
         return 2
     bus = open_bus(replace(BusConfig.from_environ(os.environ), provision=False))
-    server = ThreadingHTTPServer((args.host, args.port), handler(Ingress(Pulls(bus), secret)))
+    server = ThreadingHTTPServer((args.host, args.port), handler(Ingress(LazyPulls(bus), secret)))
     try:
         server.serve_forever()
     finally:
