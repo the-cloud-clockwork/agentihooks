@@ -44,6 +44,7 @@ OPENING_ATTEMPTS = 2
 OPENING_WATCH_S = 30.0
 TURN_COMPLETED = "turn/completed"
 USER_MESSAGE = "userMessage"
+INPUT_ITEMS = (USER_MESSAGE, "hookPrompt")
 CAPACITY = "Selected model is at capacity"
 
 LONG_SOCKET = f"socket path is longer than {SOCKET_PATH_MAX} bytes"
@@ -247,7 +248,7 @@ def opening_end(connection: protocol.Connection, events: list[dict], deadline: f
             params = message.get("params") or {}
             if message["method"] == TURN_COMPLETED:
                 return params["turn"]
-            if params.get("item", {}).get("type", USER_MESSAGE) != USER_MESSAGE:
+            if params.get("item", {}).get("type", USER_MESSAGE) not in INPUT_ITEMS:
                 return {}
         if not connection.poll(deadline - clock()):
             return {}
