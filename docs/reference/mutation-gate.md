@@ -707,8 +707,8 @@ label; it prints `pytest workers N: cpu quota Q, affinity A`.
 [Pull request 5140](https://github.com/the-cloud-clockwork/agentihooks/pull/5140)
 merged on 20 October 2026 at 08:41 UTC. Its
 [red Proofs run 39376352913](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39376352913)
-on the tests only head planned three shards at a quota of 3 where three
-workers need four, and failed the workflow scan; the quota 4 case passed. The
+on the tests-only head planned three shards at a quota of 3, where three
+workers need four shards, and failed the workflow scan; the quota 4 case passed. The
 [green Proofs run 39376809049](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39376809049)
 passed 151 plan, preflight and selection tests. The regression
 `test_shards_are_sized_by_the_workers_the_batch_runner_quota_starts` covers
