@@ -3497,7 +3497,8 @@ it checks any wait:
    prints `recycling the scheduler supervisor: <why>` and sends it SIGTERM, then waits up to 30 seconds for its lock
    to free. See [Supervisor recycle](#supervisor-recycle).
 2. **Start a missing supervisor.** With no supervisor holding the machine lock, it starts one from the installed
-   code. A supervisor that died is back within 15 seconds.
+   code. A supervisor that died is back within 15 seconds. It keeps running after the pass ends; see
+   [The supervisor outlives the wait pass](#the-supervisor-outlives-the-wait-pass).
 3. **Restore the timer while delivery is unproven.** When the tick units on disk are current and the timer is
    enabled, nothing changes. Otherwise it runs the same install as above, which writes and enables the timer.
 4. **Retire the timer once the new supervisor proves itself.** When delivery is proven, the timer units are still on
@@ -3583,6 +3584,78 @@ journalctl --user -u agentihooks-swarm-waits.service --since "-1h" \
 
 After a recycle, `supervisor.json` names a new `pid`, the installed root, the installed revision and a `started`
 time inside the window of that log line.
+
+#### The supervisor outlives the wait pass
+
+A wait pass is one start of the oneshot `agentihooks-swarm-waits.service`. The supervisor the pass starts in step 2,
+after a recycle or a crash, is a child of that pass and stays in the unit's control group, although it runs in its
+own session. The ticks it dispatches join the same group. The unit therefore sets `KillMode=process`:
+
+```ini
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-%h/.agentihooks/.env
+ExecStart="<installed agentihooks>" swarm waits
+TimeoutStartSec=120
+KillMode=process
+```
+
+When the pass ends, systemd stops only its main process, `agentihooks swarm waits`. The supervisor, its runner and
+any tick in flight keep running, and later passes find the supervisor holding its lock and leave it alone.
+
+Without the setting, systemd's default `KillMode=control-group` sent SIGTERM to every process in the group at the end
+of each pass. Every main checkout sync moved the installed revision, the next pass recycled the supervisor, started
+a new one inside its own group, and killed it, with the tick in flight, when that pass ended. Each later pass
+started another supervisor and killed it again, until a process outside the unit started the scheduler. A killed tick logs `the swarm tick stopped by the service; released <n> held tick locks`.
+On 20 October from 04:30 to 09:30 UTC all 15 such ticks started 2 to 10 seconds after a wait pass began and
+stopped 0.07 to 0.22 seconds before that pass finished; the syncs at 05:09, 05:43 and 07:37 UTC left the Doctor
+tick stale for 10.7, 19.8 and 33.7 minutes.
+
+**Older installs.** A unit written before the setting existed is migrated without a manual step. Every host tick
+calls `timer.reconcile`, which compares each installed swarm unit with the text the installed code expects. A waits
+service without `KillMode=process` differs, so the tick rewrites the unit file and runs
+`systemctl --user daemon-reload`; the next wait pass runs under the new setting. A run from a git worktree refuses
+to touch the shared units, so the rewrite comes only from the installed agentihooks. A workstation in distributed
+mode that runs only a master spoke has no waits service at all.
+
+**Number.** Ticks stopped by the service per sync and stale minutes per sync, over the syncs after the fix. Before:
+15 ticks stopped and 10.7, 19.8 and 33.7 stale minutes across three syncs. After the fix merged on 20 October at
+11:10 UTC, the journal held no `stopped by the service` line from 11:11 UTC on 20 October to 15:32 UTC on
+23 October, while wait passes logged 156 recycles in the same window.
+
+Check it on a live machine, read only:
+
+```bash
+# The installed unit carries the setting
+systemctl --user show -p KillMode agentihooks-swarm-waits.service
+
+# The supervisor sits in the waits unit's group and survives its passes
+ls -t ~/.cache/agentihooks/scheduler/supervisor.json ~/.cache/agentihooks/scheduler/*/supervisor.json \
+  2>/dev/null | head -1 | xargs cat
+cat /proc/<pid from supervisor.json>/cgroup
+systemctl --user status agentihooks-swarm-waits.service --no-pager
+
+# Ticks killed by a service stop since a given time (local time)
+journalctl --user -t agentihooks-swarm --since "<start>" --no-pager | grep -c "stopped by the service"
+```
+
+The first command prints `KillMode=process`. The cgroup line ends in `agentihooks-swarm-waits.service`, and
+`systemctl status` lists the `scheduler.service supervise` and `run` processes under the unit's `CGroup` while the
+supervisor's `started` time is older than the current pass. A supervisor listed there is expected and is not a
+leftover of a failed pass.
+
+Two tests pin the behaviour, both in the timer install tests: `test_wait_checks_have_a_separate_short_timer_and_service`
+asserts the unit text carries `KillMode=process`, and `test_a_wait_service_without_kill_mode_process_is_rewritten_and_reloaded` removes the line
+from an installed unit and asserts that `timer.reconcile` writes it back and reloads systemd. Red on the old code:
+[run 39405257992](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39405257992); green on the fix:
+[run 39405362274](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39405362274).
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `systemctl --user show -p KillMode agentihooks-swarm-waits.service` prints `KillMode=control-group` | The unit file predates the setting and no host tick has run the installed code since. | Wait one scheduled minute; the tick rewrites the unit. When it persists, read the tick journal for `the swarm user services could not be installed or enabled`. |
+| `stopped by the service` ticks a few seconds into each wait pass, right after a `recycling the scheduler supervisor` line | The waits service still runs with the old kill mode. | Check the setting as above. A hand edited unit is replaced on the next tick, so fix the unit text in `timer.units`, never on disk. |
+| `systemctl --user stop agentihooks-swarm-waits.service` leaves the supervisor running | Stopping the unit stops only its main process under `KillMode=process`. | Expected: the supervisor is meant to outlive every pass, so stopping the waits unit does not stop the scheduler. |
 
 #### The Doctor finding
 
