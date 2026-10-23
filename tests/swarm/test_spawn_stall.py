@@ -612,7 +612,8 @@ def test_a_full_local_cap_holds_the_lane_without_a_spawn_stall(stalled, monkeypa
 def test_a_local_cap_refusal_before_the_last_observation_does_not_hold_the_lane(stalled, monkeypatch):
     store, _, _, clock, _ = stalled
     monkeypatch.setattr(local_slots, "live", lambda: {f"w{n}" for n in range(8)})
-    capped_watch(stalled)
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0] - 1)
+    capped_watch(stalled, refused=False)
     clock[0] += 60_000
     capped_watch(stalled, refused=False)
     clock[0] += 600_000
