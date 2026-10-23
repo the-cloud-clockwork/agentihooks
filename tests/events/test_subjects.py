@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.events.subjects import PREFIX, subject
+from scripts.events.subjects import PREFIX, inbox, subject
 
 pytestmark = pytest.mark.unit
 
@@ -29,3 +29,13 @@ def test_subject_refuses_a_token_nats_cannot_carry(token):
 def test_subject_refuses_a_swarm_nats_cannot_carry(swarm):
     with pytest.raises(ValueError, match="invalid event subject token"):
         subject(swarm, "task")
+
+
+def test_inbox_is_the_reply_prefix_of_one_user():
+    assert inbox("UABC") == "_INBOX.UABC"
+
+
+@pytest.mark.parametrize("user", ["", "a.b", ">"])
+def test_inbox_refuses_a_user_nats_cannot_carry(user):
+    with pytest.raises(ValueError, match="invalid event subject token"):
+        inbox(user)

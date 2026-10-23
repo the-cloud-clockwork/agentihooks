@@ -15,3 +15,7 @@ def subject(swarm: str, *tokens: str) -> str:
     if not tokens:
         raise ValueError("event subject needs at least one token")
     return ".".join([PREFIX, _token(swarm), *map(_token, tokens)])
+
+
+def inbox(user: str) -> str:
+    return f"_INBOX.{_token(user)}"

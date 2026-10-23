@@ -23,10 +23,18 @@ PUSH_TIMEOUT_S = 10
 UNLIMITED = {"subs": -1, "data": -1, "payload": -1}
 OPEN = {"pub": {}, "sub": {}}
 SWARM_SUBJECTS = f"{subjects.PREFIX}.>"
-MEMBER_PERMISSIONS = {
-    "pub": {"allow": [SWARM_SUBJECTS, DEAD_SUBJECT, "agentihooks.queue.>", "$KV.>", "$JS.API.>", "$JS.ACK.>"]},
-    "sub": {"allow": [SWARM_SUBJECTS, "_INBOX.>"]},
-}
+MEMBER_PUBLISH = [
+    SWARM_SUBJECTS,
+    DEAD_SUBJECT,
+    "agentihooks.queue.>",
+    "$KV.>",
+    "$JS.ACK.>",
+    "$JS.API.STREAM.CREATE.*",
+    "$JS.API.STREAM.MSG.GET.*",
+    "$JS.API.CONSUMER.INFO.*.*",
+    "$JS.API.CONSUMER.DURABLE.CREATE.*.*",
+    "$JS.API.CONSUMER.MSG.NEXT.*.*",
+]
 ACCOUNT_LIMITS = {
     **UNLIMITED,
     "imports": -1,
@@ -78,11 +86,14 @@ def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
     return nkey.derive(signer.account, nkey.USER, member_id)
 
 
+def member_permissions(user: str) -> dict:
+    return {"pub": {"allow": MEMBER_PUBLISH}, "sub": {"allow": [SWARM_SUBJECTS, f"{subjects.inbox(user)}.>"]}}
+
+
 def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
-    return nkey.creds(
-        nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", user_claims(MEMBER_PERMISSIONS)), user.seed
-    )
+    claims = user_claims(member_permissions(user.public))
+    return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 
 
 def account_jwt(signer: Signer, revocations: Mapping[str, int]) -> str:
