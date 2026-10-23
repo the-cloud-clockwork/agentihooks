@@ -11,7 +11,7 @@ PENDING = (
     " ORDER BY revision, subject LIMIT ?"
 )
 SENT = "INSERT OR IGNORE INTO outbox_sent (id, sent_at) VALUES (?, ?)"
-SENT_COLUMNS = "PRAGMA table_info(outbox_sent)"
+SENT_COLUMNS = "SELECT * FROM outbox_sent LIMIT 0"
 ADD_SENT_AT = "ALTER TABLE outbox_sent ADD COLUMN sent_at INTEGER NOT NULL DEFAULT 0"
 PRUNE_ROWS = "DELETE FROM outbox WHERE id IN (SELECT id FROM outbox_sent WHERE sent_at < ?)"
 PRUNE_MARKS = "DELETE FROM outbox_sent WHERE sent_at < ?"
@@ -68,7 +68,7 @@ def relay(repository, events, batch: int = BATCH, clock: Callable[[], int] = now
 
 
 def migrate(connection) -> None:
-    if "sent_at" not in {row[1] for row in connection.execute(SENT_COLUMNS)}:
+    if "sent_at" not in {column[0] for column in connection.execute(SENT_COLUMNS).description}:
         connection.execute(ADD_SENT_AT)
 
 
