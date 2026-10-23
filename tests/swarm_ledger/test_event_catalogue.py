@@ -89,7 +89,10 @@ def test_import_fills_every_missing_catalogue_field_so_each_outbox_event_passes_
     repo.import_document("ledger", LEGACY)
     assert repo.export_document("ledger") == LEGACY
     assert resource_revision(repo.current("ledger").state, "tasks") == resource_revision(LEGACY, "tasks")
-    assert repo.apply_ops("ledger", changes=[DONE])[1] == []
+    entry = repo.current("ledger")
+    later = {**LEGACY, "phases": [{**LEGACY["phases"][0], "done": True}], "_meta": {"rev": 4}}
+    with repo.connect() as connection, connection:
+        repo._write(connection, "ledger", entry, later, [])
     events = written(repo)
     assert [(item.type, item.key, item.version) for item in events] == [
         ("phase.changed", "p1", 3),
