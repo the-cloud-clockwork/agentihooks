@@ -160,6 +160,7 @@ def test_an_unknown_account_names_both_absent_places(capsys):
     assert _logout(["ghost-x", "--no-openbao"]) == 0
     out = capsys.readouterr().out.splitlines()
     assert out == [
+        "OpenBao skipped: its Codex record still holds this account",
         f"no account home at {codex_login.homes() / 'ghost_x'}",
         f"no export of AH_CX_TOKEN_ghost_x, AH_CX_TOKEN_ghost-x in the token block of {aicode_tokens.rc_file()}",
     ]
