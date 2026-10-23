@@ -84,17 +84,16 @@ def test_the_runner_sleeps_by_default_between_attempts():
     assert runs == [1, 1]
 
 
-def test_a_loop_that_returns_runs_again_without_waiting():
+def test_a_loop_that_returns_ends_the_runner_without_waiting():
     runs = []
 
     def returns():
         runs.append(1)
-        if len(runs) == 3:
-            raise Stop
+        return "ended"
 
-    with pytest.raises(Stop):
-        ledger_server.retrying(returns, sleep=lambda seconds: pytest.fail(f"slept {seconds}"))()
-    assert runs == [1, 1, 1]
+    runner = ledger_server.retrying(returns, sleep=lambda seconds: pytest.fail(f"slept {seconds}"))
+    assert runner() == "ended"
+    assert runs == [1]
 
 
 def test_the_shared_server_runs_watch_and_follow_under_the_retrying_runner(monkeypatch, tmp_path):

@@ -1317,7 +1317,7 @@ def retrying(target, sleep=time.sleep, first=1.0, cap=30.0):
         delay = first
         while True:
             try:
-                target()
+                return target()
             except Exception as exc:  # an unresolved Redis name at pod start must not end the thread for good
                 sys.stderr.write(f"{target.__name__} stopped, retrying in {delay:g}s: {exc}\n")
                 sleep(delay)
