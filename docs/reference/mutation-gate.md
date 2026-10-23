@@ -837,6 +837,143 @@ passed 151 plan, preflight and selection tests. The regression
 quotas of 3 and 4 across `shard_count`, `slowest_bucket` and `plan_shards`.
 No shard wall time comparison was recorded for this change.
 
+## Single shard plans in the statistics job
+
+On a pull request into dev and on a dispatched Tests run, a mutation plan with
+one statistics part and one shard mutates that shard inside `mutation-stats (0)`
+and skips the separate `mutation` job. The shard no longer waits for a second
+batch runner, a second checkout and a second dependency install. Plans with two
+or more shards or two or more statistics parts keep their separate `mutation`
+shard jobs. Which mutants are graded, the tests that run them and the report
+format are unchanged.
+
+### When the shard runs inline
+
+The decision reads two outputs of `mutation-plan`:
+
+| `shards` | `stats_parts` | `forwarded` | Statistics job | `mutation` job |
+|---|---|---|---|---|
+| `[0]` | `[0]` | not `true` | Collects its part, then runs **Mutate the only shard in the statistics job** | Skipped |
+| `[0]` | `[0]` | `true` | Runs no mutation step; the plan job already uploaded `mutation-report-0` | Skipped |
+| `[0]` | two or more parts | any | Collects its parts | One shard job, `mutation (0)` |
+| two or more shards | any | any | Collects its parts | One job per shard |
+
+`python -m scripts.ci_mutation.plan` writes `shards` and `stats_parts` from its
+measured shard and part counts. A reused report also sets both to `[0]`; see
+[Reused and empty pull request runs](#reused-and-empty-pull-request-runs).
+
+The inline step runs after **Upload mutation stats part**, on the same runner:
+
+```bash
+python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard 0 --shards 1 --stats .mutation-stats
+```
+
+It is the command a `mutation` shard runs, with the shard fixed at 0 of 1 and
+the statistics read from the part the job just collected, so the job downloads
+no `mutation-stats-*` artifact. **Upload complete inline mutation evidence**
+then uploads `mutation-report-0`, as `mutation (0)` would: only `report.json`
+when the job succeeded, the whole `.mutation-gate/` folder otherwise. Both
+steps share the statistics job's 26 minute timeout, and the 1080 second budget
+is the same as a shard's.
+
+### Gate Required and graded bases
+
+Gate Required sets `INLINE` to `true` when `shards` and `stats_parts` are both
+`[0]`. With `INLINE` true it drops `mutation` from the jobs a pull request
+requires and accepts that job as skipped; `mutation-plan` and `mutation-stats`
+must still succeed. A failed inline step fails `mutation-stats (0)`, so the
+gate fails as it would on a failed shard. The inline form came with
+[pull request 5180](https://github.com/the-cloud-clockwork/agentihooks/pull/5180):
+`inline_mutation` in `scripts/ci_reuse.py` builds the same form, and
+`scripts/gate_protected.py` accepts it as the protected gate.
+
+`graded_green` in `scripts.ci_mutation.scope` decides whether a pushed commit
+counts as a [graded base](#graded-lines). For an open pull request it reads the
+Tests runs of that commit and counts a run as graded when every shard result
+in it succeeded. A shard result is a `mutation (<n>)` job's conclusion or,
+for a `mutation-stats` job whose inline step ran, that job's conclusion. A head
+graded inline therefore stays a base for later pushes, like one graded by a
+shard job.
+
+The branch push preflight in `mutation-preflight.yml` has no inline step: it
+still runs its `stats` job and then its `mutation-shard` job.
+
+### Inspect a single shard run
+
+List the mutation jobs of a run and the inline step's result:
+
+```bash
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/attempts/1/jobs?per_page=100" --paginate \
+  --jq '.jobs[] | select(.name|startswith("mutation")) | [.name, .conclusion, .started_at, .completed_at, ([.steps[]? | select(.name == "Mutate the only shard in the statistics job") | .conclusion] | join(","))] | @tsv'
+```
+
+An inline run shows `mutation-stats (0)` with `success` in the last column and
+a `mutation` job `skipped`. On the delivered pull request's green run:
+
+```text
+mutation-plan       success  2026-10-20T09:38:58Z  2026-10-20T09:39:55Z
+mutation-stats (0)  success  2026-10-20T09:40:01Z  2026-10-20T09:40:50Z  success
+mutation            skipped  2026-10-20T09:40:50Z  2026-10-20T09:40:50Z
+```
+
+A forwarded run shows the same skipped `mutation` job with the last column
+`skipped`. Read the plan outputs from the plan job log, which prints
+`Mutation shards: <n>` and `Stats parts: <n>`. The report is read as on any
+other run:
+
+```bash
+gh run download <run id> -n mutation-report-0 -D mutation-report
+jq '{failed, not_mutated}' mutation-report/report.json
+```
+
+### Single shard limits and troubleshooting
+
+- The inline step only applies to a plan of one shard and one part. A plan
+  that needs two shards pays for the second runner as before.
+- The statistics and mutation work share one runner and one timeout, so the
+  statistics job of a one shard plan runs longer than before by its mutation
+  time.
+- The step reuses the statistics job's checkout, dependencies and browser, so a
+  setup failure there fails both statistics and mutation in one job.
+
+| Symptom | Check |
+|---|---|
+| `mutation (0)` ran for a plan that printed one shard | The plan printed more than one `Stats parts`, or the run used a workflow revision older than pull request 5186. |
+| `mutation` skipped and no `mutation-report-0` | Read `mutation-plan`: a forwarded run uploads the report there, not in the statistics job. |
+| `mutation-stats (0)` failed after its stats part uploaded | The inline step failed; download `mutation-report-0`, which then holds the whole `.mutation-gate/` folder, and read [Clean baseline failures](#clean-baseline-failures) when no mutant was graded. |
+| Gate Required fails with `mutation` skipped | The plan had more than one shard or part, or `mutation-stats` did not succeed; the gate accepts a skipped `mutation` only when both outputs are `[0]`. |
+| A later push regrades lines of an inline graded head | That head's statistics job did not succeed, or its run was not a pull request Tests run for that commit. |
+
+### Single shard delivery evidence
+
+[Pull request 5186](https://github.com/the-cloud-clockwork/agentihooks/pull/5186)
+merged on 20 October 2026 at 10:41 UTC and closed
+[issue 5179](https://github.com/the-cloud-clockwork/agentihooks/issues/5179).
+Its [red run 39392961654](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39392961654)
+on the tests only head failed only the new
+`test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job` and
+`test_pull_request_grading_counts_the_shard_mutated_inside_the_statistics_job`.
+Its [green run 39402043868](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39402043868)
+passed, and graded its own one shard plan inline (the run shown above).
+
+The measure is wall time from the `mutation-plan` job start to the end of the
+job that graded the shard: `mutation` before the change, `mutation-stats (0)`
+after. Both samples are the five newest successful first attempts of pull
+request Tests runs whose plan had one part and one shard.
+
+| Sample | Runs created | Plan start to grade | Median | Mean |
+|---|---|---|---|---|
+| Before, recorded by the source task | 20 October 00:00 to 08:10 UTC | 191, 220, 207, 178, 186 s | 191 s | 196.4 s |
+| After, sampled for this page | 20 October 10:42 to 21 October 08:00 UTC | 125, 163, 171, 104, 129 s | 129 s | 138.4 s |
+
+Before runs: 39387418173, 39386682588, 39386638469, 39386392354 and
+39381833895, whose separate shard jobs ran 45 to 62 s. After runs:
+39555030857, 39554885886, 39543789929, 39530006213 and 39492325418, whose
+statistics jobs with the inline shard ran 37 to 68 s. The after sample also
+needed its `mutation` job skipped and the inline step successful. Other
+mutation changes merged between the two windows, so the 62 s drop in the median
+is not attributable to this change alone.
+
 ## Suite speed contracts in the branch preflight
 
 A branch push that changes a test module runs the suite speed contracts in the
@@ -1120,9 +1257,9 @@ A branch is graded only on its own lines, so a dev refresh or a stacked branch d
 - **Real bases.** The plan job resolves them once:
   - the merge base with the given base;
   - the merge base with `origin/dev`;
-  - every pushed commit inside the head whose own push Mutation preflight had a successful `mutation` job.
+  - every pushed commit inside the head whose own push Mutation preflight had a successful `mutation` job, or, for an open pull request, whose Tests run graded every shard, inline or in a shard job (see [Gate Required and graded bases](#gate-required-and-graded-bases)).
 - **Which lines count.** A line is graded only when it differs from every real base. Because the given base always counts, the scope never grows past `base...head`.
-- **Proof of grading.** The plan reads the preflight proof through the Actions API on the App token. Dispatched runs and pull request gates never count, since they choose their own base or may skip mutation.
+- **Proof of grading.** The plan reads the preflight proof through the Actions API on the App token. Dispatched runs never count, since they choose their own base.
 - **Weakened tests.** The narrowing never hides weakened tests. If the head changed `tests/` against a newer base beyond adding tests, every line that base excluded is graded again. Adding tests means new `test_` functions, or new `Test` classes holding only test methods, with only `pytest.mark` decorators, or imports in a new test file, and no reused or repeated name. An import added to an existing test file counts as a change, since it can shadow a fixture or builtin those tests use. Anything else counts as a change: an edit, a deletion, a rename, a skip marker, a fixture, a helper, a conftest or a data file.
 - **One list for every job.** The plan writes the resolved list as `bases`. The stats parts, shards, push preflight and the proofs mutation take it with `--bases`, so every job grades the same mutants.
 
@@ -1140,7 +1277,7 @@ On the pull request that delivered this, the whole mutation chain finished 184 s
 
 ## Reused and empty pull request runs
 
-On a pull request into dev and on a dispatched Tests run, mutation runs as three jobs of the Tests workflow: `mutation-plan`, then the `mutation-stats` matrix, then the `mutation` shard matrix. All three are needs of Gate Required. Two cases need no mutant work, so the plan job forwards the final report, the preflight's for an exact head reuse and its own grading of an empty set otherwise, and the other two jobs succeed after their runner setup steps. Exact head reuse applies only to pull requests; the empty change set path also applies to dispatched runs.
+On a pull request into dev and on a dispatched Tests run, mutation runs as three jobs of the Tests workflow: `mutation-plan`, then the `mutation-stats` matrix, then the `mutation` shard matrix. All three are needs of Gate Required. Two cases need no mutant work, so the plan job forwards the final report, the preflight's for an exact head reuse and its own grading of an empty set otherwise, `mutation-stats` succeeds after its runner setup steps, and `mutation` is skipped as for a [single shard plan](#single-shard-plans-in-the-statistics-job). Exact head reuse applies only to pull requests; the empty change set path also applies to dispatched runs.
 
 ### When the plan forwards
 
@@ -1254,8 +1391,8 @@ behavior.
 |---|---|---|
 | `mutation-plan` | Ends with `Forward the reused or empty mutation report`; a reused run skips installing dependencies and planning | Reuse lookup and planning; the forward step is skipped |
 | `mutation-stats (0)` | Succeeds after its runner setup and post steps; no `mutation-stats-*` artifact | Collects one stats part per matrix entry and uploads `mutation-stats-<part>` |
-| `mutation (0)` | Succeeds after its runner setup and post steps; uploads nothing | Mutates its shard and uploads `mutation-report-<shard>` |
-| Gate Required | Reads the same three job results | Reads the same three job results |
+| `mutation` | Skipped, since both matrices are `[0]`; uploads nothing | Mutates its shard and uploads `mutation-report-<shard>`, or is skipped when a [single shard plan](#single-shard-plans-in-the-statistics-job) mutates inside `mutation-stats (0)` |
+| Gate Required | Accepts the skipped `mutation` job because both outputs are `[0]` | Reads the same three job results, or the inline form for a single shard plan |
 
 A reused run sets both matrices to the single entry `[0]`. An empty change set gets `[0]` from the plan, since it has no mutants to split.
 
