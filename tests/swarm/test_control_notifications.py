@@ -4,6 +4,7 @@ import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli
+from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -97,3 +98,31 @@ def test_another_named_caller_is_refused_and_the_master_hears_nothing(controls, 
     assert store.config("demo").state == "running"
     assert InboxStore(store.redis).mailbox(master.name) == []
     assert ledger.said == []
+
+
+def _idle_finding(store):
+    cli.verdict_store(store, "demo").visible(
+        [Finding("idle", "worker", "Idle worker", ("Idle",), "One minute", 1)], 1, 60_000
+    )
+
+
+def test_a_second_masters_verdict_sends_no_inbox_item(controls, monkeypatch):
+    store, ledger, master = controls
+    second = AgentRecord("demo-master-2", "master", "master", seat="master-2@demo")
+    store.put_agent("demo", second)
+    _idle_finding(store)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", second.name)
+    assert cli.main(["demo", "verdict", "idle/worker", "resolved"]) == 0
+    inbox = InboxStore(store.redis)
+    assert inbox.mailbox(master.name) == [] and inbox.mailbox(second.name) == []
+    assert ledger.said == []
+
+
+def test_an_operator_verdict_notice_names_the_finding(controls):
+    store, ledger, master = controls
+    _idle_finding(store)
+    assert cli.main(["demo", "verdict", "idle/worker", "resolved"]) == 0
+    items = InboxStore(store.redis).mailbox(master.name)
+    assert len(items) == 1
+    assert "idle/worker" in items[0].text
+    assert "The verdict is resolved." in items[0].text
