@@ -341,7 +341,7 @@ To add a run, dispatch a same code control as shown below, then append its
 pairs from the pair logs in matrix order:
 
 ```bash
-gh run download "<run-id>" --pattern 'load-pair-*' --dir load-evidence
+gh run download "<run-id>" --dir load-evidence
 for n in 1 2 3 4 5; do
   for side in base head; do
     grep -h '^{"seconds"' "load-evidence/load-pair-$n/$side.log" | tail -1 \
@@ -411,7 +411,7 @@ Read each side's graded measure from the pair logs. The last line starting with
 `{"seconds"` in a log is the run the gate graded:
 
 ```bash
-gh run download "<run-id>" --pattern 'load-pair-*' --dir load-evidence
+gh run download "<run-id>" --dir load-evidence
 grep -h '^{"seconds"' load-evidence/load-pair-1/base.log | tail -1
 ```
 
