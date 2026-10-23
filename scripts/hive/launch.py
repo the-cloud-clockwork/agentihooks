@@ -146,6 +146,17 @@ def _by_origin(hives: list[dict], repo: str) -> list[dict]:
     ]
 
 
+def _pinned(hives: list[dict], task: dict, role: str) -> tuple[list[dict], placement.Wait | None]:
+    from scripts.swarm.commands import hive_id
+
+    if task.get("hive"):
+        hives = [hive for hive in hives if hive["id"] == task["hive"]]
+    if not task.get("workstation"):
+        return hives, None
+    kept = [hive for hive in hives if hive["id"] == hive_id()]
+    return kept, None if kept else placement.Wait(placement.NEEDS_WORKSTATION, role)
+
+
 def _matched_origin(hives: list[dict], hive: str, repo: str) -> str | placement.Wait:
     from scripts.hive.daemon import origin
 
@@ -210,15 +221,10 @@ class HiveLaunch:
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
         decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ))
         hives, now = self.hives(), lease.now_ms(self.store)
-        hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
-        hives = _by_origin(hives, config.repo)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
-        from scripts.swarm.commands import hive_id
-
-        if task.get("workstation"):
-            hives = [hive for hive in hives if hive["id"] == hive_id()]
-            if not hives:
-                return self._record_wait(lane, task, placement.Wait(placement.NEEDS_WORKSTATION, role))
+        hives, refused = _pinned(_by_origin(hives, config.repo), task, role)
+        if refused:
+            return self._record_wait(lane, task, refused)
         hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
         moved = ""
         if (saved.get("harness") or "claude") not in ("claude", "auto"):
@@ -233,6 +239,7 @@ class HiveLaunch:
             selected = self._master_selection(config, decision, hives, now, rows, front)
             return self._record_wait(lane, task, selected)
         from scripts.swarm import local_slots
+        from scripts.swarm.commands import hive_id
 
         if lane != placement.MASTER:
             for hive in hives:
