@@ -104,7 +104,7 @@ def work(bus, spoke: Spoke, runtime: ChaosRuntime, journal: Journal, hive: str) 
 def readiness_view(swarm: str) -> Callable[[], readiness.Snapshot]:
     tasks = [
         {"id": f"t{n:04d}", "phase": "chaos", "state": "open", "lane": LANE, "claim_generation": 1}
-        for n in range(1, OFFERS)
+        for n in range(1, OFFERS + 1)
     ]
     doc = {"tasks": tasks, "phases": [{"id": "chaos", "title": "chaos", "depends_on": []}]}
     rows = {task["id"]: task for task in tasks}
