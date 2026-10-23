@@ -46,6 +46,7 @@ def test_a_burst_waits_pending_while_the_session_holds_ten_unconfirmed_pushes(ch
     assert {inbox.get(item.id).state for item in items[10:]} == {"pending"}
     inbox.confirm(items[0].id, "bob")
     inbox.redis.delete(inbox.key("item", items[1].id))
+    inbox.close(items[2].id, "bob", "done", "done: handled")
     _pass(inbox, session, pushed)
-    assert session.shown == [item.id for item in items[:12]]
-    assert inbox.get(items[12].id).state == "pending"
+    assert session.shown == [item.id for item in items[:13]]
+    assert inbox.get(items[13].id).state == "pending"
