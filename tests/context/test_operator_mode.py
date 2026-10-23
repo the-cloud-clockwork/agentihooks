@@ -65,6 +65,7 @@ def test_only_a_prompt_that_opens_with_the_words_switches():
     for text in ('"operator on" was typed in the master pane', "the operator on call said ship", "operator one", ""):
         assert operator_mode.switch(text) == ""
 
+
 @pytest.mark.parametrize("word", ["on", "off"])
 def test_typed_sentence_switches_only_its_session(word):
     operator_mode.observe("other", "operator on", True, now=100)
@@ -98,6 +99,8 @@ def test_idle_scheduler_does_not_end_explicit_presence():
 
 @pytest.mark.parametrize("source", ["startup", "resume", "compact"])
 def test_session_restart_clears_presence_but_compaction_preserves_it(monkeypatch, source):
+    from unittest.mock import Mock
+
     operator_mode.observe("pane", "operator on", True, now=100)
     operator_mode.observe("other", "operator on", True, now=100)
     monkeypatch.setattr(hook_manager, "_inject_refocus", Mock())
