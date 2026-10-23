@@ -6,6 +6,7 @@ import os
 import sys
 import traceback
 from collections.abc import Mapping
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from scripts.events.config import BusConfig
@@ -105,7 +106,7 @@ def main(argv: list[str]) -> int:
     if not secret:
         print(f"agentihooks github-webhook: {NO_SECRET}", file=sys.stderr)
         return 2
-    bus = open_bus(BusConfig.from_environ(os.environ))
+    bus = open_bus(replace(BusConfig.from_environ(os.environ), provision=False))
     server = ThreadingHTTPServer((args.host, args.port), handler(Ingress(Pulls(bus), secret)))
     try:
         server.serve_forever()

@@ -8,7 +8,7 @@ has_children: true
 
 AgentiHooks is organised around four pillars: Identity, Guardrails, Context Intelligence, Fleet Command. Each pillar covers one axis of running Claude Code and Codex agents.
 
-The [swarm guide](swarm.md) covers fleet task execution, including [ready on a task of any kind](swarm.md#ready-on-a-task-of-any-kind), [ready handoffs for tasks split across pull requests](swarm.md#ready-handoffs-for-split-tasks), [labelled halves for tasks without a plan](swarm.md#labelled-halves-for-tasks-without-a-plan) and [what the ready merge pass does when a pull request leaves the merge queue](swarm.md#ready-merge-pass-queue-exits).
+The [swarm guide](swarm.md) covers fleet task execution, including [ready on a task of any kind](swarm.md#ready-on-a-task-of-any-kind), [ready handoffs for tasks split across pull requests](swarm.md#ready-handoffs-for-split-tasks), [labelled halves for tasks without a plan](swarm.md#labelled-halves-for-tasks-without-a-plan) and [what the ready merge pass does when a pull request leaves the merge queue](swarm.md#ready-merge-pass-queue-exits), and [what it does when a pull request is marked unmergeable](swarm.md#unmergeable-entries).
 
 See [recovering a released task after red checks](swarm.md#recovering-a-released-task-after-red-checks) for the handoff and branch continuation, configuration, owner safeguards and measured recovery time.
 
@@ -29,6 +29,8 @@ See [Doctor timer pass](swarm.md#doctor-timer-pass) for what one Doctor timer st
 See [Inbox escalation sender exclusion](swarm.md#inbox-escalation-sender-exclusion) for master handoffs, escalation timing, configuration, message history and delivery evidence.
 
 See [Inbox receiver read](swarm.md#inbox-receiver-read) for how the inbox detector resolves every receiver in a fixed number of Redis reads, the check command and the measured result.
+
+See [Information only items](swarm.md#information-only-items) for which inbox wakes, seat holds, escalations and Doctor findings skip items sent with `--fyi`, how to send and inspect them, troubleshooting and delivery evidence.
 
 See [Doctor measurement task readiness](swarm.md#doctor-measurement-task-readiness) for tune dependencies, application timestamps, configuration examples and releasing a read only seat with its recorded window.
 

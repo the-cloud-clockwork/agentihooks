@@ -262,17 +262,176 @@ agentihooks doctor rig-grade-swarm measure "ci-tier-wall-time/<run id>-<attempt>
 
 It prints `<finding> <seconds>`, for example `ci-tier-wall-time/39269601765-1 573`. A finding fires when the tier wall time passes 15 minutes, 900 s. A run with no recorded tier wall time is refused with `has no tier wall time`.
 
+### Concurrent merge groups on one pool
+
+The shard cap keeps one merge group inside one wave, but the queue builds up to three entries at a time (`max_entries_to_build` 3 in `.github/rulesets/dev-no-delete.json`) and every group sends its shards to the same `anton-oss-queue` pool. Two groups that reach their unit stage together ask for up to 60 runners, so the later group's shards wait for the earlier group's shards to finish. That wait, not the shard plan, is what pushed merge group tiers over 15 minutes on the night of 19 to 20 October.
+
+Doctor finding `ci-tier-wall-time/39346819295-1` fired on merge group run [39346819295](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39346819295), which took 911 s: 201 s before the unit stage, 599 s in it and 111 s after it. Its 30 shards were created while 27 shards of merge group run 39346300411 were still waiting or running, a demand of 57 on the 30 runners the pool held then. Its shards waited a median 128 s and up to 293 s for a runner.
+
+The cause task read every merge group Tests run from 18:00 to 01:30 UTC through the jobs API: 130 runs, 88 run attempts with unit shards. Each attempt ran 30 unit shards in 80 of 88 cases, plus three other queue jobs (the two `test-count` legs and `split`) that finished before the first shard was created, so no other queue job competed with the unit stage. Attempts are grouped by how many shards of other groups were waiting or running when their own unit stage started:
+
+| Other groups' shards in flight | Attempts | Median shard wait | Worst shard wait, median and max | Unit stage median | Green first attempts over 15 minutes |
+|---|---|---|---|---|---|
+| Under 10, alone | 24 | 18 s | 119 s, 224 s | 373 s | 2 of 17 |
+| 10 to 40, one other group | 42 | 124 s | 266 s, 471 s | 480 s | 9 of 31 |
+| Over 40, two or more groups | 22 | 331 s | 518 s, 713 s | 702 s | 10 of 15 |
+
+Two other ways of counting a group as concurrent, the peak of other shards during its own wait or any other queue job overlapping that wait, move attempts between rows but keep the same rise: the alone median shard wait is 18 s under all three, and two or more groups put 11 of 18 and 14 of 25 green first attempts over 15 minutes.
+
+Across the night 27 to 30 queue runners were busy 57 percent of the time, and 67 percent of all queue job wait minutes (4181 of 6227) passed with 28 or more busy. Demand, waiting plus running, was over 30 for 63 percent of the time, over 60 for 14 percent and peaked at 90. On an idle pool a shard was picked up in a median 19 s. The queue built 17.4 groups an hour, of which 8.4 went green; 64 of the 130 runs were cancelled and used 2333 of the 10058 queue runner minutes. With a median green tier of 788 s for a group alone, one group at a time would serve about 4.6 groups an hour.
+
+The cause is recorded in issue [5037](https://github.com/the-cloud-clockwork/agentihooks/issues/5037). The task was read only: it changed neither the pool nor `MAX_SHARDS`, and wrote the numbers above onto the operator's ledger follow up. The remedy among a bigger pool, one group building at a time, or a shard plan sized to the runners actually free stays with the operator.
+
+To measure overlap for a window, list the merge group runs and then each run's unit shards with their creation and start times:
+
+```bash
+since="2026-10-19T18:00:00Z"
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs?event=merge_group&created=>=$since&per_page=100" --paginate \
+  --jq '.workflow_runs[] | select(.name == "Tests") | [.id, .run_attempt, .created_at, .conclusion] | @tsv'
+run="<merge group run id>"
+attempt="<attempt>"
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --paginate \
+  --jq '.jobs[] | select(.name | startswith("unit (")) | [.name, .created_at, .started_at, .completed_at] | @tsv'
+```
+
+For the finding run, the runs listing with `since` set to `2026-10-20T00:10:00Z` prints, among others:
+
+```text
+39346819295	1	2026-10-20T00:18:07Z	success
+39346300411	1	2026-10-20T00:12:53Z	success
+```
+
+and the jobs listing for run `39346819295`, attempt `1`, prints 30 shard rows such as:
+
+```text
+unit (3.12, 2)	2026-10-20T00:21:28Z	2026-10-20T00:23:23Z	2026-10-20T00:28:45Z
+unit (3.11, 5)	2026-10-20T00:21:28Z	2026-10-20T00:21:44Z	2026-10-20T00:25:36Z
+```
+
+That night's groups still ran Python 3.11 and 3.12 legs inside the same 30 shards; 3.11 left CI later.
+
+A group's other shards in flight at its unit start is the number of other groups' unit shards whose `created_at` is before that group's first shard `created_at` and whose `completed_at` is after it. A group whose shards wait over a minute with that number over 10 is sharing the pool with another group; a wait with that number under 10 does not come from another merge group.
+
+The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`, while `MAX_SHARDS` in `tests/queue_shards.py` is still 30. Compare the two before reading a shard wait against the numbers above.
+
 ### Troubleshooting queue shard sizing
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Queue plan exceeds 360s of the step timeout` | 30 shards cannot bring the slowest shard under half the step timeout, often one slow test or a slow serial group | Split or speed up the slow test file; the planner log names the predicted seconds |
-| Shards wait minutes for a runner while each group plans 30 or fewer | Several merge groups build at once and share the 30 runners; the queue builds up to three entries at a time | Read the runner waits of every group running in the same minutes before changing the plan |
+| Shards wait minutes for a runner while each group plans 30 or fewer | Several merge groups build at once and share the 30 runners; the queue builds up to three entries at a time | Read the runner waits of every group running in the same minutes before changing the plan; see [Concurrent merge groups on one pool](#concurrent-merge-groups-on-one-pool) |
 | More than 30 `unit` jobs in one run | `MAX_SHARDS` no longer matches the pool, or a second Python version was added without the capped path | Compare `MAX_SHARDS` with the antoncore scale set `maxRunners` |
 
 ### Delivery evidence
 
 Delivered by pull request [4803](https://github.com/the-cloud-clockwork/agentihooks/pull/4803) for issue [4801](https://github.com/the-cloud-clockwork/agentihooks/issues/4801), which lowered `MAX_SHARDS` from 40 to 30. Before: merge group run [39249741419](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39249741419) planned 40 unit shards on the 30 runner pool, 10 waited for a second wave with runner waits up to 346 s, and the queue tier took 948 s. After: the first successful merge group run started after the merge, [39269601765](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39269601765), ran 30 unit shards in one wave, all started within 63 s, with a 308 s unit stage and a 574 s tier wall. Runner wait was median 29 s and worst 82 s; 8 of 30 shards still waited over 30 s, which overlapping merge groups explain. Later changes on the same planner balanced capped shards by predicted slowest shard ([4884](https://github.com/the-cloud-clockwork/agentihooks/pull/4884)), read the step timeout from the workflow ([5043](https://github.com/the-cloud-clockwork/agentihooks/pull/5043)), dropped Python 3.11 from CI ([5327](https://github.com/the-cloud-clockwork/agentihooks/pull/5327)) and calibrated `SLOWDOWN` ([5659](https://github.com/the-cloud-clockwork/agentihooks/pull/5659)).
+
+## Grouped test files in the unit shard planner
+
+The unit shard planner, `assign_nodes` in `tests/shards.py`, places the measured tests of one test file that carries an `xdist_group` mark on one shard, as one unit, and charges their summed time to that shard. Inside the shard, the group's tests run on one worker in collection order. Every other test is still placed on its own by its stored duration.
+
+A group's later tests reuse what its first test built: a module scoped fixture, a cached build or a warmed import. Split across shards, each shard builds it again; reordered by duration, a later test can run before the test that builds what it needs. The remote control mutation baseline file is the case that needed it: it runs as two tests in the `remote_control_mutation` group, one that collects the statistics baseline and one that feeds it to mutant grading, so the costly baseline is built once and stays under the one minute test watchdog.
+
+The same planner serves every sharded unit run:
+
+| Caller | Runs on | What it plans |
+|---|---|---|
+| `--shard N/M` collection, `_shard_files` and `pytest_collection_modifyitems` in `tests/conftest.py` | Each `unit (<python>, <shard>)` job, with `--dist loadgroup` and one worker per usable CPU (`scripts.ci_cpu_quota`); the plan itself assumes four | Which test files the shard collects and which collected tests it keeps |
+| `tests.queue_shards` | The merge group `split` job | The predicted slowest shard used for [queue shard sizing](#queue-shard-sizing) |
+
+### How a grouped file is placed
+
+1. `grouped_files` parses every test file and records the files that call `xdist_group` anywhere, as a module `pytestmark` or on a single test. The value is the group name, or the sorted names joined by `_` when a file names several. The planner treats every test in such a file as part of its group, marked or not.
+2. `assign_nodes` computes an even shard share: the total stored duration of every test it plans, divided by the shard count.
+3. A grouped file whose summed duration is at or under that share becomes one unit holding all its measured tests in stored order. A grouped file over the share is split test by test, since no shard can hold it; each of its tests still counts against its shard's group load.
+4. Units are placed slowest first on the shard whose predicted time grows least. A shard's predicted time is the largest of its summed time over the workers, its heaviest group, and the receiving group's load plus the new unit, plus the source size cost of each file it collects for the first time. A grouped unit therefore adds its whole summed time to the group load of one shard, which models the one worker that `--dist loadgroup` gives the group.
+5. Files in `FIRST_SHARD_FILES` (today `tests/routing/test_codex_api.py`) are left out of the plan and always run on shard 1.
+
+Inside each worker, `slowest_first` orders the collected tests slowest first, with tests under 0.1 s after them in collection order. Every test of a group takes the group's slowest duration, and the sort is stable, so the group keeps collection order at the place of its slowest test. xdist appends `@<group>` to a grouped test id; the planner strips it before reading stored durations, including ids whose parameters hold an `@`.
+
+Tests with no stored duration follow their file. A test id the plan does not name goes to a shard that already holds measured tests of its file, chosen by a CRC32 of the test id; a grouped file kept whole has exactly one such shard, so its new tests join it. A test file with no measured test at all is collected by every shard and each of its tests is hashed across all shards, so a new grouped file can split until the next dev push records its durations.
+
+### Grouped file example
+
+The planner contract test `test_one_files_xdist_group_stays_on_one_shard_with_its_summed_time` in `tests/test_shards.py` pins the behaviour with two shards and four workers:
+
+```python
+durations = {
+    "tests/test_g.py::test_builds": 5.0,
+    "tests/test_g.py::test_reuses": 30.0,
+    "tests/test_a.py::test_x": 20.0,
+    "tests/test_b.py::test_y": 20.0,
+}
+assign_nodes(durations, 2, {"tests/test_g.py": "g"}, 4)
+# [["tests/test_g.py::test_builds", "tests/test_g.py::test_reuses"],
+#  ["tests/test_a.py::test_x", "tests/test_b.py::test_y"]]
+```
+
+The share is 37.5 s, so the 35 s group stays whole on one shard in collection order and the two 20 s tests share the other. Before the change the planner placed each test alone by duration and put the 30 s `test_reuses` on one shard and the 5 s `test_builds` on the other. `test_a_grouped_file_longer_than_an_even_shard_share_still_splits` pins the cap: four 30 s tests of one group on two shards have a 60 s share against a 120 s file, so they split two and two.
+
+### Grouped file configuration
+
+The planner has no setting of its own. Its inputs are:
+
+| Input | Where it comes from |
+|---|---|
+| Group membership | Any `pytest.mark.xdist_group(...)` call in a test file, read from source with `ast` |
+| Stored durations | `.test_durations` at the repository root, which each unit job rewrites from the latest dev durations of its Python version (`tests.dev_durations.adopt`: the shared file overlaid with `.test_durations-<version>`) when a dev durations cache exists |
+| Shard count | `--shard N/M`: 20 for the 3.12 unit job, or the queue plan's `total` on merge groups |
+| Workers | 4 in the planner call in `tests/conftest.py` and `WORKERS` in `tests/queue_shards.py` |
+| Source size cost | `SECONDS_PER_SOURCE_BYTE` in `tests/shards.py` |
+
+To keep a set of tests together, put them in one file with one group:
+
+```python
+import pytest
+
+pytestmark = pytest.mark.xdist_group("remote_control_mutation")
+```
+
+Keep the mark off fakeredis test modules; the [suite speed checks](#suite-speed-checks-on-pull-requests) refuse it there. Files in different modules that share a group name are separate units: the planner may place them on different shards, and on one shard their times add to the same group load.
+
+### Checking a grouped file placement
+
+The planner is plain Python and runs without pytest. From a checkout, this prints the even share and the shard of every test in one grouped file, the same way the 3.12 unit jobs plan it:
+
+```bash
+python - tests/test_remote_control_mutation_baseline.py <<'EOF'
+import json, sys
+from pathlib import Path
+from tests.shards import FIRST_SHARD_FILES, assign_nodes, discover_test_files, grouped_files, source_sizes
+
+root, target, shards = Path("."), sys.argv[1], 20
+durations = {**json.loads((root / ".test_durations").read_text()), **json.loads((root / ".test_durations-3.12").read_text())}
+files = [p for p in discover_test_files(root) if p not in FIRST_SHARD_FILES]
+measured = {n: s for n, s in durations.items() if n.split("::", 1)[0] in files}
+parts = assign_nodes(measured, shards, grouped_files(root, files), 4, sizes=source_sizes(root, files))
+print(f"share {sum(measured.values()) / shards:.1f}s")
+for i, part in enumerate(parts, 1):
+    for node in part:
+        if node.startswith(target + "::"):
+            print(i, f"{measured[node]:.1f}s", node)
+EOF
+```
+
+On `dev` at `eef49b2f30` this reported a 280.4 s share over 5607.4 s of stored 3.12 time, 17 grouped files, 10 of them with stored durations, the largest 41.7 s (`tests/inbox/test_channel_server.py`), and no grouped file on more than one shard. The remote control mutation file sat whole on shard 2 at 40.0 s. Its stored id still named the single test that existed before the split, so its two current tests are unmeasured and follow it there.
+
+To see what a CI shard ran, read the `unit (3.12, <shard>)` job log: the Run tests step prints each test id with `-v`, and every grouped test id ends in `@<group>`.
+
+### Troubleshooting grouped files
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Tests of one group appear in two unit shard logs | The file's summed duration is over the even shard share, or none of its tests has a stored duration yet | Compare the file's stored total with the share using the command above; a new file settles after the next dev push stores its durations |
+| A group's later test fails because what its first test builds is missing | The tests sit in different files, or the group was split over the share | Move the tests into one file with one group, and keep the file under the share by moving unrelated tests out |
+| One shard runs long while carrying a grouped file | The group runs on one worker, so its summed time is that shard's floor | Split the file's work so that it reuses less, or move tests that need no shared state out of the file |
+| `shard-check` reports a test run more than once or not at all | A change to the planner's placement or fallback rules broke the exactly once rule | Read `tests/test_shards.py` and the shard check log; the planner returns every planned test exactly once |
+
+### Delivery evidence
+
+Delivered by pull request [5032](https://github.com/the-cloud-clockwork/agentihooks/pull/5032) for issue [5031](https://github.com/the-cloud-clockwork/agentihooks/issues/5031), after pull request [4909](https://github.com/the-cloud-clockwork/agentihooks/pull/4909) split the remote control mutation baseline test into two tests of one group and made `slowest_first` keep a group in collection order. Red: Tests run [39353180256](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39353180256), test only, failed the new contract test on both Python versions. Run [39353833681](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39353833681), on a first fix that kept every grouped file whole, failed the queue sizing tests and the exactly once shard test, which the share cap fixed. Green: Tests run [39355391107](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39355391107), with every unit shard and `shard-check` passing.
+
+Shard balance before the change, read on the first dev push Tests run after 4909 merged, [39338932046](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39338932046), with all unit shards green: on Python 3.11, shard 1 took 184 s against 174 to 294 s for the other eleven, median 187 s; on Python 3.12, 390 s against 358 to 530 s, median 388 s. Shard 1, which held the remote control pair then, was not an outlier. The change targets placement, not shard wall time, and no matching after window on the same twelve shard layout exists: Python 3.11 left CI and the 3.12 unit job moved to 20 shards later.
 
 ## Lost unit shard rerun
 

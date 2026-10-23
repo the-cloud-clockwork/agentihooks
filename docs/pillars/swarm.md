@@ -3111,6 +3111,8 @@ window boundaries and outputs.
 
 After `swarm ready` releases a seat, the tick's merge pass queues the pull request once its checks pass and then waits on the merge queue the way `wait --on merge` does. Each tick it reads the pull request again; when the pull request reads open and outside the queue it reads it a second time before judging, so a queue that is still settling is not mistaken for an exit. It is not judged while its checks are still running, nor, for five minutes after the pass queued it, while the pass has never seen it inside the queue. A pull request seen back in the queue, for example after the [Queue retry workflow](../reference/delivery-tiers.md#lost-runner-requeue) put it back for a lost runner, keeps the task waiting.
 
+A pull request that is still open but that GitHub marks unmergeable, inside or outside the queue, follows [Unmergeable entries](#unmergeable-entries) instead, once no dependency of the task holds it.
+
 When the pull request is no longer in the queue, the pass decides from its state and its checks on the current head:
 
 | Observation | Task outcome | Tick action line |
@@ -3167,6 +3169,62 @@ agentihooks swarm <id> merge state <url>
 ```
 
 `tests/swarm/test_ready.py` pins each row. `test_a_pull_request_that_leaves_the_queue_red_reopens_without_a_requeue` queues a pull request, lets it leave the queue red and asserts the reopen line, that no merge group run was read and that the pull request was queued only once. It was added by pull request [4733](https://github.com/the-cloud-clockwork/agentihooks/pull/4733) after the green exit test moved to the requeue path and the dev promotion [coverage ratchet](../reference/delivery-tiers.md#coverage-grading) reported the red exit reopen as a line no test ran any more ([red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39218945744)). The production code did not change.
+
+#### Unmergeable entries
+
+Each tick the merge pass reads every task in `pr` state with a pull request, including tasks whose engineer has not yet run `swarm ready`. A pull request is unmergeable when it reads open and either GitHub reports `mergeable: CONFLICTING` (cause `has a merge conflict`) or its merge queue entry reads `UNMERGEABLE` (cause `is marked unmergeable by GitHub`). GitHub can mark an entry `UNMERGEABLE` for a moment while the head still merges cleanly, so the pass separates a real conflict from that transient state:
+
+1. **A live owner fixes it.** When an agent of the task is still running, or not yet finished, the pass does nothing else and sends each such agent one inbox item: `Your pull request <url> <cause>. Restack it onto dev and publish the fix; keep your claim.` The item is sent once per agent execution, head and cause.
+2. **A fresh read confirms it.** The pass reads the pull request again without the tick's snapshot. If that read fails or no longer shows a cause, the queue is left alone.
+3. **The entry leaves the queue.** When the fresh read still shows the pull request queued, the pass dequeues it. A failed dequeue writes `could not dequeue <url> for task <id>: <error>` and nothing else changes. A dequeue that GitHub still reports as queued or merged writes `dequeue of <url> for task <id> awaits confirmation`, and the next tick judges again.
+4. **A transient state is held for a requeue.** For a task released by `swarm ready` whose fresh read is not `CONFLICTING`, the task keeps its claim. Its ready record switches to a `recover` wait on the head (the fresh head, or the head saved at `swarm ready` when GitHub returns an empty one), with the next attempt due after 2 to the power of `recoveries` minutes, one minute on a first episode. The task gets the comment `The swarm took <url> out of the merge queue: GitHub marked it unmergeable without a conflict. It queues the unchanged head again once it reads mergeable and green, so the task keeps its claim.` The action line is `dequeued <url> for task <id>: unmergeable without a conflict; the unchanged head is queued again once it reads mergeable and green`.
+5. **Anything else is a repair.** A real conflict, or a task that never ran `swarm ready`, reopens with `awaiting` set to `fix` and the comment `Reopened by the swarm: its pull request <url> <cause>. ...`. The action line is `task <id> reopened, <url> <cause>`.
+
+When the `recover` attempt falls due, the pass reads the pull request again and decides:
+
+| Fresh read | Outcome | Tick action line |
+|---|---|---|
+| Not yet due, or the read failed | Nothing changes. | none |
+| A head other than the saved one | Reopened for repair. | `task <id> reopened, <url> changed its head after leaving the merge queue` |
+| `CONFLICTING` | Reopened for repair. | `task <id> reopened, <url> has a merge conflict` |
+| A red check | Reopened for repair. | `task <id> reopened, <url> has red checks` |
+| Still unmergeable, or checks not all resolved green | The attempt counts; the next one is due later. | `<url> for task <id> is not yet mergeable and green; it retries later` |
+| Mergeable and green on the same head | Queued again with the comment `The swarm queued <url> again: its unmergeable state cleared on the unchanged green head.` The record returns to the merge wait described above. | `queued <url> for task <id>` |
+| Mergeable and green, but the queue call fails | A `requeue` ledger alert `The swarm could not queue <url> again for task <id> after a transient unmergeable state: <error>`; the attempt counts. | `could not requeue <url> for task <id>: <error>` |
+
+The backoff doubles from one minute: attempts fall due 1, 2, 4, 8 and 16 minutes apart, so within a first unmergeable episode the fresh reads come at about 1, 3, 7, 15 and 31 minutes after the dequeue, each on the first tick past its due time. The attempt count is kept in the record's `recoveries` field and lasts as long as the ready record, so it counts across episodes of one release: each attempt, failed or successful, adds one, and a later episode starts its backoff from that count. A reopen deletes the record, and the next `swarm ready` starts the count at zero. When an attempt would take the count to five (`QUEUE_TRIES`), or a new episode starts with five successful requeues already counted, the pass raises the `requeue` alert `The swarm gave up queueing <url> again for task <id>: it stayed unmergeable or not green; reopened.` and reopens the task with `awaiting` set to `fix` and the cause `stayed unmergeable after leaving the merge queue`. The `recoveries` count is separate from the `requeues` count of green queue exits.
+
+The `recover` wait lives in the swarm's ready record in Redis, and its due time is an absolute timestamp, so a restarted timer, or a tick from a new process, continues the same backoff. While it holds, the [stall watchdog](#stall-watchdog) treats the task as waiting and does not reopen it as dropped from the queue. A reopen for any cause above still releases the task only when no owner of it is live.
+
+Every dequeue and requeue the pass sends writes a [queue journal](../reference/delivery-tiers.md#the-queue-journal) record that carries `swarm`, `task`, `timer` (the tick process ID) and `by: "merge watcher"`. To see where a held task stands, read its ready record, the pass's queue records for its pull request, and its swarm comments and alerts on the ledger page:
+
+```bash
+redis-cli HGET "agentihooks:swarm:<id>:ready" "<task id>" | jq '{url, head, on, retry_at, recoveries, requeues}'
+jq -c --arg pull "<url>" 'select(.by == "merge watcher" and .pull == $pull) | {at, action, task, timer, expected_head, errors}' \
+  ~/.agentihooks/merge-queue-events.jsonl
+```
+
+A swarm with `AGENTIHOOKS_SWARM_KEY_PREFIX` set uses that prefix in place of `agentihooks` in the key. `retry_at` is in milliseconds since the epoch.
+
+This path was added by pull request [5049](https://github.com/the-cloud-clockwork/agentihooks/pull/5049) ([issue 4821](https://github.com/the-cloud-clockwork/agentihooks/issues/4821)). Before it, the pass dequeued a pull request whose tick snapshot read `UNMERGEABLE`, reopened its task for repair, never queued it again and wrote no journal record. Pull request 4704 left the queue that way at 09:52 UTC on 19 October, was queued again by hand at 10:29 and merged unchanged at 10:53. Pull request [5137](https://github.com/the-cloud-clockwork/agentihooks/pull/5137) added the fallback to the saved head when GitHub returns an empty head.
+
+The source task counted, from both swarm ledgers, the reopens whose cause was `is marked unmergeable by GitHub` and how many of those pull requests merged later with no commit after the reopen:
+
+| Window (UTC) | Unmergeable reopens | Merged later unchanged, never requeued |
+|---|---|---|
+| 19 October, before the fix | 14 | 6 (4704, 4680, 4838, 4864, 4819, 4835) |
+| 21 October, after the fix | 0 | 0 |
+
+From the merge of pull request 5049 to 23 October, the ledgers hold six `its unmergeable state cleared on the unchanged green head` requeue comments and no give up comment, and neither ledger holds a `requeue` alert.
+
+`tests/swarm/test_ready.py` pins the main steps: `test_a_stale_unmergeable_snapshot_is_not_dequeued_when_a_fresh_read_clears_it`, `test_a_watcher_recovery_requeue_hands_the_queue_its_journal`, `test_a_transient_unmergeable_head_is_requeued_unchanged_after_a_timer_restart`, `test_a_transient_unmergeable_head_waits_with_a_bounded_backoff_then_reopens`, `test_a_failed_requeue_raises_a_ledger_alert`, `test_a_head_that_turns_unmergeable_after_every_requeue_reopens_after_bounded_recoveries` and `test_an_unmergeable_entry_on_a_task_outside_the_merge_pass_reopens_with_its_cause`. `test_a_transient_unmergeable_requeue_backoff_holds_the_dropped_queue_reopen` in `tests/swarm/test_stall_watch.py` pins the stall watch hold.
+
+| Symptom | Check |
+|---|---|
+| A green pull request left the queue and its task kept its claim | Expected during a `recover` wait; read `retry_at` and `recoveries` in the ready record. |
+| A task reopened with `stayed unmergeable after leaving the merge queue` | Five attempts were spent across its episodes. Read the pull request's queue state with `agentihooks swarm <id> merge state <url>`; when it is mergeable and green, queue it with `agentihooks swarm <id> merge queue <url>`. |
+| A `requeue` alert names a queue error | Read the alert text and the matching journal record's `errors`; the pass retries at the next due time until the attempt count runs out. |
+| A dequeue left no journal record | The record write failed on that machine; the tick process printed `merge queue record not written: <error>` on stderr. |
 
 ### When a checks wait ends
 
@@ -5305,6 +5363,89 @@ the same item to pending. Whichever transport claims next can deliver it: the ch
 A failed channel write returns its unsent items to pending immediately. The redelivery window is separate
 from `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` (default 300 seconds), which controls idle wakes and escalation.
 Agents should read the item's current state before repeating work after redelivery.
+
+### Information only items
+
+An item sent with `--fyi` asks its receiver for nothing, so nothing in the swarm waits on it. Delivery is
+unchanged: the inbox channel, the hook or the next `agentihooks msg inbox` read shows it like any other item,
+and it closes as `done: information received` on explicit read or confirmed receipt. Everything that exists to
+make a receiver act on an item skips it:
+
+| Mechanism | Work item | Information only item |
+|---|---|---|
+| Typed wake from the tick wake pass, into an idle worker pane without push inbox | Up to three wakes, one per retry window | Never typed |
+| Immediate Codex wake when an item lands (`wake_now`) | Typed into an idle legacy Codex pane | Never typed |
+| Seat successor hold | Mail to a seat whose occupant left waits for the next occupant; its retry window starts when that occupant binds | Not held; no window starts, before or after a successor binds |
+| Escalation to the master, then to the operator | After the wakes, one retry window per step | Never escalated |
+| Doctor `inbox past window` finding | `unread delivery` or `delivered backlog` once open past the retry window | Never raised |
+| Doctor `inbox no outcome` finding | Closed `done` or `cancelled` without naming where the work went | Never raised |
+
+Both inbox seams read the same flag stored on the item. `scripts.inbox.wake.decide` returns no step for an
+information only item, so neither the tick wake pass nor the Codex `wake_now` path wakes, holds or escalates it,
+and `scripts.doctor.inbox.past_window` skips it before any receiver check. Work items keep the behaviour
+described under [Inbox escalation sender exclusion](#inbox-escalation-sender-exclusion) and
+[Inbox receiver read](#inbox-receiver-read). The swarm itself sends some notices as information only, for example
+the [merge priority owner notices](#merge-priority-owner-notices) and every non master copy of a page chat line
+sent To swarm (`@swarm`).
+
+#### Usage
+
+For `msg send` and `msg reply`, `--fyi` must be the first or last word of the text; for `swarm say` it is an
+ordinary option and can go anywhere:
+
+```bash
+agentihooks msg send eng-1@<slug> --fyi "Your pull request merged; nothing to do."
+agentihooks msg reply <message-id> --fyi "Thanks, received."
+agentihooks swarm <slug> say "Dev is green again." --to eng --fyi
+```
+
+Use it only when the text requests no receiver action. A status report that still asks for a check, a proof or
+a decision stays a work item, so it keeps its wakes, its seat hold and its escalation. There is no setting:
+`AGENTIHOOKS_INBOX_RETRY_WINDOW_S`, `AGENTIHOOKS_INBOX_QUIET_S` and the three wake limit apply to work items
+only.
+
+#### Inspect an item
+
+`msg read` prints the item as JSON with its history and marks it read, so an information only item closes as
+`done: information received` once the read lands. Read it from the receiving session, or from the seat holder
+taking responsibility for it:
+
+```bash
+agentihooks msg inbox --of eng-1@<slug>
+agentihooks msg read <message-id>
+```
+
+The JSON carries `"fyi": true`. Its history holds `pending`, `delivered`, `read` or `confirmed` and the `done`
+close, and never a `woken`, `escalated_master` or `escalated_operator` event.
+
+#### Troubleshooting
+
+| Symptom | Check and response |
+|---|---|
+| An idle pane was typed a wake for an item that asks for nothing | Run `msg read` on it: `"fyi": false` means it was sent as work; resend such notices with `--fyi`. `"fyi": true` with a `woken` event means the tick or Codex pane process runs code older than [pull request 5047](https://github.com/the-cloud-clockwork/agentihooks/pull/5047); pull `dev` into the checkout the tick runs from |
+| An information only item to an empty seat is still open | Expected until a session reads or confirms it: it waits for nothing and raises no finding. The seat's next occupant receives it and its receipt closes it |
+| The Doctor reports `inbox past window` on an information only item | The Doctor timer runs code older than pull request 5047; pull `dev` into the checkout it runs from. Close the item with `agentihooks msg close <message-id> done` |
+| A work item gets no wake or escalation | Check its `fyi` flag first, then the retry window, outage holds and seat successor holds listed under [Inbox escalation sender exclusion](#inbox-escalation-sender-exclusion) |
+
+#### Delivery evidence
+
+[Pull request 5047](https://github.com/the-cloud-clockwork/agentihooks/pull/5047) merged into `dev` on
+20 October 2026 at 05:29 UTC. The test only head failed four cases in the
+[red proof run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39359235659) (4 failed, 71 passed);
+the [Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39365109171) on the final head
+passed. The cases in `tests/inbox/test_wake.py` assert that an idle pane holding only information mail gets no
+wake on the tick pass or the Codex path, that information mail to a vacated seat gets no event before or after a
+successor binds, and that a work item beside it is still woken. The case in `tests/doctor/test_inbox.py` asserted
+the past window detector skips the information item and still reports the work item next to it; pull request 5742
+later rewrote it as `test_an_item_on_an_empty_seat_awaiting_a_successor_is_not_counted_and_a_live_occupant_item_still_is`,
+which still reports the work item to a live occupant and never the information item.
+
+The measured number is information only items in Doctor seat wait findings per day. The source task replayed the
+24 hours before the fix over both swarms: 25 information only seat items were open past the window. After the fix
+the count is 0 by construction, since the detector skips every such item. A later change,
+[pull request 5742](https://github.com/the-cloud-clockwork/agentihooks/pull/5742), stopped the detector from
+reporting any item that waits for a seat's successor, so the `seat wait` category no longer appears; the
+information only skip still covers the `unread delivery` and `delivered backlog` categories.
 
 ### Local outbox and limits
 

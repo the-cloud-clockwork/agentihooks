@@ -64,7 +64,7 @@ def _opens(signer: nats_grant.Signer, credentials: str | None) -> bool:
     from scripts.events import nats
 
     try:
-        bus = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credentials, bind=True))
+        bus = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credentials, provision=False))
     except Exception as exc:
         assert "authorization" in str(exc).lower()
         return False
@@ -143,7 +143,7 @@ def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_dur
 
     hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
     member = nats.open_bus(
-        BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, "m1"), bind=True)
+        BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, "m1"), provision=False)
     )
     try:
         policy = QueuePolicy()

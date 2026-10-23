@@ -138,7 +138,7 @@ def test_a_work_queue_refuses_another_policy(bus):
 
 
 def test_a_bind_bus_creates_nothing_and_binds_what_another_bus_created(url):
-    binder = nats.open_bus(BusConfig(backend="nats", url=url, queue=LOG_POLICY, bind=True))
+    binder = nats.open_bus(BusConfig(backend="nats", url=url, queue=LOG_POLICY, provision=False))
     try:
         assert binder._loop.run(binder._js.streams_info()) == []
         with pytest.raises(nats.NotFoundError):

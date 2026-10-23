@@ -55,3 +55,5 @@
 /mutation-clearances/ @nestorcolt
 /delivery.yaml @nestorcolt
 /.github/workflows/trusted-actors.json @nestorcolt
+/deploy/helm/agentihooks-swarm/charts/ @nestorcolt
+/deploy/helm/agentihooks-swarm-deps.sha256 @nestorcolt

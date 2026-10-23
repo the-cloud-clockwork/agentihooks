@@ -88,16 +88,16 @@ def _consumer_config(durable: str, subject: str, policy: QueuePolicy) -> api.Con
     )
 
 
-async def _pull(js, stream: str, durable: str, subject: str, policy: QueuePolicy, bind: bool):
+async def _pull(js, stream: str, durable: str, subject: str, policy: QueuePolicy, provision: bool):
     try:
         info = await js.consumer_info(stream, durable)
     except NotFoundError:
-        if bind:
+        if not provision:
             raise
     else:
         if info.config.filter_subject != subject:
             raise ValueError(f"durable consumer {durable!r} filters {info.config.filter_subject!r}, not {subject!r}")
-    if not bind:
+    if provision:
         config = _consumer_config(durable, subject, policy)
         if stream == DEAD_STREAM:
             config.max_deliver = policy.max_deliver
@@ -178,12 +178,12 @@ async def _publish_dead(js: JetStreamContext, event: Envelope, identity: str, at
 
 
 class NatsEventLog:
-    def __init__(self, loop: _Loop, js: JetStreamContext, policy: QueuePolicy, stream: str, bind: bool):
+    def __init__(self, loop: _Loop, js: JetStreamContext, policy: QueuePolicy, stream: str, provision: bool):
         self._loop = loop
         self._js = js
         self._policy = policy
         self._stream = stream
-        self._bind = bind
+        self._provision = provision
         self._policies: dict[str, QueuePolicy] = {}
 
     def publish(self, subject: str, event: Envelope) -> bool:
@@ -195,7 +195,7 @@ class NatsEventLog:
             raise ValueError(f"durable consumer {durable!r} already has another policy")
         return NatsConsumer(
             self._loop,
-            self._loop.run(_pull(self._js, self._stream, durable, subject, policy, self._bind)),
+            self._loop.run(_pull(self._js, self._stream, durable, subject, policy, self._provision)),
             self._js,
             policy,
             f"events.{durable}",
@@ -209,7 +209,7 @@ class NatsWorkQueue:
         self._js = js
         self._stream = queue_stream(name)
         self._subject = f"{QUEUE_SUBJECT}.{name}"
-        if not config.bind:
+        if config.provision:
             loop.run(
                 js.add_stream(
                     name=self._stream,
@@ -221,7 +221,7 @@ class NatsWorkQueue:
         durable = self._stream.removeprefix("AGENTIHOOKS_QUEUE_")
         self._consumer = NatsConsumer(
             loop,
-            loop.run(_pull(js, self._stream, durable, self._subject, policy, config.bind)),
+            loop.run(_pull(js, self._stream, durable, self._subject, policy, config.provision)),
             js,
             policy,
             f"queue.{name}",
@@ -236,11 +236,13 @@ class NatsWorkQueue:
 
 
 class NatsStateStore:
-    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, bind: bool):
+    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, provision: bool):
         self._loop = loop
         self._js = js
         self._bucket = bucket
-        self._kv = loop.run(js.key_value(bucket) if bind else js.create_key_value(bucket=bucket, history=KV_HISTORY))
+        self._kv = loop.run(
+            js.create_key_value(bucket=bucket, history=KV_HISTORY) if provision else js.key_value(bucket)
+        )
 
     def get(self, key: str) -> StateEntry | None:
         try:
@@ -287,18 +289,26 @@ class NatsBus:
                 nats_client.connect(url, allow_reconnect=False, **auth_options(config.credentials))
             )
             self._js = self._nc.jetstream()
-            if not config.bind:
-                for stream, subject in ((EVENT_STREAM, f"{PREFIX}.>"), (DEAD_STREAM, DEAD_SUBJECT)):
-                    self._loop.run(
-                        self._js.add_stream(
-                            name=stream, subjects=[subject], duplicate_window=_seconds(config.dedupe_window_ms)
-                        )
+            if config.provision:
+                self._loop.run(
+                    self._js.add_stream(
+                        name=EVENT_STREAM,
+                        subjects=[f"{PREFIX}.>"],
+                        duplicate_window=_seconds(config.dedupe_window_ms),
                     )
+                )
+                self._loop.run(
+                    self._js.add_stream(
+                        name=DEAD_STREAM,
+                        subjects=[DEAD_SUBJECT],
+                        duplicate_window=_seconds(config.dedupe_window_ms),
+                    )
+                )
         except BaseException:
             self._loop.close()
             raise
-        self.events = NatsEventLog(self._loop, self._js, config.queue, EVENT_STREAM, config.bind)
-        self.dead = NatsEventLog(self._loop, self._js, config.queue, DEAD_STREAM, config.bind)
+        self.events = NatsEventLog(self._loop, self._js, config.queue, EVENT_STREAM, config.provision)
+        self.dead = NatsEventLog(self._loop, self._js, config.queue, DEAD_STREAM, config.provision)
 
     def queue(self, name: str, policy: QueuePolicy) -> NatsWorkQueue:
         with self._lock:
@@ -314,7 +324,7 @@ class NatsBus:
         with self._lock:
             store = self._buckets.get(bucket)
             if store is None:
-                store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket, self._config.bind)
+                store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket, self._config.provision)
             return store
 
     def close(self) -> None:

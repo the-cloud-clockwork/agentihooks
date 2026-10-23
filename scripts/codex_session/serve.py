@@ -23,6 +23,7 @@ ROUTE_FLAG = "--route"
 ROUTE_PREFIX = f"{ROUTE_FLAG}="
 EFFORT_PREFIX = "model_reasoning_effort="
 QUOTE = '"'
+PUMP_EXITED = "agentihooks codex-session: inbox pump exited with status {}; stopping the app server"
 
 
 def take_route(args: list[str]) -> tuple[str, list[str]]:
@@ -187,6 +188,7 @@ def main(
             except subprocess.TimeoutExpired:
                 pass
         else:
+            print(PUMP_EXITED.format(pump.returncode), file=sys.stderr)
             return pump.returncode or 3
     finally:
         if pump is not None:

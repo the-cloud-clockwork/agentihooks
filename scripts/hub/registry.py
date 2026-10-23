@@ -59,16 +59,20 @@ REACTORS = Registry()
 
 def configured(bus: Bus, clock: lease.Clock = lease.wall_ms) -> Registry:
     from scripts.hub.hive_loss import HiveLoss
+    from scripts.hub.inbox_wake import InboxWake
     from scripts.hub.lifecycle import Lifecycle
     from scripts.hub.pulls import Pulls
     from scripts.hub.readiness import Readiness
     from scripts.hub.reconciler import Reconciler
     from scripts.hub.timers import Timers
 
+    inbox = InboxWake(bus, clock=clock)
     return Registry(
         [
             *REACTORS,
             Timers(bus, clock).reactor(),
+            inbox.reactor(),
+            inbox.expiry_reactor(),
             HiveLoss(bus, clock).reactor(),
             Lifecycle(bus).reactor(),
             Reconciler(bus, clock=clock).reactor(),

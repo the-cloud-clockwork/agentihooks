@@ -304,7 +304,7 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
     with nats_server.running(tmp_path / "nats") as url:
         bus = nats.open_bus(BusConfig(backend="nats", url=url))
         buckets.provision(bus)
-        spoke_bus = nats.open_bus(BusConfig(backend="nats", url=url, bind=True))
+        spoke_bus = nats.open_bus(BusConfig(backend="nats", url=url, provision=False))
         try:
             config = SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a")
             tasks, runtime = Mock(), Mock()

@@ -15,6 +15,10 @@ class DispatchError(InboxError):
     pass
 
 
+class InboxContention(DispatchError):
+    pass
+
+
 @dataclass(frozen=True)
 class Delivery:
     id: str
@@ -43,7 +47,7 @@ def transact(redis, body, keys=()):
                 return result
             except WatchError:
                 continue
-    raise DispatchError("the inbox changed meanwhile; run it again")
+    raise InboxContention("the inbox changed meanwhile; run it again")
 
 
 def check_owner(pipe, recipient, owner, world):
