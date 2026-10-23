@@ -153,7 +153,12 @@ attempts per image. Each attempt reads the image manifest, picks the
 `linux/amd64` digest and pulls that digest, with each command bounded by
 `PULL_ATTEMPT_SECONDS` (default 120). A failed attempt prints
 `Pull of <image> failed on attempt <n> of 3; retrying in 10 seconds` and waits
-ten seconds; the third failure exits with the pull's status.
+ten seconds; the third failure exits with the pull's status. For a
+`public.ecr.aws/docker/library/<image>` name, the second attempt reads and
+pulls `mirror.gcr.io/library/<image>` instead, so a public ECR
+`toomanyrequests` answer on the first attempt does not by itself fail the
+pull; the result is still tagged
+under the requested name.
 
 Each `docker tag` runs only after its own pull succeeds, so a failed pull never
 leaves a mirror named image behind and the step exits non zero once the build

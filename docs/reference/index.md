@@ -25,7 +25,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Tool dependency synchronization](../getting-started/installation.md#synchronize-an-editable-tool-installation) | Update the editable source checkout and its running tool environment, check missing requirements and recover failed installs |
 | [CLI Commands](cli-commands.md) | All `agentihooks` subcommands and flags: init, uninstall, claude, ignore |
 | [Developer account login](account-login.md) | Claude and Codex login, managed shell tokens, OpenBao paths and key names, refresh authority and token stores |
-| [Scheduled tick delivery guard](../pillars/swarm.md#scheduled-tick-delivery-guard) | When the systemd tick timer is retired or restored, the delivery record and its reasons, the wait pass supervisor guard, the Doctor `scheduled tick` finding, inspection commands and troubleshooting |
+| [Scheduled tick delivery guard](../pillars/swarm.md#scheduled-tick-delivery-guard) | When the systemd tick timer is retired or restored, the delivery record and its reasons, the wait pass supervisor guard, why the supervisor a wait pass starts outlives the pass, the Doctor `scheduled tick` finding, inspection commands and troubleshooting |
 | [Task scope authorizations](../pillars/swarm.md#task-scope-authorizations) | Record master or operator scope, retrace a plan, interpret authorized pieces and configure enforcement |
 | [Follow ups on a task](../pillars/swarm.md#follow-ups-an-agent-adds-on-its-task) | How `followup add` records the session's task, routing to the task's owning master, the schema and domain checks with their refusals, an inspection command and troubleshooting |
 | [Master inbox intent grouping](../pillars/swarm.md#intent-grouping) | Settings, how a pooled item is matched to a master, token cost per item, fallbacks to round robin, Redis keys and troubleshooting |
@@ -77,7 +77,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Codex CLI cache in unit jobs](../ci-timing.md#codex-cli-cache) | Seed the CLI on main, configure its release, diagnose cache misses and verify installation and shard timings |
 | [Worker hive pod image build](../ci-timing.md#worker-hive-pod-image-build) | Reuse of the published worker base, the base inputs and rebuild decisions, build output, measurements and troubleshooting |
 | [Refused worker startup diagnostics](../swarm-v2/startup-diagnostics.md) | Startup log and exit reason kept before a refused worker Pod is removed, the bounded cleanup log retry, `pods/log` permission, reading the records and troubleshooting |
-| [Worker profile proof](worker-profile-proof.md) | Offline Codex SessionStart replay, first registry write timing, surviving hook child failures, fixed limits and CI evidence |
+| [Worker profile proof](worker-profile-proof.md) | Offline Codex SessionStart replay, first registry write timing, surviving hook child failures, the session start dependency check, fixed limits and CI evidence |
 | [Browser cache](browser-cache.md) | Verified Chromium preparation, dev push only saving, restore scope, workflow configuration and cache inspection |
 | [Task browser](task-browser.md) | The `playwright-cmd` proxy: which lane homes mount it, start on first tool call, the shared tool list cache, measured memory effect and troubleshooting |
 | [WSL disk reclaim](wsl-disk.md) | Sparse VHDX so space `agentihooks gc` frees returns to Windows; why `/tmp` empties on WSL |

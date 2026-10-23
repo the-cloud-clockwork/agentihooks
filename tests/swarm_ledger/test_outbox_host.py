@@ -1,10 +1,12 @@
 import threading
+from contextlib import nullcontext
 from unittest.mock import Mock
 
 import pytest
 
 from scripts.events import factory, memory
 from scripts.events.config import BusConfig
+from scripts.hub import projector
 from scripts.swarm_ledger.repository import outbox, sqlite
 
 
@@ -145,6 +147,7 @@ def test_ledger_server_alone_drives_the_outbox_until_shutdown(tmp_path, monkeypa
     monkeypatch.setattr(factory, "open_bus", Mock(return_value=bus))
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
     monkeypatch.setattr(ledger_server, "stored", repository)
+    monkeypatch.setattr(projector, "running", Mock(return_value=nullcontext()))
     monkeypatch.setattr(ledger_server, "PIDFILE", tmp_path / "server.pid")
     monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(ledger_server.storage, "shared", lambda: None)
@@ -206,7 +209,7 @@ def test_a_disconnected_real_nats_client_is_reopened_and_the_row_reaches_a_consu
             observer.close()
 
 
-def test_server_gives_its_repository_to_the_relay_and_stops_it_before_closing(monkeypatch, tmp_path):
+def test_server_gives_the_relay_and_the_projector_their_stores_and_stops_them_before_closing(monkeypatch, tmp_path):
     from contextlib import contextmanager
 
     from scripts.swarm_ledger import ledger_server, outbox_host
@@ -222,11 +225,21 @@ def test_server_gives_its_repository_to_the_relay_and_stops_it_before_closing(mo
         finally:
             lifecycle.append("relay stopped")
 
+    @contextmanager
+    def projecting(repository, hub):
+        assert (repository, hub) == (ledger_server.repository, ledger_server.HUB)
+        lifecycle.append("projector started")
+        try:
+            yield
+        finally:
+            lifecycle.append("projector stopped")
+
     def serving():
         lifecycle.append("serving")
         raise ValueError("serving failed")
 
     monkeypatch.setattr(outbox_host, "running", running)
+    monkeypatch.setattr(projector, "running", projecting)
     monkeypatch.setattr(ledger_server, "PIDFILE", tmp_path / "server.pid")
     monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(ledger_server.storage, "shared", lambda: None)
@@ -243,7 +256,14 @@ def test_server_gives_its_repository_to_the_relay_and_stops_it_before_closing(mo
     monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
     with pytest.raises(ValueError, match="serving failed"):
         ledger_server.serve()
-    assert lifecycle == ["relay started", "serving", "relay stopped", "server closed"]
+    assert lifecycle == [
+        "relay started",
+        "projector started",
+        "serving",
+        "projector stopped",
+        "relay stopped",
+        "server closed",
+    ]
 
 
 @pytest.mark.wall_clock
