@@ -317,3 +317,30 @@ def test_a_lease_lost_mid_pass_still_drops_the_starts_it_settled(rig):
     rig.loss.poll()
     assert [call.args[1].key for call in rig.loss._emit.call_args_list] == ["hive-a", "hive-b"]
     assert json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value) == {}
+
+
+def test_index_writes_retry_a_conflict_and_give_up_after_eight(rig):
+    from scripts.events.bus import StateConflict
+    from scripts.events.envelope import Envelope
+    from scripts.hub import hive_loss
+
+    store = rig.loss._state
+    raced = [StateConflict("raced")]
+
+    def create(key, value):
+        if raced:
+            raise raced.pop()
+        return store.create(key, value)
+
+    conflicts = Mock(side_effect=create)
+    rig.loss._state = Mock(wraps=store, create=conflicts)
+    data = {"claim_key": "c", "claim_revision": 1, "hive": "hive-a"}
+    start = Envelope("started:x", "execution.started", "rig", "execution", "x", 1, T0, "hive-a", data)
+    rig.loss.handle(start)
+    assert json.loads(store.get(hive_loss.INDEX).value) == {"c": start.to_dict()}
+    assert conflicts.call_count == 2
+    rig.loss._state = Mock(wraps=store, update=Mock(side_effect=StateConflict("raced")))
+    with pytest.raises(StateConflict) as raised:
+        rig.loss.handle(replace(start, data={**data, "claim_revision": 2}))
+    assert str(raised.value) == "hive loss index remained contended"
+    assert rig.loss._state.update.call_count == 8
