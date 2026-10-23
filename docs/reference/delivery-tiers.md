@@ -446,7 +446,7 @@ The same planner serves every sharded unit run:
 
 Inside each worker, `slowest_first` orders the collected tests slowest first, with tests under 0.1 s after them in collection order. Every test of a group takes the group's slowest duration, and the sort is stable, so the group keeps collection order at the place of its slowest test. xdist appends `@<group>` to a grouped test id; the planner strips it before reading stored durations, including ids whose parameters hold an `@`.
 
-Tests with no stored duration follow their file. A test id the plan does not name goes to a shard that already holds measured tests of its file, chosen by a CRC32 of the test id; a grouped file kept whole has exactly one such shard, so its new tests join it. A test file with no measured test at all is collected by every shard and each of its tests is hashed across all shards, so a new grouped file can split until the next dev push records its durations.
+Tests with no stored duration follow their file. A test id the plan does not name goes to a shard that already holds measured tests of its file, chosen by a CRC32 of the test id; a grouped file kept whole has exactly one such shard, so its new tests join it. A test file with no measured test at all is collected by every shard and each of its tests is hashed across all shards, so a new grouped file can split until the next dev push records its durations. Since the split job prices every collected test before planning (see [stored duration coverage](#stored-duration-coverage)), this fallback only catches a test id missing from the split job's `.test_durations`.
 
 ### Grouped file example
 
@@ -529,6 +529,98 @@ To see what a CI shard ran, read the `unit (3.12, <shard>)` job log: the Run tes
 Delivered by pull request [5032](https://github.com/the-cloud-clockwork/agentihooks/pull/5032) for issue [5031](https://github.com/the-cloud-clockwork/agentihooks/issues/5031), after pull request [4909](https://github.com/the-cloud-clockwork/agentihooks/pull/4909) split the remote control mutation baseline test into two tests of one group and made `slowest_first` keep a group in collection order. Red: Tests run [39353180256](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39353180256), test only, failed the new contract test on both Python versions. Run [39353833681](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39353833681), on a first fix that kept every grouped file whole, failed the queue sizing tests and the exactly once shard test, which the share cap fixed. Green: Tests run [39355391107](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39355391107), with every unit shard and `shard-check` passing.
 
 Shard balance before the change, read on the first dev push Tests run after 4909 merged, [39338932046](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39338932046), with all unit shards green: on Python 3.11, shard 1 took 184 s against 174 to 294 s for the other eleven, median 187 s; on Python 3.12, 390 s against 358 to 530 s, median 388 s. Shard 1, which held the remote control pair then, was not an outlier. The change targets placement, not shard wall time, and no matching after window on the same twelve shard layout exists: Python 3.11 left CI and the 3.12 unit job moved to 20 shards later.
+
+## Stored duration coverage
+
+Every test the unit shard planner sees has a stored duration. Two writers fill the gaps with the median of the map they write, so a test that no run has timed yet is priced at a typical test's cost. Before this, the planner left such a test out of `assign_nodes` and placed it by the CRC32 fallback without weighing it.
+
+| Writer | Runs in | Fills |
+|---|---|---|
+| `tests.refresh_durations` | The `Refresh measured durations` step of the dev push refresh job: `python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5` | Each map it writes (`.test_durations`, `.test_durations-<version>`, `.test_durations-slowest` and `.test_durations-slowest-<version>`) gets every collected test it lacks, priced at that map's own median. The maps go out as the `durations-merged` artifact and the `durations-merged-<sha>` cache |
+| `tests.dev_durations` | The split job's `Adopt latest dev durations` step, and the `Size queue shards from conservative durations` step on merge groups | After choosing which durations to use, every collected test still missing from `.test_durations` gets the median of that file. The completed file goes out as the `split-<version>` artifact, and the unit shards plan from it |
+
+### How a push picks and completes its durations
+
+1. The split job collects the head's tests (`tests.duration_coverage.collected_tests`), or reads `collected.json` from the selection on pull request and merge group events.
+2. `_choose` in `tests.dev_durations` takes the restored dev cache (`.test_durations` overlaid with `.test_durations-<version>`). `validate_coverage` refuses a map that lacks more than one collected test in ten; the step then prints `Refusing the restored dev durations: <n> of <m> tests have no stored duration` and tries the committed `.test_durations-<version>`, then `.test_durations`. When neither file covers nine tests in ten, every collected test without a committed duration is priced at the committed median and the step warns `Splitting tests without a committed duration evenly`.
+3. `main` fills each collected test that the chosen map lacks with the median of that map, rewrites `.test_durations`, and writes its sha256 to `durations.sha256`.
+4. Each `unit (3.12, <shard>)` job downloads `split-3.12`, and `_shard_files` in `tests/conftest.py` passes every collected test to `assign_nodes` with its stored or median price.
+
+On the dev push refresh the same one in ten check runs first, and the step fails with `IncompleteDurations: <n> of <m> tests have no stored duration` when a written map would lack more than that. Within that limit the fill gives a new test the median until a later dev push times it; `ci_medians` then replaces the estimate with a measured value.
+
+The median is small. On the dev push Tests run [39992377126](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39992377126) at `94dcb486bf`, each `durations-merged` map held 43558 tests; the median was 0.0529 s in `.test_durations` and `.test_durations-3.12`, and 0.1013 s in both slowest maps.
+
+### Measured effect
+
+The Doctor measured both numbers over ten completed, non cancelled dev push Tests runs on each side of the fix (ledger tasks t553 and t618), from the run artifacts:
+
+- **Unknown duration share**: collected tests in `collected-3.12` that the `.test_durations` in `split-3.12` does not name, over all collected tests.
+- **Shard spread**: the slowest Python 3.12 unit shard's `elapsed.json` seconds minus the median shard's, per run, then the median over the ten runs.
+
+| Window | Runs | Shards | Unknown share | Spread median (range) | Slowest shard median | Median shard median |
+|---|---|---|---|---|---|---|
+| Before: 20 October, 17:12 to 19:40 UTC, ending run [39485406636](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39485406636) | 10 | 12 | 274 of 398884 (0.069%) | 27.25 s (5 to 58) | 325 s | 294.25 s |
+| After: 21 October, 00:38 to 03:41 UTC, runs [39522581705](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39522581705) to [39539929506](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39539929506) | 10 | 20 | 0 of 403194 (0%) | 19.0 s (6.5 to 36) | 214.5 s | 195.5 s |
+
+The after window starts with the first dev push Tests run created after the fix was applied, at 00:22 UTC on 21 October. Nine runs before and five after ended in failure; their shards still wrote `elapsed.json`, so they count.
+
+Read the spread with the shard count beside it. Pull request [5342](https://github.com/the-cloud-clockwork/agentihooks/pull/5342) moved the 3.12 unit job from 12 to 20 shards at 21:46 UTC on 20 October, between the two windows, and every shard got shorter. Measured against the median shard, the spread did not change: 9.6% before and 9.9% after (the median of each run's spread over its median shard). The unknown share is the number the fix moved. Each `durations-merged` per version map covered every collected test in both windows; the 274 gaps before the fix were tests that the map the split job adopted did not name yet.
+
+### Measuring a window
+
+This reads the two numbers for any dev push Tests run whose artifacts are still kept: `split-<version>` for 7 days, `collected-<version>` and the shard `durations-*` artifacts for 14. It downloads through `gh api`, so it also works with a `gh` that has no `run download --pattern`:
+
+```bash
+cat > coverage_spread.py <<'EOF'
+import io, json, re, statistics, subprocess, sys, zipfile
+
+REPO = "repos/the-cloud-clockwork/agentihooks"
+
+def api(path):
+    return subprocess.run(["gh", "api", path], check=True, capture_output=True).stdout
+
+def member(archive, suffix):
+    return json.loads(archive.read(next(n for n in archive.namelist() if n.endswith(suffix))))
+
+for run in sys.argv[1:]:
+    artifacts = json.loads(api(f"{REPO}/actions/runs/{run}/artifacts?per_page=100"))["artifacts"]
+    wanted = {a["name"]: a for a in artifacts if re.fullmatch(r"collected-3\.12|split-3\.12|durations-3\.12-\d+", a["name"])}
+    files = {name: zipfile.ZipFile(io.BytesIO(api(f"{REPO}/actions/artifacts/{a['id']}/zip"))) for name, a in wanted.items()}
+    collected = member(files["collected-3.12"], "collected.json")
+    planned = member(files["split-3.12"], ".test_durations")
+    elapsed = [member(f, "elapsed.json")["seconds"] for name, f in files.items() if name.startswith("durations-")]
+    missing = sum(node not in planned for node in collected)
+    median = statistics.median(elapsed)
+    print(run, f"missing {missing}/{len(collected)}", f"shards {len(elapsed)}",
+          f"slowest {max(elapsed)}", f"median {median}", f"spread {max(elapsed) - median}")
+EOF
+runs=$(gh api 'repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=30' \
+  --jq '[.workflow_runs[] | select(.conclusion != "cancelled")][:10][].id')
+python coverage_spread.py $runs
+```
+
+Run on two runs of the after window it printed:
+
+```text
+39539929506 missing 0/40380 shards 20 slowest 203 median 191.0 spread 12.0
+39522581705 missing 0/40250 shards 20 slowest 251 median 215.0 spread 36.0
+```
+
+Take the median of the `spread` column over the ten runs, and divide the total `missing` by the total collected. A run without a `split-3.12` artifact (a run that reused a queue split, or one past its retention) stops the script with `KeyError: 'split-3.12'`; leave that run out of the window and take the next one.
+
+### Troubleshooting stored durations
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The refresh job fails with `<n> of <m> tests have no stored duration` | A written map lacks more than one collected test in ten | Compare the run's `durations-3.12-<shard>` artifacts with its unit shards; a shard that kept no artifact leaves its tests unmeasured |
+| The split step prints `Refusing the restored dev durations` | The dev cache predates more than a tenth of the suite, for example after a large test move | The committed durations are used instead; the next green dev push refresh restores the cache |
+| `Splitting tests without a committed duration evenly` | Neither the cache nor a committed file covers nine tests in ten | Tests without a committed duration are planned at the committed median for this run; the next green dev push refresh restores the cache |
+| A new slow test makes one shard run long | It was planned at the median until a dev push timed it | Wait for the next dev push refresh, or check that the test's file appears in that run's `durations-3.12-*` artifacts |
+| The measuring script reports missing tests after the fix | The split job did not run `tests.dev_durations` for this run, or read another collection | Read the `Adopt latest dev durations` step log of the split job and compare its `collected.json` with the shards' |
+
+### Delivery evidence
+
+Delivered by pull request [5358](https://github.com/the-cloud-clockwork/agentihooks/pull/5358) for issue [5354](https://github.com/the-cloud-clockwork/agentihooks/issues/5354). Red: refresh proof [39489162638](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39489162638) left out a collected test, and planner proof [39489803250](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39489803250) failed both cache paths. Green: [39490102685](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39490102685) passed all 181 focused checks. `test_refresh_records_every_collected_test_with_a_measured_default` in `tests/test_refresh_durations_errors.py` and `test_planner_prices_every_new_case_from_the_measured_median` in `tests/test_dev_durations.py` pin the two writers.
 
 ## Lost unit shard rerun
 
