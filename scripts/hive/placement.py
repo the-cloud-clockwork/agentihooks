@@ -16,6 +16,7 @@ HEADLESS = "headless hive"
 UI_HIVE = "UI hive"
 LOCAL_MACHINE = "local machine"
 LOCAL_FULL = ", and the local machine runs "
+NEEDS_WORKSTATION = "the task needs the workstation, so no remote hive takes it"
 UNRANKED = math.inf
 
 

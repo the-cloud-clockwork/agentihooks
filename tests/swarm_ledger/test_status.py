@@ -139,6 +139,40 @@ class Comments(unittest.TestCase):
         core.sync(SLUG, ops=[agent("set", "eng", 1, path=f"{self.item}/done", value=True, status="Fixed and merged.")])
         self.assertEqual([e["text"] for e in self.entries()], ["Fixed and merged."])
 
+    def test_queue_notices_append_and_are_never_amended(self):
+        removed, requeued, merged = "The swarm took it out of the queue.", "The swarm queued it again.", "Merged."
+        core.sync(SLUG, ops=[post("swarm", removed, 1, self.thread, notice=True)])
+        core.sync(SLUG, ops=[post("swarm", requeued, 2, self.thread, notice=True)])
+        core.sync(SLUG, ops=[post("swarm", merged, 3, self.thread)])
+        entries = self.entries()
+        self.assertEqual([e["text"] for e in entries], [removed, requeued, merged])
+        self.assertEqual([e.get("notice") for e in entries], [True, True, None])
+        self.assertFalse(any("edited_at" in e for e in entries))
+
+    def test_a_repeated_notice_id_appends_once(self):
+        core.sync(SLUG, ops=[post("swarm", "Queued again.", 1, self.thread, notice=True)])
+        core.sync(SLUG, ops=[post("swarm", "Queued again.", 1, self.thread, notice=True)])
+        self.assertEqual(len(self.entries()), 1)
+
+    def test_notice_rides_only_on_an_agent_comment_add(self):
+        core.check_body({"ops": [post("swarm", "Queued again.", 1, self.thread, notice=True)]})
+        refusal = "^notice rides only on an agent add to a comment thread, as true, without outcome or to$"
+        for op in (
+            post("boss", "Queued again.", 2, "chat", notice=True),
+            {"op": "add", "thread": self.thread, "id": "op-1", "text": "why?", "notice": True},
+            post("swarm", "Queued again.", 3, self.thread, notice="yes"),
+            post("swarm", "Queued again.", 4, self.thread, notice=True, to="operator"),
+            post("swarm", "Queued again.", 5, self.thread, notice=True, outcome="done"),
+        ):
+            with self.assertRaisesRegex(ValueError, refusal):
+                core.check_body({"ops": [op]})
+
+    def test_the_api_takes_a_notice_comment(self):
+        from scripts.swarm_ledger.api import schemas
+
+        ops = [post("swarm", "Queued again.", 1, self.thread, notice=True)]
+        self.assertEqual(schemas.check_operations({"operation_id": "o1", "ops": ops, "guards": {}}, core, ()), ops)
+
     def test_noisy_phase_status_is_refused(self):
         with self.assertRaises(ValueError):
             core.check_body(

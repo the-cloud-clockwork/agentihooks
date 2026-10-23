@@ -1,5 +1,6 @@
 import pytest
 
+from scripts.hive import admission, placement, placement_waits
 from scripts.inbox import store as inbox_store
 from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, cli, commands, status, tick
@@ -562,3 +563,125 @@ def test_a_doctor_held_by_the_watched_focus_is_not_a_spawn_stall(stalled, monkey
     assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
     watched["freezes"] = [{"verb": "focus", "target": "lane:ci"}]
     assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+
+
+HIVE_FULL = "no hive for eng has room"
+CPU_GATE = {"id": "anton-1", "refusal": admission.refusal(admission.Room(0, admission.CPU, "five minute load 9.00"))}
+MAX_GATE = {"id": "anton-2", "refusal": admission.refusal(admission.capped(admission.Room(1, "", ""), 3, 3))}
+CPU_WAIT = placement._refused(HIVE_FULL, [CPU_GATE])
+FULL_WAIT = placement.overflow(
+    "engineer", placement.Wait(placement._refused(HIVE_FULL, [CPU_GATE, MAX_GATE])), 8, 8
+).reason
+REFUSALS = (
+    "Admission refusals, latest first: local cap on ws (8 of 8 agents), cpu on anton-1 (2 tasks), "
+    "max agents on anton-2 (1 task)"
+)
+
+
+def seed_refusals(store, clock):
+    placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0] + 1)
+    placement_waits.observe(store, "sw", "ci", "t2", FULL_WAIT, clock[0] + 2)
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0] + 3)
+
+
+def quiet_watch(stalled):
+    store, ledger, runtime, clock, _ = stalled
+    with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
+        pass
+
+
+def test_admission_refusals_without_a_failed_launch_are_named_in_the_alarm(stalled):
+    store, _, _, clock, _ = stalled
+    quiet_watch(stalled)
+    seed_refusals(store, clock)
+    clock[0] += 600_000
+    quiet_watch(stalled)
+    (finding,) = spawn_stall.findings(store, "sw")
+    assert finding.evidence == ("A lane has a free seat, quota and claimable work", REFUSALS)
+    (mail,) = InboxStore(store.redis).pending_mail("master@sw")
+    assert mail.text == (
+        "Spawn stall on sw: No agent has launched for ten minutes. "
+        f"A lane has a free seat, quota and claimable work; {REFUSALS}"
+    )
+
+
+def test_a_fresh_failed_launch_follows_the_admission_refusals(stalled):
+    store, _, _, clock, _ = stalled
+    tick_failure(stalled)
+    seed_refusals(store, clock)
+    clock[0] += 600_000
+    tick_failure(stalled)
+    (finding,) = alarms(stalled)
+    assert finding["evidence"] == [
+        "A lane has a free seat, quota and claimable work",
+        REFUSALS,
+        "Last failed step tests.swarm.test_spawn_stall.stalled.<locals>.broken: RuntimeError: forced phase failure",
+    ]
+
+
+def test_refusals_last_seen_before_the_stall_are_not_named(stalled):
+    store, _, _, clock, _ = stalled
+    placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0] - 5)
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0] - 1)
+    placement_waits.observe(store, "sw", "ci", "t2", FULL_WAIT, clock[0] - 2)
+    quiet_watch(stalled)
+    placement_waits.observe(store, "sw", "ci", "t2", FULL_WAIT, clock[0])
+    clock[0] += 600_000
+    quiet_watch(stalled)
+    (finding,) = spawn_stall.findings(store, "sw")
+    assert finding.evidence[-1] == (
+        "Admission refusals, latest first: cpu on anton-1 (1 task), max agents on anton-2 (1 task)"
+    )
+    assert placement_waits.read(store, "sw")["t2"]["started_at"] == clock[0] - 600_002
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        ("no hive for eng has room: anton-1 ram: 1 of 8 MB available", [("ram", "anton-1")]),
+        ("no Claude account has room after hive sessions: 2", [("quota", "")]),
+        ("no live hive takes eng, and the local machine runs 8 of its 8 agents", [("placement", "")]),
+        (", and the local machine runs 8 of its 8 agents", []),
+        ("no hive for eng has room", [("placement", "")]),
+        (f"{CPU_WAIT}, and the local machine runs 8 of its 8 agents: ram: pod full", [("cpu", "anton-1")]),
+        ("no hive has room, and the local machine runs 8 of its 8 agents", [("placement", "")]),
+        ("no hive for eng has room: anton-1 cpu: load has room: none", [("cpu", "anton-1")]),
+    ],
+)
+def test_each_refusal_names_its_reason_and_host(reason, expected):
+    assert spawn_stall._refused(reason) == expected
+
+
+def test_no_refusals_leave_no_evidence_line():
+    assert spawn_stall.refusals({}, {}, 0) == ""
+
+
+def test_a_legacy_wait_without_a_seen_time_counts_from_its_start():
+    waits = {"t1": {"lane": "eng", "reason": CPU_WAIT, "started_at": 5}}
+    assert spawn_stall.refusals(waits, {}, 5) == "Admission refusals, latest first: cpu on anton-1 (1 task)"
+    assert spawn_stall.refusals(waits, {}, 6) == ""
+
+
+def test_a_refusal_orders_by_its_latest_sighting_across_tasks():
+    waits = {
+        "t1": {"reason": CPU_WAIT, "started_at": 1, "seen_at": 9},
+        "t2": {"reason": placement._refused(HIVE_FULL, [MAX_GATE]), "started_at": 1, "seen_at": 5},
+        "t3": {"reason": CPU_WAIT, "started_at": 1, "seen_at": 1},
+    }
+    assert spawn_stall.refusals(waits, {}, 0) == (
+        "Admission refusals, latest first: cpu on anton-1 (2 tasks), max agents on anton-2 (1 task)"
+    )
+
+
+def test_a_refusal_first_seen_at_zero_keeps_its_place():
+    waits = {"t1": {"reason": placement._refused(HIVE_FULL, [MAX_GATE]), "started_at": 0, "seen_at": 0}}
+    local = {"machine": "ws", "taken": 8, "maximum": 8, "at": 0}
+    assert spawn_stall.refusals(waits, local, 0) == (
+        "Admission refusals, latest first: local cap on ws (8 of 8 agents), max agents on anton-2 (1 task)"
+    )
+
+
+def test_a_local_cap_seen_at_the_stall_start_is_named():
+    local = {"machine": "ws", "taken": 8, "maximum": 8, "at": 7}
+    assert spawn_stall.refusals({}, local, 7) == "Admission refusals, latest first: local cap on ws (8 of 8 agents)"
+    assert spawn_stall.refusals({}, local, 8) == ""
