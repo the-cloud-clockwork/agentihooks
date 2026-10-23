@@ -1,14 +1,8 @@
 import shutil
-import socket
 import subprocess
-import time
 from pathlib import Path
 
-
-def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+from tests.events.nats_server import free_port, wait_listening
 
 
 class NatsServer:
@@ -24,16 +18,7 @@ class NatsServer:
         argv = [self.binary, "-js", "-a", "127.0.0.1", "-p", str(self.port), "-sd", str(self.store)]
         with open(self.log, "a") as out:
             self.process = subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT)
-        stop = time.monotonic() + deadline_s
-        while time.monotonic() < stop:
-            if self.process.poll() is not None:
-                raise RuntimeError(f"nats-server exited with {self.process.returncode}")
-            try:
-                socket.create_connection(("127.0.0.1", self.port), timeout=0.2).close()
-                return
-            except OSError:
-                time.sleep(0.05)
-        raise RuntimeError(f"nats-server did not listen on {self.port}")
+        wait_listening(self.port, self.process, deadline_s)
 
     def kill(self) -> None:
         self.process.kill()

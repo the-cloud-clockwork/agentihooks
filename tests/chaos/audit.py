@@ -107,7 +107,9 @@ def hive_reclaim(records: list[dict], fault: dict, until: int) -> dict:
 
 
 def nats_reclaim(records: list[dict], fault: dict, until: int) -> dict:
-    back = _first(records, "fault-cleared", fault["t"], until, fault="nats-restart") or fault["t"]
+    back = _first(records, "fault-cleared", fault["t"], until, fault="nats-restart")
+    if back is None:
+        return {"outage_s": None, "first_launch_s": None, "first_settle_s": None}
     return {
         "outage_s": _seconds(fault["t"], back),
         "first_launch_s": _seconds(back, _first(records, "launched", back, until)),
@@ -185,6 +187,13 @@ def report(records: list[dict]) -> dict:
         "exit_events_never_handled": len(handled["never_handled"]),
     }
     clean = len(windows) == len(MEASURED) and all(
-        w["duplicate_claims"] == 0 and w["orphans"] == 0 and measured(w) for w in windows
+        not (w["duplicate_claims"] or w["orphans"] or w["exit_events_handled_twice"] or w["exit_events_never_handled"])
+        and measured(w)
+        for w in windows
     )
-    return {"windows": windows, "final": final, "contract_met": clean and not final["duplicate_claims"] and not lost}
+    settled = not (final["exit_events_handled_twice"] or final["exit_events_never_handled"])
+    return {
+        "windows": windows,
+        "final": final,
+        "contract_met": clean and settled and not final["duplicate_claims"] and not lost,
+    }

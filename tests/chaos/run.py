@@ -109,11 +109,11 @@ class Chaos:
             self.journal.write("lease", holder=holder)
 
     def tick(self) -> None:
+        if self.server.process.poll() is not None:
+            return
         for name in self.fleet.exited():
             self.journal.write("restarted", target=name)
             self.fleet.restart(name)
-        if self.server.process.poll() is not None:
-            return
         try:
             self._offer()
             self._lease()
@@ -190,7 +190,7 @@ def summary(found: dict) -> str:
     for window in found["windows"]:
         lines.append(
             f"{window['fault']} ({window['target']}): duplicate claims {window['duplicate_claims']}, "
-            f"orphans at window end {window['orphans']}, exit events handled twice {window['exit_events_handled_twice']}, "
+            f"orphans at window end among work offered before the fault {window['orphans']}, exit events handled twice {window['exit_events_handled_twice']}, "
             f"never handled {window['exit_events_never_handled']}, reclaim {json.dumps(window['reclaim'])}"
         )
     final = found["final"]
