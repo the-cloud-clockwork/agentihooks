@@ -162,3 +162,17 @@ def test_hub_fans_in_scoped_event_streams_with_existing_reactor_filters(hub):
     assert {delivery.event.swarm for delivery in deliveries} == {"rig", "other"}
     for delivery in deliveries:
         delivery.ack()
+
+
+def test_member_state_exists_before_its_first_event(hub, signer):
+    from scripts.hive import buckets
+
+    hub.for_swarm("rig")
+    client = member(signer)
+    try:
+        own = client.for_swarm("rig")
+        for bucket in buckets.NAMES:
+            assert own.state(bucket).get("missing") is None
+        assert own.state("hive-presence").create("hive-a", b"present")
+    finally:
+        client.close()
