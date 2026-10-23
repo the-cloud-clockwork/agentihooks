@@ -916,6 +916,8 @@ jobs:
         uses: ./.github/actions/retry-download
         with:
           name: early-collected-${{ matrix.python-version }}
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
       - name: Download the queued run's dev durations
         if: needs.select.outputs.source == '' && needs.select.outputs.queued == 'true'
@@ -923,6 +925,8 @@ jobs:
         with:
           name: dev-durations
           path: ~/dev-durations
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
       - name: Restore latest dev durations
         if: needs.select.outputs.source == '' && needs.select.outputs.key != ''
@@ -1107,18 +1111,24 @@ jobs:
         uses: ./.github/actions/retry-download
         with:
           name: split-${{ matrix.python-version }}
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
       - name: Download the suite the split job collected
         if: needs.split.outputs.source == '' && github.event.pull_request.base.ref != 'main'
         uses: ./.github/actions/retry-download
         with:
           name: collected-${{ matrix.python-version }}
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
       - name: Download the tests this run reuses
         if: needs.split.outputs.source == '' && needs.split.outputs.reused != '' && needs.split.outputs.reused != '0'
         uses: ./.github/actions/retry-download
         with:
           name: reused-${{ matrix.python-version }}
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
       - name: Mint the token that reads the dev coverage
         id: dev-token

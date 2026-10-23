@@ -526,7 +526,11 @@ def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     upload = next(step for step in collect["steps"] if step.get("name") == "Upload the early collection")
     download = next(step for step in jobs["split"]["steps"] if step.get("name") == "Download the early collection")
     assert upload["with"]["if-no-files-found"] == "error"
-    assert download["with"]["name"] == upload["with"]["name"]
+    assert download["with"] == {
+        "name": upload["with"]["name"],
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+    }
     assert "test-count" not in jobs["split"]["needs"]
     adopt = next(step for step in jobs["split"]["steps"] if step.get("name") == "Adopt latest dev durations")
     assert "--collection collected.json" in adopt["run"]
@@ -705,7 +709,11 @@ def test_unit_shards_read_the_suite_the_split_job_collected():
     upload = next(step for step in jobs["split"]["steps"] if step.get("name") == "Upload collected tests")
     _, download = _unit_step_index(lambda s: s.get("name") == "Download the suite the split job collected")
     assert download["uses"] == "./.github/actions/retry-download"
-    assert download["with"]["name"] == upload["with"]["name"]
+    assert download["with"] == {
+        "name": upload["with"]["name"],
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+    }
     assert download["if"] in (upload["if"], f"needs.split.outputs.source == '' && {upload['if']}")
 
 
@@ -1036,7 +1044,11 @@ def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
     assert upload["with"]["path"].split() == [".test_durations", "durations.sha256"]
     assert upload["with"]["include-hidden-files"] is True
     _, download = _unit_step_index(lambda s: s.get("name") == "Download the durations this run splits on")
-    assert download["with"]["name"] == upload["with"]["name"]
+    assert download["with"] == {
+        "name": upload["with"]["name"],
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+    }
     _, store = _unit_step_index(lambda s: s.get("name") == "Upload durations")
     assert "durations.sha256" in store["with"]["path"].split()
 

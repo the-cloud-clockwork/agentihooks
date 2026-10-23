@@ -58,7 +58,8 @@ def _run_fallback(tmp_path, gh, token="app-token", attempt="1"):
         "PATH": f"{tools}:{os.environ['PATH']}",
         "GH_TOKEN": token,
         "ARTIFACT": "split-3.12",
-        "DEST": str(tmp_path / "out"),
+        "HOME": str(tmp_path),
+        "DEST": "~/out",
         "ATTEMPT_SECONDS": attempt,
         "WAIT_SECONDS": "0",
         "GITHUB_REPOSITORY": "o/r",
@@ -75,6 +76,7 @@ def _run_fallback(tmp_path, gh, token="app-token", attempt="1"):
     return done, time.monotonic() - started
 
 
+@pytest.mark.wall_clock
 def test_a_stalled_rest_attempt_ends_within_its_timeout(tmp_path):
     done, elapsed = _run_fallback(tmp_path, "sleep 300")
     assert done.returncode == 1
