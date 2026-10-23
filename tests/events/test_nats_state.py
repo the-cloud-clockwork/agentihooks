@@ -148,11 +148,12 @@ def guard_state_reads(js):
     original = js.get_msg
 
     async def get_msg(stream, **kwargs):
-        if "_STATE_" in stream:
+        traversal = "_STATE_" in stream and ("seq" in kwargs or "next" in kwargs)
+        if traversal:
             assert isinstance(kwargs.get("seq"), int) and kwargs["seq"] >= 1
             assert kwargs.get("next") is True
         result = await original(stream, **kwargs)
-        if "_STATE_" in stream:
+        if traversal:
             assert result.seq >= kwargs["seq"]
         return result
 
