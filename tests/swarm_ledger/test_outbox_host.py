@@ -8,8 +8,6 @@ from scripts.events.config import BusConfig
 from scripts.swarm_ledger.repository import sqlite
 
 
-
-
 @pytest.mark.wall_clock
 def test_running_host_publishes_a_later_ledger_write_and_stops_its_relay(tmp_path, monkeypatch):
     from scripts.swarm_ledger import outbox_host
