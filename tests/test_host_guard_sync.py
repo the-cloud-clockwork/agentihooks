@@ -23,7 +23,7 @@ def scheduler(monkeypatch):
 
     live = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
     monkeypatch.setattr(sync, "_scheduler", lambda: live)
-    monkeypatch.setattr(sync, "_stranded_scheduler", lambda: None, raising=False)
+    monkeypatch.setattr(sync, "_stranded_scheduler", lambda: None)
     monkeypatch.setattr("scripts.scheduler.service.ensure_running", Mock(return_value=True))
     return live
 
