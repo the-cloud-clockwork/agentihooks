@@ -11,6 +11,7 @@ work="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 export AGENTIHOOKS_HOME="$work/agentihooks-home" NO_COLOR=1
 trap 'docker compose --project-name agentihooks-swarm down --volumes >/dev/null 2>&1 || true' EXIT
 bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/nats:2.15.1-alpine
 if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
   docker tag "$SWARM_SMOKE_IMAGE" ghcr.io/the-cloud-clockwork/agentihooks-swarm:release
 else
