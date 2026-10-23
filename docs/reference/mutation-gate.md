@@ -160,9 +160,11 @@ appears on the run summary:
 
 `REASON` is the exception class and the `gh` stderr text, decoded with
 replacement characters for undecodable bytes; without stderr it is the
-exception message, for example `BadZipFile: File is not a zip file` or
-`KeyError: 'manifest.json'`. The planner keeps the reason from the second
-attempt.
+exception message. `find_record` wraps a corrupt `dep-manifest` zip, a missing
+`manifest.json` or an invalid schema as `UnusableRecord`, so those reasons read
+`UnusableRecord: Dev run RUN_ID: File is not a zip file` or
+`UnusableRecord: Dev run RUN_ID: "There is no item named 'manifest.json' in the archive"`.
+The planner keeps the reason from the second attempt.
 
 In the fallback, every changed source file gets every `test_*.py` file under
 `tests/`, at any depth, as its selection. No recorded coverage is consulted and
@@ -210,7 +212,7 @@ modules in the tree.
 | Symptom | Meaning and action |
 |---|---|
 | `Mutation selection fallback` warning on one run | The record read failed twice. Read the reason; a transient `HTTP 5xx` or timeout needs nothing, and the next run reads the record again |
-| The same warning on every run | The failure is persistent. A `gh` authentication or permission error points at `GH_TOKEN`; `Dev run RUN_ID:` in the reason names a dev run whose `dep-manifest` is unusable, which the planner reads again on every attempt; repair the record production on dev |
+| The same warning on every run | The failure is persistent. A `gh` authentication or permission error points at `GH_TOKEN`; a reason starting `UnusableRecord: Dev run RUN_ID:` (raised by `_usable` in `scripts/ci_test_plan.py`) names a dev run whose `dep-manifest` zip or schema is unusable, which the planner reads again on every attempt; repair the record production on dev |
 | Statistics take much longer than usual | Expected after a fallback: the whole suite runs for each changed file. Check the warning before diagnosing the statistics shards |
 | Planning step fails with a traceback | The exception is outside `RECORD_ERRORS`, or the failure is elsewhere in planning; read the traceback |
 | `attempt 1` line followed by a normal plan | The retry recovered; the selection is the coverage based one |
