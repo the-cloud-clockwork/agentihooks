@@ -56,6 +56,20 @@ def test_the_retry_backoff_doubles_up_to_thirty_seconds():
     assert slept == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0]
 
 
+def test_the_runner_sleeps_by_default_between_attempts():
+    runs = []
+
+    def fails_once():
+        runs.append(1)
+        if len(runs) == 1:
+            raise UNRESOLVED
+        raise Stop
+
+    with pytest.raises(Stop):
+        ledger_server.retrying(fails_once, first=0.01)()
+    assert runs == [1, 1]
+
+
 def test_a_loop_that_returns_runs_again_without_waiting():
     runs = []
 
