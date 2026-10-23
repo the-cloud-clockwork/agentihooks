@@ -28,7 +28,7 @@ def test_the_channel_pushes_a_seat_item_the_bus_delivers_and_confirms_its_receip
 
     def wait(timeout_ms):
         entered.set()
-        return real_wait(timeout_ms)
+        return real_wait(min(timeout_ms, 100))
 
     monkeypatch.setattr(feed, "wait", wait)
     monkeypatch.setattr(channel, "SETTLE_S", 0)
