@@ -23,7 +23,12 @@ def task(task_id, **fields):
 
 
 def doc(tasks, **extra):
-    return {"overview": "o", "tasks": list(tasks), "phases": [{"id": "p1", "title": "build", "depends_on": []}], **extra}
+    return {
+        "overview": "o",
+        "tasks": list(tasks),
+        "phases": [{"id": "p1", "title": "build", "depends_on": []}],
+        **extra,
+    }
 
 
 def snapshot(found, claimed=(), slug=SLUG):
@@ -169,7 +174,9 @@ def test_offers_use_the_given_queue_policy():
     clock = Clock()
     bus = memory.open_bus(BusConfig(), clock=clock)
     policy = QueuePolicy(max_deliver=2)
-    hub = offers.Readiness(bus, SimpleNamespace(slugs=lambda: [SLUG]), lambda slug: snapshot(doc([task("a")])), clock, policy)
+    hub = offers.Readiness(
+        bus, SimpleNamespace(slugs=lambda: [SLUG]), lambda slug: snapshot(doc([task("a")])), clock, policy
+    )
     hub.poll()
     assert bus.queue(readiness.queue_name(SLUG, "eng"), policy).policy == policy
 
@@ -263,7 +270,9 @@ def test_the_ledger_view_reads_running_swarms_through_the_freeze_watch(monkeypat
     configs = {"run": "running", "stop": "stopped"}
     store = SimpleNamespace(config=lambda slug: SimpleNamespace(state=configs[slug]))
     ledger = SimpleNamespace(state=lambda slug: {"raw": slug})
-    monkeypatch.setattr(freeze, "watched", lambda *args: found if args == ("run", store, ledger, {"raw": "run"}) else None)
+    monkeypatch.setattr(
+        freeze, "watched", lambda *args: found if args == ("run", store, ledger, {"raw": "run"}) else None
+    )
     monkeypatch.setattr(tick, "snapshot", lambda *args: args)
     load = offers.ledger_view(store, ledger)
     assert load("run") == ("run", store, {"a": found["tasks"][0]}, found)
