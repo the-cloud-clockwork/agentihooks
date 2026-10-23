@@ -42,11 +42,12 @@ def verification_notices(slug: str, store: object, doc: dict, at: int) -> list[s
     for task in doc["tasks"]:
         if task.get("state") != "open" or task.get("out_of_scope") or task.get("awaiting") != "verify":
             continue
-        if (task.get("contract") or {}).get("after_at"):
-            continue
         task_id = task["id"]
-        mark = stamps.get(f"tasks/{task_id}/awaiting", {}).get("at") or 0
         since_key = store.key(slug, f"verification-hold:{task_id}")
+        if (task.get("contract") or {}).get("after_at"):
+            store.redis.delete(since_key)
+            continue
+        mark = max(stamps.get(f"tasks/{task_id}/{field}", {}).get("at") or 0 for field in ("awaiting", "contract"))
         store.redis.set(since_key, mark or at, nx=True)
         since = max(int(store.redis.get(since_key)), mark)
         notice_key = store.key(slug, f"verification-notice:{task_id}")
