@@ -85,7 +85,9 @@ def test_join_refuses_an_unscoped_bus_credential_and_keeps_the_current_membershi
     assert saved.read_text() == "previous membership\n"
     assert not (home / auth.NATS_CREDS_FILE).exists()
     err = capsys.readouterr().err
-    assert "the hive offered an unscoped bus credential" in err
+    assert err == (
+        "hive join refused: the hive offered an unscoped bus credential; ask its hub to list this member's swarms\n"
+    )
     assert "fixture nats credentials" not in err
 
 
