@@ -55,6 +55,105 @@ def test_beat_refreshes_reported_fields_and_expires_telemetry(redis, monkeypatch
     assert json.loads(redis.get(f"{registry.key('machine')}:sessions")) == {}
 
 
+def test_hive_heartbeat_renews_account_counters_from_its_own_quota_and_executions(redis, monkeypatch):
+    from scripts.hive import account_slots
+
+    report = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    hosted = {"executions": {}, "names": []}
+    publish = Mock()
+    monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
+    monkeypatch.setattr(daemon, "execution_report", lambda *args: hosted)
+    monkeypatch.setattr(account_slots, "publish", publish)
+    daemon.beat(redis, "machine")
+    publish.assert_called_once_with("machine", report, hosted)
+
+
+def test_cold_native_accounts_use_their_own_fresh_quota_before_the_first_launch(monkeypatch):
+    from hooks.context import quota_usage
+    from scripts.routing import master_account
+
+    monkeypatch.setattr(daemon.balancer, "cached_observations", lambda **kwargs: [])
+    monkeypatch.setattr(daemon.balancer, "discover_credentials", lambda env: [])
+    monkeypatch.setattr(daemon, "_claude_snapshots", lambda observed: None)
+    monkeypatch.setattr(daemon.master_claude_login, "logins", lambda: {1: "login"})
+    monkeypatch.setattr(
+        master_account, "load", lambda environ: {"claude": master_account.MasterAccount("claude", "native")}
+    )
+    monkeypatch.setattr(daemon, "claude_signed_in", lambda: False)
+    monkeypatch.setattr(daemon.codex_router, "accounts", lambda env: [])
+    monkeypatch.setattr(daemon.codex_router, "quotas", lambda *args: {})
+    monkeypatch.setattr(
+        quota_usage,
+        "latest_snapshot",
+        lambda account: (
+            99,
+            {
+                "five_hour": {"used_percentage": 1, "resets_at": 500},
+                "seven_day": {"used_percentage": 2, "resets_at": 900},
+            },
+        ),
+    )
+    slots, readings = daemon._subscriptions({}, {"claude": {}, "codex": {}}, 100)
+    assert {slot["account"] for slot in slots} == {"login", "native"}
+    assert all(slot["cap"] > 0 for slot in slots)
+    assert readings["claude:login"]["observed_at"] == 99
+    assert readings["claude:native"]["observed_at"] == 99
+    for account in ("login", "native"):
+        assert readings[f"claude:{account}"]["five_hour"]["resets_at"] == 500
+        assert readings[f"claude:{account}"]["seven_day"]["resets_at"] == 900
+
+
+def test_native_snapshot_collection_continues_after_a_missing_account_reading(monkeypatch):
+    from hooks.context import quota_usage
+    from scripts.routing import master_account
+
+    monkeypatch.setattr(daemon.master_claude_login, "logins", lambda: {1: "one", 2: "two"})
+    monkeypatch.setattr(master_account, "load", lambda env: {})
+    seen = []
+
+    def snapshot(account):
+        assert account in {"one", "two"}
+        seen.append(account)
+        return (
+            None
+            if len(seen) == 1
+            else (0.5, {"five_hour": {"used_percentage": 1}, "seven_day": {"used_percentage": 2}})
+        )
+
+    monkeypatch.setattr(quota_usage, "latest_snapshot", snapshot)
+    observed = {}
+    assert daemon._native_accounts({}, observed) == {"one", "two"}
+    assert len(seen) == 2
+    assert set(observed) == {seen[1]}
+    assert observed[seen[1]][0] == 0.5
+
+
+def test_native_snapshot_updates_preserve_equal_cache_and_continue_to_newer_readings(monkeypatch):
+    from hooks.context import quota_usage
+    from scripts.routing import master_account
+
+    monkeypatch.setattr(daemon.master_claude_login, "logins", lambda: {1: "one", 2: "two"})
+    monkeypatch.setattr(master_account, "load", lambda env: {})
+    seen = []
+    original = object()
+    observed = {account: (100, original) for account in ("one", "two")}
+
+    def snapshot(account):
+        assert account in observed
+        seen.append(account)
+        return (
+            100 if len(seen) == 1 else 101,
+            {"five_hour": {"used_percentage": 1}, "seven_day": {"used_percentage": 2}},
+        )
+
+    monkeypatch.setattr(quota_usage, "latest_snapshot", snapshot)
+    assert daemon._native_accounts({}, observed) == {"one", "two"}
+    assert len(seen) == 2
+    assert observed[seen[0]] == (100, original)
+    assert observed[seen[1]][0] == 101
+    assert observed[seen[1]][1].five_hour.used == 1
+
+
 def test_three_missed_beats_expire_both_keys(redis, monkeypatch):
     import time
 

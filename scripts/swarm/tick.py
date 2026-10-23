@@ -77,7 +77,7 @@ from scripts.swarm.naming import lane_of, parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.ready import awaiting as awaiting_merge
-from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
+from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale, master_seat_alarm
@@ -223,7 +223,8 @@ def tick(slug, store, ledger, runtime, now_ms):
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    actions += skip_refused(_orphans, slug, store, ledger, rows)
+    if config.engine != EVENTS_ENGINE:
+        actions += skip_refused(_orphans, slug, store, ledger, rows)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
@@ -255,7 +256,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
-            if config.state == "running":
+            if config.state == "running" and config.engine != EVENTS_ENGINE:
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
@@ -1210,25 +1211,33 @@ def _expire_launch(config, runtime, agent, error):
     return error if kept is False else SpawnError(ACK_EXPIRED)
 
 
+def _finished_launch(slug, store, doc, agent):
+    _release_hive_launch(slug, store, agent)
+    store.count_claim(slug, agent.task)
+    store.count_spawn(slug, agent.harness)
+    store.record_launch(
+        slug, agent, "started", after=store.take_restart(slug, agent.task) or _master_set(doc, agent.task)
+    )
+    store.redis.hdel(store.key(slug, "launch-assignments"), agent.task)
+    return f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement"
+
+
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
+    if config.engine == EVENTS_ENGINE:
+        return []
     from scripts.swarm_v2.runtime import codex
 
     rows, actions = {t["id"]: t for t in doc["tasks"]}, []
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
         if agent.state == "finished" and task.get("state") == "done":
-            _release_hive_launch(slug, store, agent)
-            store.count_claim(slug, agent.task)
-            store.count_spawn(slug, agent.harness)
-            store.record_launch(
-                slug, agent, "started", after=store.take_restart(slug, agent.task) or _master_set(doc, agent.task)
-            )
-            actions.append(f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement")
+            actions.append(_finished_launch(slug, store, doc, agent))
             continue
         try:
-            placed = runtime.collect(
-                config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True}
-            )
+            placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})
+            if agent.state == "finished" and task.get("state") == "blocked":
+                actions.append(_finished_launch(slug, store, doc, agent))
+                continue
             launched = codex.admit_legacy(store, slug, placed_record(agent, placed), runtime)
         except Exception as exc:
             error = exc

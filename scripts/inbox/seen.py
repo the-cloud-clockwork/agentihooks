@@ -9,6 +9,7 @@ from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, now_ms, owner_key, pr
 from scripts.swarm.naming import NameRegistry
 
 TTL_S = 30 * 24 * 3600
+CLAIM_BATCH = 5
 SEEN_ON_LEDGER = "already shown through the ledger"
 UNSETTLED = "returned to pending: its seen mark kept changing"
 
@@ -85,12 +86,12 @@ def first_showing(marks, name, slug, events):
         return list(events)
 
 
-def claim(store, me):
-    """Deliver at most five oldest pending items across me, my seat and aliases; close ledger writes already shown."""
+def claim(store, me, limit=CLAIM_BATCH):
+    """Deliver at most limit oldest pending items across me, my seat and aliases; close ledger writes already shown."""
     store.redeliver(now_ms(), redelivery_ms())
     marks = SeenMarks(store.redis)
     shown = []
-    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me)[:5])):
+    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me)[:limit])):
         try:
             elsewhere = item.ref and _shown_elsewhere(marks, store, item, me)
         except InboxError:

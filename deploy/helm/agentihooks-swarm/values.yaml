@@ -20,6 +20,11 @@ hive:
     redisSecret:
       name: ""
       key: ""
+    # Secret with one key per field of the hub NATS signer record, and the operator public key NATS trusts:
+    # with both set the endpoint mints each refreshing member its own signed NATS credential.
+    natsSigner:
+      secretName: ""
+      trustedOperator: ""
     affinity: {}
     tolerations: []
     ingressFrom: []
@@ -211,6 +216,9 @@ hub:
   tolerations: []
   terminationGracePeriodSeconds: 30
   env: {}
+  # Secret keys as hub env, such as AGENTIHOOKS_BUS_CREDENTIALS for a NATS that signs its users:
+  # [{name, secretName, key, optional}].
+  secretEnv: []
   resources:
     requests:
       cpu: 50m
