@@ -413,6 +413,46 @@ a confirmed long wait, that wait takes precedence over its unconfirmed age.
 The timer aggregates findings across runs; evidence names the runs, label
 sets, affected jobs, longest wait and median wait.
 
+#### One finding per wait
+
+A run attempt and label set yields at most one CI speed finding for a slow
+pickup. When any of its jobs has a confirmed start more than five minutes
+after creation, the detector raises no `ci queue age unconfirmed` finding for
+that run attempt and label set, however old its still queued siblings are.
+The confirmed wait alone stands for the group, so the masters judge one
+finding for one wait.
+
+The suppression holds whenever the confirmed wait is present in the read,
+including while the run is still in progress and the `ci runner wait`
+finding itself is not yet judged. Such a group raises nothing until the run
+completes with `success` or `failure`, then raises the runner wait. A
+confirmed wait on one label set does not suppress queue age on another label
+set or another run attempt.
+
+The 15 minute unconfirmed threshold (`UNCONFIRMED_WAIT_MS`) is the five
+minute runner wait trigger (`SHORT_WAIT_MS`) plus one ten minute Doctor pass.
+A queued job that the next pass reads as started therefore raises a runner
+wait, or nothing, instead of a queue age finding that the Doctor retracts
+minutes later.
+
+| Jobs in one run attempt and label set at the read | Findings |
+|---|---|
+| One job confirmed after 304 seconds, one still queued at 936 seconds, run completed `success` | `ci runner wait` only |
+| The same jobs, run still `in_progress` | None yet |
+| One job still queued at 900 seconds or less, nothing confirmed | None |
+| One job still queued at 901 seconds, nothing confirmed | `ci queue age unconfirmed`, measure 901 |
+
+The first row comes from the regression fixture: run `39278021878`, label
+set `anton-oss-light`, read at `15:37:32Z`. The late job was created at
+`15:31:56Z` and started at `15:37:00Z`; the sibling was created at
+`15:21:56Z` and is still queued.
+
+A queue age finding raised before a sibling confirmed is retracted on the
+pass that reads the confirmation. When any job of the run attempt and label
+set has a confirmed start over five minutes, the timer retracts the
+`ci-queue-age-unconfirmed/<run>-<attempt>-<labels>` finding and keeps the
+runner wait, with the retraction notice described below.
+
 #### Inspect a named job
 
 From the watched repository, replace the example numbers with the run and
@@ -489,6 +529,23 @@ after application, eight runner wait findings remained and zero were in that
 false class: 0 per hour. The eight retained findings had confirmed waits of
 306 to 696 seconds. This measures removal of false findings, not increased
 runner capacity.
+
+[Pull request 5112](https://github.com/the-cloud-clockwork/agentihooks/pull/5112),
+for [issue 5109](https://github.com/the-cloud-clockwork/agentihooks/issues/5109),
+merged on 20 October 2026 at 06:48 UTC and was applied at 07:37 UTC. It added
+the confirmed wait precedence and raised the unconfirmed threshold from five
+to 15 minutes. Before it, in the hour from 20:41 UTC on 19 October, five
+unconfirmed queue age findings were raised and all five retracted within
+about five minutes once their jobs started: runs 39323176234, 39323181003,
+39325949794, 39328650183 and 39328654494. Four of those runs also carried a
+confirmed runner wait for the same jobs. The tests only head failed in
+[red Proofs run 39370571622](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39370571622):
+a confirmed wait with a queued sibling raised both findings, and a 336 second
+unconfirmed job raised queue age. The fix passed
+[Tests run 39373027273](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373027273)
+and [Mutation preflight run 39373022081](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373022081).
+The source task targeted zero retracted queue age findings per hour; no after
+window count was recorded on it.
 
 ### GitHub incident holds and grouped findings
 
