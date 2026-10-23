@@ -808,6 +808,195 @@ timestamps for attempt 1 or silently drop runs without a completed gate.
 | Historical wait is negative or a metric window is absent | Preserve the evidence gap; verify attempt identity and metric retention before computing another comparison. |
 | Unit execution improves but gates stay red | Inspect the shard check and test partition, separately from runner CPU resources. |
 
+## Unit runners steered off batch runner nodes
+
+Pull request unit runner pods prefer nodes that run no batch runner pod. The
+`anton`, `anton-oss` and `anton-oss-queue` runner scale sets carry a preferred
+pod anti affinity, weight 100 per node, against pods of the `anton-oss-batch`
+and `anton-batch` scale sets. Batch runners are never refused a node by it, and
+the batch lane keeps its limits: `anton-oss-batch` still has `maxRunners` 30
+and a three CPU runner limit. [antoncore pull request 973](https://github.com/the-cloud-clockwork/antoncore/pull/973)
+delivered the rule; ArgoCD applied it at 01:23:52 UTC on 20 October 2026.
+
+### Cause
+
+[Issue 4958](https://github.com/the-cloud-clockwork/agentihooks/issues/4958)
+found on 19 October that slow Python 3.12 pull request unit shards were
+starved of CPU on runner nodes packed with batch and queue runner pods.
+Co-tenant runners used 7.7 and 8.2 cores, the slow runner pods got 1.6 to 1.9
+cores, and the slow shards ran a median 2.9 times slower per test. Their
+split, test counts and worker counts matched the fast shards; every test ran
+about three times slower than its stored duration.
+
+### The rule
+
+The term sits in the runner pod template of the antoncore runner charts:
+`k8s/charts/arc-runners-oss/values-oss.yaml` for `anton-oss`, and
+`k8s/charts/arc-runners/values.yaml` for its private twin `anton`, which a
+twin test keeps identical. The `arc-runners-oss-queue` ArgoCD application
+renders `values-oss.yaml` before `values-oss-queue.yaml`, so `anton-oss-queue`
+inherits the term.
+
+```yaml
+gha-runner-scale-set:
+  template:
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                namespaces: ["arc-runners-oss", "arc-runners"]
+                labelSelector:
+                  matchExpressions:
+                    - key: actions.github.com/scale-set-name
+                      operator: In
+                      values: ["anton-oss-batch", "anton-batch"]
+```
+
+This is an excerpt. The same list keeps its existing weight 100 term against
+`qitp-worker` pods in `anton-prod`. Change the rule only through an antoncore
+pull request into `dev`; ArgoCD tracks `dev` for these applications.
+
+`tests/unit/arc_runners_oss/test_batch_separation.py` in antoncore renders each
+of the three ArgoCD applications and asserts:
+
+| Test | Asserts |
+|---|---|
+| `test_unit_runners_prefer_nodes_without_batch_runners` | each unit set has a weight 100 preferred term per hostname against both batch sets in their namespaces |
+| `test_batch_runners_are_never_refused_a_unit_runner_node` | no unit set has a required term that names a batch set |
+| `test_batch_lane_keeps_its_limits` | `anton-oss-batch` keeps `maxRunners` 30 and a CPU limit of `"3"` |
+
+### Why the rule is preferred, not required
+
+The first fix, [antoncore pull request 968](https://github.com/the-cloud-clockwork/antoncore/pull/968),
+used `requiredDuringSchedulingIgnoredDuringExecution`. It merged at 23:10:28
+UTC on 19 October. kube-scheduler also checks the required anti affinity of
+pods already on a node against an incoming pod, so a required term on unit
+runners repels batch runners from every node that holds a unit runner. Every
+`anton-oss-batch` pod then stayed Pending, with scheduler events naming nodes
+that failed existing pods' anti affinity rules.
+[Pull request 970](https://github.com/the-cloud-clockwork/antoncore/pull/970)
+reverted it at 00:30:34 UTC on 20 October, and 973 replaced it with the
+preferred term. Do not reintroduce a required term against batch sets; the
+second test above fails on one.
+
+A preferred term is one scheduling score among others, so on a busy cluster
+a unit runner can still land beside a batch runner. Right after the apply,
+three unit runner pods shared node `anton-oci-vjnhihp4znsq` with batch
+runners. Since [antoncore pull request 994](https://github.com/the-cloud-clockwork/antoncore/pull/994),
+merged at 11:16:51 UTC on 20 October, unit and batch runners schedule through
+the `runner-binpack` scheduler profile. That profile scores
+`NodeResourcesFit` with the `MostAllocated` strategy at weight 10 and disables
+`NodeResourcesBalancedAllocation` and `PodTopologySpread`; it leaves
+`InterPodAffinity`, which scores this term, at its default.
+
+### Measured result
+
+The number moved is the share of Python 3.12 pull request unit shards that
+ran over nine minutes, 540 seconds. Both windows are twelve hours and use the
+same script. The after window starts at the apply time.
+
+| Window, UTC | Shards | Median s | p90 s | Over 540 s | Share |
+|---|---|---|---|---|---|
+| Before: 19 Oct 10:50:51 to 22:50:51 | 852 | 382 | 466 | 58 | 0.068 |
+| After: 20 Oct 01:23:52 to 13:23:52 | 738 | 357 | 410 | 2 | 0.003 |
+
+The before window closed twenty minutes before 968 merged, so neither rule
+was live in it; the required rule, live from 23:11:01 UTC until its revert,
+falls in neither window. Two runs on each side returned no job list
+and were skipped. The last two hours of the after window ran under the
+`runner-binpack` scheduler: recomputed from the retained after jobs, 690
+shards started before 994 merged, and both shards over 540 s are among them.
+
+The Doctor finding that started this work was
+`ci-tier-wall-time/39326180375-1`, judged at 1033 seconds while pull request
+Tests run [39326180375](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39326180375)
+was in progress. That run ended `cancelled` at 21:36:29 UTC on 19 October.
+The measure counts only completed runs that concluded `success` or `failure`,
+so it now refuses this finding:
+
+```console
+$ agentihooks doctor rig-grade-swarm measure ci-tier-wall-time/39326180375-1
+doctor: run 39326180375 attempt 1 has no tier wall time
+```
+
+When the source task measured it, the older measure printed
+`ci-tier-wall-time/39326180375-1 0`. Neither reading compares before and
+after; the shard share above is the measured result.
+
+### Check the rule and repeat the measurement
+
+Read the rule on the live scale sets, read only:
+
+```bash
+for set in anton-oss anton-oss-queue; do
+  kubectl get autoscalingrunnerset "$set" -n arc-runners-oss \
+    -o jsonpath='{.spec.template.spec.affinity.podAntiAffinity}{"\n"}'
+done
+kubectl get autoscalingrunnerset anton -n arc-runners \
+  -o jsonpath='{.spec.template.spec.affinity.podAntiAffinity}{"\n"}'
+```
+
+Each prints a `preferredDuringSchedulingIgnoredDuringExecution` list holding
+the batch term and no `requiredDuringSchedulingIgnoredDuringExecution` key.
+Check a running unit runner and its node:
+
+```bash
+pod="<unit runner pod>"
+kubectl describe pod "$pod" -n arc-runners-oss | grep -A12 'Anti Affinity'
+node=$(kubectl get pod "$pod" -n arc-runners-oss -o jsonpath='{.spec.nodeName}')
+kubectl get pods -A --field-selector "spec.nodeName=$node" \
+  -l 'actions.github.com/scale-set-name in (anton-oss-batch,anton-batch)'
+kubectl get events -n arc-runners-oss --field-selector reason=FailedScheduling
+```
+
+To repeat the share for a new window, list the pull request Tests runs created
+in it and read their `unit (3.12` jobs. A shard counts when it started inside
+the window, did not end `skipped` or `cancelled`, and ran at least 120
+seconds.
+
+```bash
+start=2026-10-20T01:23:52Z end=2026-10-20T13:23:52Z
+gh api --paginate \
+  "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs?event=pull_request&created=$start..$end&per_page=100" \
+  --jq '.workflow_runs[].id' |
+while read -r run; do
+  gh api --paginate "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/jobs?per_page=100&filter=all" \
+    --jq '.jobs[] | select(.name | startswith("unit (3.12")) | [.started_at, .completed_at, .conclusion] | @tsv'
+done > shards.tsv
+```
+
+Then keep the rows that meet the rule and divide the count over 540 seconds by
+the count kept. The source task's script, `measure.sh` in its Doctor task
+folder, does exactly this and prints shards, median, p90, the count over 540
+and the share. It is task evidence, not an installed command.
+
+| Symptom | Inspection |
+|---|---|
+| Batch runner pods stay Pending after a runner values change | Read `FailedScheduling` events; a required anti affinity on unit runners against batch sets causes this, as 968 did |
+| Unit shards slow again while the rule is live | Read node CPU for co-tenant runners in Prometheus; the preferred term can lose to packing on a full cluster |
+| The rule is missing from a scale set | Check that the ArgoCD application synced the `dev` revision that carries it |
+| A share is far off with few shards | Check for runs that returned no job list and for an unequal window length |
+
+### Delivery evidence
+
+- Spec: [antoncore issue 972](https://github.com/the-cloud-clockwork/antoncore/issues/972),
+  after [issue 967](https://github.com/the-cloud-clockwork/antoncore/issues/967)
+  for the reverted required rule and [issue 969](https://github.com/the-cloud-clockwork/antoncore/issues/969)
+  for the revert.
+- Red: antoncore CI Validate run 39352302110, six failures, all in
+  `test_unit_runners_prefer_nodes_without_batch_runners`.
+- Green: CI Validate run 39352529232, attempt 2. Attempt 1 lost only a k3s
+  case to a kubectl exit 137 during kubelet start.
+- Merged 973 at 01:23:20 UTC on 20 October; ArgoCD synced
+  `arc-runners-oss-queue` at 01:23:36 and `arc-runners` and `arc-runners-oss`
+  at 01:23:52.
+- Read only checks after the apply: new template pods on all three unit sets
+  carried the preferred term and no required term, four `anton-oss-batch` pods
+  scheduled at creation, and no batch `FailedScheduling` event followed.
+
 ## Resource sampling and stop condition regression checks
 
 Two regression checks cover live process tree sampling and a pre push gate that overruns its stop condition budget. Their checks distinguish sampling leaks from inherited garbage, and condition execution time from hook startup and exit time.
