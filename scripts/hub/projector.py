@@ -64,8 +64,9 @@ class Projector:
         try:
             if self.consumer is None:
                 self.bus = factory.open_bus(self.config)
-                reactor = self.reactor
-                self.consumer = self.bus.events.consumer(registry.durable(reactor), reactor.subject, reactor.policy)
+                self.consumer = self.bus.events.consumer(
+                    registry.durable(self.reactor), self.reactor.subject, self.reactor.policy
+                )
             self.pass_once(self.consumer, self.reactor.retry_ms)
         except Exception as exc:
             sys.stderr.write(f"ledger projector: {exc}\n")
