@@ -79,13 +79,13 @@ def test_verify_accepts_only_the_hmac_sha256_signature_of_the_body():
 
 def test_a_signed_pull_request_delivery_becomes_bus_events():
     _, ingress, consumer = setup()
-    assert deliver(ingress, "pull_request", pull_request()) == 202
+    assert deliver(ingress, "pull_request", pull_request()) == 200
     events = drain(consumer)
     assert [(e.swarm, e.type, e.key) for e in events] == [("crew", "pull.opened", URL)]
     assert isinstance(events[0], Envelope)
-    assert deliver(ingress, "pull_request", pull_request("synchronize", head="b2")) == 202
-    assert deliver(ingress, "pull_request", pull_request("enqueued", head="b2")) == 202
-    assert deliver(ingress, "pull_request", pull_request("closed", "closed", True, "b2")) == 202
+    assert deliver(ingress, "pull_request", pull_request("synchronize", head="b2")) == 200
+    assert deliver(ingress, "pull_request", pull_request("enqueued", head="b2")) == 200
+    assert deliver(ingress, "pull_request", pull_request("closed", "closed", True, "b2")) == 200
     assert [e.type for e in drain(consumer)] == ["pull.pushed", "merge.queued", "pull.merged"]
 
 
@@ -101,12 +101,12 @@ def test_a_signed_check_suite_completion_becomes_a_checks_event():
     _, ingress, consumer = setup()
     deliver(ingress, "pull_request", pull_request())
     drain(consumer)
-    assert deliver(ingress, "check_suite", check_suite(numbers=(7, 8))) == 202
+    assert deliver(ingress, "check_suite", check_suite(numbers=(7, 8))) == 200
     events = drain(consumer)
     assert [(e.type, e.data["suite"], e.data["app"], e.data["conclusion"]) for e in events] == [
         ("checks.completed", "9", "github-actions", "success")
     ]
-    assert deliver(ingress, "check_suite", check_suite("requested")) == 202
+    assert deliver(ingress, "check_suite", check_suite("requested")) == 200
     assert drain(consumer) == []
 
 
@@ -136,9 +136,9 @@ def test_a_signed_but_malformed_payload_is_a_bad_request(body):
 
 def test_other_signed_events_are_accepted_without_publishing():
     _, ingress, consumer = setup()
-    assert deliver(ingress, "ping", {"zen": "x"}) == 202
+    assert deliver(ingress, "ping", {"zen": "x"}) == 200
     body = b"{}"
-    assert ingress.receive({"X-Hub-Signature-256": sign(body)}, body) == 202
+    assert ingress.receive({"X-Hub-Signature-256": sign(body)}, body) == 200
     assert drain(consumer) == []
 
 
@@ -175,7 +175,7 @@ def test_ingress_refuses_to_run_without_a_secret():
 
 
 class Recorder:
-    def __init__(self, status=202):
+    def __init__(self, status=200):
         self.status = status
         self.calls = []
 
@@ -217,9 +217,9 @@ def test_http_handler_refuses_other_paths_and_bad_lengths():
     assert request(ingress, length=str(limit + 1))[0] == ("status", 413)
     assert ingress.calls == []
     body = b"x" * 3
-    assert request(ingress, body=body, length=str(limit))[0] == ("status", 202)
+    assert request(ingress, body=body, length=str(limit))[0] == ("status", 200)
     assert ingress.calls == [({"Content-Length": str(limit), "X-GitHub-Event": "ping"}, body)]
-    assert request(ingress, body=b"abcdef", length="3")[0] == ("status", 202)
+    assert request(ingress, body=b"abcdef", length="3")[0] == ("status", 200)
     assert ingress.calls[-1][1] == b"abc"
 
 
@@ -237,12 +237,21 @@ def test_a_bus_failure_answers_503_so_github_redelivers(capsys):
     err = capsys.readouterr().err
     assert err.startswith("hub: GitHub webhook could not record the event\nTraceback")
     assert err.endswith("ConnectionError: bus down\n")
-    assert deliver(ingress, "ping", {}) == 202
+    assert deliver(ingress, "ping", {}) == 200
 
 
-def test_http_handler_logs_nothing():
+def test_http_handler_logs_one_line_per_delivery(capsys):
+    request(Recorder(), headers={"X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "d-1"})
+    request(Recorder(401), headers={"X-GitHub-Event": "check_suite", "X-GitHub-Delivery": "d-2"})
+    request(Recorder(), "/other")
+    assert capsys.readouterr().err == (
+        "github-webhook: delivery d-1 event pull_request answered 200\n"
+        "github-webhook: delivery d-2 event check_suite answered 401\n"
+        "github-webhook: delivery None event ping answered 404\n"
+    )
     handler = github_webhooks.handler(Recorder())
     assert handler.log_message(None, "%s", "x") is None
+    assert capsys.readouterr().err == ""
 
 
 def test_main_refuses_to_start_without_a_secret(monkeypatch, capsys):
@@ -304,7 +313,7 @@ def test_main_serves_the_ingress_on_the_given_address(monkeypatch):
         ("bus", "memory"),
         ("init", ("0.0.0.0", 9001), "Webhook"),
         ("unsigned", ("status", 401)),
-        ("signed", ("status", 202)),
+        ("signed", ("status", 200)),
         ("serve",),
         ("close",),
         ("bus closed",),
