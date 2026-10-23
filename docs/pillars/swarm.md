@@ -29,6 +29,62 @@ tasks of one swarm ledger (`agentihooks ledger`), and every task belongs to a la
 Agents run on [hives](hives.md), the machines joined to the swarm; [Deployment modes](../reference/deployment-modes.md)
 says where the controller, ledger and Redis run.
 
+## Event driven engine
+
+Each swarm runs one of two engines, chosen by its `engine` setting:
+
+| Engine | Who starts lane agents |
+|---|---|
+| `legacy` (default) | The minute tick spawns, reaps and acknowledges agents itself. |
+| `events` | The hub offers ready tasks on the NATS JetStream bus and hives pull them. |
+
+```bash
+agentihooks swarm <slug> set engine=events
+agentihooks swarm <slug> set engine=legacy   # switch back
+```
+
+Swarms created before the setting existed read as `legacy`. Any other value is refused.
+
+### The life of a task
+
+1. **Ledger write.** Every task and phase change goes through the ledger outbox, which relays it within a second as a
+   `task.changed`, `task.removed`, `phase.changed` or `phase.removed` event on `swarm.<slug>.task.<id>` or
+   `swarm.<slug>.phase.<id>`. All events live in the `AGENTIHOOKS_EVENTS` stream. Each time `claimed_by` changes, the
+   task's `claim_generation` goes up by one.
+2. **Offer.** The hub's `readiness` reactor offers each claimable task of an `events` swarm once per claim generation.
+   The offer is a `task.ready` event, with id `ready:<slug>:<task>:<generation>`, on the lane work queue
+   `swarm.<slug>.ready.<lane>`. The bus drops a repeated id that arrives within 120 seconds. Each work queue is its own
+   stream on `agentihooks.queue.<name>`.
+3. **Pull.** A hive's spoke takes an offer only when it has room. Before it acts, it checks the offer against a fresh
+   ledger read. It terminates an offer that is stale: the task is gone, claimed, no longer open, on a different
+   generation or lane, or held.
+4. **Claim and launch.** The spoke records its claim in the hive buckets and launches the agent. It publishes
+   `execution.started` with the claim, the task generation, the hive and the pane, then acknowledges the offer.
+5. **Redelivery.**
+   - An offer that is not acknowledged within 30 seconds comes back, up to 5 deliveries.
+   - A claim conflict, or another live hive holding the claim, sends the offer back for later.
+   - After the last delivery the spoke writes a `dead_lettered` event to `AGENTIHOOKS_DEAD` and reopens the task.
+6. **Exit.** When the agent ends, `execution.exited` reaches the hub's `lifecycle` reactor. Only for the claim and
+   generation it started, it releases the slot and the claim, then settles the task: `done`, or back to `open` with no
+   claimant.
+7. **Reopen.** A reopen clears the claimant, which raises the claim generation. The next offer and claim therefore
+   carry new ids, and nothing from the old generation can block them.
+
+When a hive disappears its agents end as if they had exited; see
+[Pulling work from the hub](hives.md#pulling-work-from-the-hub).
+
+### What the minute tick still does
+
+For an `events` swarm the tick spawns no lane agent, reaps no lane agent, runs no orphan pass and collects no
+acknowledgement: those moved to the hub and the hives. It still runs master failover and recovery, pane evidence,
+exits, verification, the dispatcher, the lane split, master scaling and the promotion and release watches for both
+engines. Master agents are reaped by the tick under either engine.
+
+The hub offers eng, ci and plan tasks, and the spoke code is the same for every lane. With
+`AGENTIHOOKS_DEPLOYMENT=distributed`, a workstation runs the master lane spoke with `agentihooks swarm spoke`. That
+spoke launches only master offers that carry an execution identity. The Compose task smoke and recovery drill also run
+an eng lane spoke, against a stand-in agent.
+
 ## Agent names
 
 Run `agentihooks swarm rename` to rename every live registered swarm's agents and spaces, or
