@@ -5306,6 +5306,86 @@ A failed channel write returns its unsent items to pending immediately. The rede
 from `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` (default 300 seconds), which controls idle wakes and escalation.
 Agents should read the item's current state before repeating work after redelivery.
 
+### Information only items
+
+An item sent with `--fyi` asks its receiver for nothing, so nothing in the swarm waits on it. Delivery is
+unchanged: the inbox channel, the hook or the next `agentihooks msg inbox` read shows it like any other item,
+and it closes as `done: information received` on explicit read or confirmed receipt. Everything that exists to
+make a receiver act on an item skips it:
+
+| Mechanism | Work item | Information only item |
+|---|---|---|
+| Typed wake from the tick wake pass, into an idle worker pane without push inbox | Up to three wakes, one per retry window | Never typed |
+| Immediate Codex wake when an item lands (`wake_now`) | Typed into an idle legacy Codex pane | Never typed |
+| Seat successor hold | Mail to a seat whose occupant left waits for the next occupant; its retry window starts when that occupant binds | Not held; no window starts, before or after a successor binds |
+| Escalation to the master, then to the operator | After the wakes, one retry window per step | Never escalated |
+| Doctor `inbox past window` finding | `unread delivery` or `delivered backlog` once open past the retry window | Never raised |
+| Doctor `inbox no outcome` finding | Closed `done` or `cancelled` without naming where the work went | Never raised |
+
+Both inbox seams read the same flag stored on the item. `scripts.inbox.wake.decide` returns no step for an
+information only item, so neither the tick wake pass nor the Codex `wake_now` path wakes, holds or escalates it,
+and `scripts.doctor.inbox.past_window` skips it before any receiver check. Work items keep the behaviour
+described under [Inbox escalation sender exclusion](#inbox-escalation-sender-exclusion) and
+[Inbox receiver read](#inbox-receiver-read). The swarm itself sends some notices as information only, for example
+the [merge priority owner notices](#merge-priority-owner-notices) and every non master copy of a chat line sent
+To swarm.
+
+#### Usage
+
+The flag is the first or last word of the text, for a new item, a reply or a swarm chat line:
+
+```bash
+agentihooks msg send eng-1@<slug> --fyi "Your pull request merged; nothing to do."
+agentihooks msg reply <message-id> --fyi "Thanks, received."
+agentihooks swarm <slug> say "Dev is green again." --to eng --fyi
+```
+
+Use it only when the text requests no receiver action. A status report that still asks for a check, a proof or
+a decision stays a work item, so it keeps its wakes, its seat hold and its escalation. There is no setting:
+`AGENTIHOOKS_INBOX_RETRY_WINDOW_S`, `AGENTIHOOKS_INBOX_QUIET_S` and the three wake limit apply to work items
+only.
+
+#### Inspect an item
+
+`msg read` prints the item as JSON with its history and marks it read, so an information only item closes as
+`done: information received` once the read lands. Read it from the receiving session, or from the seat holder
+taking responsibility for it:
+
+```bash
+agentihooks msg inbox --of eng-1@<slug>
+agentihooks msg read <message-id>
+```
+
+The JSON carries `"fyi": true`. Its history holds `pending`, `delivered`, `read` or `confirmed` and the `done`
+close, and never a `woken`, `escalated_master` or `escalated_operator` event.
+
+#### Troubleshooting
+
+| Symptom | Check and response |
+|---|---|
+| An idle pane was typed a wake for an item that asks for nothing | Run `msg read` on it: `"fyi": false` means it was sent as work; resend such notices with `--fyi`. `"fyi": true` with a `woken` event means the tick or Codex pane process runs code older than [pull request 5047](https://github.com/the-cloud-clockwork/agentihooks/pull/5047); pull `dev` into the checkout the tick runs from |
+| An information only item to an empty seat is still open | Expected until a session reads or confirms it: it waits for nothing and raises no finding. The seat's next occupant receives it and its receipt closes it |
+| The Doctor reports `inbox past window` on an information only item | The Doctor timer runs code older than pull request 5047; pull `dev` into the checkout it runs from. Close the item with `agentihooks msg close <message-id> done` |
+| A work item gets no wake or escalation | Check its `fyi` flag first, then the retry window, outage holds and seat successor holds listed under [Inbox escalation sender exclusion](#inbox-escalation-sender-exclusion) |
+
+#### Delivery evidence
+
+[Pull request 5047](https://github.com/the-cloud-clockwork/agentihooks/pull/5047) merged into `dev` on
+20 October 2026 at 05:29 UTC. The test only head failed four cases in the
+[red proof run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39359235659) (4 failed, 71 passed);
+the [Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39365109171) on the final head
+passed. The cases in `tests/inbox/test_wake.py` assert that an idle pane holding only information mail gets no
+wake on the tick pass or the Codex path, that information mail to a vacated seat gets no event before or after a
+successor binds, and that a work item beside it is still woken. The case in `tests/doctor/test_inbox.py` asserts
+the past window detector skips the information item and still reports the work item next to it.
+
+The measured number is information only items in Doctor seat wait findings per day. The source task replayed the
+24 hours before the fix over both swarms: 25 information only seat items were open past the window. After the fix
+the count is 0 by construction, since the detector skips every such item. A later change,
+[pull request 5742](https://github.com/the-cloud-clockwork/agentihooks/pull/5742), stopped the detector from
+reporting any item that waits for a seat's successor, so the `seat wait` category no longer appears; the
+information only skip still covers the `unread delivery` and `delivered backlog` categories.
+
 ### Local outbox and limits
 
 When Redis is unavailable, inbox operations queue in `inbox-outbox.jsonl` under the AgentiHooks home. Records

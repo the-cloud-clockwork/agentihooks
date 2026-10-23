@@ -30,6 +30,8 @@ See [Inbox escalation sender exclusion](swarm.md#inbox-escalation-sender-exclusi
 
 See [Inbox receiver read](swarm.md#inbox-receiver-read) for how the inbox detector resolves every receiver in a fixed number of Redis reads, the check command and the measured result.
 
+See [Information only items](swarm.md#information-only-items) for which inbox wakes, seat holds, escalations and Doctor findings skip items sent with `--fyi`, how to send and inspect them, troubleshooting and delivery evidence.
+
 See [Doctor measurement task readiness](swarm.md#doctor-measurement-task-readiness) for tune dependencies, application timestamps, configuration examples and releasing a read only seat with its recorded window.
 
 See [worker execution lease through a controller rollout](swarm.md#worker-execution-lease-through-a-controller-rollout) for the lease and grant timing that keeps an Anton worker alive through a release, and why a worker exits 70.
