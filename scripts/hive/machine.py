@@ -36,6 +36,10 @@ class Delivery:
     ledger_ca: str | None = None
 
 
+def label(now: float) -> str:
+    return f"swarm-hive-{int(now)}"
+
+
 def add(
     redis: "Redis",
     local_id: str,
