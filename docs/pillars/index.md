@@ -50,6 +50,8 @@ See [headroom](hives.md#headroom) for what a hive's headroom reading holds, how 
 
 See [promotion fixer intake](swarm.md#promotion-fixer-intake) for how one swarm per repository files and closes promotion fixer tasks, hands intake over and shows its owner, and [runner outage runs](swarm.md#runner-outage-runs) for the one task filed when failed jobs lost their runner, with the jobs that failed for want of a lost unit shard's output in [jobs that failed for want of shard output](swarm.md#jobs-that-failed-for-want-of-shard-output). See [red dev workflows outside the promotion gate](swarm.md#red-dev-workflows-outside-the-promotion-gate) for the Doctor finding raised when any other workflow fails five dev push runs in a row.
 
+See [independent consumer failures beside a lost shard](swarm.md#independent-consumer-failures-beside-a-lost-shard) for mixed Sonar and shard check examples, separate fixer tasks and the fixed folding rules.
+
 See [agent status comments](swarm.md#agent-status-comments) for when an agent's status comment amends its earlier one and when it posts a new comment at the end.
 
 See [ledger artifacts](swarm.md#ledger-artifacts) for what the ledger accepts as an artifact, a master's plan publish, the two checks and refusal troubleshooting.
