@@ -265,7 +265,7 @@ Once a master gives a runner wait or tier time finding a verdict, new runs in
 the same pool or tier stay silent while the worst finished run is at or under
 the judged worst plus 20 percent (`GROWTH_MARGIN` in the CI speed detector).
 A worse run past that margin, or the end of the verdict cooldown, sends the
-finding again.
+finding again, once per verdict; later runs stay silent until a new verdict.
 
 The ten minute slice is a module constant in the Doctor loop. No flag or
 environment variable changes it; a change goes through a pull request and CI.

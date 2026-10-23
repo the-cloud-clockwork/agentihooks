@@ -296,6 +296,7 @@ def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int)
 
 def notice_key(finding: Finding, records: dict) -> str:
     prior = records.get(finding.id)
-    if finding.evidence_identity is None or prior is None or not json.loads(prior)["verdict"]:
+    verdict = json.loads(prior)["verdict"] if prior is not None else None
+    if finding.evidence_identity is None or not verdict:
         return finding.id
-    return json.dumps([finding.id, finding.evidence_identity])
+    return json.dumps([finding.id, verdict["at"]])

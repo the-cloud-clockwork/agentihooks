@@ -85,3 +85,7 @@ def test_in_range_runs_stay_silent_and_an_out_of_range_run_notifies(store, monke
     for texts in items(store).values():
         assert len(texts) == 2
         assert "ci-runner-wait/" in texts[1] and "worst 2000 seconds" in texts[1]
+    records.append(finished(4, "2026-10-19T16:20:00Z"))
+    loop.speed(store, DOCTOR, WATCHED, AFTER + 21 * 60000)
+    for texts in items(store).values():
+        assert len(texts) == 2
