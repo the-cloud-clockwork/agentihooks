@@ -11,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 
+from scripts.inbox.bus import FeedError, feed_for
 from scripts.inbox.cli import check_answer, identity
 from scripts.inbox.seen import claim
 from scripts.inbox.store import NOTIFY, InboxError, connect
@@ -142,7 +143,7 @@ async def _deliver(store, me, write):
             raise
 
 
-async def _push(store, me, write, ready):
+async def _push(store, me, write, ready, feed=None):
     import anyio
     from redis.exceptions import RedisError
 
@@ -152,11 +153,14 @@ async def _push(store, me, write, ready):
         await anyio.sleep(SETTLE_S)
         while True:
             try:
-                if pubsub is None:
+                if pubsub is None and feed is None:
                     pubsub = store.redis.pubsub()
                     pubsub.subscribe(NOTIFY)
                 await _deliver(store, me, write)
-                await _recheck(store, me, pubsub)
+                if feed is None:
+                    await _recheck(store, me, pubsub)
+                else:
+                    await _pull(feed)
                 delay = 1.0
             except RedisError:
                 if pubsub is not None:
@@ -167,9 +171,21 @@ async def _push(store, me, write, ready):
     finally:
         if pubsub is not None:
             pubsub.close()
+        if feed is not None:
+            feed.close()
 
 
-async def run(store, me, read, write, active=True):
+async def _pull(feed):
+    import anyio
+
+    try:
+        await anyio.to_thread.run_sync(feed.settle)
+        await anyio.to_thread.run_sync(feed.wait, int(RECHECK_S * 1000))
+    except FeedError:
+        pass
+
+
+async def run(store, me, read, write, active=True, feed=None):
     import anyio
     import mcp.types as types
     from mcp.server.lowlevel import Server
@@ -198,7 +214,7 @@ async def run(store, me, read, write, active=True):
             except InboxError:
                 await anyio.sleep(delay)
                 delay = min(delay * 2, 30.0)
-        await _push(store, me, write, ready)
+        await _push(store, me, write, ready, feed if feed is not None else feed_for(store, me))
 
     options = server.create_initialization_options(experimental_capabilities={"claude/channel": {}})
     async with anyio.create_task_group() as group:
