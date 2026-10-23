@@ -390,9 +390,11 @@ rollout logs already supply its quota.
 
 ### Reserved rows in `agentihooks balance`
 
-`agentihooks balance` applies the rule the swarm quota view applies to Claude
-and Codex rows, so a row with the same reading closes in both. A row closes
-when all of these hold:
+`agentihooks balance` applies the live rule the swarm quota view applies to
+Claude and Codex rows, so a row with the same reading closes in both. Swarm
+capacity also keeps a closed row closed until its week resets; `balance` does
+not (see [Closed until the week resets](#closed-until-the-week-resets)). A row
+closes when all of these hold:
 
 - its harness and account match the declared master account of that harness;
 - it is not an api row;
@@ -432,6 +434,106 @@ If a reserved account still shows as open:
   `master-account-codex`.
 - No master is live on the account: with zero live masters there is no
   reservation.
+
+### Closed until the week resets
+
+Swarm capacity, the account list the swarm tick, hive launches and agent
+choice place agents from, keeps the declared master account closed for
+workers from the first reading that closes it until that account's week
+resets. A later reading that would reopen it under the live rule does not
+reopen it. The live ceiling moves with the live master count, so without this
+closure a lane agent could be placed on the account between two readings that
+both close it.
+
+On each capacity read, for each harness with a declared master account:
+
+1. The live rule runs first, as in
+   [Reserved rows](#reserved-rows-in-agentihooks-balance).
+2. If the live rule closes the declared account's row and its week reset time
+   is known, swarm capacity writes the reason to the Redis key
+   `<prefix>:reserved-closed:<harness>:<slug>` with an expiry at that reset.
+   `<prefix>` is `AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`. Each
+   closing read writes the key again with the current reason.
+3. If the live rule leaves the row open and the key exists, the row is shown
+   `CLOSED` with cap `0` and the stored reason, the one from the last closing
+   read.
+
+Masters keep the account. The tick places a master from the same rows with the
+reservation removed, so a closed row returns to its band cap and quota state
+for the master lane only.
+
+The closure ends when any of these happens:
+
+- the week resets and the key expires;
+- the master declaration for that harness is cleared with
+  `agentihooks balance master-account --clear <harness>`;
+- the declaration names another account; declaring the first account again
+  before its reset brings the closure back, since the key is still there.
+
+A live master count that drops, to zero included, does not end it. The closure
+applies only to the declared account's non api row on its own harness. A row
+with no known week reset is never stored, and a Redis read or write failure
+leaves only the live rule in charge for that read, so a count drop during the
+failure can still reopen the row for workers.
+
+Example: `home` is the declared Claude master account, its week is 61% used
+and two masters are live, so the live rule closes it at the 60% ceiling and the
+key is written. One master ends. Under the live rule the ceiling rises to 70%
+and `home` would reopen, but swarm capacity still shows it closed:
+
+```text
+$ agentihooks swarm <slug> status | grep "quota account claude home"
+quota account claude home  closed  routing 39% left, reserved for 2 live masters: workers stop at 60% of the week, read 0m ago  sessions 1
+```
+
+`agentihooks balance` reads the live rule only, so for the same reading it
+can show `home` open while the tick still refuses workers there.
+
+Inspect or end a stored closure:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" --scan --pattern 'agentihooks:reserved-closed:*'
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:reserved-closed:claude:home
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" TTL agentihooks:reserved-closed:claude:home
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" DEL agentihooks:reserved-closed:claude:home
+```
+
+`GET` returns the stored reason and `TTL` the seconds until the week reset.
+`DEL` reopens the row to workers on the next capacity read unless the live
+rule closes it again.
+
+A lane agent's own quota handoff stays in its seat. When the quota policy
+decides `QUOTA HANDOFF REQUIRED` in a session that has `AGENTIHOOKS_SWARM`
+set, the directive tells it to write its Handoff v2, run
+`agentihooks swarm <slug> handoff DOC --reason quota` and stop; it never names
+`agentihooks init-agent --handoff`. The tick keeps the seat and the task and
+routes the successor through swarm capacity, so the successor is never placed
+on the closed account either. See [Quota policy](#quota-policy).
+
+Troubleshooting:
+
+- The tick refuses workers on the master account while `balance` shows it
+  open: the stored closure holds. Read its `TTL`; it ends at the week reset.
+- A lane agent landed on the master account: check that a master declaration
+  exists for that harness in `agentihooks balance settings`, that the
+  account's week reset is known (`7D RESET` in `agentihooks quota` is not `-`),
+  and that the swarm Redis was reachable at the spawn; each missing piece
+  leaves only the live rule.
+- A swarm agent ran `init-agent --handoff`: check that its environment has
+  `AGENTIHOOKS_SWARM`; without it the quota policy gives the plain session
+  directive.
+
+Evidence: on 19 October the Doctor tick's capacity line showed the declared
+Claude master account closed at 12:07 and 12:17 UTC and open at 12:13 and
+12:15, and at 12:13:52 the tick started engineer@d44a5a-0683 on it. The task
+record noted `balance` showing that account `CLOSED` for workers with 39% of
+its week left and workers stopping at 60%. The agent then handed off through
+`init-agent --handoff` into an unseated session. Pull request
+[#5044](https://github.com/the-cloud-clockwork/agentihooks/pull/5044) added
+the stored closure and the seat handoff directive; its red Mutation
+preflight run 39357837089 failed the four new cases and Tests run
+39363775886 passed on the final pull request head. Cases live in
+`tests/swarm/test_reserved_latch.py` and `tests/context/test_quota_policy.py`.
 
 ## Skill evaluations
 
