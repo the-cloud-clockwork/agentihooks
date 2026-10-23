@@ -657,11 +657,10 @@ class HerdrRuntime:
                 agent, saved.get("account") or self.planned_account(task["id"], agent), None, lane
             )
             route = ["--route", account.name]
-        placed = timing.call(
-            self._launch,
+        placed = self._account_launch(
             config,
             lane,
-            task["id"],
+            task,
             name,
             [
                 *argv,
@@ -677,8 +676,6 @@ class HerdrRuntime:
                 ),
                 *mode,
             ],
-            predecessor=_predecessor(task),
-            controller_epoch=task.get("controller_epoch"),
         )
         self._reserve_account(account, lane, agent)
         placed = codex.complete(config, name, placed, self._terminate)
@@ -771,6 +768,28 @@ class HerdrRuntime:
             effort_range.of(config),
         )
         return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
+
+    def _account_launch(self, config, lane, task, name, argv):
+        from functools import partial
+
+        invoke = partial(
+            timing.call,
+            self._launch,
+            config,
+            lane,
+            task["id"],
+            name,
+            predecessor=_predecessor(task),
+            controller_epoch=task.get("controller_epoch"),
+        )
+        if not task.get("account_slot_hive"):
+            return invoke(argv)
+        from scripts.hive import account_slots
+
+        try:
+            return account_slots.launch(task["account_slot_hive"], task["execution_id"], argv, invoke)
+        except account_slots.Unavailable as exc:
+            raise SpawnError(str(exc), "unavailable") from exc
 
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):

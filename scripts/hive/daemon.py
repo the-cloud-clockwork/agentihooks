@@ -83,6 +83,9 @@ def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive.execution_events import observe as publish_executions
 
     publish_executions(local_id, hosted)
+    from scripts.hive import account_slots
+
+    account_slots.publish(local_id, report, hosted)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
 

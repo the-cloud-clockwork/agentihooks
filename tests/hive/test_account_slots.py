@@ -132,3 +132,157 @@ def test_unavailable_account_refuses_launch_without_calling_runtime(rig):
     with pytest.raises(RuntimeError, match="^No account slot available$"):
         first.launch("one", "claude", "", called.append)
     assert called == []
+
+
+@pytest.mark.parametrize("cap,sessions,expected", [(0, 0, None), (1, 0, "a"), (1, 1, None), (2, 1, "a")])
+def test_admission_uses_the_hives_current_quota_and_manual_session_count(rig, cap, sessions, expected):
+    first, _, _, report, _ = rig
+    report[0] = reading(cap=cap, sessions=sessions)
+    assert first.take("one", "claude") == expected
+
+
+def test_launch_selects_only_the_requested_harness_and_account(rig):
+    first, _, _, report, _ = rig
+    report[0]["slots"].insert(0, {"harness": "codex", "account": "other", "cap": 9})
+    assert first.take("one", "claude", "missing") is None
+    assert first.take("one", "claude", "a") == "a"
+    assert first.take("two", "codex", "other") == "other"
+
+
+def test_hive_restart_recovers_the_counter_index_and_releases_dead_agents(rig):
+    from scripts.hive import account_slots
+
+    first, second, now, _, bus = rig
+    assert first.take("one", "claude") == "a"
+    restarted = account_slots.Slots(bus, "one", reading, lambda: now[0])
+    restarted.heartbeat({"slots": [], "sessions": {}}, {"one": {"pane": {"state": "dead"}}})
+    assert second.take("two", "claude") == "a"
+
+
+def test_slots_expire_at_the_deadline_and_not_one_millisecond_later(rig):
+    from scripts.hive import account_slots
+
+    first, second, now, _, _ = rig
+    assert first.take("one", "claude") == "a"
+    now[0] += account_slots.TTL_MS
+    assert second.take("two", "claude") == "a"
+    assert first.take("two", "claude") is None
+
+
+def test_a_missing_observation_does_not_extend_the_execution_lease(rig):
+    from scripts.hive import account_slots
+
+    first, second, now, _, _ = rig
+    assert first.take("one", "claude") == "a"
+    now[0] += account_slots.TTL_MS - 1
+    first.heartbeat(reading(), {"one": {"pane": {"state": "unknown"}}})
+    now[0] += 1
+    assert second.take("two", "claude") == "a"
+
+
+def test_the_launch_heartbeat_keeps_the_slot_occupied_during_a_blocking_start(rig, monkeypatch):
+    from scripts.hive import account_slots
+
+    first, second, now, _, _ = rig
+    intervals = []
+
+    class Interval:
+        def __init__(self, callback, *, every):
+            self.callback, self.every, self.closed = callback, every, False
+            intervals.append(self)
+
+        def start(self):
+            assert first.take("one", "claude") == "a"
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(account_slots, "Interval", Interval)
+
+    def launch(account):
+        now[0] += account_slots.TTL_MS - 1
+        intervals[0].callback()
+        now[0] += 2
+        assert second.take("two", "claude") is None
+        return account
+
+    assert first.launch("one", "claude", "", launch) == "a"
+    assert intervals[0].every == account_slots.presence.BEAT_SECONDS
+    assert intervals[0].closed is True
+
+
+def test_an_ambiguous_launch_retains_its_slot(rig):
+    from scripts.swarm.tick import SpawnError
+
+    first, second, _, _, _ = rig
+
+    def launch(account):
+        raise SpawnError("uncertain", "ambiguous")
+
+    with pytest.raises(SpawnError, match="^uncertain$"):
+        first.launch("one", "claude", "", launch)
+    assert second.take("two", "claude") is None
+
+
+def test_contended_state_retries_are_bounded_and_fail_admission_closed(rig, monkeypatch):
+    from scripts.events.bus import StateConflict
+    from scripts.hive import account_slots
+
+    first, _, _, _, bus = rig
+    state = bus.state("hive-slot-accounts")
+    calls = []
+
+    def conflict(*args):
+        calls.append(args)
+        raise StateConflict
+
+    monkeypatch.setattr(state, "create", conflict)
+    with pytest.raises(account_slots.Unavailable, match="^Account slot admission failed$"):
+        first.launch("one", "claude", "", lambda account: None)
+    assert len(calls) == 4
+
+
+@pytest.mark.parametrize(
+    "route,account", [([], "a"), (["--route", "a"], "a"), (["--route", "interactive"], "unrouted")]
+)
+def test_runtime_launch_pins_the_reserved_route_and_closes_the_bus(rig, monkeypatch, route, account):
+    from scripts.events import factory
+    from scripts.hive import account_slots, daemon
+
+    _, _, _, _, bus = rig
+    report = reading()
+    report["slots"][0]["account"] = account
+    monkeypatch.setattr(daemon, "observe", lambda: report)
+    monkeypatch.setattr(factory, "open_bus", lambda config: bus)
+    closed = []
+    monkeypatch.setattr(bus, "close", lambda: closed.append(True))
+    argv = ["launcher", "--agent", "claude", "--dir", "repo", "--", *route, "--model", "model"]
+    expected_route = "interactive" if account == "unrouted" else account
+    result = account_slots.launch("one", "execution", argv, lambda args: args)
+    assert result == [
+        "launcher",
+        "--agent",
+        "claude",
+        "--dir",
+        "repo",
+        "--",
+        "--route",
+        expected_route,
+        "--model",
+        "model",
+    ]
+    assert closed == [True]
+
+
+def test_distributed_heartbeat_publishes_even_without_any_executions(rig, monkeypatch):
+    from scripts.events import factory
+    from scripts.events.config import BusConfig
+    from scripts.hive import account_slots
+
+    _, second, now, _, bus = rig
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig(backend="nats"))
+    monkeypatch.setattr(factory, "open_bus", lambda config: bus)
+    monkeypatch.setattr(account_slots.presence, "now_ms", lambda: now[0])
+    monkeypatch.setattr(bus, "close", lambda: None)
+    account_slots.publish("one", reading(sessions=1), {"executions": {}})
+    assert second.take("two", "claude") is None
