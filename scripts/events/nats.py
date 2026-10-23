@@ -86,6 +86,7 @@ def _consumer_config(durable: str, subject: str, policy: QueuePolicy) -> api.Con
         max_deliver=-1,
         ack_wait=_seconds(policy.ack_wait_ms),
         backoff=backoff or None,
+        inactive_threshold=None if policy.inactive_ms is None else _seconds(policy.inactive_ms),
     )
 
 
