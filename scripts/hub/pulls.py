@@ -164,8 +164,9 @@ class Pulls:
             return {**snapshot, "swarms": sorted([*snapshot["swarms"], swarm])}
 
         _update(self._state, key(url), add)
-        if json.loads(self._state.get(key(url)).value)["state"] not in TERMINAL:
-            self._index(url, True)
+        stored = self._snapshot(url)
+        if stored["state"] not in TERMINAL:
+            self._index(stored["url"], True)
 
     def observe(self, seen: Observation) -> None:
         now = self._clock()

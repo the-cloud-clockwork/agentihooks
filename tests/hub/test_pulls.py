@@ -134,10 +134,17 @@ def test_a_reopened_pull_request_returns_to_the_poll():
 
 def test_a_webhook_url_in_other_casing_reaches_the_tracked_pull_request():
     bus, hub, consumer = setup()
+    other_casing = URL.replace("acme/widgets", "Acme/Widgets")
     hub.handle(task_changed())
-    hub.observe(Observation(URL.replace("acme/widgets", "Acme/Widgets"), "merged", "a1"))
+    hub.handle(task_changed("other", other_casing))
+    assert open_urls(bus) == [URL]
+    assert snapshot(bus)["url"] == URL
+    hub.observe(Observation(other_casing, "merged", "a1"))
     events = drain(consumer)
-    assert [(e.type, e.key, e.data["url"]) for e in events] == [("pull.merged", URL, URL)]
+    assert [(e.swarm, e.type, e.key, e.data["url"]) for e in events] == [
+        ("crew", "pull.merged", URL, URL),
+        ("other", "pull.merged", URL, URL),
+    ]
     assert open_urls(bus) == []
 
 
