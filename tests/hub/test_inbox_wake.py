@@ -311,6 +311,8 @@ def test_configured_hub_routes_arrivals_and_expiry_using_its_clock(rig, monkeypa
     from scripts.hub.runner import HubRunner
 
     monkeypatch.setattr(inbox_wake, "connect", lambda: rig.reactor.store)
+    monkeypatch.setattr(inbox_wake, "HerdrMessenger", lambda: rig.herdr)
+    monkeypatch.setattr(inbox_wake, "LedgerClient", lambda service: rig.ledger)
     reactors = registry.configured(rig.bus, clock=lambda: rig.clock.now)
     selected = [reactor for reactor in reactors if reactor.name in {"inbox-wake", "inbox-wake-expiry", "timers"}]
     assert len(selected) == 3
@@ -492,7 +494,7 @@ def test_stopped_swarm_seat_mail_does_not_wait_for_an_unavailable_successor(rig)
     from scripts.swarm.store import RedisStore, SwarmConfig
 
     store = RedisStore(rig.inbox.redis)
-    store.create(SwarmConfig("sw", "/repo", state="stopped"))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1, state="stopped"))
     rig.reactor.store = store
     item, _ = send(rig, "eng-1@sw")
     advance(rig, 1000 + W // 2)
