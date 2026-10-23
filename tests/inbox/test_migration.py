@@ -25,6 +25,7 @@ def source(monkeypatch):
         monkeypatch.setattr(store, "home", lambda address: world)
         item = store.send("sender", "eng-1@swarm", f"work {state}", item_id=state, ref="ref", task="task")
         client.hset(store.key("item", item.id), mapping={"state": state, "extra": "preserved", "fyi": "True"})
+        store.about(item.id, "tasks/reference")
         client.rpush(store.key("history", item.id), json.dumps({"event": "wake", "at": 1, "detail": state}))
     return client
 
@@ -43,6 +44,7 @@ def test_snapshot_copies_all_open_states_and_worlds_without_rebuilding_indexes(s
     assert len(records) == 4
     assert {record["world"] for record in records} == {"", "hive"}
     for record in records:
+        assert record["entry"] == "tasks/reference"
         assert record["item"]["extra"] == "preserved"
         assert len(record["history"]) == 2
         assert json.loads(record["history"][1])["detail"] == record["item"]["state"]
@@ -83,7 +85,7 @@ def test_import_reuses_existing_seat_envelopes_and_refuses_conflicting_content(s
     assert mail.send(item["address"], Message(item["id"], item["sender"], item["text"], "ref", True, "task")) == event
     changed = copy.deepcopy(records)
     changed[0]["history"].append('{"event":"changed"}')
-    with pytest.raises(ValueError, match="different migration record"):
+    with pytest.raises(ValueError, match=r"^item already has a different migration record$"):
         migration.import_snapshot(changed, bus)
 
 
@@ -125,12 +127,12 @@ def test_copy_rehearsal_verifies_the_same_snapshot_on_a_real_nats_server(source,
 def test_live_import_is_disabled_by_default_and_requires_unchanged_rehearsed_source(source, bus):
     records = migration.snapshot(source)
     proof = migration.rehearse(records, bus, "copy")
-    with pytest.raises(ValueError, match="disabled"):
+    with pytest.raises(ValueError, match=r"^live inbox migration is disabled$"):
         migration.apply(source, bus, proof, "live")
-    with pytest.raises(ValueError, match="copy destination"):
+    with pytest.raises(ValueError, match=r"^live migration requires a separate copy destination$"):
         migration.apply(source, bus, proof, "copy", enabled=True)
     changed = dict(proof, digest="wrong")
-    with pytest.raises(ValueError, match="changed since rehearsal"):
+    with pytest.raises(ValueError, match=r"^source changed since rehearsal$"):
         migration.apply(source, bus, changed, "live", enabled=True)
     live = memory.open_bus(BusConfig())
     try:
@@ -144,7 +146,7 @@ def test_corrupt_destination_fails_verification(source, bus):
     records = migration.snapshot(source)
     migration.import_snapshot(records, bus)
     with patch.object(bus.state("inbox_legacy"), "get", return_value=None):
-        with pytest.raises(ValueError, match="verification"):
+        with pytest.raises(ValueError, match=r"^migration verification failed$"):
             migration.read_records(records, bus)
 
 
@@ -153,24 +155,34 @@ def test_same_id_in_different_worlds_cannot_hide_different_open_items(source, bu
     duplicate = copy.deepcopy(records[0])
     duplicate["world"] = "other"
     duplicate["item"]["text"] = "different"
-    with pytest.raises(ValueError, match="item id"):
+    with pytest.raises(ValueError, match=r"^duplicate item id in migration snapshot$"):
         migration.import_snapshot([records[0], duplicate], bus)
 
 
-def test_cli_refuses_live_import_before_connecting_without_enable_flag(tmp_path):
+def test_cli_refuses_live_import_before_connecting_without_enable_flag(tmp_path, capsys):
     with patch.object(migration, "open_bus") as opener:
-        with pytest.raises(SystemExit) as error:
-            migration.main(["apply", str(tmp_path / "proof.json")])
+        with patch.object(migration.BusConfig, "from_environ") as config:
+            with pytest.raises(SystemExit) as error:
+                migration.main(["apply", str(tmp_path / "proof.json")])
     assert error.value.code == 2
+    assert capsys.readouterr().err.split(": error: ")[1].strip() == (
+        "live inbox migration is disabled; a scheduled cutover requires --enable-live"
+    )
     opener.assert_not_called()
+    config.assert_not_called()
 
 
-@pytest.mark.parametrize("backend,url", [("memory", None), ("nats", None)])
-def test_cli_requires_an_explicit_nats_destination(backend, url, tmp_path):
+@pytest.mark.parametrize("backend,url", [("memory", "nats://unused"), ("nats", None)])
+def test_cli_requires_an_explicit_nats_destination(backend, url, tmp_path, capsys):
     with patch.object(migration.BusConfig, "from_environ", return_value=BusConfig(backend=backend, url=url)):
-        with pytest.raises(SystemExit) as error:
-            migration.main(["rehearse", str(tmp_path / "snapshot.json"), "--receipt", str(tmp_path / "proof.json")])
+        with patch.object(migration, "open_bus") as opener:
+            with pytest.raises(SystemExit) as error:
+                migration.main(["rehearse", str(tmp_path / "snapshot.json"), "--receipt", str(tmp_path / "proof.json")])
     assert error.value.code == 2
+    assert capsys.readouterr().err.split(": error: ")[1].strip() == (
+        "migration requires an explicit NATS backend and URL"
+    )
+    opener.assert_not_called()
 
 
 def test_cli_snapshots_rehearses_and_imports_a_copy_into_a_separate_nats_destination(source, tmp_path, capsys):
@@ -208,12 +220,12 @@ def test_cli_snapshots_rehearses_and_imports_a_copy_into_a_separate_nats_destina
 def test_apply_refuses_unknown_proof_versions_and_changes_during_the_move(source, bus):
     records = migration.snapshot(source)
     proof = migration.rehearse(records, bus, "copy")
-    with pytest.raises(ValueError, match="unsupported migration proof version"):
+    with pytest.raises(ValueError, match=r"^unsupported migration proof version$"):
         migration.apply(source, bus, dict(proof, version=2), "live", enabled=True)
     live = memory.open_bus(BusConfig())
     try:
         with patch.object(migration, "snapshot", side_effect=[records, []]):
-            with pytest.raises(ValueError, match="source changed during migration"):
+            with pytest.raises(ValueError, match=r"^source changed during migration; cutover is unverified$"):
                 migration.apply(source, live, proof, "live", enabled=True)
     finally:
         live.close()
@@ -224,7 +236,7 @@ def test_import_refuses_closed_or_unknown_states_before_publishing(source, bus, 
     records = migration.snapshot(source)
     records[0]["item"]["state"] = state
     with patch.object(bus.events, "publish") as publisher:
-        with pytest.raises(ValueError, match="open inbox item"):
+        with pytest.raises(ValueError, match=r"^migration requires an open inbox item$"):
             migration.import_snapshot(records, bus)
     publisher.assert_not_called()
 
@@ -244,7 +256,60 @@ def test_destination_aliases_cannot_use_the_rehearsal_store_as_the_live_store(so
         alias = url.replace("127.0.0.1", "localhost")
         bus = open_bus(BusConfig(backend="nats", url=alias))
         try:
-            with pytest.raises(ValueError, match="separate copy destination"):
+            with pytest.raises(ValueError, match=r"^live migration requires a separate copy destination$"):
                 migration.apply(source, bus, proof, alias, enabled=True)
         finally:
             bus.close()
+
+
+def test_snapshot_retains_long_histories_and_handles_repeated_key_separators(source):
+    store = InboxStore(source, world="nested:inbox:item:world")
+    item = source.hgetall(InboxStore(source, world="").key("item", "pending"))
+    source.hset(store.key("item", "pending"), mapping=item)
+    history = [json.dumps({"event": "wake", "at": number}) for number in range(5)]
+    source.rpush(store.key("history", "pending"), *history)
+    records = migration.snapshot(source)
+    record = next(record for record in records if record["world"] == "nested:inbox:item:world")
+    assert record["history"] == history
+
+
+def test_standalone_addresses_remain_deliverable_in_the_standalone_inbox(source, bus):
+    records = migration.snapshot(source)[:1]
+    records[0]["item"]["address"] = "standalone-session"
+    migration.import_snapshot(records, bus)
+    receipt = SeatInbox(bus, "standalone").consumer("standalone-session", "receiver").fetch(1, 0)[0]
+    assert receipt.event.key == "standalone-session"
+    assert receipt.event.data["id"] == records[0]["item"]["id"]
+
+
+def test_snapshot_digest_is_stable_across_mapping_order():
+    assert migration.digest({"b": 2, "a": 1}) == "d8497d9d82770a70729261095aa98f7ef5154d7af499f8037b6ca250296785a6"
+    assert migration.digest({"a": 1, "b": 2}) == "d8497d9d82770a70729261095aa98f7ef5154d7af499f8037b6ca250296785a6"
+
+
+@pytest.mark.parametrize("args", [[], ["rehearse", "snapshot.json"]])
+def test_cli_requires_a_mode_and_a_rehearsal_receipt(args):
+    with patch.object(migration, "open_bus") as opener:
+        with pytest.raises(SystemExit) as error:
+            migration.main(args)
+    assert error.value.code == 2
+    opener.assert_not_called()
+
+
+def test_cli_help_explains_the_scheduled_cutover(capsys):
+    with pytest.raises(SystemExit) as error:
+        migration.main(["--help"])
+    assert error.value.code == 0
+    assert "Copy and rehearse open Redis inbox items before a scheduled NATS cutover" in " ".join(
+        capsys.readouterr().out.split()
+    )
+
+
+def test_the_copy_url_is_refused_even_with_a_fresh_destination_store(source, bus):
+    proof = migration.rehearse(migration.snapshot(source), bus, "copy")
+    live = memory.open_bus(BusConfig())
+    try:
+        with pytest.raises(ValueError, match=r"^live migration requires a separate copy destination$"):
+            migration.apply(source, live, proof, "copy", enabled=True)
+    finally:
+        live.close()
