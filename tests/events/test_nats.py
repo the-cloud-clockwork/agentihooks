@@ -387,7 +387,7 @@ def test_a_nak_without_a_delay_redelivers_at_once():
     async def nak(delay):
         seen.append(delay)
 
-    msg = SimpleNamespace(data=event().encode(), metadata=SimpleNamespace(num_delivered=1), nak=nak)
+    msg = SimpleNamespace(data=event().encode(), metadata=SimpleNamespace(num_delivered=1), headers=None, nak=nak)
     loop = nats._Loop()
     try:
         nats.NatsDelivery(loop, msg).nak()
@@ -398,7 +398,7 @@ def test_a_nak_without_a_delay_redelivers_at_once():
 
 def test_a_dead_letter_is_published_before_the_original_is_terminated():
     calls = []
-    message = SimpleNamespace(data=event().encode(), metadata=SimpleNamespace(num_delivered=4))
+    message = SimpleNamespace(data=event().encode(), metadata=SimpleNamespace(num_delivered=4), headers=None)
 
     async def terminate():
         calls.append("term")

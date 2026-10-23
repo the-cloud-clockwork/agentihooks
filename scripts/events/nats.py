@@ -408,6 +408,21 @@ class NatsBus:
                 store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket, self._config.provision)
             return store
 
+    def migrate_state(self, swarm: str, bucket: str, keys: list[str]) -> None:
+        from .nats_migration import migrate_state
+
+        migrate_state(self, swarm, bucket, keys)
+
+    def migrate_queue(self, swarm: str, name: str, policy: QueuePolicy) -> None:
+        from .nats_migration import migrate_queue
+
+        migrate_queue(self, swarm, name, policy)
+
+    def migrate_dead(self, swarm: str) -> None:
+        from .nats_migration import migrate_dead
+
+        migrate_dead(self, swarm)
+
     def close(self) -> None:
         with self._lock:
             try:
