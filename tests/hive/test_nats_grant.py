@@ -368,7 +368,8 @@ def _claims(jwt: str) -> dict:
 
 
 def _offline_signer() -> nats_grant.Signer:
-    return nats_grant.Signer(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT), "creds", "nats://hub:4222")
+    operator = nkey.create(nkey.OPERATOR)
+    return nats_grant.Signer(operator, nkey.create(nkey.ACCOUNT), "creds", "nats://hub:4222", operator.public)
 
 
 def test_a_member_credential_carries_exactly_the_user_claims():
@@ -398,7 +399,11 @@ def test_a_push_connects_once_without_reconnecting_and_bounds_both_waits(monkeyp
     import nats as nats_client
 
     signed = nats_grant.Signer(
-        nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT), _user_creds(nkey.create(nkey.ACCOUNT), "sys"), "nats://x"
+        nkey.create(nkey.OPERATOR),
+        nkey.create(nkey.ACCOUNT),
+        _user_creds(nkey.create(nkey.ACCOUNT), "sys"),
+        "nats://x",
+        "unused",
     )
     seen = {}
 
