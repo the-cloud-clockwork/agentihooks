@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -195,6 +196,28 @@ def test_every_declared_input_exists_and_covers_its_own_workflow():
         assert f".github/workflows/{job}.yml" in entry["paths"]
         for path in entry["paths"] + entry.get("base_paths", []):
             assert (_ROOT / path).exists(), path
+
+
+def test_the_chart_proof_key_covers_every_test_file_its_scripts_run():
+    declared = _registry()["helm-kind"]["paths"]
+    scripts = sorted((_ROOT / "deploy/helm/agentihooks-swarm/ci").glob("*.sh"))
+    roots = r"(?:scripts|hooks|profiles|docker|docs|media|tests)/[\w./-]+"
+    used = {path for script in scripts for path in re.findall(roots, script.read_text())}
+    assert {
+        "tests/chart_hub.py",
+        "tests/chart_nats.py",
+        "tests/chart_hive_only.py",
+        "tests/chart_github_auth.py",
+    } <= used
+    pending = [path for path in used if path.startswith("tests/") and path.endswith(".py")]
+    while pending:
+        source = (_ROOT / pending.pop()).read_text()
+        for name in re.findall(r"^(?:from|import) (chart_\w+)", source, re.MULTILINE):
+            if f"tests/{name}.py" not in used:
+                used.add(f"tests/{name}.py")
+                pending.append(f"tests/{name}.py")
+    for path in used:
+        assert any(path == entry or path.startswith(f"{entry}/") for entry in declared), path
 
 
 def test_the_lookup_only_checks_the_key_and_reports_a_hit_as_true_or_false():
