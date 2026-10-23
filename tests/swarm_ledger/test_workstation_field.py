@@ -1,0 +1,42 @@
+import ledger_core as core
+import pytest
+
+from scripts.swarm_ledger import ledger_tasks
+from tests.swarm_ledger import test_artifact_lifecycle as lifecycle
+from tests.swarm_ledger.test_artifact_lifecycle import AGENT, add_task, storage
+from tests.swarm_ledger.test_artifact_lifecycle import package_modules as package_modules
+from tests.swarm_ledger.test_artifact_lifecycle import slug as slug
+
+
+def test_a_task_added_or_set_for_the_workstation_keeps_the_flag(slug):
+    state, _ = add_task(slug, "w1", workstation=True)
+    assert next(t for t in state["tasks"] if t["id"] == "w1")["workstation"] is True
+    update = {"op": "task_update", "id": "u", "by": AGENT, "item": "tasks/w1", "fields": {"workstation": False}}
+    state, _ = storage.apply_ops(slug, ops=[update])
+    assert next(t for t in state["tasks"] if t["id"] == "w1")["workstation"] is False
+
+
+def test_the_workstation_flag_must_be_a_boolean():
+    assert "workstation" in ledger_tasks.UPDATABLE
+    task = {"op": "task_add", "id": "t", "by": "eng", "task": "w", "title": "Work", "lane": "eng"}
+    update = {"op": "task_update", "id": "u", "by": "eng", "item": "tasks/w", "fields": {"workstation": "yes"}}
+    for bad in ({**task, "workstation": "yes"}, update):
+        with pytest.raises(ValueError, match="^workstation must be true or false$"):
+            core.check_op(bad)
+
+
+def run(argv):
+    return lifecycle.TestCommands().run(argv)
+
+
+def test_task_add_workstation_marks_the_task():
+    assert run(["task", "add", "w9", "Landing", "--workstation"])["workstation"] is True
+    assert "workstation" not in run(["task", "add", "w9", "Landing"])
+
+
+def test_task_set_workstation_yes_and_no():
+    assert run(["task", "set", "w9", "workstation=yes"])["fields"] == {"workstation": True}
+    assert run(["task", "set", "w9", "workstation=no"])["fields"] == {"workstation": False}
+    with pytest.raises(SystemExit) as exc:
+        run(["task", "set", "w9", "workstation=maybe"])
+    assert exc.value.code == "task set takes workstation=yes or workstation=no"
