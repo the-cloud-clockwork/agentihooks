@@ -107,14 +107,18 @@ def test_retirement_does_not_refund_an_already_reset_claim(store, ending):  # no
     assert agent.name in runtime.killed
 
 
+@pytest.mark.parametrize("cause", ["quota", "parked"])
 @pytest.mark.parametrize("path", ["parked", "remote"])
-def test_a_second_tick_refund_for_the_same_claim_is_refused(store, path):  # noqa: F811
+def test_a_second_tick_refund_for_the_same_claim_is_refused(store, path, cause):  # noqa: F811
     from scripts.swarm import tick as tick_module
 
-    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
+    ledger, runtime = CommentingLedger([{"id": "t1"}, {"id": "t9", "state": "claimed"}]), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    agent = replace(workers(store)[0], state="finished")
-    store.put_handoff("sw", "t1", "continue here", seat=agent.seat, envelope={"reason": "quota"})
+    agent = replace(next(a for a in workers(store) if a.task == "t1"), state="finished")
+    if cause == "quota":
+        store.put_handoff("sw", "t1", "continue here", seat=agent.seat, envelope={"reason": "quota"})
+    else:
+        ledger.rows["t1"]["parked_on"] = ["t9"]
     generation, lives = store.claim_generation("sw", "t1"), store.claims("sw", "t1")
     for _ in range(2):
         store.put_agent("sw", agent)
@@ -133,6 +137,7 @@ def test_a_second_stop_refund_for_the_same_claim_is_refused(store):  # noqa: F81
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     agent = workers(store)[0]
+    store.count_claim("sw", "t1")
     generation, lives = store.claim_generation("sw", "t1"), store.claims("sw", "t1")
 
     def refused(*args, **kwargs):

@@ -487,14 +487,16 @@ class RedisStore:
         from redis.exceptions import WatchError
 
         key, lives = self.key(slug, "claim", task), self.key(slug, "started-lives")
+        refunded = self.key(slug, "refunded-claims")
         guards = self._claim_guards(slug, task)
         for _ in range(3):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(key, f"{key}:generation", lives, *guards)
+                    pipe.watch(key, f"{key}:generation", lives, refunded, *guards)
                     if (
                         pipe.get(key) != agent
                         or int(pipe.get(f"{key}:generation") or 0) != generation
+                        or pipe.hget(refunded, task) == f"{agent}:{generation}"
                         or any(pipe.exists(guard) for guard in guards)
                     ):
                         return False
@@ -504,6 +506,7 @@ class RedisStore:
                     pipe.multi()
                     pipe.hsetnx(lives, task, started)
                     pipe.hincrby(lives, task, -1)
+                    pipe.hset(refunded, task, f"{agent}:{generation}")
                     pipe.execute()
                     return True
                 except WatchError:
