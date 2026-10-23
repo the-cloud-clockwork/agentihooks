@@ -53,3 +53,10 @@ def test_invalid_engine_is_rejected_without_changing_config(env, capsys, engine)
         store.update("sw", engine=engine)
     assert str(caught.value) == "engine must be one of legacy, events"
     assert store.redis.hgetall(store.key("sw", "config")) == before
+
+
+def test_set_usage_names_the_engine_choices(env, capsys):  # noqa: F811
+    run("sw", "create", "--repo", "/repo")
+    capsys.readouterr()
+    assert run("sw", "set", "unknown=value") == 1
+    assert capsys.readouterr().err.endswith("=<value>, engine=legacy|events\n")
