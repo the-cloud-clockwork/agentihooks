@@ -125,11 +125,8 @@ def receiver_release_problems(chart: str) -> list[str]:
     found += receiver_problems(receivers(beside.stdout))
     if len(hubs(beside.stdout)) != 1:
         found.append("the receiver does not render beside the hub")
-    if receiver_bus_url(beside.stdout) != "nats://nats.swarm:4222":
-        found.append(f"the receiver bus address is {receiver_bus_url(beside.stdout)}, expected hub.bus.url")
-    unset = render(chart, *RECEIVER)
-    if unset.returncode or receiver_bus_url(unset.stdout) is not None:
-        found.append("a receiver without hub.bus.url renders a bus address that overrides its secret")
+    if receiver_bus_url(beside.stdout) is not None:
+        found.append("the receiver renders hub.bus.url, which overrides the authenticated bus address in its secret")
     hive = render(chart, *RECEIVER, "--set", "hiveOnly=true")
     if hive.returncode or receivers(hive.stdout):
         found.append("a hive only release renders the receiver")
