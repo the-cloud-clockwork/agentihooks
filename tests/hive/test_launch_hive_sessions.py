@@ -37,6 +37,9 @@ def test_an_outright_account_beats_an_earlier_fallback_and_the_first_fallback_is
     fallbacks = [rows[0], rows[2], rows[3]]
     assert launch._first_choice(fallbacks, picks.__getitem__) == (rows[0], picks["full_on_hives"])
     assert launch._first_choice([rows[3]], picks.__getitem__) == picks["last_seat"]
+    busier = {"last_seat": placement.Choice("anton", "busier fallback"), "other": picks["other"]}
+    assert launch._first_choice([rows[3], rows[2]], busier.__getitem__) == (rows[2], picks["other"])
+    assert launch._first_choice([], picks.__getitem__) == placement.Wait("no advertised Claude account has room")
 
 
 def test_hive_sessions_count_each_remote_hive_once_and_skip_this_machine(monkeypatch):
