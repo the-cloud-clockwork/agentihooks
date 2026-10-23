@@ -245,6 +245,7 @@ class Scheduler:
         pending = entry.get("pending")
         if pending is None:
             _log.warning("scheduler skipped stale pending entry %s: no pending details", entry_id)
+            self.update(entry_id, lambda current: None, lease=lease)
             return
         event = {
             **entry,

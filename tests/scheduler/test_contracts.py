@@ -206,6 +206,11 @@ def test_a_pending_entry_without_pending_details_is_logged_as_stale_and_the_pass
     assert [record.getMessage() for record in caplog.records] == [
         f"scheduler skipped stale pending entry {stale.id}: no pending details"
     ]
+    assert scheduler.redis.smembers(scheduler.key("pending")) == set()
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="scripts.scheduler.core"):
+        assert scheduler.run_due(now=110) == 0
+    assert caplog.records == []
 
 
 def test_dispatch_lock_refuses_a_competing_drain_without_losing_work(scheduler):
