@@ -77,4 +77,40 @@ def test_bus_config_reads_the_bus_setting():
 @pytest.mark.parametrize("environ", [{}, {"AGENTIHOOKS_BUS": "", "AGENTIHOOKS_BUS_URL": ""}])
 def test_bus_config_falls_back_to_the_default_backend_without_a_url(environ):
     bus = BusConfig.from_environ(environ)
-    assert (bus.backend, bus.url) == ("memory", None)
+    assert (bus.backend, bus.url, bus.credentials) == ("memory", None, None)
+
+
+BAO = {"OPENBAO_URL": "https://bao.example", "OPENBAO_TOKEN": "t"}
+
+
+def test_bus_credentials_are_read_from_the_file_the_setting_names(tmp_path):
+    creds = tmp_path / "hive.creds"
+    creds.write_text("creds text")
+    bus = BusConfig.from_environ({"AGENTIHOOKS_BUS_CREDENTIALS": str(creds)})
+    assert bus.credentials == "creds text"
+    assert "creds text" not in repr(bus)
+
+
+def test_bus_credentials_are_read_from_the_openbao_record_the_setting_names(monkeypatch):
+    from scripts import openbao_kv
+
+    seen = []
+    monkeypatch.setattr(
+        openbao_kv, "read", lambda bao, path: (seen.append((bao.url, path)), ({"credentials": "role"}, 3))[1]
+    )
+    bus = BusConfig.from_environ({"AGENTIHOOKS_BUS_CREDENTIALS": "openbao:k8s/nats-hub", **BAO})
+    assert (bus.credentials, seen) == ("role", [("https://bao.example", "k8s/nats-hub")])
+
+
+def test_an_openbao_credentials_reference_needs_openbao_settings():
+    with pytest.raises(ValueError, match="^AGENTIHOOKS_BUS_CREDENTIALS names an OpenBao record, so OPENBAO_URL"):
+        BusConfig.from_environ({"AGENTIHOOKS_BUS_CREDENTIALS": "openbao:k8s/nats-hub"})
+
+
+@pytest.mark.parametrize("record", [{}, {"credentials": ""}])
+def test_an_openbao_record_without_credentials_is_refused(monkeypatch, record):
+    from scripts import openbao_kv
+
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, path: (record, 1))
+    with pytest.raises(ValueError, match="^the OpenBao record openbao:k8s/nats-hub holds no credentials$"):
+        BusConfig.from_environ({"AGENTIHOOKS_BUS_CREDENTIALS": "openbao:k8s/nats-hub", **BAO})
