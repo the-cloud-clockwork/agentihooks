@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
+from scripts.events.bus import StateStore
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
@@ -19,6 +20,7 @@ from tests.chaos.journal import Journal, now_ms
 
 LANE = "eng"
 OFFERS = 10_000
+GENERATIONS = "chaos-generations"
 POLL_MS = 500
 QUIET = frozenset({"empty", "held"})
 # admission.room grants (80 * cpus - 100 * load5) // 50 launches, so these readings leave capacity minus running.
@@ -101,15 +103,35 @@ def work(bus, spoke: Spoke, runtime: ChaosRuntime, journal: Journal, hive: str) 
             time.sleep(0.2)
 
 
-def readiness_view(swarm: str) -> Callable[[], readiness.Snapshot]:
+class OfferedRows(dict):
+    def __init__(self, rows: dict, generations: Callable[[], StateStore]):
+        super().__init__(rows)
+        self.generations = generations
+
+    def get(self, key, default=None):
+        row = super().get(key, default)
+        entry = self.generations().get(key) if row is not None else None
+        return row if entry is None else {**row, "claim_generation": int(entry.value)}
+
+
+def readiness_view(swarm: str, generations: Callable[[], StateStore]) -> Callable[[], readiness.Snapshot]:
     tasks = [
         {"id": f"t{n:04d}", "phase": "chaos", "state": "open", "lane": LANE, "claim_generation": 1}
         for n in range(1, OFFERS + 1)
     ]
     doc = {"tasks": tasks, "phases": [{"id": "chaos", "title": "chaos", "depends_on": []}]}
-    rows = {task["id"]: task for task in tasks}
+    rows = OfferedRows({task["id"]: task for task in tasks}, generations)
     view = readiness.Snapshot(swarm, rows, doc, hierarchy.project(doc)[0], "", lambda _: False, lambda _: True)
     return lambda: view
+
+
+def record_generation(bus, task: str, generation: int) -> None:
+    store = bus.state(GENERATIONS)
+    entry = store.get(task)
+    if entry is None:
+        store.create(task, str(generation).encode())
+    else:
+        store.update(task, str(generation).encode(), entry.revision)
 
 
 def serve(args: argparse.Namespace) -> None:
@@ -117,7 +139,8 @@ def serve(args: argparse.Namespace) -> None:
     runtime = ChaosRuntime(journal, args.hive, args.launch_ms, args.work_ms)
     tasks = ChaosTasks(journal)
     config = SpokeConfig(swarm=SimpleNamespace(slug=args.swarm), lane=LANE, hive=args.hive)
-    view = readiness_view(args.swarm)
+    current = {}
+    view = readiness_view(args.swarm, lambda: current["bus"].state(GENERATIONS))
 
     def measure() -> dict:
         return {"cpus": args.capacity * CPUS_PER_SLOT, "load5": len(runtime.agents) * LOAD_PER_AGENT}
@@ -128,6 +151,7 @@ def serve(args: argparse.Namespace) -> None:
         except Exception:
             time.sleep(0.5)
             continue
+        current["bus"] = bus
         journal.write("connected")
         try:
             spoke = Spoke(config, bus, runtime, tasks, measure=measure, view=view)
