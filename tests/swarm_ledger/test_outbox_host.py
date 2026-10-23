@@ -5,7 +5,7 @@ import pytest
 
 from scripts.events import factory, memory
 from scripts.events.config import BusConfig
-from scripts.swarm_ledger.repository import sqlite
+from scripts.swarm_ledger.repository import outbox, sqlite
 
 
 @pytest.mark.wall_clock
@@ -66,11 +66,14 @@ def test_relay_retries_failures_on_the_next_interval_and_closes_its_bus(monkeypa
     monkeypatch.setattr(factory, "open_bus", opening)
     publish = Mock(side_effect=[OSError("offline"), 1] if failure == "publish" else [1])
     monkeypatch.setattr(outbox_host.outbox, "relay", publish)
+    prune = Mock(return_value=0)
+    monkeypatch.setattr(outbox_host.outbox, "prune", prune)
     repository = object()
-    config = BusConfig(backend="nats", url="nats://bus:4222")
+    config = BusConfig(backend="nats", url="nats://bus:4222", dedupe_window_ms=7_000)
     outbox_host.relay(repository, stopped, config, 0.25)
     assert opening.call_args_list == [((config,), {}), ((config,), {})]
     assert publish.call_args_list == [((repository, bus.events), {})] * (2 if failure == "publish" else 1)
+    assert prune.call_args_list == [((repository, 7_000), {})]
     assert stopped.wait.call_args_list == [((0.25,), {}), ((0.25,), {})]
     assert bus.close.call_args_list == [((), {})] * (2 if failure == "publish" else 1)
     assert capsys.readouterr().err == "ledger bus relay: offline\n"
@@ -237,3 +240,36 @@ def test_server_gives_its_repository_to_the_relay_and_stops_it_before_closing(mo
     with pytest.raises(ValueError, match="serving failed"):
         ledger_server.serve()
     assert lifecycle == ["relay started", "serving", "relay stopped", "server closed"]
+
+
+def test_relay_loop_prunes_sent_rows_outside_the_dedupe_window_and_keeps_the_rest(tmp_path, monkeypatch):
+    from scripts.swarm_ledger import outbox_host
+
+    repository = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
+    bus = memory.open_bus(BusConfig())
+    config = BusConfig(backend="nats")
+
+    def ids():
+        with repository.connect() as connection:
+            return {row[0] for row in connection.execute("SELECT id FROM outbox").fetchall()}
+
+    def marks():
+        with repository.connect() as connection:
+            return {row[0] for row in connection.execute("SELECT id FROM outbox_sent").fetchall()}
+
+    repository.create("old", {"title": "Old", "phases": [{"title": "One"}]})
+    stale = ids()
+    outbox.relay(repository, bus.events, clock=lambda: 1_000)
+    repository.create("recent", {"title": "Recent", "phases": [{"title": "One"}]})
+    recent = ids() - stale
+    outbox.relay(repository, bus.events, clock=lambda: outbox.now_ms() - config.dedupe_window_ms // 2)
+    repository.create("unsent", {"title": "Unsent", "phases": [{"title": "One"}]})
+    unsent = ids() - stale - recent
+    assert [len(stale), len(recent), len(unsent)] == [1, 1, 1]
+    monkeypatch.setattr(factory, "open_bus", Mock(return_value=bus))
+    monkeypatch.setattr(outbox_host.outbox, "relay", Mock(return_value=0))
+    stopped = Mock()
+    stopped.is_set.side_effect = [False, True]
+    outbox_host.relay(repository, stopped, config, 0.01)
+    assert ids() == recent | unsent
+    assert marks() == recent
