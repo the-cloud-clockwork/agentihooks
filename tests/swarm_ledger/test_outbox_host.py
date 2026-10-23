@@ -245,7 +245,8 @@ def test_server_gives_its_repository_to_the_relay_and_stops_it_before_closing(mo
     assert lifecycle == ["relay started", "serving", "relay stopped", "server closed"]
 
 
-def test_relay_loop_prunes_sent_rows_outside_the_dedupe_window_and_keeps_the_rest(tmp_path, monkeypatch):
+@pytest.mark.wall_clock
+def test_relay_publish_prunes_sent_rows_outside_the_dedupe_window_and_keeps_the_rest(tmp_path, monkeypatch):
     from scripts.swarm_ledger import outbox_host
 
     repository = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
