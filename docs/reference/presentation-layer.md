@@ -172,7 +172,7 @@ python -m scripts.swarm_ledger.request_metrics --writes --hours 1 --end "$END" -
         wall_p95: ([.records[].wall_seconds] | sort | .[(length*0.95|ceil)-1])})'
 ```
 
-A read of the live server on 23 October:
+A read of the live server on 2026-10-23:
 
 ```json
 {"matched":154,"truncated":false,"complete":true}
@@ -190,7 +190,7 @@ the head, on one runner, and compares every outcome, CPU per write and peak
 memory:
 
 ```bash
-gh workflow run proofs.yml --ref <branch> -f proof=operations-cpu -f base=origin/dev
+gh workflow run proofs.yml --ref "<branch>" -f proof=operations-cpu -f base=origin/dev
 ```
 
 The replay waits for queued publications (`Publishing.drain`) before it reads
