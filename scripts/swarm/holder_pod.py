@@ -12,7 +12,7 @@ DNS_NAMES = {
 
 
 def pod(environ: Mapping[str, str]) -> dict:
-    found = {field: environ.get(name, "") for field, name in ENV.items()}
+    found = {field: environ.get(name) for field, name in ENV.items()}
     return found if all(found.values()) else {}
 
 
@@ -36,11 +36,11 @@ def _statuses(found: dict) -> list:
 
 
 def identity(environ: Mapping[str, str], read: Callable[[str, str], dict | None] = read_pod) -> dict:
-    own, container = pod(environ), environ.get(CONTAINER_ENV, "")
+    own, container = pod(environ), environ.get(CONTAINER_ENV)
     if not own or not container:
         return own
     _, found = _read(read, own["namespace"], own["name"])
-    ids = [s.get("containerID", "") for s in _statuses(found or {}) if s.get("name") == container]
+    ids = [s.get("containerID") for s in _statuses(found or {}) if s.get("name") == container]
     return {**own, "container": ids[0]} if ids and ids[0] else own
 
 

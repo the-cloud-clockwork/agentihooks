@@ -336,7 +336,7 @@ def _dead(raw: str) -> bool:
         return True
     if host and held.get("host") != host:
         return holder_pod.gone(held.get("pod"), holder_pod.pod(os.environ))
-    if not host or not {"pid", "start"} <= held.keys():
+    if not host or "pid" not in held or "start" not in held:
         return False
     return _gone(held["pid"], held["start"])
 

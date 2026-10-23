@@ -88,6 +88,7 @@ def running(container_id, state):
         (running("c-old", {"running": {}}), False),
         (running("c-old", {"terminated": {}}), True),
         (running("c-old", {"waiting": {}}), True),
+        ({"metadata": {"uid": "uid-old"}, "status": {"containerStatuses": [{"containerID": "c-old"}]}}, True),
         (running("c-new", {"running": {}}), True),
         ({"metadata": {"uid": "uid-old"}, "status": {"phase": "Running"}}, True),
     ],
