@@ -24,6 +24,10 @@ def test_crc16_is_the_xmodem_checksum():
     assert nkey.crc16(b"") == 0
 
 
+def test_an_encoding_strips_only_base32_padding():
+    assert (nkey._encode(bytes.fromhex("000038")), nkey._encode(b"\x00")) == ("AAADQW5X", "AAAAA")
+
+
 @pytest.mark.parametrize(
     ("prefix", "seed_head", "public_head"),
     [(nkey.OPERATOR, "SO", "O"), (nkey.ACCOUNT, "SA", "A"), (nkey.USER, "SU", "U")],
