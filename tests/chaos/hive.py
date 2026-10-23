@@ -27,6 +27,7 @@ class Agent:
     task: str
     claim: str
     ends_ms: int
+    name: str = ""
 
 
 class ChaosRuntime:
@@ -42,10 +43,20 @@ class ChaosRuntime:
         fields = {"task": request.task["id"], "claim": fence["key"], "revision": fence["revision"]}
         self.journal.write("launching", **fields)
         time.sleep(self.launch_ms / 1000)
-        self.agents.append(Agent(request.task["id"], fence["key"], now_ms() + self.work_ms))
+        self.agents.append(Agent(request.task["id"], fence["key"], now_ms() + self.work_ms, request.name))
         self.journal.write("launched", **fields)
         placed = SimpleNamespace(pane_id=f"{self.hive}:{request.name}", harness="chaos", account="chaos")
         return Outcome("spawn", Status.OK, self.backend, value=placed)
+
+    def find(self, name: str) -> Outcome:
+        found = name if any(agent.name == name for agent in self.agents) else None
+        return Outcome("find", Status.OK, self.backend, value=found)
+
+    def reap(self, name: str) -> Outcome:
+        for agent in [agent for agent in self.agents if agent.name == name]:
+            self.journal.write("reaped", task=agent.task, claim=agent.claim)
+            self.agents.remove(agent)
+        return Outcome("reap", Status.OK, self.backend)
 
 
 class ChaosTasks:

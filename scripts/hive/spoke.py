@@ -121,6 +121,10 @@ class Spoke:
             return None
         return "uncertain" if state == "launching" else "busy"
 
+    def _end_leftover(self, name: str) -> bool:
+        found = self.runtime.find(name)
+        return found.ok and (found.value is None or self.runtime.reap(name).ok)
+
     def _recover(self) -> str | None:
         pending = self.bus.state("spoke-pending").get(self._pending_key)
         if pending is None or not (record := json.loads(pending.value)):
@@ -130,6 +134,8 @@ class Spoke:
         state = json.loads(entry.value)
         status = state["state"]
         if status == "launching" and state.get("owner") == self.config.hive:
+            if not self._end_leftover(state["name"]):
+                return "uncertain"
             self.bus.state("spoke-work").update(
                 claim_key(event), json.dumps({"state": "ready"}).encode(), entry.revision
             )
