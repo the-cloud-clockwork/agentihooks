@@ -36,6 +36,54 @@ one Redis, which every ledger server and controller of the swarm share.
 
 Adding machines, roles, placement, failover timing and fencing are on the [Hives](../pillars/hives.md) page.
 
+## The hub and the bus
+
+The event driven design has three parts:
+
+- a hub on Anton that runs the swarm's reactors;
+- a NATS server with JetStream;
+- hives that pull offered work (see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub)).
+
+Each swarm picks its engine with its `engine` setting, `legacy` or `events`; see
+[Event driven engine](../pillars/swarm.md#event-driven-engine).
+
+| Mode | Engine | Bus | Hub |
+|---|---|---|---|
+| `local` | `legacy`; `events` only with a hub on the same bus | `memory` unless the bus settings name NATS | None runs by default. Only the hub's `readiness` reactor offers the work of an `events` swarm. |
+| `compose` | `legacy`; `events` only with a hub on the same bus | The stack's `nats` service: `AGENTIHOOKS_BUS=nats` at `nats://nats:4222` | No hub service. The Compose task smoke runs `agentihooks hub run --once` in the `swarm` service to settle a task end to end. |
+| `distributed` | `events` through the hub; a `legacy` swarm is ticked by the chart's controller, never by the workstation | NATS with JetStream from the `agentihooks-swarm` chart (`nats.enabled`, JetStream on) | The chart's `<release>-hub` Deployment, with `hub.enabled: true` and 2 replicas by default. It runs `agentihooks hub run`, scheduled only on nodes without the `anton.io/capacity-type` label. |
+
+### Hub reactors
+
+`agentihooks hub run` creates the hive buckets, then runs every reactor. Each reactor has a durable consumer named
+`hub-<name>`. Singleton reactors hold a lease in `hub-leases`, so with two replicas only one replica runs each of
+them. Every reactor retries up to 50 times, waiting 1, 5, 15, 60 and then 300 seconds between attempts.
+
+| Reactor | Reacts to | Does |
+|---|---|---|
+| `timers` | `swarm.*.deadline.*` | Keeps scheduled deadlines and publishes `deadline.expired` when one is due. |
+| `inbox-wake` | `swarm.*.inbox-wake.requested` and a poll | Schedules the wake deadline for an inbox item and relays queued wake items onto the seat inbox. |
+| `inbox-wake-expiry` | `swarm.*.deadline.expired` | When the deadline expires, redelivers or wakes the item and schedules its next deadline. |
+| `hive-loss` | `swarm.*.execution.started` | Publishes `execution.exited` for executions on a lost hive. |
+| `lifecycle` | `swarm.*.execution.exited` | Releases the slot and claim, and settles the task. |
+| `reconciler` | A five minute poll; it also subscribes to `swarm.*.reconcile.requested`, which nothing publishes yet | Rebuilds missing starts and ends executions that are gone. |
+| `readiness` | A poll; it also subscribes to `swarm.*.readiness.requested`, which nothing publishes yet | Offers the claimable tasks of every `events` swarm to the lane work queues. |
+| `pulls` | `swarm.*.task.*` and a poll | Publishes pull request, merge queue and check events, also fed by `agentihooks github-webhook`. |
+
+### Bus settings
+
+| Setting | Meaning |
+|---|---|
+| `AGENTIHOOKS_BUS` | `memory` (default) or `nats`. |
+| `AGENTIHOOKS_BUS_URL` | The NATS URL; default `nats://127.0.0.1:4222`. |
+| `AGENTIHOOKS_BUS_CREDENTIALS` | A NATS credentials file, or `openbao:<path>`, which reads that record's `credentials` field. |
+| `AGENTIHOOKS_BUS_BIND` | `1` binds to streams and buckets the hub created, without creating any itself. |
+
+A hive gets these settings from its invite. The hub operator runs `agentihooks hive invite <label> --bus-url <url>`.
+On the hive, `agentihooks hive join <invite>` writes `AGENTIHOOKS_BUS=nats` and the URL into `hive.env`. When the
+join returns NATS credentials, it saves them privately and adds `AGENTIHOOKS_BUS_CREDENTIALS` and
+`AGENTIHOOKS_BUS_BIND=1`. Each member's NATS user is limited to the subjects its hive needs.
+
 ## Ticks started by swarm commands
 
 Several swarm commands write their change and then run one tick pass for the swarm themselves: `swarm start`,
