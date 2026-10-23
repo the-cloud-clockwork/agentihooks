@@ -231,11 +231,13 @@ class NatsWorkQueue:
 
 
 class NatsStateStore:
-    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str):
+    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, provision: bool = True):
         self._loop = loop
         self._js = js
         self._bucket = bucket
-        self._kv = loop.run(js.create_key_value(bucket=bucket, history=KV_HISTORY))
+        self._kv = loop.run(
+            js.create_key_value(bucket=bucket, history=KV_HISTORY) if provision else js.key_value(bucket)
+        )
 
     def get(self, key: str) -> StateEntry | None:
         try:
@@ -282,20 +284,21 @@ class NatsBus:
                 nats_client.connect(url, allow_reconnect=False, **auth_options(config.credentials))
             )
             self._js = self._nc.jetstream()
-            self._loop.run(
-                self._js.add_stream(
-                    name=EVENT_STREAM,
-                    subjects=[f"{PREFIX}.>"],
-                    duplicate_window=_seconds(config.dedupe_window_ms),
+            if config.provision:
+                self._loop.run(
+                    self._js.add_stream(
+                        name=EVENT_STREAM,
+                        subjects=[f"{PREFIX}.>"],
+                        duplicate_window=_seconds(config.dedupe_window_ms),
+                    )
                 )
-            )
-            self._loop.run(
-                self._js.add_stream(
-                    name=DEAD_STREAM,
-                    subjects=[DEAD_SUBJECT],
-                    duplicate_window=_seconds(config.dedupe_window_ms),
+                self._loop.run(
+                    self._js.add_stream(
+                        name=DEAD_STREAM,
+                        subjects=[DEAD_SUBJECT],
+                        duplicate_window=_seconds(config.dedupe_window_ms),
+                    )
                 )
-            )
         except BaseException:
             self._loop.close()
             raise
@@ -316,7 +319,7 @@ class NatsBus:
         with self._lock:
             store = self._buckets.get(bucket)
             if store is None:
-                store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket)
+                store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket, self._config.provision)
             return store
 
     def close(self) -> None:
