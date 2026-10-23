@@ -77,6 +77,9 @@ class _Bus:
     events = _EventLog()
     dead = _EventLog()
 
+    def for_swarm(self, swarm):
+        return self
+
     def queue(self, name: str, policy: QueuePolicy) -> WorkQueue:
         return _WorkQueue()
 

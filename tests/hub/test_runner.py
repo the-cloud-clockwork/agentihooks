@@ -414,3 +414,27 @@ def test_record_retries_a_lost_compare_and_set_and_keeps_the_higher_version(bus,
 
 def test_the_hub_command_is_a_delegated_cli():
     assert cli_delegates.delegated_cli(["hub", "run"]) is runner.main
+
+
+def test_scoped_delivery_provisions_the_event_view_before_the_handler(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from scripts.hive import buckets
+
+    bus = memory.open_bus(BusConfig(scoped=True))
+    own = bus.for_swarm("s")
+    provision = Mock()
+    monkeypatch.setattr(buckets, "provision", provision)
+    handler = Mock()
+    reactor = registry.Reactor("scoped", "swarm.>", handler)
+    hub = runner.HubRunner(bus, registry.Registry([]), "hub")
+    delivery = SimpleNamespace(event=event("scoped", 1), ack=Mock(), nak=Mock(), attempt=1)
+    try:
+        assert hub._deliver(reactor, delivery) == "handled"
+        provision.assert_called_once_with(own)
+        handler.assert_called_once_with(delivery.event)
+        delivery.ack.assert_called_once_with()
+    finally:
+        hub.stop()
+        bus.close()

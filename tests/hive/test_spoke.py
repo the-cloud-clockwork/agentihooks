@@ -37,6 +37,7 @@ def test_a_spoke_does_not_take_work_until_its_local_cgroup_admits_another_agent(
     from scripts.hive.spoke import Spoke, SpokeConfig
 
     bus, runtime, tasks = Mock(), Mock(), Mock()
+    bus.for_swarm.return_value = bus
     bus.state.return_value.get.return_value = None
     spoke = Spoke(SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a"), bus, runtime, tasks, lambda: measured)
 
@@ -51,6 +52,7 @@ def test_an_admitted_spoke_takes_only_from_its_own_lane_with_the_requested_timeo
     from scripts.hive.spoke import Spoke, SpokeConfig
 
     bus, runtime, tasks = Mock(), Mock(), Mock()
+    bus.for_swarm.return_value = bus
     bus.state.return_value.get.return_value = None
     bus.queue.return_value.take.return_value = None
     policy = QueuePolicy(max_deliver=3, backoff_ms=(10, 20))
@@ -452,6 +454,7 @@ def test_default_admission_reuses_the_previous_cpu_sample_before_taking_again(mo
     monkeypatch.setattr(spoke.headroom, "measure", measure)
     monkeypatch.setattr(spoke, "time", SimpleNamespace(time_ns=Mock(side_effect=[1_234_000_000, 5_678_000_000])))
     bus = Mock()
+    bus.for_swarm.return_value = bus
     bus.state.return_value.get.return_value = None
     bus.queue.return_value.take.return_value = None
     worker = spoke.Spoke(spoke.SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a"), bus, Mock(), Mock())
@@ -486,6 +489,7 @@ def test_one_remaining_admission_slot_takes_without_waiting_and_reports_queue_fa
     from scripts.hive import spoke
 
     bus = Mock()
+    bus.for_swarm.return_value = bus
     bus.state.return_value.get.return_value = None
     bus.queue.return_value.take.return_value = None
     monkeypatch.setattr(spoke.admission, "room", lambda value: SimpleNamespace(room=1))
