@@ -3,12 +3,16 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 
 from scripts.events.bus import Bus
+from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.hub import lease
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 Handler = Callable[[Envelope], None]
+
+# About four hours of retries, so a reactor rides out an outage that the bus default of five attempts would not.
+REACTOR_POLICY = QueuePolicy(max_deliver=50, backoff_ms=(1_000, 5_000, 15_000, 60_000, 300_000))
 
 
 @dataclass(frozen=True)
@@ -18,6 +22,7 @@ class Reactor:
     handler: Handler
     singleton: bool = False
     poll: Callable[[Callable[[], bool]], None] | None = None
+    policy: QueuePolicy = REACTOR_POLICY
 
     def __post_init__(self):
         if not isinstance(self.name, str) or not _NAME.fullmatch(self.name):

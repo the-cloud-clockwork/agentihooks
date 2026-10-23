@@ -7,7 +7,7 @@ import sys
 import traceback
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
-from scripts.events.config import BusConfig
+from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.hub import lease, registry
@@ -24,6 +24,11 @@ LEASE_TTL_MS = 15_000
 def handled_key(reactor: Reactor, event: Envelope) -> str:
     digest = hashlib.sha256(f"{event.swarm}\0{event.key}".encode()).hexdigest()
     return f"{reactor.name}.{event.entity}.{digest}"
+
+
+def retry_ms(policy: QueuePolicy, attempt: int) -> int:
+    backoff = policy.backoff_ms
+    return backoff[min(attempt, len(backoff)) - 1] if backoff else 0
 
 
 def record(store: StateStore, key: str, version: int) -> None:
@@ -51,7 +56,7 @@ class HubRunner:
     ):
         self._reactors = list(reactors)
         self._versions = bus.state(VERSIONS)
-        self._consumers = {r.name: bus.events.consumer(registry.durable(r), r.subject) for r in self._reactors}
+        self._consumers = {r.name: bus.events.consumer(registry.durable(r), r.subject, r.policy) for r in self._reactors}
         leases = bus.state(lease.BUCKET)
         self._leases = {
             r.name: lease.Lease(leases, f"reactor.{r.name}", holder, lease_ttl_ms, clock)
@@ -98,7 +103,7 @@ class HubRunner:
         except Exception:
             print(f"hub: reactor {reactor.name} failed on event {event.id}", file=sys.stderr)
             traceback.print_exc()
-            delivery.nak()
+            delivery.nak(retry_ms(reactor.policy, delivery.attempt))
             return "failed"
         record(self._versions, key, event.version)
         delivery.ack()

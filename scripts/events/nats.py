@@ -173,12 +173,13 @@ class NatsEventLog:
     def publish(self, subject: str, event: Envelope) -> bool:
         return self._loop.run(_publish(self._js, subject, self._stream, event))
 
-    def consumer(self, durable: str, subject: str) -> NatsConsumer:
+    def consumer(self, durable: str, subject: str, policy: QueuePolicy | None = None) -> NatsConsumer:
+        policy = policy or self._policy
         return NatsConsumer(
             self._loop,
-            self._loop.run(_pull(self._js, self._stream, durable, subject, self._policy)),
+            self._loop.run(_pull(self._js, self._stream, durable, subject, policy)),
             self._js,
-            self._policy,
+            policy,
             f"events.{durable}",
         )
 

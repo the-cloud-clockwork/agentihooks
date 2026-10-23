@@ -196,6 +196,12 @@ def test_an_exhausted_reactor_event_is_dead_lettered_with_its_reactor_named(bus,
     ]
 
 
+def test_the_retry_delay_follows_the_backoff_and_holds_its_last_step():
+    policy = QueuePolicy(max_deliver=5, backoff_ms=(10, 20))
+    assert [runner.retry_ms(policy, attempt) for attempt in (1, 2, 3, 4)] == [10, 20, 20, 20]
+    assert runner.retry_ms(QueuePolicy(), 3) == 0
+
+
 def test_a_singleton_reactor_runs_only_on_the_lease_holder(bus, clock):
     handler = Recorder()
     reactors = [registry.Reactor("timers", "swarm.*.task.>", handler, singleton=True)]

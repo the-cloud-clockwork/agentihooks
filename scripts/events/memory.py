@@ -181,11 +181,13 @@ class MemoryEventLog:
             self.runtime.cond.notify_all()
             return True
 
-    def consumer(self, durable: str, subject: str) -> MemoryConsumer:
+    def consumer(self, durable: str, subject: str, policy: QueuePolicy | None = None) -> MemoryConsumer:
         with self.runtime.cond:
             existing = self._consumers.get(durable)
             if existing is None:
-                existing = self._consumers[durable] = MemoryConsumer(self, subject, self._config.queue, durable)
+                existing = self._consumers[durable] = MemoryConsumer(
+                    self, subject, policy or self._config.queue, durable
+                )
             elif existing.subject != subject:
                 raise ValueError(f"durable consumer {durable!r} filters {existing.subject!r}, not {subject!r}")
             return existing
