@@ -234,6 +234,9 @@ def test_the_master_writes_freezes_without_a_quote_and_preserves_verified_words(
     assert rejected == []
     assert [(row["verb"], row["by"]) for row in state["freezes"]] == [(verb, MASTER)]
     assert "quote" not in state["freezes"][0]
+    state, rejected = write("freeze_clear", by=MASTER, target="plans/a")
+    assert rejected == []
+    assert state["freezes"] == []
     operator_words.record(MASTER, WORDS)
     state, rejected = freeze("plans/a", verb=verb, by=MASTER, quote="freeze the swarm v2 plan")
     assert rejected == []
