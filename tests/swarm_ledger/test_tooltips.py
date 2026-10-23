@@ -358,31 +358,3 @@ def test_the_page_version_follows_the_tip_module(tmp_path):
         after = core.page_version()
     assert re.fullmatch(r"[0-9a-f]{12}", before)
     assert after != before
-
-
-def test_health_evidence_renders_structured_run_links_and_rejects_script_urls(tab, monkeypatch):
-    monkeypatch.setitem(
-        STATUS,
-        "findings",
-        [
-            {
-                "id": "standing/ci_overrun",
-                "kind": "standing",
-                "subject": "ci_overrun",
-                "summary": "Slow CI stages",
-                "evidence": ["mutation: 2 runs over budget; worst 15 minutes."],
-                "threshold": "15 minutes",
-                "links": [
-                    {"label": "Slow run 6", "url": "https://github.com/o/r/actions/runs/6"},
-                    {"label": "Unsafe run", "url": "javascript:alert(1)"},
-                ],
-            }
-        ],
-    )
-    page = tab(ledger_html())
-    page.locator("#tab-swarm").click()
-    link = page.locator("#health").get_by_role("link", name="Slow run 6")
-    assert link.get_attribute("href") == "https://github.com/o/r/actions/runs/6"
-    assert link.get_attribute("target") == "_blank"
-    assert link.get_attribute("rel") == "noopener"
-    assert page.locator("#health").get_by_role("link", name="Unsafe run").count() == 0

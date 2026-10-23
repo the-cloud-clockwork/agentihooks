@@ -123,6 +123,33 @@ def test_a_read_lists_every_hive_with_liveness_slots_agents_and_its_master(store
     assert reply["revision"] == resources.revision(reply["data"])
 
 
+def test_a_hive_that_never_beat_or_went_quiet_past_a_day_is_not_listed_and_keeps_its_record(store):
+    from scripts.hive import registry
+    from scripts.swarm_ledger.api import hives
+
+    for hive_id, beat in (("never", 0), ("gone", NOW_MS - hives.GONE_MS - 1), ("edge", NOW_MS - hives.GONE_MS)):
+        record = {**registry._default(hive_id), "heartbeat_at": beat}
+        store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items()})
+        store.redis.sadd(registry.INDEX, hive_id)
+    reply = dispatch(request("GET", token=None, slug=None), store)
+    assert [hive["id"] for hive in reply["data"]] == ["desk", "edge", "pod"]
+    assert refusal(request("GET", "/api/v1/hives/never"), store) == (404, "resource_missing", "No such hive")
+    assert {"never", "gone"} <= set(store.redis.smembers(registry.INDEX))
+    assert registry.show(store.redis, "gone")["heartbeat_at"] == NOW_MS - hives.GONE_MS - 1
+
+
+def test_a_hive_named_by_its_id_shows_its_member_name_and_a_set_name_wins(store):
+    from scripts.hive import auth, registry
+
+    store.redis.hset(f"{auth.PREFIX}:member:desk", mapping={"name": "workstation"})
+    store.redis.hset(f"{auth.PREFIX}:member:pod", mapping={"name": "anton pod"})
+    store.redis.hset(registry.key("pod"), "name", "Pod one")
+    reply = dispatch(request("GET", token=None, slug=None), store)
+    assert [(hive["id"], hive["name"]) for hive in reply["data"]] == [("desk", "workstation"), ("pod", "Pod one")]
+    store.redis.delete(f"{auth.PREFIX}:member:desk")
+    assert dispatch(request("GET", token=None, slug=None), store)["data"][0]["name"] == "desk"
+
+
 def test_a_read_of_one_hive_answers_that_hive_and_a_missing_one_is_not_found(store):
     assert dispatch(request("GET", "/api/v1/hives/pod", token=None, slug=None), store)["data"]["id"] == "pod"
     assert refusal(request("GET", "/api/v1/hives/gone"), store) == (404, "resource_missing", "No such hive")

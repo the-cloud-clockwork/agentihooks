@@ -51,10 +51,9 @@ PANELS = [
     ("#art-fab", "#art-trash", "more trashed artifacts", [f"artifact-d{i}" for i in OLDEST]),
 ]
 TABLES = [
-    ("#health", "more findings", [f"finding-stale/eng-{i}" for i in OLDEST]),
     ("#swarm-handoffs", "more seats", [f"seat-eng-{i}@proof" for i in OLDEST]),
 ]
-DEEP_LINKS = ["notice-n0", "alert-a0", "artifact-r0", "artifact-d119", "finding-stale/eng-119", "seat-eng-119@proof"]
+DEEP_LINKS = ["notice-n0", "alert-a0", "artifact-r0", "artifact-d119", "seat-eng-119@proof"]
 
 
 @pytest.fixture(scope="module")
@@ -107,16 +106,6 @@ def test_a_deep_link_past_the_first_page_opens_its_panel_and_reveals_the_row(pag
     loaded(page)
     row = page.locator(f"[id='{target}']")
     row.wait_for()
-    assert row.is_visible()
-
-
-def test_a_deep_link_reveals_its_finding_while_a_verdict_pick_has_focus(page):
-    show(page, shell_html(), ledger=ledger_state(panels_doc()), swarm=SWARM)
-    page.get_by_role("tab", name="Swarm", exact=False).click()
-    page.locator("#health .hl-pick").first.focus()
-    page.evaluate("() => { location.hash = 'finding-stale/eng-119'; }")
-    row = page.locator("[id='finding-stale/eng-119']")
-    row.wait_for(timeout=5000)
     assert row.is_visible()
 
 

@@ -150,8 +150,7 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
   Stop with the new turns and tagged with swarm, agent, lane, task and account
   where set. Setup and checks:
   `docs/reference/observability-langfuse.md`.
-- `agentihooks swarm <slug> status` and the ledger page's Swarm health panel
-  list health findings, each naming the agent or task, the evidence and the
+- `agentihooks swarm <slug> status` lists health findings, each naming the agent or task, the evidence and the
   threshold crossed. The master diagnoses them; the operator decides. Thresholds
   (`AGENTIHOOKS_HEALTH_*`, defaults in brackets): ceremony, an agent's ledger
   transitions at least `CEREMONY_MIN` (20) and over `CEREMONY_RATIO` (12) per
@@ -170,7 +169,7 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
   while the task's pull request waits on checks.
 - Each finding has an id, `<kind>/<subject>`. The master gives every new one a
   verdict: `agentihooks swarm <slug> verdict <id> false-positive|early-real|established|insufficient-evidence|resolved --note "<why>"`,
-  or the operator with the page's Give verdict button. It hides for
+  or the operator through the master. It hides for
   `COOLDOWN_MINUTES` (60) and comes back once only if its evidence grew.
 - The ledger page carries a fixed outline on the left, Stats and the swarm
   panel in a sidebar that scrolls on its own, and the agent list and Swarm tasks
@@ -178,7 +177,7 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
   bin 30 days, then the server removes it.
 - Only four things on the ledger page fold, each remembering its choice per
   viewer across reloads: the Ledger tab's own sections below Overview; the
-  Swarm tab panels below Capacity (Quota, Overlays, Agents, Health, Handoff
+  Swarm tab panels below Capacity (Quota, Hives, Overlays, Agents, Handoff
   outcomes, Freezes, Architecture); the outline categories, with one toggle on
   top flipping between Expand all and Collapse all; and comment dropdowns,
   each section with one toggle for its own items flipping between Show all

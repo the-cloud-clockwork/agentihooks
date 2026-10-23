@@ -316,11 +316,4 @@ export function wireSwarm() {
   });
 
   wireHives();
-
-  $("health").addEventListener("change", (event) => {
-    const pick = event.target.closest("select.hl-pick");
-    if (!pick || !pick.value) return;
-    const row = pick.closest("tr");
-    swarmControl({ action: "verdict", id: pick.dataset.verdict, verdict: pick.value, note: row.querySelector(".hl-note").value.trim() });
-  });
 }
