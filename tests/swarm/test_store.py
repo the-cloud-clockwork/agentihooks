@@ -258,11 +258,39 @@ def test_a_held_claim_refund_refuses_after_the_hub_released_the_claim(store):
     assert store.claims("smoke", "t1") == 1
 
 
-def test_a_held_claim_refund_refuses_while_the_task_authority_is_set(store):
+def test_a_held_claim_refund_refuses_after_the_same_claimant_claimed_again(store):
     store.count_claim("smoke", "t1")
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
-    store.redis.set(store.key("smoke", "task-authority", "t1"), "hub")
+    store.release("smoke", "t1", "agent")
+    store.claim("smoke", "t1", "agent", 60_000)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 1
+
+
+def test_a_held_claim_refund_refuses_when_the_claim_moves_during_the_watch(store, monkeypatch):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    started = store._started_lives
+
+    def moved(slug, task):
+        store.redis.set(store.key(slug, "claim", task), "other")
+        return started(slug, task)
+
+    monkeypatch.setattr(store, "_started_lives", moved)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 1
+
+
+@pytest.mark.parametrize("guard", ["task-authority", "claim-journal"])
+def test_a_held_claim_refund_refuses_while_a_claim_guard_is_set(store, guard):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.redis.set(store.key("smoke", guard, "t1"), "hub")
 
     assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
     assert store.claims("smoke", "t1") == 1
