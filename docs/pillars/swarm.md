@@ -3779,6 +3779,96 @@ verdict was on disk at launch and the ready to verdict wait was zero. `tests/gat
 `persisted_at`: a slow classifier leaves `at` at the pass start and `persisted_at` after the delay, and a kept verdict
 keeps its `persisted_at`.
 
+### Pull requests a task names
+
+A task's work can land in more than one repository. The intent check reads the other repository pull requests a
+task names and judges the task's own pull request together with them. The named pulls come from three texts:
+
+- the task description,
+- the task's pull request body, without the generated Parent intent section that `swarm pr` writes between
+  `<!-- agentihooks intent -->` and `<!-- /agentihooks intent -->`,
+- every comment on the task.
+
+Each text is searched for full `github.com/<owner>/<repo>/pull/<n>` links and for short `<owner>/<repo>#<n>`
+references whose owner is the owner of the task's own pull request. Links to the task's own repository are skipped,
+and each pull request counts once. Texts are read in the order above; within one text, its full links come before
+its short references. The Parent intent section is skipped because it
+carries the project overview, and a Doctor overview lists every fix it merged: one antoncore pull request body named
+about 140 agentihooks pull requests that way, none of them part of the task.
+
+The check reads the first three named pulls (`NAMED_LIMIT`) with `gh pr view` and `gh pr diff`. A named pull that
+cannot be read, and every named pull past the first three, is unread. The classifier state carries:
+
+| Field | Content |
+|---|---|
+| `pull_requests` | The task's own pull request and each named pull that was read, with its title, body, files and diff |
+| `judged_pull_requests` | The URLs of `pull_requests`, at most 10 (`URL_COUNT`) |
+| `unread_pull_requests` | The unread URLs, failed reads first, at most 10 |
+| `unread_overflow` | How many unread URLs were left off the list; absent when none were |
+
+Both URL lists stay lists of at most 10 entries; the 8192 character bound that shortens other state fields
+never applies to them. The verdict reason ends with the pull requests it was judged on and the ones it could not
+read, each naming at most four (`LISTED`) and counting the rest:
+
+```text
+the phase can use it; judged on https://github.com/acme/app/pull/980, https://github.com/acme/api/pull/11,
+https://github.com/acme/api/pull/12 and https://github.com/acme/api/pull/13; could not read
+https://github.com/acme/api/pull/14, https://github.com/acme/api/pull/15, https://github.com/acme/api/pull/16,
+https://github.com/acme/api/pull/17 and 133 more
+```
+
+That reason comes from a body naming 140 pull requests in another repository whose first three were read: 137
+unread, ten listed in `unread_pull_requests`, `unread_overflow` 127, four named in the reason and the other 133
+counted. When none of the 140 can be read, as in the regression test below, `judged_pull_requests` holds only the
+task's own pull request, `unread_overflow` is 130 and the reason ends `and 136 more`.
+
+Read the lists the classifier saw from the intent history of the swarm:
+
+```bash
+jq -c 'select(.task == "<task>") | .classifier_input | fromjson | .state
+  | {judged_pull_requests, unread_pull_requests, unread_overflow}' \
+  ~/.agentihooks/swarm/<swarm>/gates/intent/history.jsonl
+```
+
+#### One task's failure stays with that task
+
+The check runs each task's two steps, queueing it for judgment and settling its verdict, on their own. An exception
+in either step is caught for that task alone: the swarm gate log gets a row with gate `intent`, kind `fail-open`, the
+task's claimant and task, and the reason `<exception type>: <message>`. The tick reports the action
+`task <task> intent check failed: <exception type>`, the task gets no verdict from that pass, and every other task
+is still judged. The next tick tries the task again. A `LedgerRefused` error is not caught and still ends the pass.
+
+```bash
+jq -c 'select(.gate == "intent" and .kind == "fail-open")' ~/.agentihooks/swarm/<swarm>/gates/log.jsonl
+```
+
+```json
+{"at": 1792650000000, "gate": "intent", "kind": "fail-open", "agent": "engineer@d44a5a-12", "task": "t536", "tool": "", "reason": "KeyError: slice(None, -1, None)"}
+```
+
+Before [pull request 5148](https://github.com/the-cloud-clockwork/agentihooks/pull/5148), the unread list of that
+140 link body passed the 8192 character bound and became a truncated record, the reason text sliced it as a list, and
+the `KeyError: slice(None, -1, None)` ended every Doctor tick run; the swarm journal of 20 October shows it from
+06:06 UTC until the fix merged.
+The red run on dev code with the new tests,
+[39380494294](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39380494294), failed six of them; the
+green runs, [39380496940](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39380496940) and
+[39380878177](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39380878177) after review, passed.
+`tests/gates/test_intent_cross_repo.py` pins the behaviour:
+`test_a_body_naming_over_a_hundred_other_pull_requests_keeps_lists_and_names_a_few`,
+`test_exactly_the_count_of_unread_pull_requests_carries_no_overflow`,
+`test_the_reason_names_four_pull_requests_in_full_and_counts_a_fifth`,
+`test_prepare_keeps_long_url_lists_as_lists_capped_by_count`,
+`test_named_pulls_skip_links_inside_the_generated_parent_intent_section`,
+`test_one_task_failing_in_the_intent_check_never_ends_the_tick_run` and
+`test_one_task_failing_before_it_is_judged_never_ends_the_tick_run`.
+
+| Symptom | Cause and action |
+|---|---|
+| The tick prints `task <task> intent check failed: <exception type>` | One task's queueing or settling step raised. Read its `fail-open` row in the gate log for the message; the other tasks were judged. Fix the cause in code; the task is retried every tick. |
+| A verdict reason says `could not read` a pull request | `gh pr view` failed for it, or it came after the first three named pulls. Read it with `gh pr view <url>`; name only the pull requests that belong to the task in its description or comments. |
+| A reason names pull requests the task never touched | They are in the task description, a comment, or the pull request body outside the Parent intent section. Remove them from that text; the next judgment no longer reads them. |
+
 ### Tick heartbeat and stale watcher
 
 Every tick pass that runs to its end writes the swarm's heartbeat to Redis: when the pass ended, and when each
