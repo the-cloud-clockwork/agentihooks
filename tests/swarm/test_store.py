@@ -286,6 +286,7 @@ def test_a_held_claim_refund_refuses_after_the_same_claimant_claimed_again(store
     [
         ("claim", lambda redis, key: redis.set(key, "other"), 1),
         ("claim", lambda redis, key: redis.incr(f"{key}:generation"), 1),
+        ("claim", lambda redis, key: redis.set(f"{key}:refunded", redis.get(f"{key}:generation")), 1),
         ("started-lives", lambda redis, key: redis.hset(key, "t1", 5), 5),
         ("task-authority", lambda redis, key: redis.set(key, "hub"), 1),
         ("claim-journal", lambda redis, key: redis.set(key, "hub"), 1),

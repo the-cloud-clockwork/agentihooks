@@ -765,7 +765,7 @@ def stop_now(store, slug, runtime, ledger):
         row = rows.get(agent.task, {})
         reopen = agent.state != "finished" and row.get("state") in ("claimed", "pr")
         reopen = reopen and row.get("claimed_by") == agent.name
-        if reopen and store.claims(slug, agent.task) > 0:
+        if reopen:
             store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
         store.release(slug, agent.task, agent.name)
         store.drop_agent(slug, agent.name)
