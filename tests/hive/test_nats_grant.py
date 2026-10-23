@@ -198,7 +198,23 @@ def test_claims_reads_the_payload_of_a_jwt():
     )
 
 
-@pytest.mark.parametrize("jwt", ["", "one", "a.!!!.c", f"a.{nkey.b64(b'[1]')}.c", f"a.{nkey.b64(b'not json')}.c"])
+@pytest.mark.parametrize("payload", [b'{"a":1}', b'{"ab":1}', b'{"abc":1}'])
+def test_claims_reads_a_payload_of_every_padding_length(payload):
+    assert nkey.claims(f"a.{nkey.b64(payload)}.c") == json.loads(payload)
+
+
+@pytest.mark.parametrize(
+    "jwt",
+    [
+        "",
+        "one",
+        "a.!!!.c",
+        f"a.{nkey.b64(b'{}')}.c.d",
+        f"a.{nkey.b64(b'{}')}",
+        f"a.{nkey.b64(b'[1]')}.c",
+        f"a.{nkey.b64(b'not json')}.c",
+    ],
+)
 def test_claims_refuses_a_malformed_jwt(jwt):
     with pytest.raises(nkey.NkeyError, match="^not a JWT with a claims object$"):
         nkey.claims(jwt)

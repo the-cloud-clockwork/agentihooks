@@ -20,6 +20,7 @@ CREDS = (
     "-----BEGIN NATS USER JWT-----\n{jwt}\n------END NATS USER JWT------\n\n"
     "-----BEGIN USER NKEY SEED-----\n{seed}\n------END USER NKEY SEED------\n"
 )
+NOT_CLAIMS = "not a JWT with a claims object"
 BLOCK = re.compile(r"^-{3,}BEGIN [A-Z ]+-{3,}\n(\S+)\n-{3,}END ", re.MULTILINE)
 
 
@@ -101,11 +102,11 @@ def encode_jwt(signer: KeyPair, subject: str, name: str, nats: dict) -> str:
 def claims(jwt: str) -> dict:
     parts = jwt.split(".")
     try:
-        found = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))) if len(parts) == 3 else None
+        found = json.loads(base64.urlsafe_b64decode(parts[1] + "==")) if len(parts) == 3 else None
     except ValueError:
-        found = None
+        raise NkeyError(NOT_CLAIMS) from None
     if not isinstance(found, dict):
-        raise NkeyError("not a JWT with a claims object")
+        raise NkeyError(NOT_CLAIMS)
     return found
 
 
