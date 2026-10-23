@@ -351,6 +351,61 @@ On every 3.12 unit shard of a full scope run that reuses at least one test, outs
 
 The step prints `Kept the dev coverage of <n> reused tests and <m> page captures from <commit>; <k> changed files remapped`. Each shard uploads `reused-coverage/` inside its `coverage-3.12-<shard>` artifact.
 
+### Old file fetch in the remap
+
+The remap runs against the unit job's own checkout (`--repo "$GITHUB_WORKSPACE"`), a partial clone with `filter: blob:none` (see [Unit checkout](../ci-timing.md#unit-checkout)). That checkout holds the file contents of the graded commit only. The old text of every changed file, at the record commit, is missing until git fetches it from the remote.
+
+`tests.reused_coverage.moved_lines` lists the changed files with:
+
+```bash
+git -C "$GITHUB_WORKSPACE" diff --no-renames --numstat "<record commit>" HEAD -- '*.py'
+```
+
+`--numstat` counts added and deleted lines, so git needs both texts of every listed file and fetches all the missing old blobs in one `git fetch` before it prints. The remap then reads each file's old and new text with `git show <commit>:<path>`, which finds every blob locally. The path is the third tab separated field of each `--numstat` line. The file list and the line maps are the same as before the change.
+
+Before [pull request 4828](https://github.com/the-cloud-clockwork/agentihooks/pull/4828) ([#4825](https://github.com/the-cloud-clockwork/agentihooks/issues/4825)) the list came from `git diff --name-only`, which reads no file contents. Each `git show` of an old file then started its own lazy fetch, one network round trip per changed file. The step's time grew with the number of files changed since the record commit:
+
+| Run | Changed files remapped | `Keep the reused tests' dev coverage` | Tier wall time |
+|---|---|---|---|
+| Pull request run [39251854559](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39251854559), attempt 1, before | 408 on unit (3.12, 1) | 230 to 256 s on every 3.12 shard, 256 s on unit (3.12, 1) | 1205 s, over the 900 s Doctor threshold |
+| Pull request run [39304815170](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39304815170), attempt 1, after | 9 | at most 9 s | 717 s |
+
+The fix lives in the grader's copy of `tests/reused_coverage.py`: `origin/dev` for a pull request, the head for a dispatch. Every pull request run created after the merge, 2026-10-19 18:06 UTC, uses it, whatever its branch holds. A dispatch from a head older than the merge still fetches one file at a time.
+
+#### Proof
+
+- Red: CI run [39276467640](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39276467640) on the tests alone failed `test_a_partial_clone_fetches_every_changed_file_old_text_in_one_batch` with `assert 3 == 1`: three changed files, three fetches.
+- Green: CI run [39276717099](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39276717099) on the fix passed.
+- Controlled timing: CI run [39310021504](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39310021504) timed both listings of the same 376 changed files, each on a fresh `blob:none` clone from GitHub, and printed `REMAP_TIMING files=376 same=True name_only_seconds=245.7 numstat_seconds=3.5`. Both listings produced identical line maps.
+
+The test builds an origin repository with three changed files, each with its own old text, clones it with `--filter=blob:none`, sets `GIT_TRACE2_EVENT` and counts the `git fetch` child processes that `moved_lines` starts. Identical old texts share one blob and would need one fetch even without the fix, so every file gets distinct text.
+
+#### Reading the remap time on a run
+
+The Doctor measure prints the run attempt's tier wall time in seconds; the threshold is 15 minutes, 900 s:
+
+```bash
+agentihooks doctor rig-grade-swarm measure "ci-tier-wall-time/<run id>-<attempt>"
+```
+
+The wall time of a finished run never changes, so measuring the same run before and after the fix prints the same figure. Compare the remap step on runs created before and after the change instead:
+
+```bash
+RUN="<tests run id>"
+gh api --paginate "repos/the-cloud-clockwork/agentihooks/actions/runs/$RUN/attempts/1/jobs?per_page=30" \
+  --jq '.jobs[] | select(.name | startswith("unit (3.12")) | .name as $job | .steps[]
+        | select(.name | startswith("Keep the reused tests"))
+        | "\($job) \((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601)) s"'
+gh run view "$RUN" --log | grep "changed files remapped"
+```
+
+The first command prints each 3.12 shard's remap step time; the second prints how many files each shard remapped. For the same 376 changed files, the controlled run under Proof took 3.5 s with `--numstat` and 245.7 s with `--name-only`.
+
+| Symptom | Read | Action |
+|---|---|---|
+| The remap step takes minutes and its time grows with `<k> changed files remapped` | The run's event and the grader: `origin/dev` for a pull request, the head for a dispatch | A dispatch from a head older than pull request 4828 lists files with `--name-only`; merge `origin/dev` into the branch and dispatch again |
+| The remap step takes minutes with few changed files | The step log for a stalled fetch | The batch fetch itself is slow or stalled; see [Unit checkout](../ci-timing.md#unit-checkout) for the checkout's fetch behavior |
+
 ### Unusable coverage databases
 
 `tests/coverage_check.py` decides whether a coverage data file can be read. Two steps use it: the reuse step above, before it reads the downloaded dev database, and `Check the coverage database`, before each 3.12 unit shard uploads its own.

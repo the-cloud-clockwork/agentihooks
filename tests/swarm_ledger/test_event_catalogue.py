@@ -1,5 +1,6 @@
 from scripts.events import catalogue
 from scripts.events.envelope import Envelope, create
+from scripts.swarm_ledger.api.resources import resource_revision
 from scripts.swarm_ledger.repository import outbox, sqlite
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
@@ -73,3 +74,77 @@ def test_refusal_names_an_unknown_type_a_wrong_entity_missing_fields_and_data_on
         "phase.changed data lacks description done"
     )
     assert catalogue.refusal(event("phase.removed", "phase", {"id": "p1"})) == "phase.removed carries no data"
+
+
+LEGACY = {
+    "title": "Old",
+    "phases": [{"id": "p1", "title": "One", "planning": "auto"}],
+    "tasks": [{"id": "t1", "title": "first", "state": "claimed", "kind": "ops"}, {"id": "t2"}],
+    "_meta": {"rev": 3},
+}
+
+
+def test_import_fills_every_missing_catalogue_field_so_each_outbox_event_passes_the_catalogue(tmp_path):
+    repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
+    repo.import_document("ledger", LEGACY)
+    assert repo.export_document("ledger") == LEGACY
+    assert resource_revision(repo.current("ledger").state, "tasks") == resource_revision(LEGACY, "tasks")
+    entry = repo.current("ledger")
+    later = {**LEGACY, "phases": [{**LEGACY["phases"][0], "done": True}], "_meta": {"rev": 4}}
+    with repo.connect() as connection, connection:
+        repo._write(connection, "ledger", entry, later, [])
+    events = written(repo)
+    assert [(item.type, item.key, item.version) for item in events] == [
+        ("phase.changed", "p1", 3),
+        ("task.changed", "t1", 3),
+        ("task.changed", "t2", 3),
+        ("phase.changed", "p1", 4),
+    ]
+    assert [catalogue.refusal(item) for item in events] == [None, None, None, None]
+    assert [item.data for item in events] == [
+        {"id": "p1", "title": "One", "planning": "auto", "description": "", "done": False},
+        {
+            "id": "t1",
+            "title": "first",
+            "state": "claimed",
+            "kind": "ops",
+            "description": "",
+            "phase": "",
+            "lane": "eng",
+            "claimed_by": "",
+            "issue_url": "",
+            "pr_url": "",
+            "done": False,
+        },
+        {"id": "t2", **catalogue.TASK_DEFAULTS},
+        {"id": "p1", "title": "One", "planning": "auto", "description": "", "done": True},
+    ]
+
+
+def test_filled_sets_each_missing_catalogue_field_to_its_default_and_keeps_present_values():
+    task = {"id": "t1", "title": "kept", "lane": "ci", "state": "done", "done": True, "pr_url": "u", "kind": "ops"}
+    assert catalogue.filled("task", task) == {
+        "id": "t1",
+        "title": "kept",
+        "description": "",
+        "phase": "",
+        "lane": "ci",
+        "state": "done",
+        "claimed_by": "",
+        "issue_url": "",
+        "pr_url": "u",
+        "done": True,
+        "kind": "ops",
+    }
+    assert catalogue.filled("phase", {"id": "p1"}) == {"id": "p1", "title": "", "description": "", "done": False}
+    assert task == {
+        "id": "t1",
+        "title": "kept",
+        "lane": "ci",
+        "state": "done",
+        "done": True,
+        "pr_url": "u",
+        "kind": "ops",
+    }
+    assert catalogue.TASK_FIELDS == frozenset(("id", *catalogue.TASK_DEFAULTS))
+    assert catalogue.PHASE_FIELDS == frozenset(("id", *catalogue.PHASE_DEFAULTS))
