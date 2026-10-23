@@ -81,3 +81,12 @@ def test_a_real_interval_stops_without_waiting_for_its_next_due_time():
     assert interval._worker.is_alive()
     interval.close()
     assert not interval._worker.is_alive()
+
+
+@pytest.mark.parametrize("every", [0.001, 0.5, 1.0])
+def test_an_interval_accepts_positive_subsecond_delays(every):
+    from scripts.scheduler import process_interval
+
+    interval = process_interval.Interval(Mock(), every=every)
+    assert interval.every == every
+    assert interval.check() is None
