@@ -324,20 +324,20 @@ A failure the watcher reported always fails the gate, even when the watcher job 
 
 On a failure the gate prints `Every gate required for this event must succeed and other gates must be skipped.` It does not print the needs it judged on a merge group run, so read each job's result through the API.
 
-### Checking a run
+### Checking a watcher run
 
 List the watcher and gate jobs of a merge group run:
 
 ```bash
-gh api "repos/<owner>/<repo>/actions/runs/<run id>/jobs?per_page=100" --paginate \
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs?per_page=100" --paginate \
   --jq '.jobs[] | select(.name == "queue-fail-fast" or .name == "Gate — Required") | [.id, .name, .conclusion, .started_at, .completed_at] | @tsv'
 ```
 
 Read why a red or cancelled watcher ended, and whether it reported a failure:
 
 ```bash
-gh api "repos/<owner>/<repo>/check-runs/<queue-fail-fast job id>/annotations" --jq '.[].message'
-gh api "repos/<owner>/<repo>/actions/jobs/<queue-fail-fast job id>/logs" | grep -E 'cannot pass|no longer current|Ten reads'
+gh api "repos/the-cloud-clockwork/agentihooks/check-runs/<queue-fail-fast job id>/annotations" --jq '.[].message'
+gh api "repos/the-cloud-clockwork/agentihooks/actions/jobs/<queue-fail-fast job id>/logs" | grep -E 'cannot pass|no longer current|Ten reads'
 ```
 
 A lost runner shows the annotation `The self-hosted runner lost communication with the server.` and no `cannot pass` line. A `cannot pass` line names the graded job that failed; fix that job.
@@ -368,15 +368,15 @@ Delivered by pull request [4838](https://github.com/the-cloud-clockwork/agentiho
 - Queue groups dropped only for a lost watcher runner, counted over merge group Tests runs in the 24 hours on each side of the merge at 19:52:58 UTC on 19 October: 1 of 274 runs before (run 39209314551) and 0 of 335 runs after. Every other red or cancelled watcher in both windows sat in a run whose conclusion was `cancelled`. Count it again for any window:
 
 ```bash
-gh api "repos/<owner>/<repo>/actions/workflows/test.yml/runs?event=merge_group&created=<start>..<end>&per_page=100" --paginate \
+gh api "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs?event=merge_group&created=<start>..<end>&per_page=100" --paginate \
   --jq '.workflow_runs[] | select(.conclusion == "failure") | [.id, .run_attempt] | @tsv' |
 while read -r id attempt; do
-  gh api "repos/<owner>/<repo>/actions/runs/$id/attempts/$attempt/jobs?per_page=100" --paginate \
+  gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$id/attempts/$attempt/jobs?per_page=100" --paginate \
     --jq '.jobs[] | select(.name == "queue-fail-fast" and .conclusion == "failure") | .run_id'
 done
 ```
 
-Each printed run had a failed watcher in a failed run; read its annotations as in [Checking a run](#checking-a-run) to confirm a lost runner.
+Each printed run had a failed watcher in a failed run; read its annotations as in [Checking a run](#checking-a-watcher-run) to confirm a lost runner.
 
 ## Lost runner requeue
 
