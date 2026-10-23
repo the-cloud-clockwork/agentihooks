@@ -163,10 +163,64 @@ def test_freeze_while_hive_waits_withdraws_the_delivered_offer(monkeypatch):
 
         def freeze_during_take(timeout_ms):
             delivery = take(timeout_ms)
-            ledger.state.return_value["freezes"] = [{"verb": "freeze", "target": "tasks/task-a"}]
+            ledger.state.return_value = {
+                **ledger.state.return_value,
+                "freezes": [{"verb": "freeze", "target": "tasks/task-a"}],
+            }
             return delivery
 
         monkeypatch.setattr(queue, "take", freeze_during_take)
         worker, runtime = spoke(bus, provider, "hive")
         assert worker.poll(1) == "empty"
         runtime.spawn.assert_not_called()
+
+
+def test_default_source_connects_once_and_reads_fresh_shared_state(monkeypatch):
+    _, store, ledger = source()
+    connect, client = Mock(return_value=store), Mock(return_value=ledger)
+    monkeypatch.setattr(readiness, "connect", connect)
+    monkeypatch.setattr(readiness, "LedgerClient", client)
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
+    provider = readiness.Source()
+    connect.assert_not_called()
+    assert provider.slugs() == ["rig"]
+    assert provider.snapshot("rig").rows["task-a"]["claim_generation"] == 3
+    ledger.state.return_value = doc([task("task-b")])
+    assert list(provider.snapshot("rig").rows) == ["task-b"]
+    connect.assert_called_once_with()
+    client.assert_called_once_with(service=True)
+    assert ledger.state.call_args_list == [(("rig",),), (("rig",),)]
+
+
+def test_default_hub_readiness_uses_the_shared_source_and_stops_after_lease_loss(monkeypatch):
+    from scripts.hub.readiness import Readiness
+
+    provider = Mock()
+    provider.slugs.return_value = ["rig", "other"]
+    provider.snapshot.return_value = Mock()
+    factory = Mock(return_value=provider)
+    publish = Mock()
+    monkeypatch.setattr("scripts.hub.readiness.BusConfig.from_environ", lambda: BusConfig(backend="nats"))
+    monkeypatch.setattr(readiness, "Source", factory)
+    monkeypatch.setattr(readiness, "publish", publish)
+    with backend("memory", None) as bus:
+        reactor = Readiness(bus, clock=lambda: 73)
+        reactor.poll(Mock(side_effect=[True, False]))
+        publish.assert_not_called()
+        provider.snapshot.assert_called_once_with("rig")
+        provider.slugs.return_value = ["rig"]
+        reactor.poll()
+        factory.assert_called_once_with()
+        publish.assert_called_once_with(bus, provider.snapshot.return_value, 73)
+
+
+def test_unconfigured_memory_hub_does_not_open_shared_services(monkeypatch):
+    from scripts.hub.readiness import Readiness
+
+    factory = Mock()
+    monkeypatch.setattr(readiness, "Source", factory)
+    monkeypatch.setattr("scripts.hub.readiness.BusConfig.from_environ", lambda: BusConfig())
+    with backend("memory", None) as bus:
+        Readiness(bus).poll()
+    factory.assert_not_called()
