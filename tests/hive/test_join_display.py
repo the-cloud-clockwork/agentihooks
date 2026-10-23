@@ -72,11 +72,14 @@ def test_hive_list_agents_equal_the_swarm_agents_of_every_hive(store, capsys):
     rolled = running(store, "eng-3", "old")
     for agent in (kept, finished, rolled):
         join_report.start(store.redis, "sw", agent, "session", checks(pane=False), {}, 1000)
-    store.drop_agent("sw", finished.name)
+    record = next(agent for agent in store.agents("sw") if agent.name == finished.name)
+    store.put_agent("sw", replace(record, state="finished"))
     store.drop_agent("sw", rolled.name)
     cli._list()
     listed = [row.split("\t")[0].strip() for row in rows(capsys)]
-    assert listed == [agent.name for agent in store.agents("sw")] == [kept.name]
+    swarm = [agent.name for agent in store.agents("sw") if agent.state not in ("finished", "ended")]
+    assert listed == swarm == [kept.name]
+    assert finished.name in [agent.name for agent in store.agents("sw")]
 
 
 def test_hive_list_leaves_out_a_report_from_an_earlier_generation(store, capsys):
