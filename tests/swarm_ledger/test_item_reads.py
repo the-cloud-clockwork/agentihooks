@@ -95,7 +95,8 @@ def test_tasks_filters_open_tasks_by_state_lane_and_title_text(reads, capsys, mo
 
 
 def test_tasks_prints_a_task_without_lane_or_title_with_empty_fields(monkeypatch, capsys):
-    monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: [{"id": "t9", "state": "open"}])
+    rows = [{"id": "t8", "state": "done"}, {"id": "t9"}]
+    monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: rows)
     ledger.cmd_tasks(SimpleNamespace(slug=SLUG, state=None, lane=None, text=None))
     assert capsys.readouterr().out == "t9  open    \n"
 
@@ -103,7 +104,8 @@ def test_tasks_prints_a_task_without_lane_or_title_with_empty_fields(monkeypatch
 def test_get_names_the_item_forms_when_it_refuses_one(capsys):
     with pytest.raises(SystemExit):
         ledger.build_parser().parse_args(["--slug", SLUG, "get", "chat/c1"])
-    assert "name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "argument item: name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>\n" in err
 
 
 def test_get_and_tasks_document_their_forms(capsys):

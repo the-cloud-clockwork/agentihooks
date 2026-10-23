@@ -138,7 +138,7 @@ TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("ta
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
-ITEM_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+LEDGER_ITEM = re.compile(r"(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (
@@ -765,8 +765,7 @@ def _duration(value):
 
 
 def _ledger_item(value):
-    kind, _, item = value.partition("/")
-    if kind not in ("tasks", "phases", "followups", "priorities") or not ITEM_ID.fullmatch(item):
+    if not LEDGER_ITEM.fullmatch(value):
         raise argparse.ArgumentTypeError("name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>")
     return value
 
