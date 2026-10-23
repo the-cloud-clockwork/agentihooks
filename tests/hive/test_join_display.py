@@ -167,6 +167,6 @@ def test_hive_list_lists_each_live_local_agent_once_and_only_on_its_own_hive(sto
     assert [status.agent_hive(agent) for agent in (plain, remote, pod)] == ["worker", "old", ""]
     placed = {}
     for row in status.status_report(store, "sw", {"tasks": []}, runtime=live)["agents"]:
-        if row["hive"] in listed:
+        if row["name"] not in (remote.name, pod.name):
             placed.setdefault(row["hive"], set()).add(row["name"])
     assert placed == {hive: set(names) for hive, names in listed.items()}
