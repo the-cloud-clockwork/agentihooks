@@ -4,6 +4,7 @@ import pytest
 
 from scripts.swarm.tick import STARTUP_GRACE_MS, tick
 from tests.swarm.test_claim_cap import CommentingLedger
+from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, store, workers  # noqa: F401
 
 pytestmark = pytest.mark.unit
@@ -104,3 +105,62 @@ def test_retirement_does_not_refund_an_already_reset_claim(store, ending):  # no
         tick("sw", store, ledger, runtime, now_ms=3_000)
     assert store.claims("sw", "t1") == 0
     assert agent.name in runtime.killed
+
+
+@pytest.mark.parametrize("path", ["parked", "remote"])
+def test_a_second_tick_refund_for_the_same_claim_is_refused(store, path):  # noqa: F811
+    from scripts.swarm import tick as tick_module
+
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    agent = replace(workers(store)[0], state="finished")
+    store.put_handoff("sw", "t1", "continue here", seat=agent.seat, envelope={"reason": "quota"})
+    generation, lives = store.claim_generation("sw", "t1"), store.claims("sw", "t1")
+    for _ in range(2):
+        store.put_agent("sw", agent)
+        if path == "parked":
+            tick_module._retire_ended("sw", store, ledger, runtime, ledger.rows, agent, 2_000)
+        else:
+            tick_module._drop_remote("sw", store, ledger, ledger.rows, agent, "its hive pane is gone")
+    assert store.claims("sw", "t1") == lives - 1
+    assert store.refund_held_claim("sw", "t1", agent.name, generation) is False
+
+
+def test_a_second_stop_refund_for_the_same_claim_is_refused(store):  # noqa: F811
+    from scripts.swarm.cli import stop_now
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    agent = workers(store)[0]
+    generation, lives = store.claim_generation("sw", "t1"), store.claims("sw", "t1")
+
+    def refused(*args, **kwargs):
+        raise LedgerRefused("busy")
+
+    ledger.update_task = refused
+    for _ in range(2):
+        store.put_agent("sw", agent)
+        stop_now(store, "sw", runtime, ledger)
+    assert ledger.rows["t1"]["claimed_by"] == agent.name
+    assert store.claims("sw", "t1") == lives - 1
+    assert store.refund_held_claim("sw", "t1", agent.name, generation) is False
+
+
+def test_a_dev_red_block_refunds_the_held_claim_once(env, monkeypatch):  # noqa: F811
+    from types import SimpleNamespace
+
+    from scripts.swarm import dev_red
+
+    swarm, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(dev_red, "latest", lambda repo, run=None: {"id": 41, "conclusion": "failure"})
+    generation, lives = swarm.claim_generation("sw", "t2"), swarm.claims("sw", "t2")
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev is red") == 0
+    assert swarm.claims("sw", "t2") == lives - 1
+    monkeypatch.setattr(dev_red, "latest", lambda repo, run=None: {"id": 42, "conclusion": "success"})
+    rows = {t["id"]: t for t in ledger.tasks("sw")}
+    assert dev_red.reopen_pass("sw", SimpleNamespace(repo="/repo"), swarm, ledger, rows) != []
+    assert swarm.claims("sw", "t2") == lives - 1
+    assert swarm.refund_held_claim("sw", "t2", "ci@a1b2c3-0001", generation) is False
