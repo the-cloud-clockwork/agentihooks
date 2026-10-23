@@ -166,7 +166,7 @@ def test_choice_last_reopens_the_last_masters_own_conversation_in_the_master_sea
     assert run("sw", "master", "up") == 0
     [(resumed, harness, conversation, profile, text)] = rt.resumed
     assert (resumed, harness, conversation, profile) == (name, "codex", "conv-7", "master")
-    assert "master up" in text and "re-read the ledger" in text
+    assert "master up" in text and "agentihooks ledger --slug sw get tasks/<id>" in text
     [record] = masters(store)
     assert (record.name, record.state, record.pane_id, record.seat) == (name, "working", "w2:m9", "master@sw")
     assert record.conversation_id == "conv-7" and record.account == "acct-2" and record.harness == "codex"
