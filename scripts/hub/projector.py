@@ -13,6 +13,7 @@ from scripts.events.envelope import Envelope
 from scripts.hub import registry
 from scripts.hub.registry import Reactor
 from scripts.hub.runner import retry_delay
+from scripts.swarm_ledger import ledger_link
 
 SUBJECT = "swarm.>"
 BATCH = 32
@@ -72,11 +73,12 @@ class Projector:
 
 
 @contextmanager
-def running(repository, hub, port: int, environ: Mapping[str, str] = os.environ) -> Iterator[Projector | None]:
+def running(repository, hub, environ: Mapping[str, str] = os.environ) -> Iterator[Projector | None]:
     config = BusConfig.from_environ(environ)
     if config.backend == "memory":
         yield None
         return
+    port = ledger_link.address(environ)[1]
     projector = Projector(repository, hub, identity(environ.get("HOSTNAME") or socket.gethostname(), port))
     stopped = threading.Event()
     projector.worker = threading.Thread(

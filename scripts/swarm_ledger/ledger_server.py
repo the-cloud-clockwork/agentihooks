@@ -1348,7 +1348,7 @@ def serve():
         from scripts.hub import projector
         from scripts.swarm_ledger import outbox_host
 
-        with outbox_host.running(stored), projector.running(repository, HUB, PORT):
+        with outbox_host.running(stored), projector.running(repository, HUB):
             server.serve_forever()
     finally:
         stopped.set()

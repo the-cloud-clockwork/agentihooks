@@ -5,7 +5,7 @@ import pytest
 
 from scripts.events import envelope, factory, memory
 from scripts.events.config import BusConfig
-from scripts.hub import projector
+from scripts.hub import projector, registry
 from scripts.swarm_ledger.events.hub import Hub
 from scripts.swarm_ledger.events.publishing import Publishing
 from scripts.swarm_ledger.repository import outbox, sqlite
@@ -98,13 +98,12 @@ def test_a_bus_delivery_of_another_hosts_write_reaches_the_watched_page_only(tmp
 def test_memory_bus_runs_no_projector(monkeypatch):
     opening = Mock()
     monkeypatch.setattr(factory, "open_bus", opening)
-    with projector.running(Mock(), Hub(), 8765, environ={}) as running:
+    with projector.running(Mock(), Hub(), environ={}) as running:
         assert running is None
     opening.assert_not_called()
 
 
-@pytest.mark.wall_clock
-def test_running_projector_refreshes_on_a_published_event_and_closes_its_bus_on_exit(monkeypatch):
+def test_running_projector_refreshes_on_a_published_event_and_closes_its_bus_on_exit(monkeypatch, tmp_path):
     bus = memory.open_bus(BusConfig())
     close = Mock(wraps=bus.close)
     monkeypatch.setattr(bus, "close", close)
@@ -113,9 +112,9 @@ def test_running_projector_refreshes_on_a_published_event_and_closes_its_bus_on_
     refreshed = threading.Event()
     repository = Mock()
     repository.current.side_effect = lambda slug: refreshed.set()
-    environ = {"AGENTIHOOKS_BUS": "nats", "HOSTNAME": "Pod.A"}
-    with projector.running(repository, watching("seen"), 8765, environ=environ) as running:
-        assert running.name == "pod-a-8765"
+    environ = {"AGENTIHOOKS_BUS": "nats", "HOSTNAME": "Pod.A", "LEDGER_DIR": str(tmp_path), "LEDGER_PORT": "18472"}
+    with projector.running(repository, watching("seen"), environ=environ) as running:
+        assert running.name == "pod-a-18472"
         bus.events.publish("swarm.seen.task.t1", event("seen"))
         assert refreshed.wait(5), "the projector did not refresh the watched ledger"
         worker = running.worker
@@ -125,8 +124,7 @@ def test_running_projector_refreshes_on_a_published_event_and_closes_its_bus_on_
     repository.current.assert_called_once_with("seen")
 
 
-@pytest.mark.wall_clock
-def test_a_failed_bus_open_is_logged_and_retried_until_stopped(monkeypatch, capsys):
+def test_a_failed_bus_open_is_logged_and_retried_until_stopped(monkeypatch, capsys, tmp_path):
     opened = threading.Event()
     attempts = []
 
@@ -138,7 +136,49 @@ def test_a_failed_bus_open_is_logged_and_retried_until_stopped(monkeypatch, caps
 
     monkeypatch.setattr(factory, "open_bus", refused)
     monkeypatch.setattr(projector, "REOPEN_S", 0.01)
-    with projector.running(Mock(), Hub(), 8765, environ={"AGENTIHOOKS_BUS": "nats", "HOSTNAME": "pod"}):
+    environ = {"AGENTIHOOKS_BUS": "nats", "HOSTNAME": "pod", "LEDGER_DIR": str(tmp_path), "LEDGER_PORT": "18472"}
+    with projector.running(Mock(), Hub(), environ=environ) as running:
+        assert running.name == "pod-18472"
         assert opened.wait(5), "the projector did not retry the bus"
     assert attempts[0] == BusConfig(backend="nats")
     assert "ledger projector: bus unreachable" in capsys.readouterr().err
+
+
+class Stopped:
+    def __init__(self, passes):
+        self.passes = passes
+        self.waits = []
+
+    def is_set(self):
+        self.passes -= 1
+        return self.passes < 0
+
+    def wait(self, timeout):
+        self.waits.append(timeout)
+
+
+def test_follow_consumes_under_its_durable_with_the_reactor_policy_and_retry_delays(monkeypatch):
+    bus = Mock()
+    failed = Mock(event=event("seen"), attempt=1)
+    bus.events.consumer.return_value.fetch.return_value = [failed]
+    opening = Mock(return_value=bus)
+    monkeypatch.setattr(factory, "open_bus", opening)
+    repository = Mock()
+    repository.current.side_effect = OSError("database down")
+    project = projector.Projector(repository, watching("seen"), "pod")
+    stopped = Stopped(2)
+    config = BusConfig(backend="nats")
+    project.follow(config, stopped)
+    opening.assert_called_once_with(config)
+    bus.events.consumer.assert_called_once_with("hub-projector-pod", "swarm.>", registry.REACTOR_POLICY)
+    failed.nak.assert_called_once_with(registry.RETRY_MS[0])
+    bus.close.assert_called_once_with()
+    assert stopped.waits == [projector.REOPEN_S]
+
+
+def test_follow_logs_a_refused_bus_and_waits_before_reopening(monkeypatch, capsys):
+    monkeypatch.setattr(factory, "open_bus", Mock(side_effect=OSError("bus unreachable")))
+    stopped = Stopped(1)
+    projector.Projector(Mock(), Hub(), "pod").follow(BusConfig(backend="nats"), stopped)
+    assert capsys.readouterr().err == "ledger projector: bus unreachable\n"
+    assert stopped.waits == [projector.REOPEN_S]
