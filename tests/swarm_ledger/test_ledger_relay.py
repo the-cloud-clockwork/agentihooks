@@ -117,6 +117,29 @@ class Relay(unittest.TestCase):
         _, rejected = core.sync(SLUG, ops=[relay(6, "questions/nope")])
         self.assertEqual(rejected, ["rl-6"])
 
+    def test_refused_relays_name_the_failed_check_in_the_cli(self):
+        cases = (
+            (relay(60, "questions/nope"), "relay on questions/nope refused: the entry does not exist"),
+            (
+                relay(61, self.question, by="stranger"),
+                f"relay on {self.question} refused: stranger is not an orchestrator of this ledger",
+            ),
+            (
+                relay(62, self.question, quote="words never recorded"),
+                f"relay on {self.question} refused: the server could not verify at least three quoted operator words "
+                "in its recorded prompts or answers",
+            ),
+        )
+        for op, reason in cases:
+            with self.subTest(reason=reason):
+                state, rejected = core.sync(SLUG, ops=[op])
+                self.assertEqual(rejected, [op["id"]])
+                self.assertEqual(state["_meta"]["warnings"], [reason])
+                with self.assertRaises(SystemExit) as refused:
+                    ledger.refused({**state, "rejected": rejected}, [op])
+                self.assertEqual(refused.exception.code, reason)
+                self.assertEqual(state["questions"][0]["answers"], [])
+
     def test_only_the_orchestrator_relays_and_only_words_the_operator_said(self):
         core.sync(SLUG, ops=[{"op": "join", "id": "j2", "by": "eng-1@a1-1", "role": "member"}])
         operator_words.record("eng-1@a1-1", "Use the queue")
