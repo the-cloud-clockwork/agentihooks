@@ -36,6 +36,61 @@ one Redis, which every ledger server and controller of the swarm share.
 
 Adding machines, roles, placement, failover timing and fencing are on the [Hives](../pillars/hives.md) page.
 
+## Ticks started by swarm commands
+
+Several swarm commands write their change and then run one tick pass for the swarm themselves: `swarm start`,
+`pause`, `stop` (without `--now`), `reopen` and `restore`. In a cluster install those commands also run inside agent
+pods, so their tick is gated on the client mode. Only the scheduled ticks spawn and reap agents there.
+
+| Tick | Started by | Local client mode | Any other client mode |
+|---|---|---|---|
+| Command tick | `swarm start`, `pause`, `stop`, `reopen`, `restore` | Takes the controller lease and the tick lock, then runs a full pass | Returns `the controller tick spawns and reaps agents` and does nothing else |
+| Controller tick | `agentihooks controller run`, every `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` | Full pass under the controller lease | Full pass under the controller lease |
+| Host tick | `agentihooks swarm tick`, the scheduled workstation tick | Full pass under the controller lease | Full pass, except with `AGENTIHOOKS_DEPLOYMENT=distributed`, where it ticks no swarm |
+
+The client mode is the [Client mode resolution](#client-mode-resolution) rule on the environment alone (rules 4 to
+7): local with `AGENTIHOOKS_DEPLOYMENT=local`, or with no mode and no `LEDGER_URL`; any other mode, or a
+`LEDGER_URL` with no mode, is not local. The controller, joined hive and worker hive pods of the
+`agentihooks-swarm` chart carry the chart's `deployment` value as `AGENTIHOOKS_DEPLOYMENT`, so a command tick in any
+of them stops at the gate. `SWARM_URL` and the hosted ledger rules do not change the gate.
+
+A command tick outside local mode returns before it takes the controller lease, the tick lock or any runtime. It
+spawns no agent, retires no agent, writes no lease and starts no pass of the swarm loop. The command's own write still
+lands first: `pause` stores `paused`, `stop` stores `stopping`, `start` and `reopen` store `running`. The controller
+tick acts on that state on its next pass.
+
+```bash
+# inside a worker pod, or any shell with a non-local deployment
+AGENTIHOOKS_DEPLOYMENT=distributed agentihooks swarm my-swarm pause
+# the controller tick spawns and reaps agents
+# {"swarm": "my-swarm", "state": "paused"}
+```
+
+- `swarm set` runs no tick. Its JSON reports `"applies": "next tick"`, and the next controller or host tick reads the
+  stored setting.
+- `swarm restore` resumes the snapshot's agents through the runtime before its tick, so the gate does not cover
+  those resumes; only its trailing tick stops there.
+- `swarm stop --now` runs no tick either. It retires the swarm's agents through the runtime itself and stores
+  `stopped`, or `stopping` with the agents it could not retire.
+- On a workstation in local mode, a command tick for a swarm whose controller lease another hive holds returns `the
+  swarm belongs to another hive`, as described in [Fencing](../pillars/hives.md#fencing).
+
+Before this gate, a command tick in an agent pod was fenced only by the controller lease: with no live lease it took
+the lease and spawned and reaped agents beside the controller. The regression test
+`test_an_agent_pod_tick_takes_no_controller_lease_and_never_spawns_or_reaps` runs a command tick in `compose` and
+`distributed` mode and asserts no lease, no pass, no spawn and no retire, then runs `controller.run_once` and asserts
+the controller takes the lease and runs the pass. Red on the earlier code:
+[run 39371236925](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39371236925); green:
+[run 39371557233](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39371557233). Delivered in
+[#5115](https://github.com/the-cloud-clockwork/agentihooks/pull/5115); [#5551](https://github.com/the-cloud-clockwork/agentihooks/pull/5551)
+moved the gate onto the shared client mode rule.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A swarm command prints `the controller tick spawns and reaps agents` and no agent starts | The command ran outside local client mode | Wait for the controller's next pass, or check its log with `kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-controller` |
+| A workstation command prints the same line | `LEDGER_URL` is set with no `AGENTIHOOKS_DEPLOYMENT`, or the mode is not `local` | Set `AGENTIHOOKS_DEPLOYMENT=local` when the workstation runs the swarm engine; otherwise the controller ticks the swarm |
+| Agents still do not change after the controller's interval | No controller holds the swarm, or it serves another swarm | Check `controller.api.swarm` and `controller.hostSwarms` in [Configure the controller](#configure-the-controller) |
+
 ## Serving a live swarm from a distributed controller
 
 A workstation swarm can run its engineer and CI work on a Kubernetes cluster while its master, planners and
