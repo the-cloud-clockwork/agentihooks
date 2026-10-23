@@ -539,6 +539,7 @@ def test_open_index_retries_concurrent_mail_changes(store, monkeypatch, conflict
 
 def test_open_index_cleanup_lists_all_owned_keys(store):
     first = store.send("sender", "receiver", "work")
+    store.send("sender", "other", "another swarm request")
     store.open_items("receiver")
     store.pending_items("receiver")
     keys, memberships = store.keys_for(lambda address: address == "receiver")
@@ -555,6 +556,7 @@ def test_open_index_cleanup_lists_all_owned_keys(store):
         store.key("waiting"): ["receiver"],
         store.key("indexed"): ["receiver"],
         store.key("open-indexed"): ["receiver"],
+        store.key("wake-outbox"): [first.id],
     }
 
 
@@ -681,7 +683,11 @@ def test_cleanup_reads_legacy_addresses_and_index_members_without_size_stamps(st
     }
     expected.update({store.key("item", item.id), store.key("history", item.id)})
     assert set(keys) == expected
-    assert memberships == {store.key("waiting"): ["legacy"], store.key("open-indexed"): ["empty"]}
+    assert memberships == {
+        store.key("waiting"): ["legacy"],
+        store.key("open-indexed"): ["empty"],
+        store.key("wake-outbox"): [item.id],
+    }
 
 
 def test_new_withdrawal_does_not_read_closed_mail_on_the_next_sweep(store, monkeypatch):
