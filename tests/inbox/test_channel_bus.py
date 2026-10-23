@@ -124,32 +124,47 @@ def test_the_channel_takes_its_feed_from_the_bus_setting(monkeypatch, mcp_sdk):
     from scripts.inbox.bus import Message, SeatFeed, SeatInbox
 
     bus = memory.open_bus(BusConfig())
+    closed = threading.Event()
+    real_close = bus.close
+
+    def close():
+        closed.set()
+        real_close()
+
+    monkeypatch.setattr(bus, "close", close)
     store = FakeStore()
     feed = SeatFeed(lambda: bus, store, "bob", "session-1", seat=lambda: SEAT)
-    entered = threading.Event()
+    asked, waits = [], []
     real_wait = feed.wait
 
     def wait(timeout_ms):
-        entered.set()
+        waits.append(timeout_ms)
         return real_wait(timeout_ms)
 
+    def feed_for(given, me):
+        asked.append((given, me))
+        return feed
+
     monkeypatch.setattr(feed, "wait", wait)
-    monkeypatch.setattr(channel, "feed_for", lambda store, me: feed)
+    monkeypatch.setattr(channel, "feed_for", feed_for)
     monkeypatch.setattr(channel, "SETTLE_S", 0)
-    monkeypatch.setattr(channel, "RECHECK_S", 3600)
+    monkeypatch.setattr(channel, "RECHECK_S", 0.25)
 
     async def scenario(send, receive):
-        assert await anyio.to_thread.run_sync(lambda: entered.wait(30)), "session never waited on the bus"
+        with anyio.fail_after(10):
+            while not waits:
+                await anyio.sleep(0.01)
         item = store.send("alice", "bob", "hello", notify=False)
         SeatInbox(bus, "swarm").send(SEAT, Message(item.id, "alice", "hello"))
         with anyio.fail_after(10):
-            pushed = await receive()
-        bus.close()
-        return item, pushed
+            return item, await receive()
 
     _, _, (item, pushed) = session(store, scenario)
     assert pushed["params"]["meta"]["item_id"] == item.id
+    assert asked == [(store, "bob")]
+    assert set(waits) == {250}
     assert store.subs == []
+    assert closed.is_set()
 
 
 def test_a_bus_outage_keeps_redis_items_on_the_recheck_cadence(monkeypatch, mcp_sdk):

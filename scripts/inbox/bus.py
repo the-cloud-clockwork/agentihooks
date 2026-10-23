@@ -161,7 +161,7 @@ class FeedError(RuntimeError):
 
 
 def _swarm_of(seat: str) -> str:
-    return seat.split("@", 1)[1]
+    return seat.split("@")[-1]
 
 
 def _nats() -> BusConfig | None:
