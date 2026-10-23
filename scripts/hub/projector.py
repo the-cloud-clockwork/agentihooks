@@ -12,6 +12,7 @@ from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.hub import registry
 from scripts.hub.registry import Reactor
+from scripts.hub.runner import retry_delay
 
 SUBJECT = "swarm.>"
 BATCH = 32
@@ -47,7 +48,7 @@ class Projector:
                 self.handle(delivery.event)
             except Exception as exc:
                 sys.stderr.write(f"ledger projector: event {delivery.event.id}: {exc}\n")
-                delivery.nak(registry.retry_delay(retry_ms, delivery.attempt))
+                delivery.nak(retry_delay(retry_ms, delivery.attempt))
                 outcomes.append("failed")
             else:
                 delivery.ack()
