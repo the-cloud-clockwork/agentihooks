@@ -1,5 +1,6 @@
 from scripts.events import catalogue
 from scripts.events.envelope import Envelope, create
+from scripts.swarm_ledger.api.resources import resource_revision
 from scripts.swarm_ledger.repository import outbox, sqlite
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
@@ -87,6 +88,7 @@ def test_import_fills_every_missing_catalogue_field_so_each_outbox_event_passes_
     repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
     repo.import_document("ledger", LEGACY)
     assert repo.export_document("ledger") == LEGACY
+    assert resource_revision(repo.current("ledger").state, "tasks") == resource_revision(LEGACY, "tasks")
     assert repo.apply_ops("ledger", changes=[DONE])[1] == []
     events = written(repo)
     assert [(item.type, item.key, item.version) for item in events] == [
@@ -112,7 +114,7 @@ def test_import_fills_every_missing_catalogue_field_so_each_outbox_event_passes_
             "done": False,
         },
         {"id": "t2", **catalogue.TASK_DEFAULTS},
-        {**events[3].data, "id": "p1", "title": "One", "planning": "auto", "description": "", "done": True},
+        {"id": "p1", "title": "One", "planning": "auto", "description": "", "done": True},
     ]
 
 
