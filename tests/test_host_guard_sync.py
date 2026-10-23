@@ -419,9 +419,10 @@ def test_an_unreachable_stranded_scheduler_still_schedules_the_guard(tmp_path, s
 def test_the_stranded_scheduler_is_the_local_redis_only_when_the_swarm_moved(monkeypatch):
     from scripts.swarm import store
 
-    monkeypatch.setattr(store, "redis_url", lambda environ: store.DEFAULT_URL)
+    current = [store.DEFAULT_URL]
+    monkeypatch.setattr(store, "redis_url", lambda environ: environ is os.environ and current[0])
     assert sync._stranded_scheduler() is None
-    monkeypatch.setattr(store, "redis_url", lambda environ: "redis://remote:6379/0")
+    current[0] = "redis://remote:6379/0"
     client = sync._stranded_scheduler().redis
     assert client.connection_pool.connection_kwargs == {
         **client.connection_pool.connection_kwargs,
