@@ -5,7 +5,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
 
-from . import hierarchy, refresh
+from . import hierarchy, outbox, refresh
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Snapshot, SQLiteLedgerRepository
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
@@ -34,6 +34,7 @@ TABLES = "SELECT table_name FROM information_schema.tables WHERE table_schema=cu
 STATEMENTS = {
     BEGIN_IMMEDIATE: f"SELECT pg_advisory_xact_lock({WRITER_LOCK})",
     TABLES_SQL: TABLES,
+    outbox.ADD_SENT_AT: "ALTER TABLE outbox_sent ADD COLUMN IF NOT EXISTS sent_at BIGINT NOT NULL DEFAULT 0",
     "SELECT 1 FROM sqlite_master WHERE name='hosted_fences'": f"{TABLES} AND table_name='hosted_fences'",
 }
 REWRITES = (
@@ -306,6 +307,7 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
                 connection.execute(BEGIN_IMMEDIATE)
                 connection.execute(SCHEMA_STATEMENTS_UNTIMED)
                 connection.executescript(SCHEMA + hierarchy.SCHEMA + ROWS_SCHEMA + refresh.SCHEMA + FLOOR_SCHEMA)
+                outbox.migrate(connection)
                 connection.execute(RAISE_FLOOR, (REQUIRED,))
                 connection.execute(GUARD)
                 connection.execute(GUARD_TRIGGER)

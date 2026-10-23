@@ -9,6 +9,7 @@ from scripts.swarm.store import RedisStore, SwarmConfig
 
 KEY = "profile-decisions"
 FIELD = "profile_decision"
+UNRESOLVED = "profile_unresolved"
 
 
 def placed(runtime: object) -> bool:
@@ -19,16 +20,23 @@ def placeable(
     slug: str, config: SwarmConfig, store: RedisStore, runtime: object, lane: str, ready: list[dict], room: int
 ) -> tuple[list[dict], list[str]]:
     """The first ready tasks this hive places, at most room, and why each refused task before them waits; a task is
-    decided only when a free slot reaches it."""
-    found, waits = [], []
+    decided only when a free slot reaches it. A task whose profile is unresolved is returned marked UNRESOLVED and
+    takes no slot."""
+    found, waits, slots = [], [], 0
     for task in ready:
-        if len(found) == room:
+        if slots == room:
             break
         decided(slug, config, store, runtime, lane, task)
-        if refused := seat_spawn.placed_elsewhere(runtime, lane, task):
+        try:
+            refused = seat_spawn.placed_elsewhere(runtime, lane, task)
+        except profile_choice.ProfileUnresolved as exc:
+            found.append({**task, UNRESOLVED: str(exc)})
+            continue
+        if refused:
             waits.append(f"task {task['id']} waits: {refused}")
         else:
             found.append(task)
+            slots += 1
     return found, waits
 
 
