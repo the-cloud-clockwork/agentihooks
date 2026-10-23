@@ -5,7 +5,10 @@ from collections.abc import Callable, Mapping
 ENV = {"namespace": "AGENTIHOOKS_POD_NAMESPACE", "name": "AGENTIHOOKS_POD_NAME", "uid": "AGENTIHOOKS_POD_UID"}
 CONTAINER_ENV = "AGENTIHOOKS_POD_CONTAINER"
 ENDED = ("Failed", "Succeeded")
-DNS_NAME = re.compile(r"[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?")
+DNS_NAMES = {
+    "namespace": re.compile(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?"),
+    "name": re.compile(r"[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?"),
+}
 
 
 def pod(environ: Mapping[str, str]) -> dict:
@@ -45,7 +48,7 @@ def _complete(held: object) -> bool:
     return (
         isinstance(held, dict)
         and all(isinstance(held.get(field), str) and held[field] for field in ENV)
-        and all(DNS_NAME.fullmatch(held[field]) for field in ("namespace", "name"))
+        and all(pattern.fullmatch(held[field]) for field, pattern in DNS_NAMES.items())
     )
 
 
