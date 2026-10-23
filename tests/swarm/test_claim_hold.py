@@ -10,7 +10,7 @@ from tests.swarm.test_tick import FakeLedger, FakeRuntime
 @pytest.fixture
 def held():
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", "/repo", state="paused"))
+    store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0, state="paused"))
     ledger = FakeLedger([{"id": "t1", "title": "Hive telemetry", "awaiting": "verify", "contract": {"after_at": ""}}])
     ledger.stamps = {"tasks/t1/awaiting": {"at": 1}}
     return store, ledger, FakeRuntime()
