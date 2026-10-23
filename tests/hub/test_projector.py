@@ -5,8 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.events import envelope, factory, memory, nats
-from scripts.events.config import BusConfig, QueuePolicy
+from scripts.events import envelope, factory, memory
+from scripts.events.config import BusConfig
 from scripts.hub import projector, registry
 from scripts.swarm_ledger.events.hub import Hub
 from scripts.swarm_ledger.events.publishing import Publishing
@@ -31,10 +31,6 @@ def make(repository=None, hub=None, name="pod", clock=lambda: 0.0):
     return projector.Projector(repository or Mock(), hub or Hub(), name, NATS, clock)
 
 
-def durables(bus) -> list[str]:
-    return sorted(info.name for info in bus._loop.run(bus._js.consumers_info(nats.EVENT_STREAM)))
-
-
 @pytest.mark.parametrize(
     ("host", "name"), [("Ledger_Pod.0", "ledger-pod-0-8765"), ("_pod.", "pod-8765"), ("..", "8765")]
 )
@@ -49,7 +45,7 @@ def test_reactor_follows_every_swarm_subject_under_a_durable_per_process():
 
 
 def test_reactor_policy_carries_a_ten_minute_inactive_threshold_with_the_reactor_deliveries():
-    assert make().reactor.policy == QueuePolicy(max_deliver=50, inactive_ms=600_000)
+    assert make().reactor.policy == replace(registry.REACTOR_POLICY, inactive_ms=600_000)
 
 
 def test_a_rollout_leaves_only_the_live_projector_durable_on_the_bus(monkeypatch, tmp_path):
@@ -60,15 +56,15 @@ def test_a_rollout_leaves_only_the_live_projector_durable_on_the_bus(monkeypatch
         config = BusConfig(backend="nats", url=url)
         old = projector.Projector(Mock(), Hub(), "pod-a-8765", config)
         old.pull()
-        assert durables(old.bus) == ["hub-projector-pod-a-8765"]
+        assert nats_server.durables(old.bus) == ["hub-projector-pod-a-8765"]
         old.close()
         live = projector.Projector(Mock(), Hub(), "pod-b-8765", config)
         try:
             live.pull()
             deadline = time.monotonic() + 15
-            while durables(live.bus) != ["hub-projector-pod-b-8765"] and time.monotonic() < deadline:
+            while nats_server.durables(live.bus) != ["hub-projector-pod-b-8765"] and time.monotonic() < deadline:
                 live.pull()
-            assert durables(live.bus) == ["hub-projector-pod-b-8765"]
+            assert nats_server.durables(live.bus) == ["hub-projector-pod-b-8765"]
         finally:
             live.close()
 
