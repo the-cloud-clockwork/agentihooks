@@ -1,4 +1,7 @@
-"""Which tasks a lane may claim, offered to the lane's work queue once per claim generation."""
+"""Which tasks a lane may claim, offered to the lane's work queue on every hub pass.
+
+An offer's id carries the task's claim generation, so the bus drops a repeat only inside its dedupe window.
+"""
 
 from collections.abc import Callable
 from dataclasses import dataclass
