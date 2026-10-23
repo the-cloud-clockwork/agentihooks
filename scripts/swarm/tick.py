@@ -29,6 +29,7 @@ from scripts.swarm import (
     affinity,
     apply_wait,
     bottleneck_remedy,
+    claim_hold,
     claim_order,
     content_refusal,
     continuation,
@@ -228,6 +229,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
+    actions += skip_refused(claim_hold.verification_notices, slug, store, doc, now_ms)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
     actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
     actions += skip_refused(dispatcher.group, slug, config, store, ledger, doc, now_ms)
