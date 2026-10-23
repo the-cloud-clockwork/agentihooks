@@ -845,20 +845,8 @@ def _owned_tasks(slug, store):
 
 
 def _claimable(slug, store, rows, doc, lane, dispatched=None):
-    awaiting = _owned_tasks(slug, store)
+    view = snapshot(slug, store, rows, doc)
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
-    config = store.config(slug)
-    graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
-    released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
-    view = readiness.Snapshot(
-        slug,
-        rows,
-        doc,
-        graph,
-        fix,
-        lambda task_id: task_id in awaiting or store.claimant(slug, task_id) is not None,
-        lambda task: released(task) and applied(task),
-    )
     clear, overlapping = [], []
     for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
         if readiness.claimable(t, lane, view):
@@ -879,6 +867,22 @@ def _launch_order(slug, store, tasks, dispatched=None):
             bool(store.launch_failure(slug, task["id"])),
             not claim_order.resumed(task),
         ),
+    )
+
+
+def snapshot(slug, store, rows, doc):
+    awaiting = _owned_tasks(slug, store)
+    config = store.config(slug)
+    graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
+    released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
+    return readiness.Snapshot(
+        slug,
+        rows,
+        doc,
+        graph,
+        fix,
+        lambda task_id: task_id in awaiting or store.claimant(slug, task_id) is not None,
+        lambda task: released(task) and applied(task),
     )
 
 
