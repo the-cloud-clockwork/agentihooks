@@ -57,8 +57,9 @@ def entries(environ: Mapping[str, str], home: Path) -> tuple[dict[str, str], dic
             left_out[name] = reason
         else:
             kept[name] = value
-    if "AGENTIHOOKS_MCP_URLS" in environ:
-        kept["AGENTIHOOKS_MCP_URLS"] = environ["AGENTIHOOKS_MCP_URLS"]
+    for name in ("AGENTIHOOKS_MCP_URLS", "AGENTIHOOKS_MCP_BEARER_ENV"):
+        if name in environ:
+            kept[name] = environ[name]
     return kept | bundle_origin.origin(home, environ) | {
         linked_profiles.ENV_KEY: linked_profiles.sources(home)
     }, left_out

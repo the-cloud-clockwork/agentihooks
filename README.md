@@ -128,6 +128,12 @@ A bundle is your own git repository of profiles, linked with
 swarm role profiles; your bundle adds the rest, and overlays add domain experts
 to a base role.
 
+For remote HTTP MCP servers, `AGENTIHOOKS_MCP_URLS` maps server names to URLs.
+`AGENTIHOOKS_MCP_BEARER_ENV` maps server names to environment variable names
+for bearer authentication. Both are JSON objects, apply when rendering profiles,
+and are published by `agentihooks hive setup`. Store credential values in OpenBao;
+put only their environment variable names in the bearer mapping.
+
 Docs: [Identity](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/identity/),
 [Bundles](https://the-cloud-clockwork.github.io/agentihooks/docs/bundles/),
 [Overlays](https://the-cloud-clockwork.github.io/agentihooks/docs/overlays/).

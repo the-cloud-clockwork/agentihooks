@@ -1,4 +1,5 @@
 import json
+from dataclasses import asdict, replace
 from unittest.mock import MagicMock
 
 import pytest
@@ -60,6 +61,89 @@ def test_set_pane_still_finds_an_archived_attempt(store):
 
     assert store.execution("fixture", first.execution_id).pane_id == "pane-9"
     assert not store.redis.hexists(store.key("fixture", ARCHIVE), first.execution_id)
+
+
+@pytest.mark.parametrize("archived", [False, True])
+def test_set_pane_on_a_replaced_run_keeps_its_dropped_agent_out_of_the_live_list(store, archived):
+    first, second, third, other = history(store)
+    if archived:
+        store.execution_registry.archive("fixture")
+    live = store.redis.hgetall(store.key("fixture", "agents"))
+
+    store.execution_registry.set_pane("fixture", first.execution_id, "pane-9")
+
+    assert store.execution("fixture", first.execution_id).pane_id == "pane-9"
+    assert store.redis.hgetall(store.key("fixture", "agents")) == live
+    assert [agent.name for agent in store.agents("fixture")] == [third.name]
+
+
+def test_set_pane_retries_when_its_agent_is_dropped_during_the_write(store, monkeypatch):
+    current = started(store, "eng-1@fixture")
+    original = store.redis.pipeline
+    reads = []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        hexists = pipe.hexists
+
+        def racing(name, key):
+            found = hexists(name, key)
+            reads.append(found)
+            if len(reads) == 1:
+                store.redis.hdel(name, key)
+            return found
+
+        monkeypatch.setattr(pipe, "hexists", racing)
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+
+    store.execution_registry.set_pane("fixture", current.execution_id, "pane-9")
+
+    assert reads == [True, False]
+    assert store.execution("fixture", current.execution_id).pane_id == "pane-9"
+    assert not store.redis.hexists(store.key("fixture", "agents"), current.name)
+
+
+def test_set_pane_retries_when_its_run_record_changes_during_the_write(store, monkeypatch):
+    current = started(store, "eng-1@fixture")
+    original = store.redis.pipeline
+    reads = []
+    key = store.key("fixture", "executions")
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        hexists = pipe.hexists
+
+        def racing(name, field):
+            found = hexists(name, field)
+            reads.append(found)
+            if len(reads) == 1:
+                raced = replace(store.execution("fixture", current.execution_id), pane_id="pane-race")
+                store.redis.hset(key, current.execution_id, json.dumps(asdict(raced)))
+            return found
+
+        monkeypatch.setattr(pipe, "hexists", racing)
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+
+    store.execution_registry.set_pane("fixture", current.execution_id, "pane-9")
+
+    assert reads == [True, True]
+    assert store.execution("fixture", current.execution_id).pane_id == "pane-9"
+
+
+def test_set_pane_on_an_earlier_run_of_a_live_name_keeps_the_latest_projection(store):
+    agent = AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-3@fixture")
+    one = store.start_execution("fixture", agent)
+    store.start_execution("fixture", replace(agent, state="working"), one.execution_id)
+    live = store.redis.hgetall(store.key("fixture", "agents"))
+
+    store.execution_registry.set_pane("fixture", one.execution_id, "pane-9")
+
+    assert store.execution("fixture", one.execution_id).pane_id == "pane-9"
+    assert store.redis.hgetall(store.key("fixture", "agents")) == live
 
 
 def test_archive_keeps_every_row_of_a_live_name_and_seat_head_ties(store):

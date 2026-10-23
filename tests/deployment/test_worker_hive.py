@@ -174,6 +174,24 @@ def test_the_container_env_carries_the_langfuse_settings_to_sshd_sessions(tmp_pa
     assert sourced.stdout == "fixture-langfuse-public|fixture-langfuse-private|https://langfuse.example.test"
 
 
+def test_the_container_env_carries_brain_clients_to_sshd_sessions(tmp_path, monkeypatch):
+    from dotenv import dotenv_values
+
+    brain = {
+        "BRAIN_URL": "http://brain.example.test:8080",
+        "BRAIN_ENABLED": "true",
+        "KB_ROUTER_TOKEN": "fixture-brain-client",
+        "AMYGDALA_ENABLED": "true",
+        "SWARM_BRAIN_MCP_KEY": "fixture-brain-mcp",
+    }
+    for name, value in brain.items():
+        monkeypatch.setenv(name, value)
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    saved = dotenv_values(home / "hive-container.env")
+    assert {name: saved.get(name) for name in brain} == brain
+
+
 def test_a_delivered_hive_env_runs_without_waiting(tmp_path):
     result, commands, home, _ = startup(tmp_path, credential="delivered")
     assert result.returncode == 0, result.stderr

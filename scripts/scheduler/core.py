@@ -242,7 +242,11 @@ class Scheduler:
 
     def _deliver(self, entry_id: str, now: float, lease: "Lock") -> None:
         entry = self.get(entry_id).record
-        pending = entry["pending"]
+        pending = entry.get("pending")
+        if pending is None:
+            _log.warning("scheduler skipped stale pending entry %s: no pending details", entry_id)
+            self.update(entry_id, lambda current: None, lease=lease)
+            return
         event = {
             **entry,
             "scheduled_at": pending["scheduled_at"],

@@ -365,17 +365,23 @@ class ExecutionRegistry:
             with self.redis.pipeline() as pipe:
                 try:
                     archived = self.store.key(slug, ARCHIVE)
-                    pipe.watch(key)
+                    agents = self.store.key(slug, "agents")
+                    pipe.watch(key, agents)
                     live = pipe.hget(key, execution_id)
                     raw = live or pipe.hget(archived, execution_id)
                     if not raw:
                         pipe.unwatch()
                         self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
                     current = AgentRecord(**json.loads(raw))
+                    heads = {head.execution_id for head in self.occupants(slug).values()}
+                    listed = execution_id in heads and pipe.hexists(agents, current.name)
                     pipe.multi()
                     if not live:
                         pipe.hdel(archived, execution_id)
-                    self.write(pipe, slug, replace(current, pane_id=pane_id), current)
+                    if listed:
+                        self.write(pipe, slug, replace(current, pane_id=pane_id), current)
+                    else:
+                        pipe.hset(key, execution_id, json.dumps(asdict(replace(current, pane_id=pane_id))))
                     pipe.execute()
                     return
                 except WatchError:

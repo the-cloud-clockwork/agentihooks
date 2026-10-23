@@ -146,6 +146,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         "chain": chain,
         "overlays": _overlays(dirs),
         "mcp_urls": json.loads(os.environ.get("AGENTIHOOKS_MCP_URLS", "{}")),
+        "mcp_bearer_env": json.loads(os.environ.get("AGENTIHOOKS_MCP_BEARER_ENV", "{}")),
         "enabled_plugins": _plugins(chain, _settings("claude", bundle, dirs).get("enabledPlugins") or {}),
         **({"browser": browser.spec()} if browser.proxy_enabled(chain) else {}),
         "corrections": quarantine.digest(),
@@ -256,6 +257,16 @@ def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]])
     urls = json.loads(os.environ.get("AGENTIHOOKS_MCP_URLS", "{}"))
     servers = {
         name: {**server, "url": urls[name]} if name in urls and "url" in server else server
+        for name, server in servers.items()
+    }
+    bearer_env = json.loads(os.environ.get("AGENTIHOOKS_MCP_BEARER_ENV", "{}"))
+    servers = {
+        name: {
+            **server,
+            "headers": {**server.get("headers", {}), "Authorization": "Bearer ${" + bearer_env[name] + "}"},
+        }
+        if name in bearer_env and "url" in server
+        else server
         for name, server in servers.items()
     }
     return browser.configure(servers, [name for name, _ in dirs])

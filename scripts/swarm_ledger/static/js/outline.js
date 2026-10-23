@@ -8,6 +8,7 @@ import { collapsible, groupOpen, markToggles, rememberGroup } from "./folds.js";
 import { selectTab } from "./layout.js";
 import { render } from "./render.js";
 import { closedMore, firstPage, lazy, moreButton, wanted } from "./pages.js";
+import { revealFrozenTarget, viewCount, viewItems } from "./frozen_view.js";
 
 let outlinePick = null;
 
@@ -28,12 +29,14 @@ const PANEL_ROWS = { notice: () => showNotifications(true), alert: () => showAle
 function fetchTarget(id) {
   const kind = id.split("-")[0];
   if (kind === "item") {
-    const section = document.querySelector(`section[data-outline="${id.split("-")[1]}"] > details.fold`);
+    wanted.ids = new Set(revealFrozenTarget(doc, id));
+    const list = id.split("-")[1];
+    const section = document.querySelector(`section[data-outline="${["plans", "slices"].includes(list) ? "phases" : list}"] > details.fold`);
     if (section) section.open = true;
   } else if (!Object.hasOwn(PANEL_ROWS, kind)) return;
   wanted.id = id;
   (kind === "item" ? render : PANEL_ROWS[kind])();
-  setTimeout(() => { wanted.id = null; }, 0);
+  setTimeout(() => { wanted.id = null; wanted.ids.clear(); }, 0);
 }
 
 export function revealTarget(id) {
@@ -71,12 +74,13 @@ function outlineOf(doc, heads) {
   const entry = (list) => (i, n) => typeof i === "string" ? { id: `item-${list}-${n}`, title: i }
     : { id: `item-${list}-${i.id}`, title: list === "tasks" ? `${i.id} ${i.title}` : i.title || i.text || i.item || i.id, state: itemState(list, i) };
   return heads.map((head) => {
-    const list = (head.list ? doc[head.list] || [] : []).filter((i) => !i.deleted);
+    const all = (head.list ? doc[head.list] || [] : []).filter((i) => !i.deleted);
+    const list = viewItems(head.list, all);
     const grouped = ["tasks", "followups"].includes(head.list);
     const hidden = head.list ? closedLeft(head.list) : 0;
     const counts = grouped ? [...new Set([...list.map((i) => i.state || (i.done ? "done" : "open")), ...(hidden ? ["done"] : [])])]
       .map((state) => `${list.filter((i) => (i.state || (i.done ? "done" : "open")) === state).length + (state === "done" ? hidden : 0)} ${state}`).join(" · ") : "";
-    return { id: head.id, title: head.title + (counts ? ` · ${counts}` : ""),
+    return { id: head.id, title: head.title + (counts ? ` · ${counts}` : "") + viewCount(head.list, all),
       items: head.list === "followups" ? [] : list.map(entry(head.list)) };
   });
 }

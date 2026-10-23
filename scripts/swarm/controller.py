@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import lease, local_slots, tick_stop
+from scripts.swarm import holder_pod, lease, local_slots, tick_stop
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
 from scripts.swarm_ledger import ledger_link
@@ -308,7 +308,14 @@ def _holder() -> dict:
     host, fields, machine = _host(), _stat(os.getpid()), _read("/etc/machine-id")
     if not host or len(fields) <= 19:
         return {}
-    return {"host": host, "pid": os.getpid(), "start": fields[19], **({"machine": machine} if machine else {})}
+    pod = holder_pod.identity(os.environ)
+    return {
+        "host": host,
+        "pid": os.getpid(),
+        "start": fields[19],
+        **({"machine": machine} if machine else {}),
+        **({"pod": pod} if pod else {}),
+    }
 
 
 def _gone(pid: int, start: str) -> bool:
@@ -327,7 +334,9 @@ def _dead(raw: str) -> bool:
     host = _host()
     if host and _ended_boot(held, host):
         return True
-    if not host or held.get("host") != host or not {"pid", "start"} <= held.keys():
+    if host and held.get("host") != host:
+        return holder_pod.gone(held.get("pod"), holder_pod.pod(os.environ))
+    if not host or "pid" not in held or "start" not in held:
         return False
     return _gone(held["pid"], held["start"])
 

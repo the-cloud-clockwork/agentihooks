@@ -63,6 +63,47 @@ def test_master_admission_records_fallback_auth_and_ui_placement(setup):
     assert stored.profile_decision["master_placement"] == admitted.profile_decision["master_placement"]
 
 
+@pytest.mark.parametrize("fallback", ["the task is pinned to remote", ""])
+def test_an_acknowledged_and_ended_execution_keeps_its_placement_fallback(setup, fallback):
+    from dataclasses import replace
+
+    from scripts.hive import orders
+    from scripts.swarm import lease
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    task = master(setup)
+    name = setup.store.next_name(setup.config.slug, "eng")
+    task.update(seat="eng@fixture", controller_epoch=setup.held.epoch)
+    request = SpawnRequest(setup.config, "eng", name, task)
+    selected = replace(setup.launcher.select(setup.config, "eng", task), fallback=fallback)
+    admitted = setup.launcher.admit(request, selected)
+    order = orders.LaunchOrder(
+        setup.config.slug,
+        admitted.execution_id,
+        admitted.generation,
+        "master",
+        "eng",
+        "master",
+        "account",
+        "claude",
+        "subscription",
+        "prompt",
+        setup.held.epoch,
+        lease.now_ms(setup.store) + 60000,
+        hive="remote",
+    )
+    ack = orders.Ack("live", {"host_id": "remote"}, execution={"profile_decision": {"validation": {"pid": 12}}})
+    expected = {"validation": {"pid": 12}, **({"placement_fallback": fallback} if fallback else {})}
+    acked = setup.launcher.record(admitted, order, ack)
+    assert acked.profile_decision == expected
+    registry = setup.store.execution_registry
+    assert registry.get(setup.config.slug, admitted.execution_id).profile_decision == expected
+    setup.launcher.end(acked, "done")
+    ended = registry.get(setup.config.slug, admitted.execution_id)
+    assert ended.state == "ended"
+    assert ended.profile_decision == expected
+
+
 def admit_after_starting_orphan(setup, offset, live=False):
     from types import SimpleNamespace
 

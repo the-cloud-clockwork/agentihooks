@@ -346,7 +346,7 @@ def test_timer_callbacks_receive_the_current_lease_guard(monkeypatch):
     held = hub._leases["timers"]
     decisions = iter([True, False])
     monkeypatch.setattr(held, "acquire", lambda: next(decisions))
-    assert hub.run_once(timeout_ms=0) == {"timers": ["handled"]}
+    assert hub.run_once(timeout_ms=0)["timers"] == ["handled"]
     assert bus.events.consumer("expiry", "swarm.*.deadline.expired").fetch(10, 0) == []
 
 

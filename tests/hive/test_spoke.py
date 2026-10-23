@@ -722,3 +722,250 @@ def test_a_request_without_admitted_execution_identity_is_retried_without_spawni
     assert rig.spoke.poll() == "retry"
     rig.runtime.spawn.assert_not_called()
     assert claim(rig) == {"state": "ready"}
+
+
+def test_poll_renews_presence_even_when_admission_holds_the_hive(rig, monkeypatch):
+    import json
+
+    from scripts.hive import spoke
+
+    rig.spoke.measure = lambda: None
+    monkeypatch.setattr(spoke.time, "time_ns", lambda: 1_234_000_000)
+    assert rig.spoke.poll() == "held"
+    store = rig.bus.state("hive-presence")
+    first = store.get("hive-a")
+    assert first is not None
+    assert json.loads(first.value) == {"heartbeat_ms": 1234, "expires_ms": 46234}
+    monkeypatch.setattr(spoke.time, "time_ns", lambda: 3_333_000_000)
+    assert rig.spoke.poll() == "held"
+    renewed = store.get("hive-a")
+    assert renewed.revision > first.revision
+    assert json.loads(renewed.value) == {"heartbeat_ms": 3333, "expires_ms": 48333}
+
+
+@pytest.mark.parametrize("state", ["claimed", "launching"])
+def test_lost_hive_work_redelivers_and_changes_the_old_claim_fence(rig, monkeypatch, state):
+    import json
+
+    from scripts.hive import spoke
+
+    monkeypatch.setattr(spoke.time, "time_ns", lambda: rig.clock.now * 1_000_000)
+    rig.bus.state("hive-presence").create("hive-lost", b'{"heartbeat_ms":0,"expires_ms":45000}')
+    claims = rig.bus.state("spoke-work")
+    key = spoke.claim_key(rig.event)
+    old_revision = claims.create(key, json.dumps({"state": state, "owner": "hive-lost", "name": "old"}).encode())
+    held = rig.queue.take(0)
+    assert held.event == rig.event
+    assert rig.spoke.poll() == "empty"
+    rig.clock.now = 45000
+    assert rig.spoke.poll() == "started"
+    request = rig.runtime.spawn.call_args.args[0]
+    assert request.task["claim_fence"]["revision"] > old_revision
+    started = rig.bus.events.consumer("loss-audit", "swarm.rig.execution.started").fetch(1, 0)
+    assert len(started) == 1
+    assert started[0].event.data["hive"] == "hive-a"
+    assert rig.queue.take(0) is None
+
+
+@pytest.mark.parametrize("state", ["claimed", "launching"])
+def test_a_fresh_hive_keeps_its_claim_until_presence_expires(rig, monkeypatch, state):
+    import json
+
+    from scripts.hive import spoke
+
+    monkeypatch.setattr(spoke.time, "time_ns", lambda: 44_999_000_000)
+    rig.bus.state("hive-presence").create("hive-live", b'{"heartbeat_ms":0,"expires_ms":45000}')
+    store = rig.bus.state("spoke-work")
+    value = json.dumps({"state": state, "owner": "hive-live"}).encode()
+    revision = store.create(spoke.claim_key(rig.event), value)
+    assert rig.spoke.poll() == ("busy" if state == "claimed" else "uncertain")
+    assert store.get(spoke.claim_key(rig.event)).revision == revision
+    rig.runtime.spawn.assert_not_called()
+
+
+@pytest.mark.parametrize("state", ["exiting", "exited"])
+def test_a_redelivered_offer_for_an_exiting_claim_is_nacked_busy(rig, state):
+    import json
+
+    from scripts.hive import spoke
+
+    store = rig.bus.state("spoke-work")
+    revision = store.create(spoke.claim_key(rig.event), json.dumps({"state": state, "owner": "hive-a"}).encode())
+    assert rig.spoke.poll() == "busy"
+    assert store.get(spoke.claim_key(rig.event)).revision == revision
+    rig.tasks.request.assert_not_called()
+    rig.runtime.spawn.assert_not_called()
+    assert rig.queue.take(0) is None
+    rig.clock.now = rig.config.policy.ack_wait_ms
+    assert rig.spoke.poll() == "busy"
+
+
+@pytest.mark.parametrize("state", ["claimed", "launching"])
+def test_nats_redelivers_lost_hive_work_to_a_second_hive(tmp_path, rig, monkeypatch, state):
+    import json
+
+    from scripts.events import nats
+    from scripts.events.bus import StateConflict
+    from scripts.events.config import BusConfig, QueuePolicy
+    from scripts.hive import spoke
+    from tests.events import nats_server
+
+    clock = SimpleNamespace(now=0)
+    monkeypatch.setattr(spoke.time, "time_ns", lambda: clock.now * 1_000_000)
+    policy = QueuePolicy(ack_wait_ms=50, max_deliver=10)
+    with nats_server.running(tmp_path / "nats-loss") as url:
+        config = BusConfig(backend="nats", url=url)
+        old_bus, new_bus = nats.open_bus(config), nats.open_bus(config)
+        try:
+            old_config = replace(rig.config, hive="hive-lost", policy=policy)
+            old = spoke.Spoke(old_config, old_bus, Mock(), rig.tasks, reading)
+            assert old.poll() == "empty"
+            queue = old_bus.queue("swarm.rig.ready.eng", policy)
+            queue.offer(rig.event)
+            delivery = queue.take(500)
+            assert delivery is not None
+            key = spoke.claim_key(rig.event)
+            revision = old_bus.state("spoke-work").create(
+                key, json.dumps({"state": state, "owner": "hive-lost", "name": "old"}).encode()
+            )
+            old_bus.close()
+            clock.now = 45000
+            survivor = spoke.Spoke(replace(rig.config, policy=policy), new_bus, rig.runtime, rig.tasks, reading)
+            outcomes = []
+            for _ in range(10):
+                outcomes.append(survivor.poll(500))
+                if outcomes[-1] == "started":
+                    break
+            assert outcomes[-1] == "started", outcomes
+            rig.runtime.spawn.assert_called_once()
+            request = rig.runtime.spawn.call_args.args[0]
+            assert request.task["claim_fence"]["revision"] > revision
+            assert json.loads(new_bus.state("hive-presence").get("hive-a").value) == {
+                "heartbeat_ms": 45000,
+                "expires_ms": 90000,
+            }
+            with pytest.raises(StateConflict):
+                new_bus.state("spoke-work").update(key, b'{"state":"started"}', revision)
+            assert new_bus.queue("swarm.rig.ready.eng", policy).take(50) is None
+        finally:
+            old_bus.close()
+            new_bus.close()
+
+
+def test_presence_is_renewed_before_pending_recovery_even_without_admission(rig):
+    import json
+
+    seed_pending(rig, {"state": "launching"})
+    rig.spoke.measure = Mock(side_effect=AssertionError("must recover first"))
+    rig.spoke.clock = lambda: 777
+    assert rig.spoke.poll() == "uncertain"
+    assert json.loads(rig.bus.state("hive-presence").get("hive-a").value) == {
+        "heartbeat_ms": 777,
+        "expires_ms": 45777,
+    }
+    rig.spoke.measure.assert_not_called()
+
+
+def test_a_presence_write_failure_prevents_taking_or_launching_work(rig, monkeypatch):
+    write = Mock(side_effect=RuntimeError("store unavailable"))
+    monkeypatch.setattr(rig.bus.state("hive-presence"), "create", write)
+    rig.spoke._recover = Mock(side_effect=AssertionError("presence must succeed first"))
+    assert rig.spoke.poll() == "retry"
+    rig.spoke._recover.assert_not_called()
+    rig.runtime.spawn.assert_not_called()
+    assert rig.queue.take(0).event == rig.event
+
+
+def test_a_racing_takeover_cannot_launch_after_losing_the_claim_revision(rig, monkeypatch):
+    import json
+
+    from scripts.events.bus import StateConflict
+    from scripts.hive import spoke
+
+    rig.spoke.clock = lambda: 45000
+    rig.bus.state("hive-presence").create("hive-lost", b'{"heartbeat_ms":0,"expires_ms":45000}')
+    claims = rig.bus.state("spoke-work")
+    key = spoke.claim_key(rig.event)
+    old = claims.create(key, json.dumps({"state": "launching", "owner": "hive-lost"}).encode())
+    update = Mock(side_effect=StateConflict)
+    monkeypatch.setattr(claims, "update", update)
+    assert rig.spoke.poll() == "busy"
+    update.assert_called_once_with(key, json.dumps({"owner": "hive-a", "state": "claimed"}).encode(), old)
+    rig.runtime.spawn.assert_not_called()
+
+
+def test_an_injected_clock_controls_the_presence_timestamp(rig):
+    import json
+
+    from scripts.hive.spoke import Spoke
+
+    spoke = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, lambda: None, clock=lambda: 8765)
+    assert spoke.poll() == "held"
+    assert json.loads(rig.bus.state("hive-presence").get("hive-a").value) == {
+        "heartbeat_ms": 8765,
+        "expires_ms": 53765,
+    }
+
+
+def test_presence_keeps_renewing_while_the_runtime_blocks(rig, monkeypatch):
+    import threading
+
+    from scripts.hive import presence
+
+    renewed = threading.Event()
+    original = presence.beat
+    clock = SimpleNamespace(now=0)
+    rig.spoke.clock = lambda: clock.now
+
+    def beat(bus, hive, at_ms):
+        revision = original(bus, hive, at_ms)
+        if at_ms == 45000:
+            renewed.set()
+        return revision
+
+    def spawn(request):
+        clock.now = 45000
+        assert renewed.wait(2), "heartbeat stopped during a blocking launch"
+        assert presence.lost(rig.bus, "hive-a", clock.now) is False
+        return outcome
+
+    outcome = rig.runtime.spawn.return_value
+    monkeypatch.setattr(presence, "beat", beat)
+    monkeypatch.setattr(presence, "BEAT_SECONDS", 0.001, raising=False)
+    rig.runtime.spawn.side_effect = spawn
+    assert rig.spoke.poll() == "started"
+    rig.runtime.spawn.assert_called_once()
+
+
+def test_failed_renewal_during_request_loading_prevents_spawn_and_releases_claim(rig, monkeypatch):
+    import json
+    import threading
+
+    from scripts.hive import presence, spoke
+
+    failed = threading.Event()
+    original = presence.beat
+    failure = RuntimeError("presence lost")
+    workers = []
+
+    def beat(bus, hive, at_ms):
+        if loading.is_set():
+            workers.append(threading.current_thread())
+            failed.set()
+            raise failure
+        return original(bus, hive, at_ms)
+
+    def request(event):
+        loading.set()
+        assert failed.wait(2)
+        workers[0].join(2)
+        assert not workers[0].is_alive()
+        return rig.request
+
+    loading = threading.Event()
+    rig.tasks.request.side_effect = request
+    monkeypatch.setattr(presence, "BEAT_SECONDS", 0.001)
+    monkeypatch.setattr(presence, "beat", beat)
+    assert rig.spoke.poll() == "retry"
+    rig.runtime.spawn.assert_not_called()
+    assert json.loads(rig.bus.state("spoke-work").get(spoke.claim_key(rig.event)).value) == {"state": "ready"}

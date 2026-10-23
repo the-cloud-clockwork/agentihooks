@@ -364,8 +364,10 @@ def _drop(slug, store, ledger, rows, agent, refund=False):
 
 
 def _verify(slug, store, ledger, runtime, rows, now_ms):
+    from scripts.hub.reconciler import legacy_agents
+
     judged = launch_check.judged(store, slug)
-    agents, actions = [a for a in store.agents(slug) if a.name not in judged], []
+    agents, actions = [a for a in legacy_agents(store, slug) if a.name not in judged], []
     facts, live_names = runtime.bindings(agents), runtime.live_names()
     for agent in agents:
         if (
@@ -593,8 +595,10 @@ def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
 
 
 def _reap(slug, store, ledger, runtime, rows, now_ms):
+    from scripts.hub.reconciler import legacy_agents
+
     live, actions = runtime.live_names(), []
-    for agent in store.agents(slug):
+    for agent in legacy_agents(store, slug):
         if (
             agent.state == "awaiting-decision"
             or (agent.lane == MASTER and agent.state == "starting")

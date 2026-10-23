@@ -9,7 +9,7 @@ from scripts.events.bus import Bus, Delivery, StateConflict
 from scripts.events.config import QueuePolicy
 from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
-from scripts.hive import admission, execution_events, headroom
+from scripts.hive import admission, execution_events, headroom, presence
 from scripts.swarm import readiness
 from scripts.swarm_v2.runtime.base import Runtime, SpawnRequest
 
@@ -42,10 +42,12 @@ class Spoke:
         runtime: Runtime,
         tasks: Tasks,
         measure: Callable[[], dict | None] | None = None,
+        clock: Callable[[], int] | None = None,
     ):
         self.config, self.bus, self.runtime, self.tasks = config, bus, runtime, tasks
         self._previous = None
         self.measure = measure or self._measure
+        self.clock = clock or presence.now_ms
         self._pending_key = hashlib.sha256(
             json.dumps([config.swarm.slug, config.lane, config.hive]).encode()
         ).hexdigest()
@@ -58,11 +60,16 @@ class Spoke:
 
     def poll(self, timeout_ms: int = 0) -> str:
         try:
-            recovered = self._recover()
+            with presence.Heartbeat(self.bus, self.config.hive, self.clock) as heartbeat:
+                return self._poll(timeout_ms, heartbeat)
         except Exception:
             return "retry"
+
+    def _poll(self, timeout_ms: int, heartbeat: presence.Heartbeat) -> str:
+        recovered = self._recover()
         if recovered in ("busy", "uncertain"):
             return recovered
+        heartbeat.check()
         if admission.room(self.measure()).room < 1:
             return recovered or "held"
         try:
@@ -73,7 +80,8 @@ class Spoke:
         if delivery is None:
             return recovered or "empty"
         try:
-            return self._apply(delivery)
+            heartbeat.check()
+            return self._apply(delivery, heartbeat)
         except Exception:
             return self._retry(delivery)
 
@@ -102,6 +110,14 @@ class Spoke:
     def _clear_pending(self, revision: int) -> None:
         self.bus.state("spoke-pending").update(self._pending_key, b"{}", revision)
 
+    def _waiting(self, prior: dict) -> str | None:
+        state = prior.get("state")
+        if state not in ("claimed", "launching"):
+            return None
+        if presence.lost(self.bus, prior.get("owner"), self.clock()):
+            return None
+        return "uncertain" if state == "launching" else "busy"
+
     def _recover(self) -> str | None:
         pending = self.bus.state("spoke-pending").get(self._pending_key)
         if pending is None or not (record := json.loads(pending.value)):
@@ -122,7 +138,7 @@ class Spoke:
         self._clear_pending(pending.revision)
         return None if status == "ready" else status
 
-    def _apply(self, delivery: Delivery) -> str:
+    def _apply(self, delivery: Delivery, heartbeat: presence.Heartbeat) -> str:
         event = delivery.event
         claims = self.bus.state("spoke-work")
         key = claim_key(event)
@@ -133,15 +149,15 @@ class Spoke:
             self._clear_current(event)
             delivery.ack()
             return "started"
-        if prior.get("state") == "launching":
+        if waiting := self._waiting(prior):
             delivery.nak(self.config.policy.ack_wait_ms)
-            return "uncertain"
+            return waiting
         if prior.get("state") in ("dead", "withdrawn"):
             delivery.term()
             return prior["state"]
         if prior.get("state") == "dead_pending":
             return self._exhaust(delivery)
-        if entry and prior["state"] != "ready":
+        if entry and prior["state"] not in ("ready", "claimed", "launching"):
             delivery.nak(self.config.policy.ack_wait_ms)
             return "busy"
         value = json.dumps({"owner": self.config.hive, "state": "claimed"}).encode()
@@ -156,7 +172,7 @@ class Spoke:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
             raise
         try:
-            started = self._spawn(event, key, revision)
+            started = self._spawn(event, key, revision, heartbeat)
         except Exception:
             current = json.loads(claims.get(key).value)
             if current["state"] == "ready" and delivery.attempt < self.config.policy.max_deliver:
@@ -171,7 +187,7 @@ class Spoke:
         delivery.ack()
         return "started"
 
-    def _spawn(self, event: Envelope, key: str, revision: int) -> Envelope | None:
+    def _spawn(self, event: Envelope, key: str, revision: int, heartbeat: presence.Heartbeat) -> Envelope | None:
         claims = self.bus.state("spoke-work")
         try:
             request = self.tasks.request(event)
@@ -179,6 +195,7 @@ class Spoke:
                 execution_id = request.task["execution_id"]
                 generation = request.task["execution_generation"]
                 task_generation = request.task["claim_generation"]
+            heartbeat.check()
         except Exception:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
             raise

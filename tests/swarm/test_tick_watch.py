@@ -435,7 +435,7 @@ def test_a_blocked_call_in_one_swarm_pass_keeps_the_watchdog_beating_and_the_sta
     assert baseline + 2 <= events.count("beat") <= baseline + 2 * 22
     assert f"sw: told {FRONT_DOOR} the tick is stale" in out.out
     assert out.err.count("other: its pass is still blocked after 1.0 seconds; the watch goes on") == 2
-    assert len(threads) == 1 and threads[0].daemon
+    assert len(threads) == 2 and all(thread.daemon for thread in threads)
 
 
 def test_a_pass_blocked_through_the_limit_of_passes_exits_the_watcher_so_systemd_restarts_it(store, monkeypatch):
@@ -450,7 +450,7 @@ def test_a_pass_blocked_through_the_limit_of_passes_exits_the_watcher_so_systemd
 
     assert str(raised.value) == "the pass of other stayed blocked through 3 passes; the watcher exits"
     assert waits == [tick_watch.PASS_S, tick_watch.PASS_S]
-    assert len(threads) == 1
+    assert len(threads) == 3
 
 
 def test_a_blocked_pass_that_ends_lets_the_next_pass_start_its_count_afresh(store, monkeypatch, capsys):
@@ -463,6 +463,91 @@ def test_a_blocked_pass_that_ends_lets_the_next_pass_start_its_count_afresh(stor
 
     assert len(threads) == 3
     assert capsys.readouterr().err.count("other: its pass is still blocked") == 3
+
+
+def alerts(store):
+    return [text for text in texts(store, FRONT_DOOR) if "is stale" in text]
+
+
+def test_a_stuck_first_check_does_not_stop_the_second_pass_from_alerting(store, monkeypatch):
+    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 0.3)
+    monkeypatch.setattr(tick_watch, "BEAT_S", 0.05)
+    beat(store, START - LIMIT)
+    gate, stuck, real = threading.Event(), [], tick_heartbeat.read
+
+    def read(store, slug):
+        if not stuck:
+            stuck.append(threading.current_thread())
+            gate.wait(30)
+        return real(store, slug)
+
+    monkeypatch.setattr(tick_heartbeat, "read", read)
+    clock = [START]
+
+    def wait(seconds):
+        clock[0] += MINUTE
+
+    try:
+        tick_watch.run(store, lambda: clock[0], None, wait, passes=2, beat=capped([], 200))
+        assert len(alerts(store)) == 1
+    finally:
+        gate.set()
+        stuck[0].join(5)
+
+    assert not stuck[0].is_alive()
+    assert len(alerts(store)) == 1
+
+
+def test_a_stuck_check_that_ends_after_the_next_pass_saw_the_tick_recover_never_alerts(store, monkeypatch):
+    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 0.3)
+    monkeypatch.setattr(tick_watch, "BEAT_S", 0.05)
+    beat(store, START - LIMIT)
+    gate, stuck, real = threading.Event(), [], tick_heartbeat.stale
+
+    def stale(*args, **kwargs):
+        found = real(*args, **kwargs)
+        if not stuck:
+            stuck.append(threading.current_thread())
+            gate.wait(30)
+        return found
+
+    monkeypatch.setattr(tick_heartbeat, "stale", stale)
+    clock = [START]
+
+    def wait(seconds):
+        clock[0] += MINUTE
+        beat(store, clock[0], rev=2)
+
+    try:
+        tick_watch.run(store, lambda: clock[0], None, wait, passes=2, beat=capped([], 200))
+    finally:
+        gate.set()
+        stuck[0].join(5)
+
+    assert not stuck[0].is_alive()
+    assert alerts(store) == []
+
+
+def test_a_check_that_ends_after_a_newer_check_decided_is_dropped(store):
+    beat(store, START - LIMIT)
+    guard = tick_watch.Guard()
+    guard.decided = START + MINUTE
+
+    repaired = []
+
+    assert tick_watch.watch_pass(store, "sw", START, START, lambda slug, now: repaired.append(slug), guard) == []
+    assert (alerts(store), repaired) == ([], [])
+    assert guard.decided == START + MINUTE
+
+
+def test_a_check_at_the_same_moment_as_the_last_decision_still_decides(store):
+    beat(store, START - LIMIT)
+    guard = tick_watch.Guard()
+    assert tick_watch.watch_pass(store, "sw", START, START, guard=guard) == [f"told {FRONT_DOOR} the tick is stale"]
+    beat(store, START, rev=2)
+
+    assert tick_watch.watch_pass(store, "sw", START, START, guard=guard) == [f"told {FRONT_DOOR} the tick runs again"]
+    assert guard.decided == START
 
 
 class Stuck:
