@@ -345,6 +345,13 @@ def routed(pool: list[CodexAccount], environ: Mapping[str, str]) -> list[CodexAc
     return [account for account in pool if account.name not in repeated]
 
 
+def routed_live(
+    pool: list[CodexAccount], sessions: Mapping[str, int], environ: Mapping[str, str]
+) -> list[CodexAccount]:
+    repeated = duplicates(token_accounts(environ), environ)
+    return [account for account in live_accounts(pool, sessions) if account.name not in repeated]
+
+
 def identity_warnings(environ: Mapping[str, str]) -> list[str]:
     return [
         f"{CODEX_TOKEN_PREFIX}{name} is the same ChatGPT account as {earlier}; it is not routed"

@@ -120,3 +120,12 @@ def test_the_shell_block_removal_leaves_files_without_a_block_alone(tmp_path):
     assert aicode_tokens.remove_exports(rc, ["AH_CX_TOKEN_team"]) is False
     assert rc.read_text() == "export AH_CX_TOKEN_team=x\n"
     assert aicode_tokens.remove_exports(Path(tmp_path / "missing"), ["AH_CX_TOKEN_team"]) is False
+
+
+def test_a_block_without_the_account_is_left_alone_and_reported_as_absent(capsys):
+    _registered()
+    before = aicode_tokens.rc_file().read_text()
+    assert aicode_tokens.remove_exports(aicode_tokens.rc_file(), ["AH_CX_TOKEN_ghost"]) is False
+    assert _logout(["ghost", "--no-openbao"]) == 0
+    assert aicode_tokens.rc_file().read_text() == before
+    assert "no export of AH_CX_TOKEN_ghost" in capsys.readouterr().out

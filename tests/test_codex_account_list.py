@@ -1,8 +1,8 @@
 import base64
 import json
 
+from scripts import agents_quota, codex_router
 from scripts import claude_quota_balancer as balancer
-from scripts import codex_router
 from scripts.codex_quota import CodexQuota
 from scripts.hive import daemon
 from scripts.swarm import capacity
@@ -45,3 +45,21 @@ def test_the_hives_table_and_the_quota_table_list_the_same_deduplicated_codex_ac
     rows = [row.name for row in capacity._codex(environ, 100 + 3600, True)]
     assert hives == rows == ["gamma", KEPT]
     assert sorted(key for key in quota if key.startswith("codex:")) == ["codex:gamma", f"codex:{KEPT}"]
+
+
+def test_the_page_quota_table_drops_a_duplicate_a_live_session_still_runs_on(tmp_path, monkeypatch):
+    from hooks.context import account_sessions
+
+    for name, value in _environ(tmp_path).items():
+        monkeypatch.setenv(name, value)
+    agents_quota._page_cache.clear()
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [])
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **kw: {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda **kw: {"alpha": 2})
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
+    rows = agents_quota.page_quota(now=100.0)["rows"]
+    assert [row["account"] for row in rows if row["agent"] == "codex" and row["kind"] != "api"] == ["gamma", KEPT]
+    assert codex_router.routed_live([], {"alpha": 2, "other": 1}, dict(_environ(tmp_path))) == [
+        codex_router.CodexAccount("other", "AH_CX_TOKEN_other")
+    ]

@@ -67,5 +67,5 @@ def main(
     if aicode_tokens.remove_exports(rc, tokens):
         print(f"removed {', '.join(tokens)} from {rc}\nrun: unset {' '.join(tokens)}")
     else:
-        print(f"no token block in {rc} for {', '.join(tokens)}")
+        print(f"no export of {', '.join(tokens)} in the token block of {rc}")
     return 0
