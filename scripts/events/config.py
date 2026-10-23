@@ -13,7 +13,15 @@ SCOPED_ENV = "AGENTIHOOKS_BUS_SCOPED"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
 DEFAULT_BACKEND = "memory"
-SCOPED_STATE_BUCKETS = ("spoke-work", "spoke-pending", "hive-presence", "hive-executions", "execution-starts")
+SCOPED_STATE_BUCKETS = (
+    "spoke-work",
+    "spoke-pending",
+    "hive-presence",
+    "hive-executions",
+    "execution-starts",
+    "account-slots",
+    "hive-slot-accounts",
+)
 
 
 def _positive(value) -> bool:
@@ -25,6 +33,7 @@ class QueuePolicy:
     max_deliver: int = 5
     ack_wait_ms: int = 30_000
     backoff_ms: tuple[int, ...] = ()
+    inactive_ms: int | None = None
 
     def __post_init__(self):
         if not _positive(self.max_deliver):
@@ -35,6 +44,8 @@ class QueuePolicy:
             raise ValueError("queue backoff must be a tuple of non negative integers")
         if len(self.backoff_ms) > self.max_deliver:
             raise ValueError(f"queue backoff has {len(self.backoff_ms)} steps for {self.max_deliver} deliveries")
+        if self.inactive_ms is not None and not _positive(self.inactive_ms):
+            raise ValueError("queue inactive threshold must be a positive integer")
 
 
 @dataclass(frozen=True)

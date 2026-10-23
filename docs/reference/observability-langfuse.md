@@ -373,6 +373,82 @@ question fails or names no project. A refusal fails the `trace` detector: its
 error is printed on stderr and the measure counts it among the failed
 detectors. The caller's terminal keys never change what `doctor measure` reads.
 
+### Internal ingress for Doctor reads
+
+The reader chooses its route from `LANGFUSE_HOST` after removing trailing
+slashes. The default needs no route setting:
+
+| Reader host | Connection |
+|---|---|
+| Unset, empty, or `https://langfuse.homeofanton.com` (also with a trailing slash) | HTTPS to `10.10.30.200:443`, with `langfuse.homeofanton.com` as HTTP `Host` and TLS server name |
+| Another hostname, scheme or explicit port, such as `https://langfuse.example.com` or `https://langfuse.homeofanton.com:8443` | Directly to the configured URL |
+
+TLS verification stays enabled. Keep the hostname in `LANGFUSE_HOST`: setting
+it to the ingress IP selects a direct request and loses the hostname used for
+certificate verification. The ingress address comes from the built-in
+`langfuse_route({})` default; changing the exporter's `OTEL_LANGFUSE_ENDPOINT`
+does not change this reader route. The project key pair is passed unchanged as
+HTTP Basic authentication, and the [read budget](#read-budget) still applies.
+
+For a manual reader pass on Anton, use a shell with the watched project's keys
+already supplied, then run:
+
+```bash
+cd ~/dev/tcc-ecosystem/agentihooks
+LANGFUSE_HOST=https://langfuse.homeofanton.com \
+  LANGFUSE_PUBLIC_KEY="$SWARM_LANGFUSE_PUBLIC_KEY" \
+  LANGFUSE_SECRET_KEY="$SWARM_LANGFUSE_SECRET_KEY" \
+  ~/dev/tcc-ecosystem/.venv/bin/python -m scripts.doctor.traces_read rig-grade-swarm
+```
+
+`SWARM_LANGFUSE_PUBLIC_KEY` and `SWARM_LANGFUSE_SECRET_KEY` above are references
+to keys supplied by your secret manager. This command uses the internal route,
+prints `measures` and `findings`, and updates the reader's watermarks and cache.
+For another installation, replace the host and key references with that
+installation's HTTPS origin and project pair; that origin is read directly.
+The manual reader does not validate the project. For a measurement with the
+installed keys and the `agent-swarm` project check described above, use:
+
+```bash
+agentihooks doctor rig-grade-swarm measure trace-reader-unavailable
+```
+
+This measure command always uses the default host, regardless of the caller's
+`LANGFUSE_HOST`.
+
+#### Checking the internal connection
+
+Run this read-only probe from the host that runs the Doctor. It needs no
+project keys and keeps the same hostname and certificate verification:
+
+```bash
+curl --noproxy '*' --resolve langfuse.homeofanton.com:443:10.10.30.200 \
+  --connect-timeout 5 --max-time 10 --silent --show-error \
+  --output /dev/null --write-out 'status=%{http_code} tls=%{ssl_verify_result}\n' \
+  https://langfuse.homeofanton.com/api/public/health
+```
+
+`status=200 tls=0` confirms a healthy response and a verified certificate from
+the ingress. It does not confirm that the reader's keys open the right project
+or that trace queries finish within their budget.
+
+| Symptom | Check |
+|---|---|
+| Public URL returns a tunnel 502, internal health probe succeeds | Default-origin Doctor reads bypass the tunnel. Compare the finding's request URL and time with the internal path before attributing it to the tunnel. |
+| Internal connection times out or refuses the connection | The Doctor host must reach `10.10.30.200:443`; check that path and the ingress. There is no fallback to the public tunnel. |
+| Certificate verification fails | Check the certificate served for `langfuse.homeofanton.com`; keep verification enabled and the hostname configured. |
+| Langfuse returns 5xx through the internal path, or trace requests time out | These remain read failures and can raise `trace reader unavailable`; inspect the [failure lines](#read-budget) and backend health. |
+| Health succeeds but measurement refuses the project | Follow [Finding where a trace went](#finding-where-a-trace-went); health alone does not validate project identity. |
+
+Pull request [#5353](https://github.com/the-cloud-clockwork/agentihooks/pull/5353)
+proved the route with a public tunnel returning 502 and an internal endpoint
+returning 200. Its CI proofs went from
+[red](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39486962592)
+to [green](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39487595146),
+including checks that internal 503 responses and timeouts still raise the
+reader finding. Host memory paging was a hypothesis, not an established cause
+of that incident.
+
 ### Active telemetry
 
 Every working agent record of the watched swarm is an expected binding: name,
@@ -431,7 +507,7 @@ backfill, which keep their own budget.
 | Trace listing pages | 20 pages | the trace listing, 100 traces per page |
 | Backfill pages | 20 pages | each trace's observation backfill, 50 observations per page |
 | Active freshness rows | 10 observations | the first page of each binding's observations since its watermark |
-| Step deadline | 55 seconds | the trace reads and the wait history together |
+| Step deadline | 55 seconds | the wait history reads, counted from the start of the trace step; the trace reads keep their own budgets |
 
 The request timeout stays under half the active budget, so one stalled request
 leaves room for its retry. When the budget ends, no new attempt starts and every
@@ -480,6 +556,249 @@ finding is absent.
 | one binding's line ends at an `httpx` frame | that request failed or timed out against Langfuse; the line's error names the status or timeout |
 | a line ends at a file system or JSON frame | the exporter cursor or transcript of that session could not be read on this host |
 | every read fails with the same error | the keys, host or ingress route are wrong; `LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set` means the keys the reader was given are missing or empty |
+| reads time out while the swarm tick also logs Redis socket timeouts | the shared host under Langfuse's Redis is stalled; see [Langfuse and the swarm Redis time out together](#langfuse-and-the-swarm-redis-time-out-together) |
+
+### Langfuse and the swarm Redis time out together
+
+Langfuse keeps its queue and cache in a Redis outside the cluster: the
+`dataplane_redis` container on the Anton Unraid host, `10.10.30.130:6379`. The
+public tunnel to `langfuse.homeofanton.com` is the `cloudflared` container on
+the same host, and the k3s VMs `k8s-master`, `k8s-worker-1` and `k8s-worker-2`
+are libvirt guests there too. When that host runs out of memory every one of
+these stalls at once, so Langfuse, the edge and anything scheduled on those VMs
+fail in the same minutes even though the pods themselves never restart.
+
+#### What each path shows
+
+| Path | Signature during a host stall |
+|---|---|
+| Public Langfuse URL | Cloudflare answers 530 (error 1033), while on 20 October `grafana` and `sonar` on the same domain still answered; `cloudflared` logs `timeout: no recent network activity` on all four QUIC connections, then re-registers |
+| Langfuse server (`langfuse-0` in `anton-prod`) | Redis `Command timed out` and socket timeout errors; the pod keeps running |
+| Langfuse Redis (`dataplane_redis`) | `Asynchronous AOF fsync is taking too long (disk is busy?)`, and a `Saving...` line followed many seconds later by `Background saving started`: the fork blocked the main thread |
+| Swarm tick | `alias lookup failed for ...: Timeout reading from socket` in the user journal, from `scripts.swarm.naming`, when the swarm Redis runs on one of the Anton VMs. The lookup falls back to the plain name, so the tick keeps going |
+| Doctor trace reads | read timeouts and 5xx answers, raised as `trace reader unavailable` |
+| Other containers on the host | `anton_autoheal` restarts unrelated containers whose health checks timed out, and its own alert posts get `error code: 1033` |
+
+#### Checking for a host stall
+
+Confirm which Redis Langfuse holds connections to. `/proc/net/tcp` prints the
+remote address in little endian hex; `821E0A0A:18EB` is `10.10.30.130:6379` and
+state `01` is established:
+
+```bash
+KUBECONFIG=~/.kube/config-k3s kubectl -n anton-prod exec langfuse-0 -- \
+  cat /proc/net/tcp | awk '$3 ~ /:18EB$/ {print $3, $4}' | sort | uniq -c
+```
+
+Observed on 23 October: `6 821E0A0A:18EB 01`, six established connections to
+the Anton host.
+
+Count the swarm tick's Redis timeouts in the window:
+
+```bash
+journalctl --user -t agentihooks-swarm --since "2026-10-20 11:00" --until "2026-10-20 11:40" \
+  | grep -c "alias lookup failed"
+```
+
+Then read the host itself, read only, over SSH
+(`ssh -i ~/.ssh/anton_id_ed25519 root@10.10.30.130`):
+
+```bash
+free -m
+swapon --show
+grep -E "^(allocstall|compact_stall|oom_kill)" /proc/vmstat
+dmesg -T | grep -i "out of memory"
+virsh list
+for vm in k8s-master k8s-worker-1 k8s-worker-2 automation-vm; do virsh dommemstat "$vm" | grep -E "actual|rss"; done
+docker logs --since "2026-10-20T11:00:00" --until "2026-10-20T11:40:00" cloudflared 2>&1 | grep "no recent network activity"
+docker logs --since "2026-10-20T11:00:00" --until "2026-10-20T11:40:00" anton_autoheal 2>&1 | grep unhealthy
+docker logs --since "2026-10-20T11:00:00" --until "2026-10-20T11:40:00" dataplane_redis 2>&1 \
+  | grep -E "fsync is taking too long|Saving|Background saving started"
+```
+
+A stalled host shows swap fully used, little available memory, large
+`allocstall` counts and the log lines in the table above in the same minutes.
+The host has no node exporter in Prometheus, so these commands are the only
+host history.
+
+#### Cause found on 20 October
+
+Swarm task t575 followed an outage from 11:20 to 11:27 UTC on 20 October:
+`langfuse.homeofanton.com` answered 530 at 11:24 and 200 again at 11:26:48,
+`langfuse-0` logged 62 Redis timeouts in the hour to 11:24, and the swarm tick
+logged 97 `alias lookup failed ... Timeout reading from socket` lines between
+11:20 and 11:30 against the swarm Redis, then on `k8s-worker-2`. Read on the host
+that day:
+
+| Check | Result |
+|---|---|
+| Physical memory | 60 GB; the three k3s VMs fully resident at 14.4, 14.5 and 14.6 GB, each with a 14 GiB maximum, `automation-vm` 2.7 GB of 8 GiB |
+| Swap | the 4 GB swapfile 100 percent used |
+| `/proc/vmstat` | `allocstall_normal` 3.48 million, `allocstall_movable` 6.20 million, `compact_stall` 1.62 million |
+| `dmesg` | a global OOM kill of the `k8s-worker-1` qemu process on 19 October at 09:09:25 |
+| `dataplane_redis` | slow AOF fsync at 11:20:04; a 20.5 second fork for a 6 MB dataset from 11:25:26 to 11:25:47 |
+| `cloudflared` | all four QUIC connections timed out from 11:24:47 to 11:26:26, re-registered 11:25:52 to 11:25:55 |
+| `anton_autoheal` | seven unrelated containers restarted between 11:22:29 and 11:27:03 |
+
+The root cause was memory overcommit on the Anton host. Memory was already
+exhausted, so any burst stalled everything on it. The likely trigger, correlated
+but not proven, was a CI runner pod created on `k8s-worker-2` at 11:19:08 that
+ran a Terraform job from 11:20:24 to 11:26:24, while that node's disk writes rose
+from about 0 to 46 MB/s.
+
+#### Fix and result
+
+The fix is in antoncore, not in AgentiHooks:
+[antoncore#998](https://github.com/the-cloud-clockwork/antoncore/issues/998)
+holds the diagnosis and
+[antoncore#1024](https://github.com/the-cloud-clockwork/antoncore/pull/1024),
+merged on 20 October, sizes the VMs in `VM_DEFS` of `automation/vm-provision.sh`
+at 36 GiB in all: `k8s-master` 8G, `k8s-worker-1` and `k8s-worker-2` 10G,
+`automation-vm` 8G. `bash automation/vm-provision.sh --memory`, run from a clean
+antoncore `dev` checkout, applies them: persistent maximum and current memory,
+and the live balloon of a running VM. The VM sizing and its budget are
+described in antoncore `docs/2A-KUBERNETES.md`.
+
+Measured on the host after the change was applied at 23:43 UTC on 20 October:
+available memory rose from 941 MiB to 16852 MiB. Over the next hour, 62
+one-minute samples showed available memory never below 15098 MiB, swap never
+full, load at most 22, no new OOM kill and no swap traffic at the end.
+
+Two things have changed since that bear on reading this symptom:
+
+- Doctor reads of the default host go through the internal ingress, not the
+  tunnel (see [How the Doctor reads traces](#how-the-doctor-reads-traces)), so a
+  530 at the edge alone no longer fails a read. A stall of `dataplane_redis`
+  still does, through the Langfuse server.
+- On 23 October the swarm Redis pod `agentihooks-swarm-redis-tls-0` and
+  `langfuse-0` both ran on `worker-001`, which is not one of the Anton VMs
+  (`virsh list` on the host names only `k8s-master`, `k8s-worker-1`,
+  `k8s-worker-2` and `automation-vm`), so a host stall no longer stalls the
+  swarm Redis with it. Check placement with
+  `kubectl -n agentihooks-swarm get pod -o wide` before assuming both paths share
+  a host.
+
+### Wait history
+
+A turn gap finding counts only the minutes between two turns that fall outside
+the agent's declared waits (`agentihooks swarm <slug> wait`). After the trace
+reads, the detector reads those waits from Redis with `idle.wait_history`, one
+hash per agent name and per alias of that name. `traces_read.waits` reads them
+inside their own budget, and `traces.gap_agents` picks the agents that need
+them.
+
+**Which agents are read.** Only agents whose traces hold a gap between two
+turns longer than `AGENTIHOOKS_DOCTOR_TURN_GAP_MINUTES` (30), counted in whole
+minutes. An agent with no long gap cannot raise a turn gap finding, so its wait
+history is never read. The agents are read in this order:
+
+1. agents with an active binding in this scan, the live agents
+2. then the agent whose newest long gap ends latest
+3. then by name
+
+**When the reads stop.** The step clock starts when the trace step starts,
+before the Langfuse reads. The wait reads stop at whichever comes first:
+
+| Limit | Value | Counted from |
+|---|---|---|
+| Wait history budget | 15 seconds | the first wait read |
+| Step deadline | 55 seconds | the start of the trace step |
+
+The clock is checked before each agent. A read that has started finishes, and
+no new read starts once the deadline has passed. The trace reads keep their own
+budgets ([Read budget](#read-budget)) and are not cut by the step deadline. The
+deadline only limits how long the wait reads may run after them. If the trace
+reads end 20 seconds into the step, the wait reads stop at 35 seconds, when
+their 15 second budget ends. If the trace reads end at 50 seconds, the wait
+reads stop at 55 seconds. If the trace reads end at 55 seconds or later, no wait
+history is read. Both values are `Budget.wait_seconds` and
+`Budget.step_seconds` in `scripts/doctor/traces_read.py`, and no environment
+variable changes them. Raising `AGENTIHOOKS_DOCTOR_TURN_GAP_MINUTES` leaves
+fewer agents to read.
+
+**Agents left unread.** An agent whose wait history was not read gets no turn
+gap judgement in that scan, so no turn gap finding is raised for it. The scan
+raises one `wait history partial` finding for the swarm instead.
+The finding's subject is the swarm slug and its number is the count of unread
+agents:
+
+```text
+wait history of 6 agents with turn gaps over 30 minutes not read in budget
+unread: eng-3, eng-7, ci-1, eng-12, eng-4
+live agents unread: 2
+turn gap findings skip agents whose wait history was not read
+each Doctor scan reads the wait history again within its budget
+```
+
+The first line is the title. The `unread` line names the first five unread
+agents in read order. The threshold reads `every agent with a turn gap over the
+limit has its wait history read`. The finding is absent when every agent that
+needs its wait history was read. Each scan picks the agents again, so the next
+scan retries the unread ones.
+
+#### Why the wait reads are bounded
+
+Before this change, the step read the wait history of every traced agent,
+whatever its gaps. On rig-grade-swarm on 20 October 2026, `doctor.trace` took
+51 to 73 seconds per pass until 04:42 UTC, then 200 to 300 seconds. The last
+three passes before 06:54 UTC took 125 seconds, 238 seconds and over 450
+seconds. The over 450 second pass was still running when the 450 second tick
+deadline stopped the tick. No Doctor code had changed in that window. A probe
+of one pass, using the real code and a copy of the trace cache, timed each
+part:
+
+| Part | Seconds |
+|---|---|
+| Langfuse trace listing and backfill | 15.6 |
+| Active binding reads, 13 of 13 | 5.4 |
+| Wait history of all 1998 traced agents, one after another | 118.4 |
+| Wait history of the 119 agents with a gap over 30 minutes | 6.0 |
+
+Pull request #5176 (issue #5175) limited the wait reads to the agents with a
+long gap and gave them the budget above. The new tests failed on the old code
+in Proofs run
+[39389821466](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39389821466)
+and passed on the fix in Tests run
+[39391541421](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39391541421).
+Pull request #5229 later moved live agents to the front of the read order. The
+command under [Reading the trace step time](#reading-the-trace-step-time), run
+at 15:07 UTC on 23 October 2026 over the six hours before it, showed 43
+`doctor.trace` passes with a median of 24.7 seconds, a maximum of 42.9
+seconds and none over 60 seconds.
+
+The tests that pin this behaviour are the `waits` tests in
+`tests/doctor/test_traces_read.py`, which cover the budget, the step deadline
+and the unread list. The gap agent order, skipped judgement and finding text are
+tested in `tests/doctor/test_turn_gap_waits.py`. The test in
+`tests/swarm/test_wait_history.py` checks that only agents with a long gap are
+read.
+
+#### Reading the trace step time
+
+```bash
+D=rig-grade-swarm-doctor
+journalctl --user -t agentihooks-swarm --since "-6h" \
+  | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
+  | grep "\"slug\": \"$D\"" | grep '"step": "doctor.trace"' \
+  | sed 's/^[^{]*//' \
+  | python3 -c 'import sys, json
+w = sorted(json.loads(l)["wall_s"] for l in sys.stdin)
+print(len(w), "passes; median", round(w[len(w) // 2], 1), "max", round(w[-1], 1), "over 60 s", sum(x > 60 for x in w))'
+agentihooks doctor <watched slug> measure wait-history-partial/<watched slug>
+```
+
+The first command prints the `doctor.trace` wall seconds per pass, as in
+[Measure the timer step](../pillars/swarm.md#measure-the-timer-step). The
+second prints the number of agents left unread in the current scan. When the
+scan raises no such finding it prints 0 only if the finding was seen before;
+otherwise it fails with `no finding wait-history-partial/<slug> has been seen`.
+
+| Symptom | Read |
+|---|---|
+| `wait history partial` on every scan, with `doctor.trace` near 55 seconds | the Langfuse reads used up the step before the wait reads began; check `trace reader unavailable` and the Langfuse response time |
+| `wait history partial` with `doctor.trace` well under 55 seconds | the wait reads themselves used the 15 seconds; many agents have long gaps, or Redis answers slowly |
+| `doctor.trace` above 60 seconds | a Langfuse request or a wait read in flight finished past its budget; read the `trace reader unavailable` failure lines for timeouts |
+| a turn gap finding disappears while `wait history partial` is present | its agent was left unread in that scan; it is judged again once its wait history is read |
 
 ### Historical findings
 

@@ -11,7 +11,7 @@ from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
 from scripts.hive import admission, execution_events, headroom, presence
 from scripts.swarm import readiness
-from scripts.swarm_v2.runtime.base import Runtime, SpawnRequest
+from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest
 
 
 class Tasks(Protocol):
@@ -39,7 +39,7 @@ class Spoke:
         self,
         config: SpokeConfig,
         bus: Bus,
-        runtime: Runtime,
+        runtime: NamedRuntime,
         tasks: Tasks,
         measure: Callable[[], dict | None] | None = None,
         clock: Callable[[], int] | None = None,
@@ -121,6 +121,10 @@ class Spoke:
             return None
         return "uncertain" if state == "launching" else "busy"
 
+    def _end_leftover(self, name: str) -> bool:
+        found = self.runtime.find(name)
+        return found.ok and (found.value is None or self.runtime.reap(name).ok)
+
     def _recover(self) -> str | None:
         pending = self.bus.state("spoke-pending").get(self._pending_key)
         if pending is None or not (record := json.loads(pending.value)):
@@ -130,6 +134,8 @@ class Spoke:
         state = json.loads(entry.value)
         status = state["state"]
         if status == "launching" and state.get("owner") == self.config.hive:
+            if not self._end_leftover(state["name"]):
+                return "uncertain"
             self.bus.state("spoke-work").update(
                 claim_key(event), json.dumps({"state": "ready"}).encode(), entry.revision
             )
@@ -212,7 +218,14 @@ class Spoke:
             return None
         intent = json.dumps({"state": "launching", "owner": self.config.hive, "name": request.name}).encode()
         revision = claims.update(key, intent, revision)
-        request = replace(request, task={**request.task, "claim_fence": {"key": key, "revision": revision}})
+        request = replace(
+            request,
+            task={
+                **request.task,
+                "claim_fence": {"key": key, "revision": revision},
+                "account_slot_hive": self.config.hive,
+            },
+        )
         execution_events.prepare(self.bus, event.swarm, request.name, generation)
         outcome = self.runtime.spawn(request)
         if not outcome.ok:

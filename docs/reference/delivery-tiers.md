@@ -20,6 +20,141 @@ Each tier has a wall time budget. A check that does not fit the pull request or 
 
 How a green promotion run merges `dev` into `main` and creates the release is in [Promotion and releases](promotion.md).
 
+## Hierarchy CPU proof at promotion
+
+The Tests workflow calls `Hierarchy CPU proof` as `hierarchy-cpu` on a push to
+`dev`. It compares hierarchy request CPU and response identity and runs paired
+ledger load measurements. A hierarchy cost regression therefore receives a
+grade before that head can reach `main`. The
+[hierarchy grading reference](ledger-load-gate.md#hierarchy-cpu-grading) explains
+the CPU ratio, same code margin, response checks and retained pair artifacts;
+the [paired load grade](ledger-load-gate.md#grading-after-the-fix) explains the
+separate load comparison.
+
+| Event | Hierarchy proof | Effect |
+|---|---|---|
+| Push to `dev` admitted by promotion concurrency | Called by Tests | `promote` requires `hierarchy-cpu` to succeed |
+| Pull request or merge group | Skipped | Never holds entry to the queue or merging into `dev` |
+| Manual dispatch of Tests | Skipped | Dispatch `Hierarchy CPU proof` itself for an investigation |
+| Manual dispatch of `Hierarchy CPU proof` | Runs on the selected ref | Evidence only; this workflow does not promote |
+
+`hierarchy-cpu` is a direct need of `promote`, with an explicit
+`needs.hierarchy-cpu.result == 'success'` check. It is outside the
+`Gate — Required` dependency list. A failed, cancelled or skipped hierarchy proof
+cannot authorize promotion even if `Gate — Required` is green. `main` retains
+its last promoted tree while ordinary pull requests keep merging into `dev`.
+
+### Scheduling and runner isolation
+
+Tests uses the `promotion-dev` concurrency group for dev pushes, `queue: single`
+and `cancel-in-progress: false` for that event. A running run finishes; newer
+pushes replace only the pending run. Thus a burst grades the running head and
+the newest pending head, rather than every intermediate revision. A running
+proof is not cancelled merely because another pull request merges.
+
+When called by Tests, the proof uses `hierarchy-cpu-<caller run id>` as its own
+concurrency group, avoiding the caller's lock. A standalone dispatch uses one
+of the three `hosted-lane-*` groups with `queue: max`, as described in
+[CI timing](../ci-timing.md).
+
+For trusted executions, the four current hierarchy pairs and five load pairs
+use `anton-oss-batch`; `grade` uses `anton-oss-light`. Other executions fall back
+to `ubuntu-latest` under the workflow's actor and repository trust checks.
+These jobs never select the pull request `anton-oss` or queue
+`anton-oss-queue` runner pools. Redis starts inside each pair job, using the
+runner's installed binary when available; see
+[Redis acquisition](ledger-load-gate.md#hierarchy-cpu-redis-acquisition).
+Runner pool isolation does not imply zero waits or independent physical hosts.
+
+### Configuration and investigation
+
+The promotion call has no operator setting to enable. Its workflow wiring is:
+
+{% raw %}
+```yaml
+hierarchy-cpu:
+  if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+  uses: ./.github/workflows/hierarchy-cpu.yml
+```
+{% endraw %}
+
+The reusable proof accepts one optional string input, `base`, for both
+`workflow_call` and `workflow_dispatch`:
+
+| Input | Hierarchy comparison base | Paired load comparison base |
+|---|---|---|
+| Explicit `base` revision | That revision | That revision |
+| Empty on a dev push | `github.event.before`, the previous dev head | Pinned revision `726353637ab44da81bdbd374ec393db275856e22` |
+| Empty on a standalone dispatch | Merge base of HEAD and `origin/dev` | The same pinned revision |
+
+The hierarchy base on a push is the previous pushed head, which can differ
+from the last head promotion actually graded when pending runs were replaced.
+To compare a branch normally, or to measure identical code on both sides:
+
+```bash
+R=the-cloud-clockwork/agentihooks
+BRANCH=your-branch
+gh workflow run hierarchy-cpu.yml -R "$R" --ref "$BRANCH"
+HEAD_SHA=$(gh api "repos/$R/commits/$BRANCH" --jq '.sha')
+gh workflow run hierarchy-cpu.yml -R "$R" --ref "$BRANCH" -f base="$HEAD_SHA"
+```
+
+Run the workload in CI. A standalone green result supplies investigation
+evidence; the dev push's own successful proof remains the promotion requirement.
+Changing runner labels, the promotion condition or grading margins requires a
+reviewed workflow change. Current margins and same code records are documented
+under [hierarchy grading](ledger-load-gate.md#current-behavior).
+
+Inspect the latest completed dev push, including jobs beyond the first page:
+
+```bash
+R=repos/the-cloud-clockwork/agentihooks
+RUN=$(gh api "$R/actions/workflows/test.yml/runs?event=push&branch=dev&status=completed&per_page=1" --jq '.workflow_runs[0].id')
+gh api --paginate "$R/actions/runs/$RUN/jobs?per_page=100" \
+  --jq '.jobs[] | select(.name | startswith("hierarchy-cpu /") or startswith("promote /")) | {id,name,conclusion,labels,runner_name,created_at,started_at,completed_at}'
+```
+
+Use a returned job id to read its logs with
+`gh api "$R/actions/jobs/$JOB/logs"`, after setting `JOB` to that id.
+For measurements, retain the run ids, job timestamps and runner labels for
+each named before and after cohort. Separate whole Tests wall time from proof
+duration and from runner wait (`started_at` minus `created_at`). Pool waits
+alone do not attribute a slowdown to the hierarchy proof.
+
+### Delivery evidence and limits
+
+[Pull request 5223](https://github.com/the-cloud-clockwork/agentihooks/pull/5223)
+delivered the promotion dependency, callable proof and batch runner selection.
+Its tests only [red run 39408550884](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39408550884)
+failed seven new workflow contract cases. The
+[green Tests run 39427913795](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39427913795)
+and [standalone proof 39427973115](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39427973115)
+passed. The merged head's first
+[dev push run 39453177041](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39453177041)
+passed its hierarchy, five load and grade jobs; the pair jobs reported batch
+runner labels and the grader reported the light pool. That delivery used one
+hierarchy job; the current four pair matrix came later.
+
+The delivered pull request records an eight run before cohort with median
+Tests wall time about 1130 seconds and median maximum pull request and queue
+pool wait about 45 seconds. It leaves the five dev push after cohort pending.
+These records establish automatic execution and runner selection, not a
+completed before and after timing comparison or a ten minute runtime guarantee.
+
+### Troubleshooting
+
+| Symptom | Check and action |
+|---|---|
+| `Gate — Required` is green but `promote` is skipped | Read `hierarchy-cpu / grade` and all other promotion dependencies. The hierarchy proof must succeed independently of the gate |
+| A hierarchy pair or load pair fails before grading | Read the failing job's Redis readiness, dependency installation and probe logs; setup failure is not a measured CPU regression |
+| `grade` reports a CPU or response regression | Follow [hierarchy troubleshooting](ledger-load-gate.md#troubleshooting-a-hierarchy-red), retain pair artifacts and fix through a pull request into `dev` |
+| A dev push has no proof jobs | Check whether it was cancelled while pending in `promotion-dev`; inspect the running or newest admitted run. A pull request, merge group or Tests dispatch skips the proof by design |
+| Proof jobs queue while merge queue jobs run | Compare the returned labels and runner times. Batch jobs do not request queue runners; investigate the named pool's capacity before attributing the wait |
+
+A red promotion receives a fixer task under the [delivery tiers rule](#rules).
+It holds release promotion only; repeatedly rerunning a measured regression
+until it passes does not repair it.
+
 ## Checks a dev push skips
 
 `lint` and `semgrep` pass on the pull request head, and `test-count` passes on the pull request head and again on the merged tree in the merge group. A push to `dev` carries a tree whose changes already passed them, so their job `if` in `.github/workflows/test.yml` carries `github.event_name != 'push'` and the promotion run skips them. `Gate — Required` checks each event's set:
@@ -221,7 +356,7 @@ python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inp
 | Setting | Value | Where it comes from |
 |---|---|---|
 | `MAX_SHARDS` | 30 | The `maxRunners` of the antoncore `anton-oss-queue` scale set, less the queue tier jobs that run during the unit stage (none today) |
-| `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import |
+| `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import; see [Step timeout limits](#step-timeout-limits) |
 | Half step timeout | 360 s | The target a plan must predict under |
 | `SLOWDOWN` | 1.15 | Factor applied to the predicted slowest shard, calibrated from recorded queue runs |
 | `STARTUP_SECONDS` | 30 | Added to every shard's prediction |
@@ -325,6 +460,103 @@ The queue pool changed after the finding: antoncore pull request [1036](https://
 ### Delivery evidence
 
 Delivered by pull request [4803](https://github.com/the-cloud-clockwork/agentihooks/pull/4803) for issue [4801](https://github.com/the-cloud-clockwork/agentihooks/issues/4801), which lowered `MAX_SHARDS` from 40 to 30. Before: merge group run [39249741419](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39249741419) planned 40 unit shards on the 30 runner pool, 10 waited for a second wave with runner waits up to 346 s, and the queue tier took 948 s. After: the first successful merge group run started after the merge, [39269601765](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39269601765), ran 30 unit shards in one wave, all started within 63 s, with a 308 s unit stage and a 574 s tier wall. Runner wait was median 29 s and worst 82 s; 8 of 30 shards still waited over 30 s, which overlapping merge groups explain. Later changes on the same planner balanced capped shards by predicted slowest shard ([4884](https://github.com/the-cloud-clockwork/agentihooks/pull/4884)), read the step timeout from the workflow ([5043](https://github.com/the-cloud-clockwork/agentihooks/pull/5043)), dropped Python 3.11 from CI ([5327](https://github.com/the-cloud-clockwork/agentihooks/pull/5327)) and calibrated `SLOWDOWN` ([5659](https://github.com/the-cloud-clockwork/agentihooks/pull/5659)).
+
+## Step timeout limits
+
+The queue shard planner and the shard budget grade shards against the time their test step may run. Both read that time from one source, the `timeout-minutes` of the step in `.github/workflows/test.yml`, so a timeout change in the workflow moves the planner target and the budget in the same commit.
+
+| Reader | Job | Step | Timeout today | Limit it sets |
+|---|---|---|---|---|
+| `tests.queue_shards` (`STEP_SECONDS`) | `unit` | `Run tests` | 12 minutes | 720 s; a queue plan must predict its slowest shard under half of it, 360 s |
+| `tests.shard_budget`, a unit shard | `unit` | `Run tests` | 12 minutes | 720 s of elapsed test step time |
+| `tests.shard_budget`, a selected leg | `unit-selected` | `Run the selected tests` | 7 minutes | 420 s of elapsed test step time |
+
+### How a limit is read
+
+`step_seconds(job)` in `tests/shard_budget.py` maps the job to its step name (`STEPS`: `unit` to `Run tests`, `unit-selected` to `Run the selected tests`), takes the workflow text from that job's header on, finds the first step of that name after it, keeps that step's text up to the next step, and returns the step's `timeout-minutes` times 60. A `timeout-minutes` line of a later step is never read. `tests.queue_shards` imports it and sets `STEP_SECONDS = step_seconds("unit")` when the module loads, so the planner needs no YAML library.
+
+The reader expects the plain form the workflow uses today:
+
+```yaml
+  unit:
+    steps:
+      - name: Run tests
+        timeout-minutes: 12
+```
+
+A renamed job or step, a step without `timeout-minutes`, or a timeout written as an expression stops the read with a Python error: `IndexError: list index out of range` when the job or step name is not found, `TypeError: 'NoneType' object is not subscriptable` when the step holds no integer `timeout-minutes` line. For the planner that error happens at import, so the merge group `split` job fails before it plans. Rename the step and its entry in `STEPS` in the same pull request.
+
+### Elapsed time records
+
+Both test steps time pytest with the shell's `SECONDS` and write `elapsed.json` next to `durations.json`, keeping pytest's exit status, so a failed shard still records its time:
+
+| Job | `elapsed.json` | Uploaded in |
+|---|---|---|
+| `unit` | `{"seconds": <n>}` | `durations-<python>-<shard>`, with `durations.json` and `durations.sha256` |
+| `unit-selected` | `{"seconds": <n>, "job": "unit-selected"}` | `durations-<python>-<leg>`, with `durations.json` |
+
+The budget grades each shard on its `elapsed.json` seconds and picks the step from its `job` field, `unit` when the field is absent. A folder with `durations.json` and no `elapsed.json` is graded on the sum of its test durations against the `Run tests` limit.
+
+### Running the shard budget
+
+`shard-check` runs it as its last step, `Check every shard's test time fits the Run tests deadline`, on every event except `merge_group`, over every downloaded `durations-3.12-*` artifact:
+
+```bash
+python -m tests.shard_budget $REPORT shard-durations/*/durations.json
+```
+
+| Event | `REPORT` | A shard over its limit |
+|---|---|---|
+| `push` to `dev` | `--report` | `::warning::`, the step stays green |
+| Full scope pull request, dispatch | empty | `::error::`, `shard-check` fails |
+| `merge_group` | step skipped | Not graded; shard budgets never hold the queue |
+
+A shard folder that holds no `durations.json` fails the step in both modes: `::error::No shard durations at <paths>, so those shards cannot be graded.`
+
+`unit-selected` runs only on pull requests of `selected` scope, and `shard-check` runs on pull requests only at `full` scope, so the workflow never grades a selected leg today. The selected limit applies when a selected leg's artifact is graded by hand. Download it and run the command from a checkout of the same workflow:
+
+```bash
+run="<pull request Tests run id>"
+gh run download "$run" --pattern 'durations-3.12-*' --dir shard-durations
+python -m tests.shard_budget shard-durations/*/durations.json
+```
+
+The first line names the slowest shard and the limit of its own step; one line per shard follows, slowest first:
+
+```text
+2 shards, slowest 431.0 s of test time against the 7 minute Run the selected tests deadline of 420 s
+durations-3.12-1 431.0 s over budget
+durations-3.12-2 120.0 s
+::error::1 of 2 shards passed the 420 s budget.
+```
+
+When shards over budget have different limits, the last line joins them, for example `passed the 420 or 720 s budget`. `--budget <seconds>` replaces every step limit with one number, and the first line then reads `against a budget of <seconds> s`.
+
+### Tests that pin the limits
+
+| Test | Pins |
+|---|---|
+| `test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout` in `tests/test_queue_shards.py` | `STEP_SECONDS` equals the `Run tests` timeout |
+| `test_the_default_budget_is_the_run_tests_step_deadline` in `tests/test_shard_budget.py` | A unit shard is graded against the `Run tests` timeout |
+| `test_a_selected_leg_is_graded_against_the_selected_tests_step_deadline` in `tests/test_shard_budget.py` | A leg whose `elapsed.json` names `unit-selected` is graded against the `Run the selected tests` timeout |
+| `test_selected_legs_record_elapsed_time_and_their_job_and_preserve_pytest_status` in `tests/test_ci_workflow.py` | The selected step writes `elapsed.json` with its job and keeps pytest's exit status |
+| `test_unit_step_records_elapsed_time_and_preserves_pytest_status` in `tests/test_ci_workflow.py` | The unit step writes `elapsed.json` and keeps pytest's exit status |
+
+### Troubleshooting step timeout limits
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `split` fails with `IndexError: list index out of range` from `step_seconds` | The `unit` job or its `Run tests` step was renamed | Update `STEPS` in `tests/shard_budget.py` with the new name |
+| `TypeError: 'NoneType' object is not subscriptable` from `step_seconds` | The step's `timeout-minutes` was removed or written as an expression | Keep a plain integer `timeout-minutes` on the step |
+| The queue plans more shards than the step timeout needs | An older planner with a fixed timeout; before pull request 5043 it assumed 420 s while the step allowed 720 s | Merge `origin/dev`; the `split` log prints `of 360s` while the timeout is 12 minutes |
+| A selected leg passes 420 s and nothing turns red | `shard-check` never runs beside `unit-selected` | Grade the leg's artifact by hand as above |
+| `KeyError` from `tests.shard_budget` | An `elapsed.json` names a job other than `unit` or `unit-selected` | Add the job and its step to `STEPS` |
+
+### Delivery evidence
+
+Delivered by pull request [5043](https://github.com/the-cloud-clockwork/agentihooks/pull/5043) for issue [5041](https://github.com/the-cloud-clockwork/agentihooks/issues/5041). Before it, the planner held a fixed 420 s timeout while `Run tests` stopped at 720 s, and the budget graded every shard, selected legs included, against a fixed twelve minutes of summed test time, though `Run the selected tests` stops at seven minutes and recorded no elapsed time. Red: Tests run [39357706899](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39357706899), on the test only commit, failed exactly the six new or changed tests. Green: Tests run [39358460209](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39358460209).
+
+Measured over completed merge group Tests runs, counting Python 3.12 unit shards per group and the slowest `Run tests` step: the last ten groups before the merge ran 20 shards each, slowest 388 s; the ten groups after 06:01 UTC on 20 October ran a mean of 13.3 shards (13 or 14), slowest 305 s, and no shard reached 720 s. Calibrating `SLOWDOWN` from 1.5 to 1.15 in pull request [5659](https://github.com/the-cloud-clockwork/agentihooks/pull/5659) later changed the plan again.
 
 ## Grouped test files in the unit shard planner
 
@@ -631,6 +863,80 @@ A stalled run is cancelled, then force cancelled if a plain cancel does not end 
 
 GitHub can list a dead runner online for over a minute, and the scheduled workflow starts at most every ten minutes, so the swarm tick also runs the watchdog with `--cluster` on the tick host, where `kubectl` can read the cluster; CI runners cannot. The tick step `lost_runner.sweep` starts it at most once a minute per repository, only where `kubectl` exists and the repository has the Tests workflow, and a file lock under the AgentiHooks home keeps one watchdog acting at a time; a later tick finding it held exits and the next free minute looks again. The watchdog runs isolated (`python -I`), so it imports the installed AgentiHooks package, and a change to it reaches the tick when the installed checkout pulls `dev`. In cluster mode a runner is lost when its pod ended (phase Failed or Succeeded, or its `runner` container terminated), sits on a node NotReady for at least sixty seconds or on a node the cluster no longer lists, is in phase Unknown on a Ready node, or is missing from a scale set the cluster lists. There is no job age grace and the second read comes thirty seconds after the first. The only reads are `kubectl get autoscalingrunnersets --all-namespaces`, `kubectl get pods --all-namespaces -l actions.github.com/scale-set-name` and `kubectl get nodes`, so the tick host's kubeconfig needs list rights on those three. A refused cluster read reports `error` and never counts as a loss, and a runner whose scale set the cluster does not list is never counted lost. Its output goes to `lost-runner.log` under the AgentiHooks home.
 
+#### Recovery timestamps
+
+Recovery records include the following ISO 8601 UTC times, delivered by [pull request 5389](https://github.com/the-cloud-clockwork/agentihooks/pull/5389). Recording needs no extra setting and applies to both the scheduled workflow and the tick's cluster watchdog.
+
+| Field | Meaning |
+|---|---|
+| `run`, `attempt` | GitHub run ID and the attempt examined; keep both when comparing recoveries. |
+| `detected_at` | Time the second assessment confirms the stall, before the run attempt is checked again. It is not the first suspicion or the time the runner disappeared. |
+| `cancel_requested_at` | Time immediately before the plain cancel API request. It records an attempted request, including one GitHub refuses. |
+| `force_cancel_requested_at` | Time immediately before the force cancel API request; `null` when that request was not attempted. |
+| `completed_observed_at` | Time of the first poll, or follow-up read after a cancel API error, that reports the run `completed`; `null` when completion was not observed. |
+
+For example, this illustrative recovery attempted both cancellation methods and then reran failed jobs:
+
+```json
+{"run":123456,"attempt":1,"action":"rerun","reason":"lost runner; first attempt without an independent job failure","detected_at":"2026-10-20T12:00:00+00:00","cancel_requested_at":"2026-10-20T12:00:01+00:00","force_cancel_requested_at":"2026-10-20T12:03:01+00:00","completed_observed_at":"2026-10-20T12:03:11+00:00"}
+```
+
+After each cancellation request, the watchdog sleeps ten seconds before each of up to eighteen status reads. If plain cancel ends the run, force cancel is skipped. Otherwise force cancel gets the same polling budget. API time adds to these waits. The completion observation can therefore lag GitHub's state change by the polling interval and API time. GitHub's workflow run REST response supplies no `completed_at`; `updated_at` is not a completion time.
+
+Read retained tick recovery records without triggering cancellation:
+
+```bash
+jq -c 'select(.detected_at != null) |
+  {run, attempt, action, reason, detected_at, cancel_requested_at,
+   force_cancel_requested_at, completed_observed_at}' \
+  "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/lost-runner.log"
+```
+
+For the scheduled workflow, read the JSON lines in the **Cancel stalled Tests runs and rerun their failed jobs once** step of the Lost runner run. The tick writes its output to the log above; the workflow writes to its job log.
+
+To calculate observed seconds after each request, pipe the selected JSON records above into this command. It accepts fractional seconds as well as the example's whole seconds:
+
+```bash
+python3 -c '
+import json
+import sys
+from datetime import datetime
+
+for line in sys.stdin:
+    row = json.loads(line)
+    end = row.get("completed_observed_at")
+    if not end:
+        continue
+    elapsed = {
+        field: (datetime.fromisoformat(end) - datetime.fromisoformat(row[field])).total_seconds()
+        for field in ("detected_at", "cancel_requested_at", "force_cancel_requested_at")
+        if row.get(field)
+    }
+    print(json.dumps({"run": row["run"], "attempt": row["attempt"], "seconds_since": elapsed}))
+'
+```
+
+The example gives 191 seconds since detection, 190 since plain cancel and 10 since force cancel. A record with both requests includes the plain cancel wait before force cancel; it cannot prove how fast force cancel alone would have ended the run. Compare complete records over a named window, retain records without completion as unmeasured, and keep error outcomes separate.
+
+#### Running and configuring recovery
+
+The timestamp fields need no environment flag. To run recovery manually from a checkout with dependencies installed, use an authenticated `gh` with Actions write access and organization self-hosted runner read access. `GH_TOKEN` can supply the token; keep its value outside commands and logs. This command can cancel the selected run and rerun its failed jobs under the policy above:
+
+```bash
+python -m scripts.ci_lost_runner \
+  --repo The-Cloud-Clockwork/agentihooks \
+  --workflow test.yml --run-id 123456 --grace-minutes 10
+```
+
+Replace the example run ID with the intended run. Repeat `--run-id` to select several runs; omit it to examine all unfinished runs of `--workflow` (default `test.yml`). The workflow file is read from the checkout to resolve job dependencies. `--grace-minutes` sets the minimum job age, default ten minutes, or zero with `--cluster`. Cluster mode also switches to the cluster evidence and thirty second confirmation described above. `--lock <path>` optionally holds a file lock for the invocation; a held lock prints `action: none` and exits successfully. Cancellation polling has no CLI override.
+
+| Observation | Interpretation and action |
+|---|---|
+| Force cancel time is `null`, completion is present | The run completed before force cancel was attempted. Read `action` and `reason` to distinguish a rerun, cancellation or a run that completed meanwhile. |
+| Completion is `null`, reason says the run did not end after force cancel | Both polling budgets expired without observing completion. Read the run's current status before treating it as freed. |
+| `action: error` with timestamps | Recovery began and an API operation failed. Attempted cancel times and any observed completion survive the error, including a failed rerun request. Read `reason`; a request timestamp does not prove GitHub accepted it. |
+| No timing fields | Older records and decisions made before recovery, including early read errors, have no recovery timings. A run rerun meanwhile is also left alone without these fields. Do not fill gaps with zero or `updated_at`. |
+
 ## Queue rebuild records
 
 GitHub rebuilds a merge group whenever an entry ahead of it changes: an enqueue or priority insertion ahead, a dequeue, a requeue, a removal ahead or a push to the base. The rebuilt group gets a new head commit, and the Tests run still building the old head is cancelled. On 16 October a priority insertion rebuilt three group chains and cancelled 195.550 runner minutes, and no record named the action that caused it ([issue 4282](https://github.com/the-cloud-clockwork/agentihooks/issues/4282)). Two records now keep that link:
@@ -763,6 +1069,111 @@ gh api repos/<owner>/<repo>/actions/jobs/<queue-fail-fast job id>/logs \
 - The journal lives only on the machine that ran the tooling. The watcher record lives only in the run log and job summary.
 - Journal records are not deduplicated against GitHub events: each mutation call writes one record.
 - `merge priority` reorders with dequeue and requeue, never GitHub's native `jump`, so its insertions appear as `steps`, not as `jump: true` entries.
+
+## Merge queue churn measurement
+
+On 20 October one pull request took 109 minutes from enqueue to merge while its merge group was cancelled and rebuilt six times, and 17 of the last 30 finished merge group Tests runs had been cancelled with none failed. A read only measurement over one day of `dev` merge groups counted every cancelled run, named what cancelled it and summed what it cost ([issue 5401](https://github.com/the-cloud-clockwork/agentihooks/issues/5401), ledger task t584). It changed nothing; the fixes it led to are listed below.
+
+### Window and queue settings
+
+The window ran from 2026-10-20T02:00Z to 2026-10-21T02:00Z. It held 301 merge group Tests runs: 170 `success`, 126 `cancelled`, 5 still queued and none `failure`. The `dev` merge queue then built up to five entries at once (`max_entries_to_build` 5), merged up to five, grouped `ALLGREEN`, waited one minute for entries and timed checks out after 45 minutes. `.github/rulesets/dev-no-delete.json` now sets `max_entries_to_build` to 3; the other values are unchanged.
+
+### How each cancelled run was attributed
+
+Every cancelled run falls into one of two kinds:
+
+- **Ejection of the entry itself.** A job of the run itself concluded `failure`, `timed_out` or `startup_failure`, and the run's `queue-fail-fast` job cancelled it; or the queue timed the entry out (`checks_timed_out`). This split is read from job conclusions, not from removal reasons: GitHub can give `failed_checks` even when every own run was cancelled clean. The fail fast job logs the failed job before cancelling: `<job> failed, so Gate Required cannot pass; cancelling this queue run.`
+- **Rebuild caused by another entry.** No job of the run failed; GitHub rebuilt the group because an entry ahead of it left the queue, and cancelled the run building the old head. The trigger is the removal event of the entry ahead whose time falls inside the run: `failed_checks`, a removal by hand or a priority move (`manual`), or `checks_timed_out`.
+
+A cancelled run with no failed job and no removal ahead inside its window stays unattributed: an enqueue ahead, a base push or a ruleset change leaves no queue event that names it. Wall minutes are the run's own duration; runner minutes are the sum of its jobs' durations.
+
+The [queue rebuild records](#queue-rebuild-records) now name the cause of each rebuild cancellation directly in the watcher record; the removal ahead cause arrived with pull request 5706 on 22 October, after this measurement, which attributed rebuilds by hand from the same queue events.
+
+### Counts and costs
+
+| Kind | Trigger | Runs | Wall minutes | Runner minutes | Example runs |
+|---|---|---|---|---|---|
+| Ejection of the entry | A job of its own failed | 36 | 430 | 3424 | [39506054106](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39506054106) |
+| Ejection of the entry | Checks timed out | 1 | 48 | 133 | [39506046726](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39506046726) |
+| Rebuild by another entry | Entry ahead failed checks | 38 | 298 | 1627 | [39505435816](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39505435816) |
+| Rebuild by another entry | Entry ahead removed by hand or moved by priority | 16 | 86 | 124 | [39507217466](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39507217466) |
+| Rebuild by another entry | Entry ahead timed out | 4 | 102 | 216 | [39510499547](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39510499547) |
+| Rebuild by another entry | No queue event names it | 31 | 349 | 2344 | [39519081840](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39519081840) |
+| Total | | 126 | 1311 | 7867 | |
+
+Row minutes are rounded per run, so they can differ from the totals by a minute. Ejections of the entry itself came to 37 runs and 3557 runner minutes; rebuilds caused by another entry came to 89 runs and 4310 runner minutes.
+
+The leading trigger was an entry failing in the queue. Its own ejections plus the rebuilds it caused behind it came to 74 runs and 5051 of the 7867 cancelled runner minutes. Removals by hand were frequent, 125 in the window and every one queued again (median 38 seconds later), but cost little: their 16 attributed rebuilds came to 124 runner minutes.
+
+Passing groups in a sample of 100 successful runs took 14.8 minutes median and 40.0 at most.
+
+### Rebuilds per merged pull request
+
+| Rebuilds before merging | Pull requests |
+|---|---|
+| 0 | 111 |
+| 1 | 25 |
+| 2 | 14 |
+| 3 | 7 |
+| 4 | 3 |
+| 5 | 1 |
+
+Across the 161 merged pull requests, enqueue to merge took 88.8 minutes median and 185.6 at the 90th percentile: 77.7 minutes median with no rebuild and 102.5 with one or more. Builds discarded on pull requests that later merged came to 864 wall minutes.
+
+### Why entries kept failing
+
+Of the 36 own job failures, 15 failed in `Run tests` and 11 in `Install dependencies`. Most test failures were deterministic. Counted per test, so one run can appear under more than one test: the code owner test failed nine times on one pull request, the CI script inventory test three times and the ledger cutover test four times. The install failures were PyPI answering 502 on `setuptools` between 21:34Z and 22:06Z, which `uv` gave up on within eight seconds.
+
+The queue timelines, a separate count from the run table above, recorded 20 removals with reason `failed_checks`; 19 of them were queued again at an unchanged head. Pull request 5129 entered at head `527d01a7` and was queued again six times with no new commit. Eight merge group runs at that head failed the same code owner test after those requeues: runs [39396055512](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39396055512), [39404264587](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39404264587), [39408630475](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39408630475), [39412887866](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39412887866), [39413818395](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39413818395), [39427751037](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39427751037), [39436310682](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39436310682) and [39448639696](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39448639696). These re-failures cost 809 runner minutes, and the 10 rebuilds they caused behind them another 216.
+
+The cause was in the swarm's queue exit judgment. `queue-fail-fast` cancels its own run on the first failed job, so a failing entry's run ends `cancelled`, never `failure`. The merge pass counted a `cancelled` run as clean, read the exit as having no failure of its own and queued the same head again.
+
+### Fixes it led to
+
+| Fix | Pull request |
+|---|---|
+| A cancelled merge group run with a failed, timed out or startup failed job counts as the entry's own failure, and `agentihooks swarm <slug> merge queue <url>` refuses a head whose last merge group run failed until a new commit lands; see [Ready merge pass queue exits](../pillars/swarm.md#ready-merge-pass-queue-exits) | [5466](https://github.com/the-cloud-clockwork/agentihooks/pull/5466) |
+| The code owner and script inventory tests run on pull requests that add, remove or move files, so they fail before the queue | [5470](https://github.com/the-cloud-clockwork/agentihooks/pull/5470) |
+| The unit dependency install retries through a short PyPI outage | [5633](https://github.com/the-cloud-clockwork/agentihooks/pull/5633) |
+| The mutation and test planner dependency installs retry the same way | [5665](https://github.com/the-cloud-clockwork/agentihooks/pull/5665) |
+
+### Repeat the measurement
+
+All reads go through `gh` with read access to the repository. List the window's merge group Tests runs with their conclusion and wall minutes:
+
+```bash
+gh api --paginate "repos/<owner>/<repo>/actions/runs?event=merge_group&created=<from>..<to>&per_page=100" \
+  --jq '.workflow_runs[] | select(.name == "Tests")
+        | [.id, .conclusion, .head_branch,
+           (((.updated_at | fromdate) - (.run_started_at | fromdate)) / 60 | floor)] | @tsv'
+```
+
+`<from>` and `<to>` are UTC times such as `2026-10-20T02:00:00Z`. The branch `gh-readonly-queue/dev/pr-<number>-<sha>` names the entry. For each cancelled run, sum its runner minutes and list any failed job:
+
+```bash
+gh api --paginate "repos/<owner>/<repo>/actions/runs/<run id>/jobs?per_page=100" \
+  --jq '.jobs[] | select(.started_at and .completed_at)
+        | [.name, .conclusion, (((.completed_at | fromdate) - (.started_at | fromdate)) / 60)] | @tsv'
+```
+
+A job concluded `failure`, `timed_out` or `startup_failure` makes the run an ejection of the entry itself. Otherwise read the queue removals of the entries that were ahead of it, and keep the ones inside the run's window:
+
+```bash
+gh api graphql -f query='query($url: URI!) { resource(url: $url) { ... on PullRequest {
+  timelineItems(last: 100, itemTypes: [ADDED_TO_MERGE_QUEUE_EVENT, REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes {
+    __typename
+    ... on AddedToMergeQueueEvent { createdAt actor { login } }
+    ... on RemovedFromMergeQueueEvent { createdAt actor { login } reason }
+  } } } } }' -f url="https://github.com/<owner>/<repo>/pull/<number>"
+```
+
+An added event after a removal with no commit between them is a requeue at an unchanged head.
+
+### Measurement limits
+
+- The measurement covers one day and one repository, before the fixes above merged; it has not been repeated after them.
+- 31 of the 126 cancelled runs could not be attributed from queue events.
+- The pass sample for passing group duration is 100 of the 170 successful runs.
 
 ## Coverage grading
 

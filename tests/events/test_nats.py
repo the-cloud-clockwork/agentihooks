@@ -125,6 +125,17 @@ def test_a_consumer_carries_the_queue_policy(bus):
     assert (work.max_deliver, work.backoff) == (-1, [0.2, 0.4])
 
 
+def test_a_durable_without_an_inactive_threshold_stays_and_one_with_it_is_reaped_once_idle(bus):
+    bus.events.consumer("kept", "swarm.>", LOG_POLICY)
+    bus.events.consumer("idle", "swarm.>", QueuePolicy(max_deliver=3, ack_wait_ms=1_000, inactive_ms=500))
+    assert _consumer_config(bus, nats.EVENT_STREAM, "kept").inactive_threshold is None
+    assert _consumer_config(bus, nats.EVENT_STREAM, "idle").inactive_threshold == 0.5
+    deadline = time.monotonic() + 15
+    while "idle" in nats_server.durables(bus) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert nats_server.durables(bus) == ["kept"]
+
+
 def test_a_durable_consumer_refuses_another_filter(bus):
     bus.events.consumer("watcher", "swarm.a.>")
     with pytest.raises(ValueError, match=r"^durable consumer 'watcher' filters 'swarm.a.>', not 'swarm.b.>'$"):

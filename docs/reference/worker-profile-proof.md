@@ -171,6 +171,76 @@ Preserve the failed run and fix the hook or proof in source before rerunning CI.
 Do not treat container teardown as evidence that the hook cleaned up its own
 children.
 
+## Session start dependency check
+
+When the fixture home's `deps.stamp` is missing or older than six hours and
+`agentihooks` is on `PATH`, a replayed SessionStart runs
+`agentihooks deps ensure --quiet`. The hook runs that check in its own process
+group, waits up to one second for it, then sends SIGKILL to the whole group and
+reaps the check before it continues. The check and everything left in its
+process group are gone before the hook registers the session and returns, so
+the probe finds no surviving child from it. The full behaviour, the six hour
+stamp rule and how to finish a repair the limit cut short are in
+[Session start dependency check](../getting-started/installation.md#session-start-dependency-check).
+
+The one second wait comes before the broadcast session registration. The probe
+starts `registered_at` at the first matching registry write, so the wait does
+not count toward the two second registration to container exit budget.
+
+| Control | Current value |
+|---------|---------------|
+| Stamp age that skips the check (`STAMP_TTL_SECONDS`) | 6 hours |
+| Wait before the kill (`WAIT_SECONDS`) | 1 second |
+| Signal | SIGKILL to the check's process group |
+
+Both values are source constants in the session start dependency kick, not
+environment settings.
+
+### What the proof caught
+
+Before [pull request 5194](https://github.com/the-cloud-clockwork/agentihooks/pull/5194)
+the hook started the check detached and returned at once. On a dev push the
+`worker-image (profiles)` job failed with `Codex hook children outlived
+registration`, and `worker-image-compare` and `Gate — Required` failed after it
+([run 39338932046](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39338932046)).
+A first fix that only waited for the check still left a child the check had
+started alive whenever the check exited within the second. Killing the process
+group on both paths closes that case.
+
+| Run | Head | Result |
+|-----|------|--------|
+| [39397216293](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39397216293) | Tests only, old hook | Red: a slow check's group outlived the hook; a fast check was not waited for |
+| [39397813388](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39397813388) | Tests and the wait only fix | Red: a check that exits inside the second left its child alive |
+| [39398074119](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39398074119) | Fixed hook | Green: `test_deps_preflight` and `test_hook_manager` |
+| [39397866186](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39397866186) | Fixed hook | Green: worker image proof, `startup`, `rebuild`, `profiles` and `compare` legs |
+
+### Tests that pin it
+
+The tests live in `tests/test_deps_preflight.py`:
+
+| Test | What it proves |
+|------|----------------|
+| `test_session_start_kick_spawns_only_when_stale` | A fresh stamp starts nothing; a stale or missing stamp starts exactly `agentihooks deps ensure --quiet` |
+| `test_session_start_kick_leaves_no_check_process_behind[slow]` | A check still running after the wait is killed with its process group, and the kick returns within five seconds |
+| `test_session_start_kick_leaves_no_check_process_behind[leaves-a-child]` | A check that exits at once but leaves a background child has that child killed too |
+| `test_session_start_kick_waits_for_a_fast_check` | A check that finishes inside the second is waited for, and its exit status is collected |
+| `test_session_start_kick_reaps_a_check_that_outlives_the_bounded_wait` | The kick waits exactly `WAIT_SECONDS`, sends one SIGKILL to the check's process group, then waits with no limit to reap it |
+
+The two `leaves_no_check_process_behind` cases read process groups from
+`/proc`, so they need Linux and run in CI. Run them on a pushed branch:
+
+```bash
+gh workflow run proofs.yml \
+  --ref <pushed-branch> \
+  -f proof=tests \
+  -f tests=tests/test_deps_preflight.py
+```
+
+If `Codex hook children outlived registration` names an `agentihooks deps
+ensure` command again, check that the session start dependency kick still
+waits for and kills the check's process group before it returns. Do not raise
+the probe's grace period to make the failure pass.
+
 ## Delivered regression evidence
 
 [Pull request 3913](https://github.com/the-cloud-clockwork/agentihooks/pull/3913)

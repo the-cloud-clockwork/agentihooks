@@ -46,7 +46,10 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
         '  [[ "$*" != "init --bundle "* ]] || printf %s "$3" > "$AGENTIHOOKS_HOME/linked-bundle"\n'
         '  [[ "$REFUSE" != init ]] || exit 7\n'
         '  [[ "$REFUSE" != bundle-init || "$*" == init ]] || exit 7\nfi\n'
-        'if [[ "$1 ${2:-}" == "hive join" ]]; then [[ "$REFUSE" != join ]] || exit 9; fi\n'
+        'if [[ "$1 ${2:-}" == "hive join" ]]; then\n'
+        '  printf %s "${LEDGER_CA_PEM:+set}" > "$AGENTIHOOKS_HOME/hive-join-ca-pem"\n'
+        '  [[ ! -f "$AGENTIHOOKS_HOME/ledger-ca.pem" ]] || cp "$AGENTIHOOKS_HOME/ledger-ca.pem" "$AGENTIHOOKS_HOME/hive-join-ca-file"\n'
+        '  [[ "$REFUSE" != join ]] || exit 9\nfi\n'
         'if [[ "$*" == "deps ensure" ]]; then [[ "$REFUSE" != deps ]] || exit 4; fi\n'
         'if [[ "$*" == "hive run" ]]; then printf %s "${LEDGER_CA_PEM:+set}" > "$AGENTIHOOKS_HOME/hive-run-ca-pem"; fi\n'
         'if [[ "$*" == "hive run" && "${GH_TOKEN:-}" == "$GITHUB_PERSONAL_ACCESS_TOKEN" ]]; then\n'
@@ -506,3 +509,14 @@ def test_hive_run_and_the_agents_it_launches_never_inherit_the_inline_ledger_ca(
     result, _, home, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
     assert (home / "hive-run-ca-pem").read_text() == ""
+
+
+def test_hive_join_trusts_the_system_roots_beside_the_mounted_ledger_ca(tmp_path, monkeypatch, cert):
+    pem = Path(cert[0]).read_text()
+    monkeypatch.setenv("LEDGER_CA_PEM", pem)
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (home / "hive-join-ca-pem").read_text() == ""
+    trusted = (home / "hive-join-ca-file").read_text()
+    assert trusted.startswith(Path(ssl.get_default_verify_paths().cafile).read_text())
+    assert trusted.endswith(pem.strip() + "\n")

@@ -15,7 +15,7 @@ parent: Getting Started
 
 ---
 
-For the packaged service stack, use the [Docker Compose bundle quick start](compose-quick-start.md). The native installation below configures **Claude Code and Codex** on an agent host. Plain `agentihooks init` installs both; `--target claude` or `--target codex` selects one. Claude-specific paths below describe its native configuration; Codex uses `config.toml`, `hooks.json` and `AGENTS.md` as detailed in the [Codex reference](../reference/CODEX-COMPAT.md).
+For the packaged service stack, use the [Docker Compose bundle quick start](compose-quick-start.md), the [single machine quick start](single-machine-quick-start.md) or the [Kubernetes quick start](kubernetes-quick-start.md), then [add a hive](add-hive-quick-start.md) for each further machine. The native installation below configures **Claude Code and Codex** on an agent host. Plain `agentihooks init` installs both; `--target claude` or `--target codex` selects one. Claude-specific paths below describe its native configuration; Codex uses `config.toml`, `hooks.json` and `AGENTS.md` as detailed in the [Codex reference](../reference/CODEX-COMPAT.md).
 
 ## 1. Install uv
 
@@ -213,6 +213,57 @@ its stamp is fresh. A declared Python installation failure is reported and
 preflight continues; `--quiet` suppresses that report. A successful `ensure`
 exit therefore does not prove Python dependency repair. Use `deps check` for
 the explicit missing dependency result.
+
+#### Session start dependency check
+
+Two paths run `ensure` without you typing it:
+
+| Path | When | Limit |
+|------|------|-------|
+| `agenti` launcher (`cmd_claude`) | Before every Claude launch, before the route lock | Runs to completion; a broken manifest prints `deps: preflight skipped` and the launch continues |
+| SessionStart hook | At every session start on every target, Claude and Codex included | One second, then the check's process group is killed |
+
+The SessionStart hook reads `ok_at` from `deps.stamp` in `AGENTIHOOKS_HOME`
+(default `~/.agentihooks`). It does nothing when that time is under six hours
+old, or when `agentihooks` is not on `PATH`. Otherwise it starts
+`agentihooks deps ensure --quiet` in its own session and process group, with
+standard input, output and error sent to `/dev/null`, and:
+
+1. Waits up to one second (`WAIT_SECONDS`) for the check to exit.
+2. Sends SIGKILL to the check's whole process group, whether or not the check
+   finished, so anything the check started dies with it.
+3. Waits for the killed process, so no zombie remains.
+
+The hook therefore returns with no dependency check process left running. A
+check that needs more than a second is cut short. It writes no stamp, so the
+next session start or launch tries again. `ensure` writes the stamp only when it
+finishes with no required system tool missing.
+
+The check runs after `start` conditions and before the Codex refresh, the swarm
+ledger step and broadcast session registration. A stale stamp can add up to one
+second to session start; a fresh stamp adds none. An exception in this step is
+logged as `deps kick failed` and session start continues.
+
+Before pull request 5194 the hook started the check detached and returned at once.
+The check then outlived the hook, and the worker image profiles proof failed
+with `Codex hook children outlived registration`. See
+[Worker profile proof](../reference/worker-profile-proof.md#session-start-dependency-check).
+
+To finish a repair that the one second limit cut short, run the check in a
+shell, where nothing limits it:
+
+```bash
+agentihooks deps ensure
+agentihooks deps check
+```
+
+To see whether the next session start will run the check, read the stamp age:
+
+```bash
+python3 -c 'import json,os,time,pathlib; h=pathlib.Path(os.environ.get("AGENTIHOOKS_HOME", pathlib.Path.home()/".agentihooks")); print(round(time.time()-json.loads((h/"deps.stamp").read_text())["ok_at"]), "seconds old")'
+```
+
+At 21600 seconds or more, or with no stamp file, the next session start runs it.
 
 See the [deps command reference](../reference/cli-commands.md#agentihooks-deps)
 for the command summary and flags.

@@ -95,7 +95,7 @@ mutation reports are retained for seven days.
 | Symptom | Meaning and action |
 |---|---|
 | `No dev test dependency manifest found; tests are selected by import only.` | Lookup completed without a usable record. Import selection still applies; inspect dev Tests record production and lookup diagnostics before assuming indirect callers were included |
-| `Mutation selection fallback` warning | Current code retries a coverage read failure once, then selects every test module for each changed file. Read the preceding attempt errors and repair the record or GitHub access failure; expect more statistics work |
+| `Mutation selection fallback` warning | Current code retries a coverage read failure once, then selects every test module for each changed file. Read the preceding attempt errors and repair the record or GitHub access failure; expect more statistics work. See [Unreadable coverage record](#unreadable-coverage-record) |
 | Expected helper test is absent | Check the recorded dev run, containing function identity and test file's continued existence. A new call path or renamed function may have no historical execution record; import selection remains available but recorded coverage cannot invent that execution |
 | File reports `not mutated, no matching or importing test modules` | Neither selection route supplied a test for a changed file containing functions. Planning fails; supply covering tests and inspect their recorded coverage |
 | Candidate file appears as individual node ids | Current drift checks allowed narrowing. Compare those ids with the function's recorded coverage instead of requiring the whole file |
@@ -122,6 +122,128 @@ That head also removed a fallback, so this supports the selection diagnosis but
 is not an identical-head replay proving all 27 original mutants killed.
 The helper regression fixture and saved-selection refinement regression are
 maintained in `tests/test_ci_mutation_planned_selection.py`.
+
+## Unreadable coverage record
+
+When the planner cannot read the recorded dev coverage, it plans with every
+test module rather than failing the planning job. A GitHub or artifact hiccup
+then costs extra statistics work, never a failed pull request check. The
+behavior lives in `read_record` in `scripts/ci_mutation/plan.py` and applies
+wherever the planner runs with `--repository`: the `plan` job of the mutation
+preflight and the `mutation-plan` job of the Tests run, both in the step
+**Size mutation shards from stored timings**.
+
+### Retry and fallback
+
+The planner reads the record through `find_record` in `scripts/ci_test_plan.py`,
+which lists completed dev push Tests runs, lists each candidate's artifacts,
+reads its unit shard jobs and downloads its `dep-manifest` zip, all through
+`gh api`. One read can end three ways:
+
+| Read outcome | Planner behavior | Log |
+|---|---|---|
+| A usable record | Import selection plus the tests whose recorded coverage reaches the change, narrowed as described in [Individual tests for statistics](#individual-tests-for-statistics) | `Recorded coverage from dev run RUN_ID adds the tests that executed a changed function.` |
+| No usable record, every request answered | Import selection only. No retry; a missing record is an answer, not a failure | `No dev test dependency manifest found; tests are selected by import only.` |
+| The read raised a read error | Wait `RECORD_RETRY_SECONDS` (10), read again with the same cutoff time. A second success plans normally; a second failure falls back | `Reading the recorded dev coverage failed on attempt N: REASON` per failed attempt |
+
+A read error is any exception in `RECORD_ERRORS`: a failed or timed out `gh api`
+call (`subprocess.SubprocessError`), `OSError`, `ValueError` (unparsable JSON and
+an unusable manifest zip or schema included), `KeyError` and
+`zipfile.BadZipFile`. Any other exception still fails the step.
+
+After the second failure the planner prints one warning annotation, which
+appears on the run summary:
+
+```text
+::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every test module is selected for each changed file: CalledProcessError: gh: Server Error (HTTP 502)
+```
+
+`REASON` is the exception class and the `gh` stderr text, decoded with
+replacement characters for undecodable bytes; without stderr it is the
+exception message. `find_record` wraps a corrupt `dep-manifest` zip, a missing
+`manifest.json` or an invalid schema as `UnusableRecord`, so those reasons read
+`UnusableRecord: Dev run RUN_ID: File is not a zip file` or
+`UnusableRecord: Dev run RUN_ID: "There is no item named 'manifest.json' in the archive"`.
+The planner keeps the reason from the second attempt.
+
+In the fallback, every changed source file gets every `test_*.py` file under
+`tests/`, at any depth, as its selection. No recorded coverage is consulted and
+no narrowing runs, so the selection is a superset of what a readable record
+would have produced. The plan still validates the selection, writes
+`.mutation-selection.json`, sizes shards and statistics parts from it and
+continues. Statistics then collect the whole suite for those files, so expect
+more statistics parts and a longer statistics phase on that run.
+
+### Configuration
+
+The fallback has no switch. The planner command is the existing CI step:
+
+```bash
+python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+```
+
+The step needs `GH_TOKEN` for `gh api`. The retry delay is the
+`RECORD_RETRY_SECONDS` constant, one retry is fixed, and each `gh api` call
+times out after 60 seconds. Without `--repository` the planner reads no record
+and uses import selection.
+
+### Inspect a run
+
+Find the planner step's lines in the job log:
+
+```bash
+gh run view RUN_ID --log | grep -E "Reading the recorded dev coverage failed|Mutation selection fallback|Recorded coverage from dev run|No dev test dependency manifest"
+```
+
+A recovered read shows one `attempt 1` line followed by `Recorded coverage from
+dev run`. A fallback shows both attempt lines and the warning. Confirm the
+selection with the planner artifact, downloaded as in
+[Inspect the selection](#inspect-the-selection):
+
+```bash
+jq -r '.[] | length' EVIDENCE_DIR/selection/.mutation-selection.json | sort -u
+```
+
+In a fallback every changed file lists the same count, the number of test
+modules in the tree.
+
+### Limits and troubleshooting
+
+| Symptom | Meaning and action |
+|---|---|
+| `Mutation selection fallback` warning on one run | The record read failed twice. Read the reason; a transient `HTTP 5xx` or timeout needs nothing, and the next run reads the record again |
+| The same warning on every run | The failure is persistent. A `gh` authentication or permission error points at `GH_TOKEN`; a reason starting `UnusableRecord: Dev run RUN_ID:` (raised by `_usable` in `scripts/ci_test_plan.py`) names a dev run whose `dep-manifest` zip or schema is unusable, which the planner reads again on every attempt; repair the record production on dev |
+| Statistics take much longer than usual | Expected after a fallback: the whole suite runs for each changed file. Check the warning before diagnosing the statistics shards |
+| Planning step fails with a traceback | The exception is outside `RECORD_ERRORS`, or the failure is elsewhere in planning; read the traceback |
+| `attempt 1` line followed by a normal plan | The retry recovered; the selection is the coverage based one |
+
+The fallback covers reading the record only. A failed upload or download of
+the planner's own selection artifact between jobs is a separate transfer
+failure; see [Reused and empty pull request runs](#reused-and-empty-pull-request-runs).
+
+### Delivery evidence
+
+[Pull request 5201](https://github.com/the-cloud-clockwork/agentihooks/pull/5201)
+delivered the retry and fallback on 2026-10-20 for
+[issue 5199](https://github.com/the-cloud-clockwork/agentihooks/issues/5199).
+
+| Evidence | Result |
+|---|---|
+| [Mutation preflight 39263117668](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39263117668), 2026-10-19 | Planning failed downloading the `dep-manifest` artifact zip with a `gh api` `CalledProcessError` |
+| [Mutation preflight 39227109213](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39227109213), 2026-10-19 | Planning failed listing dev runs with a `gh api` `CalledProcessError` |
+| [Red Proofs 39399678910](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39399678910) | Tests only: 6 failed, 50 passed on the old planner |
+| [Green Proofs 39400480288](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39400480288) | 149 passed across the planned selection, plan and preflight test modules on the delivered head |
+
+The source investigation found the artifact unexpired and downloadable
+afterwards, and the run listing reads no artifact. Nothing observed showed that
+the organization's private artifact storage quota, reported over its included
+amount the same day, caused either failure; the old planner discarded the `gh`
+stderr, which the fallback reason now carries. The regression cases are
+`test_plan_retries_an_unreadable_record_once_then_selects_every_test` and
+`test_record_failure_names_the_gh_error_text` in
+`tests/test_ci_mutation_planned_selection.py`: one failure then a recovered
+read keeps the coverage selection, and two failures from a 502, a timeout, a
+bad zip, unparsable JSON or a missing manifest select every test module.
 
 ## Individual tests for statistics
 
@@ -715,6 +837,143 @@ passed 151 plan, preflight and selection tests. The regression
 quotas of 3 and 4 across `shard_count`, `slowest_bucket` and `plan_shards`.
 No shard wall time comparison was recorded for this change.
 
+## Single shard plans in the statistics job
+
+On a pull request into dev and on a dispatched Tests run, a mutation plan with
+one statistics part and one shard mutates that shard inside `mutation-stats (0)`
+and skips the separate `mutation` job. The shard no longer waits for a second
+batch runner, a second checkout and a second dependency install. Plans with two
+or more shards or two or more statistics parts keep their separate `mutation`
+shard jobs. Which mutants are graded, the tests that run them and the report
+format are unchanged.
+
+### When the shard runs inline
+
+The decision reads two outputs of `mutation-plan`:
+
+| `shards` | `stats_parts` | `forwarded` | Statistics job | `mutation` job |
+|---|---|---|---|---|
+| `[0]` | `[0]` | not `true` | Collects its part, then runs **Mutate the only shard in the statistics job** | Skipped |
+| `[0]` | `[0]` | `true` | Runs no mutation step; the plan job already uploaded `mutation-report-0` | Skipped |
+| `[0]` | two or more parts | any | Collects its parts | One shard job, `mutation (0)` |
+| two or more shards | any | any | Collects its parts | One job per shard |
+
+`python -m scripts.ci_mutation.plan` writes `shards` and `stats_parts` from its
+measured shard and part counts. A reused report also sets both to `[0]`; see
+[Reused and empty pull request runs](#reused-and-empty-pull-request-runs).
+
+The inline step runs after **Upload mutation stats part**, on the same runner:
+
+```bash
+python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard 0 --shards 1 --stats .mutation-stats
+```
+
+It is the command a `mutation` shard runs, with the shard fixed at 0 of 1 and
+the statistics read from the part the job just collected, so the job downloads
+no `mutation-stats-*` artifact. **Upload complete inline mutation evidence**
+then uploads `mutation-report-0`, as `mutation (0)` would: only `report.json`
+when the job succeeded, the whole `.mutation-gate/` folder otherwise. Both
+steps share the statistics job's 26 minute timeout, and the 1080 second budget
+is the same as a shard's.
+
+### Gate Required and graded bases
+
+Gate Required sets `INLINE` to `true` when `shards` and `stats_parts` are both
+`[0]`. With `INLINE` true it drops `mutation` from the jobs a pull request
+requires and accepts that job as skipped; `mutation-plan` and `mutation-stats`
+must still succeed. A failed inline step fails `mutation-stats (0)`, so the
+gate fails as it would on a failed shard. The inline form came with
+[pull request 5180](https://github.com/the-cloud-clockwork/agentihooks/pull/5180):
+`inline_mutation` in `scripts/ci_reuse.py` builds the same form, and
+`scripts/gate_protected.py` accepts it as the protected gate.
+
+`graded_green` in `scripts.ci_mutation.scope` decides whether a pushed commit
+counts as a [graded base](#graded-lines). For an open pull request it reads the
+Tests runs of that commit and counts a run as graded when every shard result
+in it succeeded. A shard result is a `mutation (<n>)` job's conclusion or,
+for a `mutation-stats` job whose inline step ran, that job's conclusion. A head
+graded inline therefore stays a base for later pushes, like one graded by a
+shard job.
+
+The branch push preflight in `mutation-preflight.yml` has no inline step: it
+still runs its `stats` job and then its `mutation-shard` job.
+
+### Inspect a single shard run
+
+List the mutation jobs of a run and the inline step's result:
+
+```bash
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/attempts/1/jobs?per_page=100" --paginate \
+  --jq '.jobs[] | select(.name|startswith("mutation")) | [.name, .conclusion, .started_at, .completed_at, ([.steps[]? | select(.name == "Mutate the only shard in the statistics job") | .conclusion] | join(","))] | @tsv'
+```
+
+An inline run shows `mutation-stats (0)` with `success` in the last column and
+a `mutation` job `skipped`. On the delivered pull request's green run:
+
+```text
+mutation-plan       success  2026-10-20T09:38:58Z  2026-10-20T09:39:55Z
+mutation-stats (0)  success  2026-10-20T09:40:01Z  2026-10-20T09:40:50Z  success
+mutation            skipped  2026-10-20T09:40:50Z  2026-10-20T09:40:50Z
+```
+
+A forwarded run shows the same skipped `mutation` job with the last column
+`skipped`. Read the plan outputs from the plan job log, which prints
+`Mutation shards: <n>` and `Stats parts: <n>`. The report is read as on any
+other run:
+
+```bash
+gh run download <run id> -n mutation-report-0 -D mutation-report
+jq '{failed, not_mutated}' mutation-report/report.json
+```
+
+### Single shard limits and troubleshooting
+
+- The inline step only applies to a plan of one shard and one part. A plan
+  that needs two shards pays for the second runner as before.
+- The statistics and mutation work share one runner and one timeout, so the
+  statistics job of a one shard plan runs longer than before by its mutation
+  time.
+- The step reuses the statistics job's checkout, dependencies and browser, so a
+  setup failure there fails both statistics and mutation in one job.
+
+| Symptom | Check |
+|---|---|
+| `mutation (0)` ran for a plan that printed one shard | The plan printed more than one `Stats parts`, or the run used a workflow revision older than pull request 5186. |
+| `mutation` skipped and no `mutation-report-0` | Read `mutation-plan`: a forwarded run uploads the report there, not in the statistics job. |
+| `mutation-stats (0)` failed after its stats part uploaded | The inline step failed; download `mutation-report-0`, which then holds the whole `.mutation-gate/` folder, and read [Clean baseline failures](#clean-baseline-failures) when no mutant was graded. |
+| Gate Required fails with `mutation` skipped | The plan had more than one shard or part, or `mutation-stats` did not succeed; the gate accepts a skipped `mutation` only when both outputs are `[0]`. |
+| A later push regrades lines of an inline graded head | That head's statistics job did not succeed, or its run was not a pull request Tests run for that commit. |
+
+### Single shard delivery evidence
+
+[Pull request 5186](https://github.com/the-cloud-clockwork/agentihooks/pull/5186)
+merged on 20 October 2026 at 10:41 UTC and closed
+[issue 5179](https://github.com/the-cloud-clockwork/agentihooks/issues/5179).
+Its [red run 39392961654](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39392961654)
+on the tests only head failed only the new
+`test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job` and
+`test_pull_request_grading_counts_the_shard_mutated_inside_the_statistics_job`.
+Its [green run 39402043868](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39402043868)
+passed, and graded its own one shard plan inline (the run shown above).
+
+The measure is wall time from the `mutation-plan` job start to the end of the
+job that graded the shard: `mutation` before the change, `mutation-stats (0)`
+after. Both samples are the five newest successful first attempts of pull
+request Tests runs whose plan had one part and one shard.
+
+| Sample | Runs created | Plan start to grade | Median | Mean |
+|---|---|---|---|---|
+| Before, recorded by the source task | 20 October 00:00 to 08:10 UTC | 191, 220, 207, 178, 186 s | 191 s | 196.4 s |
+| After, sampled for this page | 20 October 10:42 to 21 October 08:00 UTC | 125, 163, 171, 104, 129 s | 129 s | 138.4 s |
+
+Before runs: 39387418173, 39386682588, 39386638469, 39386392354 and
+39381833895, whose separate shard jobs ran 45 to 62 s. After runs:
+39555030857, 39554885886, 39543789929, 39530006213 and 39492325418, whose
+statistics jobs with the inline shard ran 37 to 68 s. The after sample also
+needed its `mutation` job skipped and the inline step successful. Other
+mutation changes merged between the two windows, so the 62 s drop in the median
+is not attributable to this change alone.
+
 ## Suite speed contracts in the branch preflight
 
 A branch push that changes a test module runs the suite speed contracts in the
@@ -998,9 +1257,9 @@ A branch is graded only on its own lines, so a dev refresh or a stacked branch d
 - **Real bases.** The plan job resolves them once:
   - the merge base with the given base;
   - the merge base with `origin/dev`;
-  - every pushed commit inside the head whose own push Mutation preflight had a successful `mutation` job.
+  - every pushed commit inside the head whose own push Mutation preflight had a successful `mutation` job, or, for an open pull request, whose Tests run graded every shard, inline or in a shard job (see [Gate Required and graded bases](#gate-required-and-graded-bases)).
 - **Which lines count.** A line is graded only when it differs from every real base. Because the given base always counts, the scope never grows past `base...head`.
-- **Proof of grading.** The plan reads the preflight proof through the Actions API on the App token. Dispatched runs and pull request gates never count, since they choose their own base or may skip mutation.
+- **Proof of grading.** The plan reads the preflight proof through the Actions API on the App token. Dispatched runs never count, since they choose their own base.
 - **Weakened tests.** The narrowing never hides weakened tests. If the head changed `tests/` against a newer base beyond adding tests, every line that base excluded is graded again. Adding tests means new `test_` functions, or new `Test` classes holding only test methods, with only `pytest.mark` decorators, or imports in a new test file, and no reused or repeated name. An import added to an existing test file counts as a change, since it can shadow a fixture or builtin those tests use. Anything else counts as a change: an edit, a deletion, a rename, a skip marker, a fixture, a helper, a conftest or a data file.
 - **One list for every job.** The plan writes the resolved list as `bases`. The stats parts, shards, push preflight and the proofs mutation take it with `--bases`, so every job grades the same mutants.
 
@@ -1018,7 +1277,7 @@ On the pull request that delivered this, the whole mutation chain finished 184 s
 
 ## Reused and empty pull request runs
 
-On a pull request into dev and on a dispatched Tests run, mutation runs as three jobs of the Tests workflow: `mutation-plan`, then the `mutation-stats` matrix, then the `mutation` shard matrix. All three are needs of Gate Required. Two cases need no mutant work, so the plan job forwards the final report, the preflight's for an exact head reuse and its own grading of an empty set otherwise, and the other two jobs succeed after their runner setup steps. Exact head reuse applies only to pull requests; the empty change set path also applies to dispatched runs.
+On a pull request into dev and on a dispatched Tests run, mutation runs as three jobs of the Tests workflow: `mutation-plan`, then the `mutation-stats` matrix, then the `mutation` shard matrix. All three are needs of Gate Required. Two cases need no mutant work, so the plan job forwards the final report, the preflight's for an exact head reuse and its own grading of an empty set otherwise, `mutation-stats` succeeds after its runner setup steps, and `mutation` is skipped as for a [single shard plan](#single-shard-plans-in-the-statistics-job). Exact head reuse applies only to pull requests; the empty change set path also applies to dispatched runs.
 
 ### When the plan forwards
 
@@ -1132,8 +1391,8 @@ behavior.
 |---|---|---|
 | `mutation-plan` | Ends with `Forward the reused or empty mutation report`; a reused run skips installing dependencies and planning | Reuse lookup and planning; the forward step is skipped |
 | `mutation-stats (0)` | Succeeds after its runner setup and post steps; no `mutation-stats-*` artifact | Collects one stats part per matrix entry and uploads `mutation-stats-<part>` |
-| `mutation (0)` | Succeeds after its runner setup and post steps; uploads nothing | Mutates its shard and uploads `mutation-report-<shard>` |
-| Gate Required | Reads the same three job results | Reads the same three job results |
+| `mutation` | Skipped, since both matrices are `[0]`; uploads nothing | Mutates its shard and uploads `mutation-report-<shard>`, or is skipped when a [single shard plan](#single-shard-plans-in-the-statistics-job) mutates inside `mutation-stats (0)` |
+| Gate Required | Accepts the skipped `mutation` job because both outputs are `[0]` | Reads the same three job results, or the inline form for a single shard plan |
 
 A reused run sets both matrices to the single entry `[0]`. An empty change set gets `[0]` from the plan, since it has no mutants to split.
 

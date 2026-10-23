@@ -99,6 +99,12 @@ class Runtime(Protocol):
     def recover(self, agent: AgentRecord, mode: Recovery, config: Any, text: str) -> Outcome: ...
 
 
+class NamedRuntime(Runtime, Protocol):
+    def find(self, name: str) -> Outcome: ...
+
+    def reap(self, name: str) -> Outcome: ...
+
+
 def foreign(runtime: Runtime, operation: str, agent: AgentRecord) -> Outcome | None:
     if agent.runtime_backend == runtime.backend:
         return None
