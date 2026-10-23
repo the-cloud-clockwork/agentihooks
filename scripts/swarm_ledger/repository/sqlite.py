@@ -6,7 +6,6 @@ import threading
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
-from scripts.events import catalogue
 from scripts.swarm_ledger import request_metrics
 
 from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
@@ -623,8 +622,7 @@ class SQLiteLedgerRepository:
             return True
 
     def import_document(self, slug: str, state: dict, token: str | None = None, replace: bool = False) -> None:
-        """Store an exported or legacy document with its catalogue fields filled, then prove its export equals it."""
-        state = catalogue.filled(state)
+        """Store an exported or legacy document as it is, then prove its export equals it."""
         stored = json.loads(encode(state))
         seeds = stored["_meta"].get("seeds")
         if seeds is not None:

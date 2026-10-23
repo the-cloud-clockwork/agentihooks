@@ -86,15 +86,18 @@ LEGACY = {
 def test_import_fills_every_missing_catalogue_field_so_each_outbox_event_passes_the_catalogue(tmp_path):
     repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
     repo.import_document("ledger", LEGACY)
+    assert repo.export_document("ledger") == LEGACY
+    assert repo.apply_ops("ledger", changes=[DONE])[1] == []
     events = written(repo)
-    assert sorted((item.type, item.key) for item in events) == [
-        ("phase.changed", "p1"),
-        ("task.changed", "t1"),
-        ("task.changed", "t2"),
+    assert [(item.type, item.key, item.version) for item in events] == [
+        ("phase.changed", "p1", 3),
+        ("task.changed", "t1", 3),
+        ("task.changed", "t2", 3),
+        ("phase.changed", "p1", 4),
     ]
-    assert [catalogue.refusal(item) for item in events] == [None, None, None]
-    stored = repo.export_document("ledger")
-    assert stored["tasks"] == [
+    assert [catalogue.refusal(item) for item in events] == [None, None, None, None]
+    assert [item.data for item in events] == [
+        {"id": "p1", "title": "One", "planning": "auto", "description": "", "done": False},
         {
             "id": "t1",
             "title": "first",
@@ -108,31 +111,35 @@ def test_import_fills_every_missing_catalogue_field_so_each_outbox_event_passes_
             "pr_url": "",
             "done": False,
         },
-        {
-            "id": "t2",
-            "title": "",
-            "description": "",
-            "phase": "",
-            "lane": "eng",
-            "state": "open",
-            "claimed_by": "",
-            "issue_url": "",
-            "pr_url": "",
-            "done": False,
-        },
+        {"id": "t2", **catalogue.TASK_DEFAULTS},
+        {**events[3].data, "id": "p1", "title": "One", "planning": "auto", "description": "", "done": True},
     ]
-    assert stored["phases"] == [{"id": "p1", "title": "One", "planning": "auto", "description": "", "done": False}]
-    assert LEGACY["tasks"][1] == {"id": "t2"}
 
 
-def test_filled_keeps_present_values_and_leaves_other_collections_and_non_items_alone():
-    task = {"id": "t1", "title": "kept", "lane": "ci", "state": "done", "done": True, "pr_url": "u"}
-    state = {"tasks": [task, "loose"], "phases": "none", "chat": [{"id": "m1"}]}
-    assert catalogue.filled(state) == {
-        "tasks": [{**catalogue.TASK_DEFAULTS, **task}, "loose"],
-        "phases": "none",
-        "chat": [{"id": "m1"}],
+def test_filled_sets_each_missing_catalogue_field_to_its_default_and_keeps_present_values():
+    task = {"id": "t1", "title": "kept", "lane": "ci", "state": "done", "done": True, "pr_url": "u", "kind": "ops"}
+    assert catalogue.filled("task", task) == {
+        "id": "t1",
+        "title": "kept",
+        "description": "",
+        "phase": "",
+        "lane": "ci",
+        "state": "done",
+        "claimed_by": "",
+        "issue_url": "",
+        "pr_url": "u",
+        "done": True,
+        "kind": "ops",
     }
-    assert catalogue.filled({"title": "Bare"}) == {"title": "Bare"}
+    assert catalogue.filled("phase", {"id": "p1"}) == {"id": "p1", "title": "", "description": "", "done": False}
+    assert task == {
+        "id": "t1",
+        "title": "kept",
+        "lane": "ci",
+        "state": "done",
+        "done": True,
+        "pr_url": "u",
+        "kind": "ops",
+    }
     assert catalogue.TASK_FIELDS == frozenset(("id", *catalogue.TASK_DEFAULTS))
     assert catalogue.PHASE_FIELDS == frozenset(("id", *catalogue.PHASE_DEFAULTS))

@@ -5,7 +5,6 @@ import threading
 
 import pytest
 
-from scripts.events import catalogue
 from scripts.swarm_ledger.repository import sqlite
 from scripts.swarm_ledger.repository.sqlite import (
     Missing,
@@ -34,9 +33,8 @@ def document():
     seed = {
         "title": "Café",
         "tasks": [
-            {**catalogue.TASK_DEFAULTS, "id": "second", "proof": {"output": "verified"}, "comments": []},
+            {"id": "second", "proof": {"output": "verified"}, "comments": []},
             {
-                **catalogue.TASK_DEFAULTS,
                 "id": "first",
                 "unknown": {"a/b": [None, False, 0]},
                 "comments": [
