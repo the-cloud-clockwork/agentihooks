@@ -240,7 +240,7 @@ the seat's current execution. On a master seat this showed as forced launches th
 with `replacement does not match the current execution`, then as
 `master launch refused: startup pending for <name>` in the tick journal.
 
-Each tick, before the master steps, the execution reconcile ends such an orphan. It ends the current execution of
+Each tick, before step 1 of [the minute tick](#the-minute-tick), the execution reconcile ends such an orphan. It ends the current execution of
 a seat when all of these hold:
 
 | Condition | Read from |
@@ -276,7 +276,7 @@ agentihooks swarm <id> status
 
 A refusal that keeps repeating with no `ended orphan execution` line has one of two causes. Either a condition
 above still holds (an agent record with that name, a pane or hook report under it, or a remote hive report that
-still lists it or no report at all), or the launch is refused for another reason the journal names:
+still lists it or no report at all), or the launch is refused for another reason its error names:
 `master launch refused: unfinished lead`, `current execution publication is in flight`,
 `the controller lease is stale`, `execution history kept changing` or
 `canonical agent already belongs to another execution seat`. Read the seat history before acting; never end an
@@ -3453,13 +3453,14 @@ lock, so a minute that fires while a tick still runs starts no second tick; the 
 minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
 again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
 An outage holds the affected idle and delivery decisions until recovery (see
-[Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm:
+[Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm, before step 1 the tick ends any orphan
+execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)), then:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 20 ticks. A stale agent is nudged through its inbox
    (see Stale nudge).
 3. Reopen claimed tasks that have no agent.
-4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)). Before the master steps, the tick ends any orphan execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)).
+4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)).
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
    under its session cap. Claimable tasks are taken highest [queue rank](#queue-rank) first. Sessions go to the
    lanes in rounds: a lane with fewer live agents spawns before one holding more, ties in eng, ci, plan order, so
