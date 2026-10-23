@@ -134,7 +134,7 @@ RUN = [
 def test_mounted_member_clones_repo_and_configures_before_run(tmp_path):
     result, commands, home, repo = startup(tmp_path)
     assert result.returncode == 0, result.stderr
-    assert commands.splitlines() == RUN
+    assert commands.splitlines() == [f"hive join {home / 'hive.env'}", *RUN]
     assert (repo / ".git").is_dir()
     assert (home / "hive.env").stat().st_mode & 0o777 == 0o600
     assert "fixture member credential" not in result.stdout + result.stderr
@@ -211,7 +211,7 @@ def test_the_container_env_carries_brain_clients_to_sshd_sessions(tmp_path, monk
 def test_a_delivered_hive_env_runs_without_waiting(tmp_path):
     result, commands, home, _ = startup(tmp_path, credential="delivered")
     assert result.returncode == 0, result.stderr
-    assert commands.splitlines() == RUN
+    assert commands.splitlines() == [f"hive join {home / 'hive.env'}", *RUN]
     assert (home / "hive.env").read_text() == "fixture delivered hive env\n"
 
 

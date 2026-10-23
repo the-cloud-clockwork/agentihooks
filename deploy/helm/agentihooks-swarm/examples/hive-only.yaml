@@ -1,0 +1,10 @@
+hiveOnly: true
+nats:
+  enabled: false
+workers:
+  replicas: 1
+  image:
+    tag: release
+  credentialSecret:
+    name: hive-invite
+    key: invite

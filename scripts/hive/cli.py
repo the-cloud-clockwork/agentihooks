@@ -46,7 +46,9 @@ def refresh_env(environ: MutableMapping[str, str]) -> str:
             "AGENTIHOOKS_HIVE_URL and AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL must both be set"
         )
     grant = _post(url, server.REFRESH_PATH, {"ledger_credential": credential}, "refresh", environ)
-    auth.write_env(registry.home(environ), url, {**grant, "ledger_credential": credential})
+    from scripts.hive import join
+
+    join.save(registry.home(environ), url, {**grant, "ledger_credential": credential}, saved)
     ledger_ca.place(registry.home(environ), grant.get("ledger_ca"), environ)
     environ["AGENTIHOOKS_HIVE_REDIS_URL"] = grant["redis_url"]
     return grant["id"]
@@ -135,6 +137,7 @@ def _invite(args: argparse.Namespace) -> str:
         args.redis_url,
         args.swarm_url,
         ledger_ca.served(),
+        bus_url=args.bus_url,
     )
     return invite.invite(redis_client(), bao, request, redis_url(os.environ))
 
@@ -233,6 +236,7 @@ def _parser() -> argparse.ArgumentParser:
     invited.add_argument("--url", help="this hive's endpoint as the new hive reaches it, for hive refresh")
     invited.add_argument("--redis-url", help="Redis URL the new hive connects to")
     invited.add_argument("--swarm-url", help="ledger address the new hive reaches")
+    invited.add_argument("--bus-url", help="NATS address the new hive reaches; copied from --like when omitted")
     created = sub.add_parser("create", help="Create a Kubernetes hive from nothing and add it to herdr")
     created.add_argument("--repo", help="GitOps repository of the hive; defaults to antoncore")
     created.add_argument("--base", help="branch the hive pull request merges into; defaults to dev")
@@ -240,6 +244,8 @@ def _parser() -> argparse.ArgumentParser:
     created.add_argument("--node", help="node the hive pod runs on; defaults to worker-001")
     created.add_argument("--timeout", type=int, help="seconds each wait may take; defaults to 1800")
     created.add_argument("--dry-run", action="store_true", help="Print every step and file, and write nothing")
+    joined = sub.add_parser("join", help="Join this host with one invite file from hive invite")
+    joined.add_argument("invite", type=Path, help="private member invite file shared with Kubernetes workers")
     sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its hive endpoint")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
     removed = sub.add_parser(
@@ -370,6 +376,12 @@ def main(argv: list[str]) -> int:
             print(f"added {args.target} to herdr as {label}; its hive member is {grant['id']}")
         elif args.command in ("invite", "create"):
             print((_invite if args.command == "invite" else _create)(args))
+        elif args.command == "join":
+            from scripts.hive import join
+
+            with refresh_lock(os.environ):
+                member_id = join.enroll(args.invite, os.environ)
+            print(f"joined hive member {member_id}; its configuration is in {registry.home() / auth.ENV_FILE}")
         elif args.command == "refresh":
             with refresh_lock(os.environ):
                 member_id = refresh_env(os.environ)
