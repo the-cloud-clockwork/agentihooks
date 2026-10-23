@@ -62,6 +62,20 @@ def test_set_pane_still_finds_an_archived_attempt(store):
     assert not store.redis.hexists(store.key("fixture", ARCHIVE), first.execution_id)
 
 
+@pytest.mark.parametrize("archived", [False, True])
+def test_set_pane_on_a_replaced_run_keeps_its_dropped_agent_out_of_the_live_list(store, archived):
+    first, second, third, other = history(store)
+    if archived:
+        store.execution_registry.archive("fixture")
+    live = store.redis.hgetall(store.key("fixture", "agents"))
+
+    store.execution_registry.set_pane("fixture", first.execution_id, "pane-9")
+
+    assert store.execution("fixture", first.execution_id).pane_id == "pane-9"
+    assert store.redis.hgetall(store.key("fixture", "agents")) == live
+    assert [agent.name for agent in store.agents("fixture")] == [third.name]
+
+
 def test_archive_keeps_every_row_of_a_live_name_and_seat_head_ties(store):
     agent = AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-3@fixture")
     one = store.start_execution("fixture", agent)
