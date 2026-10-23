@@ -499,7 +499,7 @@ changing either requires a reviewed code change.
 | `unreadable` | The attempt lookup failed. Check Actions API access and availability; do not record zero. |
 | `has no job on runner labels` or `match no job in the window` | The requested set has no matching measurable jobs for the run, or no matching jobs in the window. Use the reported known label sets and check the bounds. |
 | Window read error or incomplete snapshot | The command refuses the class result. A run value may already have printed; it does not establish a complete class read. |
-| `0 of 0 runs over ...` | No measurable samples for the selected tier, or no scopes for a bare class. Median and worst are omitted. This is no exposure, not evidence of improvement. |
+| `0 of 0 runs over ...` | No measurable samples for the selected tier or label set, or no scopes for a bare class. A label set can have jobs but no confirmed waits for `ci-runner-wait`, or no unconfirmed jobs for `ci-queue-age-unconfirmed`. Median and worst are omitted. This is no exposure, not evidence of improvement. |
 
 [Pull request 5076](https://github.com/the-cloud-clockwork/agentihooks/pull/5076)
 delivered this measurement path. Its source proof reported 818 of 818 recorded
