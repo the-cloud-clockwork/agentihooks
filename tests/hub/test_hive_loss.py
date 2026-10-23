@@ -31,7 +31,13 @@ def rig():
     policy = QueuePolicy(max_deliver=3, backoff_ms=(10, 20))
     queue = bus.queue("swarm.rig.ready.eng", policy)
 
-    def spoke(hive, name, execution, generation):
+    def spoke(hive, name, execution, generation, ledger_row=lambda: {"claim_generation": 0}):
+        from tests.swarm.test_readiness import doc, snapshot
+        from tests.swarm.test_readiness import task as ready_task
+
+        def view():
+            return snapshot(doc([{**ready_task("task"), **ledger_row()}]))
+
         tasks, runtime = Mock(), Mock()
         task = {"id": "task", "execution_id": execution, "execution_generation": generation, "claim_generation": 3}
         tasks.request.return_value = SpawnRequest(SimpleNamespace(slug="rig"), "eng", name, task)
@@ -39,7 +45,9 @@ def rig():
             "spawn", Status.OK, "local", SimpleNamespace(pane_id=f"{hive}:{name}", harness="claude", account="a")
         )
         config = SpokeConfig(SimpleNamespace(slug="rig"), "eng", hive, policy)
-        return SimpleNamespace(spoke=Spoke(config, bus, runtime, tasks, reading, clock=clock), runtime=runtime)
+        return SimpleNamespace(
+            spoke=Spoke(config, bus, runtime, tasks, reading, clock=clock, view=view), runtime=runtime
+        )
 
     def offer(version):
         queue.offer(
@@ -129,8 +137,8 @@ def test_a_killed_hive_reopens_its_running_task_for_another_claim_at_the_presenc
     assert len(rig.returned) == 1
     assert rig.store.agents("rig") == []
     assert claim_state(rig) == "exited"
-    rig.offer(1)
-    second = rig.spoke("hive-b", "agent-b", "execution-b", 8)
+    rig.offer(3)
+    second = rig.spoke("hive-b", "agent-b", "execution-b", 8, lambda: rig.row)
     assert second.spoke.poll() == "started"
     second.runtime.spawn.assert_called_once()
 
