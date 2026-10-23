@@ -91,3 +91,14 @@ def test_receipts_keyed_by_operation_convert_to_slots_keeping_the_newest(monkeyp
         "0": {"seq": 2, "operation_id": "next", "digest": "d-next", "results": {}},
         "1": {"seq": 1, "operation_id": "new", "digest": "d-new", "results": {"new": True}},
     }
+
+
+def test_slotted_receipts_read_back_in_sorted_key_order_keep_their_slots(monkeypatch):
+    monkeypatch.setattr(receipts, "LIMIT", 11)
+    meta = {}
+    for n in range(11):
+        receipts.store(meta, f"op-{n}", f"d-{n}", {})
+    meta = json.loads(json.dumps(meta, sort_keys=True))
+    before = dict(meta["api_operations"])
+    receipts.store(meta, "op-10", "d-10", {"again": True})
+    assert meta["api_operations"] == {**before, "10": {**before["10"], "results": {"again": True}}}
