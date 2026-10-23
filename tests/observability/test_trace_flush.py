@@ -1090,9 +1090,12 @@ def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tm
         accepted.append(transcript.stat().st_size)
         return True
 
-    assert trace_flush.supervise(
-        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda owner: state["alive"]
-    ) == "owner exited"
+    assert (
+        trace_flush.supervise(
+            "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda owner: state["alive"]
+        )
+        == "owner exited"
+    )
     assert len(clients) > 1
     assert len(accepted) == 3
     assert accepted[0] < accepted[1] < accepted[2] == transcript.stat().st_size
