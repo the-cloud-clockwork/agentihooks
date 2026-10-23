@@ -228,6 +228,8 @@ python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inp
 
 ### What combine decides
 
+Every plan that is not refused ends with the line `<n> queue jobs fit one wave of 30 runners; predicted slowest test step <s>s`; a capped plan prints its warnings before it.
+
 | Plan | Outcome | Log line |
 |---|---|---|
 | At most 30 jobs, slowest under 360 s | Runs as one wave | `<n> queue jobs fit one wave of 30 runners; predicted slowest test step <s>s` |
@@ -242,25 +244,25 @@ The capped path caps the total across Python versions, not each version, so two 
 
 `MAX_SHARDS` must equal the queue pool `maxRunners` less any queue pool job that runs at the same time as the unit stage. When the antoncore scale set changes, change `MAX_SHARDS` in `tests/queue_shards.py` by pull request in the same window. Raising the pool is an antoncore change and stays with the operator. `tests/test_queue_shards.py` pins the cap: `test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool` plants a 40 job plan and expects `40 queue jobs exceed the pool of 30; capped at 30 shards`.
 
-### Checking a run
+### Checking a queue shard run
 
 Read the plan from the `split` job log, then list the unit shards and their runner waits:
 
 ```bash
-run=<merge group run id>
+run="<merge group run id>"
 gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/attempts/1/jobs" --paginate \
   --jq '.jobs[] | select(.name | startswith("unit (")) | [.name, .created_at, .started_at, .completed_at] | @tsv'
 ```
 
-A shard's runner wait is `started_at` minus `created_at`. Count the shards: more than 30, or start times that fall into two groups minutes apart, means a second wave. The Doctor measure reports the queue tier wall time for a finding:
+A shard's runner wait is `started_at` minus `created_at`. Count the shards: more than 30, or start times that fall into two groups minutes apart, means a second wave. The Doctor measure prints the run attempt's queue tier wall time in seconds:
 
 ```bash
-agentihooks doctor rig-grade-swarm measure ci-tier-wall-time/<run id>-<attempt>
+agentihooks doctor rig-grade-swarm measure "ci-tier-wall-time/<run id>-<attempt>"
 ```
 
-It prints `0` once the run's tier wall time is under 15 minutes or the finding has left the detector window.
+It prints `<finding> <seconds>`, for example `ci-tier-wall-time/39269601765-1 573`. A finding fires when the tier wall time passes 15 minutes, 900 s. A run with no recorded tier wall time is refused with `has no tier wall time`.
 
-### Troubleshooting
+### Troubleshooting queue shard sizing
 
 | Symptom | Cause | Fix |
 |---|---|---|
