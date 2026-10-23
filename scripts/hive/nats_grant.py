@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 SIGNER_ENV = "AGENTIHOOKS_NATS_SIGNER"
 HUB_PATH = "agentihooks/hub/"
+TRUSTED_OPERATOR_ENV = "AGENTIHOOKS_NATS_TRUSTED_OPERATOR"
 ACCOUNT_NAME = "SWARM"
 REVOKED = f"{auth.PREFIX}:nats-revoked"
 CLAIMS_UPDATE = "$SYS.REQ.CLAIMS.UPDATE"
@@ -48,10 +49,16 @@ def from_environ(environ: Mapping[str, str]) -> Signer | None:
     path = environ.get(SIGNER_ENV)
     if not path:
         return None
-    if not path.startswith(HUB_PATH):
+    hub, _, name = path.partition(HUB_PATH)
+    if hub or any(part in ("", ".", "..") for part in name.split("/")):
         raise auth.HiveError(
             f"the NATS signer record {path} holds the system account credential, "
             f"so it must live under the OpenBao path {HUB_PATH} that only the hub role reads"
+        )
+    trusted = environ.get(TRUSTED_OPERATOR_ENV)
+    if not trusted:
+        raise auth.HiveError(
+            f"{SIGNER_ENV} is set, so {TRUSTED_OPERATOR_ENV} must name the operator public key the NATS server trusts"
         )
     bao = openbao_kv.from_env(environ)
     if bao is None:
@@ -65,7 +72,7 @@ def from_environ(environ: Mapping[str, str]) -> Signer | None:
             nkey.from_seed(record["account_seed"]),
             record["system_credentials"],
             record["url"],
-            record["trusted_operator"],
+            trusted,
         )
     except (openbao_kv.OpenBaoError, KeyError, nkey.NkeyError) as exc:
         raise auth.HiveError(f"the NATS signer record {path} cannot be used ({exc})") from None

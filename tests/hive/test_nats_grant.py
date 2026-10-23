@@ -205,17 +205,12 @@ def test_claims_refuses_a_malformed_jwt(jwt):
 
 
 def _signer_record(operator, account) -> dict:
-    return {
-        "operator_seed": operator.seed,
-        "account_seed": account.seed,
-        "system_credentials": "c",
-        "url": "u",
-        "trusted_operator": operator.public,
-    }
+    return {"operator_seed": operator.seed, "account_seed": account.seed, "system_credentials": "c", "url": "u"}
 
 
 SIGNER_PATH = "agentihooks/hub/nats-signer"
-BAO_ENV = {"OPENBAO_URL": "https://bao.example", "OPENBAO_TOKEN": "t"}
+TRUSTED = nkey.create(nkey.OPERATOR).public
+BAO_ENV = {"OPENBAO_URL": "https://bao.example", "OPENBAO_TOKEN": "t", nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED}
 
 
 def test_the_signer_comes_from_the_openbao_record_named_by_reference(monkeypatch):
@@ -224,12 +219,47 @@ def test_the_signer_comes_from_the_openbao_record_named_by_reference(monkeypatch
     expected = (openbao_kv.OpenBao("https://bao.example", "t"), SIGNER_PATH)
     monkeypatch.setattr(openbao_kv, "read", lambda bao, path: (record, 1) if (bao, path) == expected else None)
     environ = {nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV}
-    assert nats_grant.from_environ(environ) == nats_grant.Signer(operator, account, "c", "u", operator.public)
+    assert nats_grant.from_environ(environ) == nats_grant.Signer(operator, account, "c", "u", TRUSTED)
     assert nats_grant.from_environ({}) is None
 
 
+def test_the_trusted_operator_never_comes_from_the_signer_record(monkeypatch):
+    operator, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)
+    record = {**_signer_record(operator, account), "trusted_operator": operator.public}
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, path: (record, 1))
+    assert nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV}).trusted_operator == TRUSTED
+
+
+@pytest.mark.parametrize("trusted", [None, ""])
+def test_a_signer_needs_the_trusted_operator_from_the_environment(monkeypatch, trusted):
+    reads = []
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, found: reads.append(found))
+    environ = {nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV, nats_grant.TRUSTED_OPERATOR_ENV: trusted}
+    if trusted is None:
+        del environ[nats_grant.TRUSTED_OPERATOR_ENV]
+    with pytest.raises(auth.HiveError) as refused:
+        nats_grant.from_environ(environ)
+    assert str(refused.value) == (
+        "AGENTIHOOKS_NATS_SIGNER is set, so AGENTIHOOKS_NATS_TRUSTED_OPERATOR must name "
+        "the operator public key the NATS server trusts"
+    )
+    assert reads == []
+
+
 @pytest.mark.parametrize(
-    "path", ["k8s/nats-signer", "agentihooks/nats-signer", "agentihooks/hub", "x/agentihooks/hub/s"]
+    "path",
+    [
+        "k8s/nats-signer",
+        "agentihooks/nats-signer",
+        "agentihooks/hub",
+        "agentihooks/hub/",
+        "x/agentihooks/hub/s",
+        "agentihooks/hub/../../k8s/x",
+        "agentihooks/hub/a/../b",
+        "agentihooks/hub/./s",
+        "agentihooks/hub//s",
+        "agentihooks/hub/s/",
+    ],
 )
 def test_a_signer_record_outside_the_hub_path_is_refused(monkeypatch, path):
     reads = []
@@ -243,9 +273,17 @@ def test_a_signer_record_outside_the_hub_path_is_refused(monkeypatch, path):
     assert reads == []
 
 
+def test_a_nested_signer_record_under_the_hub_path_is_read(monkeypatch):
+    reads = []
+    record = _signer_record(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT))
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, found: (reads.append(found), (record, 1))[1])
+    nats_grant.from_environ({nats_grant.SIGNER_ENV: "agentihooks/hub/a/b", **BAO_ENV})
+    assert reads == ["agentihooks/hub/a/b"]
+
+
 def test_a_signer_record_missing_a_field_is_refused(monkeypatch):
     record = _signer_record(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT))
-    del record["trusted_operator"]
+    del record["system_credentials"]
     monkeypatch.setattr(openbao_kv, "read", lambda bao, path: (record, 1))
     environ = {nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV}
     with pytest.raises(auth.HiveError, match=f"^the NATS signer record {SIGNER_PATH} cannot be used"):
@@ -254,7 +292,7 @@ def test_a_signer_record_missing_a_field_is_refused(monkeypatch):
 
 def test_a_signer_reference_needs_openbao_settings():
     with pytest.raises(auth.HiveError, match="names an OpenBao record"):
-        nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH})
+        nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH, nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED})
 
 
 def test_refresh_writes_the_bus_credential_beside_the_member_env(tmp_path):
