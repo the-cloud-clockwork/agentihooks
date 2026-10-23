@@ -262,12 +262,48 @@ agentihooks doctor rig-grade-swarm measure "ci-tier-wall-time/<run id>-<attempt>
 
 It prints `<finding> <seconds>`, for example `ci-tier-wall-time/39269601765-1 573`. A finding fires when the tier wall time passes 15 minutes, 900 s. A run with no recorded tier wall time is refused with `has no tier wall time`.
 
+### Concurrent merge groups on one pool
+
+The shard cap keeps one merge group inside one wave, but the queue builds up to three entries at a time (`max_entries_to_build` 3 in `.github/rulesets/dev-no-delete.json`) and every group sends its shards to the same `anton-oss-queue` pool. Two groups that reach their unit stage together ask for up to 60 runners, so the later group's shards wait for the earlier group's shards to finish. That wait, not the shard plan, is what pushed merge group tiers over 15 minutes on the night of 19 to 20 October.
+
+Doctor finding `ci-tier-wall-time/39346819295-1` fired on merge group run [39346819295](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39346819295), which took 911 s: 201 s before the unit stage, 599 s in it and 111 s after it. Its 30 shards were created while 27 shards of merge group run 39346300411 were still waiting or running, a demand of 57 on the 30 runners the pool held then. Its shards waited a median 128 s and up to 293 s for a runner.
+
+The cause task read every merge group Tests run from 18:00 to 01:30 UTC through the jobs API: 130 runs, 88 run attempts with unit shards. Each attempt ran 30 unit shards in 80 of 88 cases, plus three other queue jobs (the two `test-count` legs and `split`) that finished before the first shard was created, so no other queue job competed with the unit stage. Attempts are grouped by how many shards of other groups were waiting or running when their own unit stage started:
+
+| Other groups' shards in flight | Attempts | Median shard wait | Worst shard wait, median and max | Unit stage median | Green first attempts over 15 minutes |
+|---|---|---|---|---|---|
+| Under 10, alone | 24 | 18 s | 119 s, 224 s | 373 s | 2 of 17 |
+| 10 to 40, one other group | 42 | 124 s | 266 s, 471 s | 480 s | 9 of 31 |
+| Over 40, two or more groups | 22 | 331 s | 518 s, 713 s | 702 s | 10 of 15 |
+
+Two other ways of counting a group as concurrent, the peak of other shards during its own wait or any other queue job overlapping that wait, move attempts between rows but keep the same rise: the alone median shard wait is 18 s under all three, and two or more groups put 11 of 18 and 14 of 25 green first attempts over 15 minutes.
+
+Across the night 27 to 30 queue runners were busy 57 percent of the time, and 67 percent of all queue job wait minutes (4181 of 6227) passed with 28 or more busy. Demand, waiting plus running, was over 30 for 63 percent of the time, over 60 for 14 percent and peaked at 90. On an idle pool a shard was picked up in a median 19 s. The queue built 17.4 groups an hour and merged 8.4; 64 of the 130 runs were cancelled and used 2333 of the 10058 queue runner minutes. With a median green tier of 788 s for a group alone, one group at a time would serve about 4.6 groups an hour.
+
+The cause is recorded in issue [5037](https://github.com/the-cloud-clockwork/agentihooks/issues/5037). The task was read only: it changed neither the pool nor `MAX_SHARDS`, and wrote the numbers above onto the operator's ledger follow up. The remedy among a bigger pool, one group building at a time, or a shard plan sized to the runners actually free stays with the operator.
+
+To measure overlap for a window, list the merge group runs and then each run's unit shards with their creation and start times:
+
+```bash
+since="2026-10-19T18:00:00Z"
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs?event=merge_group&created=>=$since&per_page=100" --paginate \
+  --jq '.workflow_runs[] | select(.name == "Tests") | [.id, .run_attempt, .created_at, .conclusion] | @tsv'
+run="<merge group run id>"
+attempt="<attempt>"
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --paginate \
+  --jq '.jobs[] | select(.name | startswith("unit (")) | [.name, .created_at, .started_at, .completed_at] | @tsv'
+```
+
+A group's other shards in flight at its unit start is the number of other groups' unit shards whose `created_at` is before that group's first shard `created_at` and whose `completed_at` is after it. A group whose shards wait over a minute with that number over 10 is sharing the pool with another group; a wait with that number under 10 does not come from another merge group.
+
+The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`, while `MAX_SHARDS` in `tests/queue_shards.py` is still 30. Compare the two before reading a shard wait against the numbers above.
+
 ### Troubleshooting queue shard sizing
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Queue plan exceeds 360s of the step timeout` | 30 shards cannot bring the slowest shard under half the step timeout, often one slow test or a slow serial group | Split or speed up the slow test file; the planner log names the predicted seconds |
-| Shards wait minutes for a runner while each group plans 30 or fewer | Several merge groups build at once and share the 30 runners; the queue builds up to three entries at a time | Read the runner waits of every group running in the same minutes before changing the plan |
+| Shards wait minutes for a runner while each group plans 30 or fewer | Several merge groups build at once and share the 30 runners; the queue builds up to three entries at a time | Read the runner waits of every group running in the same minutes before changing the plan; see [Concurrent merge groups on one pool](#concurrent-merge-groups-on-one-pool) |
 | More than 30 `unit` jobs in one run | `MAX_SHARDS` no longer matches the pool, or a second Python version was added without the capped path | Compare `MAX_SHARDS` with the antoncore scale set `maxRunners` |
 
 ### Delivery evidence
