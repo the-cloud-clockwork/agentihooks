@@ -61,7 +61,7 @@ def test_a_window_close_failure_is_logged(master, monkeypatch):
     logged = Mock()
     monkeypatch.setattr(master_coding, "close", close)
     monkeypatch.setattr(hook_manager, "log", logged)
-    hook_manager._close_master_coding(SID)
+    hook_manager._close_master_coding(SID, "startup")
     close.assert_called_once_with(SID)
     logged.assert_called_once_with("master coding window close failed", {"error": "close failed"})
 

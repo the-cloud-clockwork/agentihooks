@@ -309,7 +309,9 @@ def notify_on_error(transcript_path: str) -> None:
 # =============================================================================
 
 
-def _close_master_coding(session_id: str) -> None:
+def _close_master_coding(session_id: str, source: str | None) -> None:
+    if source == "compact":
+        return
     try:
         from hooks.context import master_coding
 
@@ -342,8 +344,7 @@ def on_session_start(payload: dict) -> None:
     log("Session started", {"session_id": session_id})
     if payload.get("source") == "compact":
         _inject_refocus(session_id, "compact")
-    else:
-        _close_master_coding(session_id)
+    _close_master_coding(session_id, payload.get("source"))
     from hooks.lifecycle.guard import session_event
 
     session_event()
