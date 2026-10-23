@@ -34,6 +34,15 @@ def running(store, seat, hive):
     return replace(agent, hive=hive)
 
 
+def local(store, seat, **fields):
+    from scripts.swarm.store import AgentRecord
+
+    agent = AgentRecord(store.next_name("sw", "eng"), "eng", seat, seat=f"{seat}@sw", **fields)
+    agent = store.start_execution("sw", agent)
+    store.put_agent("sw", agent)
+    return agent
+
+
 def checks(**misses):
     from scripts.hive import join_report
 
@@ -120,14 +129,11 @@ def listed_by_hive(out):
 def test_hive_list_shows_the_local_agents_swarm_status_places_on_this_hive(store, capsys, monkeypatch):
     from scripts.hive import cli
     from scripts.swarm import commands, runtime, status
-    from scripts.swarm.store import AgentRecord
 
     monkeypatch.setattr(commands, "hive_id", lambda: "worker")
-    claude = [AgentRecord(store.next_name("sw", "eng"), "eng", f"t{n}") for n in range(2)]
-    codex = replace(AgentRecord(store.next_name("sw", "eng"), "eng", "t2"), hive="worker", runtime_target={"pid": 1})
-    stopped = AgentRecord(store.next_name("sw", "eng"), "eng", "t3")
-    for agent in (*claude, codex, stopped):
-        store.put_agent("sw", agent)
+    claude = [local(store, f"eng-{n}") for n in range(2)]
+    codex = local(store, "eng-2", hive="worker", runtime_target={"pid": 1})
+    local(store, "eng-3")
     live = Herdr({agent.name for agent in (*claude, codex)})
     monkeypatch.setattr(runtime, "HerdrRuntime", lambda: live)
     cli._list()
@@ -136,3 +142,21 @@ def test_hive_list_shows_the_local_agents_swarm_status_places_on_this_hive(store
     names = sorted(agent.name for agent in (*claude, codex))
     assert placed == dict.fromkeys(names, "worker")
     assert listed == {"worker": names}
+
+
+def test_hive_list_lists_each_live_local_agent_once_and_only_on_its_own_hive(store, capsys, monkeypatch):
+    from scripts.hive import cli, join_report
+    from scripts.swarm import commands, runtime, status
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "worker")
+    plain = local(store, "eng-0")
+    finished = local(store, "eng-1", state="finished")
+    remote = local(store, "eng-2", runtime_target={"host_id": "old"})
+    pod = local(store, "eng-3", runtime_backend="kubernetes")
+    reported = running(store, "eng-9", "worker")
+    join_report.start(store.redis, "sw", reported, "session", checks(), {}, 1000)
+    live = Herdr({agent.name for agent in (plain, finished, remote, pod, reported)})
+    monkeypatch.setattr(runtime, "HerdrRuntime", lambda: live)
+    cli._list()
+    assert listed_by_hive(capsys.readouterr().out) == {"worker": [reported.name, plain.name]}
+    assert [status.agent_hive(agent) for agent in (plain, remote, pod)] == ["worker", "old", ""]
