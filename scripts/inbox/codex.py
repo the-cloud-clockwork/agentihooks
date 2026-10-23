@@ -209,7 +209,7 @@ class Pump:
         self.leased = False
 
     def run(self, stop: Callable[[], bool]) -> str:
-        starting, reconnecting, resyncing = True, False, False
+        resume = self.start
         backoff, pause = self.timing.backoff_s, 0.0
         try:
             while True:
@@ -217,15 +217,9 @@ class Pump:
                     if pause:
                         self._pause(pause)
                         pause = 0.0
-                    if starting:
-                        self.start()
-                        starting = False
-                    elif reconnecting:
-                        self._reconnect()
-                        reconnecting = False
-                    elif resyncing:
-                        self._resync()
-                        resyncing = False
+                    if resume is not None:
+                        resume()
+                        resume = None
                     if stop():
                         return STOPPED
                     self.step()
@@ -237,9 +231,8 @@ class Pump:
                     self.log(CONTENDED_LOG.format(self.binding.recipient, failure))
                     if stop():
                         return STOPPED
-                    pause = backoff
-                    backoff = min(backoff * 2, self.timing.backoff_max_s)
-                    resyncing = not (starting or reconnecting)
+                    pause, backoff = backoff, min(backoff * 2, self.timing.backoff_max_s)
+                    resume = resume or self._resync
                 except DispatchError as failure:
                     self._degrade(failure)
                     return DEGRADED
@@ -247,9 +240,8 @@ class Pump:
                     self._degrade(failure)
                     if stop():
                         return STOPPED
-                    pause = backoff
-                    backoff = min(backoff * 2, self.timing.backoff_max_s)
-                    starting, reconnecting = False, True
+                    pause, backoff = backoff, min(backoff * 2, self.timing.backoff_max_s)
+                    resume = self._reconnect
         finally:
             if self.subscription is not None:
                 self.subscription.close()
