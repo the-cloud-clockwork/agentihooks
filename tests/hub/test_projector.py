@@ -51,7 +51,7 @@ def test_reactor_policy_carries_a_ten_minute_inactive_threshold_with_the_reactor
 def test_a_rollout_leaves_only_the_live_projector_durable_on_the_bus(monkeypatch, tmp_path):
     from tests.events import nats_server
 
-    monkeypatch.setattr(projector, "POLICY", replace(projector.POLICY, inactive_ms=500))
+    monkeypatch.setattr(projector, "POLICY", replace(projector.POLICY, inactive_ms=2000))
     with nats_server.running(tmp_path / "jetstream") as url:
         config = BusConfig(backend="nats", url=url)
         old = projector.Projector(Mock(), Hub(), "pod-a-8765", config)
