@@ -63,6 +63,7 @@ def ddl(script: str) -> list:
     """The SQLite schema as Postgres statements: 64 bit integers and byte ordered text, as SQLite compares them."""
     script = re.sub(r"\bINTEGER\b", "BIGINT", script)
     script = re.sub(r"\bTEXT\b", 'TEXT COLLATE "C"', script)
+    script = re.sub(r"\bBLOB\b", "BYTEA", script)
     return [statement.strip() for statement in script.split(";") if statement.strip()]
 
 

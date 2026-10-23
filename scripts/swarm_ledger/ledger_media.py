@@ -73,18 +73,14 @@ def inspect(data):
 def write_file(path: Path, data: bytes) -> None:
     from scripts.swarm_ledger.storage_migration.hosted import media_mutation
 
+    slug = path.parent.name.removesuffix(".media")
     with (
         request_metrics.locked(core.LOCK),
-        media_mutation(path.parent.parent, path.parent.name.removesuffix(".media")) as writable,
+        media_mutation(path.parent.parent, slug) as writable,
     ):
         if not writable:
             raise Refused(409, "ledger moved to hosted service")
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".part")
-            tmp.write_bytes(data)
-            tmp.replace(path)
-        path.touch()
+        files.build(path.parent.parent).put(slug, path.name, data)
 
 
 def store(slug, data):
@@ -100,14 +96,23 @@ def store(slug, data):
 def path_of(slug, media_id):
     if not isinstance(media_id, str) or not ID_RE.match(media_id):
         raise ValueError("not a media id")
-    path = folder(slug) / media_id
-    if not path.is_file():
+    path = store_files().local(slug, media_id)
+    if path is None:
         raise ValueError(f"no stored image {media_id}")
     return path
 
 
+def load(slug, media_id):
+    if not isinstance(media_id, str) or not ID_RE.match(media_id):
+        raise ValueError("not a media id")
+    data = store_files().get(slug, media_id)
+    if data is None:
+        raise ValueError(f"no stored image {media_id}")
+    return data
+
+
 def entry(slug, media_id):
-    data = path_of(slug, media_id).read_bytes()
+    data = load(slug, media_id)
     kind, width, height = inspect(data)
     return {"id": media_id, "type": kind, "size": len(data), "width": width, "height": height}
 
@@ -144,7 +149,7 @@ def purge(slug):
         raise ValueError(f"refusing to purge media for {slug!r}: not a ledger slug")
     with media_mutation(core.LEDGER_DIR, slug) as writable:
         if writable:
-            shutil.rmtree(folder(slug), ignore_errors=True)
+            store_files().purge(slug)
 
 
 def sweep(slug: str, used: set[str], now: int) -> None:
@@ -155,6 +160,7 @@ def sweep(slug: str, used: set[str], now: int) -> None:
     with media_mutation(core.LEDGER_DIR, slug) as writable:
         if not writable:
             return
-        for path in folder(slug).glob("*"):
-            if path.is_file() and path.name not in used and path.stat().st_mtime < cutoff:
-                path.unlink()
+        store = store_files()
+        for name, touched in store.touched(slug).items():
+            if name not in used and touched < cutoff:
+                store.drop(slug, name)
