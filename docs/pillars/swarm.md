@@ -234,8 +234,9 @@ per agent, and the ledger page marks the agent row promoted.
 #### Orphan executions on a seat
 
 Every seat has one current execution in the swarm's execution registry. A new launch on a seat names the
-execution it replaces, and the registry accepts it only when that matches the current one. An execution whose
-agent record is gone but which was never marked ended keeps the seat: every launch on it is refused with
+execution it replaces, and the registry accepts it only when that matches the current one. Hive admission names
+the occupant as the replaced execution only once it has ended, so an execution whose agent record is gone but
+which was never marked ended keeps the seat: launches on it are refused with
 `replacement does not match the current execution`, and a master launch then reads as
 `master launch refused: startup pending for <name>` in the tick journal, so the forced launches of an outage
 never bind.
@@ -248,20 +249,23 @@ a seat when all of these hold:
 | Its state is `working`, or `starting` with its start at least the master startup window (two minutes) ago | The execution record |
 | The swarm has no agent record under its name | The agent records |
 | No live pane carries its name and its hook has not reported | The runtime |
-| Its process is gone: a remote hive's latest report omits the name, a non local backend observes it dead, or, for a local execution, the two checks above suffice | The hive report or the runtime |
+| On a remote hive, a latest report exists and omits the name; with no report the seat is kept | The hive report |
+| On a non-local backend, the runtime observes it dead | The runtime |
 
-The ending is atomic: it rereads the seat under a Redis watch on the executions and agent records, repeats the state
-and window check, and writes the same record with state `ended`. When the seat changed, an agent record appeared,
-or a write raced it, the tick leaves the execution alone and tries again on the next tick. A `starting` execution
-inside its startup window, one with a live pane or a reported hook, and one a remote hive still lists are kept.
-Each ended orphan is a tick journal line:
+The ending is atomic: under a Redis watch on the executions and agent records it requires the seat's current
+record to equal the one the reconcile read, repeats the state and window check, and writes that record with state
+`ended`. When the record changed, an agent record appeared, or a write raced it, the tick leaves the execution
+alone and tries again on the next tick. A `starting` execution inside its startup window, one with a live pane or
+a reported hook, and one a remote hive still lists are kept. Each ended orphan is a tick journal line:
 
 ```text
 ended orphan execution <execution id> for <agent name>
 ```
 
 With the occupant ended, hive admission names it as the execution the next launch replaces, so the forced master
-launch binds. The window applies to every seat, engineer seats included. To check a stuck seat:
+launch binds. The startup window applies to a `starting` execution on any seat, engineer seats included, and
+a `starting` orphan inside it blocks launches on its seat until it expires; a `working` orphan is ended with no
+window. To check a stuck seat:
 
 ```bash
 # Launch refusals and orphan endings for the master in the last hour
@@ -271,9 +275,13 @@ journalctl --user -t agentihooks-swarm --since "1 hour ago" \
 agentihooks swarm <id> status
 ```
 
-A refusal that keeps repeating with no `ended orphan execution` line means one of the conditions above still
-holds: an agent record with that name, a pane or hook report under it, or a remote hive report that still lists
-it. Read the seat history before acting; never end an execution by writing to Redis by hand.
+A refusal that keeps repeating with no `ended orphan execution` line has one of two causes. Either a condition
+above still holds (an agent record with that name, a pane or hook report under it, or a remote hive report that
+still lists it or no report at all), or the launch is refused for another reason the journal names:
+`master launch refused: unfinished lead`, `current execution publication is in flight`,
+`the controller lease is stale`, `execution history kept changing` or
+`canonical agent already belongs to another execution seat`. Read the seat history before acting; never end an
+execution by writing to Redis by hand.
 
 ### Several master seats
 
@@ -3452,7 +3460,7 @@ An outage holds the affected idle and delivery decisions until recovery (see
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 20 ticks. A stale agent is nudged through its inbox
    (see Stale nudge).
 3. Reopen claimed tasks that have no agent.
-4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)). Before the master steps, the tick ends any orphan execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)).
+4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)). Before step 1, the tick ends any orphan execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)).
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
    under its session cap. Claimable tasks are taken highest [queue rank](#queue-rank) first. Sessions go to the
    lanes in rounds: a lane with fewer live agents spawns before one holding more, ties in eng, ci, plan order, so
