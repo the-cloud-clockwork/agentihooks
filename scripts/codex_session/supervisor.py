@@ -255,9 +255,9 @@ def opening_end(connection: protocol.Connection, events: list[dict], deadline: f
 
 
 def open_turn(connection: protocol.Connection, thread_id: str, launch: Launch, deps: Deps) -> str:
-    events: list[dict] = []
-    connection.listener = events.append
     for _ in range(OPENING_ATTEMPTS):
+        events: list[dict] = []
+        connection.listener = events.append
         turn_id = protocol.start_turn(connection, thread_id, launch.opening)
         turn = opening_end(connection, events, deps.clock() + OPENING_WATCH_S, deps.clock)
         error = str((turn.get("error") or {}).get("message"))
