@@ -106,6 +106,7 @@ def test_host_stops_the_scheduled_interval_before_closing_the_bus(monkeypatch, c
     opening = Mock(return_value=bus)
     monkeypatch.setattr(factory, "open_bus", opening)
     monkeypatch.setattr(outbox_host.outbox, "relay", Mock())
+    monkeypatch.setattr(outbox_host.outbox, "prune", Mock())
     scheduled.close.side_effect = ValueError("stop") if close_error else None
     repository = object()
     with pytest.raises(ValueError, match="stop" if close_error else "serving"):
