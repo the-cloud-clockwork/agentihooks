@@ -373,7 +373,7 @@ def _unmergeable(run, row, found, pull):
         found["on"] = {"kind": RECOVER, "head": head}
         found["retry_at"], found["recoveries"] = run.now_ms + BACKOFF_MS * 2**tries, tries
         save(run.store, run.slug, task_id, found)
-        run.ledger.comment(run.slug, task_id, DEQUEUED.format(url=url), by="swarm")
+        run.ledger.notice(run.slug, task_id, DEQUEUED.format(url=url))
         return [f"dequeued {url} for task {task_id}: {TRANSIENT}"]
     return _reopen(run, row, found, fresh.merge_problem)
 
@@ -401,7 +401,7 @@ def _recover(run, row, found):
     found["on"], found["queued_at"] = {"kind": "merge", "target": url}, run.now_ms
     found["recoveries"] += 1
     save(run.store, run.slug, task_id, found)
-    run.ledger.comment(run.slug, task_id, RECOVERED.format(url=url), by="swarm")
+    run.ledger.notice(run.slug, task_id, RECOVERED.format(url=url))
     return [f"queued {url} for task {task_id}"]
 
 
