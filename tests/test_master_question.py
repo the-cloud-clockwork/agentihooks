@@ -82,6 +82,21 @@ def test_a_repeated_question_reuses_its_ledger_operation_id(master):
     assert first[3] == second[3] and len(first[3]) == 32
 
 
+def test_a_question_asked_again_after_the_operator_returned_gets_a_new_operation_id(master):
+    typed_at(NOW - 2 * master_question.WINDOW_SEC)
+    master_question.move(ask(FOCUS), master, now=NOW)
+    typed_at(NOW)
+    master_question.move(ask(FOCUS), master, now=NOW + master_question.WINDOW_SEC)
+    first, second = master.questions
+    assert first[3] != second[3]
+
+
+def test_operator_on_with_no_typing_for_ten_minutes_still_moves_the_question(master):
+    operator_mode.observe(SID, "operator on", typed=True, now=NOW - master_question.WINDOW_SEC)
+    assert master_question.move(ask(FOCUS), master, now=NOW)
+    assert len(master.questions) == 1
+
+
 def test_a_question_without_options_is_moved_as_asked(master):
     master_question.move(ask({"question": "Ship it?"}), master, now=NOW)
     assert master.questions[0][1] == "Ship it?"

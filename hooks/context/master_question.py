@@ -34,7 +34,7 @@ def move(payload: dict, ledger=None, environ=None, now: float | None = None) -> 
         ledger = LedgerClient()
     for question in questions:
         text = _text(question)
-        ledger.question(slug, text, name, hashlib.sha256(f"{session}:{text}".encode()).hexdigest()[:32])
+        ledger.question(slug, text, name, hashlib.sha256(f"{session}:{typed}:{text}".encode()).hexdigest()[:32])
     return MOVED.format(asked=" ".join(q["question"] for q in questions))
 
 
