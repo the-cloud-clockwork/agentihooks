@@ -554,7 +554,7 @@ The same file also holds `test_a_run_whose_last_test_crashes_its_worker_ends`, f
 Run the probe test on a branch through the Proofs workflow; tests do not run on this machine:
 
 ```bash
-gh workflow run proofs.yml --ref "<branch>" -f proof=tests -f tests="tests/test_xdist_coverage_crash.py"
+gh workflow run proofs.yml --ref "<branch>" -f proof=tests -f tests='tests/test_xdist_coverage_crash.py'
 ```
 
 ### Measured result
