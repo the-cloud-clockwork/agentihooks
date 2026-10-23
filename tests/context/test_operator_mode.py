@@ -59,10 +59,12 @@ def test_a_prompt_that_was_not_typed_never_switches_the_mode():
     assert operator_mode.present("s1", SWARM, now=102)
 
 
-def test_only_a_prompt_that_opens_with_the_words_switches():
+def test_presence_commands_match_sentences_with_command_boundaries():
     assert operator_mode.switch("Operator  On.") == "on"
-    assert operator_mode.switch("operator off, then rebase") == "off"
-    for text in ('"operator on" was typed in the master pane', "the operator on call said ship", "operator one", ""):
+    assert operator_mode.switch("Please, operator off, then rebase") == "off"
+    assert operator_mode.switch("operator on, then operator off") == "off"
+    assert operator_mode.switch("operator off, then operator on") == "off"
+    for text in ("operator one", "preoperator on", "pre-operator on", "operator on-call", ""):
         assert operator_mode.switch(text) == ""
 
 
