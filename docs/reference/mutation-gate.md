@@ -210,6 +210,109 @@ alone do not establish equal mutant grading or a shorter job wall time.
 | A helper caller disappears | Check that its recorded context executes the changed line or fallback unit and the test file still exists; preserve the helper inclusion rule |
 | Statistics time differs from the sum of selected durations | Collection, instrumentation, setup, runner contention and cache reuse also affect wall time; compare the same source, record and duration corpus |
 
+### Line contexts in the dependency manifest
+
+The line rule depends on the dev dependency manifest that the full-scope Tests
+run records. Python 3.12 unit shards run with `--cov-context=test`; the
+`Build the test dependency manifest` step combines their coverage and runs
+`python -m tests.dep_manifest build`. The `dep-manifest` artifact holds
+`manifest.json`, which is also cached under `dep-manifest-<sha>` when Gate
+Required passes. Mutation planning reads that record through the
+`--repository` lookup described above.
+
+| Manifest field | Content |
+|---|---|
+| `version` | `2` |
+| `commit` | The dev commit the coverage was recorded on; drift checks compare the pull request against it |
+| `units` | Every recorded function, method or module unit, as `path::Qualified.name` or `path::<module>` |
+| `tests` | Per test: `units` (indexes into `units`), data `files` it opened, and `escapes` for escape-only child processes |
+| `lines` | Per test: each measured source path and the sorted line numbers that test executed |
+
+Test ids come from the coverage context with its phase suffix after the last
+`|` removed, so setup, call and teardown lines of one test merge into one
+entry. A test executes a line when coverage recorded that line inside the
+test's context; a line reached only during an import in another test's context
+belongs to that other test. A `tests` entry with no `lines` entry is selected
+whenever planning considers it, never dropped.
+
+Download the record a dev run produced and count the tests that execute each
+line of one function. Replace `DEV_RUN_ID` and `EVIDENCE_DIR`:
+
+```bash
+gh run download DEV_RUN_ID --name dep-manifest --dir EVIDENCE_DIR/manifest
+
+jq -r '[.version, .commit, (.tests | length), (.lines | length)] | @tsv' \
+  EVIDENCE_DIR/manifest/manifest.json
+
+jq -r --arg path scripts/swarm/health/verdicts.py \
+  '[.lines[] | .[$path] // [] | .[]] | group_by(.) | map("\(.[0]) \(length)") | .[]' \
+  EVIDENCE_DIR/manifest/manifest.json
+```
+
+List the tests that execute one line, and the tests that have no line context
+and therefore keep their whole file:
+
+```bash
+jq -r --arg path scripts/swarm/health/verdicts.py --argjson line 27 \
+  '.lines | to_entries[] | select(.value[$path] // [] | index($line)) | .key' \
+  EVIDENCE_DIR/manifest/manifest.json
+
+jq -r '[.tests | keys[]] - [.lines | keys[]] | .[]' \
+  EVIDENCE_DIR/manifest/manifest.json
+```
+
+Dev run [39910141570](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39910141570)
+on `cbf887e` recorded 42,974 tests, 42,972 of them with line contexts. In
+`VerdictStore.visible`, 935 tests executed the method's first body line, 194
+reached the loop body, and one,
+`tests/doctor/test_loop.py::test_a_legacy_verdict_adopts_evidence_identity_without_returning_on_new_wording`,
+executed line 27. Under the function rule a change to line 27 selects all 935
+tests; under the line rule it selects that one test, plus any helper caller,
+fallback unit or whole file the conservative rules keep. The two tests without
+line contexts were Postgres ledger tests and keep their whole files.
+
+| Symptom | Check |
+|---|---|
+| `jq` reports `null` for `lines` | The record predates line contexts; selection falls back to function units for every test |
+| A test listed for the line is missing from the selection | Check that its file still exists and is named `test_*.py`; recorded files that are gone or renamed are not added as candidates |
+| A test that never reaches the changed line is selected | It has no line context, it opened a changed data file, or the line falls in an insertion, deletion, import-time change or replaced block the mapping cannot place |
+| The line numbers in `lines` differ from the pull request's | The record is from `commit`; planning maps the pull request's lines back through the diff from that commit before comparing |
+
+### Paired selection proof
+
+The `Mutation line selection proof` workflow
+(`mutation-line-selection-proof.yml`) grades one sample change twice to show
+the narrower selection gives the same verdicts. It checks out the
+[pull request 4473](https://github.com/the-cloud-clockwork/agentihooks/pull/4473)
+merge commit `328ddd3` as the sample, copies the dispatched branch's
+`scripts/ci_mutation`, `tests/dep_manifest.py` and
+`tests/mutation_line_selection_proof.py` over it, and runs
+`python -m tests.mutation_line_selection_proof` in four modes:
+
+| Mode | Result |
+|---|---|
+| `prepare` | Runs the tests import selection picks for the sample's changes with test contexts, builds a manifest, and writes `selection.json` with the function-rule (`before`, the manifest without `lines`) and line-rule (`after`) selections and their stored test seconds. Fails unless `after` costs fewer seconds |
+| `before` | Mutates `scripts/swarm/health/verdicts.py` against the `before` selection and writes `before-verdicts.json` |
+| `after` | The same against the `after` selection; writes `after-verdicts.json` |
+| `verify` | Fails on any mutant whose verdict differs and prints `Identical verdicts for N sample pull request mutants` |
+
+Dispatch it on a branch that carries a selection change and read the result:
+
+```bash
+gh workflow run mutation-line-selection-proof.yml --ref BRANCH
+
+gh run download RUN_ID --name mutation-line-selection-proof --dir EVIDENCE_DIR/line-proof
+
+jq '{before: .before.seconds, after: .after.seconds,
+     before_entries: (.before.tests | length), after_entries: (.after.tests | length)}' \
+  EVIDENCE_DIR/line-proof/selection.json
+```
+
+The artifact also holds both verdict files and each grading `run.log`, and is
+retained for seven days. Both sides share the sample's source, tests, contexts
+and durations, so the comparison isolates the selection rule; it does not
+measure statistics job wall time on live pull requests.
+
 ### Delivery and measurement limits
 
 [Pull request 4710](https://github.com/the-cloud-clockwork/agentihooks/pull/4710)
@@ -224,7 +327,15 @@ after; 788 recorded tests reached `VerdictStore.visible`. The source request's
 figures, not the delivered replay's result.
 
 The later [pull request 4809](https://github.com/the-cloud-clockwork/agentihooks/pull/4809)
-delivered the current line coverage selection. Its
+delivered the current line coverage selection, closing
+[issue 4792](https://github.com/the-cloud-clockwork/agentihooks/issues/4792).
+Red Proofs runs
+[39251990627](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39251990627)
+(recording and selection regressions) and
+[39253762512](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39253762512)
+(fallback regressions) failed on the old selection; green Proofs run
+[39258209332](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39258209332)
+passed the 86 regression checks. Its
 [paired proof 39258204668](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39258204668)
 reported 530 entries / 373.63 stored test seconds before and 115 entries /
 20.33 seconds after, with all 38 mutation verdicts equal. Both sides used the
