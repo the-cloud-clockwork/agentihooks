@@ -314,14 +314,20 @@ def test_nats_requests_wait_their_timeout_and_reach_one_replica_of_a_queue_group
     assert hub.request("swarm.rig.slow", b"again", 5000) == b"again"
     assert calls == ["swarm.rig.slow", "swarm.rig.slow"]
 
+
+def test_a_nats_request_passes_its_timeout_and_maps_a_nats_timeout():
+    import asyncio
+    from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
     from nats.errors import TimeoutError as NatsTimeout
 
+    bus = object.__new__(nats.NatsBus)
     silent = AsyncMock(side_effect=NatsTimeout)
-    hub._nc.request = silent
+    bus._loop = SimpleNamespace(run=asyncio.run)
+    bus._nc = SimpleNamespace(request=silent)
     with pytest.raises(TimeoutError, match="^no responders for 'swarm.rig.silent'$"):
-        hub.request("swarm.rig.silent", b"", 300)
+        bus.request("swarm.rig.silent", b"", 300)
     silent.assert_awaited_once_with("swarm.rig.silent", b"", timeout=0.3)
 
 
