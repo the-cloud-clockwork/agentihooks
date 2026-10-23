@@ -1,0 +1,152 @@
+from dataclasses import replace
+
+import pytest
+
+from scripts.events import nats
+from scripts.events.bus import StateConflict
+from scripts.events.config import BusConfig, QueuePolicy
+from scripts.events.envelope import Envelope
+from scripts.events.subjects import subject
+from scripts.hive import nats_grant
+from tests.hive.test_nats_grant import _user_creds, _violations
+from tests.hive.test_nats_grant import signer as signer
+
+pytestmark = pytest.mark.unit
+POLICY = QueuePolicy(max_deliver=1, ack_wait_ms=100)
+
+
+def event(swarm="rig", identity="own"):
+    return Envelope(identity, "execution.started", swarm, "execution", "work", 1, 0, "member", {})
+
+
+@pytest.fixture
+def hub(signer):
+    bus = nats.open_bus(
+        BusConfig(
+            backend="nats", url=signer.url, scoped=True, credentials=_user_creds(signer.account, "hub"), queue=POLICY
+        )
+    )
+    try:
+        yield bus
+    finally:
+        bus.close()
+
+
+def member(signer, swarm="rig"):
+    configured = replace(signer, member_swarms={"m1": (swarm,)})
+    return nats.open_bus(
+        BusConfig(
+            backend="nats",
+            url=signer.url,
+            scoped=True,
+            provision=False,
+            credentials=nats_grant.mint(configured, "m1"),
+            queue=POLICY,
+        )
+    )
+
+
+def test_member_scoped_bus_logs_queues_and_keeps_state(hub, signer):
+    own = hub.for_swarm("rig")
+    assert hub.for_swarm("rig") is own
+    own.queue("eng", POLICY)
+    own.events.consumer("member-events", "swarm.rig.>")
+    own.dead.consumer("member-dead", "dead.>")
+    client = member(signer)
+    try:
+        scoped = client.for_swarm("rig")
+        queue = scoped.queue("swarm.rig.ready.eng", POLICY)
+        work = event()
+        assert queue.offer(work)
+        delivery = queue.take(1000)
+        assert delivery.event == work
+        delivery.ack()
+        assert scoped.events.publish(subject("rig", "execution", "started"), work)
+        [logged] = scoped.events.consumer("member-events", "swarm.rig.>").fetch(1, 1000)
+        assert logged.event == work
+        logged.ack()
+        state = scoped.state("spoke-work")
+        revision = state.create("key", b"first")
+        updated = state.update("key", b"second", revision)
+        assert state.get("key").value == b"second"
+        assert state.get("key").revision == updated
+        assert [(entry.value, entry.revision) for entry in state.watch("key")] == [
+            (b"first", revision),
+            (b"second", updated),
+        ]
+        with pytest.raises(StateConflict):
+            state.update("key", b"stale", revision)
+        assert scoped.dead.publish("dead.rig", work)
+        [dead] = scoped.dead.consumer("member-dead", "dead.>").fetch(1, 1000)
+        assert dead.event == work
+        dead.ack()
+    finally:
+        client.close()
+
+
+def test_scoped_queue_attempt_cap_moves_work_to_its_own_dead_stream(hub, signer):
+    own = hub.for_swarm("rig")
+    own.queue("eng", POLICY).offer(event())
+    own.dead.consumer("attempts", "dead.>")
+    client = member(signer)
+    try:
+        scoped = client.for_swarm("rig")
+        queue = scoped.queue("eng", POLICY)
+        delivery = queue.take(1000)
+        assert delivery.attempt == 1
+        delivery.nak()
+        assert queue.take(1000) is None
+        [dead] = scoped.dead.consumer("attempts", "dead.>").fetch(1, 1000)
+        assert dead.event.cause == "own"
+        assert dead.event.data["attempts"] == 1
+        dead.ack()
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "swarm.other.queue.eng.work",
+        "swarm.other.dead.letter",
+        "swarm.other.state.spoke-work.key",
+        "$JS.API.STREAM.MSG.GET.AGENTIHOOKS_6f74686572_STATE_spoke-work",
+        "$JS.API.CONSUMER.MSG.NEXT.AGENTIHOOKS_6f74686572_QUEUE_eng.eng",
+    ],
+)
+def test_member_is_refused_foreign_resources_that_exist(hub, signer, target):
+    foreign = hub.for_swarm("other")
+    foreign.queue("eng", POLICY).offer(event("other", "foreign"))
+    foreign.state("spoke-work").create("key", b"foreign")
+    foreign.dead.publish("dead.other", event("other", "foreign"))
+    configured = replace(signer, member_swarms={"m1": ("rig",)})
+
+    async def act(nc):
+        await nc.publish(target, b"{}")
+
+    assert _violations(configured, nats_grant.mint(configured, "m1"), act, refused=True) == [
+        f'nats: permissions violation for publish to "{target.lower()}"'
+    ]
+
+
+def test_legacy_bus_and_scoped_bus_keep_working_on_the_same_server(signer):
+    legacy = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "legacy")))
+    legacy_queue = legacy.queue("swarm.old.ready.eng", POLICY)
+    old = event("old", "old")
+    legacy_queue.offer(old)
+    legacy.state("spoke-work").create("old", b"legacy")
+    modern = nats.open_bus(
+        BusConfig(backend="nats", url=signer.url, scoped=True, credentials=_user_creds(signer.account, "modern"))
+    )
+    try:
+        scoped = modern.for_swarm("rig")
+        scoped.queue("eng", POLICY).offer(event())
+        scoped.state("spoke-work").create("old", b"scoped")
+        assert legacy.events.publish(subject("old", "task", "ready"), old)
+        assert legacy_queue.take(1000).event == old
+        assert legacy.state("spoke-work").get("old").value == b"legacy"
+        assert scoped.state("spoke-work").get("old").value == b"scoped"
+        assert scoped.queue("eng", POLICY).take(1000).event == event()
+    finally:
+        modern.close()
+        legacy.close()
