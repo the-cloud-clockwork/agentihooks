@@ -156,3 +156,17 @@ def test_hub_record_refuses_malformed_member_swarm_membership(monkeypatch, membe
     monkeypatch.setattr(openbao_kv, "read", lambda *_: (record, 1))
     with pytest.raises(auth.HiveError, match="member_swarms"):
         nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV})
+
+
+@pytest.mark.parametrize("signer", [4096], indirect=True)
+def test_scoped_credentials_require_more_than_the_default_control_line(signer):
+    import nats as nats_client
+
+    from scripts.events import nats
+    from scripts.events.config import BusConfig
+
+    scoped = replace(signer, member_swarms={"m1": ("rig",)})
+    credentials = nats_grant.mint(scoped, "m1")
+    with pytest.raises(nats_client.errors.Error) as error:
+        nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credentials, provision=False))
+    assert str(error.value) == "nats: 'maximum control line exceeded'"
