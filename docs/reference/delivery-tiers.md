@@ -278,7 +278,7 @@ The cause task read every merge group Tests run from 18:00 to 01:30 UTC through 
 
 Two other ways of counting a group as concurrent, the peak of other shards during its own wait or any other queue job overlapping that wait, move attempts between rows but keep the same rise: the alone median shard wait is 18 s under all three, and two or more groups put 11 of 18 and 14 of 25 green first attempts over 15 minutes.
 
-Across the night 27 to 30 queue runners were busy 57 percent of the time, and 67 percent of all queue job wait minutes (4181 of 6227) passed with 28 or more busy. Demand, waiting plus running, was over 30 for 63 percent of the time, over 60 for 14 percent and peaked at 90. On an idle pool a shard was picked up in a median 19 s. The queue built 17.4 groups an hour and merged 8.4; 64 of the 130 runs were cancelled and used 2333 of the 10058 queue runner minutes. With a median green tier of 788 s for a group alone, one group at a time would serve about 4.6 groups an hour.
+Across the night 27 to 30 queue runners were busy 57 percent of the time, and 67 percent of all queue job wait minutes (4181 of 6227) passed with 28 or more busy. Demand, waiting plus running, was over 30 for 63 percent of the time, over 60 for 14 percent and peaked at 90. On an idle pool a shard was picked up in a median 19 s. The queue built 17.4 groups an hour, of which 8.4 went green; 64 of the 130 runs were cancelled and used 2333 of the 10058 queue runner minutes. With a median green tier of 788 s for a group alone, one group at a time would serve about 4.6 groups an hour.
 
 The cause is recorded in issue [5037](https://github.com/the-cloud-clockwork/agentihooks/issues/5037). The task was read only: it changed neither the pool nor `MAX_SHARDS`, and wrote the numbers above onto the operator's ledger follow up. The remedy among a bigger pool, one group building at a time, or a shard plan sized to the runners actually free stays with the operator.
 
@@ -293,6 +293,22 @@ attempt="<attempt>"
 gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --paginate \
   --jq '.jobs[] | select(.name | startswith("unit (")) | [.name, .created_at, .started_at, .completed_at] | @tsv'
 ```
+
+For the finding run, the runs listing with `since` set to `2026-10-20T00:10:00Z` prints, among others:
+
+```text
+39346819295	1	2026-10-20T00:18:07Z	success
+39346300411	1	2026-10-20T00:12:53Z	success
+```
+
+and the jobs listing for run `39346819295`, attempt `1`, prints 30 shard rows such as:
+
+```text
+unit (3.12, 2)	2026-10-20T00:21:28Z	2026-10-20T00:23:23Z	2026-10-20T00:28:45Z
+unit (3.11, 5)	2026-10-20T00:21:28Z	2026-10-20T00:21:44Z	2026-10-20T00:25:36Z
+```
+
+That night's groups still ran Python 3.11 and 3.12 legs inside the same 30 shards; 3.11 left CI later.
 
 A group's other shards in flight at its unit start is the number of other groups' unit shards whose `created_at` is before that group's first shard `created_at` and whose `completed_at` is after it. A group whose shards wait over a minute with that number over 10 is sharing the pool with another group; a wait with that number under 10 does not come from another merge group.
 
