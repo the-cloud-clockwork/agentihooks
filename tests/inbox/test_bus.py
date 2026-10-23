@@ -260,3 +260,51 @@ def test_altering_a_receipt_address_cannot_confirm_another_mailbox(rig):
     another_swarm = SeatInbox(bus, "other").consumer("seat", "session")
     assert not another_swarm.confirm(replace(receipt, event=replace(receipt.event, swarm="other")))
     assert original.confirm(receipt)
+
+
+def test_each_message_in_a_seat_batch_has_its_own_claim(rig):
+    bus, _ = rig
+    mail = inbox(bus)
+    mail.send("seat", message(id="first"))
+    mail.send("seat", message(id="second"))
+    consumer = mail.consumer("seat", "session")
+    receipts = consumer.fetch(2, 0)
+    assert [receipt.event.id for receipt in receipts] == ["first", "second"]
+    assert all(consumer.confirm(receipt) for receipt in receipts)
+
+
+def test_a_redelivery_claim_conflict_keeps_work_available(rig):
+    from scripts.events.bus import StateConflict
+
+    bus, clock = rig
+    mail = inbox(bus)
+    mail.send("seat", message())
+    consumer = mail.consumer("seat", "session")
+    original = consumer.fetch(1, 0)[0]
+    clock[0] += 11
+    with patch.object(mail.state, "update", side_effect=StateConflict):
+        assert consumer.fetch(1, 0) == []
+    clock[0] += 11
+    latest = consumer.fetch(1, 0)[0]
+    assert not consumer.confirm(original)
+    assert consumer.confirm(latest)
+
+
+def test_a_lost_publish_response_does_not_repeat_confirmed_work(rig):
+    bus, clock = rig
+    mail = inbox(bus)
+    publish = bus.events.publish
+
+    def lose_response(subject, event):
+        publish(subject, event)
+        raise OSError("response lost")
+
+    with patch.object(bus.events, "publish", side_effect=lose_response):
+        with pytest.raises(OSError, match="response lost"):
+            mail.send("seat", message())
+    consumer = mail.consumer("seat", "session")
+    receipt = consumer.fetch(1, 0)[0]
+    assert consumer.confirm(receipt)
+    clock[0] += 120_001
+    assert mail.send("seat", message()) == receipt.event
+    assert consumer.fetch(1, 0) == []
