@@ -1,11 +1,23 @@
+import functools
 import hashlib
 import json
+import os
+import sys
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
+from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
+from scripts.events.factory import open_bus
 from scripts.events.subjects import subject
+from scripts.inbox.seats import is_seat
+from scripts.inbox.store import InboxError
+
+FEED_BACKEND = "nats"
+FEED_BATCH = 10
+REOPEN_S = 30.0
 
 
 def _identity(*parts: str) -> str:
@@ -143,3 +155,142 @@ class SeatConsumer:
                 return False
         receipt.delivery.ack()
         return True
+
+
+class FeedError(RuntimeError):
+    pass
+
+
+def _swarm_of(seat: str) -> str:
+    return seat.partition("@")[2]
+
+
+def _nats() -> BusConfig | None:
+    config = BusConfig.from_environ(os.environ)
+    return config if config.backend == FEED_BACKEND else None
+
+
+def _drop(bus: Bus | None) -> None:
+    if bus is not None:
+        try:
+            bus.close()
+        except Exception:
+            pass
+
+
+def seat_of(store, me: str) -> str:
+    me = store.names.resolve(me)
+    seat = store.seats.seat_of(me)
+    return seat if seat and not store.seats.left(me, seat) else ""
+
+
+class SeatPublisher:
+    def __init__(self, opener: Callable[[], Bus]):
+        self._opener = opener
+        self._bus = None
+        self._retry_at = 0.0
+
+    def publish(self, item) -> None:
+        if not is_seat(item.address) or (self._bus is None and time.monotonic() < self._retry_at):
+            return
+        try:
+            if self._bus is None:
+                self._bus = self._opener()
+            message = Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
+            SeatInbox(self._bus, _swarm_of(item.address)).send(item.address, message)
+        except Exception as exc:
+            _drop(self._bus)
+            self._bus, self._retry_at = None, time.monotonic() + REOPEN_S
+            print(
+                f"agentihooks inbox: bus publish of {item.id} failed ({exc}); the Redis recheck delivers it",
+                file=sys.stderr,
+            )
+
+
+@functools.cache
+def _publisher(config: BusConfig) -> SeatPublisher:
+    return SeatPublisher(lambda: open_bus(config))
+
+
+def publish(item) -> None:
+    config = _nats()
+    if config is not None:
+        _publisher(config).publish(item)
+
+
+class SeatFeed:
+    """Bus deliveries of one receiver's seat; a receipt is confirmed once the Redis item it names leaves pending."""
+
+    def __init__(self, opener: Callable[[], Bus], store, me: str, session: str, seat: Callable[[], str] | None = None):
+        self._opener = opener
+        self._store = store
+        self._seat = seat or (lambda: seat_of(store, me))
+        self._session = session
+        self._bus = None
+        self._consumers: dict[str, SeatConsumer] = {}
+        self._retry_at = 0.0
+        self.held: dict[str, Receipt] = {}
+
+    def _bind(self) -> SeatConsumer | None:
+        if self._bus is None and time.monotonic() < self._retry_at:
+            return None
+        address = self._seat()
+        if not address:
+            return None
+        consumer = self._consumers.get(address)
+        if consumer is None:
+            if self._bus is None:
+                self._bus = self._opener()
+            consumer = SeatInbox(self._bus, _swarm_of(address)).consumer(address, self._session)
+            self._consumers[address] = consumer
+        return consumer
+
+    def wait(self, timeout_ms: int) -> bool:
+        try:
+            consumer = self._bind()
+            receipts = consumer.fetch(FEED_BATCH, timeout_ms) if consumer is not None else []
+        except Exception as exc:
+            raise self._lost(exc) from exc
+        if consumer is None:
+            time.sleep(timeout_ms / 1000)
+        for receipt in receipts:
+            self.held[receipt.event.id] = receipt
+        return bool(receipts)
+
+    def settle(self) -> list[str]:
+        settled = []
+        try:
+            consumer = self._bind()
+            for item_id, receipt in list(self.held.items()):
+                if self._pending(item_id):
+                    continue
+                del self.held[item_id]
+                if consumer is not None and consumer.confirm(receipt):
+                    settled.append(item_id)
+        except Exception as exc:
+            raise self._lost(exc) from exc
+        return settled
+
+    def _lost(self, exc: Exception) -> FeedError:
+        self.close()
+        self._retry_at = time.monotonic() + REOPEN_S
+        return FeedError(str(exc))
+
+    def _pending(self, item_id: str) -> bool:
+        try:
+            return self._store.get(item_id).state == "pending"
+        except InboxError:
+            return False
+
+    def close(self) -> None:
+        bus, self._bus = self._bus, None
+        self._consumers.clear()
+        self.held.clear()
+        _drop(bus)
+
+
+def feed_for(store, me: str, session: str = "") -> SeatFeed | None:
+    config = _nats()
+    if config is None:
+        return None
+    return SeatFeed(lambda: open_bus(config), store, me, session or store.session_id or me)

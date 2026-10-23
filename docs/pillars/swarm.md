@@ -709,6 +709,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm init --no-start` | Check Docker and the Compose plugin, write the stack files, `.env` (adoption included with `--adopt`) and `client.env`, then stop: no service, swarm or ledger is started or created. |
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
 | `agentihooks swarm tick-watch` | The stale tick watcher, run by its own user service: one inbox alert per stale tick episode to the front door master seat and every live agent seat, a resolved notice when a fresh pass lands, on a workstation a scheduler tick restart and a respawn of an empty front door master while the tick is stale, and in a cluster a placement of an empty front door master (see [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher)). |
+| `agentihooks swarm spoke` | The workstation spoke, run by the `agentihooks-spoke` user service when `AGENTIHOOKS_DEPLOYMENT=distributed`: a master lane spoke per swarm takes master work from the bus as this hive and launches it in a herdr pane. Refused in any other mode. |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the scheduler runs it every minute). |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
 | `agentihooks swarm <id> controller release` | Release this hive's lease so another controller can take over at a higher epoch. |
@@ -1604,6 +1605,9 @@ command runs `git` or `gh`, and acts only on calls that run `git push`,
 `gh pr create` or `gh pr ready`, including inside a chain such as
 `cd <checkout> && git push`. The directory it checks is the session's working
 folder joined with the call's `workdir` and any `cd` or `git -C` in the command.
+Codex 0.162.1 sends no `workdir` in its shell hook payload; the hook reads
+the folder the model gave `exec_command` from the session's rollout, as
+described in [Shell working folder](../reference/CODEX-COMPAT.md#shell-working-folder).
 
 ### Who it applies to
 
@@ -1778,13 +1782,18 @@ A gate that raises lets the call through and records a `fail-open` row.
 | `gh pr create` refused although both readers reviewed | The readers were launched under another name. Launch them with `name` or `subagent_type` set to `standards-reader` and `spec-reader`. A launch is counted only while the `subagents` gate runs: with `subagents-gate=skip` no reader is counted and every non draft open is refused, so set `one-push-gate` to `log only` or `skip` too. |
 | Refused for `uncommitted changes` with nothing to commit | A tracked file changed in the checkout the command runs in. Check `git status` in the folder named by `workdir`, `cd` or `git -C`, not the session's starting folder. |
 | Refused for `commits not on origin` | `HEAD` holds a commit no `origin` branch has. Publish it with `swarm publish`, then open the pull request. |
+| A Codex agent is refused for `commits not on origin` or `uncommitted changes` while its worktree is clean and on origin | The refusal ends with `Checked worktree: <folder>`. When that is the session's starting folder while the command was meant for a worktree, the hook may have found no `workdir` for the command in the rollout's newest `exec` program. Print that program as shown in [Shell working folder](../reference/CODEX-COMPAT.md#shell-working-folder): the decoded `cmd` must equal the shell command exactly, every matching call must name the same `workdir`, and every string in the program must decode. Otherwise put `cd <worktree> &&` at the start of the command. |
 | A push is refused although the checks look finished | The gate counts as running a required check that has not reported yet, a check result still pending, and a current workflow suite that has not completed, including one still queued. Wait with `--on checks`. |
 | A push to another branch is refused | The task records no branch, so every push to the pull request's repository is checked. Once the task records its branch (`swarm publish` records it; the `push-stop` gate only names it in a ledger comment), a push whose destination is another branch passes. A push to another GitHub repository always passes. |
 | The gate never refuses | The session is not pinned to an `eng` or `ci` task, the mode is `skip` or `log only`, or a lift holds. Check `swarm status --json` for `gate_modes` and the agent's `gates`. |
 
 The gate was delivered in [pull request 2116](https://github.com/the-cloud-clockwork/agentihooks/pull/2116);
 [pull request 4736](https://github.com/the-cloud-clockwork/agentihooks/pull/4736)
-made it count commits in the folder the command runs in.
+made it count commits in the folder the command runs in, and
+[pull request 4804](https://github.com/the-cloud-clockwork/agentihooks/pull/4804)
+gave Codex shell calls their `exec_command` folder, and
+[pull request 5676](https://github.com/the-cloud-clockwork/agentihooks/pull/5676)
+read JSON quoted keys and added the checked worktree to readiness refusals.
 
 ## Promotion fixer intake
 
@@ -1849,7 +1858,111 @@ no live task carries it. The next pass by the owner, or by a new owner after a h
 
 A run whose failed jobs all failed only at the `Check dev still points at this commit` step, with the annotation that
 `dev` advanced before Sonar analysis, is still reported as superseded and files nothing. Failed jobs that lost their
-runner still share one runner outage task.
+runner share one [runner outage task](#runner-outage-runs).
+
+### Runner outage runs
+
+A job that lost its runner has no code cause, so a fixer per job only adds work the master has to hold by hand. The
+watch files one runner outage task for all such jobs of a run and keeps a fixer for every job that failed on its own.
+
+On 19 October cluster node `k8s-worker-1` went `NotReady` during dev push run 39226179257. Its unit jobs failed with
+the annotation `Failed to resolve action download info` and `Resource temporarily unavailable
+(launch.actions.githubusercontent.com:443)`. Twenty jobs failed besides `Gate — Required`, and intake filed seventeen
+urgent fixer tasks, `promo-39226179257-<n>` in the Doctor ledger, for one outage.
+
+#### How a job is judged lost
+
+The watch reads the failed jobs of the run, leaving out `Gate — Required` unless it is the only failed job. For each
+job it builds a cause from the names of its failed steps and its failure annotations, without `Process completed with
+exit code 1.` and empty messages. The job lost its runner when any of these holds:
+
+| Sign | Example annotation or step state |
+|---|---|
+| The cause contains `Failed to resolve action download info` | The runner could not reach the actions download service |
+| The cause contains `Failed to download action` or `Failed to download archive` | `Failed to download archive after 3 attempts.` |
+| The cause contains `lost communication with the server` | `The self-hosted runner: anton-x lost communication with the server.` |
+| The cause contains `The operation was canceled` | A spot drain or node loss stopped the job |
+| The `Set up job` step failed or timed out | The runner died before any workflow step ran |
+| The job has a `Run tests` step that neither passed nor failed, and no step of the job failed | `Run tests` ends `skipped`, `cancelled` or with no conclusion |
+
+A job whose `Run tests` step was skipped because an earlier step such as `Install dependencies` failed is not lost: the
+failed step is a real cause and gets its own fixer. A job whose tests passed and that failed on a later check, such as a
+coverage floor, carrying no sign above, also gets its own fixer.
+
+The signs are fixed in `scripts.swarm.promotion_watch` (`OUTAGE_SIGNS`, `SETUP_STEP`, `TEST_STEP`). No setting
+changes them.
+
+#### What the watch files
+
+When at least one failed job lost its runner, the lost jobs become one cause, `runner outage`. Every other failed job
+keeps its own cause. `refresh-durations` is folded into the outage cause when it kept no samples
+from a durations artifact. When a lost job is a unit shard, a shard consumer job (`sonar`, `shard-check`,
+`coverage-ratchet`, `coverage-baseline`, `flake-budget`) whose failure names the missing shard output is folded too. The watch then
+files as for any red run:
+
+- One urgent `ci` task titled `Promotion red: runner outage`, in the `ci` lane, or `eng` while the `ci` lane has no
+  effective seats. Its id is `promo-<run id>-<n>` like any promotion task; it is `promo-<run id>-0` unless the run also
+  has failing unit tests, whose grouped fixers are numbered first.
+- Its description names the run, the commit, the run link, every lost job and every sign found. With no annotation
+  sign it reads `Set up job failed or Run tests never ran`. It ends `No code change is due` instead of `Fix it on dev`.
+- One fixer task per cause that failed on its own. Failing unit tests are grouped into one fixer per test.
+- One promotion alert for the run, replacing a live one, and one inbox item for the master naming the new tasks.
+
+For a run whose two unit jobs both failed on download resolution and cancellation, the task reads:
+
+```text
+The dev push run 900 of Tests lost its runner infrastructure at commit <sha>:
+https://github.com/<owner>/<repo>/actions/runs/900. Its cause: the jobs unit (3.11, 1), unit (3.11, 2) lost their
+runner infrastructure (Failed to resolve action download info; The operation was canceled). No code change is due;
+the swarm closes this task when a later dev push run passes.
+```
+
+#### Later outages and the green run
+
+The outage task holds the cause `runner outage` in `promotion:jobs`, without the run, job names or signs. While that
+task is not done in the owner's ledger or a former owner's ledger, a later red run that also lost runners files no
+second outage task, whichever jobs it lost. Its real failures are still filed. The next green dev push run closes an
+open or blocked outage task with the other promotion tasks and the alert, and releases its held cause, so the next
+outage files a new task. An outage task that is claimed or in `pr` stays open on green and keeps holding the cause
+until its holder finishes it.
+
+#### Checking a run
+
+Read the failed jobs, their step states and their failure annotations the same way the watch does:
+
+```bash
+RUN="<run id>"
+gh api "repos/{owner}/{repo}/actions/runs/$RUN/jobs?per_page=100" \
+  --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out")
+        | [.name, ([.steps[] | "\(.name)=\(.conclusion)"] | join(", ")), .check_run_url] | @tsv'
+gh api "<check run url>/annotations" --jq '.[] | select(.annotation_level == "failure") | .message'
+```
+
+Run the commands from the swarm's `repo` checkout so `gh` resolves the repository. Then check what the swarm holds:
+
+```bash
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli HGETALL "$P:swarm:<id>:promotion:jobs"   # an outage task maps to the value runner outage
+agentihooks ledger --slug "<id>" show | jq -r --arg run "promo-$RUN-" \
+  '.tasks[] | select(.id | startswith($run)) | [.id, .state, .title] | @tsv'
+```
+
+| Symptom | Cause | Action |
+|---|---|---|
+| An outage run filed one fixer per job | No failed job carried a sign above, for example a new runner error text | Read the job annotations. A new runner error needs a code change to `OUTAGE_SIGNS` with a test |
+| A real failure was folded into the outage task | Its annotations contain a sign, for example a test that prints `The operation was canceled` | Read the cause in the task description. Fix the test output, or file the fixer by hand |
+| A red run with lost runners filed no outage task | An outage task that is not done already holds `runner outage` | Expected. A green dev push run closes it and the next outage files a new one |
+| A skipped `Run tests` step still got a fixer | Another step of the job failed first | Expected. The failed step is the cause |
+
+Delivered in [pull request 4829](https://github.com/the-cloud-clockwork/agentihooks/pull/4829), with
+[issue 4827](https://github.com/the-cloud-clockwork/agentihooks/issues/4827) as the spec. Its tests cover each sign,
+the skipped test step after a real failure, a real failure beside an outage, the exact description, and an open
+outage task holding a later outage until a green run closes it. In the test of seventeen unit jobs all lost to
+download resolution, the code before the change filed seventeen tasks and the change files one. Red: Tests run
+[39276851003](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39276851003) on the tests only commit
+failed all seven new tests. Green: Tests run
+[39287821375](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39287821375) passed on the final head.
+No live dev outage run has been counted since the change.
 
 ### Checking the owner
 

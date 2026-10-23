@@ -7,7 +7,7 @@ permalink: /docs/getting-started/compose-quick-start/
 
 # Docker Compose Quick Start
 
-Start the packaged swarm service bundle for **Claude Code and Codex**. It provides Redis, the ledger web service and a controller. Independent agent sessions can use [native installation](installation.md) without these services.
+Start the packaged swarm service bundle for **Claude Code and Codex**. It provides Redis, a NATS server with JetStream, the ledger web service and a controller. Independent agent sessions can use [native installation](installation.md) without these services.
 
 ## Prerequisites
 
@@ -33,8 +33,8 @@ One run does the following, in order:
 1. Checks that `docker` is on the `PATH`, that the daemon answers `docker info` and that `docker compose version` works.
 2. Copies the Compose files packaged with AgentiHooks into `$AGENTIHOOKS_HOME/swarm-stack` (default `~/.agentihooks/swarm-stack`).
 3. On first use writes `.env` there, readable only by you: a random Redis password, a free ledger port (8765 when free), a free Redis port (6379 when free) and `SWARM_IMAGE_TAG=release`. It also writes `client.env`, the settings a shell needs to reach the stack.
-4. Runs `docker compose up --detach --wait` for `redis`, `swarm` (the ledger server) and `controller`. The first run pulls the released images.
-5. Waits until all three services are healthy, up to `--timeout` seconds (default 300), then checks that the ledger's `/healthz` route answers and its home page is served.
+4. Runs `docker compose up --detach --wait` for `redis`, `nats` (the event bus, JetStream on the `nats-data` volume, reachable only inside the stack), `swarm` (the ledger server) and `controller`. The first run pulls the released images.
+5. Waits until all four services are healthy, up to `--timeout` seconds (default 300), then checks that the ledger's `/healthz` route answers and its home page is served.
 6. Creates the swarm and its ledger inside the stack, paused. Without `--content`, the ledger holds one automatic phase titled after the `--plan` file, or after the name when there is no plan. Without `--repo`, the swarm works the current directory.
 
 | Option | Use |
@@ -55,7 +55,7 @@ On a terminal the ready line is green, the `Open the ledger` address cyan and a 
 
 ```text
 Starting the swarm stack; the first run pulls its images.
-Swarm stack ready: redis, swarm and controller are healthy.
+Swarm stack ready: redis, nats, swarm and controller are healthy.
 Next steps:
   1. Open the ledger: http://127.0.0.1:8765/
   2. Point this shell at the stack: set -a; . /home/me/.agentihooks/swarm-stack/client.env; set +a
