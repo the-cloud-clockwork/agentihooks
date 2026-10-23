@@ -24,14 +24,14 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _forget(bao: openbao_kv.OpenBao, path: str, names: tuple[str, ...]) -> int:
+def _forget(bao: openbao_kv.OpenBao, path: str, names: tuple[str, ...]) -> bool:
     try:
         left = openbao_kv.merge(bao, path, {}, names)
     except openbao_kv.OpenBaoError as exc:
         print(term_colors.red(f"OpenBao write failed: {exc}"))
-        return 1
+        return False
     print(f"OpenBao {openbao_kv.MOUNT}/{path}: removed {', '.join(sorted(names))} ({left} keys left)")
-    return 0
+    return True
 
 
 def main(
@@ -55,7 +55,7 @@ def main(
     except StoreRefused as exc:
         _fail(str(exc))
         return 1
-    if bao is not None and _forget(bao, openbao_kv.codex_creds(environ), tokens + refresh):
+    if bao is not None and not _forget(bao, openbao_kv.codex_creds(environ), tokens + refresh):
         return 1
     home = codex_login.homes() / slug
     if home.is_dir():

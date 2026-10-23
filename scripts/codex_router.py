@@ -333,7 +333,7 @@ def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str
 
 
 def _routed_rank(account: CodexAccount, environ: Mapping[str, str]) -> tuple[bool, bool, str]:
-    claims = _claims(environ.get(account.env_name) or "")
+    claims = _claims(environ[account.env_name])
     profile = claims.get(OPENAI_PROFILE_CLAIM)
     email = profile.get("email") if isinstance(profile, dict) else None
     named = isinstance(email, str) and account.name == account_names.secret_key(email).replace("-", "_")
