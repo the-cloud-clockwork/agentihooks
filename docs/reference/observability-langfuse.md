@@ -131,7 +131,9 @@ The `endpoint`, `public_key` and `secret_key` fields under `otel.langfuse` in
 
 Put these in `~/.agentihooks/.env` or a companion `~/.agentihooks/*.env`
 file. The hook loads them at start; a value already in the process environment
-wins.
+wins. Codex sessions on the app-server transport are the exception: their launch
+sets the key pair from these files over any inherited one (see
+[Traces in another Langfuse project](#traces-in-another-langfuse-project)).
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -208,6 +210,135 @@ either key is empty.
 
 The session id of a Claude session is printed at SessionStart. A swarm agent's
 trace is also found by its `agent:<name>` tag.
+
+## Traces in another Langfuse project
+
+Langfuse files spans under the project the key pair belongs to. A session that
+exports with another project's keys gets an accepted cursor and no failure log
+line, yet its trace is missing from the swarm's project. The Doctor reports it as
+a [`telemetry misattributed`](#active-telemetry) finding of the unattributed
+kind: `session <id> accepted <n> observations, none under agent:<name>`.
+
+### Cause found on 19 October
+
+Doctor finding `telemetry-misattributed/engineer@323133-2054` (issue
+[#4899](https://github.com/the-cloud-clockwork/agentihooks/issues/4899)) named a
+watched Codex agent whose session `01a154bc-0fa0-7c53-943e-5816332b59c1` had an
+accepted cursor with 450 spans and no trace in `agent-swarm`.
+
+- The hook reads `OTEL_LANGFUSE_PUBLIC_KEY` and `OTEL_LANGFUSE_SECRET_KEY`, falls
+  back to `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`, and never lets an
+  AgentiHooks env file override a value already in the process environment.
+- The herdr server process held a `LANGFUSE_*` pair for the project `antoncore`
+  from boot, and the pane shells and launchers it started inherited that pair.
+  None of them set the `OTEL_LANGFUSE_*` names.
+- A Codex session on the app-server transport received its environment through
+  the Codex router's routed child environment, which passes the launching
+  environment through. The Codex hook wrapper sets the Langfuse switch, not the
+  keys. Those sessions therefore exported with the `antoncore` pair.
+
+Evidence recorded on the cause task:
+
+| Check | Result |
+|---|---|
+| Trace `8550912e0cd2eeaa4958b122d1545fd3` (session `01a154bc`) with the `agent-swarm` keys | 404 |
+| The same trace with the `antoncore` keys | 200, tags `agent:engineer@323133-2054` and `swarm:rig-grade-swarm`, 450 observations |
+| Codex sessions on the app-server transport started in the watched swarm over 48 hours | 20 of 20 missing from `agent-swarm`, all 20 present in `antoncore` |
+| Codex sessions under profile homes in both swarms over the same 48 hours | 202 of 202 traced in `agent-swarm` |
+
+### Pinned keys at app-server launch
+
+Since pull request
+[#4903](https://github.com/the-cloud-clockwork/agentihooks/pull/4903),
+`python -m scripts.codex_session serve` routes the Codex account, then sets
+`OTEL_LANGFUSE_PUBLIC_KEY` and `OTEL_LANGFUSE_SECRET_KEY` in the session's
+environment from the AgentiHooks env files
+(`profile_telemetry.agentihooks_langfuse_keys`):
+
+- For each key it reads the `OTEL_LANGFUSE_*` name first, then the
+  `LANGFUSE_*` name.
+- Files are read as the hook reads them: `~/.agentihooks/.env`, then the other
+  `~/.agentihooks/*.env` files in sorted order, first assignment wins.
+- Because the hook reads the `OTEL_` names first, the pinned pair wins over an
+  inherited `LANGFUSE_*` pair and over a stale inherited `OTEL_` value.
+- When the files hold neither name for a key, that key is left as inherited.
+
+With the Anton env files below, every app-server Codex session exports to
+`agent-swarm` whatever the herdr server carries:
+
+```bash
+# ~/.agentihooks/langfuse.env
+AGENTIHOOKS_LANGFUSE_ENABLED=1
+LANGFUSE_PUBLIC_KEY=<agent-swarm public key>
+LANGFUSE_SECRET_KEY=<agent-swarm secret key>
+```
+
+The pin applies at launch. A session already running keeps the keys it started
+with, and traces already exported stay in the project that accepted them. Claude
+sessions and Codex terminal sessions are not pinned: for them a `LANGFUSE_*`
+pair in the launching environment still wins over the env files.
+
+The Doctor's reader uses the same env file keys and refuses to measure unless
+they open the watched swarm's project.
+
+### Finding where a trace went
+
+1. Derive the session's trace id. The exporter computes it from the session id,
+   so it is the same in every project:
+
+   ```bash
+   cd ~/dev/tcc-ecosystem/agentihooks
+   SESSION="<session id>"
+   TRACE=$(~/dev/tcc-ecosystem/.venv/bin/python -c "import sys; from hooks.observability.agent_trace import trace_id; print(format(trace_id(sys.argv[1]), '032x'))" "$SESSION")
+   echo "$TRACE"
+   ```
+
+2. Ask the swarm's project for it. `200` means the trace is there; `404` means
+   another project accepted it:
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' -u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" "https://langfuse.homeofanton.com/api/public/traces/$TRACE"
+   ```
+
+3. Check which project each key pair opens. The shell's pair:
+
+   ```bash
+   curl -s -u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" https://langfuse.homeofanton.com/api/public/projects | jq -r '.data[].name'
+   ```
+
+   The pair the app-server launch pins, from the env files:
+
+   ```bash
+   cd ~/dev/tcc-ecosystem/agentihooks
+   ~/dev/tcc-ecosystem/.venv/bin/python - <<'EOF'
+   import httpx
+   from scripts.profile_telemetry import agentihooks_langfuse_keys
+   keys = agentihooks_langfuse_keys()
+   auth = (keys["OTEL_LANGFUSE_PUBLIC_KEY"], keys["OTEL_LANGFUSE_SECRET_KEY"])
+   print([p["name"] for p in httpx.get("https://langfuse.homeofanton.com/api/public/projects", auth=auth, timeout=20).json()["data"]])
+   EOF
+   ```
+
+   Both print `agent-swarm` on the Anton workbench. Neither command prints a key.
+
+4. Test which key names a launching shell carries, without printing values:
+
+   ```bash
+   for name in LANGFUSE_PUBLIC_KEY OTEL_LANGFUSE_PUBLIC_KEY; do test -n "${!name:-}" && echo "$name set" || echo "$name unset"; done
+   ```
+
+5. Repeat step 2 with a pair that opens another project to confirm the trace
+   landed there.
+
+### Troubleshooting
+
+| Symptom | Cause | Action |
+|---|---|---|
+| Accepted cursor, trace 404 in `agent-swarm`, app-server Codex session started before #4903 | Inherited `LANGFUSE_*` pair for another project | The trace stays in that project. Sessions launched since #4903 pin the env file pair. |
+| Accepted cursor, trace 404 in `agent-swarm`, Claude or Codex terminal session | A `LANGFUSE_*` or `OTEL_LANGFUSE_*` pair for another project in the launching environment | Unset the pair, or set the swarm's pair under the `OTEL_` names, in the environment that starts the herdr server or the launcher, then relaunch the session. |
+| App-server Codex session still exports elsewhere after #4903 | The env files hold no key pair, so the inherited pair is kept | Put the swarm's pair in `~/.agentihooks/.env` or a companion `*.env` file; step 3 shows the project it opens. |
+| Step 3 prints another project for the env file pair | The env files hold another project's keys | Replace them with the swarm project's pair; new launches pick them up. |
+| `KeyError` from the step 3 snippet | The env files hold no `OTEL_LANGFUSE_*` or `LANGFUSE_*` key | Add the pair to an env file. |
 
 ## How the Doctor reads traces
 
