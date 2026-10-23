@@ -3,6 +3,8 @@ import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
+from scripts.hive import admission, placement_waits
+from scripts.hive.placement import LOCAL_FULL, LOCAL_MACHINE
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import capacity, freeze, timing
@@ -11,6 +13,7 @@ from scripts.swarm.ledger_client import LedgerGone
 
 STALL_MS = 600_000
 REF = "spawn-stall:"
+LOCAL_CAP = "local cap"
 
 
 def read(store, slug: str) -> dict:
@@ -76,12 +79,35 @@ def observe(store, slug: str, ledger, at: int, runtime) -> dict:
     return state
 
 
+def _refused(reason: str) -> list[tuple[str, str]]:
+    head, local, _ = reason.partition(LOCAL_FULL)
+    _, room, held = head.partition(" has room: ")
+    found = [(admission.category(part), part.split(" ", 1)[0]) for part in held.split("; ")] if room else []
+    found = found or [(admission.category(head), "")]
+    return found + [(LOCAL_CAP, LOCAL_MACHINE)] if local else found
+
+
+def refusals(waits: dict) -> str:
+    latest, counts = {}, {}
+    for row in waits.values():
+        for found in set(_refused(row["reason"])):
+            latest[found] = max(latest.get(found, 0), row["started_at"])
+            counts[found] = counts.get(found, 0) + 1
+    shown = [
+        f"{reason} on {host} ({counts[reason, host]})" if host else f"{reason} ({counts[reason, host]})"
+        for reason, host in sorted(latest, key=lambda found: (-latest[found], found))
+    ]
+    return f"Admission refusals, latest first: {', '.join(shown)}" if shown else ""
+
+
 def findings(store, slug: str) -> list[Finding]:
     state = read(store, slug)
     if "since" not in state or state["at"] - state["since"] < STALL_MS:
         return []
     failure = json.loads(store.redis.get(store.key(slug, "tick-failure")) or "{}")
     evidence = ("A lane has a free seat, quota and claimable work",)
+    if refused := refusals(placement_waits.read(store, slug)):
+        evidence += (refused,)
     if "at" in failure and failure["at"] >= state["since"]:
         evidence += (f"Last failed step {failure['step']}: {failure['error']}",)
     return [Finding("spawn stall", slug, "No agent has launched for ten minutes", evidence, "ten minutes", 1)]
