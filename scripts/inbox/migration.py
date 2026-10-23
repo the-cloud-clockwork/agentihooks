@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import json
 import os
+import uuid
 from pathlib import Path
 
 from scripts.events.bus import Bus, StateConflict
@@ -95,9 +96,19 @@ def import_snapshot(records: list[dict], bus: Bus) -> dict:
     return _report(records)
 
 
+def _destination(bus: Bus) -> str:
+    state = bus.state(BUCKET)
+    value = uuid.uuid4().hex.encode()
+    try:
+        state.create("destination", value)
+    except StateConflict:
+        value = state.get("destination").value
+    return value.decode()
+
+
 def rehearse(records: list[dict], bus: Bus, destination: str) -> dict:
     copied = json.loads(_encode(records))
-    return {"version": 1, "copy": digest(destination), **import_snapshot(copied, bus)}
+    return {"version": 1, "copy": digest(destination), "store": _destination(bus), **import_snapshot(copied, bus)}
 
 
 def apply(client, bus: Bus, proof: dict, destination: str, *, enabled: bool = False) -> dict:
@@ -110,6 +121,8 @@ def apply(client, bus: Bus, proof: dict, destination: str, *, enabled: bool = Fa
     records = snapshot(client)
     if _report(records) != {key: proof[key] for key in ("items", "history_entries", "digest")}:
         raise ValueError("source changed since rehearsal")
+    if proof["store"] == _destination(bus):
+        raise ValueError("live migration requires a separate copy destination")
     report = import_snapshot(records, bus)
     if snapshot(client) != records:
         raise ValueError("source changed during migration; cutover is unverified")

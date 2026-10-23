@@ -210,9 +210,13 @@ def test_apply_refuses_unknown_proof_versions_and_changes_during_the_move(source
     proof = migration.rehearse(records, bus, "copy")
     with pytest.raises(ValueError, match="unsupported migration proof version"):
         migration.apply(source, bus, dict(proof, version=2), "live", enabled=True)
-    with patch.object(migration, "snapshot", side_effect=[records, []]):
-        with pytest.raises(ValueError, match="source changed during migration"):
-            migration.apply(source, bus, proof, "live", enabled=True)
+    live = memory.open_bus(BusConfig())
+    try:
+        with patch.object(migration, "snapshot", side_effect=[records, []]):
+            with pytest.raises(ValueError, match="source changed during migration"):
+                migration.apply(source, live, proof, "live", enabled=True)
+    finally:
+        live.close()
 
 
 @pytest.mark.parametrize("state", ["done", "unknown"])
@@ -223,3 +227,24 @@ def test_import_refuses_closed_or_unknown_states_before_publishing(source, bus, 
         with pytest.raises(ValueError, match="open inbox item"):
             migration.import_snapshot(records, bus)
     publisher.assert_not_called()
+
+
+def test_destination_aliases_cannot_use_the_rehearsal_store_as_the_live_store(source, tmp_path):
+    from scripts.events.nats import open_bus
+    from tests.events.nats_server import running
+
+    records = migration.snapshot(source)
+    with running(tmp_path / "copy") as url:
+        bus = open_bus(BusConfig(backend="nats", url=url))
+        try:
+            proof = migration.rehearse(records, bus, url)
+            assert migration.rehearse(records, bus, url) == proof
+        finally:
+            bus.close()
+        alias = url.replace("127.0.0.1", "localhost")
+        bus = open_bus(BusConfig(backend="nats", url=alias))
+        try:
+            with pytest.raises(ValueError, match="separate copy destination"):
+                migration.apply(source, bus, proof, alias, enabled=True)
+        finally:
+            bus.close()
