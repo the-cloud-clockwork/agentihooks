@@ -1,7 +1,7 @@
 import math
 from collections import defaultdict
 
-ENDS = frozenset({"exited", "exit-unrecorded"})
+ENDS = frozenset({"exited", "exit-unrecorded", "reaped"})
 SETTLE_GRACE_MS = 60_000
 
 

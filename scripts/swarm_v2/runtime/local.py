@@ -111,6 +111,14 @@ class LocalHerdrRuntime:
         refusal = self.herdr.refusal(agent)
         return Outcome("terminate", Status.REFUSED, LOCAL, refusal, refusal["refusal"])
 
+    def find(self, name: str) -> Outcome:
+        return Outcome("find", Status.OK, LOCAL, name if name in self.herdr.live_names() else None)
+
+    def reap(self, name: str) -> Outcome:
+        if self.herdr.reap_name(name):
+            return Outcome("reap", Status.OK, LOCAL)
+        return Outcome("reap", Status.REFUSED, LOCAL, detail=f"a process carrying {name} still runs")
+
     def recover(self, agent: AgentRecord, mode: Recovery, config: Any, text: str) -> Outcome:
         refused = foreign(self, "recover", agent)
         if refused:
