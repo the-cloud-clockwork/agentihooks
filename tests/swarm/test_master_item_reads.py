@@ -21,3 +21,13 @@ def test_master_role_rule_names_the_item_reads_and_forbids_ledger_show():
     assert "agentihooks ledger --slug <slug> get tasks/<id>" in rule
     assert "agentihooks ledger --slug <slug> tasks --state <state> --lane <lane> --text <words>" in rule
     assert "never `agentihooks ledger --slug <slug> show`" in rule
+
+
+def test_resumed_master_prompt_reads_items_and_forbids_a_full_show():
+    from scripts.swarm import master_launch
+
+    text = master_launch.RESUMED.format(slug="sw", name="master@sw", ledger=prompt.ledger_read("sw"))
+
+    assert GET in text and "agentihooks ledger --slug sw tasks" in text
+    assert "never agentihooks ledger --slug sw show" in text
+    assert "re-read the ledger" not in text
