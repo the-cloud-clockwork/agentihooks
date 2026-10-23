@@ -48,7 +48,7 @@ def test_reactor_follows_every_swarm_subject_under_a_durable_per_process():
     assert (reactor.name, reactor.subject, reactor.singleton) == ("projector-pod-8765", "swarm.>", False)
 
 
-def test_reactor_durable_is_reaped_after_ten_idle_minutes_with_the_reactor_deliveries():
+def test_reactor_policy_carries_a_ten_minute_inactive_threshold_with_the_reactor_deliveries():
     assert make().reactor.policy == QueuePolicy(max_deliver=50, inactive_ms=600_000)
 
 
@@ -60,6 +60,7 @@ def test_a_rollout_leaves_only_the_live_projector_durable_on_the_bus(monkeypatch
         config = BusConfig(backend="nats", url=url)
         old = projector.Projector(Mock(), Hub(), "pod-a-8765", config)
         old.pull()
+        assert durables(old.bus) == ["hub-projector-pod-a-8765"]
         old.close()
         live = projector.Projector(Mock(), Hub(), "pod-b-8765", config)
         try:
