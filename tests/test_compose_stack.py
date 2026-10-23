@@ -116,3 +116,11 @@ def test_swarm_services_reach_nats_through_the_bus_setting():
         assert service["environment"]["AGENTIHOOKS_BUS"] == "${AGENTIHOOKS_BUS:-nats}", name
         assert service["environment"]["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}", name
         assert service["depends_on"]["nats"]["condition"] == "service_healthy", name
+
+
+def test_swarm_init_smoke_pulls_nats_and_reads_the_four_service_ready_line():
+    smoke = (ROOT / "scripts/packaging/swarm-init-smoke.sh").read_text()
+    pull = "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/nats:2.15.1-alpine\n"
+    assert pull in smoke
+    assert smoke.index(pull) < smoke.index('"$work/venv/bin/agentihooks" swarm init')
+    assert "grep -qx 'Swarm stack ready: redis, nats, swarm and controller are healthy.'" in smoke

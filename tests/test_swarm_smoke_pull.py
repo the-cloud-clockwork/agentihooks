@@ -7,7 +7,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("missing", ["", "swarm", "redis"])
+@pytest.mark.parametrize("missing", ["", "swarm", "redis", "nats"])
 def test_smoke_selects_runtime_manifests_and_keeps_missing_images_red(tmp_path, missing):
     tools = tmp_path / "bin"
     tools.mkdir()
@@ -78,7 +78,8 @@ fi
         assert result.returncode == 0, result.stderr
         assert "Swarm container smoke passed" in result.stdout
         pulls = [call for call in calls if " pull " in f" {call} "]
-        assert len(pulls) == 2
+        assert len(pulls) == 3
         assert all("@sha256:runtime" in call for call in pulls)
         assert any("redis:7@sha256:runtime" in call for call in pulls)
+        assert any("nats:2.15.1-alpine@sha256:runtime" in call for call in pulls)
         assert any("agentihooks-swarm:dev@sha256:runtime" in call for call in pulls)

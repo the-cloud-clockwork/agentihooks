@@ -79,10 +79,10 @@ fi
         assert "runtime images ready for startup" in result.stdout, result.stderr
         assert len(starts) == 1
         pulls = [call for call in calls if " pull " in f" {call} "]
-        assert len(pulls) == (3 if script == "compose-hive-smoke" else 2)
+        assert len(pulls) == (2 if script == "hive-launch-smoke" else 3)
         assert all("@sha256:runtime" in call for call in pulls)
         assert any("redis:7@sha256:runtime" in call for call in pulls)
-        if script == "compose-hive-smoke":
+        if script != "hive-launch-smoke":
             assert any("nats:2.15.1-alpine@sha256:runtime" in call for call in pulls)
         if script != "hive-launch-smoke":
             assert any("agentihooks-swarm:dev@sha256:runtime" in call for call in pulls)
@@ -211,6 +211,8 @@ def test_runtime_pull_fails_with_the_timeout_status_after_three_stalled_attempts
     [
         ("redis:7", "amd64", 0),
         ("redis:7-alpine", "amd64", 0),
+        ("nats:2.15.1-alpine", "amd64", 0),
+        ("nats:2.15.1-alpine", "arm64", 17),
         ("redis:7", "arm64", 17),
         ("python:3.12-slim-bookworm", "amd64", 17),
     ],
@@ -255,7 +257,7 @@ exit 17
         assert any(call.startswith("manifest inspect ") for call in calls)
 
 
-@pytest.mark.parametrize("failure", ["", "redis:7", "redis:7-alpine", "build"])
+@pytest.mark.parametrize("failure", ["", "redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "build"])
 def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path, failure):
     log = tmp_path / "docker.log"
     tools = tools_with(
@@ -312,8 +314,11 @@ fi
     assert sum(call.startswith("build ") for call in calls) == 1
     assert (sync / "redis:7").exists()
     assert (sync / "redis:7-alpine").exists()
+    assert (sync / "nats:2.15.1-alpine").exists()
     assert {call.split()[1] for call in calls if call.startswith("tag ")} == {
-        f"public.ecr.aws/docker/library/{image}" for image in ("redis:7", "redis:7-alpine") if image != failure
+        f"public.ecr.aws/docker/library/{image}"
+        for image in ("redis:7", "redis:7-alpine", "nats:2.15.1-alpine")
+        if image != failure
     }
 
 
