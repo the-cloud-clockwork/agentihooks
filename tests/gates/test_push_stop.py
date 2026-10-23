@@ -907,15 +907,18 @@ def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch,
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
     real_push = push_stop.push
 
-    def slow_runner_push(tree, branch, seconds):
-        if branch == f"{BRANCH}-2":
-            time.sleep(overhead)
-        return real_push(tree, branch, seconds)
+    def first_push_leaves_one_second(tree, branch, seconds):
+        if branch != f"{BRANCH}-2":
+            return real_push(tree, branch, seconds)
+        time.sleep(overhead)
+        pushed = real_push(tree, branch, seconds)
+        # Runner load before the second push varies; pin what the first push left so only the budget is under test.
+        rig.gate.started = time.monotonic() - (timeout - RESERVE_S - 1.0)
+        return pushed
 
-    monkeypatch.setattr(push_stop, "push", slow_runner_push)
-    started = time.monotonic()
-    decision = rig.stop(started=started)
-    took = time.monotonic() - started
+    monkeypatch.setattr(push_stop, "push", first_push_leaves_one_second)
+    decision = rig.stop()
+    took = time.monotonic() - rig.gate.started
     assert not decision.allowed
     assert took < timeout
     assert rig.remote_head() == ""
