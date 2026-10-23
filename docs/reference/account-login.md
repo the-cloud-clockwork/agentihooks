@@ -124,6 +124,35 @@ The forms `agentihooks codex login` without a slug, `login status`, `login help`
 and `login --<flag>` pass through to native Codex login instead of registering
 a routed account.
 
+## Codex logout
+
+```bash
+agentihooks codex logout developer@example.com
+```
+
+`agentihooks codex logout <slug> [--openbao | --no-openbao]` removes one Codex
+account from every place login registered it: the `AH_CX_TOKEN_<slug>` and
+`AH_CX_REFRESH_<slug>` keys of the OpenBao Codex record, the account's
+`CODEX_HOME` at `~/.agentihooks/codex/<slug>`, and its export in the managed
+shell block. It also removes the unnormalised name a login replaced. OpenBao
+runs first with check-and-set, keeping every other account; a failed write
+leaves the local registration in place so the command can be repeated. The
+OpenBao choice follows the same flags and prompts as login. Other shells keep
+the variable until `unset AH_CX_TOKEN_<slug>` or a new shell.
+
+`agentihooks codex logout` without a slug, `logout status`, `logout help` and
+`logout --<flag>` pass through to native Codex.
+
+## Duplicate Codex accounts
+
+Two `AH_CX_TOKEN_` names whose tokens carry the same ChatGPT account id are one
+account. The router keeps one routed name for it: the slug of the email in the
+token's profile claim, else a slug shaped like an email (`<user>at<domain>`),
+else the first name in sort order. The other names are reported by
+`agentihooks codex` as the same account and are left out of routing, the hive
+slots and quota readings the Swarm page Hives table shows, and the swarm quota
+table. Remove a duplicate with `agentihooks codex logout <slug>`.
+
 ## Managed shell token block
 
 The login commands maintain a block between these marker names:
