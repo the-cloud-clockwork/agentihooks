@@ -67,3 +67,20 @@ def test_scope_provisions_dedupe_and_buckets_then_reuses_owned_resources(monkeyp
     with pytest.raises(ValueError) as caught:
         view.for_swarm("other")
     assert str(caught.value) == "a scoped bus cannot change its swarm"
+
+
+def test_reopening_scoped_queue_preserves_the_existing_stream_configuration(monkeypatch):
+    from scripts.events import nats
+    from scripts.events.config import QueuePolicy
+
+    js = SimpleNamespace(stream_info=AsyncMock(return_value=SimpleNamespace()), add_stream=AsyncMock())
+    pull = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(nats, "_pull", pull)
+    loop = SimpleNamespace(run=asyncio.run)
+    policy = QueuePolicy(max_deliver=2)
+    config = BusConfig(scoped=True)
+    queue = nats.NatsWorkQueue(loop, js, "swarm.rig.ready.eng", policy, config, "rig")
+    js.stream_info.assert_awaited_once_with(stream_name("rig", "QUEUE_eng"))
+    js.add_stream.assert_not_awaited()
+    assert queue._subject == "swarm.rig.queue.eng.work"
+    assert queue._filter == "swarm.rig.queue.eng.>"

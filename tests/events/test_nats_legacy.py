@@ -114,3 +114,19 @@ def test_missing_publish_allow_list_means_unrestricted_legacy_routing():
     from scripts.events.nats_legacy import legacy_target
 
     assert legacy_target("swarm.rig.execution.started", {}) == "legacy.swarm.rig.execution.started"
+
+
+def test_unrestricted_signed_event_log_accepts_an_absent_publish_claim(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from scripts.events.config import QueuePolicy
+
+    monkeypatch.setattr(nats.nkey, "parse_creds", lambda _: ("synthetic", "synthetic"))
+    monkeypatch.setattr(nats.nkey, "claims", lambda _: {"nats": {}})
+    js = SimpleNamespace(publish=AsyncMock(return_value=SimpleNamespace(duplicate=False)))
+    log = nats.NatsEventLog(
+        SimpleNamespace(run=asyncio.run), js, QueuePolicy(), nats.EVENT_STREAM, True, credentials="synthetic"
+    )
+    event = Envelope("unrestricted", "ready", "rig", "task", "work", 1, 0, "author", {})
+    assert log.publish("swarm.rig.ready", event)
+    assert js.publish.await_args.args[0] == "legacy.swarm.rig.ready"

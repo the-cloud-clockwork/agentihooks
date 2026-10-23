@@ -193,3 +193,92 @@ def test_dead_import_walks_holes_and_includes_last_record_with_conditional_write
     )
     if race:
         root._js.get_last_msg.assert_awaited_once_with("target", destination)
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_state_handover_pins_the_ownership_plan_and_checks_source_revisions(monkeypatch, changed):
+    import json
+    from unittest.mock import Mock
+
+    root = backend()
+    records = [StateEntry("a", b"last", 9), StateEntry("a", b"first", 4)]
+    source = SimpleNamespace(
+        watch=lambda key: records if key == "a" else [],
+        get=lambda key: SimpleNamespace(revision=10 if changed else 9) if key == "a" else None,
+    )
+    root.state = Mock(return_value=source)
+    root._js.stream_info.return_value.state.last_seq = 17
+    target = SimpleNamespace(_stream="target")
+    construct = Mock(return_value=target)
+    begin = Mock(return_value={IMPORT_PENDING: "state", "preserved": "yes"})
+    copy = Mock()
+    metadata = AsyncMock()
+    monkeypatch.setattr(migration, "ScopedStateStore", construct)
+    monkeypatch.setattr(migration, "_begin_state", begin)
+    monkeypatch.setattr(migration, "_copy_state", copy)
+    monkeypatch.setattr(migration, "_metadata", metadata)
+    if changed:
+        with pytest.raises(RuntimeError) as caught:
+            migration.migrate_state(root, "rig", "work", ["a", "missing", "a"])
+        assert str(caught.value) == "legacy state changed during migration"
+        metadata.assert_not_awaited()
+    else:
+        migration.migrate_state(root, "rig", "work", ["a", "missing", "a"])
+        metadata.assert_awaited_once_with(root, "target", {"preserved": "yes"})
+    plan = hashlib.sha256(
+        json.dumps({"keys": ["a", "missing"], "revisions": [("a", 4), ("a", 9)]}).encode()
+    ).hexdigest()
+    construct.assert_called_once_with(root, "rig", "work", importing=True)
+    begin.assert_called_once_with(root, target, plan, 17)
+    copy.assert_called_once_with(root, target, list(reversed(records)), plan)
+
+
+def test_first_state_import_sets_the_source_highwater_before_copying():
+    root = backend({})
+    target = SimpleNamespace(_stream="target")
+    result = migration._begin_state(root, target, "plan", 99)
+    assert result == {migration.IMPORT_PLAN: "plan", REVISION_BASE: "99", IMPORT_PENDING: "state"}
+    assert target._revision_base == 99
+    assert root._js.update_stream.await_args.kwargs["config"].metadata == result
+
+
+def test_queue_handover_holds_the_import_barrier_until_drain_is_confirmed(monkeypatch):
+    from unittest.mock import Mock
+
+    root = backend({"preserved": "yes"})
+    source = SimpleNamespace(_stream="source")
+    target = SimpleNamespace(_stream="target")
+    constructor = Mock(return_value=source)
+    root.for_swarm = Mock(return_value=SimpleNamespace(queue=Mock(return_value=target)))
+    snapshots = []
+
+    async def metadata(current, stream, changes):
+        assert current is root and stream == "target"
+        snapshots.append(dict(changes))
+
+    async def drain(current, original, destination, policy, swarm):
+        assert snapshots == [{"preserved": "yes", IMPORT_PENDING: "queue"}]
+        assert (current, original, destination, swarm) == (root, source, target, "rig")
+
+    monkeypatch.setattr(migration, "NatsWorkQueue", constructor)
+    monkeypatch.setattr(migration, "_metadata", metadata)
+    monkeypatch.setattr(migration, "_drain_work", drain)
+    policy = QueuePolicy(max_deliver=2)
+    migration.migrate_queue(root, "rig", "eng", policy)
+    assert snapshots == [{"preserved": "yes", IMPORT_PENDING: "queue"}, {"preserved": "yes"}]
+    args = constructor.call_args.args
+    assert args[:4] == (root._loop, root._js, "swarm.rig.ready.eng", policy)
+    assert args[4].scoped is False
+    root.for_swarm.assert_called_once_with("rig")
+    root.for_swarm.return_value.queue.assert_called_once_with("eng", policy)
+
+
+def test_dead_handover_uses_the_selected_swarm_stream(monkeypatch):
+    from unittest.mock import Mock
+
+    root = backend()
+    root.for_swarm = Mock(return_value=SimpleNamespace(dead=SimpleNamespace(_log=SimpleNamespace(_stream="target"))))
+    copy = AsyncMock()
+    monkeypatch.setattr(migration, "_copy_dead", copy)
+    migration.migrate_dead(root, "rig")
+    copy.assert_awaited_once_with(root, "rig", "target")
