@@ -8,7 +8,8 @@ import pytest
 
 from scripts import openbao_kv
 from scripts.events import nkey
-from scripts.events.config import BusConfig
+from scripts.events.config import BusConfig, QueuePolicy
+from scripts.events.envelope import Envelope
 from scripts.hive import auth, nats_grant, nats_permissions, remove, server
 from tests.events import nats_server
 
@@ -99,6 +100,31 @@ def test_hive_serve_mints_a_member_credential_the_bus_opens_with(admin, signer):
     jwt, user = nkey.parse_creds(grant["nats_credentials"])
     assert user == nats_grant.member_user(signer, member["id"])
     assert _opens(signer, grant["nats_credentials"])
+
+
+def test_a_member_credential_runs_the_hive_bus_operations(signer):
+    from scripts.events import nats
+
+    hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
+    member = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, "m1")))
+    try:
+        event = Envelope(
+            "ready-a", "task.ready", "rig", "task", "task-a", 0, 12, "readiness", {"lane": "eng", "generation": 0}
+        )
+        hub.queue("swarm.rig.ready.eng", QueuePolicy()).offer(event)
+        delivery = member.queue("swarm.rig.ready.eng", QueuePolicy()).take(5000)
+        assert delivery.event == event
+        delivery.ack()
+        work = member.state("spoke-work")
+        revision = work.create("task-a", b"claimed")
+        assert work.update("task-a", b"done", revision) > revision
+        assert work.get("task-a").value == b"done"
+        assert [entry.value for entry in work.watch("task-a")] == [b"claimed", b"done"]
+        assert member.events.publish("swarm.rig.execution.started", event)
+        assert member.dead.publish("dead.rig", event)
+    finally:
+        member.close()
+        hub.close()
 
 
 def test_a_hive_endpoint_without_a_signer_mints_no_bus_credential(admin):
