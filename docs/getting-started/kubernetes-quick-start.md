@@ -46,7 +46,23 @@ helm upgrade --install agentihooks-swarm \
   --version <version> --namespace agentihooks -f values.yaml
 ```
 
-The chart repository's `examples/` folder holds the same hub values as `hub.yaml`, a hub on a NATS outside the release as `external-nats.yaml`, and a worker hive with no hub as `hive-only.yaml`. To use an existing NATS, set `nats.enabled: false` and `hub.bus.url` to its address.
+The chart repository's `examples/` folder holds the same hub values as `hub.yaml`, a hub on a NATS outside the release as `external-nats.yaml`, and a worker hive with no hub as `hive-only.yaml`.
+
+### Use an existing NATS
+
+To run the hub on a NATS server you already operate, turn the bundled one off and point the hub bus at yours:
+
+```yaml
+hub:
+  enabled: true
+  bus:
+    url: nats://nats.nats.svc.cluster.local:4222
+
+nats:
+  enabled: false
+```
+
+The server needs JetStream enabled for the hub's durable consumers.
 
 ### Use your own Redis
 
@@ -77,6 +93,10 @@ kubectl -n agentihooks port-forward service/agentihooks-swarm-ledger 8765:8765
 ```
 
 Then open `http://127.0.0.1:8765/`. Publish the ledger outside the cluster with the chart's `ingress` values or your own route.
+
+## Enroll workers
+
+The hub runs no agents. Each machine or worker pod that runs agents joins as a hive with one invite: issue it with `agentihooks hive invite`, then join a machine with `agentihooks hive join` or install a hive only release of this chart. Follow [Add a hive](add-hive-quick-start.md).
 
 ## Troubleshooting
 

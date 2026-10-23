@@ -82,7 +82,7 @@ helm upgrade --install hive-lab oci://ghcr.io/the-cloud-clockwork/charts/agentih
   --version <version> --namespace hive-lab -f hive-values.yaml
 ```
 
-`hiveOnly: true` renders one worker hive and no hub, Redis or NATS. Worker startup runs `agentihooks hive join` before it accepts work and stops if enrollment fails. Use one invite and one release per hive. For a private hub CA set `workers.caSecret`. GitHub and provider credentials stay separate Secret references.
+`hiveOnly: true` renders one worker hive and no hub or Redis, and `nats.enabled: false` keeps the bundled NATS out. Worker startup runs `agentihooks hive join` before it accepts work and stops if enrollment fails. Use one invite and one release per hive. For a private hub CA set `workers.caSecret`. GitHub and provider credentials stay separate Secret references.
 
 ## Verify
 

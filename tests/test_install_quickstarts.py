@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize(
-    ("slug", "commands"),
+    ("slug", "commands", "terms"),
     [
         (
             "kubernetes-quick-start",
@@ -17,10 +18,14 @@ pytestmark = pytest.mark.unit
                 "hub:",
                 "enabled: true",
                 "jetstream:",
+                "nats:",
+                "enabled: false",
+                "bus:",
                 "existingSecret:",
                 "kubectl rollout status",
                 "helm test",
             ],
+            ["JetStream", "add-hive-quick-start.md"],
         ),
         (
             "single-machine-quick-start",
@@ -28,11 +33,11 @@ pytestmark = pytest.mark.unit
                 "docker compose version",
                 "agentihooks swarm init",
                 "client.env",
-                "NATS",
-                "JetStream",
+                "agentihooks hive install",
                 "agentihooks hive list",
                 "agentihooks swarm my-swarm start",
             ],
+            ["NATS", "JetStream"],
         ),
         (
             "add-hive-quick-start",
@@ -46,10 +51,11 @@ pytestmark = pytest.mark.unit
                 "SSL_CERT_FILE",
                 "agentihooks hive show",
             ],
+            ["workers.caSecret"],
         ),
     ],
 )
-def test_install_quickstart_is_published_and_actionable(slug, commands):
+def test_install_quickstart_is_published_and_actionable(slug, commands, terms):
     root = Path(__file__).resolve().parents[1]
     docs = root / "docs" / "getting-started"
     page = docs / f"{slug}.md"
@@ -59,11 +65,11 @@ def test_install_quickstart_is_published_and_actionable(slug, commands):
     assert metadata["parent"] == "Getting Started"
     assert metadata["permalink"] == f"/docs/getting-started/{slug}/"
     assert f"({slug}.md)" in (docs / "index.md").read_text()
-    assert "Prerequisites" in body
-    assert "Verify" in body
-    assert "Troubleshooting" in body
-    for command in commands:
-        assert command in body
+    headings = re.findall(r"^## (.+)$", body, re.M)
+    assert {"Prerequisites", "Verify", "Troubleshooting"} <= set(headings)
+    code = "\n".join(re.findall(r"^ *```[a-z]*\n(.*?)^ *```", body, re.M | re.S))
+    assert [command for command in commands if command not in code] == []
+    assert [term for term in terms if term not in body] == []
     config = yaml.safe_load((root / "_config.yml").read_text())
     assert "docs" not in config["exclude"]
     assert page.relative_to(root).as_posix() not in config["exclude"]
