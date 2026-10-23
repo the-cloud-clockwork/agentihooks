@@ -303,8 +303,10 @@ def _list() -> None:
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
         room = headroom.summary(headroom.read(redis, record["id"], now))
+        label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
         print(
-            f"{record['id']}\t{state}\tui={record['ui']}\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}"
+            f"{record['id']}{label}\t{state}\tui={record['ui']}"
+            f"\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}"
         )
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))
