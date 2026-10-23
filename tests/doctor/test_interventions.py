@@ -181,7 +181,7 @@ def test_record_applied_stamps_utc_whatever_the_local_zone(store, monkeypatch):
 
 
 def test_a_failed_command_is_reported_and_not_logged(store):
-    ctx = context(store, FakeRun({"rev-parse": "dev\n"}, failing=("pull",)))
+    ctx = context(store, FakeRun({"rev-parse": "dev\n"}, failing=("merge",)))
     with pytest.raises(SwarmError, match="refused"):
         interventions.apply(ctx, "pull-dev", args())
     assert ctx.ledger.noted == []
