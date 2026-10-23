@@ -546,7 +546,7 @@ Every test the unit shard planner sees has a stored duration. Two writers fill t
 3. `main` fills each collected test that the chosen map lacks with the median of that map, rewrites `.test_durations`, and writes its sha256 to `durations.sha256`.
 4. Each `unit (3.12, <shard>)` job downloads `split-3.12`, and `_shard_files` in `tests/conftest.py` passes every collected test to `assign_nodes` with its stored or median price.
 
-On the dev push refresh the same one in ten check runs first, and the step fails with `IncompleteDurations: <n> of <m> tests have no stored duration` when a written map would lack more than that. Within that limit the fill gives a new test the median until a later dev push times it; `ci_medians` then replaces the estimate with a measured value.
+On the dev push refresh the same one in ten check runs first, and the step fails with `::error::refresh durations: <n> of <m> tests have no stored duration` when a written map would lack more than that. When the run's own shard samples are incomplete, the line ends `; run <id> kept no samples from durations-3.12-<shard>`. Within that limit the fill gives a new test the median until a later dev push times it; `ci_medians` then replaces the estimate with a measured value.
 
 The median is small. On the dev push Tests run [39992377126](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39992377126) at `94dcb486bf`, each `durations-merged` map held 43558 tests; the median was 0.0529 s in `.test_durations` and `.test_durations-3.12`, and 0.1013 s in both slowest maps.
 
@@ -612,7 +612,7 @@ Take the median of the `spread` column over the ten runs, and divide the total `
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| The refresh job fails with `<n> of <m> tests have no stored duration` | A written map lacks more than one collected test in ten | Compare the run's `durations-3.12-<shard>` artifacts with its unit shards; a shard that kept no artifact leaves its tests unmeasured |
+| The refresh job fails with `::error::refresh durations: <n> of <m> tests have no stored duration` | A written map lacks more than one collected test in ten | Read the rest of the line: `kept no samples from` names the shards whose `durations-3.12-<shard>` artifacts the run lost, which leaves their tests unmeasured |
 | The split step prints `Refusing the restored dev durations` | The dev cache predates more than a tenth of the suite, for example after a large test move | The committed durations are used instead; the next green dev push refresh restores the cache |
 | `Splitting tests without a committed duration evenly` | Neither the cache nor a committed file covers nine tests in ten | Tests without a committed duration are planned at the committed median for this run; the next green dev push refresh restores the cache |
 | A new slow test makes one shard run long | It was planned at the median until a dev push timed it | Wait for the next dev push refresh, or check that the test's file appears in that run's `durations-3.12-*` artifacts |
