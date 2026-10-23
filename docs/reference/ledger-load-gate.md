@@ -547,7 +547,7 @@ gh workflow run hierarchy-cpu.yml --ref "<branch>" -f base="$(git rev-parse "ori
 | `hierarchy responses of pair N differ between base and head` | Source, request count or any response body differs. Response identity is still required byte for byte |
 | `head hierarchy CPU geometric mean pair ratio R exceeds the Mx margin` | The geometric mean is over the margin |
 
-### The same code record
+### The hierarchy same code record
 
 `tests/ledger_load/hierarchy_same_code.json` maps each recorded run id to its
 pairs in matrix order, each pair `[base, head]` CPU seconds per read:
