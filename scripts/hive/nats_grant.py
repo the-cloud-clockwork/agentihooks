@@ -51,6 +51,33 @@ MEMBER_PUBLISH = (
     *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets.NAMES),
     *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets.NAMES),
 )
+CONTROLLER_BUCKETS = (
+    *buckets.NAMES,
+    "hub-versions",
+    "hub-leases",
+    "hub-hive-loss",
+    "hub-timers",
+    "hub-github",
+    "hub-reconciler",
+    "inbox",
+    "inbox-wake",
+    "inbox_legacy",
+)
+# Queue stream names hash the swarm and lane into one token, so stream level API grants take any stream name.
+CONTROLLER_PUBLISH = (
+    f"{subjects.PREFIX}.>",
+    "dead.>",
+    "agentihooks.queue.>",
+    "$JS.API.STREAM.CREATE.*",
+    "$JS.API.STREAM.INFO.*",
+    "$JS.API.STREAM.MSG.GET.*",
+    "$JS.API.CONSUMER.CREATE.>",
+    "$JS.API.CONSUMER.DURABLE.CREATE.>",
+    "$JS.API.CONSUMER.INFO.>",
+    "$JS.API.CONSUMER.MSG.NEXT.>",
+    "$JS.ACK.>",
+    *(f"$KV.{bucket}.>" for bucket in CONTROLLER_BUCKETS),
+)
 
 
 @dataclass(frozen=True)
@@ -181,6 +208,10 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None) -> dict:
         "pub": {"allow": publish} if publish else {"deny": [">"]},
         "sub": {"allow": [*(f"{subjects.PREFIX}.{swarm}.>" for swarm in swarms), f"{subjects.inbox(user)}.>"]},
     }
+
+
+def controller_claims() -> dict:
+    return {**user_claims(), "pub": {"allow": list(CONTROLLER_PUBLISH)}, "sub": {"allow": ["_INBOX.>"]}}
 
 
 def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
