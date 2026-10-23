@@ -878,8 +878,8 @@ runners repels batch runners from every node that holds a unit runner. Every
 `anton-oss-batch` pod then stayed Pending, with scheduler events naming nodes
 that failed existing pods' anti affinity rules.
 [Pull request 970](https://github.com/the-cloud-clockwork/antoncore/pull/970)
-reverted it at 00:30:34 UTC on 20 October, and 973 replaced it with the
-preferred term. Do not reintroduce a required term against batch sets; the
+reverted it at 00:30:34 UTC on 20 October, and pull request 973 replaced it
+with the preferred term. Do not reintroduce a required term against batch sets; the
 second test above fails on one.
 
 A preferred term is one scheduling score among others, so on a busy cluster
@@ -903,19 +903,20 @@ same script. The after window starts at the apply time.
 | Before: 19 Oct 10:50:51 to 22:50:51 | 852 | 382 | 466 | 58 | 0.068 |
 | After: 20 Oct 01:23:52 to 13:23:52 | 738 | 357 | 410 | 2 | 0.003 |
 
-The before window closed twenty minutes before 968 merged, so neither rule
+The before window closed twenty minutes before pull request 968 merged, so neither rule
 was live in it; the required rule, live from 23:11:01 UTC until its revert,
 falls in neither window. Two runs on each side returned no job list
-and were skipped. The last two hours of the after window ran under the
+and were skipped, as the source task's recorded proof states for each side. The last two hours of the after window ran under the
 `runner-binpack` scheduler: recomputed from the retained after jobs, 690
-shards started before 994 merged, and both shards over 540 s are among them.
+shards started before pull request 994 merged, and both shards over 540 s are among them.
 
 The Doctor finding that started this work was
 `ci-tier-wall-time/39326180375-1`, judged at 1033 seconds while pull request
 Tests run [39326180375](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39326180375)
 was in progress. That run ended `cancelled` at 21:36:29 UTC on 19 October.
-The measure counts only completed runs that concluded `success` or `failure`,
-so it now refuses this finding:
+The measure refuses a completed run whose conclusion is neither `success` nor
+`failure`; it still measures a run in progress against the current time. It
+now refuses this finding:
 
 ```console
 $ agentihooks doctor rig-grade-swarm measure ci-tier-wall-time/39326180375-1
@@ -941,11 +942,12 @@ kubectl get autoscalingrunnerset anton -n arc-runners \
 
 Each prints a `preferredDuringSchedulingIgnoredDuringExecution` list holding
 the batch term and no `requiredDuringSchedulingIgnoredDuringExecution` key.
-Check a running unit runner and its node:
+Check a running unit runner and its node. Pick a pod name from
+`kubectl get pods -n arc-runners-oss -l actions.github.com/scale-set-name=anton-oss`:
 
 ```bash
-pod="<unit runner pod>"
-kubectl describe pod "$pod" -n arc-runners-oss | grep -A12 'Anti Affinity'
+pod="$UNIT_RUNNER_POD"
+kubectl get pod "$pod" -n arc-runners-oss -o jsonpath='{.spec.affinity.podAntiAffinity}{"\n"}'
 node=$(kubectl get pod "$pod" -n arc-runners-oss -o jsonpath='{.spec.nodeName}')
 kubectl get pods -A --field-selector "spec.nodeName=$node" \
   -l 'actions.github.com/scale-set-name in (anton-oss-batch,anton-batch)'
@@ -955,27 +957,40 @@ kubectl get events -n arc-runners-oss --field-selector reason=FailedScheduling
 To repeat the share for a new window, list the pull request Tests runs created
 in it and read their `unit (3.12` jobs. A shard counts when it started inside
 the window, did not end `skipped` or `cancelled`, and ran at least 120
-seconds.
+seconds. This prints the same figures as the table above:
 
 ```bash
-start=2026-10-20T01:23:52Z end=2026-10-20T13:23:52Z
-gh api --paginate \
-  "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs?event=pull_request&created=$start..$end&per_page=100" \
+start='2026-10-20T01:23:52Z'
+end='2026-10-20T13:23:52Z'
+filter='.jobs[] | select(.name | startswith("unit (3.12"))
+  | select(.started_at != null and .completed_at != null)
+  | select(.conclusion != "skipped" and .conclusion != "cancelled")
+  | select(.started_at >= "'"$start"'" and .started_at < "'"$end"'")
+  | (.completed_at | fromdate) - (.started_at | fromdate)
+  | select(. >= 120)'
+gh api --method GET --paginate \
+  repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs \
+  -f event=pull_request -f created="$start..$end" -f per_page=100 \
   --jq '.workflow_runs[].id' |
 while read -r run; do
-  gh api --paginate "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/jobs?per_page=100&filter=all" \
-    --jq '.jobs[] | select(.name | startswith("unit (3.12")) | [.started_at, .completed_at, .conclusion] | @tsv'
-done > shards.tsv
+  gh api --paginate \
+    "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/jobs?per_page=100&filter=all" \
+    --jq "$filter"
+done | sort -n | awk '
+  { d[NR] = $1; if ($1 > 540) over++ }
+  END {
+    median = NR % 2 ? d[(NR + 1) / 2] : (d[NR / 2] + d[NR / 2 + 1]) / 2
+    printf "shards %d median %.0f p90 %d over540 %d share %.3f\n",
+      NR, median, d[int(NR * 0.9) + 1], over, over / NR
+  }'
 ```
 
-Then keep the rows that meet the rule and divide the count over 540 seconds by
-the count kept. The source task's script, `measure.sh` in its Doctor task
-folder, does exactly this and prints shards, median, p90, the count over 540
-and the share. It is task evidence, not an installed command.
+The source task ran the same rule as `measure.sh` in its Doctor task folder;
+that script is task evidence, not an installed command.
 
 | Symptom | Inspection |
 |---|---|
-| Batch runner pods stay Pending after a runner values change | Read `FailedScheduling` events; a required anti affinity on unit runners against batch sets causes this, as 968 did |
+| Batch runner pods stay Pending after a runner values change | Read `FailedScheduling` events; a required anti affinity on unit runners against batch sets causes this, as pull request 968 did |
 | Unit shards slow again while the rule is live | Read node CPU for co-tenant runners in Prometheus; the preferred term can lose to packing on a full cluster |
 | The rule is missing from a scale set | Check that the ArgoCD application synced the `dev` revision that carries it |
 | A share is far off with few shards | Check for runs that returned no job list and for an unequal window length |
@@ -986,11 +1001,13 @@ and the share. It is task evidence, not an installed command.
   after [issue 967](https://github.com/the-cloud-clockwork/antoncore/issues/967)
   for the reverted required rule and [issue 969](https://github.com/the-cloud-clockwork/antoncore/issues/969)
   for the revert.
-- Red: antoncore CI Validate run 39352302110, six failures, all in
-  `test_unit_runners_prefer_nodes_without_batch_runners`.
-- Green: CI Validate run 39352529232, attempt 2. Attempt 1 lost only a k3s
-  case to a kubectl exit 137 during kubelet start.
-- Merged 973 at 01:23:20 UTC on 20 October; ArgoCD synced
+- Red: antoncore CI Validate run [39352302110](https://github.com/the-cloud-clockwork/antoncore/actions/runs/39352302110),
+  six failures, all in `test_unit_runners_prefer_nodes_without_batch_runners`.
+- Green: CI Validate run [39352529232](https://github.com/the-cloud-clockwork/antoncore/actions/runs/39352529232),
+  attempt 2. Attempt 1 lost only a k3s case to a kubectl exit 137 during
+  kubelet start.
+- Merged [pull request 973](https://github.com/the-cloud-clockwork/antoncore/pull/973)
+  at 01:23:20 UTC on 20 October; ArgoCD synced
   `arc-runners-oss-queue` at 01:23:36 and `arc-runners` and `arc-runners-oss`
   at 01:23:52.
 - Read only checks after the apply: new template pods on all three unit sets
