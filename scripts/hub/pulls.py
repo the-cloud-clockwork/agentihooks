@@ -11,13 +11,15 @@ from scripts.events.envelope import Envelope
 from scripts.events.subjects import subject
 from scripts.hub import lease
 from scripts.hub.registry import Reactor
-from scripts.swarm import merge_queue
+from scripts.swarm import merge_queue, mutation_wait
 from scripts.swarm.store import SwarmError
 
 BUCKET = "hub-github"
 OPEN = "open"
 POLLED = "polled"
 INTERVAL_MS = 300_000
+FLUSH_AFTER_MS = 60_000
+FETCH_ERRORS = (SwarmError, KeyError, TypeError)
 ATTEMPTS = 8
 AUTHOR = "github"
 ENTITY = "pull"
@@ -89,7 +91,9 @@ def _changes(snapshot: dict, seen: Observation) -> list[tuple[str, dict]]:
     if seen.head is not None and seen.head != snapshot["head"]:
         if snapshot["head"] is not None:
             found.append(("pull.pushed", {"previous": snapshot["head"]}))
-        snapshot["head"], snapshot["suites"] = seen.head, {}
+        early = snapshot["early"].get(seen.head, {})
+        snapshot["head"], snapshot["suites"], snapshot["early"] = seen.head, {}, {}
+        found += _suites(snapshot, early)
     if seen.state is not None and seen.state != snapshot["state"]:
         found.append((ARRIVED.get(seen.state) or ("pull.reopened" if snapshot["state"] else "pull.opened"), {}))
         snapshot["state"] = seen.state
@@ -98,11 +102,19 @@ def _changes(snapshot: dict, seen: Observation) -> list[tuple[str, dict]]:
     elif seen.queued is not None and seen.queued != snapshot["queued"]:
         found.append(("merge.queued" if seen.queued else "merge.dequeued", {}))
         snapshot["queued"] = seen.queued
-    if seen.checks_head is not None and seen.checks_head == snapshot["head"]:
-        for suite, result in sorted(seen.suites.items()):
-            if snapshot["suites"].get(suite) != result:
-                found.append(("checks.completed", {"suite": suite, **result}))
-                snapshot["suites"][suite] = result
+    if seen.checks_head == snapshot["head"]:
+        found += _suites(snapshot, seen.suites)
+    elif seen.checks_head is not None:
+        snapshot["early"][seen.checks_head] = {**snapshot["early"].get(seen.checks_head, {}), **seen.suites}
+    return found
+
+
+def _suites(snapshot: dict, suites: dict) -> list[tuple[str, dict]]:
+    found = []
+    for suite, result in sorted(suites.items()):
+        if snapshot["suites"].get(suite) != result:
+            found.append(("checks.completed", {"suite": suite, **result}))
+            snapshot["suites"][suite] = result
     return found
 
 
@@ -127,11 +139,11 @@ class Pulls:
         self._clock = clock
 
     def reactor(self) -> Reactor:
-        return Reactor("pulls", "swarm.*.task.changed", self.handle, singleton=True, poll=self.poll)
+        return Reactor("pulls", "swarm.*.task.*", self.handle, singleton=True, poll=self.poll)
 
     def handle(self, event: Envelope) -> None:
         url = event.data.get("pr_url")
-        if isinstance(url, str) and URL.fullmatch(url):
+        if event.type == "task.changed" and isinstance(url, str) and URL.fullmatch(url):
             self.track(event.swarm, url)
 
     def track(self, swarm: str, url: str) -> None:
@@ -143,6 +155,7 @@ class Pulls:
                 "head": None,
                 "queued": False,
                 "suites": {},
+                "early": {},
                 "version": 0,
                 "pending": [],
             }
@@ -156,33 +169,39 @@ class Pulls:
 
     def observe(self, seen: Observation) -> None:
         now = self._clock()
+        created = []
 
         def change(snapshot):
             if snapshot is None:
                 return None
             after = json.loads(json.dumps(snapshot))
-            found = _changes(after, seen)
-            if not found and not after["pending"]:
-                return None
-            after["pending"] += _rows(after, found, now)
-            return after
+            created[:] = _rows(after, _changes(after, seen), now)
+            after["pending"] += created
+            return None if after == snapshot else after
 
-        written = _update(self._state, key(seen.url), change)
-        if written is None:
+        written = _update(self._state, key(seen.url), change) or self._snapshot(seen.url)
+        self._publish(seen.url, created)
+        if written is not None and written["state"] in TERMINAL:
+            self._index(seen.url, False)
+
+    def _snapshot(self, url: str) -> dict | None:
+        entry = self._state.get(key(url))
+        return None if entry is None else json.loads(entry.value)
+
+    def _publish(self, url: str, rows: list[dict]) -> None:
+        if not rows:
             return
-        for row in written["pending"]:
+        for row in rows:
             self._events.publish(row["subject"], Envelope.from_dict(row["event"]))
-        sent = {row["event"]["id"] for row in written["pending"]}
+        sent = {row["event"]["id"] for row in rows}
         _update(
             self._state,
-            key(seen.url),
+            key(url),
             lambda snapshot: {
                 **snapshot,
                 "pending": [row for row in snapshot["pending"] if row["event"]["id"] not in sent],
             },
         )
-        if written["state"] in TERMINAL:
-            self._index(seen.url, False)
 
     def _index(self, url: str, present: bool) -> None:
         def change(urls):
@@ -204,10 +223,14 @@ class Pulls:
         for url in json.loads(index.value) if index else []:
             if not guard():
                 return
+            pending = self._snapshot(url)["pending"]
+            self._publish(url, [row for row in pending if row["event"]["time"] <= now - FLUSH_AFTER_MS])
             try:
                 seen = self._fetch(url)
-            except SwarmError as exc:
-                print(f"hub: GitHub poll stopped at {url}: {exc}", file=sys.stderr)
-                break
+            except FETCH_ERRORS as exc:
+                print(f"hub: GitHub poll skipped {url}: {exc}", file=sys.stderr)
+                if mutation_wait.rate_limited(exc):
+                    break
+                continue
             self.observe(seen)
         _update(self._state, POLLED, lambda _: now)

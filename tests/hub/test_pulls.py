@@ -3,13 +3,13 @@ import json
 import subprocess
 
 import pytest
-from scripts.hub.pulls import Observation, Pulls
 
 from scripts.events.bus import StateConflict
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hub import pulls
+from scripts.hub.pulls import Observation, Pulls
 from scripts.swarm.store import SwarmError
 
 pytestmark = pytest.mark.unit
@@ -70,9 +70,25 @@ def open_urls(bus):
 def test_reactor_follows_task_changes_on_one_hub_replica():
     _, hub, _ = setup()
     reactor = hub.reactor()
-    assert (reactor.name, reactor.subject, reactor.singleton) == ("pulls", "swarm.*.task.changed", True)
+    assert (reactor.name, reactor.subject, reactor.singleton) == ("pulls", "swarm.*.task.*", True)
     assert reactor.handler == hub.handle
     assert reactor.poll == hub.poll
+
+
+def test_hub_runner_tracks_pull_requests_from_ledger_outbox_subjects():
+    from scripts.events import subjects
+    from scripts.hub import registry, runner
+    from scripts.swarm_ledger.repository import outbox
+
+    bus, hub, _ = setup(lambda url: Observation(url))
+    hubs = runner.HubRunner(bus, registry.Registry([hub.reactor()]), "holder")
+    removed = Envelope(**{**task_changed(url=OTHER).to_dict(), "id": "gone", "type": "task.removed", "key": "t.2"})
+    bus.events.publish(subjects.subject("crew", "task", outbox.token("t.2")), removed)
+    bus.events.publish(subjects.subject("crew", "task", outbox.token("t1")), task_changed())
+    assert hubs.run_once(timeout_ms=0)["pulls"] == ["handled", "handled"]
+    assert snapshot(bus)["swarms"] == ["crew"]
+    assert snapshot(bus, OTHER) is None
+    assert open_urls(bus) == [URL]
 
 
 def test_key_is_a_stable_digest_of_the_url():
@@ -92,6 +108,7 @@ def test_a_task_carrying_a_pull_request_url_tracks_it_for_its_swarm():
         "head": None,
         "queued": False,
         "suites": {},
+        "early": {},
         "version": 0,
         "pending": [],
     }
@@ -249,8 +266,9 @@ def test_check_suites_of_another_head_are_ignored_and_a_push_clears_old_suites()
     assert snapshot(bus)["suites"] == {}
 
 
-def test_a_failed_publish_stays_pending_and_is_published_by_the_next_observation():
-    bus, hub, consumer = setup()
+def test_a_failed_publish_stays_pending_until_the_poll_flushes_it():
+    clock = Clock()
+    bus, hub, consumer = setup(lambda url: Observation(url), clock)
     hub.handle(task_changed())
     publish = bus.events.publish
     calls = []
@@ -266,22 +284,65 @@ def test_a_failed_publish_stays_pending_and_is_published_by_the_next_observation
     assert [row["subject"] for row in snapshot(bus)["pending"]] == ["swarm.crew.pull.opened"]
     bus.events.publish = publish
     hub.observe(Observation(URL, "open", "a1"))
+    assert drain(consumer) == []
+    clock.now = 1000 + pulls.FLUSH_AFTER_MS - 1
+    hub.poll()
+    assert drain(consumer) == []
+    assert len(snapshot(bus)["pending"]) == 1
+    clock.now += pulls.INTERVAL_MS
+    hub.poll()
     assert kinds(drain(consumer)) == [("crew", "pull.opened", 1)]
     assert snapshot(bus)["pending"] == []
 
 
-def test_pending_events_published_twice_collapse_on_their_id():
+def test_an_observation_publishes_only_the_events_it_created():
     bus, hub, consumer = setup()
     hub.handle(task_changed())
     hub.observe(Observation(URL, "open", "a1"))
-    published = drain(consumer)
+    first = drain(consumer)
     state = bus.state(pulls.BUCKET)
     entry = state.get(pulls.key(URL))
-    row = {"subject": "swarm.crew.pull.opened", "event": published[0].to_dict()}
-    state.update(pulls.key(URL), json.dumps({**json.loads(entry.value), "pending": [row]}).encode(), entry.revision)
-    hub.observe(Observation(URL))
+    leftover = {"subject": "swarm.crew.pull.opened", "event": first[0].to_dict()}
+    state.update(
+        pulls.key(URL), json.dumps({**json.loads(entry.value), "pending": [leftover]}).encode(), entry.revision
+    )
+    hub.observe(Observation(URL, "closed", "a1"))
+    assert [e.type for e in drain(consumer)] == ["pull.closed"]
+    assert snapshot(bus)["pending"] == [leftover]
+
+
+def test_a_terminal_pull_request_left_in_the_index_is_removed_on_its_next_observation():
+    bus, hub, _ = setup()
+    hub.handle(task_changed())
+    hub.observe(Observation(URL, "merged", "a1"))
+    state = bus.state(pulls.BUCKET)
+    entry = state.get(pulls.OPEN)
+    state.update(pulls.OPEN, json.dumps([URL]).encode(), entry.revision)
+    hub.observe(Observation(URL, "merged", "a1"))
+    assert open_urls(bus) == []
+
+
+def test_check_suites_that_arrive_before_their_head_report_when_the_head_does():
+    bus, hub, consumer = setup()
+    hub.handle(task_changed())
+    hub.observe(Observation(URL, "open", "a1"))
+    drain(consumer)
+    red = {"app": "sonar", "conclusion": "failure"}
+    hub.observe(Observation(URL, checks_head="b2", suites={"9": SUITE}))
+    hub.observe(Observation(URL, checks_head="b2", suites={"4": red}))
+    hub.observe(Observation(URL, checks_head="c3", suites={"5": SUITE}))
     assert drain(consumer) == []
-    assert snapshot(bus)["pending"] == []
+    assert snapshot(bus)["early"] == {"b2": {"9": SUITE, "4": red}, "c3": {"5": SUITE}}
+    hub.observe(Observation(URL, "open", "b2"))
+    events = drain(consumer)
+    assert [(e.type, e.data.get("suite"), e.version) for e in events] == [
+        ("pull.pushed", None, 2),
+        ("checks.completed", "4", 3),
+        ("checks.completed", "9", 4),
+    ]
+    assert events[1].data["head"] == "b2"
+    assert snapshot(bus)["suites"] == {"9": SUITE, "4": red}
+    assert snapshot(bus)["early"] == {}
 
 
 def test_a_contended_snapshot_write_retries_on_the_newer_revision():
@@ -378,21 +439,41 @@ def test_poll_records_its_pass_time():
     assert json.loads(bus.state(pulls.BUCKET).get(pulls.POLLED).value) == 1000 + pulls.INTERVAL_MS
 
 
-def test_poll_stops_at_a_github_failure_and_waits_for_the_next_interval(capsys):
+@pytest.mark.parametrize("error", [SwarmError("gone"), KeyError("state"), TypeError("none")])
+def test_poll_skips_a_pull_request_it_cannot_read_and_polls_the_rest(capsys, error):
     fetched = []
 
     def fetch(url):
         fetched.append(url)
-        raise SwarmError("rate limited")
+        if url == URL:
+            raise error
+        return Observation(url, "open", "c3")
+
+    bus, hub, consumer = setup(fetch)
+    hub.handle(task_changed())
+    hub.handle(task_changed(url=OTHER))
+    hub.poll()
+    assert fetched == [URL, OTHER]
+    assert capsys.readouterr().err == f"hub: GitHub poll skipped {URL}: {error}\n"
+    assert [(e.key, e.type) for e in drain(consumer)] == [(OTHER, "pull.opened")]
+    hub.poll()
+    assert fetched == [URL, OTHER]
+
+
+def test_poll_stops_at_a_rate_limit_and_waits_for_the_next_interval(capsys):
+    fetched = []
+
+    def fetch(url):
+        fetched.append(url)
+        raise SwarmError("API rate limit exceeded")
 
     bus, hub, consumer = setup(fetch)
     hub.handle(task_changed())
     hub.handle(task_changed(url=OTHER))
     hub.poll()
     assert fetched == [URL]
-    assert capsys.readouterr().err == f"hub: GitHub poll stopped at {URL}: rate limited\n"
-    hub.poll()
-    assert fetched == [URL]
+    assert capsys.readouterr().err == f"hub: GitHub poll skipped {URL}: API rate limit exceeded\n"
+    assert json.loads(bus.state(pulls.BUCKET).get(pulls.POLLED).value) == 1000
     assert drain(consumer) == []
 
 
