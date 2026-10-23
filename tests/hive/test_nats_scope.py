@@ -146,7 +146,7 @@ def test_hub_record_supplies_member_swarm_membership(monkeypatch):
     assert loaded.member_swarms == {"m1": ("rig", "second")}
 
 
-@pytest.mark.parametrize("membership", [None, [], "rig", {"m1": "rig"}, {"m1": ["*"]}, {"m1": [None]}])
+@pytest.mark.parametrize("membership", [None, [], "rig", {"m1": "rig"}])
 def test_hub_record_refuses_malformed_member_swarm_membership(monkeypatch, membership):
     from scripts import openbao_kv
     from tests.hive.test_nats_grant import BAO_ENV, SIGNER_PATH, _signer_record
@@ -154,8 +154,9 @@ def test_hub_record_refuses_malformed_member_swarm_membership(monkeypatch, membe
     operator, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)
     record = {**_signer_record(operator, account), "member_swarms": membership}
     monkeypatch.setattr(openbao_kv, "read", lambda *_: (record, 1))
-    with pytest.raises(auth.HiveError, match="member_swarms"):
+    with pytest.raises(auth.HiveError) as error:
         nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV})
+    assert str(error.value) == "member_swarms must map member ids to lists of swarm names"
 
 
 @pytest.mark.parametrize("signer", [4096], indirect=True)
@@ -170,3 +171,65 @@ def test_scoped_credentials_require_more_than_the_default_control_line(signer):
     with pytest.raises(nats_client.errors.Error) as error:
         nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credentials, provision=False))
     assert str(error.value) == "nats: 'maximum control line exceeded'"
+
+
+def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
+    scoped = replace(signer, member_swarms={"m1": ("rig",)})
+    jwt, user = nkey.parse_creds(nats_grant.mint(scoped, "m1"))
+    resources = (
+        "EVENTS",
+        "DEAD",
+        "QUEUE_eng",
+        "QUEUE_ci",
+        "QUEUE_plan",
+        "STATE_spoke-work",
+        "STATE_spoke-pending",
+        "STATE_hive-presence",
+        "STATE_hive-executions",
+        "STATE_execution-starts",
+    )
+    expected = {"swarm.rig.>"}
+    for resource in resources:
+        stream = f"AGENTIHOOKS_726967_{resource}"
+        expected.update(
+            (
+                f"$JS.API.STREAM.INFO.{stream}",
+                f"$JS.API.STREAM.MSG.GET.{stream}",
+                f"$JS.API.CONSUMER.INFO.{stream}.*",
+                f"$JS.API.CONSUMER.MSG.NEXT.{stream}.*",
+                f"$JS.ACK.{stream}.>",
+            )
+        )
+    claims = nkey.claims(jwt)["nats"]
+    assert set(claims) == {"type", "version", "pub", "sub", "subs", "data", "payload"}
+    assert set(claims["pub"]) == {"allow"}
+    assert set(claims["pub"]["allow"]) == expected
+    assert claims["sub"] == {"allow": ["swarm.rig.>", f"_INBOX.{user.public}.>"]}
+
+
+@pytest.mark.parametrize("memberships", [{}, {"another": ("rig",)}, {"m1": ()}])
+def test_unlisted_or_empty_membership_carries_an_explicit_publish_deny(signer, memberships):
+    scoped = replace(signer, member_swarms=memberships)
+    jwt, user = nkey.parse_creds(nats_grant.mint(scoped, "m1"))
+    claims = nkey.claims(jwt)["nats"]
+    assert claims["pub"] == {"deny": [">"]}
+    assert claims["sub"] == {"allow": [f"_INBOX.{user.public}.>"]}
+
+
+@pytest.mark.parametrize(
+    "swarm,expected",
+    [
+        ("*", "member_swarms contains an invalid swarm name (invalid event subject token '*')"),
+        (None, "member_swarms contains an invalid swarm name (invalid event subject token None)"),
+    ],
+)
+def test_hub_record_refuses_invalid_member_swarm_tokens(monkeypatch, swarm, expected):
+    from scripts import openbao_kv
+    from tests.hive.test_nats_grant import BAO_ENV, SIGNER_PATH, _signer_record
+
+    operator, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)
+    record = {**_signer_record(operator, account), "member_swarms": {"m1": [swarm]}}
+    monkeypatch.setattr(openbao_kv, "read", lambda *_: (record, 1))
+    with pytest.raises(auth.HiveError) as error:
+        nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV})
+    assert str(error.value) == expected
