@@ -83,6 +83,11 @@ class SwarmConfig:
     swap_floor_mb: int = DEFAULT_SWAP_FLOOR_MB
     hive_placement: bool = False
     local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
+    engine: str = "legacy"
+
+    def __post_init__(self) -> None:
+        if self.engine not in ("legacy", "events"):
+            raise SwarmError("engine must be one of legacy, events")
 
 
 def scaling_refusal(config):
@@ -225,6 +230,7 @@ class RedisStore:
             int(raw.get("swap_floor_mb") or DEFAULT_SWAP_FLOOR_MB),
             raw.get("hive_placement") == "True",
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
+            raw.get("engine", "legacy"),
         )
 
     def update(self, slug, **changes):
