@@ -905,6 +905,25 @@ def test_spawn_preserves_profile_and_prompt_boundary_arguments(tmp_path, monkeyp
     assert observed == ["profile", "prompt"]
 
 
+def test_spawn_passes_the_pinned_claim_to_the_shared_launcher(tmp_path):
+    import json
+
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="swarm-buildout", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    fence = {"key": "claim-a", "revision": 7}
+    runtime.spawn(config, "eng", "swarm-buildout-eng-4", {"id": "t4", "title": "x", "claim_fence": fence})
+    args = seen["argv"]
+    assert json.loads(args[args.index("--claim-fence") + 1]) == fence
+
+
 SEAT_TASKS = {
     "eng": {"id": "t1", "title": "x"},
     "ci": {"id": "t1", "title": "x"},

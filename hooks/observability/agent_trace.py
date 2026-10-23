@@ -120,8 +120,11 @@ def _blocks(entry: dict) -> list:
 
 
 def _is_prompt(entry: dict) -> bool:
-    if entry.get("type") != "user" or entry.get("isMeta"):
+    if entry.get("type") != "user":
         return False
+    if entry.get("isMeta"):
+        origin = entry.get("origin")
+        return isinstance(origin, dict) and origin.get("kind") == "channel" and origin.get("server") == "inbox"
     text = _text(_blocks(entry))
     if (
         entry.get("uuid", "").startswith("codex-")

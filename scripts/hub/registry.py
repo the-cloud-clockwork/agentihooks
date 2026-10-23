@@ -2,7 +2,9 @@ import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 
+from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
+from scripts.hub import lease
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 
@@ -15,6 +17,7 @@ class Reactor:
     subject: str
     handler: Handler
     singleton: bool = False
+    poll: Callable[[Callable[[], bool]], None] | None = None
 
     def __post_init__(self):
         if not isinstance(self.name, str) or not _NAME.fullmatch(self.name):
@@ -42,3 +45,9 @@ def durable(reactor: Reactor) -> str:
 
 
 REACTORS = Registry()
+
+
+def configured(bus: Bus, clock: lease.Clock = lease.wall_ms) -> Registry:
+    from scripts.hub.timers import Timers
+
+    return Registry([*REACTORS, Timers(bus, clock).reactor()])

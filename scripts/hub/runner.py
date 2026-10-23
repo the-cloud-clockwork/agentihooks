@@ -77,6 +77,13 @@ class HubRunner:
                 outcomes.append("standby")
                 continue
             outcomes.append(self._deliver(reactor, delivery))
+        if reactor.poll is not None:
+            try:
+                reactor.poll(held.acquire if held is not None else lambda: True)
+            except Exception:
+                print(f"hub: reactor {reactor.name} timer callback failed", file=sys.stderr)
+                traceback.print_exc()
+                outcomes.append("failed")
         return outcomes
 
     def _deliver(self, reactor: Reactor, delivery: Delivery) -> str:
@@ -116,7 +123,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     bus = open_bus(BusConfig.from_environ(os.environ))
-    hub = HubRunner(bus, registry.REACTORS, os.environ.get("HOSTNAME") or socket.gethostname())
+    hub = HubRunner(bus, registry.configured(bus), os.environ.get("HOSTNAME") or socket.gethostname())
     previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         return {"run": _run}[args.action](hub, args.once)

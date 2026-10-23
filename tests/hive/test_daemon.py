@@ -1248,11 +1248,13 @@ def test_execution_report_deduplicates_processes_and_skips_stale_records(redis, 
 def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeypatch):
     from dataclasses import replace
 
-    from scripts.hive import orders, reports
+    from scripts.hive import execution_events, orders, reports
     from scripts.swarm.pane import PaneObservation
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
     from scripts.swarm_v2.runtime import process
 
+    publisher = Mock()
+    monkeypatch.setattr(execution_events, "observe", publisher)
     store = RedisStore(redis)
     store.create(SwarmConfig("swarm", "repo", 8, 0))
     here = AgentRecord(
@@ -1279,6 +1281,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
     daemon.beat(redis, "machine")
+    publisher.assert_called_once_with("machine", json.loads(redis.get(reports.key("machine"))))
     assert [a.name for a in herdr.bindings.call_args.args[0]] == [here.name]
     assert herdr.reported.call_args.args[0].execution_id == here.execution_id
     assert herdr.observe.call_args.args[0].execution_id == here.execution_id
