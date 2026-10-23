@@ -27,8 +27,8 @@ if ! docker compose up --pull never "${build[@]}" --wait --wait-timeout 180 redi
 fi
 printf 'stack up: redis, nats and swarm healthy in project %s\n' "$run"
 
-export SLUG="compose-task"
-started="$(docker compose exec -T -e SLUG swarm python - <<'PY'
+export SLUG="compose-task" LEDGER_HOST="127.0.0.1"
+started="$(docker compose exec -T -e SLUG -e LEDGER_HOST swarm python - <<'PY'
 import json
 import os
 import subprocess
@@ -121,8 +121,8 @@ printf 'stand in agent finished and its exit is on NATS: %s\n' "$started"
 
 settled=""
 for _ in $(seq 30); do
-  docker compose exec -T swarm agentihooks hub run --once
-  settled="$(docker compose exec -T -e SLUG -e STARTED="$started" swarm python - <<'PY'
+  docker compose exec -T -e LEDGER_HOST swarm agentihooks hub run --once
+  settled="$(docker compose exec -T -e SLUG -e LEDGER_HOST -e STARTED="$started" swarm python - <<'PY'
 import json
 import os
 from types import SimpleNamespace
