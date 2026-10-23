@@ -10,6 +10,7 @@ from scripts.hive import auth, cli
 def invitation(tmp_path, monkeypatch):
     home = tmp_path / "joined"
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(home))
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_URL", "https://previous-hub.example.test")
     invite = tmp_path / "invite"
     invite.write_text(
         auth.env_text(
