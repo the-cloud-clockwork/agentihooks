@@ -180,29 +180,52 @@ def _configured(monkeypatch, runner, tmp_path, existing: str | None) -> str:
     return path.read_text(encoding="utf-8")
 
 
+RESUME_OFF = "\n[session]\nresume_agents_on_restore = false\n"
+
+
 def test_configure_adds_a_ui_section_that_turns_copy_on_select_off(monkeypatch, runner, tmp_path, capsys):
     text = _configured(monkeypatch, runner, tmp_path, 'onboarding = false\n\n[theme]\nname = "one-dark"\n')
-    assert text == 'onboarding = false\n\n[theme]\nname = "one-dark"\n\n[ui]\ncopy_on_select = false\n'
+    assert text == 'onboarding = false\n\n[theme]\nname = "one-dark"\n\n[ui]\ncopy_on_select = false\n' + RESUME_OFF
     assert runner.options[("/bin/herdr", "server", "reload-config")] == {"capture_output": True}
     printed = capsys.readouterr().out.splitlines()[-1]
-    assert printed == f"[herdr] config: copy_on_select = false in {tmp_path / 'xdg' / 'herdr' / 'config.toml'}"
+    path = tmp_path / "xdg" / "herdr" / "config.toml"
+    assert printed == f"[herdr] config: copy_on_select = false, resume_agents_on_restore = false in {path}"
 
 
 def test_configure_merges_copy_on_select_into_an_existing_ui_section(monkeypatch, runner, tmp_path):
     existing = "# mine\n[ui]\nconfirm_close = true\n\n[ui.sound]\nenabled = false\n"
     text = _configured(monkeypatch, runner, tmp_path, existing)
-    assert text == "# mine\n[ui]\nconfirm_close = true\ncopy_on_select = false\n\n[ui.sound]\nenabled = false\n"
+    assert (
+        text
+        == "# mine\n[ui]\nconfirm_close = true\ncopy_on_select = false\n\n[ui.sound]\nenabled = false\n" + RESUME_OFF
+    )
     assert ["/bin/herdr", "server", "reload-config"] in runner.calls
 
 
-def test_configure_keeps_copy_on_select_the_operator_turned_on(monkeypatch, runner, tmp_path):
+def test_configure_keeps_copy_on_select_the_operator_turned_on(monkeypatch, runner, tmp_path, capsys):
     existing = "[ui]\ncopy_on_select = true\n"
+    assert _configured(monkeypatch, runner, tmp_path, existing) == existing + RESUME_OFF
+    printed = capsys.readouterr().out.splitlines()[-1]
+    assert printed.startswith("[herdr] config: resume_agents_on_restore = false in ")
+
+
+def test_configure_turns_off_agent_resume_the_operator_turned_on(monkeypatch, runner, tmp_path):
+    existing = "[ui]\ncopy_on_select = true\n\n[session]\nresume_agents_on_restore = true\n"
+    text = _configured(monkeypatch, runner, tmp_path, existing)
+    assert tomllib.loads(text)["session"] == {"resume_agents_on_restore": False}
+    assert text == "[ui]\ncopy_on_select = true\n" + RESUME_OFF
+    assert ["/bin/herdr", "server", "reload-config"] in runner.calls
+
+
+def test_configure_leaves_a_compliant_config_alone(monkeypatch, runner, tmp_path, capsys):
+    existing = "[ui]\ncopy_on_select = true\n" + RESUME_OFF
     assert _configured(monkeypatch, runner, tmp_path, existing) == existing
     assert ["/bin/herdr", "server", "reload-config"] not in runner.calls
+    assert "[herdr] config:" not in capsys.readouterr().out
 
 
 def test_configure_creates_a_missing_config(monkeypatch, runner, tmp_path):
-    assert _configured(monkeypatch, runner, tmp_path, None) == "[ui]\ncopy_on_select = false\n"
+    assert _configured(monkeypatch, runner, tmp_path, None) == "[ui]\ncopy_on_select = false\n" + RESUME_OFF
 
 
 def test_the_config_path_follows_herdr(monkeypatch, tmp_path):
