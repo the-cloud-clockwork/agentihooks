@@ -3607,10 +3607,11 @@ any tick in flight keep running, and later passes find the supervisor holding it
 Without the setting, systemd's default `KillMode=control-group` sent SIGTERM to every process in the group at the end
 of each pass. Every main checkout sync moved the installed revision, the next pass recycled the supervisor, started
 a new one inside its own group, and killed it, with the tick in flight, when that pass ended. Each later pass
-started another supervisor and killed it again, until a process outside the unit started the scheduler. A killed tick logs `the swarm tick stopped by the service; released <n> held tick locks`.
-On 20 October from 04:30 to 09:30 UTC all 15 such ticks started 2 to 10 seconds after a wait pass began and
-stopped 0.07 to 0.22 seconds before that pass finished; the syncs at 05:09, 05:43 and 07:37 UTC left the Doctor
-tick stale for 10.7, 19.8 and 33.7 minutes.
+started another supervisor and killed it again, until a process outside the unit started the scheduler. A killed
+tick logs `the swarm tick stopped by the service; released <n> held tick locks`. On 20 October from 04:30 to
+09:30 UTC all 15 such ticks started 2 to 10 seconds after a wait pass began and stopped 0.07 to 0.22 seconds before
+that pass finished; the syncs at 05:09, 05:43 and 07:37 UTC left the Doctor tick stale for 10.7, 19.8 and
+33.7 minutes.
 
 **Older installs.** A unit written before the setting existed is migrated without a manual step. Every host tick
 calls `timer.reconcile`, which compares each installed swarm unit with the text the installed code expects. A waits
@@ -3619,10 +3620,10 @@ service without `KillMode=process` differs, so the tick rewrites the unit file a
 to touch the shared units, so the rewrite comes only from the installed agentihooks. A workstation in distributed
 mode that runs only a master spoke has no waits service at all.
 
-**Number.** Ticks stopped by the service per sync and stale minutes per sync, over the syncs after the fix. Before:
-15 ticks stopped and 10.7, 19.8 and 33.7 stale minutes across three syncs. After the fix merged on 20 October at
-11:10 UTC, the journal held no `stopped by the service` line from 11:11 UTC on 20 October to 15:32 UTC on
-23 October, while wait passes logged 156 recycles in the same window.
+**Number.** Ticks stopped by the service per sync and stale minutes per sync, over the syncs after the fix,
+against the figures above. After the fix merged on 20 October at 11:10 UTC, the journal held no
+`stopped by the service` line from 11:11 UTC on 20 October to 15:32 UTC on 23 October, while wait passes logged
+156 recycles in the same window.
 
 Check it on a live machine, read only:
 
@@ -3636,8 +3637,10 @@ ls -t ~/.cache/agentihooks/scheduler/supervisor.json ~/.cache/agentihooks/schedu
 cat /proc/<pid from supervisor.json>/cgroup
 systemctl --user status agentihooks-swarm-waits.service --no-pager
 
-# Ticks killed by a service stop since a given time (local time)
-journalctl --user -t agentihooks-swarm --since "<start>" --no-pager | grep -c "stopped by the service"
+# Ticks killed by a service stop in a window. journalctl reads --since and --until in local time, so set TZ
+# to give the window in UTC
+TZ=UTC journalctl --user -t agentihooks-swarm --since "<YYYY-MM-DD HH:MM:SS>" --until "<YYYY-MM-DD HH:MM:SS>" \
+  --no-pager | grep -c "stopped by the service"
 ```
 
 The first command prints `KillMode=process`. The cgroup line ends in `agentihooks-swarm-waits.service`, and
@@ -3645,9 +3648,10 @@ The first command prints `KillMode=process`. The cgroup line ends in `agentihook
 supervisor's `started` time is older than the current pass. A supervisor listed there is expected and is not a
 leftover of a failed pass.
 
-Two tests pin the behaviour, both in the timer install tests: `test_wait_checks_have_a_separate_short_timer_and_service`
-asserts the unit text carries `KillMode=process`, and `test_a_wait_service_without_kill_mode_process_is_rewritten_and_reloaded` removes the line
-from an installed unit and asserts that `timer.reconcile` writes it back and reloads systemd. Red on the old code:
+Two tests pin the behaviour, both in the timer install tests.
+`test_wait_checks_have_a_separate_short_timer_and_service` asserts the unit text carries `KillMode=process`, and
+`test_a_wait_service_without_kill_mode_process_is_rewritten_and_reloaded` removes the line from an installed unit
+and asserts that `timer.reconcile` writes it back and reloads systemd. Red on the old code:
 [run 39405257992](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39405257992); green on the fix:
 [run 39405362274](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39405362274).
 
