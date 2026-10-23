@@ -9,7 +9,7 @@ from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.swarm import apply_wait, claim_hold, freeze, release_wait
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import RedisStore, connect
+from scripts.swarm.store import EVENTS_ENGINE, RedisStore, connect
 from scripts.swarm_ledger.repository import hierarchy
 
 AUTHOR = "readiness"
@@ -33,7 +33,7 @@ class Source:
 
     def slugs(self) -> list[str]:
         self._store = self._store or connect()
-        return self._store.slugs()
+        return [slug for slug in self._store.slugs() if self._store.config(slug).engine == EVENTS_ENGINE]
 
     def snapshot(self, slug: str) -> Snapshot:
         self._store = self._store or connect()
