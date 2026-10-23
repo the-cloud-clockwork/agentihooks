@@ -9,6 +9,7 @@ that runs without the channel.
 import json
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from scripts.inbox.bus import FeedError, feed_for
@@ -26,6 +27,12 @@ METHOD = "notifications/claude/channel"
 UNSHOWN = "the inbox channel could not show it"
 UNCONFIRMED_MAX = 10
 HELD = ("pending", "delivered")
+
+
+@dataclass
+class Pushed:
+    shown: set[str] = field(default_factory=set)
+    held: set[str] = field(default_factory=set)
 
 
 def launch_args(root: str = ROOT, python: str = sys.executable, *, active: bool = True) -> list[str]:
@@ -134,9 +141,9 @@ async def _deliver(store, me, write, pushed):
     import mcp.types as types
     from mcp.shared.message import SessionMessage
 
-    pushed.intersection_update([item_id for item_id in pushed if _held(store, item_id)])
-    room = UNCONFIRMED_MAX - len(pushed)
-    items = [item for item in claim(store, me, min(room, CLAIM_BATCH)) if item.id not in pushed]
+    pushed.held.intersection_update([item_id for item_id in pushed.held if _held(store, item_id)])
+    room = UNCONFIRMED_MAX - len(pushed.held)
+    items = [item for item in claim(store, me, min(room, CLAIM_BATCH)) if item.id not in pushed.shown]
     for index, item in enumerate(items):
         note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
         try:
@@ -145,7 +152,8 @@ async def _deliver(store, me, write, pushed):
             for unsent in items[index:]:
                 store.requeue(unsent.id, me, UNSHOWN)
             raise
-        pushed.add(item.id)
+        pushed.shown.add(item.id)
+        pushed.held.add(item.id)
 
 
 def _held(store, item_id):
@@ -159,7 +167,7 @@ async def _push(store, me, write, ready, feed=None):
     import anyio
     from redis.exceptions import RedisError
 
-    pubsub, delay, pushed = None, 1.0, set()
+    pubsub, delay, pushed = None, 1.0, Pushed()
     try:
         await ready.wait()
         await anyio.sleep(SETTLE_S)

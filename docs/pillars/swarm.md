@@ -5691,8 +5691,8 @@ relay retries from creating a second item; an unconfirmed delivery may still be 
 transport. While it runs, the inbox channel pushes an item into its session once, however often redelivery returns
 it, and holds at most ten pushed items the session has not confirmed, read or closed; further items wait pending
 until the session settles one or one moves to another inbox, so a stalled session never collects a growing queue
-of copies. A settled item that is reopened is pushed again, and a restarted channel starts with no record of
-earlier pushes.
+of copies. An item that moves to another inbox and back is not pushed again, and a restarted channel starts with
+no record of earlier pushes.
 
 ### Inbox escalation sender exclusion
 
