@@ -185,6 +185,29 @@ def test_a_failing_slot_is_logged_unacknowledged_and_other_entries_still_run(cap
     assert len(caplog.records) == 1
 
 
+def test_a_pending_entry_without_pending_details_is_logged_as_stale_and_the_pass_continues(caplog, scheduler):
+    import json
+
+    from scripts.inbox.store import InboxStore
+    from scripts.scheduler.slots import InboxSlot
+
+    stale = scheduler.timer(owner="operator", payload="stale", delay=1, now=100)
+    stored = {**stale.record, "state": "pending"}
+    scheduler.redis.hset(scheduler.key("entries"), stale.id, json.dumps(stored))
+    scheduler.redis.sadd(scheduler.key("pending"), stale.id)
+    healthy = scheduler.timer(owner="operator", payload="healthy", delay=1, now=100)
+    healthy.timeout.connect(InboxSlot("proof-session"))
+    healthy.start(now=100)
+    with caplog.at_level(logging.WARNING, logger="scripts.scheduler.core"):
+        assert scheduler.run_due(now=101) == 1
+    assert [item.text for item in InboxStore(scheduler.redis).pending_items("proof-session")] == ["healthy"]
+    assert healthy.state == "fired"
+    assert stale.record == stored
+    assert [record.getMessage() for record in caplog.records] == [
+        f"scheduler skipped stale pending entry {stale.id}: no pending details"
+    ]
+
+
 def test_dispatch_lock_refuses_a_competing_drain_without_losing_work(scheduler):
     timer = scheduler.timer(owner="operator", payload="notice", delay=1, now=100)
     timer.start(now=100)
