@@ -42,3 +42,26 @@ def test_legacy_publishers_keep_both_subjects_during_concurrent_first_use(url, m
     finally:
         first.close()
         second.close()
+
+
+@pytest.mark.parametrize(
+    "permissions,expected",
+    [
+        ({}, "legacy.swarm.rig.execution.started"),
+        ({"allow": ["swarm.*.execution.>"]}, "swarm.rig.execution.started"),
+        ({"allow": [">"], "deny": ["legacy.>"]}, "swarm.rig.execution.started"),
+        ({"allow": ["legacy.swarm.rig.>"]}, "legacy.swarm.rig.execution.started"),
+    ],
+)
+def test_legacy_wire_selection_preserves_the_signed_publish_limits(permissions, expected):
+    from scripts.events.nats_legacy import legacy_target
+
+    assert legacy_target("swarm.rig.execution.started", permissions) == expected
+
+
+def test_legacy_filters_keep_existing_cursor_subjects_and_new_wire_subjects():
+    from scripts.events.nats_legacy import legacy_filters, legacy_target
+
+    assert legacy_filters("swarm.rig.>") == ["swarm.rig.>", "legacy.swarm.rig.>"]
+    assert legacy_filters(">") == [">"]
+    assert legacy_target("agentihooks.queue.work", {}) == "agentihooks.queue.work"

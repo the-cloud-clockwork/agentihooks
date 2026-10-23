@@ -16,7 +16,7 @@ from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
-from .nats_legacy import capture, provision_events
+from .nats_legacy import legacy_filters, legacy_target, provision_events
 from .scope import RoutedLog, queue_lane, require_owner
 from .subjects import PREFIX, inbox, stream_name
 from .subjects import subject as event_subject
@@ -94,16 +94,20 @@ def _consumer_config(durable: str, subject: str, policy: QueuePolicy) -> api.Con
 
 
 async def _pull(js, stream: str, durable: str, subject: str, policy: QueuePolicy, provision: bool):
+    wanted = legacy_filters(subject) if stream == EVENT_STREAM else [subject]
     try:
         info = await js.consumer_info(stream, durable)
     except NotFoundError:
         if not provision:
             raise
     else:
-        if info.config.filter_subject != subject:
-            raise ValueError(f"durable consumer {durable!r} filters {info.config.filter_subject!r}, not {subject!r}")
+        found = info.config.filter_subjects or [info.config.filter_subject]
+        if found != wanted and not (stream == EVENT_STREAM and found == [subject]):
+            raise ValueError(f"durable consumer {durable!r} filters {found[0]!r}, not {subject!r}")
     if provision:
         config = _consumer_config(durable, subject, policy)
+        if len(wanted) > 1:
+            config.filter_subject, config.filter_subjects = None, wanted
         if stream.endswith("_DEAD"):
             config.max_deliver = policy.max_deliver
         await js.add_consumer(stream, config=config)
@@ -200,17 +204,18 @@ class NatsEventLog:
         stream: str,
         provision: bool,
         swarm: str | None = None,
+        credentials: str | None = None,
     ):
         self._loop, self._js, self._policy = loop, js, policy
         self._stream, self._provision, self._swarm = stream, provision, swarm
+        self._permissions = (
+            nkey.claims(nkey.parse_creds(credentials)[0])["nats"].get("pub", {}) if credentials is not None else {}
+        )
         self._policies: dict[str, QueuePolicy] = {}
-        self._captured: set[str] = set()
 
     def publish(self, subject: str, event: Envelope) -> bool:
-        if self._provision and self._stream == EVENT_STREAM and subject not in self._captured:
-            self._loop.run(capture(self._js, self._stream, subject))
-            self._captured.add(subject)
-        return self._loop.run(_publish(self._js, subject, self._stream, event))
+        target = legacy_target(subject, self._permissions) if self._stream == EVENT_STREAM else subject
+        return self._loop.run(_publish(self._js, target, self._stream, event))
 
     def consumer(self, durable: str, subject: str, policy: QueuePolicy | None = None) -> NatsConsumer:
         policy = policy or self._policy
@@ -348,7 +353,9 @@ class NatsBus:
         except BaseException:
             self._loop.close()
             raise
-        self._legacy_events = NatsEventLog(self._loop, self._js, config.queue, EVENT_STREAM, config.provision)
+        self._legacy_events = NatsEventLog(
+            self._loop, self._js, config.queue, EVENT_STREAM, config.provision, credentials=config.credentials
+        )
         self._legacy_dead = NatsEventLog(self._loop, self._js, config.queue, DEAD_STREAM, config.provision)
         self.events = (
             RoutedLog(lambda swarm: self.for_swarm(swarm).events, lambda: self._logs("events"))
