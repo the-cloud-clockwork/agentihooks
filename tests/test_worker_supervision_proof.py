@@ -95,6 +95,46 @@ def test_a_container_that_never_exits_still_fails_and_is_removed(container, tmp_
 
     assert (("wait", "container"), 12) in container.calls
     assert container.calls[-1][0] == ("rm", "--force", "container")
+    attempt = "container:/home/worker/attempts/fixture"
+    for args in (
+        ("inspect", "--format", "{{json .State}}", "container"),
+        ("top", "container", "-eo", "pid,ppid,stat,etime,args"),
+        ("logs", "--timestamps", "--tail", "500", "container"),
+    ):
+        assert (args, 10) in container.calls
+    copies = [(args[1], timeout) for args, timeout in container.calls if args[0] == "cp"]
+    assert copies == [(f"{attempt}/launch.json", 10), (f"{attempt}/run/supervision", 10)]
+    [evidence] = tmp_path.glob("stalled-*")
+    assert sorted(path.name for path in evidence.iterdir()) == ["attempts", "logs.txt", "processes.txt", "state.json"]
+    captured = evidence / "attempts" / "fixture"
+    assert (captured / "launch.json").exists()
+    assert (captured / "run" / "supervision" / "incarnation" / "result.json").exists()
+
+
+def test_unavailable_stall_evidence_is_recorded_and_the_timeout_still_fails(container, tmp_path, monkeypatch):
+    container.wait_error = subprocess.TimeoutExpired(["docker", "wait", "container"], 12)
+    docker = proof.docker
+
+    def failing(*args, timeout=30):
+        if args[0] in ("inspect", "top", "logs", "cp"):
+            container.calls.append((args, timeout))
+            raise subprocess.CalledProcessError(1, ["docker", *args])
+        return docker(*args, timeout=timeout)
+
+    monkeypatch.setattr(proof, "docker", failing)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        proof.run_case("image", "complete", tmp_path, viewer=False)
+
+    [evidence] = tmp_path.glob("stalled-*")
+    for name in ("state.json", "processes.txt", "logs.txt"):
+        assert (evidence / name).read_text().startswith("unavailable: ")
+    lines = (evidence / "unavailable.txt").read_text().splitlines()
+    assert [line.split(": ")[0] for line in lines] == [
+        "/home/worker/attempts/fixture/launch.json",
+        "/home/worker/attempts/fixture/run/supervision",
+    ]
+    assert container.calls[-1][0] == ("rm", "--force", "container")
 
 
 @pytest.mark.parametrize("error", [subprocess.CalledProcessError(1, "docker"), ValueError("bad json")])
