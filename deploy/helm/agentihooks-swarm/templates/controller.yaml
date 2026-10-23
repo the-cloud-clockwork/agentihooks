@@ -260,6 +260,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.uid
+            - name: AGENTIHOOKS_POD_CONTAINER
+              value: controller
             {{- with .Values.controller.hostSwarms }}
             - name: AGENTIHOOKS_CONTROL_HOST_SWARMS
               value: {{ join "," . | quote }}

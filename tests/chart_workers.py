@@ -81,6 +81,8 @@ def main(values_paths: list[str], rendered: str) -> list[str]:
         for name, path in POD_FIELDS.items()
         if fields.get(name) != path
     ]
+    if env.get("AGENTIHOOKS_POD_CONTAINER") != container["name"]:
+        problems.append("AGENTIHOOKS_POD_CONTAINER does not name the controller container")
     if "AGENTIHOOKS_WORKER_IMAGE_DIGEST" in env or any("@sha256" in str(v) for v in env.values()):
         problems.append("the controller env pins a worker image digest")
     mounts = {m["name"]: m for m in container["volumeMounts"]}

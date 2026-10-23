@@ -256,11 +256,25 @@ def test_a_lock_held_by_a_replaced_pod_is_recovered_at_once(replaced_pod, pod):
     assert reads == [("swarm", "controller-old")]
 
 
-def test_a_lock_from_an_earlier_container_of_this_pod_is_recovered_without_asking(replaced_pod):
+def this_pod(container_id, running=True):
+    status = {"name": "controller", "containerID": container_id, "state": {"running": {}} if running else {}}
+    return {"metadata": {"uid": "uid-new"}, "status": {"phase": "Running", "containerStatuses": [status]}}
+
+
+@pytest.mark.parametrize(
+    ("pod", "recovered"),
+    [(this_pod("c-new"), True), (this_pod("c-old", running=False), True), (this_pod("c-old"), False)],
+)
+def test_a_lock_from_another_container_of_this_pod_is_recovered_only_once_that_container_stopped(
+    replaced_pod, pod, recovered
+):
     store, held, answer, reads, lock = replaced_pod
-    lock({"namespace": "swarm", "name": "controller-new", "uid": "uid-new"})
-    assert controller.take_tick_lock(store, "sw", held, 600_000) is not None
-    assert reads == []
+    answer["pod"] = pod
+    original = lock({"namespace": "swarm", "name": "controller-new", "uid": "uid-new", "container": "c-old"})
+    token = controller.take_tick_lock(store, "sw", held, 600_000)
+    assert (token is not None) is recovered
+    assert store.redis.get(store.key("sw", "tick-lock")) == (token if recovered else original)
+    assert reads == [("swarm", "controller-new")]
 
 
 @pytest.mark.parametrize(

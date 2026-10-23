@@ -335,7 +335,7 @@ def _dead(raw: str) -> bool:
     if host and _ended_boot(held, host):
         return True
     if host and held.get("host") != host:
-        return holder_pod.gone(held.get("pod"), holder_pod.identity(os.environ))
+        return holder_pod.gone(held.get("pod"), holder_pod.pod(os.environ))
     if not host or not {"pid", "start"} <= held.keys():
         return False
     return _gone(held["pid"], held["start"])
