@@ -143,7 +143,7 @@ class SourceRun(FakeRun):
 
     def __call__(self, argv, **kwargs):
         done = super().__call__(argv, **kwargs)
-        if "pull" in argv:
+        if "merge" in argv:
             self.text = self.after
         return subprocess.CompletedProcess(argv, 0, self.text, "") if "show" in argv else done
 
