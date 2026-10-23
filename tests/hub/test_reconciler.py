@@ -17,7 +17,7 @@ def rig():
     from scripts.events.envelope import Envelope
     from scripts.hive import execution_events, registry, reports
     from scripts.hub import lifecycle, reconciler
-    from scripts.swarm.store import PREFIX, AgentRecord, RedisStore
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
     clock = Mock(return_value=1_000_000)
     bus = memory.open_bus(BusConfig())
@@ -36,7 +36,7 @@ def rig():
         launched_at=900_000,
         pane_id="pane",
     )
-    store.redis.sadd(f"{PREFIX}:index", "rig")
+    store.create(SwarmConfig("rig", "/repo", max_eng=1, max_ci=0, engine="events"))
     store.redis.hset(store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
     store.redis.hset(store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
     store.redis.set(store.key("rig", "claim", agent.task), agent.name)
@@ -107,6 +107,14 @@ def test_fresh_exit_repairs_task_and_slot_without_an_exit_event(rig):
     assert len(rig.returned) == 1
     assert rig.store.agents("rig") == []
     assert json.loads(rig.bus.state("spoke-work").get("claim").value)["state"] == "exited"
+
+
+def test_a_swarm_on_the_legacy_engine_is_left_to_the_tick(rig):
+    rig.store.update("rig", engine="legacy")
+    rig.react.poll()
+    assert rig.row["state"] == "claimed"
+    assert rig.returned == [] and rig.ledger.writes == []
+    assert [a.name for a in rig.store.agents("rig")] == ["engineer"]
 
 
 def test_repeated_pass_does_not_repeat_settlement(rig):
