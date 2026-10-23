@@ -33,6 +33,11 @@ def test_scoped_queue_names_publish_to_work_and_filter_the_lane():
     )
 
 
+def test_an_empty_swarm_takes_the_scoped_path_and_is_refused():
+    with pytest.raises(ValueError):
+        nats.queue_names("swarm.rig.ready.eng", "")
+
+
 @pytest.mark.parametrize("metadata", [None, {}, {"agentihooks_import_pending": ""}, {"other": "1"}])
 def test_migration_guard_passes_a_stream_with_no_pending_import(metadata):
     nats.require_migrated(SimpleNamespace(config=SimpleNamespace(metadata=metadata)))
@@ -80,3 +85,12 @@ def test_scoped_provisioning_adds_a_missing_stream():
     asyncio.run(nats.provision_queue(js, names, BusConfig(dedupe_window_ms=12345), scoped=True))
     js.stream_info.assert_awaited_once_with(names.stream)
     _assert_added(js, names)
+
+
+def test_scoped_provisioning_propagates_a_lookup_failure_other_than_not_found():
+    js = _js(AsyncMock(side_effect=RuntimeError("lookup failed")))
+    names = nats.queue_names("eng", "rig")
+    with pytest.raises(RuntimeError) as caught:
+        asyncio.run(nats.provision_queue(js, names, BusConfig(dedupe_window_ms=12345), scoped=True))
+    assert str(caught.value) == "lookup failed"
+    js.add_stream.assert_not_awaited()
