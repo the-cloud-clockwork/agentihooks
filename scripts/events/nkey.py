@@ -98,6 +98,17 @@ def encode_jwt(signer: KeyPair, subject: str, name: str, nats: dict) -> str:
     return f"{signing}.{b64(signer.sign(signing.encode()))}"
 
 
+def claims(jwt: str) -> dict:
+    parts = jwt.split(".")
+    try:
+        found = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))) if len(parts) == 3 else None
+    except ValueError:
+        found = None
+    if not isinstance(found, dict):
+        raise NkeyError("not a JWT with a claims object")
+    return found
+
+
 def creds(jwt: str, seed: str) -> str:
     return CREDS.format(jwt=jwt, seed=seed)
 

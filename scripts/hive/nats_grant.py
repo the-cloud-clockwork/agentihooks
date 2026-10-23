@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from redis import Redis
 
 SIGNER_ENV = "AGENTIHOOKS_NATS_SIGNER"
+HUB_PATH = "agentihooks/hub/"
 ACCOUNT_NAME = "SWARM"
 REVOKED = f"{auth.PREFIX}:nats-revoked"
 CLAIMS_UPDATE = "$SYS.REQ.CLAIMS.UPDATE"
@@ -40,12 +41,18 @@ class Signer:
     account: nkey.KeyPair
     system_credentials: str = field(repr=False)
     url: str
+    trusted_operator: str
 
 
 def from_environ(environ: Mapping[str, str]) -> Signer | None:
     path = environ.get(SIGNER_ENV)
     if not path:
         return None
+    if not path.startswith(HUB_PATH):
+        raise auth.HiveError(
+            f"the NATS signer record {path} holds the system account credential, "
+            f"so it must live under the OpenBao path {HUB_PATH} that only the hub role reads"
+        )
     bao = openbao_kv.from_env(environ)
     if bao is None:
         raise auth.HiveError(
@@ -58,6 +65,7 @@ def from_environ(environ: Mapping[str, str]) -> Signer | None:
             nkey.from_seed(record["account_seed"]),
             record["system_credentials"],
             record["url"],
+            record["trusted_operator"],
         )
     except (openbao_kv.OpenBaoError, KeyError, nkey.NkeyError) as exc:
         raise auth.HiveError(f"the NATS signer record {path} cannot be used ({exc})") from None
@@ -108,5 +116,12 @@ def push(signer: Signer, jwt: str) -> None:
 
 def revoke(redis: "Redis", signer: Signer, member_id: str) -> str:
     redis.hset(REVOKED, member_user(signer, member_id).public, int(time.time()))
-    push(signer, account_jwt(signer, {key: int(value) for key, value in redis.hgetall(REVOKED).items()}))
+    jwt = account_jwt(signer, {key: int(value) for key, value in redis.hgetall(REVOKED).items()})
+    issuer = nkey.claims(jwt)["iss"]
+    if issuer != signer.trusted_operator:
+        raise auth.HiveError(
+            f"refusing to push an account update issued by {issuer}, "
+            f"which is not the trusted operator {signer.trusted_operator}"
+        )
+    push(signer, jwt)
     return f"revoked the NATS credential of {member_id}"
