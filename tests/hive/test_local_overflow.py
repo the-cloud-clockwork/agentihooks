@@ -116,6 +116,40 @@ def test_the_local_machine_cap_holds_the_spawn_with_the_reason(setup, monkeypatc
     fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
+def local_refusal(setup, since=0):
+    from scripts.swarm.commands import hive_id
+    from scripts.swarm.health import spawn_stall
+
+    found = json.loads(setup.store.redis.get(setup.store.key(setup.config.slug, spawn_stall.LOCAL_REFUSAL)))
+    assert found.pop("machine") == hive_id()
+    assert found.pop("at") >= since
+    return found
+
+
+@pytest.mark.parametrize("deployment", ["hybrid", "local"])
+def test_a_local_cap_refusal_is_recorded_for_the_spawn_stall_alarm(setup, monkeypatch, deployment):
+    from scripts.swarm import lease
+    from scripts.swarm.health import spawn_stall
+
+    fenced = hybrid(setup, monkeypatch, deployment)
+    fill_anton(setup)
+    local_agents(setup, 8)
+    since = lease.now_ms(setup.store)
+    assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal("eng", {"id": "task"})
+    assert local_refusal(setup, since) == {"taken": 8, "maximum": 8}
+    assert spawn_stall.LOCAL_REFUSAL == "spawn-stall-local"
+
+
+def test_a_hive_refusal_alone_records_no_local_cap(setup, monkeypatch):
+    from scripts.swarm.health import spawn_stall
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    local_agents(setup, 3)
+    assert "local machine runs" not in fenced.placement_refusal("eng", {"id": "task"})
+    assert setup.store.redis.get(setup.store.key(setup.config.slug, spawn_stall.LOCAL_REFUSAL)) is None
+
+
 def test_the_local_machine_cap_is_its_swarm_cpu_share(setup, monkeypatch):
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
@@ -323,6 +357,7 @@ def test_two_concurrent_spawns_at_cap_minus_one_yield_one_local_spawn_and_one_wa
         outcomes = sorted(pool.map(attempt, ["first", "second"]))
     assert outcomes == [capped(8, 8, 7), "placed on the workstation"]
     assert setup.herdr.spawn.call_count == 1
+    assert local_refusal(setup) == {"taken": 8, "maximum": 8}
 
 
 def test_a_failed_local_spawn_releases_its_slot(setup, monkeypatch):

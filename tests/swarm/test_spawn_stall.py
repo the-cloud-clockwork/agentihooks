@@ -572,26 +572,31 @@ FULL_WAIT = (
     "anton-2 max agents: 3 of 3 agents on the hive, fits 0 more, and the local machine runs 8 of its 8 agents"
 )
 REFUSALS = (
-    "Admission refusals, latest first: cpu on anton-1 (2), local cap on local machine (1), max agents on anton-2 (1)"
+    "Admission refusals, latest first: local cap on ws (8 of 8 agents), cpu on anton-1 (2 tasks), "
+    "max agents on anton-2 (1 task)"
 )
 
 
 def seed_refusals(store, clock):
     from scripts.hive import placement_waits
 
-    placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0] - 2)
-    placement_waits.observe(store, "sw", "ci", "t2", FULL_WAIT, clock[0] - 1)
+    placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0] + 1)
+    placement_waits.observe(store, "sw", "ci", "t2", FULL_WAIT, clock[0] + 2)
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0] + 3)
+
+
+def quiet_watch(stalled):
+    store, ledger, runtime, clock, _ = stalled
+    with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
+        pass
 
 
 def test_admission_refusals_without_a_failed_launch_are_named_in_the_alarm(stalled):
-    store, ledger, runtime, clock, _ = stalled
+    store, _, _, clock, _ = stalled
+    quiet_watch(stalled)
     seed_refusals(store, clock)
-    for _ in range(2):
-        with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
-            pass
-        clock[0] += 600_000
-    with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
-        pass
+    clock[0] += 600_000
+    quiet_watch(stalled)
     (finding,) = spawn_stall.findings(store, "sw")
     assert finding.evidence == ("A lane has a free seat, quota and claimable work", REFUSALS)
     (mail,) = InboxStore(store.redis).pending_mail("master@sw")
@@ -603,8 +608,8 @@ def test_admission_refusals_without_a_failed_launch_are_named_in_the_alarm(stall
 
 def test_a_fresh_failed_launch_follows_the_admission_refusals(stalled):
     store, _, _, clock, _ = stalled
-    seed_refusals(store, clock)
     tick_failure(stalled)
+    seed_refusals(store, clock)
     clock[0] += 600_000
     tick_failure(stalled)
     (finding,) = alarms(stalled)
@@ -615,15 +620,31 @@ def test_a_fresh_failed_launch_follows_the_admission_refusals(stalled):
     ]
 
 
+def test_refusals_last_seen_before_the_stall_are_not_named(stalled):
+    from scripts.hive import placement_waits
+
+    store, _, _, clock, _ = stalled
+    placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0] - 5)
+    spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0] - 1)
+    placement_waits.observe(store, "sw", "ci", "t2", FULL_WAIT, clock[0] - 2)
+    quiet_watch(stalled)
+    placement_waits.observe(store, "sw", "ci", "t2", FULL_WAIT, clock[0])
+    clock[0] += 600_000
+    quiet_watch(stalled)
+    (finding,) = spawn_stall.findings(store, "sw")
+    assert finding.evidence[-1] == (
+        "Admission refusals, latest first: cpu on anton-1 (1 task), max agents on anton-2 (1 task)"
+    )
+    assert placement_waits.read(store, "sw")["t2"]["started_at"] == clock[0] - 600_002
+
+
 @pytest.mark.parametrize(
     ("reason", "expected"),
     [
         ("no hive for eng has room: anton-1 ram: 1 of 8 MB available", [("ram", "anton-1")]),
         ("no Claude account has room after hive sessions: 2", [("quota", "")]),
-        (
-            "no live hive takes eng, and the local machine runs 8 of its 8 agents",
-            [("placement", ""), ("local cap", "local machine")],
-        ),
+        ("no live hive takes eng, and the local machine runs 8 of its 8 agents", [("placement", "")]),
+        (", and the local machine runs 8 of its 8 agents", []),
         ("no hive for eng has room", [("placement", "")]),
     ],
 )
@@ -632,4 +653,10 @@ def test_each_refusal_names_its_reason_and_host(reason, expected):
 
 
 def test_no_refusals_leave_no_evidence_line():
-    assert spawn_stall.refusals({}) == ""
+    assert spawn_stall.refusals({}, {}, 0) == ""
+
+
+def test_a_legacy_wait_without_a_seen_time_counts_from_its_start():
+    waits = {"t1": {"lane": "eng", "reason": CPU_WAIT, "started_at": 5}}
+    assert spawn_stall.refusals(waits, {}, 5) == "Admission refusals, latest first: cpu on anton-1 (1 task)"
+    assert spawn_stall.refusals(waits, {}, 6) == ""

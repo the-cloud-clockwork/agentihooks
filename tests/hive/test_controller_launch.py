@@ -1843,8 +1843,11 @@ def test_placement_wait_records_original_start_and_clears_on_selection(setup):
     assert first["task"]["reason"] == "no live hive takes frontend"
     assert first["task"]["lane"] == "eng"
     assert first["task"]["started_at"] > 0
+    assert first["task"]["seen_at"] == first["task"]["started_at"]
     setup.launcher.select(setup.config, "eng", {"id": "task"})
-    assert placement_waits.read(setup.store, setup.config.slug) == first
+    again = placement_waits.read(setup.store, setup.config.slug)["task"]
+    assert again.pop("seen_at") >= first["task"].pop("seen_at")
+    assert again == first["task"]
     setup.herdr._profile_decision.return_value = decision
     setup.launcher.select(setup.config, "eng", {"id": "task"})
     assert placement_waits.read(setup.store, setup.config.slug) == {}
