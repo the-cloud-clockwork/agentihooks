@@ -100,6 +100,11 @@ def problems(chart: str) -> list[str]:
         found.append("a NATS hub without hub.bus.url renders instead of failing on the missing address")
     if receivers(default.stdout):
         found.append("the default release renders the GitHub webhook receiver")
+    return found + receiver_release_problems(chart)
+
+
+def receiver_release_problems(chart: str) -> list[str]:
+    found = []
     beside = render(chart, *ENABLED, *RECEIVER, *RELEASE)
     if beside.returncode:
         return [*found, f"an enabled receiver fails to render: {beside.stderr.strip()}"]
