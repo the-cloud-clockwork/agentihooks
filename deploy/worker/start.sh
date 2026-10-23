@@ -132,21 +132,10 @@ kept = [line for line in saved.read_text().splitlines() if not line.startswith('
 saved.write_text('\n'.join([f"AGENTIHOOKS_HIVE_URL={os.environ['AGENTIHOOKS_HIVE_URL']}", *kept]) + '\n')
 PY
 fi
-agentihooks hive join "$AGENTIHOOKS_HOME/hive.env"
-bundle=()
-[[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
-python3 -m scripts.hive.linked_profiles
-if (( ${#bundle[@]} )) && ! agentihooks init "${bundle[@]}"; then
-  echo "worker-hive: agentihooks init with the bundle failed; init runs on the package roles alone" >&2
-  bundle=()
-fi
-if (( ! ${#bundle[@]} )); then
-  agentihooks bundle unlink
-  agentihooks init
-fi
-# init writes the hosted ledger CA; agents read only this file, never the multi-line LEDGER_CA_PEM.
-if [[ -n "${LEDGER_CA_PEM:-}" ]]; then
-  python3 - <<'PY'
+# Join and agents trust the system roots beside the mounted CA; init rewrites the file, so it is placed twice.
+place_ledger_ca() {
+  if [[ -n "${LEDGER_CA_PEM:-}" ]]; then
+    python3 - <<'PY'
 import os, ssl
 from pathlib import Path
 
@@ -159,7 +148,22 @@ system = Path(roots).read_text()
 if ledger_ca.place(Path(os.environ['AGENTIHOOKS_HOME']), system.rstrip() + '\n' + os.environ['LEDGER_CA_PEM'].strip() + '\n') is None:
     raise SystemExit('worker-hive: LEDGER_CA_PEM holds no valid certificate')
 PY
+  fi
+}
+place_ledger_ca
+env -u LEDGER_CA_PEM agentihooks hive join "$AGENTIHOOKS_HOME/hive.env"
+bundle=()
+[[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
+python3 -m scripts.hive.linked_profiles
+if (( ${#bundle[@]} )) && ! agentihooks init "${bundle[@]}"; then
+  echo "worker-hive: agentihooks init with the bundle failed; init runs on the package roles alone" >&2
+  bundle=()
 fi
+if (( ! ${#bundle[@]} )); then
+  agentihooks bundle unlink
+  agentihooks init
+fi
+place_ledger_ca
 unset LEDGER_CA_PEM
 agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
