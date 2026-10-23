@@ -1,5 +1,6 @@
 import re
 import time
+from collections.abc import Callable
 
 from scripts.events import envelope, subjects
 
@@ -55,7 +56,7 @@ def now_ms() -> int:
     return time.time_ns() // 1_000_000
 
 
-def relay(repository, events, batch: int = BATCH, clock=now_ms) -> int:
+def relay(repository, events, batch: int = BATCH, clock: Callable[[], int] = now_ms) -> int:
     """Publish up to a batch of unsent rows under their row id, which the bus dedupes within its window."""
     with repository.connect() as connection:
         pending = connection.execute(PENDING, (batch,)).fetchall()
@@ -71,7 +72,7 @@ def migrate(connection) -> None:
         connection.execute(ADD_SENT_AT)
 
 
-def prune(repository, window_ms: int, clock=now_ms) -> int:
+def prune(repository, window_ms: int, clock: Callable[[], int] = now_ms) -> int:
     """Delete sent rows and their marks older than the bus dedupe window, which can no longer dedupe them."""
     cutoff = clock() - window_ms
     with repository.connect() as connection, connection:
