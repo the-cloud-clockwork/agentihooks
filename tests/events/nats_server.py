@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.events import nats
+
 REQUIRED_ENV = "NATS_SERVER_REQUIRED"
 
 
@@ -38,6 +40,10 @@ def wait_listening(port: int, process: subprocess.Popen, deadline_s: float = 10)
         except OSError:
             time.sleep(0.02)
     raise RuntimeError(f"nats-server did not listen on {port}")
+
+
+def durables(bus) -> list[str]:
+    return sorted(info.name for info in bus._loop.run(bus._js.consumers_info(nats.EVENT_STREAM)))
 
 
 @contextmanager
