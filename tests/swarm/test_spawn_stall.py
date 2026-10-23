@@ -1,5 +1,6 @@
 import pytest
 
+from scripts.hive import admission, placement, placement_waits
 from scripts.inbox import store as inbox_store
 from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, cli, commands, status, tick
@@ -564,13 +565,13 @@ def test_a_doctor_held_by_the_watched_focus_is_not_a_spawn_stall(stalled, monkey
     assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
 
 
-CPU_WAIT = (
-    "no hive for eng has room: anton-1 cpu: five minute load 9.00 on 8 CPUs, fits 0 more under the 80 percent line"
-)
-FULL_WAIT = (
-    "no hive for eng has room: anton-1 cpu: five minute load 9.00 on 8 CPUs, fits 0 more under the 80 percent line; "
-    "anton-2 max agents: 3 of 3 agents on the hive, fits 0 more, and the local machine runs 8 of its 8 agents"
-)
+HIVE_FULL = "no hive for eng has room"
+CPU_GATE = {"id": "anton-1", "refusal": admission.refusal(admission.Room(0, admission.CPU, "five minute load 9.00"))}
+MAX_GATE = {"id": "anton-2", "refusal": admission.refusal(admission.capped(admission.Room(1, "", ""), 3, 3))}
+CPU_WAIT = placement._refused(HIVE_FULL, [CPU_GATE])
+FULL_WAIT = placement.overflow(
+    "engineer", placement.Wait(placement._refused(HIVE_FULL, [CPU_GATE, MAX_GATE])), 8, 8
+).reason
 REFUSALS = (
     "Admission refusals, latest first: local cap on ws (8 of 8 agents), cpu on anton-1 (2 tasks), "
     "max agents on anton-2 (1 task)"
@@ -578,8 +579,6 @@ REFUSALS = (
 
 
 def seed_refusals(store, clock):
-    from scripts.hive import placement_waits
-
     placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0] + 1)
     placement_waits.observe(store, "sw", "ci", "t2", FULL_WAIT, clock[0] + 2)
     spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0] + 3)
@@ -621,8 +620,6 @@ def test_a_fresh_failed_launch_follows_the_admission_refusals(stalled):
 
 
 def test_refusals_last_seen_before_the_stall_are_not_named(stalled):
-    from scripts.hive import placement_waits
-
     store, _, _, clock, _ = stalled
     placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0] - 5)
     spawn_stall.refuse_local(store, "sw", "ws", 8, 8, clock[0] - 1)
@@ -646,6 +643,8 @@ def test_refusals_last_seen_before_the_stall_are_not_named(stalled):
         ("no live hive takes eng, and the local machine runs 8 of its 8 agents", [("placement", "")]),
         (", and the local machine runs 8 of its 8 agents", []),
         ("no hive for eng has room", [("placement", "")]),
+        (f"{CPU_WAIT}, and the local machine runs 8 of its 8 agents: ram: pod full", [("cpu", "anton-1")]),
+        ("no hive has room, and the local machine runs 8 of its 8 agents", [("placement", "")]),
     ],
 )
 def test_each_refusal_names_its_reason_and_host(reason, expected):

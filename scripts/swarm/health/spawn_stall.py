@@ -87,8 +87,8 @@ def refuse_local(store, slug: str, machine: str, taken: int, maximum: int, at: i
 
 def _refused(reason: str) -> list[tuple[str, str]]:
     head = reason.partition(LOCAL_FULL)[0]
-    _, room, held = head.partition(" has room: ")
-    found = [(admission.category(part), part.split(" ", 1)[0]) for part in held.split("; ")] if room else []
+    _, has_room, held = head.partition(" has room: ")
+    found = [(admission.category(part), part.split(" ", 1)[0]) for part in held.split("; ")] if has_room else []
     return found or ([(admission.category(head), "")] if head else [])
 
 
