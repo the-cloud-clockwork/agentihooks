@@ -73,8 +73,11 @@ def test_a_bus_delivery_of_another_hosts_write_reaches_the_watched_page_only(tmp
     hub = Hub()
     repository = Publishing(inner, lambda slug, state: hub.publish_snapshot(slug, "ledger", state))
     hub.open("seen", lambda: {"ledger": repository.get_document("seen")})
+    hub.open("other", lambda: {"ledger": repository.get_document("other")})
+    hub.close("other")
     repository.drain(5)
     before = hub.resource("seen", "ledger")["_meta"]["rev"]
+    other = hub.resource("other", "ledger")["_meta"]["rev"]
     bus = memory.open_bus(BusConfig())
     outbox.relay(inner, bus.events)
     consumer = bus.events.consumer("projector-test", "swarm.>")
@@ -89,7 +92,7 @@ def test_a_bus_delivery_of_another_hosts_write_reaches_the_watched_page_only(tmp
     after = hub.resource("seen", "ledger")
     assert after["_meta"]["rev"] > before
     assert after["phases"][0]["done"] is True
-    assert not hub.has("other")
+    assert hub.resource("other", "ledger")["_meta"]["rev"] == other
 
 
 def test_memory_bus_runs_no_projector(monkeypatch):
@@ -125,13 +128,17 @@ def test_running_projector_refreshes_on_a_published_event_and_closes_its_bus_on_
 @pytest.mark.wall_clock
 def test_a_failed_bus_open_is_logged_and_retried_until_stopped(monkeypatch, capsys):
     opened = threading.Event()
+    attempts = []
 
     def refused(config):
-        opened.set()
+        attempts.append(config)
+        if len(attempts) == 2:
+            opened.set()
         raise OSError("bus unreachable")
 
     monkeypatch.setattr(factory, "open_bus", refused)
     monkeypatch.setattr(projector, "REOPEN_S", 0.01)
     with projector.running(Mock(), Hub(), 8765, environ={"AGENTIHOOKS_BUS": "nats", "HOSTNAME": "pod"}):
-        assert opened.wait(5)
+        assert opened.wait(5), "the projector did not retry the bus"
+    assert attempts[0] == BusConfig(backend="nats")
     assert "ledger projector: bus unreachable" in capsys.readouterr().err
