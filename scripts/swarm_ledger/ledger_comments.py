@@ -109,17 +109,10 @@ def post_outcome(thread, op, ctx, target):
 
 
 def post_answer(thread, op, ctx, target):
-    """An agent's answer to the operator stays beside its status comment: it never amends one or is amended."""
+    """An answer to the operator or a swarm notice never amends a status comment and is never amended."""
     if not any(e["id"] == op["id"] for e in thread):
-        thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], "to": op["to"]})
-        ctx.record(op["by"], "comment added", target, id=op["id"], text=op["text"])
-    seen(ctx, op["by"])
-
-
-def post_notice(thread, op, ctx, target):
-    """A swarm notice records an event: it never amends a comment and is never amended."""
-    if not any(e["id"] == op["id"] for e in thread):
-        thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], "notice": True})
+        key = "to" if "to" in op else "notice"
+        thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], key: op[key]})
         ctx.record(op["by"], "comment added", target, id=op["id"], text=op["text"])
     seen(ctx, op["by"])
 
@@ -162,11 +155,8 @@ def agent_thread_op(thread, op, ctx, target, noun):
     if op["op"] == "add" and "outcome" in op:
         post_outcome(thread, op, ctx, target)
         return True
-    if op["op"] == "add" and noun == "comment" and "to" in op:
+    if op["op"] == "add" and noun == "comment" and {"to", "notice"} & op.keys():
         post_answer(thread, op, ctx, target)
-        return True
-    if op["op"] == "add" and noun == "comment" and "notice" in op:
-        post_notice(thread, op, ctx, target)
         return True
     if op["op"] == "add" and noun == "comment":
         post_status(thread, by, op["id"], text, ctx, target, op.get("attachments"))
