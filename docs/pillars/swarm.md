@@ -1604,7 +1604,7 @@ command runs `git` or `gh`, and acts only on calls that run `git push`,
 `gh pr create` or `gh pr ready`, including inside a chain such as
 `cd <checkout> && git push`. The directory it checks is the session's working
 folder joined with the call's `workdir` and any `cd` or `git -C` in the command.
-Codex sends no `workdir` in its shell hook payload; the hook reads the folder
+Codex 0.162.1 sends no `workdir` in its shell hook payload; the hook reads the folder
 the model gave `exec_command` from the session's rollout, as described in
 [Shell working folder](../reference/CODEX-COMPAT.md#shell-working-folder).
 
@@ -1781,7 +1781,7 @@ A gate that raises lets the call through and records a `fail-open` row.
 | `gh pr create` refused although both readers reviewed | The readers were launched under another name. Launch them with `name` or `subagent_type` set to `standards-reader` and `spec-reader`. A launch is counted only while the `subagents` gate runs: with `subagents-gate=skip` no reader is counted and every non draft open is refused, so set `one-push-gate` to `log only` or `skip` too. |
 | Refused for `uncommitted changes` with nothing to commit | A tracked file changed in the checkout the command runs in. Check `git status` in the folder named by `workdir`, `cd` or `git -C`, not the session's starting folder. |
 | Refused for `commits not on origin` | `HEAD` holds a commit no `origin` branch has. Publish it with `swarm publish`, then open the pull request. |
-| A Codex agent is refused for `commits not on origin` or `uncommitted changes` while its worktree is clean and on origin | The refusal ends with `Checked worktree: <folder>`. When that is the session's starting folder, the hook found no `workdir` for the command in the rollout's newest `exec` program. Print that program as shown in [Shell working folder](../reference/CODEX-COMPAT.md#shell-working-folder): the `cmd` must equal the shell command exactly and every matching call must name the same `workdir`. Otherwise put `cd <worktree> &&` at the start of the command. |
+| A Codex agent is refused for `commits not on origin` or `uncommitted changes` while its worktree is clean and on origin | The refusal ends with `Checked worktree: <folder>`. When that is the session's starting folder while the command was meant for a worktree, the hook may have found no `workdir` for the command in the rollout's newest `exec` program. Print that program as shown in [Shell working folder](../reference/CODEX-COMPAT.md#shell-working-folder): the decoded `cmd` must equal the shell command exactly, every matching call must name the same `workdir`, and every string in the program must decode. Otherwise put `cd <worktree> &&` at the start of the command. |
 | A push is refused although the checks look finished | The gate counts as running a required check that has not reported yet, a check result still pending, and a current workflow suite that has not completed, including one still queued. Wait with `--on checks`. |
 | A push to another branch is refused | The task records no branch, so every push to the pull request's repository is checked. Once the task records its branch (`swarm publish` records it; the `push-stop` gate only names it in a ledger comment), a push whose destination is another branch passes. A push to another GitHub repository always passes. |
 | The gate never refuses | The session is not pinned to an `eng` or `ci` task, the mode is `skip` or `log only`, or a lift holds. Check `swarm status --json` for `gate_modes` and the agent's `gates`. |
@@ -1790,7 +1790,9 @@ The gate was delivered in [pull request 2116](https://github.com/the-cloud-clock
 [pull request 4736](https://github.com/the-cloud-clockwork/agentihooks/pull/4736)
 made it count commits in the folder the command runs in, and
 [pull request 4804](https://github.com/the-cloud-clockwork/agentihooks/pull/4804)
-gave Codex shell calls their `exec_command` folder.
+gave Codex shell calls their `exec_command` folder, and
+[pull request 5676](https://github.com/the-cloud-clockwork/agentihooks/pull/5676)
+read JSON quoted keys and added the checked worktree to readiness refusals.
 
 ## Promotion fixer intake
 

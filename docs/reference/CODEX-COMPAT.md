@@ -122,10 +122,10 @@ for the transcript-driven events (`SessionEnd`, `Stop`, `SubagentStop`,
 #### Shell working folder
 
 Codex 0.162.1 sends a shell `PreToolUse` with only `tool_input.command` and the
-session's `cwd`, the folder the session started in (captured live with a stdin
-dump hook, 2026-10-19). The `workdir` the model gave `exec_command` is not in
-the payload. It is in the rollout, inside the code mode `exec` program of the
-current turn, which Codex has written to disk when the hook fires.
+session's `cwd`, the folder the session started in, as captured live with a
+stdin dump hook for pull request 4804. The `workdir` the model gave
+`exec_command` is not in the payload. It is in the rollout, inside the code mode
+`exec` program, which Codex has written to disk when the hook fires.
 
 `normalize_payload` copies that `workdir` into `tool_input` so the hooks that
 read `tool_input.workdir` see the folder the command really runs in: the
@@ -140,7 +140,7 @@ a `Bash` call with no `workdir` of its own it:
 3. Parses every `exec_command({...})` call in that program's `input`. Keys may
    be bare (`cmd:`) or JSON quoted (`"cmd":`); string values are JavaScript
    string literals.
-4. Keeps the calls whose `cmd` equals the hook's `command` exactly. When they
+4. Keeps the calls whose decoded `cmd` equals the hook's `command` exactly. When they
    all name the same non-empty `workdir`, that value becomes
    `tool_input.workdir`.
 
@@ -162,8 +162,11 @@ A rollout line and the payload it produces:
 }
 ```
 
-The hooks then join `cwd` with `workdir` (a relative `workdir` resolves against
-`cwd`, `~` expands) and apply any `cd` or `git -C` in the command on top.
+The `one-push` gate and the prepush guard then join `cwd` with `workdir` (a
+relative `workdir` resolves against `cwd`, `~` expands) and apply any `cd` or
+`git -C` in the command on top. The lifecycle guard compares `workdir` as given
+with the worktree and scratch roots, so only an absolute `workdir` matches
+there.
 
 No `workdir` is added, and the hooks fall back to the session's `cwd`, when:
 
@@ -172,21 +175,25 @@ No `workdir` is added, and the hooks fall back to the session's `cwd`, when:
   1 MiB;
 - no `exec_command` call in the newest program runs exactly the hook's command,
   or the matching calls name different folders, or one of them has none;
-- a string value in the program cannot be decoded.
+- any string value in the newest program cannot be decoded, even in a call
+  that runs another command.
 
 To see what the hook will read for a session, print the newest `exec` program
 from its rollout:
 
 ```bash
-R=$(ls "${CODEX_HOME:-$HOME/.codex}"/sessions/*/*/*/rollout-*"<session id>".jsonl)
+SID='<session id>'
+R=$(ls "${CODEX_HOME:-$HOME/.codex}"/sessions/*/*/*/rollout-*"$SID".jsonl)
 tail -c 1048576 "$R" | jq -rR 'fromjson? | .payload
   | select(type == "object" and .type == "custom_tool_call" and .name == "exec")
   | .input' | tail -n 1
 ```
 
-Swarm Codex sessions run with their own `CODEX_HOME`; use the session's value.
-The `cmd` and `workdir` printed there are what the normalizer compares and
-copies. Delivered in [pull request 4804](https://github.com/the-cloud-clockwork/agentihooks/pull/4804);
+Set `SID` to the session id. Swarm Codex sessions run with their own
+`CODEX_HOME`; use the session's value. When `CODEX_HOME` lists several folders
+separated by commas, the hooks read only the first; put that one in the
+command. The `cmd` and `workdir` strings printed there are JavaScript literals
+with `\"` escapes; the normalizer compares and copies their decoded values. Delivered in [pull request 4804](https://github.com/the-cloud-clockwork/agentihooks/pull/4804);
 [pull request 5676](https://github.com/the-cloud-clockwork/agentihooks/pull/5676)
 added JSON quoted keys.
 
