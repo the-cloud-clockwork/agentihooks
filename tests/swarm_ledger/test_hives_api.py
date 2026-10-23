@@ -150,6 +150,33 @@ def test_a_hive_named_by_its_id_shows_its_member_name_and_a_set_name_wins(store)
     assert dispatch(request("GET", token=None, slug=None), store)["data"][0]["name"] == "desk"
 
 
+def test_a_hive_that_beat_at_this_moment_is_listed_as_live(store):
+    from scripts.hive import registry
+
+    store.redis.hset(registry.key("desk"), "heartbeat_at", registry._encode("heartbeat_at", NOW_MS))
+    reply = dispatch(request("GET", token=None, slug=None), store)
+    assert [(hive["id"], hive["live"]) for hive in reply["data"]] == [("desk", True), ("pod", False)]
+
+
+def test_a_quiet_hive_inside_the_day_is_listed_and_readable_by_id(store):
+    from scripts.hive import registry
+    from scripts.swarm_ledger.api import hives
+
+    beat = NOW_MS - hives.GONE_MS + 1
+    store.redis.hset(registry.key("pod"), "heartbeat_at", registry._encode("heartbeat_at", beat))
+    found = dispatch(request("GET", "/api/v1/hives/pod", token=None, slug=None), store)["data"]
+    assert (found["id"], found["live"], found["heartbeat_at"]) == ("pod", False, beat)
+
+
+def test_a_hive_gone_past_a_day_is_not_found_by_id(store):
+    from scripts.hive import registry
+    from scripts.swarm_ledger.api import hives
+
+    store.redis.hset(registry.key("pod"), "heartbeat_at", registry._encode("heartbeat_at", NOW_MS - hives.GONE_MS - 1))
+    assert refusal(request("GET", "/api/v1/hives/pod"), store) == (404, "resource_missing", "No such hive")
+    assert registry.show(store.redis, "pod") is not None
+
+
 def test_a_read_of_one_hive_answers_that_hive_and_a_missing_one_is_not_found(store):
     assert dispatch(request("GET", "/api/v1/hives/pod", token=None, slug=None), store)["data"]["id"] == "pod"
     assert refusal(request("GET", "/api/v1/hives/gone"), store) == (404, "resource_missing", "No such hive")

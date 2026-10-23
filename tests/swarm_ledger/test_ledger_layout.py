@@ -120,6 +120,11 @@ def test_an_unreadable_file_reads_as_the_defaults():
     assert layout.read() == {"agents-box": {"height": 200}}
 
 
+def test_the_layout_rows_carry_no_health_row():
+    assert "health-box" not in layout.ROWS
+    assert {"quota-box", "hives-box", "agents-box", "handoff-box"} <= set(layout.ROWS)
+
+
 @pytest.mark.parametrize(
     ("body", "message"),
     [

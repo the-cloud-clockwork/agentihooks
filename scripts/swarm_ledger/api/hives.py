@@ -56,7 +56,7 @@ def masters(store: object) -> dict[str, dict]:
 def view(store: object, now_ms: int) -> list[dict]:
     loaded_hives = ports.hive().launch.loaded_hives
     leads = masters(store)
-    hives = [hive for hive in loaded_hives(store) if 0 < now_ms - hive["heartbeat_at"] <= GONE_MS]
+    hives = [hive for hive in loaded_hives(store) if now_ms - hive["heartbeat_at"] <= GONE_MS]
     for hive in hives:
         sessions = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
         if hive["name"] == hive["id"]:
