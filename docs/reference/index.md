@@ -64,6 +64,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Helm kind proof input keys](ci-result-cache.md#helm-kind-proof-input-keys) | Declared chart and image inputs, due decisions, dispatch examples, cache misses and proof measurements |
 | [Old file fetch in the remap](ci-result-cache.md#old-file-fetch-in-the-remap) | The one batch fetch of changed files' old text in a partial clone, before and after times, the proof, reading the remap step time and troubleshooting |
 | [Unusable coverage databases](ci-result-cache.md#unusable-coverage-databases) | The coverage database check before reuse and before upload, its errors, a manual check and troubleshooting |
+| [A crashed xdist worker and coverage data](ci-result-cache.md#a-crashed-xdist-worker-and-coverage-data) | Why a replacement worker used to delete the live workers' coverage files, the `tests.browser_coverage` fix, where it loads, the crash probe test, before and after runs and troubleshooting |
 | [Helm kind registration to readiness](../ci-timing.md#helm-kind-registration-to-readiness) | Preserved recovery checks, parallel work, kind probe settings, CI dispatch and measured intervals |
 | [Codex CLI cache in unit jobs](../ci-timing.md#codex-cli-cache) | Seed the CLI on main, configure its release, diagnose cache misses and verify installation and shard timings |
 | [Worker hive pod image build](../ci-timing.md#worker-hive-pod-image-build) | Reuse of the published worker base, the base inputs and rebuild decisions, build output, measurements and troubleshooting |
