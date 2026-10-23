@@ -18,6 +18,11 @@ INTENT = (
     "User-facing text states the value or state its label names. "
     "It never explains why, how it was computed, or adds detail nobody asked for."
 )
+PROJECT_INTENT = (
+    "Judge user-facing text, including accessible names and tooltips. HTML tag names, attribute names, "
+    "boolean and structural attribute values, CSS selectors, module paths, storage keys and other technical "
+    "strings are permitted and never violate this intent. " + INTENT
+)
 TAIL = "reason += f\"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats\""
 CLEAN = 'label = "changed 9m ago"'
 
@@ -42,9 +47,9 @@ def _edit(text, path="scripts/swarm/capacity.py", tool="Edit"):
 
 
 def test_shipped_filters_have_the_requested_contract():
-    for path in (PACKAGE, PROJECT):
+    for path, intent in ((PACKAGE, INTENT), (PROJECT, PROJECT_INTENT)):
         spec = schema.load(path)
-        assert spec.intent == INTENT
+        assert spec.intent == intent
         assert spec.mode == "both"
         assert spec.action == "send-back"
         assert [finder.script for finder in spec.finders] == ["string_literals", "explanation_tail"]

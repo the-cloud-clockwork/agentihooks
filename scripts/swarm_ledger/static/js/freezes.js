@@ -14,7 +14,7 @@ export function isSelector(target) {
 
 const indexes = new WeakMap();
 
-function byId(list, id) {
+export function byId(list, id) {
   let index = indexes.get(list);
   let at = index && index.get(id);
   if (at === undefined || list[at]?.id !== id) {
