@@ -281,3 +281,26 @@ def test_default_registry_runs_hive_loss_before_lifecycle(rig):
         True,
         True,
     )
+
+
+def test_a_lease_lost_mid_pass_still_drops_the_starts_it_settled(rig):
+    from scripts.events.envelope import Envelope
+    from scripts.hive import presence
+    from scripts.hub import hive_loss
+
+    claims = rig.bus.state("spoke-work")
+    for hive in ("hive-a", "hive-b"):
+        presence.beat(rig.bus, hive, T0)
+        claims.create(f"claim-{hive}", json.dumps({"state": "started", "claim_revision": 1}).encode())
+        data = {"claim_key": f"claim-{hive}", "claim_revision": 1, "hive": hive, "task": hive}
+        rig.loss.handle(Envelope(f"started:{hive}", "execution.started", "rig", "execution", hive, 1, T0, hive, data))
+    while rig.clock() < T0 + hive_loss.PRUNE_MS:
+        rig.clock.return_value = rig.clock() + 5_000
+        rig.loss.poll(lambda: False)
+    rig.loss._emit = Mock()
+    rig.loss.poll(Mock(side_effect=[True, False]))
+    assert [call.args[1].key for call in rig.loss._emit.call_args_list] == ["hive-a"]
+    assert list(json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value)) == ["claim-hive-b"]
+    rig.loss.poll()
+    assert [call.args[1].key for call in rig.loss._emit.call_args_list] == ["hive-a", "hive-b"]
+    assert json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value) == {}
