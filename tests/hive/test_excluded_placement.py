@@ -156,7 +156,7 @@ def test_a_hive_never_takes_an_agent_past_max_agents():
     [
         ("eng", "frontend", ["frontend"], "no live hive takes frontend"),
         ("eng", "engineer", ["eng"], "no live hive takes eng"),
-        ("eng", "frontend", [], "remote"),
+        ("eng", "frontend", [], "no live UI hive takes frontend"),
         ("ci", "cicd", ["master"], "remote"),
         ("eng", "planner", ["plan"], "no live hive takes plan"),
         ("eng", "planner", ["eng"], "no live hive takes plan"),
