@@ -41,7 +41,7 @@ def source():
     document = doc([row])
     store, ledger = Mock(), Mock()
     store.slugs.return_value = ["rig"]
-    store.config.return_value = SimpleNamespace(slug="rig", state="running", repo="", template="")
+    store.config.return_value = SimpleNamespace(slug="rig", state="running", repo="", template="", engine="events")
     store.agents.return_value = []
     store.claimant.return_value = None
     ledger.state.return_value = document
@@ -191,6 +191,16 @@ def test_default_source_connects_once_and_reads_fresh_shared_state(monkeypatch):
     connect.assert_called_once_with()
     client.assert_called_once_with(service=True)
     assert ledger.state.call_args_list == [(("rig",),), (("rig",),)]
+
+
+def test_the_source_lists_only_swarms_on_the_events_engine():
+    _, store, ledger = source()
+    store.slugs.return_value = ["one", "two", "three"]
+    engines = {"one": "events", "two": "legacy", "three": "events"}
+    store.config.side_effect = lambda slug: SimpleNamespace(slug=slug, engine=engines[slug])
+    assert readiness.Source(store, ledger).slugs() == ["one", "three"]
+    engines["one"] = "legacy"
+    assert readiness.Source(store, ledger).slugs() == ["three"]
 
 
 def test_default_hub_readiness_uses_the_shared_source_and_stops_after_lease_loss(monkeypatch):
