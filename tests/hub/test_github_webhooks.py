@@ -254,6 +254,8 @@ def test_the_receiver_binds_its_bucket_on_a_delivery_until_the_hub_creates_it(ca
             return inner.state(bucket)
 
     ingress = Ingress(github_webhooks.LazyPulls(Bus()), SECRET)
+    assert deliver(ingress, "ping", {}) == 200
+    assert deliver(ingress, "check_suite", check_suite(action="requested")) == 200
     assert bound == []
     assert deliver(ingress, "pull_request", pull_request()) == 503
     assert capsys.readouterr().err.endswith("LookupError: bucket not found\n")
