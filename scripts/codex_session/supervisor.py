@@ -100,6 +100,7 @@ class Started:
     record: TransportRecord
     agent: AgentRecord
     process: subprocess.Popen
+    slot_hive: str = ""
 
 
 def runtime_root(environ: Mapping[str, str]) -> Path:
@@ -291,15 +292,22 @@ def _connect_bound(store, bindings, launch, agent, record, process, deps) -> tup
 
 
 def spawn(spec: Launch, deps: Deps, path: Path) -> subprocess.Popen:
+    from scripts.hive import account_slots
+
     try:
-        return deps.popen(
-            server_command(deps.codex_bin, path, spec.server_args),
-            env=dict(spec.environ),
-            cwd=spec.cwd,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
+        return account_slots.execute(
+            "codex",
+            spec.agent.account,
+            {**spec.environ, account_slots.EXECUTION_ENV: spec.agent.execution_id},
+            lambda env: deps.popen(
+                server_command(deps.codex_bin, path, spec.server_args),
+                env=env,
+                cwd=spec.cwd,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            ),
         )
-    except OSError as exc:
+    except (OSError, account_slots.Unavailable) as exc:
         raise LaunchFailure("spawn", SPAWN_FAILED.format(exc)) from exc
 
 
@@ -403,7 +411,7 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
     try:
         path = socket_path(deps.runtime_root or runtime_root(spec.environ), agent.execution_id)
         record = bindings.reserve(spec.slug, _record(spec, agent, path))
-        spec = execution_home(spec, path.parent)
+        spec = execution_home(replace(spec, agent=agent), path.parent)
         process = spawn(spec, deps, path)
         record = replace(record, server_pid=process.pid, server_start_identity=deps.start_identity(process.pid) or 0)
         bindings.put(spec.slug, record)
@@ -412,6 +420,7 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
         try:
             if process is not None:
                 stop(process)
+                _release_slot(spec.environ.get("AGENTIHOOKS_SLOT_HIVE", ""), agent)
         finally:
             try:
                 if record is not None:
@@ -426,10 +435,18 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
                     if path is not None:
                         shutil.rmtree(path.parent)
         raise
-    return Started(record, agent, process)
+    return Started(record, agent, process, spec.environ.get("AGENTIHOOKS_SLOT_HIVE", ""))
+
+
+def _release_slot(hive: str, agent: AgentRecord) -> None:
+    if hive:
+        from scripts.hive.account_slots import release
+
+        release(hive, agent.execution_id, "codex", agent.account)
 
 
 def finish(store: RedisStore, slug: str, started: Started, now_ms: int) -> TransportRecord:
+    _release_slot(started.slot_hive, started.agent)
     bindings = BindingStore(store)
     current = bindings.get(slug, started.record.execution_id) or started.record
     record = replace(current, state=EXITED, active_turn_id="", last_transport_activity=now_ms)

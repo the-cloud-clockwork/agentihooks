@@ -168,6 +168,17 @@ def execute(harness: str, account: str, environ: Mapping[str, str], invoke: Call
         bus.close()
 
 
+def release(hive: str, execution: str, harness: str, account: str) -> None:
+    from scripts.events.config import BusConfig
+    from scripts.events.factory import open_bus
+
+    bus = open_bus(BusConfig.from_environ())
+    try:
+        Slots(bus, hive, lambda: {}).release(execution, harness, account)
+    finally:
+        bus.close()
+
+
 def publish(hive: str, report: dict, hosted: dict) -> None:
     from scripts.events.config import BusConfig
     from scripts.events.factory import open_bus

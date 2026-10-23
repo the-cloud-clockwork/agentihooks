@@ -233,7 +233,13 @@ def test_runtime_launch_pins_the_reserved_route_and_closes_the_bus(rig, monkeypa
     _, _, _, _, bus = rig
     report = reading()
     report["slots"][0]["account"] = account
-    monkeypatch.setattr(account_slots, "_reading", lambda hive: report)
+    report["slots"].insert(0, {"harness": "claude", "account": "different", "cap": 2})
+
+    def local_reading(hive):
+        assert hive == "one"
+        return report
+
+    monkeypatch.setattr(account_slots, "_reading", local_reading)
     monkeypatch.setattr(factory, "open_bus", lambda config: bus)
     closed = []
     monkeypatch.setattr(bus, "close", lambda: closed.append(True))
@@ -329,4 +335,89 @@ def test_exec_failure_returns_capacity_and_closes_the_connection(rig, monkeypatc
     with pytest.raises(OSError, match="^exec refused$"):
         account_slots.execute("claude", "a", env, failed)
     assert second.take("other", "claude") == "a"
+    assert closed == [True]
+
+
+def test_release_is_idempotent_before_reservation_and_for_unknown_executions(rig):
+    first, second, _, _, _ = rig
+    first.release("never", "claude", "a")
+    assert first.take("one", "claude") == "a"
+    first.release("unknown", "claude", "a")
+    assert second.take("two", "claude") is None
+    first.release("one", "claude", "a")
+    first.release("one", "claude", "a")
+    assert second.take("two", "claude") == "a"
+
+
+def test_account_keys_keep_harnesses_accounts_and_hive_indexes_separate(rig):
+    from scripts.hive import account_slots
+
+    first, _, _, _, bus = rig
+    keys = {
+        account_slots.key(harness, account) for harness in ("claude", "codex", "hive") for account in ("one", "two")
+    }
+    assert len(keys) == 6
+    assert first.take("one", "claude") == "a"
+    entry = bus.state("hive-slot-accounts").get(account_slots.key("hive", "one"))
+    assert json.loads(entry.value) == {"accounts": [["claude", "a"]]}
+
+
+def test_launch_respects_a_preferred_account_even_when_another_is_first(rig):
+    first, _, _, report, _ = rig
+    report[0]["slots"].insert(0, {"harness": "claude", "account": "b", "cap": 2})
+    assert first.launch("one", "claude", "a", lambda account: account) == "a"
+
+
+def test_foreign_process_correlation_never_hides_our_manual_sessions(rig):
+    first, second, _, report, _ = rig
+    second.read = lambda: reading(cap=2)
+    assert second.take("other", "claude") == "a"
+    report[0] = {**reading(cap=2, sessions=1), "sessions": {"claude:a": 1, "_executions": {"claude:a": ["other"]}}}
+    first.heartbeat(report[0], {"other": {"pane": {"state": "working"}}})
+    assert first.take("one", "claude") is None
+
+
+def test_missing_quota_keeps_live_ownership_closed_until_a_fresh_report(rig):
+    from scripts.hive import account_slots
+
+    first, second, _, _, bus = rig
+    assert first.take("one", "claude") == "a"
+    first.heartbeat({"slots": [], "sessions": {}}, {"one": {"pane": {"state": "working"}}})
+    value = json.loads(bus.state("account-slots").get(account_slots.key("claude", "a")).value)
+    assert value["hives"]["one"]["cap"] == 0
+    first.release("one", "claude", "a")
+    assert second.take("two", "claude") is None
+    first.heartbeat({"slots": [], "sessions": {}}, {})
+    first.heartbeat({"slots": [], "sessions": {}}, {})
+    assert second.take("two", "claude") == "a"
+
+
+def test_memory_heartbeat_never_opens_a_new_independent_bus(monkeypatch):
+    from scripts.events import factory
+    from scripts.events.config import BusConfig
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig())
+    monkeypatch.setattr(factory, "open_bus", lambda config: pytest.fail("memory heartbeat opened a bus"))
+    account_slots.publish("one", reading(), {"executions": {}})
+
+
+def test_published_exit_uses_the_current_hive_and_real_execution_report(rig, monkeypatch):
+    from scripts.events import factory
+    from scripts.events.config import BusConfig
+    from scripts.hive import account_slots
+
+    first, second, _, _, bus = rig
+    assert first.take("one", "claude") == "a"
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig(backend="nats"))
+    closed = []
+
+    def opened(config):
+        assert config.backend == "nats"
+        return bus
+
+    monkeypatch.setattr(factory, "open_bus", opened)
+    monkeypatch.setattr(bus, "close", lambda: closed.append(True))
+    account_slots.publish("one", reading(), {"executions": {"one": {"pane": {"state": "exited"}}}})
+    assert second.take("two", "claude") == "a"
     assert closed == [True]

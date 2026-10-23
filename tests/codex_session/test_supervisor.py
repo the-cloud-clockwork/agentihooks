@@ -194,6 +194,10 @@ def test_a_hive_app_server_reserves_its_resolved_account_before_the_subprocess(
     assert len(server.spawns) == 1
     assert account_slots.HIVE_ENV not in server.spawns[0]["env"]
     assert account_slots.EXECUTION_ENV not in server.spawns[0]["env"]
+    released = []
+    monkeypatch.setattr(account_slots, "release", lambda *args: released.append(args))
+    supervisor.finish(store, SLUG, started, 2000)
+    assert released == [("hive-a", started.agent.execution_id, "codex", "default")]
 
 
 def test_local_codex_app_server_admission_records_the_root_hive(store, server, clock, root, tmp_path, monkeypatch):
