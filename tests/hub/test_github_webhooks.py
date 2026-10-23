@@ -184,11 +184,13 @@ class Recorder:
         return self.status
 
 
-def request(ingress, path="/github", body=b"{}", length=None):
-    cls = github_webhooks.handler(ingress)
+def request(ingress, path="/github", body=b"{}", length=None, cls=None):
+    cls = cls or github_webhooks.handler(ingress)
     handler = cls.__new__(cls)
     handler.path = path
-    handler.headers = {"Content-Length": str(len(body)) if length is None else length, "X-GitHub-Event": "ping"}
+    handler.headers = {"X-GitHub-Event": "ping"}
+    if length is not False:
+        handler.headers["Content-Length"] = str(len(body)) if length is None else length
     handler.rfile = io.BytesIO(body)
     sent = []
     handler.send_response = lambda status: sent.append(("status", status))
@@ -209,6 +211,7 @@ def test_http_handler_refuses_other_paths_and_bad_lengths():
     limit = 25 * 1024 * 1024
     assert request(ingress, "/other")[0] == ("status", 404)
     assert request(ingress, length="")[0] == ("status", 411)
+    assert request(ingress, length=False)[0] == ("status", 411)
     assert request(ingress, length="-1")[0] == ("status", 411)
     assert request(ingress, length="²")[0] == ("status", 411)
     assert request(ingress, length=str(limit + 1))[0] == ("status", 413)
@@ -241,11 +244,21 @@ def test_http_handler_logs_nothing():
 
 
 def test_main_refuses_to_start_without_a_secret(monkeypatch, capsys):
+    def refuse(config):
+        raise AssertionError("opened the bus without a secret")
+
     monkeypatch.delenv("AGENTIHOOKS_GITHUB_WEBHOOK_SECRET", raising=False)
+    monkeypatch.setattr(github_webhooks, "open_bus", refuse)
     assert github_webhooks.main([]) == 2
     assert capsys.readouterr().err == (
         "agentihooks github-webhook: AGENTIHOOKS_GITHUB_WEBHOOK_SECRET must be set to verify GitHub webhooks\n"
     )
+
+
+def test_main_names_its_command_in_usage(capsys):
+    with pytest.raises(SystemExit):
+        github_webhooks.main(["--port", "x"])
+    assert capsys.readouterr().err.startswith("usage: agentihooks github-webhook [-h]")
 
 
 def test_main_serves_the_ingress_on_the_given_address(monkeypatch):
@@ -267,6 +280,7 @@ def test_main_serves_the_ingress_on_the_given_address(monkeypatch):
     class Server:
         def __init__(self, address, handler):
             served.append(("init", address, handler.__name__))
+            served.append(("unsigned", request(None, cls=handler)[0]))
 
         def serve_forever(self):
             served.append(("serve",))
@@ -283,6 +297,7 @@ def test_main_serves_the_ingress_on_the_given_address(monkeypatch):
     assert served == [
         ("bus", "memory"),
         ("init", ("0.0.0.0", 9001), "Webhook"),
+        ("unsigned", ("status", 401)),
         ("serve",),
         ("close",),
         ("bus closed",),

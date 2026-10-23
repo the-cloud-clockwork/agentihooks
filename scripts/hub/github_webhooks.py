@@ -28,7 +28,7 @@ def verify(secret: bytes, body: bytes, signature: str | None) -> bool:
     return hmac.compare_digest(signature.encode(), expected.encode())
 
 
-def observations(name: str, payload: dict) -> list[Observation]:
+def observations(name: str | None, payload: dict) -> list[Observation]:
     if name == "pull_request":
         pull = payload["pull_request"]
         state = "merged" if pull["merged"] else pull["state"]
@@ -55,7 +55,7 @@ class Ingress:
         if not verify(self._secret, body, headers.get("X-Hub-Signature-256")):
             return 401
         try:
-            seen = observations(headers.get("X-GitHub-Event", ""), json.loads(body))
+            seen = observations(headers.get("X-GitHub-Event"), json.loads(body))
         except (ValueError, KeyError, TypeError):
             return 400
         try:
@@ -73,10 +73,10 @@ def handler(ingress: Ingress) -> type[BaseHTTPRequestHandler]:
         timeout = REQUEST_TIMEOUT_S
 
         def do_POST(self):
-            length = self.headers.get("Content-Length", "")
+            length = str(self.headers.get("Content-Length"))
             if self.path != PATH:
                 status = 404
-            elif not (length.isascii() and length.isdigit()):
+            elif not length.isdecimal():
                 status = 411
             elif int(length) > MAX_BODY:
                 status = 413
