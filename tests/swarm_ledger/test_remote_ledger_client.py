@@ -168,6 +168,70 @@ def test_remote_swarm_state_uses_the_callers_agent_credential(live, hive):
     assert WORKER in state["_meta"]["members"]
 
 
+@pytest.fixture
+def hosted_controls(live, hive, monkeypatch):
+    from scripts.swarm import cli
+    from scripts.swarm.ledger_client import LedgerClient
+    from scripts.swarm.store import SwarmConfig
+    from tests.swarm_ledger.test_ledger_authority import MASTER
+
+    store = RedisStore(hive)
+    store.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=1, state="running"))
+    hive.hset(store.names.key("name", MASTER), mapping={"swarm": SLUG, "code": "323133"})
+    store.start_execution(SLUG, AgentRecord(MASTER, "master", "master", seat=f"master@{SLUG}", hive="member-1"))
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "compose")
+    monkeypatch.setenv("SWARM_URL", ledger.BASE)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", MASTER)
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", authority.hive_agent_token("member-1", SLUG, MASTER))
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_CREDENTIAL", raising=False)
+    monkeypatch.delenv("SWARM_SECRET", raising=False)
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "run_tick", lambda *args: [])
+    monkeypatch.setattr(cli, "_snapshot", lambda *args: None)
+    monkeypatch.setattr(cli.timer, "ensure", lambda *args: True)
+    monkeypatch.setattr(ledger.repository, "token", server_only(ledger.repository.token))
+    LedgerClient().join(SLUG, MASTER, "orchestrator")
+    return store
+
+
+def test_pinned_master_controls_cross_the_hosted_credential_boundary(hosted_controls):
+    from scripts.swarm import cli
+    from scripts.swarm.ledger_client import LedgerClient
+    from tests.swarm_ledger.test_ledger_authority import MASTER
+
+    store = hosted_controls
+    before = len(LedgerClient().state(SLUG)["notifications"])
+    for arguments, state in [
+        (["pause"], "paused"),
+        (["start"], "running"),
+        (["set", "max-eng-agents=3"], "running"),
+        (["stop"], "stopping"),
+    ]:
+        assert cli.main([SLUG, *arguments]) == 0
+        assert store.config(SLUG).state == state
+    assert store.config(SLUG).max_eng == 3
+    notices = LedgerClient().state(SLUG)["notifications"][before:]
+    assert len(notices) == 4
+    assert all(notice["by"] == MASTER for notice in notices)
+    with exits("a remote ledger client cannot make service writes; the operator credential stays on its host"):
+        ledger.credentials(SLUG, service=True)
+
+
+@pytest.mark.parametrize("arguments", [["pause"], ["start"], ["stop"], ["set", "max-eng-agents=3"]])
+def test_hosted_controls_still_refuse_a_nonmaster(hosted_controls, monkeypatch, capsys, arguments):
+    from scripts.swarm import cli
+
+    store = hosted_controls
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", WORKER)
+    before = store.config(SLUG)
+    assert cli.main([SLUG, *arguments]) == 1
+    assert capsys.readouterr().err == (
+        f"swarm: only the operator or the master of swarm {SLUG} uses its swarm controls, and {WORKER} is neither\n"
+    )
+    assert store.config(SLUG) == before
+
+
 def test_a_remote_client_without_a_credential_is_refused(live, hive):
     with patch.dict(os.environ, REMOTE):
         os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)
