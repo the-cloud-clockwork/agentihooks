@@ -231,7 +231,7 @@ class NatsWorkQueue:
 
 
 class NatsStateStore:
-    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, provision: bool = True):
+    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, provision: bool):
         self._loop = loop
         self._js = js
         self._bucket = bucket
