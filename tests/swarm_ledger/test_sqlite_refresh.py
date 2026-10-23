@@ -121,7 +121,8 @@ def test_a_reader_refreshes_only_while_its_gap_fits_the_kept_generations(tmp_pat
     assert served.text == whole(tmp_path).text
 
 
-def test_changed_paths_unite_every_recorded_generation_in_the_gap(tmp_path):
+def test_changed_paths_unite_every_recorded_generation_in_the_gap(tmp_path, monkeypatch):
+    monkeypatch.setattr(refresh, "PATHS_KEPT", 2)
     repo = store(tmp_path)
     repo.create("ledger", CONTENT)
     with repo.connect() as connection, connection:
