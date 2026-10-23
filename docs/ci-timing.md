@@ -532,10 +532,10 @@ While at least one open incident is listed by the current read:
 | `ci skipped record lag` | Not raised |
 | `CI speed API read is incomplete` | Not raised, even when the read fails |
 | Retractions of earlier findings | Unchanged: a corrected read still retracts a superseded finding |
-| Notice to the masters | One information notice per incident, to both masters |
+| Notice to the masters | One FYI notice per incident, to both masters |
 
 The notice reaches the watched swarm's master and the Doctor master once per
-incident, as information that needs no reply. On the 19 October incident it
+incident, as an FYI notice that needs no reply. On the 19 October incident it
 read:
 
 ```text
@@ -663,7 +663,7 @@ Later pull requests changed the grouping:
 [5715](https://github.com/the-cloud-clockwork/agentihooks/pull/5715) took the
 window out of the finding id, so a group keeps its id from one window to the
 next, and [5707](https://github.com/the-cloud-clockwork/agentihooks/pull/5707)
-sent the hold notice as information.
+sent the hold notice as an FYI notice.
 
 ### Inspect and diagnose a read
 
