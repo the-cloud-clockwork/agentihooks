@@ -176,7 +176,7 @@ The current workflow grades as follows:
 | Load ratio | Per pair head over base ratios, combined as the geometric mean of the base first median and the head first median, so launch order cancels out |
 | Load margin | `SAME_CODE_MARGIN: '1.25'` in the grade job |
 | Hierarchy pairs | A four job matrix of hierarchy probes graded by `tests.ledger_load.hierarchy_paired` at `HIERARCHY_SAME_CODE_MARGIN: '1.3'` |
-| Margin floor | Each grader reads its recorded same code runs (`tests/ledger_load/same_code_pairs.json`, `tests/ledger_load/hierarchy_same_code.json`) and refuses a margin below the widest single pair ratio in them |
+| Margin floor | Each grader reads its recorded same code runs and refuses a margin below their noise: the load grader below the widest single pair ratio in `tests/ledger_load/same_code_pairs.json`, the hierarchy grader below the widest per run geometric mean in `tests/ledger_load/hierarchy_same_code.json` |
 | Load base | Still `726353637` unless the dispatch names a `base` |
 
 Pull request 4956 recorded five of five same code runs green and a planted
@@ -213,7 +213,7 @@ bound as JSON before its error lines.
 
 | Observation | Meaning and next step |
 |---|---|
-| `the margin Mx is below Bx, the widest pair ratio of the same code runs` | The workflow margin is under the recorded noise. Raise the margin in the workflow, or record new same code runs if the runners changed |
+| `the margin Mx is below Bx, the widest pair ratio of the same code runs` (load) or `the margin Mx is below Bx, the widest geometric mean of the same code runs` (hierarchy) | The workflow margin is under the recorded noise. Raise the margin in the workflow, or record new same code runs if the runners changed |
 | `head write p50 order balanced pair ratio R exceeds the 1.25x margin` on a head that does not touch the ledger server | Run a same code control first. If identical code also crosses the margin, the noise grew; record the control runs and judge the margin before looking for a regression |
 | The same red on a head that changes server code | Compare dev against an older base in CI to bracket the merge that introduced it, then bisect the merges between |
 | One pair far from the rest | Read that pair's runner and start time with the jobs command above. Each pair runs on its own runner, so one busy runner skews one pair |
