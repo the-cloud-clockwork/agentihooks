@@ -293,3 +293,52 @@ def test_actionable_mail_is_not_mistaken_for_a_generated_trigger_notice(mailbox,
     assert len(runtime.spawned) == 1
     [seat] = seats(store)
     assert inbox.deliver(item.id, seat.name).state == "delivered"
+
+
+@pytest.mark.parametrize("addressed_to", ["seat", "occupant"])
+@pytest.mark.parametrize("delivery", ["pending", "delivered", "read"])
+def test_master_followup_during_dispatcher_exit_reaches_successor(mailbox, monkeypatch, capsys, addressed_to, delivery):
+    from scripts.inbox import exits
+    from scripts.swarm import cli as swarm_cli
+
+    store, inbox = mailbox
+    runtime = FakeRuntime()
+    first = inbox.send("master", f"dispatcher@{SLUG}", "Rank the launch blocker first")
+    run(store, runtime, doc())
+    [departing] = seats(store)
+    inbox.seats.occupy(departing.seat, departing.name, NOW)
+    assert inbox.read(first.id, departing.name).state == "read"
+    assert inbox.reply(first.id, departing.name, "The launch blocker ranks first").state == "done"
+    monkeypatch.setattr(swarm_cli, "LedgerClient", lambda: type("Ledger", (), {"state": lambda self, slug: doc()})())
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: NOW)
+    settle = exits.settle
+    sent = []
+
+    def arriving(inbox_store, name, seat, reason):
+        address = departing.seat if addressed_to == "seat" else departing.name
+        followup = inbox_store.send("master", address, "Group the remaining launch blockers next")
+        sent.append(followup)
+        if delivery == "delivered":
+            assert inbox_store.deliver(followup.id, departing.name).state == delivery
+        elif delivery == "read":
+            assert inbox_store.read(followup.id, departing.name).state == delivery
+        settle(inbox_store, name, seat, reason)
+
+    monkeypatch.setattr(exits, "settle", arriving)
+    swarm_cli._dispatcher_done(store, SLUG, departing)
+    capsys.readouterr()
+    [followup] = sent
+    assert inbox.get(followup.id).state == "pending"
+    assert inbox.get(followup.id).address == departing.seat
+    exits.sweep(inbox, SLUG, store, lambda: {})
+    assert inbox.get(followup.id).state == "pending"
+    run(store, runtime, doc(), NOW + 60_000)
+    [successor] = [agent for agent in seats(store) if agent.state != "finished"]
+    assert successor.name != departing.name
+    inbox.seats.occupy(successor.seat, successor.name, NOW + 60_000)
+    assert inbox.read(followup.id, successor.name).text == followup.text
+    assert followup.id in dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(), NOW + 60_000)
+    assert inbox.reply(followup.id, successor.name, "Remaining launch blockers grouped").state == "done"
+    assert inbox.open_items("master")[-1].text == "Remaining launch blockers grouped"
+    run(store, runtime, doc(), NOW + 120_000)
+    assert all(agent.state == "finished" for agent in seats(store))
