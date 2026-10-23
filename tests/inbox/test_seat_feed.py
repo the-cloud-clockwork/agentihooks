@@ -102,17 +102,20 @@ def test_a_feed_binds_each_seat_once_and_rebinds_when_its_receiver_changes_seat(
     assert set(feed.held) == {"moved"}
 
 
-def test_settle_confirms_every_item_that_left_pending_and_keeps_the_rest():
+def test_settle_confirms_received_items_and_keeps_unconfirmed_or_missing_items():
+    from dataclasses import replace
+
     shared = memory.open_bus(BusConfig())
     items = Items()
     items.add("waiting")
-    items.add("shown", "delivered")
+    items.add("shown", "confirmed")
+    items.items["shown"] = replace(items.get("shown"), delivery_session="session-1")
     feed = SeatFeed(lambda: shared, items, "bob", "session-1", seat=lambda: SEAT)
     for item_id in ("waiting", "shown", "gone"):
         mailed(shared, SEAT, item_id)
     assert feed.wait(0)
-    assert feed.settle() == ["shown", "gone"]
-    assert set(feed.held) == {"waiting"}
+    assert feed.settle() == ["shown"]
+    assert set(feed.held) == {"waiting", "gone"}
 
 
 def test_a_store_failure_in_settle_is_a_feed_error_naming_it():

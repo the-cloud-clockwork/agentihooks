@@ -107,12 +107,38 @@ def _remove_units(home: Path) -> bool:
     return running
 
 
+def _stranded_scheduler():
+    import redis
+
+    from scripts.scheduler import Scheduler
+    from scripts.swarm.store import DEFAULT_URL, redis_url
+
+    if redis_url(os.environ) == DEFAULT_URL:
+        return None
+    client = redis.Redis.from_url(DEFAULT_URL, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)
+    return Scheduler(client)
+
+
+def _retire(payload: str) -> bool:
+    from redis.exceptions import RedisError
+
+    try:
+        old = _stranded_scheduler()
+        for entry in _entries(old) if old else []:
+            if entry.record["payload"] == payload:
+                entry.cancel()
+    except RedisError:
+        return False
+    return True
+
+
 def _schedule(home: Path) -> str:
     from redis.exceptions import RedisError
 
     try:
         scheduler = _scheduler()
         payload = json.dumps({"script": str(home / LINKS[0])})
+        retired = _retire(payload)
         stale = [entry for entry in _entries(scheduler) if entry.record["payload"] == payload]
         entry = scheduler.interval(owner=OWNER, payload=payload, every=EVERY)
         entry.timeout.connect(tick)
@@ -122,7 +148,8 @@ def _schedule(home: Path) -> str:
     except RedisError:
         return f"[!!] Host guard linked in {home}; Redis is unreachable, so the guard is not scheduled"
     _start()
-    return f"[OK] Host guard installed in {home} from {REPO}, every {EVERY}s on the agentihooks scheduler"
+    message = f"[OK] Host guard installed in {home} from {REPO}, every {EVERY}s on the agentihooks scheduler"
+    return message if retired else f"{message}; a guard entry on the local Redis could not be checked or retired"
 
 
 def install(home: Path, enable: bool) -> str:
@@ -146,7 +173,8 @@ def reconcile(home: Path) -> str:
     records = _records()
     if records is None:
         return "[!!] Host guard not reconciled: the agentihooks scheduler is unreachable"
-    return install(home, enable=bool(_for(home, records)))
+    linked = all((home / name).is_symlink() for name in LINKS)
+    return install(home, enable=linked or bool(_for(home, records)))
 
 
 def tick(event: dict, delivery_id: str, redis: "Redis") -> None:

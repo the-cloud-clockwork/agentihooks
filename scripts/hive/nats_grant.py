@@ -8,13 +8,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.events import nkey
-from scripts.hive import auth
+from scripts.events import nkey, subjects
+from scripts.events.dead import DEAD_STREAM
+from scripts.hive import auth, buckets
 
 if TYPE_CHECKING:
     from redis import Redis
 
 SIGNER_ENV = "AGENTIHOOKS_NATS_SIGNER"
+HUB_PATH = "agentihooks/hub/"
+TRUSTED_OPERATOR_ENV = "AGENTIHOOKS_NATS_TRUSTED_OPERATOR"
 ACCOUNT_NAME = "SWARM"
 REVOKED = f"{auth.PREFIX}:nats-revoked"
 CLAIMS_UPDATE = "$SYS.REQ.CLAIMS.UPDATE"
@@ -32,6 +35,19 @@ ACCOUNT_LIMITS = {
     "streams": -1,
     "consumer": -1,
 }
+MEMBER_PUBLISH = (
+    "swarm.*.execution.>",
+    "dead.*",
+    "dead.*.*",
+    "$JS.API.INFO",
+    f"$JS.API.STREAM.MSG.GET.{DEAD_STREAM}",
+    "$JS.API.CONSUMER.INFO.>",
+    "$JS.API.CONSUMER.MSG.NEXT.>",
+    "$JS.ACK.>",
+    *(f"$KV.{bucket}.>" for bucket in buckets.NAMES),
+    *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets.NAMES),
+    *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets.NAMES),
+)
 
 
 @dataclass(frozen=True)
@@ -40,12 +56,24 @@ class Signer:
     account: nkey.KeyPair
     system_credentials: str = field(repr=False)
     url: str
+    trusted_operator: str
 
 
 def from_environ(environ: Mapping[str, str]) -> Signer | None:
     path = environ.get(SIGNER_ENV)
     if not path:
         return None
+    hub, _, name = path.partition(HUB_PATH)
+    if hub or "%" in name or any(part in ("", ".", "..") for part in name.split("/")):
+        raise auth.HiveError(
+            f"the NATS signer record {path} holds the system account credential, "
+            f"so it must live under the OpenBao path {HUB_PATH} that only the hub role reads"
+        )
+    trusted = environ.get(TRUSTED_OPERATOR_ENV)
+    if not trusted:
+        raise auth.HiveError(
+            f"{SIGNER_ENV} is set, so {TRUSTED_OPERATOR_ENV} must name the operator public key the NATS server trusts"
+        )
     bao = openbao_kv.from_env(environ)
     if bao is None:
         raise auth.HiveError(
@@ -58,6 +86,7 @@ def from_environ(environ: Mapping[str, str]) -> Signer | None:
             nkey.from_seed(record["account_seed"]),
             record["system_credentials"],
             record["url"],
+            trusted,
         )
     except (openbao_kv.OpenBaoError, KeyError, nkey.NkeyError) as exc:
         raise auth.HiveError(f"the NATS signer record {path} cannot be used ({exc})") from None
@@ -67,13 +96,18 @@ def user_claims() -> dict:
     return {"type": "user", "version": 2, "pub": {}, "sub": {}, **UNLIMITED}
 
 
+def member_claims(user: str) -> dict:
+    return {**user_claims(), "pub": {"allow": list(MEMBER_PUBLISH)}, "sub": {"allow": [f"{subjects.inbox(user)}.>"]}}
+
+
 def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
     return nkey.derive(signer.account, nkey.USER, member_id)
 
 
 def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
-    return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", user_claims()), user.seed)
+    claims = member_claims(user.public)
+    return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 
 
 def account_jwt(signer: Signer, revocations: Mapping[str, int]) -> str:
@@ -108,5 +142,12 @@ def push(signer: Signer, jwt: str) -> None:
 
 def revoke(redis: "Redis", signer: Signer, member_id: str) -> str:
     redis.hset(REVOKED, member_user(signer, member_id).public, int(time.time()))
-    push(signer, account_jwt(signer, {key: int(value) for key, value in redis.hgetall(REVOKED).items()}))
+    jwt = account_jwt(signer, {key: int(value) for key, value in redis.hgetall(REVOKED).items()})
+    issuer = nkey.claims(jwt)["iss"]
+    if issuer != signer.trusted_operator:
+        raise auth.HiveError(
+            f"refusing to push an account update issued by {issuer}, "
+            f"which is not the trusted operator {signer.trusted_operator}"
+        )
+    push(signer, jwt)
     return f"revoked the NATS credential of {member_id}"

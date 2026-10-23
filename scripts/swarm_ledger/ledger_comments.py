@@ -81,10 +81,10 @@ def can_change(entry, by, members):
 
 
 def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
-    """An agent's comment amends its own latest one on the item, unless anyone commented after it."""
+    """An agent's comment amends its own latest one on the item, unless anyone commented after it or it is a notice."""
     live = [e for e in thread if not e.get("deleted")]
     mine = next((e for e in reversed(live) if e.get("by") == by and "to" not in e), None)
-    if mine is None or mine is not live[-1] or "outcome" in mine:
+    if mine is None or mine is not live[-1] or "outcome" in mine or "notice" in mine:
         if any(e["id"] == entry_id for e in thread):
             return
         thread.append({"id": entry_id, "by": by, "at": ctx.at, "text": text})
@@ -109,9 +109,10 @@ def post_outcome(thread, op, ctx, target):
 
 
 def post_answer(thread, op, ctx, target):
-    """An agent's answer to the operator stays beside its status comment: it never amends one or is amended."""
+    """An answer to the operator or a swarm notice never amends a status comment and is never amended."""
     if not any(e["id"] == op["id"] for e in thread):
-        thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], "to": op["to"]})
+        key = "to" if "to" in op else "notice"
+        thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], key: op[key]})
         ctx.record(op["by"], "comment added", target, id=op["id"], text=op["text"])
     seen(ctx, op["by"])
 
@@ -123,9 +124,11 @@ def seen(ctx, by):
 
 
 def check_outcome(op):
+    agent_comment = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
+    if "notice" in op and (op["notice"] is not True or not agent_comment or "outcome" in op or "to" in op):
+        raise ValueError("notice rides only on an agent add to a comment thread, as true, without outcome or to")
     if "outcome" not in op:
         return
-    agent_comment = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
     if op["outcome"] not in OUTCOMES or not agent_comment or "attachments" in op:
         raise ValueError(
             "outcome rides only on an agent add to a comment thread, as done or blocked, without attachments"
@@ -152,7 +155,7 @@ def agent_thread_op(thread, op, ctx, target, noun):
     if op["op"] == "add" and "outcome" in op:
         post_outcome(thread, op, ctx, target)
         return True
-    if op["op"] == "add" and noun == "comment" and "to" in op:
+    if op["op"] == "add" and noun == "comment" and {"to", "notice"} & op.keys():
         post_answer(thread, op, ctx, target)
         return True
     if op["op"] == "add" and noun == "comment":

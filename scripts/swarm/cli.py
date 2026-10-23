@@ -629,7 +629,7 @@ def cmd_spoke(store, args):
 
     if workstation.runs_engine(os.environ):
         raise SwarmError(workstation.ENGINE_RUNS)
-    bus = factory.open_bus(BusConfig.from_environ(os.environ))
+    bus = factory.open_bus(replace(BusConfig.from_environ(os.environ), provision=False))
     try:
         workstation.run(store, bus, LocalHerdrRuntime(HerdrRuntime()), commands.hive_id())
     finally:
@@ -2073,7 +2073,7 @@ def _seat(agent):
 def _retire(store, slug, agent, exit_text):
     store.release(slug, agent.task, agent.name)
     store.put_agent(slug, replace(agent, state="finished"))
-    exits.settle(InboxStore(store.redis), agent.name, "", exit_text)
+    exits.settle(InboxStore(store.redis), agent.name, agent.seat if agent.lane == DISPATCH else "", exit_text)
 
 
 def cmd_say(store, args):
