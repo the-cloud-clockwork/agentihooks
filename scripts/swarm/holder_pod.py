@@ -67,4 +67,4 @@ def gone(held: object, own: dict, read: Callable[[str, str], dict | None] = read
     if found.get("metadata", {}).get("uid") != held["uid"] or found.get("status", {}).get("phase") in ENDED:
         return True
     container = held.get("container")
-    return isinstance(container, str) and bool(container) and not _running(found, container)
+    return isinstance(container, str) and bool(container) and bool(_statuses(found)) and not _running(found, container)

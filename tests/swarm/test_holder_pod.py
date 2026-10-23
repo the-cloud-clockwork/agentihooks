@@ -90,7 +90,8 @@ def running(container_id, state):
         (running("c-old", {"waiting": {}}), True),
         ({"metadata": {"uid": "uid-old"}, "status": {"containerStatuses": [{"containerID": "c-old"}]}}, True),
         (running("c-new", {"running": {}}), True),
-        ({"metadata": {"uid": "uid-old"}, "status": {"phase": "Running"}}, True),
+        ({"metadata": {"uid": "uid-old"}, "status": {"phase": "Running"}}, False),
+        ({"metadata": {"uid": "uid-old"}, "status": {"phase": "Running", "containerStatuses": []}}, False),
     ],
 )
 def test_a_holder_container_is_gone_once_it_no_longer_runs_in_its_pod(pod, gone):
