@@ -5,6 +5,7 @@ import sys
 import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import replace
 
 from scripts.events import catalogue, factory
 from scripts.events.bus import Consumer
@@ -21,6 +22,7 @@ BATCH = 32
 FETCH_TIMEOUT_MS = 500
 REOPEN_S = 5.0
 PULL_S = 0.05
+POLICY = replace(registry.REACTOR_POLICY, inactive_ms=600_000)
 _SAFE = re.compile(r"[a-z0-9]+")
 
 
@@ -35,7 +37,7 @@ class Projector:
         self.name = name
         self.config = config
         self.clock = clock
-        self.reactor = Reactor(f"projector-{name}", SUBJECT, self.handle)
+        self.reactor = Reactor(f"projector-{name}", SUBJECT, self.handle, policy=POLICY)
         self.bus = None
         self.consumer = None
         self.reopen_at = 0.0

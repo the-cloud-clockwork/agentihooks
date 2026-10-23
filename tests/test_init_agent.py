@@ -614,6 +614,18 @@ def test_a_swarm_spawn_exports_its_identity_and_enables_langfuse_traces(tmp_path
     assert text.index("AGENTIHOOKS_LANGFUSE_ENABLED") < text.index(" claude ")
 
 
+def test_hive_slot_markers_survive_a_launcher_without_the_callers_environment(tmp_path):
+    import subprocess
+
+    env = {"AGENTIHOOKS_SWARM": "rig", "AGENTIHOOKS_SLOT_HIVE": "hive-a", "AGENTIHOOKS_SLOT_EXECUTION": "execution-a"}
+    text = _launcher_text(tmp_path, env)
+    assert "export AGENTIHOOKS_SLOT_HIVE=hive-a\n" in text
+    assert "export AGENTIHOOKS_SLOT_EXECUTION=execution-a\n" in text
+    script = init_agent._swarm_exports(env) + 'printf "%s\\n%s" "$AGENTIHOOKS_SLOT_HIVE" "$AGENTIHOOKS_SLOT_EXECUTION"'
+    result = subprocess.run(["bash", "-c", script], env={}, capture_output=True, text=True, check=True)
+    assert result.stdout == "hive-a\nexecution-a"
+
+
 def test_a_swarm_spawn_exports_its_compact_limit(tmp_path):
     env = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_COMPACT_LIMIT": "40"}
     text = _launcher_text(tmp_path, env)

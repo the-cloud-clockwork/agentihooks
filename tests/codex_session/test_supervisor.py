@@ -119,6 +119,7 @@ def assert_failed_cleanly(store, server, error_class):
 def test_a_launch_admits_one_server_binds_its_thread_and_opens_once(store, server, clock, root, tmp_path):
     started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
     record, agent = started.record, started.agent
+    assert started.slot_hive == ""
     path = Path(record.endpoint_ref.removeprefix("unix://"))
     assert path == root / agent.execution_id.removeprefix("exe-")[:16] / "s"
     assert server.commands == [["codex", "app-server", "--listen", f"unix://{path}"]]
@@ -159,6 +160,82 @@ def test_a_launch_admits_one_server_binds_its_thread_and_opens_once(store, serve
     assert server.methods().index("thread/name/set") < server.methods().index("turn/start")
     assert not BindingStore(store).claim_opening(SLUG, agent.execution_id, 2000)
     assert all(connection.closed for connection in server.connections)
+
+
+def test_a_hive_app_server_reserves_its_resolved_account_before_the_subprocess(
+    store, server, clock, root, tmp_path, monkeypatch
+):
+    from dataclasses import replace
+
+    from scripts.hive import account_slots
+
+    spec = launch_spec(store, server, tmp_path)
+    spec = replace(
+        spec, environ={**spec.environ, account_slots.HIVE_ENV: "hive-a", account_slots.EXECUTION_ENV: "pending"}
+    )
+    admitted = []
+
+    def execute(harness, account, environ, invoke):
+        assert server.spawns == []
+        assert harness == "codex"
+        assert account == "default"
+        assert environ[account_slots.HIVE_ENV] == "hive-a"
+        assert environ[account_slots.EXECUTION_ENV] != "pending"
+        admitted.append(environ[account_slots.EXECUTION_ENV])
+        return invoke(
+            {
+                key: value
+                for key, value in environ.items()
+                if key not in (account_slots.HIVE_ENV, account_slots.EXECUTION_ENV)
+            }
+        )
+
+    monkeypatch.setattr(account_slots, "execute", execute)
+    started = supervisor.launch(store, spec, deps(server, clock, root))
+    assert admitted == [started.agent.execution_id]
+    assert len(server.spawns) == 1
+    assert account_slots.HIVE_ENV not in server.spawns[0]["env"]
+    assert account_slots.EXECUTION_ENV not in server.spawns[0]["env"]
+    released = []
+    monkeypatch.setattr(account_slots, "release", lambda *args: released.append(args))
+    supervisor.finish(store, SLUG, started, 2000)
+    assert released == [("hive-a", started.agent.execution_id, "codex", "default")]
+
+
+def test_failed_hive_app_server_start_returns_the_canonical_account_slot(
+    store, server, clock, root, tmp_path, monkeypatch
+):
+    from dataclasses import replace
+
+    from scripts.hive import account_slots
+
+    spec = launch_spec(store, server, tmp_path)
+    spec = replace(spec, environ={**spec.environ, account_slots.HIVE_ENV: "hive-a"})
+    monkeypatch.setattr(account_slots, "execute", lambda harness, account, env, invoke: invoke(env))
+    released = []
+    monkeypatch.setattr(account_slots, "release", lambda *args: released.append(args))
+
+    def failed(*args):
+        raise RuntimeError("startup failed")
+
+    monkeypatch.setattr(supervisor, "_connect_bound", failed)
+    with pytest.raises(RuntimeError, match="^startup failed$"):
+        supervisor.launch(store, spec, deps(server, clock, root))
+    assert server.processes[0].stopped
+    assert released == [("hive-a", only_record(store).execution_id, "codex", "default")]
+
+
+def test_unmanaged_app_server_failure_never_releases_a_hive_slot(store, server, clock, root, tmp_path, monkeypatch):
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(account_slots, "release", lambda *args: pytest.fail("unmanaged launch released a slot"))
+
+    def failed(*args):
+        raise RuntimeError("startup failed")
+
+    monkeypatch.setattr(supervisor, "_connect_bound", failed)
+    with pytest.raises(RuntimeError, match="^startup failed$"):
+        supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
 
 
 def test_local_codex_app_server_admission_records_the_root_hive(store, server, clock, root, tmp_path, monkeypatch):
