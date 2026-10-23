@@ -89,6 +89,14 @@ def test_a_reactor_name_must_be_a_lowercase_token(name):
         registry.Reactor(name, "swarm.>", Recorder())
 
 
+@pytest.mark.parametrize("retry_ms", [[10], (-1,), (1.5,), (True,)])
+def test_reactor_retry_delays_must_be_non_negative_integers(retry_ms):
+    with pytest.raises(ValueError) as raised:
+        registry.Reactor("life", "swarm.>", Recorder(), retry_ms=retry_ms)
+    assert str(raised.value) == "reactor 'life' retry delays must be a tuple of non negative integers"
+    assert registry.Reactor("life", "swarm.>", Recorder(), retry_ms=(0, 5)).retry_ms == (0, 5)
+
+
 def test_the_default_registry_declares_reactors():
     assert isinstance(registry.REACTORS, registry.Registry)
 

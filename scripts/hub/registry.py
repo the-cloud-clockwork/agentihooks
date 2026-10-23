@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from scripts.events.bus import Bus
 from scripts.events.config import QueuePolicy
-from scripts.events.envelope import Envelope
+from scripts.events.envelope import Envelope, _count
 from scripts.hub import lease
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
@@ -34,6 +34,8 @@ class Reactor:
             raise ValueError(f"reactor {self.name!r} needs a subject")
         if not callable(self.handler):
             raise ValueError(f"reactor {self.name!r} needs a callable handler")
+        if not isinstance(self.retry_ms, tuple) or not all(map(_count, self.retry_ms)):
+            raise ValueError(f"reactor {self.name!r} retry delays must be a tuple of non negative integers")
 
 
 class Registry:
