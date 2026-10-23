@@ -1153,10 +1153,12 @@ def _acknowledging_error(exc):
 
 
 def _acknowledging(slug, store, agent):
-    if agent.lane == MASTER:
-        return False
+    return agent.lane != MASTER and _launch_row(slug, store, agent).get("state") == ACKNOWLEDGING
+
+
+def _launch_row(slug, store, agent):
     raw = store.redis.hget(store.key(slug, "launches"), agent.name)
-    return bool(raw) and json.loads(raw).get("state") == ACKNOWLEDGING
+    return json.loads(raw) if raw else {}
 
 
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
@@ -1164,6 +1166,7 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
 
     rows, actions = {t["id"]: t for t in doc["tasks"]}, []
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
+        agent = replace(agent, started_at=_launch_row(slug, store, agent)["at"])
         task = rows.get(agent.task) or {"id": agent.task}
         try:
             if now_ms - agent.started_at >= LEASE_MS:
@@ -1175,6 +1178,8 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
         except Exception as exc:
             if _acknowledging_error(exc) or not isinstance(exc, SpawnError):
                 store.refresh(slug, agent.task, agent.name, LEASE_MS)
+                if not isinstance(exc, SpawnError):
+                    actions.append(f"{agent.name} acknowledgement collect for {agent.task} failed, retrying: {exc}")
             else:
                 actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(agent, task, exc), now_ms)
             continue
