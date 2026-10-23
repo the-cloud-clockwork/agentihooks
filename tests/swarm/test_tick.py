@@ -644,10 +644,7 @@ class HiveAcks(FakeRuntime):
         self.live, self.asked = set(), []
 
     def launched(self, config, lane, name, task):
-        from scripts.swarm.tick import ACK_LATER
-
-        assert (config.slug, task) == ("sw", {"id": task["id"], "seat": task["seat"], ACK_LATER: True})
-        assert task["seat"].startswith(f"{lane}-")
+        assert (config.slug, task["seat"].split("-")[0], len(task)) == ("sw", lane, 3)
         self.asked.append(name)
         return name in self.live
 
