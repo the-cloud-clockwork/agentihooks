@@ -203,6 +203,21 @@ def test_the_source_lists_only_swarms_on_the_events_engine():
     assert readiness.Source(store, ledger).slugs() == ["three"]
 
 
+def test_the_source_skips_a_swarm_removed_while_it_lists():
+    from scripts.swarm.store import SwarmError
+
+    _, store, ledger = source()
+    store.slugs.return_value = ["gone", "kept"]
+
+    def config(slug):
+        if slug == "gone":
+            raise SwarmError("no swarm gone")
+        return SimpleNamespace(slug=slug, engine="events")
+
+    store.config.side_effect = config
+    assert readiness.Source(store, ledger).slugs() == ["kept"]
+
+
 def test_default_hub_readiness_uses_the_shared_source_and_stops_after_lease_loss(monkeypatch):
     from scripts.hub.readiness import Readiness
 
