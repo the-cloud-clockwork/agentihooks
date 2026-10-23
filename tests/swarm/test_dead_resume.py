@@ -540,6 +540,40 @@ def test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone
     assert ledger.rows["t1"]["claimed_by"] == ""
 
 
+@pytest.mark.parametrize("live", [{"claimed_by": "engineer@other-0001"}, {"claim_generation": 7}])
+def test_a_tick_drop_refunds_nothing_when_one_claim_field_moved(store, live):
+    ledger, runtime, agent = prepared_recovery(store)
+    rows = {"t1": dict(ledger.rows["t1"])}
+    store.count_claim("sw", "t1")
+    lives = store.claims("sw", "t1")
+    ledger.rows["t1"].update(live)
+
+    tick_module._drop("sw", store, ledger, rows, agent, refund=True)
+
+    assert store.claims("sw", "t1") == lives
+
+
+def test_a_tick_drop_refunds_a_legacy_claim_without_a_generation(store):
+    ledger, runtime, agent = prepared_recovery(store)
+    ledger.rows["t1"].pop("claim_generation")
+    rows = {"t1": dict(ledger.rows["t1"])}
+    lives = store.claims("sw", "t1")
+
+    assert tick_module._drop("sw", store, ledger, rows, agent, refund=True) == ", task t1 reopened"
+    assert store.claims("sw", "t1") == lives - 1
+
+
+def test_a_tick_drop_refunds_nothing_when_the_live_task_is_gone(store):
+    ledger, runtime, agent = prepared_recovery(store)
+    rows = {"t1": dict(ledger.rows["t1"])}
+    lives = store.claims("sw", "t1")
+    ledger.task = lambda slug, task_id: None
+
+    tick_module._drop("sw", store, ledger, rows, agent, refund=True)
+
+    assert store.claims("sw", "t1") == lives
+
+
 def test_reap_reports_every_lost_engineer_in_the_pass(store):
     store.update("sw", max_eng=2)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), ResumingRuntime()
