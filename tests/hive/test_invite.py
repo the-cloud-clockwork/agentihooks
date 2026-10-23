@@ -99,6 +99,7 @@ def test_like_copies_the_addresses_and_ca_of_another_hive_and_mints_a_new_member
         "AGENTIHOOKS_HIVE_URL",
         "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL",
         "AGENTIHOOKS_HIVE_REDIS_URL",
+        "AGENTIHOOKS_SWARM_URL",
     ]
     assert env["AGENTIHOOKS_HIVE_ID"] == member
     assert env["AGENTIHOOKS_HIVE_URL"] == URL
@@ -184,6 +185,7 @@ def test_the_invite_parser_names_its_record_and_addresses():
         (["--url"], "url", "this hive's endpoint as the new hive reaches it, for hive refresh"),
         (["--redis-url"], "redis_url", "Redis URL the new hive connects to"),
         (["--swarm-url"], "swarm_url", "ledger address the new hive reaches"),
+        (["--bus-url"], "bus_url", "NATS address the new hive reaches; copied from --like when omitted"),
     ]
 
 
@@ -284,14 +286,34 @@ def test_the_cli_passes_its_flags_and_prints_the_outcome(monkeypatch, capsys):
     monkeypatch.setattr("scripts.swarm.store.redis_url", lambda environ: LOCAL if environ is os.environ else None)
     monkeypatch.setattr(invite, "invite", lambda *args: seen.append(args) or "invited")
 
-    assert cli.main(["invite", "lab", "--like", LIKE, "--url", URL, "--redis-url", PUBLIC, "--swarm-url", SWARM]) == 0
+    assert (
+        cli.main(
+            [
+                "invite",
+                "lab",
+                "--like",
+                LIKE,
+                "--url",
+                URL,
+                "--redis-url",
+                PUBLIC,
+                "--swarm-url",
+                SWARM,
+                "--bus-url",
+                "nats://bus.example.test:4222",
+            ]
+        )
+        == 0
+    )
     assert cli.main(["invite", "lab2", "--path", "k8s/elsewhere"]) == 0
 
     assert capsys.readouterr().out == "invited\ninvited\n"
     [(redis, bao, first, local), (_, _, second, _)] = seen
     assert (redis, local) == ("redis", LOCAL)
     assert (bao.url, bao.token) == (BAO_URL, BAO_TOKEN)
-    assert first == invite.Request("lab", "k8s/agentihooks-hive-lab", LIKE, URL, PUBLIC, SWARM, "served-ca")
+    assert first == invite.Request(
+        "lab", "k8s/agentihooks-hive-lab", LIKE, URL, PUBLIC, SWARM, "served-ca", bus_url="nats://bus.example.test:4222"
+    )
     assert second == invite.Request("lab2", "k8s/elsewhere", None, None, None, None, "served-ca")
 
 

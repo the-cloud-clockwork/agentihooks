@@ -83,3 +83,71 @@ def test_an_incomplete_invite_is_refused_before_contacting_the_hub(invitation, m
     monkeypatch.setattr(cli, "_post", lambda *args: pytest.fail("invalid invite reached hub"))
     assert cli.main(["join", str(invite)]) == 1
     assert not (home / auth.ENV_FILE).exists()
+
+
+def test_an_unreadable_invite_is_reported_without_joining(invitation, capsys):
+    invite, home = invitation
+    assert cli.main(["join", str(invite / "missing")]) == 1
+    assert "the invite file could not be read" in capsys.readouterr().err
+    assert not (home / auth.ENV_FILE).exists()
+
+
+def test_a_grant_for_another_member_does_not_replace_membership(invitation, monkeypatch, capsys):
+    invite, home = invitation
+    home.mkdir()
+    saved = home / auth.ENV_FILE
+    saved.write_text("previous membership\n")
+    monkeypatch.setattr(cli, "_post", lambda *args: {"id": "another-member"})
+    assert cli.main(["join", str(invite)]) == 1
+    assert "different invited member" in capsys.readouterr().err
+    assert saved.read_text() == "previous membership\n"
+
+
+def test_multiline_invite_settings_are_refused_before_refresh(invitation, monkeypatch, capsys):
+    invite, home = invitation
+    with invite.open("a") as stream:
+        stream.write('AGENTIHOOKS_BUS_URL="nats://bus.example.test\\nINJECTED=value"\n')
+    monkeypatch.setattr(cli, "_post", lambda *args: pytest.fail("invalid invite reached hub"))
+    assert cli.main(["join", str(invite)]) == 1
+    assert "one line" in capsys.readouterr().err
+    assert not (home / auth.ENV_FILE).exists()
+
+
+def test_an_invite_cannot_send_its_credential_over_remote_plain_http(invitation, capsys):
+    invite, home = invitation
+    invite.write_text(invite.read_text().replace("https://hub.example.test", "http://hub.example.test"))
+    assert cli.main(["join", str(invite)]) == 1
+    assert "must be https" in capsys.readouterr().err
+    assert not (home / auth.ENV_FILE).exists()
+
+
+def test_connection_settings_survive_a_later_refresh(invitation, monkeypatch):
+    invite, home = invitation
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_URL")
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", raising=False)
+    monkeypatch.setattr(
+        cli,
+        "_post",
+        lambda *args: {
+            "id": "fixture-member",
+            "redis_url": "redis://fresh.example.test/0",
+        },
+    )
+    assert cli.main(["join", str(invite)]) == 0
+    assert cli.main(["refresh"]) == 0
+    saved = dotenv_values(home / auth.ENV_FILE)
+    assert saved["AGENTIHOOKS_BUS"] == "nats"
+    assert saved["AGENTIHOOKS_BUS_URL"] == "nats://bus.example.test:4222"
+    assert saved["AGENTIHOOKS_SWARM_URL"] == "https://ledger.example.test"
+
+
+def test_an_older_invite_without_bus_settings_still_joins(invitation, monkeypatch):
+    invite, home = invitation
+    invite.write_text(
+        "\n".join(line for line in invite.read_text().splitlines() if line.startswith("AGENTIHOOKS_HIVE_"))
+    )
+    monkeypatch.setattr(
+        cli, "_post", lambda *args: {"id": "fixture-member", "redis_url": "redis://fresh.example.test/0"}
+    )
+    assert cli.main(["join", str(invite)]) == 0
+    assert "AGENTIHOOKS_BUS" not in dotenv_values(home / auth.ENV_FILE)
