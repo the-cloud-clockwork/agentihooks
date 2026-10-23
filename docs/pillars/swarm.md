@@ -733,7 +733,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> restore [--from FILE]` | After a reboot or a lost Redis: refuse while any agent of the swarm is live, write the newest snapshot back (manual, stop or automatic, by the time it was taken; `--from` names an older file) and leave the swarm paused. Each agent with a conversation id, its worktree still on disk (the master: the swarm repo) and its account not out of quota is relaunched through `init-agent --resume` into its own conversation, with the same pane name, seat, task and account (`--route`) on its lane's current model and effort, never the recorded one (a master on the frontier model at high effort); it counts as resumed only once herdr shows that conversation on the new pane, and its first message tells it to re-read its task folder and the ledger before acting. Every failed resume retains its seat and task as awaiting decision. The tick never starts a fresh replacement until the master or operator chooses Fresh on the page or runs `restore-decision`. Resume retries the old conversation; a failed retry keeps the decision open. Each agent's outcome, resumed or awaiting decision with the reason, shows as a `restored` line in `status`, under `restored` in `status --json` and in the Last restore list of the ledger page swarm panel. The ledger copy is written back only when the ledger file is gone. |
 | `agentihooks swarm <id> restore-decision AGENT resume\|fresh` | The master or operator chooses how an awaiting seat returns. Resume retries the saved conversation; fresh explicitly permits a new successor. The Last restore list offers the same two controls. For a Kubernetes worker attempt the controller applies the choice on its next recovery pass; see [Fenced restore decisions](../swarm-v2/checkpoint-restore.md). |
 | `agentihooks swarm <id> confirm-handoff TRANSFER --next TEXT` | A live successor confirms that it read the handoff and its first Next action. Continuity remains pending until that confirmation; binding independently records live seat occupancy. Both appear in Handoff outcomes on the page and in `status --json`. |
-| `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent with its [transport capabilities](#transport-capabilities), and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room unknown` with its reason when capacity is unavailable; see [Deployed host capacity](#deployed-host-capacity)) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling, and the tick's master seat too, after the quota seat check. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
+| `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent with its [transport capabilities](#transport-capabilities), and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room unknown` with its reason when capacity is unavailable; see [Local host room](#local-host-room) and [Deployed host capacity](#deployed-host-capacity)) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling, and the tick's master seat too, after the quota seat check. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
 | `agentihooks swarm <id> autoscale [--fixture <file>] [--json]` | Read only: the autoscale decision (lane ceilings, pending raise, host room and reason) for the live swarm, or for a fixture of accounts and host readings. It never refreshes quota or writes the stored decision; `applied` is false when the swarm runs manual scaling. `swarm create` stores `scaling=auto` and prints it, caps given at create included, so a new swarm's lane ceilings follow free quota seats, host room and ready work; a master keeps it on and reads this preview with `agentihooks balance` before stating capacity. In deployed mode it reads the Kubernetes worker namespace or reports why host room is off; see [Deployed host capacity](#deployed-host-capacity). |
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
 | `agentihooks swarm <id> ledger-ready` | Verify the caller's staged credential against the hosted metadata API and report readiness for every current worker and configured master seat. The active ledger address stays unchanged. |
@@ -741,6 +741,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set masters=N` | The master seat count: `master@<id>` is the lead and answers the operator, `master-2@<id>` and up each own phases assigned by code. The tick launches a master in every empty seat after the lead. |
 | `agentihooks swarm <id> set masters-step=N` | `swarm create` stores 12; a swarm created before the setting loads `0` until it is set. With no `master-per` rule the master count is one plus the unfinished engineer, CI and planner agents divided by N, masters not counted: 0 to 11 agents one master, 12 two, 24 three. The front door seat `master@<id>` never retires by scaling; backend seats are `master-2@<id>`, `master-3@<id>`, launched by the same seat launcher as the first master. A smaller count waits until it stayed lower for ten minutes, and that cool off restarts whenever the wanted count rises; a rise also withdraws the retire request of a seat wanted again. The highest backend seat retires first, as `master-per` describes below. `0` keeps the `masters=N` count, and `set masters=N` sets the step to `0` unless the same command sets it. The ledger page shows it beside the lane caps. |
 | `agentihooks swarm <id> set master-per=N\|hive\|off` | Overrides `masters-step`. The master count follows the swarm size: one seat per N working agents rounded up, or one per hive (agents with no hive count as the local hive), with a floor of one; `off` (default) hands sizing back to `masters-step`. A larger swarm raises the count at once. A swarm smaller for ten minutes asks each extra master to hand off, and the count falls only past seats whose master has left. When an asked seat empties, its handoff and its other open items go to the lead and its retire request is withdrawn; until the count falls past it, items for its phases reach the lead. Each change rebalances phase owners and posts them on the masters channel. |
+| `agentihooks swarm <id> set load-high=N load-low=N memory-per-agent=MB swap-full-share=N swap-floor=MB` | The local host budget behind host room; see [Local host room](#local-host-room). |
 | `agentihooks swarm <id> set compact-limit=N` | Launch this swarm's next agents with `AGENTIHOOKS_COMPACT_LIMIT=N` (thousands of tokens); 0 keeps the default. |
 | `agentihooks swarm <id> set autonomy=LEVEL` | Set how far agents go without the operator: `manual` engineers open a draft pull request and stop for the operator; `assist` engineers open a pull request and merge only after an operator approval line on the ledger; `delegate` (default) engineers queue on green checks with `agentihooks swarm <slug> merge queue <url>`; `full` is delegate, and the master also turns follow ups into tasks without asking. Agents spawned next get it in their prompt and as `AGENTIHOOKS_SWARM_AUTONOMY`; the ledger page swarm panel shows it. |
 | `agentihooks swarm <id> set master-agent=claude\|codex` | Master affinity, the master lane's `agent`. The ledger page's Capacity dropdown writes the same field through Apply. When the value differs from the live master's harness, one durable inbox order reaches the master seat: hand off with Handoff v2 and stop. The tick ends the old process before it starts the successor in the same seat on the chosen harness, with the original profile and the frontier model of that harness. An unchanged value orders nothing. A failed successor launch shows on `swarm status` and the page, keeps the handoff and the seat inbox, and retries each tick. Templates, snapshots and restore carry the value. |
@@ -2171,6 +2172,115 @@ plan refusals before its merge survive only in agent comments.
 | `trace-plan` printed a refusal and the gate log has no row | The mode is `skip`, or the refusal came before the plan was read. Check `gate_modes` in `swarm status --json`. |
 | Many identical refusal rows for one task | The agent reran `trace-plan` without changing `plan.md`. Rewrite the line the reason names. |
 | A refused plan never blocked the task | Refusals are not failed plans. Only a traced plan with a failed verdict counts toward the block. |
+
+## Local host room
+
+On a local host (`AGENTIHOOKS_DEPLOYMENT` unset or `local`) the tick reads
+`/proc` before each spawn pass and computes how many more agents fit. The room
+is the smaller of a load limit and a memory limit. It gates every spawn in
+manual and auto scaling; `swarm status` and `swarm autoscale` print it as
+`host room N: <reason>`.
+
+### Load limit
+
+The one minute load is divided by the CPU count:
+
+| Load per CPU | Room |
+|---|---|
+| Above `load-high` (default 1.5) | 0, reason `... is above the high watermark 1.50, no room`. |
+| From `load-low` (default 1.0) up to `load-high` | The previous room holds, unless the memory limit is lower; then the memory limit applies. |
+| Below `load-low` | The smaller of the memory limit and a load projection: the load per live agent, Claude and Codex, sets how many more agents bring the load to `load-high`. |
+
+### Memory limit
+
+The memory limit reads `MemAvailable`, `SwapTotal` and `SwapFree` from
+`/proc/meminfo`:
+
+- **Swap counts against available memory.** Swap in use (`SwapTotal - SwapFree`)
+  is subtracted from available memory before the division.
+- **Full swap is no room.** When swap in use is above `swap-full-share` of total
+  (default 0.9) and available memory is below `swap-floor` (default 4096 MB), the
+  memory limit is zero.
+- **Stale swap is ignored.** When swap in use is above the share but available
+  memory is at or above `swap-floor`, the pages sitting in swap are not being
+  used; the limit divides available memory alone and the reason says the swap
+  reads stale.
+- **The per agent figure is measured.** The divisor is the larger of the mean
+  resident memory of the live Claude agent process trees (each session process
+  plus every descendant, `VmRSS` summed) and the configured `memory-per-agent`
+  (default 700 MB). With no tree readable, the configured figure applies. Only
+  Claude session trees are measured; Codex agents count in the load projection
+  only. Processes outside a session tree, such as the Serena backends that run
+  under the router, are not counted, so the configured figure stays the floor.
+
+Room is `(available - swap in use) // per agent figure`, floored at zero.
+
+### Reading the host room line
+
+Each memory reason names swap in use against swap total and the per agent
+figure it used. With 9000 MB available, 1000 of 4096 MB swap in use and 18
+Claude trees averaging 820 MB:
+
+```text
+host room 9: one minute load 0.80 per CPU is below the low watermark; 9000 MB available memory less 1000 of 4096 MB swap in use fits 9 at 820 MB each, the larger of 820 MB measured over 18 Claude agent trees and the configured 700 MB
+```
+
+A full machine, 3997 of 4096 MB swap in use with 2794 MB available:
+
+```text
+host room 0: one minute load 0.80 per CPU is below the low watermark; swap 3997 of 4096 MB in use is above the 90% share and 2794 MB available memory is below the 4096 MB floor, no memory room
+```
+
+Swap above the share on a machine with free memory, no trees measured:
+
+```text
+host room 12: one minute load 0.80 per CPU is below the low watermark; swap 4000 of 4096 MB in use is above the 90% share but 9000 MB available memory is at or above the 4096 MB floor, so the swap reads stale; 9000 MB available memory fits 12 at 700 MB each, the configured figure
+```
+
+`host unknown: the process files cannot be read, so spawns pass` means `/proc`
+was unreadable; spawns pass and the last known room is kept.
+
+### Configure the host budget
+
+All five values are per swarm and take effect on the next tick:
+
+```bash
+agentihooks swarm example-swarm set load-high=1.5 load-low=1.0
+agentihooks swarm example-swarm set memory-per-agent=900
+agentihooks swarm example-swarm set swap-full-share=0.8 swap-floor=6144
+agentihooks swarm example-swarm status --json   # config shows load_high, load_low, memory_per_agent_mb, swap_full_share, swap_floor_mb
+```
+
+| Setting | Default | Accepted values |
+|---|---|---|
+| `load-high` | 1.5 | Load per CPU, at least `load-low` and at most 10. |
+| `load-low` | 1.0 | Load per CPU, above 0. |
+| `memory-per-agent` | 700 | Whole MB above 0; the floor under the measured figure. |
+| `swap-full-share` | 0.9 | Share of swap total in use, above 0 and at most 1. |
+| `swap-floor` | 4096 | Whole MB above 0; available memory under it makes full swap count. |
+
+Raise `memory-per-agent` when agents carry heavy helpers outside their own
+process tree. Lower `swap-floor` only on a host with little memory, where a
+4096 MB floor would hold every spawn once swap fills.
+
+### Host samples
+
+Each tick's metrics pass writes one `host_samples` row to the swarm metrics
+outbox (`~/.agentihooks/swarm/metrics-outbox.sqlite`, relayed to the ClickHouse
+`swarm` database): `available_mb`, `load_per_cpu`, `live_agents`,
+`swap_used_mb`, `swap_total_mb`, `agent_mb` (the measured mean, 0 when no tree
+was read), the held spawn count and its reason. Count minutes with swap above
+ninety percent while room was above zero from these rows and the host room
+lines in the swarm tick journal.
+
+### Troubleshooting
+
+| Symptom | Cause and action |
+|---|---|
+| Room 0 with `no memory room` while agents look idle | Swap is above the share and available memory is under `swap-floor`. Free memory or end idle agents; raise the floor only if the host never reaches it. |
+| Room fell after more agents started | The measured per agent figure rose above `memory-per-agent`; the line names the measured mean and tree count. |
+| Room reads high on a loaded machine | Codex agents and helpers outside session trees are not measured. Raise `memory-per-agent`. |
+| `swap reads stale` | Swap filled earlier and memory is free now; the swap is not subtracted. Expected. |
 
 ## Deployed host capacity
 
