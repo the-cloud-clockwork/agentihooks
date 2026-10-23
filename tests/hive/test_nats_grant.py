@@ -243,6 +243,32 @@ def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_dur
     assert f"permissions violation for publish to {durable}" in refused
 
 
+def test_hive_members_bind_hub_provisioned_account_slots_and_share_capacity(admin, signer):
+    from scripts.events import nats
+    from scripts.hive import account_slots, buckets
+
+    hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
+    members = [
+        nats.open_bus(
+            BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, name), provision=False)
+        )
+        for name in ("m1", "m2")
+    ]
+    try:
+        buckets.provision(hub)
+        report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+        first = account_slots.Slots(members[0], "m1", lambda: report, lambda: 1000)
+        second = account_slots.Slots(members[1], "m2", lambda: report, lambda: 1000)
+        assert first.take("one", "claude") == "a"
+        assert second.take("two", "claude") is None
+        first.release("one", "claude", "a")
+        assert second.take("two", "claude") == "a"
+    finally:
+        for member in members:
+            member.close()
+        hub.close()
+
+
 def test_a_hive_endpoint_without_a_signer_mints_no_bus_credential(admin):
     member = auth.mint(admin, "h1", PUBLIC)
     grant = _refresh(admin, None, member["ledger_credential"])
@@ -537,7 +563,15 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
     jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
     claims = _claims(jwt)
     assert (claims["iss"], claims["sub"], claims["name"]) == (signed.account.public, user.public, "hive-m1")
-    buckets = ("spoke-work", "spoke-pending", "hive-presence", "hive-executions", "execution-starts")
+    buckets = (
+        "spoke-work",
+        "spoke-pending",
+        "hive-presence",
+        "hive-executions",
+        "execution-starts",
+        "account-slots",
+        "hive-slot-accounts",
+    )
     publish = [
         "swarm.*.execution.>",
         "dead.*",
