@@ -219,6 +219,16 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
                 f"$JS.ACK.{stream}.>",
             )
         )
+    expected.update(
+        {
+            "$KV.account-slots.>",
+            "$KV.hive-slot-accounts.>",
+            "$JS.API.STREAM.INFO.KV_account-slots",
+            "$JS.API.STREAM.INFO.KV_hive-slot-accounts",
+            "$JS.API.STREAM.MSG.GET.KV_account-slots",
+            "$JS.API.STREAM.MSG.GET.KV_hive-slot-accounts",
+        }
+    )
     claims = nkey.claims(jwt)["nats"]
     assert set(claims) == {"type", "version", "pub", "sub", "subs", "data", "payload"}
     assert set(claims["pub"]) == {"allow"}

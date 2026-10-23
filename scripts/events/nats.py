@@ -13,7 +13,7 @@ from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError
 
 from . import nkey
 from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
-from .config import BusConfig, QueuePolicy
+from .config import SHARED_SLOT_BUCKETS, BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
 from .nats_legacy import legacy_filters, legacy_target, provision_events
@@ -408,7 +408,7 @@ class NatsBus:
             return queue
 
     def state(self, bucket: str) -> NatsStateStore:
-        if self._config.scoped and not self._config.provision:
+        if self._config.scoped and not self._config.provision and bucket not in SHARED_SLOT_BUCKETS:
             raise PermissionError("select a swarm before opening scoped state")
         with self._lock:
             store = self._buckets.get(bucket)

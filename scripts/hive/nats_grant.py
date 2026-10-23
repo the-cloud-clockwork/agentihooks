@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
 from scripts.events import nkey, subjects
+from scripts.events.config import SHARED_SLOT_BUCKETS
 from scripts.events.dead import DEAD_STREAM
 from scripts.hive import auth, buckets
 
@@ -141,7 +142,16 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None) -> dict:
             "pub": {"allow": list(MEMBER_PUBLISH)},
             "sub": {"allow": [f"{subjects.inbox(user)}.>"]},
         }
-    publish = [subject for swarm in swarms for subject in swarm_publish(swarm)]
+    shared = [
+        permission
+        for bucket in SHARED_SLOT_BUCKETS
+        for permission in (
+            f"$KV.{bucket}.>",
+            f"$JS.API.STREAM.INFO.KV_{bucket}",
+            f"$JS.API.STREAM.MSG.GET.KV_{bucket}",
+        )
+    ]
+    publish = [*shared, *(subject for swarm in swarms for subject in swarm_publish(swarm))] if swarms else []
     return {
         **user_claims(),
         "pub": {"allow": publish} if publish else {"deny": [">"]},

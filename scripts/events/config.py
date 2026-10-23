@@ -13,6 +13,7 @@ SCOPED_ENV = "AGENTIHOOKS_BUS_SCOPED"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
 DEFAULT_BACKEND = "memory"
+SHARED_SLOT_BUCKETS = ("account-slots", "hive-slot-accounts")
 SCOPED_STATE_BUCKETS = (
     "spoke-work",
     "spoke-pending",
