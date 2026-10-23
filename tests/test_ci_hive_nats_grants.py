@@ -115,7 +115,7 @@ def test_a_member_source_without_member_grants_is_red(tmp_path, capsys):
     _, antoncore = _matching(tmp_path)
     source = tmp_path / "bare" / grants.MEMBER_SOURCE
     source.parent.mkdir(parents=True)
-    source.write_text("OTHER = {}\n")
+    source.write_text("OTHER = {}\nOTHER.MEMBER = {}\n")
     status, lines = _run(capsys, tmp_path / "bare", antoncore)
     assert status == 1
     assert lines == ["::error::The hive member NATS grants cannot be read (StopIteration: )."]
@@ -126,6 +126,32 @@ def test_a_missing_antoncore_checkout_is_red(tmp_path, capsys):
     status, lines = _run(capsys, agentihooks, tmp_path / "absent")
     assert status == 1
     assert lines[0].startswith("::error::The hive member NATS grants cannot be read (FileNotFoundError: ")
+
+
+def test_the_member_checkout_defaults_to_the_working_directory(tmp_path, capsys, monkeypatch):
+    agentihooks, antoncore = _matching(tmp_path)
+    monkeypatch.chdir(agentihooks)
+    assert grants.main(["--antoncore", str(antoncore)]) == 0
+
+
+def test_the_antoncore_checkout_is_required(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        grants.main([])
+    assert exit_info.value.code == 2
+    assert "the following arguments are required: --antoncore" in capsys.readouterr().err
+
+
+def test_the_help_states_what_the_check_fails_on(capsys):
+    with pytest.raises(SystemExit):
+        grants.main(["--help"])
+    lines = capsys.readouterr().out.splitlines()
+    assert "Fail when hive member NATS grants differ from the antoncore hive user." in lines
+
+
+def test_minted_claims_never_share_the_member_grants():
+    claims = nats_grant.user_claims()
+    claims["pub"]["planted"] = True
+    assert "planted" not in nats_permissions.MEMBER["pub"]
 
 
 def test_the_member_grants_render_the_minted_user_claims():

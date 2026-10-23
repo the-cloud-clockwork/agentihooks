@@ -32,7 +32,8 @@ def member_grants(agentihooks: Path) -> dict[str, dict[str, frozenset[str]]]:
     member = next(
         node.value
         for node in tree.body
-        if isinstance(node, ast.Assign) and any(getattr(target, "id", None) == "MEMBER" for target in node.targets)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "MEMBER" for target in node.targets)
     )
     claims = ast.literal_eval(member)
     return {"publish": _direction(claims.get("pub")), "subscribe": _direction(claims.get("sub"))}
@@ -69,7 +70,7 @@ def differences(member: dict, hive: dict) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Fail when the hive member NATS grants differ between agentihooks and antoncore."
+        description="Fail when hive member NATS grants differ from the antoncore hive user."
     )
     parser.add_argument("--agentihooks", type=Path, default=Path.cwd())
     parser.add_argument("--antoncore", type=Path, required=True)
