@@ -366,3 +366,34 @@ def test_a_lost_offer_record_write_is_reported(rig, capsys):
     rig.hub._offers = Conflicting(rig.hub._offers)
     rig.hub.offer(snapshot(doc([task("a")])), NOW)
     assert capsys.readouterr().err == "hub: readiness offers for swarm sw changed under the pass\n"
+
+
+def test_a_ready_claim_record_is_withdrawn_in_place(rig):
+    rig.views[SLUG] = live = snapshot(doc([task("a")]))
+    rig.hub.poll()
+    claims = rig.bus.state(offers.CLAIMS)
+    claims.create(claim_key(offered(live, "a")), json.dumps(offers.READY).encode())
+    rig.views[SLUG] = snapshot(doc([task("a")], freezes=[{"verb": "freeze", "target": "tasks/a"}]))
+    rig.later()
+    rig.hub.poll()
+    entry = claims.get(claim_key(offered(live, "a")))
+    assert (json.loads(entry.value), entry.revision) == (offers.WITHDRAWN, 2)
+    assert rig.hub.outstanding(SLUG) == []
+
+
+def test_outstanding_offers_live_in_the_hub_readiness_bucket(rig):
+    rig.views[SLUG] = snapshot(doc([task("a")]))
+    rig.hub.poll()
+    raw = json.loads(rig.bus.state("hub-readiness").get(offers.offers_key(SLUG)).value)
+    assert [event["id"] for event in raw] == ["ready:sw:a:0"]
+
+
+def test_a_skipped_offer_does_not_stop_the_offers_after_it(rig):
+    rig.hub.offer(snapshot(doc([task("a")])), NOW)
+    assert rig.hub.offer(snapshot(doc([task("a"), task("b")])), NOW) == ["ready:sw:b:0"]
+
+
+def test_the_hub_gives_the_readiness_reactor_its_clock():
+    clock = Clock()
+    reactors = {reactor.name: reactor for reactor in registry.configured(memory.open_bus(BusConfig()), clock)}
+    assert reactors["readiness"].poll.__self__._clock is clock
