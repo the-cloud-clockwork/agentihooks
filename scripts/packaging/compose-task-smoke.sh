@@ -147,6 +147,7 @@ print(json.dumps({
     "task": row["state"],
     "claim": store.claimant(slug, "t1"),
     "execution": store.execution(slug, started["execution"]).state,
+    "agent": any(agent.name == started["name"] for agent in store.agents(slug)),
     "spoke": json.loads(claim.value)["state"] if claim else None,
 }))
 PY
@@ -155,7 +156,7 @@ PY
   sleep 1
 done
 printf 'after the hub lifecycle pass: %s\n' "$settled"
-if [[ $settled != '{"task": "done", "claim": null, "execution": "ended", "spoke": "exited"}' ]]; then
+if [[ $settled != '{"task": "done", "claim": null, "execution": "finished", "agent": false, "spoke": "exited"}' ]]; then
   docker compose logs swarm >&2
   printf 'the task did not settle to done through the hub\n' >&2
   exit 1
