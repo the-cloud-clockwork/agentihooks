@@ -148,6 +148,27 @@ def test_a_member_credential_cannot_subscribe_outside_the_swarm_prefix(signer):
     ]
 
 
+def test_a_member_credential_cannot_read_the_replies_of_other_members(signer):
+    async def act(nc):
+        await nc.subscribe("_INBOX.>")
+
+    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
+        'nats: permissions violation for subscription to "_INBOX.>"'
+    ]
+
+
+@pytest.mark.parametrize("verb", ["DELETE", "PURGE", "UPDATE"])
+def test_a_member_credential_cannot_change_a_stream(signer, verb):
+    subject = f"$JS.API.STREAM.{verb}.AGENTIHOOKS_EVENTS"
+
+    async def act(nc):
+        await nc.publish(subject, b"{}")
+
+    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
+        f'nats: permissions violation for publish to "{subject}"'
+    ]
+
+
 def test_a_member_credential_publishes_and_subscribes_under_the_swarm_prefix(signer):
     received = []
 
@@ -348,8 +369,21 @@ def test_a_member_credential_carries_exactly_the_user_claims():
     assert claims["nats"] == {
         "type": "user",
         "version": 2,
-        "pub": {"allow": ["swarm.>", "dead.>", "agentihooks.queue.>", "$KV.>", "$JS.API.>", "$JS.ACK.>"]},
-        "sub": {"allow": ["swarm.>", "_INBOX.>"]},
+        "pub": {
+            "allow": [
+                "swarm.>",
+                "dead.>",
+                "agentihooks.queue.>",
+                "$KV.>",
+                "$JS.ACK.>",
+                "$JS.API.STREAM.CREATE.*",
+                "$JS.API.STREAM.MSG.GET.*",
+                "$JS.API.CONSUMER.INFO.*.*",
+                "$JS.API.CONSUMER.DURABLE.CREATE.*.*",
+                "$JS.API.CONSUMER.MSG.NEXT.*.*",
+            ]
+        },
+        "sub": {"allow": ["swarm.>", f"_INBOX.{user.public}.>"]},
         "subs": -1,
         "data": -1,
         "payload": -1,
@@ -388,16 +422,18 @@ def test_a_push_connects_once_without_reconnecting_and_bounds_both_waits(monkeyp
             seen["closed"] = True
 
     async def connect(url, **kwargs):
-        seen["connect"] = (url, {key: kwargs[key] for key in ("allow_reconnect", "connect_timeout")}, sorted(kwargs))
+        named = ("allow_reconnect", "connect_timeout", "inbox_prefix")
+        seen["connect"] = (url, {key: kwargs[key] for key in named}, sorted(kwargs))
         return Client()
 
     monkeypatch.setattr(nats_client, "connect", connect)
     nats_grant.push(signed, "a.b.c")
+    system = nkey.parse_creds(signed.system_credentials)[1]
     assert seen == {
         "connect": (
             "nats://x",
-            {"allow_reconnect": False, "connect_timeout": 10},
-            ["allow_reconnect", "connect_timeout", "signature_cb", "user_jwt_cb"],
+            {"allow_reconnect": False, "connect_timeout": 10, "inbox_prefix": f"_INBOX.{system.public}"},
+            ["allow_reconnect", "connect_timeout", "inbox_prefix", "signature_cb", "user_jwt_cb"],
         ),
         "request": ("$SYS.REQ.CLAIMS.UPDATE", b"a.b.c", {"timeout": 10}),
         "closed": True,
