@@ -76,7 +76,7 @@ def container_problems(container: dict, values: dict, fullname: str) -> list[str
             {"name": "LEDGER_CA_PEM", "valueFrom": {"secretKeyRef": {"name": ledger_tls, "key": "ca.crt"}}}
         )
     mounts = [{"name": "tls", "mountPath": "/tls", "readOnly": True}]
-    if signer := join["natsSigner"]["secretName"]:
+    if join["natsSigner"]["secretName"]:
         expected_env += [
             {"name": "AGENTIHOOKS_NATS_SIGNER", "value": f"file:{SIGNER_MOUNT}"},
             {"name": "AGENTIHOOKS_NATS_TRUSTED_OPERATOR", "value": join["natsSigner"]["trustedOperator"]},
@@ -85,10 +85,7 @@ def container_problems(container: dict, values: dict, fullname: str) -> list[str
     if container.get("env") != expected_env:
         problems.append(f"the hive join env is {json.dumps(container.get('env'), sort_keys=True)}")
     if container.get("volumeMounts") != mounts:
-        problems.append(
-            "the hive join container does not mount only the TLS secret"
-            f"{' and the NATS signer ' + signer if signer else ''} read only"
-        )
+        problems.append(f"the hive join container mounts are not {json.dumps(mounts)}")
     if container.get("securityContext") != CONTAINER_SECURITY:
         problems.append(f"the hive join container security is {json.dumps(container.get('securityContext'))}")
     if container.get("readinessProbe", {}).get("tcpSocket") != PROBE["tcpSocket"]:
@@ -214,7 +211,11 @@ def _container(docs: dict) -> dict:
 
 PLANTS = (
     ("image", lambda d: _container(d).update(image="other/image:dev"), "not the chart image"),
-    ("mount", lambda d: _container(d)["volumeMounts"][0].update(readOnly=False), "does not mount only"),
+    (
+        "mount",
+        lambda d: _container(d)["volumeMounts"][0].update(readOnly=False),
+        "the hive join container mounts are not",
+    ),
     ("token", lambda d: _pod(d).update(automountServiceAccountToken=True), "service account token"),
     ("seccomp", lambda d: _pod(d)["securityContext"].pop("seccompProfile"), "the hive join pod security is"),
     ("host", lambda d: _pod(d).update(hostNetwork=True), "shares host namespace"),

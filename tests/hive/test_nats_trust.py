@@ -40,8 +40,15 @@ def bao(monkeypatch):
         records[path] = {**records.get(path, {}), **entries}
         return len(records[path])
 
+    def create(found, path, entries):
+        if path in records:
+            return False
+        records[path] = dict(entries)
+        return True
+
     monkeypatch.setattr(openbao_kv, "read", read)
     monkeypatch.setattr(openbao_kv, "merge", merge)
+    monkeypatch.setattr(openbao_kv, "create", create)
     return openbao_kv.OpenBao("https://bao.example", "t"), records
 
 
@@ -159,6 +166,38 @@ def test_the_trust_values_preload_the_system_and_swarm_accounts(bao):
         "SWARM",
     )
     assert "revocations" not in account_claims["nats"]
+
+
+def test_keys_another_run_created_first_are_used_instead_of_new_ones(bao, monkeypatch):
+    client, records = bao
+    winner = {
+        "operator": nkey.create(nkey.OPERATOR),
+        "system": nkey.create(nkey.ACCOUNT),
+        "account": nkey.create(nkey.ACCOUNT),
+    }
+    reads = iter([({}, 0)])
+
+    def read(found, path):
+        return next(reads, (dict(records.get(path, {})), 1))
+
+    def create(found, path, entries):
+        records[path] = {f"{name}_seed": pair.seed for name, pair in winner.items()}
+        return False
+
+    monkeypatch.setattr(openbao_kv, "read", read)
+    monkeypatch.setattr(openbao_kv, "create", create)
+    values, lines = nats_trust.bootstrap(client, USERS[:1], URL)
+
+    assert lines[0] == f"operator {winner['operator'].public}, swarm account {winner['account'].public}"
+    assert values["config"]["merge"]["system_account"] == winner["system"].public
+
+
+def test_a_signer_record_that_vanishes_after_a_lost_create_is_refused(bao, monkeypatch):
+    client, _ = bao
+    monkeypatch.setattr(openbao_kv, "read", lambda found, path: ({}, 0))
+    monkeypatch.setattr(openbao_kv, "create", lambda found, path, entries: False)
+    with pytest.raises(auth.HiveError, match="^the NATS signer record agentihooks/hub/nats-signer cannot be used \\("):
+        nats_trust.bootstrap(client, USERS, URL)
 
 
 def test_a_broken_signer_record_is_refused(bao):

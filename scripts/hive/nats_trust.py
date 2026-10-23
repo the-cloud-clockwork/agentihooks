@@ -52,28 +52,26 @@ def service_creds(account: nkey.KeyPair, entry: Mapping) -> str:
 
 def _keys(bao: openbao_kv.OpenBao, url: str) -> dict[str, nkey.KeyPair]:
     record, _ = openbao_kv.read(bao, SIGNER_PATH)
-    if record:
-        try:
-            return {name: nkey.from_seed(record[f"{name}_seed"]) for name in ("operator", "system", "account")}
-        except (KeyError, nkey.NkeyError) as exc:
-            raise auth.HiveError(f"the NATS signer record {SIGNER_PATH} cannot be used ({exc})") from None
-    keys = {
-        "operator": nkey.create(nkey.OPERATOR),
-        "system": nkey.create(nkey.ACCOUNT),
-        "account": nkey.create(nkey.ACCOUNT),
-    }
-    system_user = nkey.derive(keys["system"], nkey.USER, SYSTEM_USER)
-    system_jwt = nkey.encode_jwt(keys["system"], system_user.public, SYSTEM_USER, nats_grant.user_claims())
-    openbao_kv.merge(
-        bao,
-        SIGNER_PATH,
-        {
+    if not record:
+        keys = {
+            "operator": nkey.create(nkey.OPERATOR),
+            "system": nkey.create(nkey.ACCOUNT),
+            "account": nkey.create(nkey.ACCOUNT),
+        }
+        system_user = nkey.derive(keys["system"], nkey.USER, SYSTEM_USER)
+        system_jwt = nkey.encode_jwt(keys["system"], system_user.public, SYSTEM_USER, nats_grant.user_claims())
+        created = {
             **{f"{name}_seed": pair.seed for name, pair in keys.items()},
             "system_credentials": nkey.creds(system_jwt, system_user.seed),
             "url": url,
-        },
-    )
-    return keys
+        }
+        if openbao_kv.create(bao, SIGNER_PATH, created):
+            return keys
+        record, _ = openbao_kv.read(bao, SIGNER_PATH)
+    try:
+        return {name: nkey.from_seed(record[f"{name}_seed"]) for name in ("operator", "system", "account")}
+    except (KeyError, nkey.NkeyError) as exc:
+        raise auth.HiveError(f"the NATS signer record {SIGNER_PATH} cannot be used ({exc})") from None
 
 
 def trust_values(keys: Mapping[str, nkey.KeyPair]) -> dict:

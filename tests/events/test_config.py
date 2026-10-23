@@ -108,8 +108,7 @@ def test_bus_credentials_are_read_from_the_file_the_setting_names(tmp_path):
     assert "creds text" not in repr(bus)
 
 
-def test_bus_credentials_given_as_text_are_used_as_they_are(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_bus_credentials_given_as_text_are_used_as_they_are():
     text = "-----BEGIN NATS USER JWT-----\neyJ\n------END NATS USER JWT------\n"
     assert config.INLINE_CREDENTIALS == "-----BEGIN NATS USER JWT-----"
     assert BusConfig.from_environ({"AGENTIHOOKS_BUS_CREDENTIALS": text}).credentials == text
