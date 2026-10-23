@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from scripts import ci_hive_nats_grants as grants
-from scripts.hive import nats_grant, nats_permissions
+from scripts.hive import nats_grant
 
 pytestmark = pytest.mark.unit
 
@@ -13,11 +13,13 @@ PUBLISH = ["swarm.*.execution.>", "$JS.ACK.>"]
 SUBSCRIBE = ["_INBOX.>"]
 
 
-def _agentihooks(tmp_path: Path, pub: dict, sub: dict) -> Path:
+def _agentihooks(tmp_path: Path, pub: dict, sub: dict, body: str | None = None) -> Path:
     root = tmp_path / "agentihooks"
     source = root / grants.MEMBER_SOURCE
     source.parent.mkdir(parents=True)
-    source.write_text(f"MEMBER = {{'pub': {pub!r}, 'sub': {sub!r}}}\n")
+    for package in (root / "scripts", source.parent):
+        (package / "__init__.py").write_text("")
+    source.write_text(body or f"def member_claims():\n    return {{'pub': {pub!r}, 'sub': {sub!r}}}\n")
     return root
 
 
@@ -58,7 +60,7 @@ def test_a_planted_extra_subject_in_the_member_credential_fails(tmp_path, capsys
     assert status == 1
     assert lines == [
         "::error::publish allow planted.> is granted only by the agentihooks member credential"
-        " (scripts/hive/nats_permissions.py)."
+        " (scripts/hive/nats_grant.py)."
     ]
 
 
@@ -92,7 +94,7 @@ def test_an_unrestricted_member_credential_differs_from_a_restricted_hive_user(t
     _, antoncore = _matching(tmp_path)
     status, lines = _run(capsys, _agentihooks(tmp_path / "open", {}, {}), antoncore)
     assert status == 1
-    ours = "is granted only by the agentihooks member credential (scripts/hive/nats_permissions.py)."
+    ours = "is granted only by the agentihooks member credential (scripts/hive/nats_grant.py)."
     theirs = (
         "is granted only by the antoncore swarm-hive user (k8s/values-overlays/agentihooks-swarm-nats/values.yaml)."
     )
@@ -120,17 +122,16 @@ def test_a_missing_hive_user_is_red(tmp_path, capsys):
     ]
 
 
-def test_a_member_source_without_member_grants_is_red(tmp_path, capsys):
+def test_a_member_source_that_cannot_render_its_claims_is_red(tmp_path, capsys):
     _, antoncore = _matching(tmp_path)
-    source = tmp_path / "bare" / grants.MEMBER_SOURCE
-    source.parent.mkdir(parents=True)
-    source.write_text("OTHER = {}\nOTHER.MEMBER = {}\n")
-    status, lines = _run(capsys, tmp_path / "bare", antoncore)
+    agentihooks = _agentihooks(tmp_path / "bare", {}, {}, body="def user_claims():\n    return {}\n")
+    status, lines = _run(capsys, agentihooks, antoncore)
     assert status == 1
-    assert lines == [
+    assert lines[0].startswith(
         "::error::The hive member NATS grants cannot be read"
-        " (ValueError: scripts/hive/nats_permissions.py assigns no MEMBER grants)."
-    ]
+        " (ValueError: scripts/hive/nats_grant.py did not render member_claims: Traceback"
+    )
+    assert lines[-1].endswith("AttributeError: module 'scripts.hive.nats_grant' has no attribute 'member_claims').")
 
 
 def test_a_missing_antoncore_checkout_is_red(tmp_path, capsys):
@@ -160,19 +161,11 @@ def test_the_help_states_what_the_check_fails_on(capsys):
     assert "Fail when hive member NATS grants differ from the antoncore hive user." in lines
 
 
-def test_minted_claims_never_share_the_member_grants():
-    claims = nats_grant.user_claims()
-    claims["pub"]["planted"] = True
-    assert "planted" not in nats_permissions.MEMBER["pub"]
-
-
-def test_the_member_grants_render_the_minted_user_claims():
-    claims = nats_grant.user_claims()
+def test_the_member_grants_render_the_minted_member_claims():
+    claims = nats_grant.member_claims()
     rendered = grants.member_grants(ROOT)
-    assert {key: claims[key] for key in ("pub", "sub")} == nats_permissions.MEMBER
-    for direction, key in (("publish", "pub"), ("subscribe", "sub")):
-        assert rendered[direction]["allow"] == frozenset(claims[key].get("allow") or [">"])
-        assert rendered[direction]["deny"] == frozenset(claims[key].get("deny") or [])
+    assert rendered["publish"] == {"allow": frozenset(nats_grant.MEMBER_PUBLISH), "deny": frozenset()}
+    assert rendered["subscribe"] == {"allow": frozenset(claims["sub"]["allow"]), "deny": frozenset()}
 
 
 def test_lint_grades_the_member_grants_against_the_antoncore_dev_hive_user():

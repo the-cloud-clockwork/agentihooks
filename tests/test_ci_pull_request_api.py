@@ -174,7 +174,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_semgrep.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
-        "scripts/hive/nats_permissions.py",
+        "scripts/hive/nats_grant.py",
         "scripts/packaging/compose-hive-smoke.sh",
         "scripts/packaging/compose-task-smoke.sh",
         "scripts/packaging/hive-join-smoke.sh",

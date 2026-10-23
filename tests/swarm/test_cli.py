@@ -935,10 +935,10 @@ def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(env, mon
     calls = []
     monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
     monkeypatch.setenv(cli.wake.WINDOW_ENV, "60")
-    monkeypatch.setenv(cli.wake.QUIET_ENV, "7")
-    monkeypatch.setattr(cli.wake, "wake_pass", lambda *args: calls.append(args[-3:]) or [])
+    monkeypatch.setattr(cli.wake, "maintenance", lambda *args: calls.append(args[-2:]) or [])
+    monkeypatch.setattr(cli.wake, "wake_pass", lambda *args: pytest.fail("tick swept the wake ladder"))
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert calls == [(9_000_000, 60_000, 7_000)]
+    assert calls == [(9_000_000, 60_000)]
 
 
 def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
@@ -1582,12 +1582,12 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
 
     ledger.relay = refuse
     ran = []
-    for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (cli.wake, "wake_pass")):
+    for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (cli.wake, "maintenance")):
         real = getattr(module, name)
         monkeypatch.setattr(module, name, lambda *a, _n=name, _r=real: ran.append(_n) or _r(*a))
     item = InboxStore(store.redis).send("engineer@a1b2c3-0001", "operator", "the job finished at 18:45")
     cli.run_tick(store, "sw")
-    assert ran == ["phase_pass", "event_pass", "wake_pass"]
+    assert ran == ["phase_pass", "event_pass", "maintenance"]
     assert InboxStore(store.redis).get(item.id).state == "cancelled"
 
 
@@ -2136,7 +2136,6 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
 
 def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):
     from scripts.inbox.store import InboxStore
-    from scripts.inbox.wake import WAKE_TEXT
 
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
@@ -2145,8 +2144,8 @@ def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):
     item = InboxStore(store.redis).send("operator", "engineer@a1b2c3-0001", "look at the failing check")
     herdr = FakeHerdr({"p1": "idle"})
     actions = cli.run_tick(store, "sw", ledger, rt, herdr)
-    assert herdr.prompts == [("p1", WAKE_TEXT)]
-    assert f"woke engineer@a1b2c3-0001 for message {item.id}" in actions
+    assert herdr.prompts == []
+    assert f"woke engineer@a1b2c3-0001 for message {item.id}" not in actions
 
 
 def test_the_tick_turns_an_engineer_follow_up_into_a_master_inbox_item(env):

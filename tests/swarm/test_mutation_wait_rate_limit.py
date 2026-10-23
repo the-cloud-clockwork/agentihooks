@@ -81,7 +81,8 @@ def test_a_rate_limited_run_read_admits_the_mutation_wait_pending(env, github): 
     ledger.tasks = lambda slug: list(ledger.rows.values())
     assert cli.main(["sw", "--as", ME, "wait", "--on", "mutation", URL]) == 0
     held = idle.wait(store.redis, "sw", ME)["on"]
-    assert held == {"kind": "mutation", "target": URL, "head": None}
+    task = next(agent.task for agent in store.agents("sw") if agent.name == ME)
+    assert held == {"kind": "mutation", "target": URL, "task": task, "head": None}
     assert github.asked == [RUN, "rate_limit"]
     lines = (github.home / "github-backoff.jsonl").read_text().splitlines()
     assert [json.loads(line) for line in lines] == [

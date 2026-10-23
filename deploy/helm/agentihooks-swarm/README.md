@@ -8,6 +8,29 @@
 | `hive-only.yaml` | one worker hive that joins a swarm installed elsewhere, without NATS |
 | `external-nats.yaml` | the hub on a NATS outside the release |
 
+# Join a hive with one invite
+
+`agentihooks hive join /path/to/invite` enrolls a machine with the private member
+invite file issued by `agentihooks hive invite`. The hub operator supplies
+`--bus-url` with the NATS address the member reaches. The invite contains the hive
+endpoint, member identity, ledger credential and connection addresses. Join
+refreshes the member through HTTPS and saves its Redis and NATS credentials in
+private files under the agentihooks home. Keep the invite private; do not source it.
+
+Kubernetes uses the same file through an existing Secret:
+
+```bash
+kubectl create secret generic hive-invite --from-file=invite=/path/to/invite
+helm upgrade --install hive oci://ghcr.io/the-cloud-clockwork/charts/agentihooks-swarm \
+  -f examples/hive-only.yaml
+```
+
+The example deploys one worker hive and no hub or NATS server. Worker startup runs
+the same join command before accepting work; failed enrollment stops startup.
+Use a separate invite and release for every hive. Provider and GitHub credentials
+remain separate Secret references. For a private hub CA, set `workers.caSecret`;
+on a machine, set `SSL_CERT_FILE` to a trusted CA bundle before joining.
+
 # Bundled NATS chart
 
 The pinned NATS chart archive is committed under `charts/` and checked against `deploy/helm/agentihooks-swarm-deps.sha256`, so releases and proofs never fetch the upstream chart index. To move the pin, update the version in `Chart.yaml`, then from the repository root:

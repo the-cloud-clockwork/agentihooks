@@ -10,6 +10,7 @@ from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
+from scripts.hive import buckets
 from scripts.hub import lease, registry
 from scripts.hub.registry import Reactor, Registry
 from scripts.scheduler.process_timer import wait as scheduled_wait
@@ -129,6 +130,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     bus = open_bus(BusConfig.from_environ(os.environ))
+    buckets.provision(bus)
     hub = HubRunner(bus, registry.configured(bus), os.environ.get("HOSTNAME") or socket.gethostname())
     previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:

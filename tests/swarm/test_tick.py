@@ -106,6 +106,9 @@ class FakeLedger:
     def comment(self, slug, task_id, text, by):
         self.comments.append((task_id, text, by))
 
+    def notice(self, slug, task_id, text):
+        self.comments.append((task_id, text, "swarm"))
+
 
 class FakeRuntime:
     def __init__(self, fail=False, full=False, crash=None):

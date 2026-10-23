@@ -8,6 +8,7 @@ from .envelope import _count
 BACKEND_ENV = "AGENTIHOOKS_BUS"
 URL_ENV = "AGENTIHOOKS_BUS_URL"
 CREDENTIALS_ENV = "AGENTIHOOKS_BUS_CREDENTIALS"
+BIND_ENV = "AGENTIHOOKS_BUS_BIND"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
 DEFAULT_BACKEND = "memory"
@@ -41,6 +42,7 @@ class BusConfig:
     dedupe_window_ms: int = 120_000
     queue: QueuePolicy = field(default_factory=QueuePolicy)
     credentials: str | None = field(default=None, repr=False)
+    provision: bool = True
 
     def __post_init__(self):
         if not isinstance(self.backend, str) or not self.backend:
@@ -58,6 +60,7 @@ class BusConfig:
             backend=environ.get(BACKEND_ENV) or DEFAULT_BACKEND,
             url=environ.get(URL_ENV) or None,
             credentials=credentials_from(environ),
+            provision=environ.get(BIND_ENV) != "1",
         )
 
 

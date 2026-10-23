@@ -520,6 +520,10 @@ class Ledger:
         assert slug == "sw"
         self.comments.append((task_id, text, by))
 
+    def notice(self, slug, task_id, text):
+        assert slug == "sw"
+        self.comments.append((task_id, text, "notice"))
+
 
 @pytest.fixture
 def merging(monkeypatch):
@@ -1430,7 +1434,7 @@ def test_a_watcher_dequeue_writes_its_identity_into_the_queue_journal(env, monke
 
 def test_a_transient_unmergeable_head_is_requeued_unchanged_after_a_timer_restart(merging):
     assert dequeued_transient(merging) == [f"dequeued {URL} for task t1: {ready.TRANSIENT}"]
-    assert merging.ledger.comments == [("t1", ready.DEQUEUED.format(url=URL), "swarm")]
+    assert merging.ledger.comments == [("t1", ready.DEQUEUED.format(url=URL), "notice")]
     assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": ready.RECOVER, "head": HEAD}
     assert merging.rows["t1"]["state"] == "pr" and merging.rows["t1"]["claimed_by"] == AGENT
     assert merging.store.claimant("sw", "t1") == AGENT
@@ -1445,7 +1449,7 @@ def test_a_transient_unmergeable_head_is_requeued_unchanged_after_a_timer_restar
     assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "merge", "target": URL}
     assert merging.rows["t1"]["state"] == "pr" and merging.rows["t1"]["claimed_by"] == AGENT
     assert ready.record(merging.store, "sw", "t1")["queued_at"] == NOW + 60_000 + ready.BACKOFF_MS
-    assert merging.ledger.comments[-1] == ("t1", ready.RECOVERED.format(url=URL), "swarm")
+    assert merging.ledger.comments[-1] == ("t1", ready.RECOVERED.format(url=URL), "notice")
     assert merging.ledger.alerts == []
 
 
@@ -1518,7 +1522,7 @@ def test_an_empty_head_read_at_the_retry_requeues_the_saved_green_head(merging):
     assert merging.run(ready.record(merging.store, "sw", "t1")["retry_at"]) == [f"queued {URL} for task t1"]
     assert merging.queued == [("queue", URL), ("dequeue", URL), ("queue", URL)]
     assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "merge", "target": URL}
-    assert merging.ledger.comments[-1] == ("t1", ready.RECOVERED.format(url=URL), "swarm")
+    assert merging.ledger.comments[-1] == ("t1", ready.RECOVERED.format(url=URL), "notice")
 
 
 def test_an_empty_head_read_with_no_saved_head_reopens_for_repair(merging):

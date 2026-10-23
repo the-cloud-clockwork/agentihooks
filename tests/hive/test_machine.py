@@ -258,9 +258,9 @@ def test_cli_add_help_names_every_option(monkeypatch, capsys):
         assert f" {text}\n" in out
 
 
-def test_join_is_gone(capsys):
+def test_join_refuses_the_removed_url_and_code_arguments(capsys):
     with pytest.raises(SystemExit) as refused:
         cli.main(["join", URL, "code"])
 
     assert refused.value.code == 2
-    assert "invalid choice" in capsys.readouterr().err
+    assert "unrecognized arguments: code" in capsys.readouterr().err

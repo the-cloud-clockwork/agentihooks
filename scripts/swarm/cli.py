@@ -368,7 +368,6 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
 
                 with lease.kept(store, slug, held):
                     actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
-            herdr = messenger or delivery.HerdrMessenger()
             timing.call(delivery.migrate_outbox, store, slug, inbox)
             agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
             skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
@@ -419,9 +418,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             )
             actions += skip_refused(bottleneck_status.refresh, slug, store, now_ms())
             window = wake.window_ms(os.environ)
-            actions += skip_refused(
-                wake.wake_pass, inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ)
-            )
+            actions += skip_refused(wake.maintenance, inbox, slug, agents, now_ms(), window)
             started = timing.call(snapshot_job.start, store, slug, now_ms(), os.environ)
             store.redis.set(store.key(slug, "last-tick"), now_ms())
             doc = timing.call(ledger.state, slug)
@@ -632,7 +629,7 @@ def cmd_spoke(store, args):
 
     if workstation.runs_engine(os.environ):
         raise SwarmError(workstation.ENGINE_RUNS)
-    bus = factory.open_bus(BusConfig.from_environ(os.environ))
+    bus = factory.open_bus(replace(BusConfig.from_environ(os.environ), provision=False))
     try:
         workstation.run(store, bus, LocalHerdrRuntime(HerdrRuntime()), commands.hive_id())
     finally:
@@ -2076,7 +2073,7 @@ def _seat(agent):
 def _retire(store, slug, agent, exit_text):
     store.release(slug, agent.task, agent.name)
     store.put_agent(slug, replace(agent, state="finished"))
-    exits.settle(InboxStore(store.redis), agent.name, "", exit_text)
+    exits.settle(InboxStore(store.redis), agent.name, agent.seat if agent.lane == DISPATCH else "", exit_text)
 
 
 def cmd_say(store, args):

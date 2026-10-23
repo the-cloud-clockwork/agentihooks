@@ -8,9 +8,8 @@ import pytest
 
 from scripts import openbao_kv
 from scripts.events import nkey
-from scripts.events.config import BusConfig, QueuePolicy
-from scripts.events.envelope import Envelope
-from scripts.hive import auth, nats_grant, nats_permissions, remove, server
+from scripts.events.config import BusConfig
+from scripts.hive import auth, nats_grant, remove, server
 from tests.events import nats_server
 
 pytestmark = pytest.mark.unit
@@ -28,15 +27,16 @@ def admin():
 
 def _user_creds(account: nkey.KeyPair, name: str) -> str:
     user = nkey.create(nkey.USER)
-    claims = {"type": "user", "version": 2, "pub": {}, "sub": {}, **nats_grant.UNLIMITED}
-    return nkey.creds(nkey.encode_jwt(account, user.public, name, claims), user.seed)
+    return nkey.creds(nkey.encode_jwt(account, user.public, name, nats_grant.user_claims()), user.seed)
 
 
 @pytest.fixture
 def signer(tmp_path):
     operator, system, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT), nkey.create(nkey.ACCOUNT)
     port = nats_server.free_port()
-    signed = nats_grant.Signer(operator, account, _user_creds(system, "sys"), f"nats://127.0.0.1:{port}")
+    signed = nats_grant.Signer(
+        operator, account, _user_creds(system, "sys"), f"nats://127.0.0.1:{port}", operator.public
+    )
     claims = {"type": "operator", "version": 2, "system_account": system.public}
     system_jwt = nkey.encode_jwt(
         operator, system.public, "SYS", {"type": "account", "version": 2, "limits": SYSTEM_LIMITS}
@@ -66,7 +66,7 @@ def _opens(signer: nats_grant.Signer, credentials: str | None) -> bool:
     from scripts.events import nats
 
     try:
-        bus = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credentials))
+        bus = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credentials, provision=False))
     except Exception as exc:
         assert "authorization" in str(exc).lower()
         return False
@@ -102,31 +102,76 @@ def test_hive_serve_mints_a_member_credential_the_bus_opens_with(admin, signer):
     assert _opens(signer, grant["nats_credentials"])
 
 
-def test_a_member_credential_runs_the_hive_bus_operations(signer):
+def _refused(signer: nats_grant.Signer, credentials: str) -> list[str]:
+    import asyncio
+
+    import nats as nats_client
+
     from scripts.events import nats
 
-    hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
-    member = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, "m1")))
-    try:
-        event = Envelope(
-            "ready-a", "task.ready", "rig", "task", "task-a", 0, 12, "readiness", {"lane": "eng", "generation": 0}
+    errors = []
+
+    async def attempt() -> None:
+        async def collect(exc):
+            errors.append(str(exc).lower())
+
+        nc = await nats_client.connect(
+            signer.url, allow_reconnect=False, error_cb=collect, **nats.auth_options(credentials)
         )
-        assert hub.queue("swarm.rig.ready.eng", QueuePolicy()).offer(event)
-        delivery = member.queue("swarm.rig.ready.eng", QueuePolicy()).take(5000)
-        assert delivery.event == event
+        js = nc.jetstream(timeout=1)
+        try:
+            for create in (
+                js.add_stream(name="ROGUE", subjects=["rogue.>"]),
+                js.add_consumer(nats.EVENT_STREAM, durable_name="rogue"),
+            ):
+                with pytest.raises(nats_client.errors.TimeoutError):
+                    await create
+            for _ in range(100):
+                if len(errors) >= 2:
+                    break
+                await asyncio.sleep(0.05)
+        finally:
+            await nc.close()
+
+    asyncio.run(attempt())
+    return errors
+
+
+def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_durable(admin, signer):
+    from scripts.events import nats
+    from scripts.events.config import QueuePolicy
+    from scripts.events.envelope import Envelope
+    from scripts.hive import buckets
+
+    hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
+    member = nats.open_bus(
+        BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, "m1"), provision=False)
+    )
+    try:
+        policy = QueuePolicy()
+        with pytest.raises(nats.NotFoundError):
+            member.queue("swarm.rig.ready.eng", policy)
+        buckets.provision(hub)
+        event = Envelope("offer-1", "task.ready", "rig", "task", "t1", 0, 1, "readiness", {"lane": "eng"})
+        hub.queue("swarm.rig.ready.eng", policy).offer(event)
+        delivery = member.queue("swarm.rig.ready.eng", policy).take(1_000)
+        assert delivery.event.id == "offer-1"
         delivery.ack()
-        work = member.state("spoke-work")
-        revision = work.create("task-a", b"claimed")
-        assert work.update("task-a", b"done", revision) > revision
-        assert work.get("task-a").value == b"done"
-        assert [entry.value for entry in work.watch("task-a")] == [b"claimed", b"done"]
+        for bucket in buckets.NAMES:
+            store = member.state(bucket)
+            assert store.create("k", b"v") == 1
+            assert store.update("k", b"w", 1) == 2
+            assert store.get("k").value == b"w"
+            assert [entry.value for entry in store.watch("k")] == [b"v", b"w"]
         assert member.events.publish("swarm.rig.execution.started", event)
         assert member.dead.publish("dead.rig", event)
-        for _ in range(2):
-            member._loop.run(nats._publish_dead(member._js, event, "queue.m1", 1))
     finally:
         member.close()
         hub.close()
+    refused = " ".join(_refused(signer, nats_grant.mint(signer, "m1")))
+    assert 'permissions violation for publish to "$js.api.stream.create.rogue"' in refused
+    durable = f'"$js.api.consumer.durable.create.{nats.EVENT_STREAM}.rogue"'.lower()
+    assert f"permissions violation for publish to {durable}" in refused
 
 
 def test_a_hive_endpoint_without_a_signer_mints_no_bus_credential(admin):
@@ -158,7 +203,11 @@ def test_a_claims_update_the_server_refuses_raises(signer):
 
 def test_a_failed_push_keeps_the_revocation_for_the_next_push(admin, signer):
     unreachable = nats_grant.Signer(
-        signer.operator, signer.account, signer.system_credentials, f"nats://127.0.0.1:{nats_server.free_port()}"
+        signer.operator,
+        signer.account,
+        signer.system_credentials,
+        f"nats://127.0.0.1:{nats_server.free_port()}",
+        signer.trusted_operator,
     )
     with pytest.raises(Exception):
         nats_grant.revoke(admin, unreachable, "m1")
@@ -182,26 +231,158 @@ def test_a_role_credential_named_in_openbao_opens_the_bus(signer, monkeypatch):
     assert _opens(signer, config.credentials)
 
 
+def test_revoke_refuses_an_account_update_from_an_untrusted_operator(admin, signer):
+    member = auth.mint(admin, "h1", PUBLIC)
+    creds = _refresh(admin, signer, member["ledger_credential"])["nats_credentials"]
+    stranger = nkey.create(nkey.OPERATOR)
+    untrusted = nats_grant.Signer(
+        stranger, signer.account, signer.system_credentials, signer.url, signer.trusted_operator
+    )
+    message = (
+        f"refusing to push an account update issued by {stranger.public}, "
+        f"which is not the trusted operator {signer.trusted_operator}"
+    )
+    with pytest.raises(auth.HiveError) as refused:
+        nats_grant.revoke(admin, untrusted, member["id"])
+    assert str(refused.value) == message
+    assert _opens(signer, creds)
+    assert _opens(signer, _refresh(admin, signer, member["ledger_credential"])["nats_credentials"])
+
+
+def test_the_trusted_operator_signs_the_revoking_account_update(admin, signer, monkeypatch):
+    pushed = []
+    monkeypatch.setattr(nats_grant, "push", lambda signed, jwt: pushed.append((signed, jwt)))
+    nats_grant.revoke(admin, signer, "m1")
+    [(signed, jwt)] = pushed
+    claims = nkey.claims(jwt)
+    assert signed is signer
+    assert (claims["iss"], claims["sub"]) == (signer.trusted_operator, signer.account.public)
+
+
+def test_claims_reads_the_payload_of_a_jwt():
+    operator = nkey.create(nkey.OPERATOR)
+    claims = nkey.claims(nkey.encode_jwt(operator, "subject", "n", {"type": "account"}))
+    assert (claims["iss"], claims["sub"], claims["name"], claims["nats"]) == (
+        operator.public,
+        "subject",
+        "n",
+        {"type": "account"},
+    )
+
+
+@pytest.mark.parametrize("payload", [b'{"a":1}', b'{"ab":1}', b'{"abc":1}'])
+def test_claims_reads_a_payload_of_every_padding_length(payload):
+    assert nkey.claims(f"a.{nkey.b64(payload)}.c") == json.loads(payload)
+
+
+@pytest.mark.parametrize(
+    "jwt",
+    [
+        "",
+        "one",
+        "a.!!!.c",
+        f"a.{nkey.b64(b'{}')}.c.d",
+        f"a.{nkey.b64(b'{}')}",
+        f"a.{nkey.b64(b'[1]')}.c",
+        f"a.{nkey.b64(b'not json')}.c",
+    ],
+)
+def test_claims_refuses_a_malformed_jwt(jwt):
+    with pytest.raises(nkey.NkeyError, match="^not a JWT with a claims object$"):
+        nkey.claims(jwt)
+
+
+def _signer_record(operator, account) -> dict:
+    return {"operator_seed": operator.seed, "account_seed": account.seed, "system_credentials": "c", "url": "u"}
+
+
+SIGNER_PATH = "agentihooks/hub/nats-signer"
+TRUSTED = nkey.create(nkey.OPERATOR).public
+BAO_ENV = {"OPENBAO_URL": "https://bao.example", "OPENBAO_TOKEN": "t", nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED}
+
+
 def test_the_signer_comes_from_the_openbao_record_named_by_reference(monkeypatch):
     operator, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)
-    record = {"operator_seed": operator.seed, "account_seed": account.seed, "system_credentials": "c", "url": "u"}
-    expected = (openbao_kv.OpenBao("https://bao.example", "t"), "k8s/nats-signer")
+    record = _signer_record(operator, account)
+    expected = (openbao_kv.OpenBao("https://bao.example", "t"), SIGNER_PATH)
     monkeypatch.setattr(openbao_kv, "read", lambda bao, path: (record, 1) if (bao, path) == expected else None)
-    environ = {nats_grant.SIGNER_ENV: "k8s/nats-signer", "OPENBAO_URL": "https://bao.example", "OPENBAO_TOKEN": "t"}
-    assert nats_grant.from_environ(environ) == nats_grant.Signer(operator, account, "c", "u")
+    environ = {nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV}
+    assert nats_grant.from_environ(environ) == nats_grant.Signer(operator, account, "c", "u", TRUSTED)
     assert nats_grant.from_environ({}) is None
 
 
+def test_the_trusted_operator_never_comes_from_the_signer_record(monkeypatch):
+    operator, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)
+    record = {**_signer_record(operator, account), "trusted_operator": operator.public}
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, path: (record, 1))
+    assert nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV}).trusted_operator == TRUSTED
+
+
+@pytest.mark.parametrize("trusted", [None, ""])
+def test_a_signer_needs_the_trusted_operator_from_the_environment(monkeypatch, trusted):
+    reads = []
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, found: reads.append(found))
+    environ = {nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV, nats_grant.TRUSTED_OPERATOR_ENV: trusted}
+    if trusted is None:
+        del environ[nats_grant.TRUSTED_OPERATOR_ENV]
+    with pytest.raises(auth.HiveError) as refused:
+        nats_grant.from_environ(environ)
+    assert str(refused.value) == (
+        "AGENTIHOOKS_NATS_SIGNER is set, so AGENTIHOOKS_NATS_TRUSTED_OPERATOR must name "
+        "the operator public key the NATS server trusts"
+    )
+    assert reads == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "k8s/nats-signer",
+        "agentihooks/nats-signer",
+        "agentihooks/hub",
+        "agentihooks/hub/",
+        "x/agentihooks/hub/s",
+        "agentihooks/hub/../../k8s/x",
+        "agentihooks/hub/a/../b",
+        "agentihooks/hub/./s",
+        "agentihooks/hub//s",
+        "agentihooks/hub/s/",
+        "agentihooks/hub/%2e%2e/k8s/x",
+        "agentihooks/hub/%2e%2e%2fk8s%2fx",
+    ],
+)
+def test_a_signer_record_outside_the_hub_path_is_refused(monkeypatch, path):
+    reads = []
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, found: reads.append(found))
+    with pytest.raises(auth.HiveError) as refused:
+        nats_grant.from_environ({nats_grant.SIGNER_ENV: path, **BAO_ENV})
+    assert str(refused.value) == (
+        f"the NATS signer record {path} holds the system account credential, "
+        "so it must live under the OpenBao path agentihooks/hub/ that only the hub role reads"
+    )
+    assert reads == []
+
+
+def test_a_nested_signer_record_under_the_hub_path_is_read(monkeypatch):
+    reads = []
+    record = _signer_record(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT))
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, found: (reads.append(found), (record, 1))[1])
+    nats_grant.from_environ({nats_grant.SIGNER_ENV: "agentihooks/hub/a/b", **BAO_ENV})
+    assert reads == ["agentihooks/hub/a/b"]
+
+
 def test_a_signer_record_missing_a_field_is_refused(monkeypatch):
-    monkeypatch.setattr(openbao_kv, "read", lambda bao, path: ({"operator_seed": "x"}, 1))
-    environ = {nats_grant.SIGNER_ENV: "k8s/nats-signer", "OPENBAO_URL": "https://bao.example", "OPENBAO_TOKEN": "t"}
-    with pytest.raises(auth.HiveError, match="^the NATS signer record k8s/nats-signer cannot be used"):
+    record = _signer_record(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT))
+    del record["system_credentials"]
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, path: (record, 1))
+    environ = {nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV}
+    with pytest.raises(auth.HiveError, match=f"^the NATS signer record {SIGNER_PATH} cannot be used"):
         nats_grant.from_environ(environ)
 
 
 def test_a_signer_reference_needs_openbao_settings():
     with pytest.raises(auth.HiveError, match="names an OpenBao record"):
-        nats_grant.from_environ({nats_grant.SIGNER_ENV: "k8s/nats-signer"})
+        nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH, nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED})
 
 
 def test_refresh_writes_the_bus_credential_beside_the_member_env(tmp_path):
@@ -210,9 +391,10 @@ def test_refresh_writes_the_bus_credential_beside_the_member_env(tmp_path):
     creds = tmp_path / auth.NATS_CREDS_FILE
     assert creds.read_text() == "creds text"
     assert oct(creds.stat().st_mode & 0o777) == "0o600"
-    assert env.endswith(f"AGENTIHOOKS_BUS_CREDENTIALS={creds}\n")
+    assert env.endswith(f"AGENTIHOOKS_BUS_CREDENTIALS={creds}\nAGENTIHOOKS_BUS_BIND=1\n")
     env = auth.write_env(tmp_path, "https://hive", {**grant, "nats_credentials": None}).read_text()
     assert "AGENTIHOOKS_BUS_CREDENTIALS" not in env
+    assert "AGENTIHOOKS_BUS_BIND" not in env
     assert not creds.exists()
 
 
@@ -277,24 +459,51 @@ def _claims(jwt: str) -> dict:
 
 
 def _offline_signer() -> nats_grant.Signer:
-    return nats_grant.Signer(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT), "creds", "nats://hub:4222")
+    operator = nkey.create(nkey.OPERATOR)
+    return nats_grant.Signer(operator, nkey.create(nkey.ACCOUNT), "creds", "nats://hub:4222", operator.public)
 
 
-def test_a_member_credential_carries_exactly_the_user_claims():
+def test_a_member_credential_carries_exactly_the_hive_member_claims():
     signed = _offline_signer()
     jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
     claims = _claims(jwt)
     assert (claims["iss"], claims["sub"], claims["name"]) == (signed.account.public, user.public, "hive-m1")
+    buckets = ("spoke-work", "spoke-pending", "hive-presence", "hive-executions", "execution-starts")
+    publish = [
+        "swarm.*.execution.>",
+        "dead.*",
+        "dead.*.*",
+        "$JS.API.INFO",
+        "$JS.API.STREAM.MSG.GET.AGENTIHOOKS_DEAD",
+        "$JS.API.CONSUMER.INFO.>",
+        "$JS.API.CONSUMER.MSG.NEXT.>",
+        "$JS.ACK.>",
+        *(f"$KV.{bucket}.>" for bucket in buckets),
+        *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets),
+        *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets),
+    ]
     assert claims["nats"] == {
         "type": "user",
         "version": 2,
-        **nats_permissions.MEMBER,
+        "pub": {"allow": publish},
+        "sub": {"allow": ["_INBOX.>"]},
         "subs": -1,
         "data": -1,
         "payload": -1,
     }
-    assert claims["nats"]["sub"] == {"allow": ["_INBOX.>"]}
-    assert "swarm.*.execution.>" in claims["nats"]["pub"]["allow"]
+    assert not [subject for subject in publish if ".CREATE" in subject]
+
+
+def test_a_role_credential_keeps_the_unrestricted_user_claims():
+    assert nats_grant.user_claims() == {
+        "type": "user",
+        "version": 2,
+        "pub": {},
+        "sub": {},
+        "subs": -1,
+        "data": -1,
+        "payload": -1,
+    }
 
 
 @pytest.mark.parametrize("revocations", [{}, {"UA": 7}])
@@ -316,7 +525,11 @@ def test_a_push_connects_once_without_reconnecting_and_bounds_both_waits(monkeyp
     import nats as nats_client
 
     signed = nats_grant.Signer(
-        nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT), _user_creds(nkey.create(nkey.ACCOUNT), "sys"), "nats://x"
+        nkey.create(nkey.OPERATOR),
+        nkey.create(nkey.ACCOUNT),
+        _user_creds(nkey.create(nkey.ACCOUNT), "sys"),
+        "nats://x",
+        "unused",
     )
     seen = {}
 
