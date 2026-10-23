@@ -5,6 +5,11 @@ from pathlib import Path
 import yaml
 
 POLICY_DIR = "/etc/agentihooks/pod-policy"
+POD_FIELDS = {
+    "AGENTIHOOKS_POD_NAMESPACE": "metadata.namespace",
+    "AGENTIHOOKS_POD_NAME": "metadata.name",
+    "AGENTIHOOKS_POD_UID": "metadata.uid",
+}
 
 
 def expected_env(workers: dict) -> dict:
@@ -69,6 +74,12 @@ def main(values_paths: list[str], rendered: str) -> list[str]:
         f"{name} is {env.get(name)!r}, expected {value!r}"
         for name, value in expected_env(workers).items()
         if env.get(name) != value
+    ]
+    fields = {e["name"]: e.get("valueFrom", {}).get("fieldRef", {}).get("fieldPath") for e in container["env"]}
+    problems += [
+        f"{name} does not carry the controller pod {path}"
+        for name, path in POD_FIELDS.items()
+        if fields.get(name) != path
     ]
     if "AGENTIHOOKS_WORKER_IMAGE_DIGEST" in env or any("@sha256" in str(v) for v in env.values()):
         problems.append("the controller env pins a worker image digest")
