@@ -362,6 +362,20 @@ def test_a_failed_publish_stays_pending_until_the_poll_flushes_it():
     assert snapshot(bus)["pending"] == []
 
 
+def test_the_poll_flushes_a_pending_event_exactly_at_its_flush_age():
+    clock = Clock()
+    bus, hub, consumer = setup(lambda url: Observation(url), clock)
+    hub.handle(task_changed())
+    publish = bus.events.publish
+    bus.events.publish = lambda subject, event: (_ for _ in ()).throw(ConnectionError("bus down"))
+    with pytest.raises(ConnectionError):
+        hub.observe(Observation(URL, "open", "a1"))
+    bus.events.publish = publish
+    clock.now = 1000 + 60_000
+    hub.poll()
+    assert kinds(drain(consumer)) == [("crew", "pull.opened", 1)]
+
+
 def test_an_observation_publishes_only_the_events_it_created():
     bus, hub, consumer = setup()
     hub.handle(task_changed())
