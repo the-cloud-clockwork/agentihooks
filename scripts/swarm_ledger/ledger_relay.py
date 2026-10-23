@@ -85,12 +85,20 @@ def apply(doc, op, ctx):
     name, item_id = op["item"].split("/")
     item = next((i for i in doc[name] if i["id"] == item_id), None)
     if item is None:
+        ctx.refused.append(f"relay on {op['item']} refused: the entry does not exist")
         return False
     thread = "answers" if name == "questions" else "comments"
     if any(e["id"] == op["id"] for e in item[thread]):
         return True
-    words = relayed(op, ctx.meta)
+    if ctx.meta["members"].get(op["by"], {}).get("role") != "orchestrator":
+        ctx.refused.append(f"relay on {op['item']} refused: {op['by']} is not an orchestrator of this ledger")
+        return False
+    words = verified(op["by"], op["quote"])
     if not words:
+        ctx.refused.append(
+            f"relay on {op['item']} refused: the server could not verify at least three quoted operator words "
+            "in its recorded prompts or answers"
+        )
         return False
     marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
     text = op["text"].strip()
