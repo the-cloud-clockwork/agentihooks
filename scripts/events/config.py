@@ -10,6 +10,7 @@ URL_ENV = "AGENTIHOOKS_BUS_URL"
 CREDENTIALS_ENV = "AGENTIHOOKS_BUS_CREDENTIALS"
 BIND_ENV = "AGENTIHOOKS_BUS_BIND"
 SCOPED_ENV = "AGENTIHOOKS_BUS_SCOPED"
+SWARMS_ENV = "AGENTIHOOKS_BUS_SWARMS"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
 DEFAULT_BACKEND = "memory"
@@ -19,8 +20,6 @@ SCOPED_STATE_BUCKETS = (
     "hive-presence",
     "hive-executions",
     "execution-starts",
-    "account-slots",
-    "hive-slot-accounts",
 )
 
 

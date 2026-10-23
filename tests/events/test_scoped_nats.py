@@ -288,26 +288,18 @@ def test_a_scoped_member_reaches_the_hub_slot_service_only_through_its_own_swarm
         client.close()
 
 
-def test_scoped_members_share_only_the_two_approved_account_slot_buckets(hub, signer):
-    from scripts.hive import account_slots
+def test_scoped_members_open_no_root_state_including_the_hub_owned_account_buckets(hub, signer):
+    from scripts.hub import slots
 
-    for bucket in ("account-slots", "hive-slot-accounts"):
-        hub.state(bucket)
-    first, second = member(signer, "rig"), member(signer, "other")
-    report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+    first = member(signer, "rig")
     try:
-        own = account_slots.Slots(first, "first", lambda: report, lambda: 1000)
-        peer = account_slots.Slots(second, "second", lambda: report, lambda: 1000)
-        assert own.take("one", "claude") == "a"
-        assert peer.take("two", "claude") is None
-        own.release("one", "claude", "a")
-        assert peer.take("two", "claude") == "a"
         for bucket in (
             "spoke-work",
             "spoke-pending",
             "hive-presence",
             "hive-executions",
             "execution-starts",
+            *slots.BUCKETS,
             "unlisted",
         ):
             with pytest.raises(PermissionError) as caught:
@@ -315,4 +307,3 @@ def test_scoped_members_share_only_the_two_approved_account_slot_buckets(hub, si
             assert str(caught.value) == "select a swarm before opening scoped state"
     finally:
         first.close()
-        second.close()
