@@ -47,11 +47,11 @@ The event driven design has three parts:
 Each swarm picks its engine with its `engine` setting, `legacy` or `events`; see
 [Event driven engine](../pillars/swarm.md#event-driven-engine).
 
-| Mode | Bus | Hub |
-|---|---|---|
-| `local` | `memory` unless the bus settings name NATS | None runs by default. Only the hub's `readiness` reactor offers the work of an `events` swarm, so such a swarm needs a hub on the same bus. |
-| `compose` | The stack's `nats` service: `AGENTIHOOKS_BUS=nats` at `nats://nats:4222` | No hub service. The Compose task smoke runs `agentihooks hub run --once` in the `swarm` service to settle a task end to end. |
-| `distributed` | NATS with JetStream from the `agentihooks-swarm` chart (`nats.enabled`, JetStream on) | The chart's `<release>-hub` Deployment, with `hub.enabled: true` and 2 replicas by default. It runs `agentihooks hub run`, scheduled only on nodes without the `anton.io/capacity-type` label. |
+| Mode | Engine | Bus | Hub |
+|---|---|---|---|
+| `local` | `legacy`; `events` only with a hub on the same bus | `memory` unless the bus settings name NATS | None runs by default. Only the hub's `readiness` reactor offers the work of an `events` swarm. |
+| `compose` | `legacy`; `events` only with a hub on the same bus | The stack's `nats` service: `AGENTIHOOKS_BUS=nats` at `nats://nats:4222` | No hub service. The Compose task smoke runs `agentihooks hub run --once` in the `swarm` service to settle a task end to end. |
+| `distributed` | `events` through the hub; a `legacy` swarm is ticked by the chart's controller, never by the workstation | NATS with JetStream from the `agentihooks-swarm` chart (`nats.enabled`, JetStream on) | The chart's `<release>-hub` Deployment, with `hub.enabled: true` and 2 replicas by default. It runs `agentihooks hub run`, scheduled only on nodes without the `anton.io/capacity-type` label. |
 
 ### Hub reactors
 
@@ -66,8 +66,8 @@ them. Every reactor retries up to 50 times, waiting 1, 5, 15, 60 and then 300 se
 | `inbox-wake-expiry` | `swarm.*.deadline.expired` | When the deadline expires, redelivers or wakes the item and schedules its next deadline. |
 | `hive-loss` | `swarm.*.execution.started` | Publishes `execution.exited` for executions on a lost hive. |
 | `lifecycle` | `swarm.*.execution.exited` | Releases the slot and claim, and settles the task. |
-| `reconciler` | A five minute poll | Rebuilds missing starts and ends executions that are gone. |
-| `readiness` | A poll | Offers the claimable tasks of every `events` swarm to the lane work queues. |
+| `reconciler` | A five minute poll; it also subscribes to `swarm.*.reconcile.requested`, which nothing publishes yet | Rebuilds missing starts and ends executions that are gone. |
+| `readiness` | A poll; it also subscribes to `swarm.*.readiness.requested`, which nothing publishes yet | Offers the claimable tasks of every `events` swarm to the lane work queues. |
 | `pulls` | `swarm.*.task.*` and a poll | Publishes pull request, merge queue and check events, also fed by `agentihooks github-webhook`. |
 
 ### Bus settings
