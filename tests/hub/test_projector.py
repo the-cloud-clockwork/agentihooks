@@ -5,7 +5,7 @@ import pytest
 
 from scripts.events import envelope, factory, memory
 from scripts.events.config import BusConfig
-from scripts.swarm_ledger import projector
+from scripts.hub import projector
 from scripts.swarm_ledger.events.hub import Hub
 from scripts.swarm_ledger.events.publishing import Publishing
 from scripts.swarm_ledger.repository import outbox, sqlite
