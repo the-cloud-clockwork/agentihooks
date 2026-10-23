@@ -30,6 +30,8 @@ def scoped_subject(swarm: str, kind: str, logical: str) -> str:
             logical = ">"
     elif logical in (f"{PREFIX}.>", f"{PREFIX}.*.>"):
         logical = ">"
+    elif logical.startswith(f"{PREFIX}.*."):
+        logical = logical.removeprefix(f"{PREFIX}.*.")
     elif logical.startswith(f"{PREFIX}.{swarm}."):
         logical = logical.removeprefix(f"{PREFIX}.{swarm}.")
     elif logical.startswith(f"{PREFIX}."):

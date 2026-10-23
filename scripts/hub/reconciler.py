@@ -19,7 +19,7 @@ COMPLETED = "completed"
 
 def _start(bus: Bus, slug: str, agent: AgentRecord) -> Envelope | None:
     key = execution_events.identity(slug, agent.name, agent.generation)
-    entry = bus.state(execution_events.STARTS).get(key)
+    entry = bus.for_swarm(slug).state(execution_events.STARTS).get(key)
     raw = json.loads(entry.value) if entry else None
     if raw is None:
         return None

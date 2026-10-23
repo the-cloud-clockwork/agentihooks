@@ -119,7 +119,7 @@ async def _copy_work(root: "NatsBus", target: NatsWorkQueue, message) -> None:
     else:
         if existing.data != message.data:
             raise ValueError("retained migration copy differs from its source")
-    await message.term()
+    await message.ack_sync()
 
 
 async def _drain_work(

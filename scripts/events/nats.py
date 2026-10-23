@@ -376,11 +376,11 @@ class NatsBus:
             return view
 
     def _logs(self, kind: str) -> list[EventLog]:
+        from .nats_scope import discover_swarms
+
         if self._config.provision:
-            names = self._loop.run(self._js.stream_names(subject=f"{PREFIX}.*.events.>"))
-            for name in names:
-                encoded = name.removeprefix("AGENTIHOOKS_").removesuffix("_EVENTS")
-                self.for_swarm(bytes.fromhex(encoded).decode())
+            for swarm in self._loop.run(discover_swarms(self._js)):
+                self.for_swarm(swarm)
         with self._lock:
             legacy = [getattr(self, f"_legacy_{kind}")] if self._config.provision else []
             return legacy + [getattr(view, kind) for view in self._views.values()]

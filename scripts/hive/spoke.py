@@ -45,7 +45,7 @@ class Spoke:
         clock: Callable[[], int] | None = None,
         view: Callable[[], readiness.Snapshot] | None = None,
     ):
-        self.config, self.bus, self.runtime, self.tasks = config, bus, runtime, tasks
+        self.config, self.bus, self.runtime, self.tasks = config, bus.for_swarm(config.swarm.slug), runtime, tasks
         self._previous = None
         self.measure = measure or self._measure
         self.clock = clock or presence.now_ms

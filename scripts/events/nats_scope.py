@@ -1,5 +1,8 @@
+import re
 import threading
 from typing import TYPE_CHECKING
+
+from nats.js import JetStreamContext
 
 from .bus import StateStore, WorkQueue
 from .config import QueuePolicy
@@ -10,6 +13,22 @@ from .subjects import stream_name, subject
 
 if TYPE_CHECKING:
     from .nats import NatsBus
+
+
+async def discover_swarms(js: JetStreamContext) -> list[str]:
+    offset, swarms = 0, []
+    while True:
+        page = await js.streams_info_iterator(offset=offset)
+        for info in page:
+            name = info.config.name
+            matched = re.fullmatch(r"AGENTIHOOKS_([0-9a-f]+)_EVENTS", name)
+            if matched:
+                swarms.append(bytes.fromhex(matched[1]).decode())
+        offset += len(page.streams)
+        if offset >= page.total:
+            return swarms
+        if not page.streams:
+            raise RuntimeError("NATS stream inventory did not advance")
 
 
 class NatsScopedBus:

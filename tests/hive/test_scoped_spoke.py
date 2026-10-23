@@ -7,6 +7,7 @@ from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
 from tests.hive.test_nats_grant import admin as admin
 from tests.hive.test_nats_grant import signer as signer
+from tests.hive.test_spoke import live_readiness as live_readiness
 from tests.hive.test_spoke import reading
 from tests.hive.test_spoke import rig as rig
 
