@@ -282,9 +282,12 @@ def test_unfenced_agents_remain_owned_by_legacy_tick(rig, monkeypatch):
     state = rig.bus.state(execution_events.STARTS)
     entry = state.get(key)
     state.update(key, b"null", entry.revision)
-    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
-    monkeypatch.setattr(reconciler, "open_bus", lambda _: rig.bus)
+    config = SimpleNamespace(backend="nats")
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: config)
+    opening = Mock(return_value=rig.bus)
+    monkeypatch.setattr(reconciler, "open_bus", opening)
     assert reconciler.legacy_agents(rig.store, "rig") == [rig.agent]
+    opening.assert_called_once_with(config)
 
 
 @pytest.mark.parametrize("field", ["type", "swarm", "key", "version", "name", "task", "claim_key"])
@@ -404,7 +407,8 @@ def test_default_reconciler_connects_lazily_for_the_due_pass(rig, monkeypatch):
 
     connect = Mock(return_value=rig.store)
     monkeypatch.setattr(reconciler, "connect", connect)
-    monkeypatch.setattr(reconciler, "Lifecycle", Mock(return_value=rig.life))
+    building = Mock(return_value=rig.life)
+    monkeypatch.setattr(reconciler, "Lifecycle", building)
     monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
     react = reconciler.Reconciler(rig.bus, clock=rig.clock)
     connect.assert_not_called()
@@ -412,6 +416,7 @@ def test_default_reconciler_connects_lazily_for_the_due_pass(rig, monkeypatch):
     assert len(rig.returned) == 1
     react.poll()
     connect.assert_called_once_with()
+    building.assert_called_once_with(rig.bus, rig.store)
 
 
 def test_an_empty_legacy_projection_never_opens_the_bus(rig, monkeypatch):
@@ -423,3 +428,65 @@ def test_an_empty_legacy_projection_never_opens_the_bus(rig, monkeypatch):
     monkeypatch.setattr(reconciler, "open_bus", opening)
     assert reconciler.legacy_agents(rig.store, "rig") == []
     opening.assert_not_called()
+
+
+def test_the_reactor_listens_on_reconcile_requests_and_records_its_own_cadence(rig):
+    from scripts.hub.reconciler import BUCKET, COMPLETED
+
+    assert rig.react.reactor().subject == "swarm.*.reconcile.requested"
+    rig.react.poll()
+    assert rig.bus.state(BUCKET).get(COMPLETED).value == b"1000000"
+
+
+def test_the_repair_settles_one_exit_derived_from_the_start_and_the_report(rig):
+    handled = Mock(wraps=rig.life.handle)
+    rig.life.handle = handled
+    rig.react.poll()
+    exited = handled.call_args.args[0]
+    assert (exited.id, exited.type, exited.time, exited.cause) == (
+        "exited:started",
+        "execution.exited",
+        1_000_000,
+        "started",
+    )
+    assert (exited.swarm, exited.key, exited.version) == ("rig", "execution", 3)
+
+
+def test_skipped_executions_ahead_in_the_scan_do_not_end_the_pass(rig):
+    from scripts.hive import execution_events
+
+    unfenced = replace(rig.agent, name="legacy", task="legacy", execution_id="unfenced", seat="eng-0", generation=1)
+    elsewhere = replace(rig.agent, name="remote", task="remote", execution_id="remote", seat="eng-0", generation=2)
+    elsewhere = replace(elsewhere, hive="other", runtime_target={"host_id": "other"})
+    for agent in (unfenced, elsewhere):
+        rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    execution_events.started(
+        rig.bus,
+        replace(
+            rig.event,
+            id="remote-started",
+            key="remote",
+            version=2,
+            data={**rig.event.data, "name": "remote", "task": "remote", "claim_key": "remote"},
+        ),
+    )
+    assert [a.execution_id for a in rig.store.execution_registry.records("rig")] == [
+        "unfenced",
+        "remote",
+        "execution",
+    ]
+    rig.react.poll()
+    assert len(rig.returned) == 1
+    assert rig.row["state"] == "open"
+
+
+def test_the_default_registry_reconciler_uses_the_hub_clock(rig, monkeypatch):
+    from scripts.hub import reconciler, registry
+
+    monkeypatch.setattr(reconciler, "connect", Mock(return_value=rig.store))
+    monkeypatch.setattr(reconciler, "Lifecycle", Mock(return_value=rig.life))
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
+    reactors = {reactor.name: reactor for reactor in registry.configured(rig.bus, rig.clock)}
+    reactors["reconciler"].poll()
+    assert len(rig.returned) == 1
+    assert rig.bus.state(reconciler.BUCKET).get(reconciler.COMPLETED).value == b"1000000"
