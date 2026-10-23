@@ -425,20 +425,13 @@ def cmd_get(args):
 def cmd_tasks(args):
     text = (args.text or "").lower()
     for task in resource(args.slug, "tasks", collection=True):
-        state = task.get("state") or "open"
+        state, lane, title = task.get("state") or "open", task.get("lane") or "", task.get("title") or ""
         if state == "done" or task.get("out_of_scope"):
             continue
-        if args.state not in (None, state) or args.lane not in (None, task.get("lane")):
+        if args.state not in (None, state) or args.lane not in (None, lane):
             continue
-        if text in (task.get("title") or "").lower():
-            print(f"{task['id']}  {state}  {task.get('lane', '')}  {task.get('title', '')}")
-
-
-def ledger_item(value: str) -> str:
-    kind, _, item = value.partition("/")
-    if kind not in ("tasks", "phases", "followups", "priorities") or not item or "/" in item:
-        raise argparse.ArgumentTypeError("name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>")
-    return value
+        if text in title.lower():
+            print(f"{task['id']}  {state}  {lane}  {title}")
 
 
 def cmd_status(args):
@@ -769,6 +762,13 @@ def _duration(value):
     return minutes
 
 
+def _ledger_item(value):
+    kind, _, item = value.partition("/")
+    if kind not in ("tasks", "phases", "followups", "priorities") or not item or "/" in item:
+        raise argparse.ArgumentTypeError("name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>")
+    return value
+
+
 def cmd_fold(args):
     from scripts.swarm_ledger import ledger_fold
 
@@ -1002,7 +1002,7 @@ def build_parser():
         "node", nargs="?", help="plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger"
     )
     sub.add_parser("get", help="print one task, phase, follow up or priority through the ledger API").add_argument(
-        "item", type=ledger_item, help="tasks/<id>, phases/<id>, followups/<id> or priorities/<id>"
+        "item", type=_ledger_item, help="tasks/<id>, phases/<id>, followups/<id> or priorities/<id>"
     )
     tasks = sub.add_parser("tasks", help="list open tasks, one line each, filtered by state, lane or title text")
     for flag in ("--state", "--lane", "--text"):
