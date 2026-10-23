@@ -314,14 +314,15 @@ def test_nats_requests_wait_their_timeout_and_reach_one_replica_of_a_queue_group
     assert hub.request("swarm.rig.slow", b"again", 5000) == b"again"
     assert calls == ["swarm.rig.slow", "swarm.rig.slow"]
 
-    async def silent(msg):
-        pass
+    from unittest.mock import AsyncMock
 
-    hub._loop.run(hub._nc.subscribe("swarm.rig.silent", cb=silent))
-    started = time.monotonic()
+    from nats.errors import TimeoutError as NatsTimeout
+
+    silent = AsyncMock(side_effect=NatsTimeout)
+    hub._nc.request = silent
     with pytest.raises(TimeoutError, match="^no responders for 'swarm.rig.silent'$"):
         hub.request("swarm.rig.silent", b"", 300)
-    assert time.monotonic() - started < 5
+    silent.assert_awaited_once_with("swarm.rig.silent", b"", timeout=0.3)
 
 
 def test_scoped_members_open_no_root_state_including_the_hub_owned_account_buckets(hub, signer):
