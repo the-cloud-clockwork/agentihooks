@@ -527,8 +527,8 @@ Evidence: on 19 October the Doctor tick's capacity line showed the declared
 Claude master account closed at 12:07 and 12:17 UTC and open at 12:13 and
 12:15, and at 12:13:52 the tick started engineer@d44a5a-0683 on it. The task
 record noted `balance` showing that account `CLOSED` for workers with 39% of
-its week left and workers stopping at 60%. The agent then handed off through `init-agent --handoff` into
-an unseated session. Pull request
+its week left and workers stopping at 60%. The agent then handed off through
+`init-agent --handoff` into an unseated session. Pull request
 [#5044](https://github.com/the-cloud-clockwork/agentihooks/pull/5044) added
 the stored closure and the seat handoff directive; its red Mutation
 preflight run 39357837089 failed the four new cases and Tests run
