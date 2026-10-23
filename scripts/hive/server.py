@@ -55,6 +55,15 @@ class _TLSHandler(BaseHTTPRequestHandler):
                 pass
 
 
+def _grant(operation: str, redis: "Redis", value: str, redis_url: str, signer: "Signer | None") -> dict:
+    grant = getattr(auth, operation)(redis, value, redis_url)
+    if signer is None:
+        return grant
+    from scripts.hive import nats_grant
+
+    return {**grant, "nats_credentials": nats_grant.mint(signer, grant["id"])}
+
+
 def _handler(
     redis: "Redis",
     redis_url: str,
@@ -77,11 +86,7 @@ def _handler(
             from redis.exceptions import TimeoutError as Stalled
 
             try:
-                grant = getattr(auth, operation)(redis, value, redis_url)
-                if signer is not None:
-                    from scripts.hive import nats_grant
-
-                    grant["nats_credentials"] = nats_grant.mint(signer, grant["id"])
+                grant = _grant(operation, redis, value, redis_url, signer)
                 return self._answer(200, {**grant, "ledger_ca": ledger_ca} if ledger_ca else grant)
             except auth.HiveError as exc:
                 if not isinstance(exc.__cause__, (Stalled, Unreachable)):
