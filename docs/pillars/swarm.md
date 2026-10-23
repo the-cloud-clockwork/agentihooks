@@ -3588,8 +3588,9 @@ time inside the window of that log line.
 
 Any process that waits on a scheduler timer or connects to the scheduler for a command calls `ensure_running`. When a
 Redis URL is configured (`REDIS_URL`, `AGENTIHOOKS_HIVE_REDIS_URL` or `AGENTIHOOKS_SWARM_REDIS_URL`) and no supervisor
-holds the machine lock, it starts a detached scheduler supervisor, logging to `scheduler.log` in the runtime folder. A ledger server, tick or command run from a worktree or
-a scratch copy, such as a scratch ledger server proof, reaches it through the process timer. Before this change that
+holds the machine lock, it starts a detached scheduler supervisor, logging to `scheduler.log` in the runtime folder.
+A ledger server, tick or command run from a worktree or a scratch copy, such as a scratch ledger server proof, reaches
+it through the process timer. Before this change that
 supervisor and its runner outlived the proof: two proofs on 19 October at 10:32 and 14:35 UTC still had their
 supervisor and runner running a day later, each with its own runtime folder (a scratch Redis endpoint gets its own
 hashed subfolder of the scheduler cache). The recycle above never reached them, because it only checks the lock holder
@@ -3663,10 +3664,13 @@ no process, and the records of two worktree supervisors from 20 October named pi
 starter variable (and that an inherited one is dropped for the installed code), that `installed()` compares the
 loaded root with `install_root()`, and that a tied supervisor stops its runner, or ends between runners, once its
 parent changes. `tests/scheduler/test_process_timer.py` pins that a wait with no wake by its recheck calls
-`ensure_running` again. Delivered by [#5228](https://github.com/the-cloud-clockwork/agentihooks/pull/5228), closing
-[#5225](https://github.com/the-cloud-clockwork/agentihooks/issues/5225). Red: Proofs run 39410168496 on the tests only
-commit, 6 failed (the new tests). Green: Proofs run 39410579532, 635 passed across `tests/scheduler` and every
-`ensure_running` consumer test.
+`ensure_running` again. Delivered by
+[pull request 5228](https://github.com/the-cloud-clockwork/agentihooks/pull/5228), closing
+[issue 5225](https://github.com/the-cloud-clockwork/agentihooks/issues/5225). Red: Proofs run
+[39410168496](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39410168496) on the tests only commit, 6 failed
+(the new tests). Green: Proofs run
+[39410579532](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39410579532), 635 passed across
+`tests/scheduler` and every `ensure_running` consumer test.
 
 #### The Doctor finding
 
