@@ -41,7 +41,7 @@ def test_an_item_sent_to_a_seat_is_published_to_its_bus_inbox_with_its_item_id(m
 
 def test_an_item_sent_to_an_agent_name_stays_off_the_bus(mail):
     store, shared = mail
-    store.send("alice", "engineer@abc-0001", "work")
+    store.send("alice", "engineer@323133-0001", "work")
     assert shared.events.entries == []
 
 
