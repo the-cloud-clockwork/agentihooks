@@ -30,7 +30,7 @@ def master(store: RedisStore, slug: str) -> AgentRecord | None:
 def notify(
     store: RedisStore, args: Namespace, ledger: LedgerClient, before: AgentRecord | None, action: str, detail: str = ""
 ) -> None:
-    by = getattr(args, "name", "") or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    by = getattr(args, "by", "") or getattr(args, "name", "") or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
     after = master(store, args.slug)
     if any(a and by == a.name for a in (before, after)):
         return

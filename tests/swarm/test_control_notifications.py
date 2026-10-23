@@ -118,6 +118,18 @@ def test_a_second_masters_verdict_sends_no_inbox_item(controls, monkeypatch):
     assert ledger.said == []
 
 
+def test_a_master_named_by_its_session_sends_no_verdict_notice(controls, monkeypatch):
+    store, ledger, master = controls
+    second = AgentRecord("demo-master-2", "master", "master", seat="master-2@demo")
+    store.put_agent("demo", second)
+    _idle_finding(store)
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    monkeypatch.setattr(cli.Who, "from_env", classmethod(lambda cls, environ=None: cls(name=second.name)))
+    assert cli.main(["demo", "verdict", "idle/worker", "resolved"]) == 0
+    assert InboxStore(store.redis).mailbox(master.name) == []
+    assert ledger.said == []
+
+
 def test_an_operator_verdict_notice_names_the_finding(controls):
     store, ledger, master = controls
     _idle_finding(store)
