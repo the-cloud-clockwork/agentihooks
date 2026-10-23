@@ -46,7 +46,7 @@ exit "$status"
         "docker build -t local/agentihooks-swarm:clients-check .",
         "bash scripts/packaging/swarm-smoke-parallel.sh scripts/packaging/hive-launch-smoke.sh"
         " scripts/packaging/swarm-smoke.sh scripts/packaging/hive-join-smoke.sh scripts/packaging/compose-hive-smoke.sh"
-        " scripts/packaging/compose-task-smoke.sh",
+        " scripts/packaging/compose-task-smoke.sh scripts/packaging/compose-recovery-drill.sh",
         "bash scripts/packaging/swarm-init-smoke.sh",
         "bash scripts/packaging/hive-launch-attestation-proof.sh",
         "bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check",
