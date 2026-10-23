@@ -19,3 +19,7 @@ def subject(swarm: str, *tokens: str) -> str:
 
 def inbox(user: str) -> str:
     return f"_INBOX.{_token(user)}"
+
+
+def stream_name(swarm: str, resource: str) -> str:
+    return f"AGENTIHOOKS_{_token(swarm).encode().hex()}_{_token(resource)}"

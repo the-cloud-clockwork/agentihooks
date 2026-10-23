@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.events.subjects import PREFIX, inbox, subject
+from scripts.events.subjects import PREFIX, inbox, stream_name, subject
 
 pytestmark = pytest.mark.unit
 
@@ -39,3 +39,15 @@ def test_inbox_is_the_reply_prefix_of_one_user():
 def test_inbox_refuses_a_user_nats_cannot_carry(user):
     with pytest.raises(ValueError, match="invalid event subject token"):
         inbox(user)
+
+
+def test_stream_names_carry_an_unambiguous_swarm_identity():
+    assert stream_name("rig", "EVENTS") == "AGENTIHOOKS_726967_EVENTS"
+    assert stream_name("other", "STATE_spoke-work") == "AGENTIHOOKS_6f74686572_STATE_spoke-work"
+    assert stream_name("a_b", "EVENTS") != stream_name("a", "b_EVENTS")
+
+
+@pytest.mark.parametrize("swarm,resource", [("bad.name", "EVENTS"), ("rig", "*"), (None, "EVENTS"), ("rig", None)])
+def test_stream_names_refuse_invalid_identity_tokens(swarm, resource):
+    with pytest.raises(ValueError, match="invalid event subject token"):
+        stream_name(swarm, resource)

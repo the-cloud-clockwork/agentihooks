@@ -84,22 +84,126 @@ running without its wrapper, and that session ended some time later.
 
 ## Install and drift check
 
+The guard runs from two files in the account's home folder, and both are links
+into the agentihooks checkout:
+
+| Home file | Links to |
+|-----------|----------|
+| `~/guard-daemon.sh` | `scripts/host_guard/guard-daemon.sh` |
+| `~/guard-config.json` | `scripts/host_guard/guard-config.json` |
+
+A merged guard change reaches the running guard when that checkout pulls the
+merge. No file is copied by hand. Before [#5143](https://github.com/the-cloud-clockwork/agentihooks/pull/5143)
+both files were hand copies run by a hand written systemd user timer, so the
+merged [#5006](https://github.com/the-cloud-clockwork/agentihooks/pull/5006)
+exclusion applied only after a manual copy at 03:43 UTC on 20 October.
+
 ```bash
 agentihooks host-guard install   # link both files from this checkout and schedule the guard
 agentihooks host-guard check     # print each drift, exit 1 when any is found
 ```
 
-`agentihooks init` runs the same reconcile. When both links resolve to the
-repository and the schedule is in place, it reports
-`[OK] Host guard in sync with <repo>`. A host that never installed the guard
-gets `[--] Host guard not installed`. `check` reports these drifts:
+Run both from the checkout the guard should follow. The links point at the
+checkout of the `agentihooks` command that ran `install`.
 
-- `~/guard-daemon.sh is missing` or `... is not a link to <repo>/...`, and the
-  same for `~/guard-config.json`
-- `... still runs the guard on systemd instead of the agentihooks scheduler`
-  for a leftover `guard-daemon.timer` or `guard-daemon.service`
-- `~/guard-daemon.sh is not scheduled every 60s on the agentihooks scheduler`
-- `the agentihooks scheduler is unreachable, so the guard schedule was not checked`
+### What install does
+
+1. Replaces `~/guard-daemon.sh` and `~/guard-config.json` with links to the
+   repository copies. Each link is written beside the file and renamed over
+   it, so a hand copy or a link to another checkout is replaced in one step.
+2. Removes the old `guard-daemon.timer` and `guard-daemon.service` from
+   `~/.config/systemd/user`. In the account's own home it runs
+   `systemctl --user disable --now guard-daemon.timer` before removing them
+   and `systemctl --user daemon-reload` after.
+3. Cancels a live guard entry for the same home left on the local Redis at
+   `redis://127.0.0.1:6379/0`. This runs only when the swarm Redis the
+   scheduler uses is another endpoint, so the guard never runs from two
+   schedulers. An unreachable local Redis does not stop the install.
+4. Adds an interval entry for the owner `agentihooks-host-guard` that runs
+   every 60 seconds. Its payload names the home script. The new entry starts
+   before this home's older guard entries are cancelled, so a failed install
+   never stops a running guard. Entries for other homes are left alone.
+5. Starts the scheduler runner when it is not running.
+
+Each scheduler delivery runs the home script once, detached and inside
+`timeout 120` when `timeout` is installed. A delivery that arrives twice runs
+the script once.
+
+| `install` prints | Exit |
+|------------------|------|
+| `[OK] Host guard installed in <home> from <repo>, every 60s on the agentihooks scheduler` | 0 |
+| The same line ending `; a guard entry on the local Redis could not be checked or retired` | 0 |
+| `[!!] Host guard linked in <home>; Redis is unreachable, so the guard is not scheduled` | 1 |
+
+When Redis is unreachable the links are still written. Run `install` again once
+Redis answers.
+
+### What check reports
+
+`check` changes nothing. It prints `[OK] Host guard in sync with <repo>` and
+exits 0, or prints one line per drift and exits 1:
+
+| Drift line | Meaning | Fix |
+|------------|---------|-----|
+| `<home>/guard-daemon.sh is missing` | No script, and no link | `agentihooks host-guard install` |
+| `<home>/guard-config.json is not a link to <repo>/guard-config.json` | A hand copy, or a link to another checkout. A copy with the same text still counts | `agentihooks host-guard install` |
+| `<home>/.config/systemd/user/guard-daemon.timer still runs the guard on systemd instead of the agentihooks scheduler` | An old unit is left, `.timer` or `.service` | `agentihooks host-guard install` removes it |
+| `<home>/guard-daemon.sh is not scheduled every 60s on the agentihooks scheduler` | No live entry for this home at 60 seconds that calls the guard | `agentihooks host-guard install` |
+| `the agentihooks scheduler is unreachable, so the guard schedule was not checked` | The swarm Redis did not answer | Restore Redis, then run `check` again |
+
+A live entry is one in the `ready`, `active` or `pending` state.
+
+### What agentihooks init does
+
+`agentihooks init` reconciles the guard in the step that schedules the hourly
+lifecycle sweep, and prints one line after the sweep line. It changes only a
+guard that is already installed:
+
+| Home state | `init` prints | Change |
+|------------|---------------|--------|
+| No guard file, no link and no old unit | `[--] Host guard not installed; agentihooks host-guard install adds it` | None |
+| No drift | `[OK] Host guard in sync with <repo>` | Starts the scheduler runner when it is not running |
+| Drift, and the scheduler is unreachable | `[!!] Host guard not reconciled: the agentihooks scheduler is unreachable` | None |
+| Drift, and both home files are links, the home has a live guard entry, or an enabled old systemd timer was removed | The `install` lines above | Relinks and schedules |
+| Drift otherwise, for example hand copies with no schedule and no enabled timer | `[--] Host guard linked in <home> from <repo>; agentihooks host-guard install schedules it` | Relinks only |
+
+`init` never schedules a guard the operator turned off. A disabled systemd
+timer, or hand copies with no entry, end up linked but unscheduled until
+`agentihooks host-guard install` runs.
+
+### Example
+
+On this workstation on 23 October both links were in place, the guard was not
+scheduled and the last guard log line was from 21 October:
+
+```console
+$ agentihooks host-guard check
+/home/iamroot/guard-daemon.sh is not scheduled every 60s on the agentihooks scheduler
+$ echo $?
+1
+$ ls -l ~/guard-daemon.sh ~/guard-config.json
+lrwxrwxrwx ... /home/iamroot/guard-config.json -> /home/iamroot/dev/tcc-ecosystem/agentihooks/scripts/host_guard/guard-config.json
+lrwxrwxrwx ... /home/iamroot/guard-daemon.sh -> /home/iamroot/dev/tcc-ecosystem/agentihooks/scripts/host_guard/guard-daemon.sh
+$ tail -1 ~/guard-daemon.log
+2026-10-21 08:45:15 TICK_COMPLETE flagged=0 kills=0 errors=0
+```
+
+`agentihooks host-guard install` schedules it again. A later `check` prints
+`[OK] Host guard in sync with <repo>`, and a `TICK_COMPLETE` line reaches the
+log on each 60 second pass.
+
+### Evidence
+
+- [#5143](https://github.com/the-cloud-clockwork/agentihooks/pull/5143): red
+  [run 39377373912](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39377373912),
+  where a hand copied config passed the drift check; green
+  [run 39384284773](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39384284773).
+  `tests/test_host_guard_sync.py` covers the links, the old unit removal, the
+  schedule, each drift line and the `init` reconcile.
+- [#6311](https://github.com/the-cloud-clockwork/agentihooks/pull/6311) added
+  step 3 and the scheduling by `init` when both files are links. After the
+  swarm Redis moved to a remote endpoint, the guard entry stayed live on the
+  local Redis and `init` relinked the home without scheduling it.
 
 ## Log lines
 
@@ -148,7 +252,8 @@ done
 3. A `KILLED` line for a command that should stay alive needs an
    `excludeCommands` pattern. Add it in a pull request with a test.
 4. `TICK_COMPLETE` lines that stop appearing mean the guard is no longer
-   running. Run `agentihooks host-guard check`.
+   running. Run `agentihooks host-guard check` and apply the fix for each
+   drift line it prints.
 
 ## Evidence for pull request 5006
 
