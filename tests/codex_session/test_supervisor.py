@@ -164,6 +164,7 @@ def test_a_hive_app_server_reserves_its_resolved_account_before_the_subprocess(
     store, server, clock, root, tmp_path, monkeypatch
 ):
     from dataclasses import replace
+
     from scripts.hive import account_slots
 
     spec = launch_spec(store, server, tmp_path)
