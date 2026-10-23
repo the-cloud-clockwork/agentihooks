@@ -26,6 +26,10 @@ def handled_key(reactor: Reactor, event: Envelope) -> str:
     return f"{reactor.name}.{event.entity}.{digest}"
 
 
+def retry_delay(retry_ms: tuple[int, ...], attempt: int) -> int:
+    return retry_ms[min(attempt, len(retry_ms)) - 1] if retry_ms else 0
+
+
 def record(store: StateStore, key: str, version: int) -> None:
     entry = store.get(key)
     if entry is not None and int(entry.value) >= version:
@@ -51,7 +55,9 @@ class HubRunner:
     ):
         self._reactors = list(reactors)
         self._versions = bus.state(VERSIONS)
-        self._consumers = {r.name: bus.events.consumer(registry.durable(r), r.subject) for r in self._reactors}
+        self._consumers = {
+            r.name: bus.events.consumer(registry.durable(r), r.subject, r.policy) for r in self._reactors
+        }
         leases = bus.state(lease.BUCKET)
         self._leases = {
             r.name: lease.Lease(leases, f"reactor.{r.name}", holder, lease_ttl_ms, clock)
@@ -98,7 +104,7 @@ class HubRunner:
         except Exception:
             print(f"hub: reactor {reactor.name} failed on event {event.id}", file=sys.stderr)
             traceback.print_exc()
-            delivery.nak()
+            delivery.nak(retry_delay(reactor.retry_ms, delivery.attempt))
             return "failed"
         record(self._versions, key, event.version)
         delivery.ack()

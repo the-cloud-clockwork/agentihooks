@@ -6,7 +6,7 @@ import pytest
 from scripts import cli_delegates
 from scripts.events import memory
 from scripts.events.bus import StateEntry
-from scripts.events.config import BusConfig
+from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.hub import lease, registry, runner
 
@@ -89,6 +89,14 @@ def test_a_reactor_name_must_be_a_lowercase_token(name):
         registry.Reactor(name, "swarm.>", Recorder())
 
 
+@pytest.mark.parametrize("retry_ms", [[10], (-1,), (1.5,), (True,)])
+def test_reactor_retry_delays_must_be_non_negative_integers(retry_ms):
+    with pytest.raises(ValueError) as raised:
+        registry.Reactor("life", "swarm.>", Recorder(), retry_ms=retry_ms)
+    assert str(raised.value) == "reactor 'life' retry delays must be a tuple of non negative integers"
+    assert registry.Reactor("life", "swarm.>", Recorder(), retry_ms=(0, 5)).retry_ms == (0, 5)
+
+
 def test_the_default_registry_declares_reactors():
     assert isinstance(registry.REACTORS, registry.Registry)
 
@@ -142,13 +150,67 @@ def test_two_replicas_share_the_durable_consumer_and_its_versions(bus):
     assert handler.seen == [("e1", 1)]
 
 
-def test_a_failed_handler_is_redelivered_and_records_no_version(bus):
+def test_a_failed_handler_is_redelivered_and_records_no_version(bus, clock):
     handler = Recorder(fail=1)
     hosted = hub(bus, [registry.Reactor("lifecycle", "swarm.*.task.>", handler)])
     bus.events.publish(SUBJECT, event("e1", 1))
     assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": ["failed"]}
+    clock.now += registry.RETRY_MS[0]
     assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": ["handled"]}
     assert handler.seen == [("e1", 1)]
+
+
+def test_a_failed_handler_waits_out_its_reactor_backoff(bus, clock):
+    hosted = hub(bus, [registry.Reactor("lifecycle", "swarm.*.task.>", Recorder(fail=2))])
+    bus.events.publish(SUBJECT, event("e1", 1))
+    first, second = registry.RETRY_MS[:2]
+    assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": ["failed"]}
+    clock.now += first - 1
+    assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": []}
+    clock.now += 1
+    assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": ["failed"]}
+    clock.now += second - 1
+    assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": []}
+    clock.now += 1
+    assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": ["handled"]}
+
+
+def test_a_reactor_outlasts_the_bus_attempt_cap_by_default(bus, clock):
+    failures = BusConfig().queue.max_deliver + 3
+    handler = Recorder(fail=failures)
+    hosted = hub(bus, [registry.Reactor("lifecycle", "swarm.*.task.>", handler)])
+    bus.events.publish(SUBJECT, event("e1", 1))
+    outcomes = []
+    for _ in range(failures + 1):
+        outcomes += hosted.run_once(batch=10, timeout_ms=0)["lifecycle"]
+        clock.now += max(registry.RETRY_MS)
+    assert outcomes == ["failed"] * failures + ["handled"]
+    assert handler.seen == [("e1", 1)]
+    assert registry.REACTOR_POLICY.max_deliver > BusConfig().queue.max_deliver
+    default = registry.Reactor("lifecycle", "swarm.>", Recorder())
+    assert (default.policy, default.retry_ms) == (registry.REACTOR_POLICY, registry.RETRY_MS)
+    assert registry.REACTOR_POLICY.backoff_ms == ()
+
+
+def test_an_exhausted_reactor_event_is_dead_lettered_with_its_reactor_named(bus, clock):
+    reactor = registry.Reactor(
+        "lifecycle", "swarm.*.task.>", Recorder(fail=99), policy=QueuePolicy(max_deliver=2), retry_ms=(10,)
+    )
+    hosted = hub(bus, [reactor])
+    original = event("e1", 1)
+    bus.events.publish(SUBJECT, original)
+    for _ in range(4):
+        hosted.run_once(batch=10, timeout_ms=0)
+        clock.now += 10
+    letters = bus.dead.consumer("dead-reader", "dead.>").fetch(10, 0)
+    assert [letter.event.data for letter in letters] == [
+        {"event": original.to_dict(), "attempts": 2, "source": "events.hub-lifecycle"}
+    ]
+
+
+def test_the_retry_delay_follows_the_schedule_and_holds_its_last_step():
+    assert [runner.retry_delay((10, 20), attempt) for attempt in (1, 2, 3, 4)] == [10, 20, 20, 20]
+    assert runner.retry_delay((), 3) == 0
 
 
 def test_a_singleton_reactor_runs_only_on_the_lease_holder(bus, clock):
