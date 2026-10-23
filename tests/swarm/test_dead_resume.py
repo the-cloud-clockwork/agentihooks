@@ -567,11 +567,13 @@ def test_a_tick_drop_refunds_nothing_when_the_live_task_is_gone(store):
     ledger, runtime, agent = prepared_recovery(store)
     rows = {"t1": dict(ledger.rows["t1"])}
     lives = store.claims("sw", "t1")
-    ledger.task = lambda slug, task_id: None
+    read = []
+    ledger.task = lambda slug, task_id: read.append((slug, task_id))
 
     tick_module._drop("sw", store, ledger, rows, agent, refund=True)
 
     assert store.claims("sw", "t1") == lives
+    assert read == [("sw", "t1")]
 
 
 def test_reap_reports_every_lost_engineer_in_the_pass(store):
