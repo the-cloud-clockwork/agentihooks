@@ -38,6 +38,7 @@ def bao(monkeypatch):
         return dict(records.get(path, {})), len(records.get(path, {}))
 
     def merge(found, path, entries, stale=()):
+        assert found.url == "https://bao.example"
         records[path] = {**records.get(path, {}), **entries}
         return len(records[path])
 
@@ -254,6 +255,7 @@ def test_cli_writes_the_trust_values_and_reports_each_user(bao, tmp_path, monkey
         "swarm-controller: OpenBao secret/k8s/agentihooks-swarm-nats-controller: wrote credentials (2 keys total)",
         f"wrote the public operator trust to {values}",
     ]
+    assert list(written["config"]["merge"]) == ["operator", "system_account", "resolver_preload"]
     assert list(written["config"]["merge"]["resolver_preload"])[1] == account.public
     assert values.read_text().count("\n") == 7
 
@@ -326,7 +328,7 @@ def test_a_server_run_from_the_trust_values_admits_service_users_and_minted_memb
         assert _opens(url, records[USERS[0]["openbao"]]["credentials"])
         assert _opens(url, nats_grant.mint(signer, "h1"))
         assert not _opens(url, None)
-        nats_grant.push(signer, nats_grant.account_jwt(signer, {}))
+        nats_grant.push(signer, nats_grant.account_jwt(signer.operator, signer.account, {}))
     finally:
         process.terminate()
         process.wait(10)

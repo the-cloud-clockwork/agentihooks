@@ -184,11 +184,11 @@ def mint(signer: Signer, member_id: str) -> str:
     return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 
 
-def account_jwt(signer: Signer, revocations: Mapping[str, int]) -> str:
+def account_jwt(operator: nkey.KeyPair, account: nkey.KeyPair, revocations: Mapping[str, int]) -> str:
     claims = {"type": "account", "version": 2, "limits": ACCOUNT_LIMITS, "default_permissions": {"pub": {}, "sub": {}}}
     if revocations:
         claims["revocations"] = dict(revocations)
-    return nkey.encode_jwt(signer.operator, signer.account.public, ACCOUNT_NAME, claims)
+    return nkey.encode_jwt(operator, account.public, ACCOUNT_NAME, claims)
 
 
 def push(signer: Signer, jwt: str) -> None:
@@ -216,7 +216,9 @@ def push(signer: Signer, jwt: str) -> None:
 
 def revoke(redis: "Redis", signer: Signer, member_id: str) -> str:
     redis.hset(REVOKED, member_user(signer, member_id).public, int(time.time()))
-    jwt = account_jwt(signer, {key: int(value) for key, value in redis.hgetall(REVOKED).items()})
+    jwt = account_jwt(
+        signer.operator, signer.account, {key: int(value) for key, value in redis.hgetall(REVOKED).items()}
+    )
     issuer = nkey.claims(jwt)["iss"]
     if issuer != signer.trusted_operator:
         raise auth.HiveError(

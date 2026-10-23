@@ -76,7 +76,6 @@ def _keys(bao: openbao_kv.OpenBao, url: str) -> dict[str, nkey.KeyPair]:
 
 def trust_values(keys: Mapping[str, nkey.KeyPair]) -> dict:
     operator, system = keys["operator"], keys["system"]
-    signer = nats_grant.Signer(operator, keys["account"], "", "", operator.public)
     operator_claims = {"type": "operator", "version": 2, "system_account": system.public}
     system_claims = {"type": "account", "version": 2, "limits": SYSTEM_LIMITS}
     return {
@@ -86,7 +85,7 @@ def trust_values(keys: Mapping[str, nkey.KeyPair]) -> dict:
                 "system_account": system.public,
                 "resolver_preload": {
                     system.public: nkey.encode_jwt(operator, system.public, SYSTEM_ACCOUNT_NAME, system_claims),
-                    keys["account"].public: nats_grant.account_jwt(signer, {}),
+                    keys["account"].public: nats_grant.account_jwt(operator, keys["account"], {}),
                 },
             }
         }

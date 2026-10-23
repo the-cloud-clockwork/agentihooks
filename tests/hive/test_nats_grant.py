@@ -49,7 +49,7 @@ def signer(tmp_path, request):
         f'jetstream: {{store_dir: "{tmp_path / "js"}"}}\n'
         f'resolver: {{type: full, dir: "{tmp_path / "jwt"}"}}\n'
         f"resolver_preload: {{\n  {system.public}: {system_jwt}\n"
-        f"  {account.public}: {nats_grant.account_jwt(signed, {})}\n}}\n"
+        f"  {account.public}: {nats_grant.account_jwt(operator, account, {})}\n}}\n"
     )
     process = subprocess.Popen(
         [nats_server.binary(), "-c", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -644,7 +644,7 @@ def test_a_role_credential_keeps_the_unrestricted_user_claims():
 @pytest.mark.parametrize("revocations", [{}, {"UA": 7}])
 def test_the_account_jwt_carries_exactly_the_account_claims(revocations):
     signed = _offline_signer()
-    claims = _claims(nats_grant.account_jwt(signed, revocations))
+    claims = _claims(nats_grant.account_jwt(signed.operator, signed.account, revocations))
     assert (claims["iss"], claims["sub"], claims["name"]) == (signed.operator.public, signed.account.public, "SWARM")
     assert claims["nats"] == {
         "type": "account",
