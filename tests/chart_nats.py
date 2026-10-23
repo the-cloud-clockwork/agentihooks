@@ -5,6 +5,8 @@ import yaml
 
 HUB = ["--set", "hub.enabled=true"]
 EXTERNAL = ["--set", "nats.enabled=false", "--set", "hub.bus.url=nats://bus.example:4222"]
+LONG_RELEASE = "swarm-" + "r" * 47
+LONG_NAME = "bus-" + "n" * 16
 
 
 def render(chart: str, release: str, *extra: str) -> subprocess.CompletedProcess:
@@ -52,6 +54,9 @@ def problems(chart: str) -> list[str]:
         *bundled_problems(chart, "nats", "nats"),
         *bundled_problems(chart, "swarm", "swarm-bus", "--set", "nats.nameOverride=bus"),
         *bundled_problems(chart, "swarm", "bus", "--set", "nats.fullnameOverride=bus"),
+        *bundled_problems(
+            chart, LONG_RELEASE, f"{LONG_RELEASE}-{LONG_NAME}"[:63], "--set", f"nats.nameOverride={LONG_NAME}"
+        ),
     ]
     external = render(chart, "swarm", *HUB, *EXTERNAL)
     if external.returncode:
