@@ -102,6 +102,31 @@ def test_lint_setup_python_caches_pip_keyed_on_pyproject():
     (step,) = _setup_python_steps("lint")
     assert step["with"]["cache"] == "pip"
     assert step["with"]["cache-dependency-path"] == "pyproject.toml"
+    assert step["env"]["SEGMENT_DOWNLOAD_TIMEOUT_MINS"] == "1"
+
+
+def _tests_workflow_steps() -> list[dict]:
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
+    actions = {
+        step["uses"].split(".github/actions/")[1] for step in steps if ".github/actions/" in step.get("uses", "")
+    }
+    for action in actions:
+        steps += yaml.safe_load((_ROOT / ".github/actions" / action / "action.yml").read_text())["runs"].get(
+            "steps", []
+        )
+    return steps
+
+
+def test_tests_workflow_cache_restores_bound_download_timeout():
+    restores = [
+        step
+        for step in _tests_workflow_steps()
+        if step.get("uses", "").startswith("actions/cache/restore") and not step.get("with", {}).get("lookup-only")
+    ]
+    assert len(restores) >= 19
+    for step in restores:
+        assert step.get("env", {}).get("SEGMENT_DOWNLOAD_TIMEOUT_MINS") == "1", step.get("name", step["with"]["path"])
 
 
 def test_unit_setup_python_restores_no_pip_cache():
@@ -526,7 +551,11 @@ def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     upload = next(step for step in collect["steps"] if step.get("name") == "Upload the early collection")
     download = next(step for step in jobs["split"]["steps"] if step.get("name") == "Download the early collection")
     assert upload["with"]["if-no-files-found"] == "error"
-    assert download["with"]["name"] == upload["with"]["name"]
+    assert download["with"] == {
+        "name": upload["with"]["name"],
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+    }
     assert "test-count" not in jobs["split"]["needs"]
     adopt = next(step for step in jobs["split"]["steps"] if step.get("name") == "Adopt latest dev durations")
     assert "--collection collected.json" in adopt["run"]
@@ -705,7 +734,11 @@ def test_unit_shards_read_the_suite_the_split_job_collected():
     upload = next(step for step in jobs["split"]["steps"] if step.get("name") == "Upload collected tests")
     _, download = _unit_step_index(lambda s: s.get("name") == "Download the suite the split job collected")
     assert download["uses"] == "./.github/actions/retry-download"
-    assert download["with"] == {"name": upload["with"]["name"]}
+    assert download["with"] == {
+        "name": upload["with"]["name"],
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+    }
     assert download["if"] in (upload["if"], f"needs.split.outputs.source == '' && {upload['if']}")
 
 
@@ -1036,7 +1069,11 @@ def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
     assert upload["with"]["path"].split() == [".test_durations", "durations.sha256"]
     assert upload["with"]["include-hidden-files"] is True
     _, download = _unit_step_index(lambda s: s.get("name") == "Download the durations this run splits on")
-    assert download["with"] == {"name": upload["with"]["name"]}
+    assert download["with"] == {
+        "name": upload["with"]["name"],
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+    }
     _, store = _unit_step_index(lambda s: s.get("name") == "Upload durations")
     assert "durations.sha256" in store["with"]["path"].split()
 

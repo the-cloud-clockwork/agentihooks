@@ -210,6 +210,112 @@ alone do not establish equal mutant grading or a shorter job wall time.
 | A helper caller disappears | Check that its recorded context executes the changed line or fallback unit and the test file still exists; preserve the helper inclusion rule |
 | Statistics time differs from the sum of selected durations | Collection, instrumentation, setup, runner contention and cache reuse also affect wall time; compare the same source, record and duration corpus |
 
+### Line contexts in the dependency manifest
+
+The line rule depends on the dev dependency manifest that the full-scope Tests
+run records. Python 3.12 unit shards run with `--cov-context=test`; the
+`Build the test dependency manifest` step combines their coverage and runs
+`python -m tests.dep_manifest build`. The `dep-manifest` artifact holds
+`manifest.json`, which is also cached under `dep-manifest-<sha>` when Gate
+Required passes. Mutation planning reads that record through the
+`--repository` lookup described above.
+
+| Manifest field | Content |
+|---|---|
+| `version` | `2` |
+| `commit` | The dev commit the coverage was recorded on; drift checks compare the pull request against it |
+| `units` | Every recorded function, method or module unit, as `path::Qualified.name` or `path::<module>` |
+| `tests` | Per test: `units` (indexes into `units`), data `files` it opened, and `escapes` for escape-only child processes |
+| `lines` | Per test: each measured source path and the sorted line numbers that test executed |
+
+Test ids come from the coverage context with its phase suffix after the last
+`|` removed, so setup, call and teardown lines of one test merge into one
+entry. A test executes a line when coverage recorded that line inside the
+test's context; a line reached only during an import in another test's context
+belongs to that other test. A `tests` entry with no `lines` entry is selected
+whenever planning considers it, never dropped.
+
+Download the record a dev run produced and count the tests that execute each
+line of one function. Replace `DEV_RUN_ID` and `EVIDENCE_DIR` with the dev run
+and a task evidence folder:
+
+```bash
+gh run download DEV_RUN_ID --name dep-manifest --dir EVIDENCE_DIR/manifest
+
+jq -r '[.version, .commit, (.tests | length), (.lines | length)] | @tsv' \
+  EVIDENCE_DIR/manifest/manifest.json
+
+jq -r --arg path scripts/swarm/health/verdicts.py \
+  '[.lines[] | .[$path] // [] | .[]] | group_by(.) | map("\(.[0]) \(length)") | .[]' \
+  EVIDENCE_DIR/manifest/manifest.json
+```
+
+List the tests that execute one line, and the tests that have no line context
+and therefore keep their whole file:
+
+```bash
+jq -r --arg path scripts/swarm/health/verdicts.py --argjson line 27 \
+  '.lines | to_entries[] | select(.value[$path] // [] | index($line)) | .key' \
+  EVIDENCE_DIR/manifest/manifest.json
+
+jq -r '[.tests | keys[]] - [.lines | keys[]] | .[]' \
+  EVIDENCE_DIR/manifest/manifest.json
+```
+
+Dev run [39910141570](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39910141570)
+on `cbf887e` recorded 42,974 tests, 42,972 of them with line contexts. In
+`VerdictStore.visible`, 935 tests executed the method's first body line, 194
+reached the loop body, and one,
+`tests/doctor/test_loop.py::test_a_legacy_verdict_adopts_evidence_identity_without_returning_on_new_wording`,
+executed line 27. Under the function rule a change to line 27 selects all 935
+tests; under the line rule it selects that one test, plus any helper caller,
+fallback unit or whole file the conservative rules keep. The two tests without
+line contexts were Postgres ledger tests and keep their whole files.
+
+| Symptom | Check |
+|---|---|
+| `jq` reports `null` for `lines` | The record predates line contexts; selection falls back to function units for every test |
+| A test listed for the line is missing from the selection | Check that its file still exists and is named `test_*.py`; recorded files that are gone or renamed are not added as candidates |
+| A test that never reaches the changed line is selected | It has no line context, it opened a changed data file, or the line falls in an insertion, deletion, import-time change or replaced block the mapping cannot place |
+| The line numbers in `lines` differ from the pull request's | The record is from `commit`; planning maps the pull request's lines back through the diff from that commit before comparing |
+
+### Paired selection proof
+
+The `Mutation line selection proof` workflow
+(`mutation-line-selection-proof.yml`) grades one sample change twice to show
+the narrower selection gives the same verdicts. It checks out the
+[pull request 4473](https://github.com/the-cloud-clockwork/agentihooks/pull/4473)
+merge commit `328ddd3` as the sample, copies the dispatched branch's
+`scripts/ci_mutation`, `tests/dep_manifest.py` and
+`tests/mutation_line_selection_proof.py` over it, and runs
+`python -m tests.mutation_line_selection_proof` in four modes:
+
+| Mode | Result |
+|---|---|
+| `prepare` | Runs the tests import selection picks for the sample's changes with test contexts, builds a manifest, and writes `selection.json` with the function-rule (`before`, the manifest without `lines`) and line-rule (`after`) selections and their stored test seconds. Fails unless `after` costs fewer seconds |
+| `before` | Mutates `scripts/swarm/health/verdicts.py` against the `before` selection and writes `before-verdicts.json` |
+| `after` | The same against the `after` selection; writes `after-verdicts.json` |
+| `verify` | Fails on any mutant whose verdict differs and prints `Identical verdicts for N sample pull request mutants` |
+
+Dispatch it on a branch that carries a selection change and read the result.
+Replace `BRANCH` with the dispatched branch and, after dispatch, `RUN_ID` and
+`EVIDENCE_DIR` with the run and a task evidence folder:
+
+```bash
+gh workflow run mutation-line-selection-proof.yml --ref BRANCH
+
+gh run download RUN_ID --name mutation-line-selection-proof --dir EVIDENCE_DIR/line-proof
+
+jq '{before: .before.seconds, after: .after.seconds,
+     before_entries: (.before.tests | length), after_entries: (.after.tests | length)}' \
+  EVIDENCE_DIR/line-proof/selection.json
+```
+
+The artifact also holds both verdict files and each grading `run.log`, and is
+retained for seven days. Both sides share the sample's source, tests, contexts
+and durations, so the comparison isolates the selection rule; it does not
+measure statistics job wall time on live pull requests.
+
 ### Delivery and measurement limits
 
 [Pull request 4710](https://github.com/the-cloud-clockwork/agentihooks/pull/4710)
@@ -224,7 +330,15 @@ after; 788 recorded tests reached `VerdictStore.visible`. The source request's
 figures, not the delivered replay's result.
 
 The later [pull request 4809](https://github.com/the-cloud-clockwork/agentihooks/pull/4809)
-delivered the current line coverage selection. Its
+delivered the current line coverage selection requested in
+[issue 4792](https://github.com/the-cloud-clockwork/agentihooks/issues/4792).
+Red Proofs runs
+[39251990627](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39251990627)
+(recording and selection regressions) and
+[39253762512](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39253762512)
+(fallback regressions) failed on the old selection; green Proofs run
+[39258209332](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39258209332)
+passed the 86 regression checks. Its
 [paired proof 39258204668](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39258204668)
 reported 530 entries / 373.63 stored test seconds before and 115 entries /
 20.33 seconds after, with all 38 mutation verdicts equal. Both sides used the
@@ -367,6 +481,127 @@ For a new comparison, retain ten runs on each side with ten or fewer selected
 cases, exact revisions, raw job timestamps and the same startup interval.
 Record CPU seconds separately when available; whole job duration and runner
 queue wait measure different intervals.
+
+## Mutation statistics and shard worker sizing
+
+The `mutation-stats` jobs fork one process per statistics bucket, and each
+`mutation` shard passes `--max-children` to mutmut. In CI both counts are now
+capped by the runner container's CPU quota, so a batch runner limited to three
+CPUs on a sixteen core node starts three buckets or three mutmut children
+instead of sixteen.
+
+`worker_count` in `scripts.ci_mutation.selection` takes the CPU count each step
+can see and returns:
+
+| Environment | Worker count |
+|---|---|
+| `CI` set to a non-empty value, finite CPU quota | `max(1, min(CPU count, int(quota)))` |
+| `CI` set to a non-empty value, no finite quota | the CPU count |
+| `CI` unset or empty | `min(CPU count, 2)` |
+
+The quota comes from `quota_cpus` in `scripts.ci_cpu_quota`, the helper the
+unit shards and the Proofs `tests` proof use. It reads every finite cgroup
+v2 `cpu.max` or v1 `cpu.cfs_quota_us` and `cpu.cfs_period_us` limit on the
+process's cgroup path and its parents and keeps the smallest. A fractional
+quota is truncated; a quota below one CPU still gives one worker.
+
+| Step | CPU count read | Further cap |
+|---|---|---|
+| **Collect one stats part for every mutation shard** (`mutation-stats`) | `os.sched_getaffinity(0)` | `stats_shards` makes at most one bucket per test unit, so a selection of two test files never forks more than two buckets |
+| Statistics of a `python -m scripts.ci_mutation` run without `--stats`, collected inline before mutating | `os.sched_getaffinity(0)` | the same `stats_shards` cap |
+| **Mutate changed Python files**, **Mutate dispatched Python files** (`mutation`) and **Mutate the only shard in the statistics job** | `os.cpu_count()` | none |
+
+The branch preflight in `mutation-preflight.yml` runs the same steps in its
+`stats` and `mutation-shard` jobs. `stats_shards` keeps files that share an `xdist_group` in one
+bucket, so the number of buckets can be lower than the worker count. A shard
+given `--stats` reuses the collected parts and forks no buckets.
+
+For example, on a runner with sixteen visible CPUs and a `cpu.max` of
+`300000 100000`:
+
+| Selected test units | Statistics buckets | mutmut `--max-children` |
+|---|---|---|
+| 40 | 3 | 3 |
+| 2 | 2 | 3 |
+
+With a `cpu.max` of `250000 100000` both values for 40 units are 2; with
+`50000 100000` they are 1.
+
+### Configuration
+
+There is no input, flag or environment variable for this worker count. Change
+it by changing the runner's CPU limit or CPU affinity; a CPU request without a
+limit sets no finite cgroup quota, so the step uses every visible CPU. The cap
+does not limit processes a test starts itself.
+
+Local runs, where `CI` is unset, keep the two worker limit from the local
+mutation run. Run the mutation gate in CI, not on the shared host.
+
+### Inspect a run
+
+The selection does not print its worker count. Read the runner's quota and the
+job wall times instead:
+
+```bash
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/attempts/1/jobs?per_page=100" \
+  --jq '.jobs[] | select((.name|startswith("mutation-stats")) or (.name|startswith("mutation ("))) | [.name, .runner_name, .started_at, .completed_at] | @tsv'
+```
+
+To see the quota a runner image exposes, run the same helper the unit shards
+log, in a CI step on that runner label:
+
+```bash
+python -m scripts.ci_cpu_quota
+```
+
+It prints `pytest workers N: cpu quota Q, affinity A` on standard error and the
+count on standard output. `cpu quota None` means no finite limit was found, so
+the mutation steps use every visible CPU.
+
+| Symptom | Check |
+|---|---|
+| Statistics or shards start as many workers as the node has cores | The runner has no finite CPU limit; `cpu quota None` in the helper output confirms it. |
+| Fewer statistics buckets than the quota | The selection has fewer test units, or several files share an `xdist_group`. |
+| One worker on a multi-CPU runner | The quota is below two CPUs, or `CI` is unset or empty and the CPU count is one. |
+| Two workers in a local run | Expected: local runs cap at two. |
+
+### Worker sizing delivery evidence
+
+[Pull request 4979](https://github.com/the-cloud-clockwork/agentihooks/pull/4979)
+merged on 20 October 2026 at 02:48 UTC. Its
+[red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39343122438)
+failed the new quota cases with `--max-children 16`, and the
+[green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39344403807)
+passed `mutation-plan`, `mutation-stats` and `mutation`. The regression
+`test_local_selection_caps_mutation_and_stats_workers` covers sixteen CPUs with
+quotas of 3, 2.5 and 0.5, a request below the quota, no quota and local runs.
+
+Job wall times were read with the source task's sampler: successful first
+attempts of pull request Tests runs, counting only `mutation-stats` jobs whose
+**Collect one stats part for every mutation shard** step succeeded and
+`mutation` jobs whose **Mutate changed Python files** step succeeded, all on
+`anton-oss-batch` runners. Wall time is `completed_at` minus `started_at`, so
+runner queue wait is excluded.
+
+| Sample | Jobs started | Statistics jobs | Shard jobs |
+|---|---|---|---|
+| Before the merge | 19 October 10:26 to 23:11 UTC | 397 jobs, median 199 s, mean 189.9 s, p90 277 s | 263 jobs, median 102 s, mean 170.9 s, p90 399 s |
+| After the merge | 21 October 08:00 to 11:03 UTC | 47 jobs, median 129 s, mean 131.6 s, p90 184 s | 39 jobs, median 121 s, mean 114.0 s, p90 177 s |
+
+The samples are unequal in size and window, the after read was cut short by
+GitHub API errors, and other mutation changes merged between the two windows,
+so the drop cannot be attributed to worker sizing alone. To repeat the
+comparison, sample equal counts of at least ten runs on each side and keep the
+selected test counts comparable:
+
+```bash
+gh api -X GET repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs \
+  -f event=pull_request -f per_page=100 -f created='<start>..<end>' --paginate \
+  --jq '.workflow_runs[].id' | head -n 40
+```
+
+Then read each run's `attempts/1/jobs` with the job query under
+[Inspect a run](#inspect-a-run).
 
 ## Suite speed contracts in the branch preflight
 
@@ -561,7 +796,7 @@ When the estimate still runs far over the **Mutate changed Python files** step t
 
 ### Test durations adjusted for statistics contention
 
-The statistics job forks one bucket per visible CPU onto a runner whose CPU quota is smaller, so buckets wait on each other and every recorded test duration carries that wait. Before pricing, the planner divides each recorded duration by the contention ratio of the statistics it read:
+When a statistics job runs more buckets than its runner's CPU quota, as it did before [statistics and shard worker sizing](#mutation-statistics-and-shard-worker-sizing) or on a runner with no finite quota, buckets wait on each other and every recorded test duration carries that wait. Before pricing, the planner divides each recorded duration by the contention ratio of the statistics it read:
 
 | Input | How the planner reads it |
 |---|---|

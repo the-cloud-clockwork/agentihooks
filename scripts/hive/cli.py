@@ -22,6 +22,8 @@ LOCK_FILE = "hive.lock"
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.hive.nats_grant import Signer
+
 
 def redis_client() -> "Redis":
     from scripts.swarm.store import redis_client as connect
@@ -163,14 +165,18 @@ def _remove(args: argparse.Namespace) -> list[str]:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
     store = RedisStore(redis_client())
     label = args.label or remove.label(store.redis, args.id)
-    plan = remove.Plan(args.id, label, args.path or invite.default_path(label), args.antoncore, args.wait)
+    plan = remove.Plan(args.id, label, args.path or invite.default_path(label), args.antoncore, args.wait, _signer())
     return remove.remove(store, bao, plan, remove.Host())
 
 
 def _retire(args: argparse.Namespace) -> str:
     if args.command == "revoke":
-        auth.revoke(redis_client(), args.id)
-        return f"revoked {args.id}"
+        from scripts.hive import nats_grant
+
+        redis, signer = redis_client(), _signer()
+        bus = [nats_grant.revoke(redis, signer, args.id)] if signer is not None else []
+        auth.revoke(redis, args.id)
+        return "\n".join([*bus, f"revoked {args.id}"])
     if args.command == "drain":
         return _drain(args.wait)
     return "\n".join(_remove(args))
@@ -184,6 +190,12 @@ def _drain(wait_s: int) -> str:
     return remove.settle(RedisStore(redis_client()), hive_id(), wait_s, remove.Host())
 
 
+def _signer() -> "Signer | None":
+    from scripts.hive import nats_grant
+
+    return nats_grant.from_environ(os.environ)
+
+
 def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
@@ -193,7 +205,13 @@ def _serve(args: argparse.Namespace) -> int:
     redis = redis_client()
     auth.regrant(redis)
     httpd = server.make_server(
-        redis, args.redis_url or redis_url(os.environ), args.host, args.port, tls, ledger_ca=ledger_ca.served()
+        redis,
+        args.redis_url or redis_url(os.environ),
+        args.host,
+        args.port,
+        tls,
+        ledger_ca=ledger_ca.served(),
+        signer=_signer(),
     )
     scheme = "https" if tls else "http"
     print(f"hive endpoint on {scheme}://{args.host}:{httpd.server_address[1]}{server.REFRESH_PATH}", flush=True)
@@ -272,15 +290,51 @@ def _list() -> None:
 
     now = now_ms()
     redis = redis_client()
-    for record in registry.hives(redis):
+    hives = registry.hives(redis)
+    reported = {record["id"]: join_report.live(redis, record["id"]) for record in hives}
+    local = _local_agents(redis, {(report["slug"], report["agent"]) for rows in reported.values() for report in rows})
+    for record in hives:
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
         room = headroom.summary(headroom.read(redis, record["id"], now))
         print(
             f"{record['id']}\t{state}\tui={record['ui']}\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}"
         )
-        for report in join_report.live(redis, record["id"]):
+        for report in reported[record["id"]]:
             print("  " + join_report.summary(report))
+        for name in local.pop(record["id"], []):
+            print(f"  {name}\tlocal")
+    for hive, names in local.items():
+        print(f"{hive}\tunregistered")
+        for name in names:
+            print(f"  {name}\tlocal")
+
+
+def _local_agents(redis: "Redis", reported: set[tuple[str, str]]) -> dict[str, list[str]]:
+    from scripts.hive import reports
+    from scripts.swarm import runtime, status
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(redis)
+    candidates = [
+        agents
+        for slug in store.slugs()
+        if (
+            agents := [
+                agent
+                for agent in store.agents(slug)
+                if agent.runtime_backend == "local" and not reports.host(agent) and (slug, agent.name) not in reported
+            ]
+        )
+    ]
+    if not candidates:
+        return {}
+    herdr = runtime.HerdrRuntime()
+    found: dict[str, list[str]] = {}
+    for agents in candidates:
+        for agent in status.live_agents(agents, herdr):
+            found.setdefault(status.agent_hive(agent), []).append(agent.name)
+    return found
 
 
 def _registry(args: argparse.Namespace) -> None:

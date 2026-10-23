@@ -110,7 +110,7 @@ def choose(
     picked = (
         _pick(role, harness, slot, route_kind, repo, first, kind) if first else Wait(f"no live {kind} takes {role}")
     )
-    if isinstance(picked, Choice):
+    if isinstance(picked, Choice) or role != MASTER:
         return picked
     fallback = _pick(role, harness, slot, route_kind, repo, rest)
     return Choice(fallback.hive, picked.reason) if isinstance(fallback, Choice) else picked

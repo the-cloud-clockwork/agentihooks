@@ -40,6 +40,6 @@ jobs:
         run: |
           version="${RELEASE#v}"
           printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          helm dependency build deploy/helm/agentihooks-swarm
+          sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
           helm package deploy/helm/agentihooks-swarm --version "$version" --app-version "$version" --destination "$RUNNER_TEMP/chart"
           helm push "$RUNNER_TEMP/chart/agentihooks-swarm-$version.tgz" "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"

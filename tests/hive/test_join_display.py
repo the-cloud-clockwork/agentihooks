@@ -34,6 +34,15 @@ def running(store, seat, hive):
     return replace(agent, hive=hive)
 
 
+def local(store, seat, **fields):
+    from scripts.swarm.store import AgentRecord
+
+    agent = AgentRecord(store.next_name("sw", "eng"), "eng", seat, seat=f"{seat}@sw", **fields)
+    agent = store.start_execution("sw", agent)
+    store.put_agent("sw", agent)
+    return agent
+
+
 def checks(**misses):
     from scripts.hive import join_report
 
@@ -97,3 +106,69 @@ def test_hive_list_leaves_out_a_report_from_an_earlier_generation(store, capsys)
     join_report.start(store.redis, "sw", replace(agent, generation=agent.generation - 1), "old", checks(), {}, 900)
     cli._list()
     assert rows(capsys) == []
+
+
+class Herdr:
+    def __init__(self, names):
+        self.names = names
+
+    def live_names(self):
+        return self.names
+
+
+def listed_by_hive(out):
+    hive, found = "", {}
+    for line in out.splitlines():
+        if line.startswith("  "):
+            found.setdefault(hive, []).append(line.split("\t")[0].strip())
+        else:
+            hive = line.split("\t")[0]
+    return found
+
+
+def test_hive_list_shows_the_local_agents_swarm_status_places_on_this_hive(store, capsys, monkeypatch):
+    from scripts.hive import cli
+    from scripts.swarm import commands, runtime, status
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "worker")
+    claude = [local(store, f"eng-{n}") for n in range(2)]
+    codex = local(store, "eng-2", hive="worker", runtime_target={"pid": 1})
+    local(store, "eng-3")
+    live = Herdr({agent.name for agent in (*claude, codex)})
+    monkeypatch.setattr(runtime, "HerdrRuntime", lambda: live)
+    cli._list()
+    listed = listed_by_hive(capsys.readouterr().out)
+    placed = {a["name"]: a["hive"] for a in status.status_report(store, "sw", {"tasks": []}, runtime=live)["agents"]}
+    names = sorted(agent.name for agent in (*claude, codex))
+    assert placed == dict.fromkeys(names, "worker")
+    assert listed == {"worker": names}
+
+
+def test_hive_list_lists_each_live_local_agent_once_and_only_on_its_own_hive(store, capsys, monkeypatch):
+    from scripts.hive import cli, join_report
+    from scripts.swarm import commands, runtime, status
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "worker")
+    plain = local(store, "eng-0")
+    finished = local(store, "eng-1", state="finished")
+    remote = local(store, "eng-2", runtime_target={"host_id": "old"})
+    pod = local(
+        store, "eng-3", runtime_backend="kubernetes", runtime_target={"pod_namespace": "swarm", "pod_name": "eng-3"}
+    )
+    moved = local(store, "eng-4", hive="elsewhere")
+    local(store, "eng-5")
+    reported = running(store, "eng-9", "worker")
+    join_report.start(store.redis, "sw", reported, "session", checks(), {}, 1000)
+    live = Herdr({agent.name for agent in (plain, finished, remote, pod, moved, reported)})
+    monkeypatch.setattr(runtime, "HerdrRuntime", lambda: live)
+    cli._list()
+    out = capsys.readouterr().out
+    listed = listed_by_hive(out)
+    assert listed == {"worker": [reported.name, plain.name, finished.name], "elsewhere": [moved.name]}
+    assert [line for line in out.splitlines() if line.endswith("\tunregistered")] == ["elsewhere\tunregistered"]
+    assert [status.agent_hive(agent) for agent in (plain, remote, pod)] == ["worker", "old", ""]
+    placed = {}
+    for row in status.status_report(store, "sw", {"tasks": []}, runtime=live)["agents"]:
+        if row["name"] not in (remote.name, pod.name):
+            placed.setdefault(row["hive"], set()).add(row["name"])
+    assert placed == {hive: set(names) for hive, names in listed.items()}

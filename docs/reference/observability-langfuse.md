@@ -772,12 +772,13 @@ in git and let CI deploy it; an edited Pod is replaced on the next rollout.
 ### Findings
 
 A row breaches when an agent with at least 10 observations has an error rate
-over 0.2, or an agent with at least 3 turns has a turn latency p95 over ten
-minutes. Breaches are grouped by the agent's account into one standing
+over 0.2. Turn latency is not judged: a turn runs from one prompt to the
+agent's stop, so its length is the agent's working time, tool calls and CI
+waits included, and routinely passes ten minutes on a healthy swarm. Breaches
+are grouped by the agent's account into one standing
 `langfuse_account_<account>` finding, which names each agent, task, value and
 threshold. After a successful read, a finding clears when its account no
-longer breaches, except an account whose agents had enough turns but no latency
-figure, which keeps its finding until a read can judge it. The tick prints
+longer breaches. The tick prints
 `Langfuse summary read: <n> breaching accounts`; `swarm tick` prefixes each
 line with the swarm slug, as in `<slug>: Langfuse summary read: ...`.
 

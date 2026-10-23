@@ -266,7 +266,7 @@ The required gate accepts a skipped `helm-kind` when `due=false`. It still check
 
 The `helm-kind` entry in `.github/input-keys.json` is the declaration to maintain when the chart proof gains an input. It covers:
 
-- The whole `deploy/helm/agentihooks-swarm` chart, including its CI fixtures, and `.github/workflows/helm-kind.yml`.
+- The whole `deploy/helm/agentihooks-swarm` chart, including its CI fixtures and the pinned NATS archive, its digest file `deploy/helm/agentihooks-swarm-deps.sha256`, and `.github/workflows/helm-kind.yml`.
 - Swarm image inputs: `Dockerfile`, `.dockerignore`, `pyproject.toml`, `README.md`, `docker/swarm/requirements.lock`, `docker/swarm-node`, `hooks`, `scripts`, `profiles` and `media`.
 - Proof schemas and fixtures: `docs/swarm-v2/schemas`, `tests/fixtures/swarm_v2`, `tests/kind_request.py` and the five `tests/chart_*.py` helpers named in the declaration (`chart_hive_join`, `chart_network`, `chart_redis`, `chart_secrets`, `chart_workers`).
 - Tool labels `kind v0.33.0` and `kindest/node v1.37.0`. Keep these aligned with `KIND_VERSION` and `KIND_NODE_IMAGE` in the Helm workflow; the workflow itself is also a declared input, including the pinned node image digest.
@@ -480,6 +480,62 @@ gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused"
 
 `shard-check`'s step summary prints `Python 3.12: ran <n>, reused <m> from <dev run>, flaky <k>`.
 
+### Shard summary
+
+`shard-check`'s step `Summarize reused, ran and flaky tests` runs `python -m tests.shard_summary` from the base checkout on every `shard-check` leg except pull requests into `main`, and appends its lines to the job log and the step summary. It runs unless the run is cancelled, so it also prints when an earlier `shard-check` step failed.
+
+```bash
+python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \
+  --collected collected-data/collected.json --plan reused-plan/reused-tests.json --flakes shard-flakes/*/flakes.jsonl
+```
+
+| Option | Input |
+|---|---|
+| `--version` | The Python version named on the first line. |
+| `--durations` | Each unit shard's `durations.json`, downloaded from the `durations-<python>-<shard>` artifacts. A test's keys count once per shard, with a trailing `@<worker>` suffix removed. |
+| `--collected` | The head's collected test identifiers. |
+| `--plan` | The test plan from `split`. The workflow downloads `reused-tests-<python>` only when `unit` reports at least one reused test; a missing file means no plan. |
+| `--flakes` | Each shard's `flakes.jsonl`. Missing files are skipped. |
+
+The first line always prints:
+
+```text
+Python 3.12: ran <n>, reused <m> from dev run <run id>, flaky <k>
+```
+
+| Field | Counted as |
+|---|---|
+| `ran` | Distinct test identifiers across every shard's durations. |
+| `reused` | Planned tests that the head also collected, minus every planned test that ran in any shard. |
+| `from` | `dev run <run id>` from the plan's `run` field, or `no plan` with `reused 0`. |
+| `flaky` | Records whose `outcome` is `flaky` across every flake report. |
+
+A shard **fell back** when its durations include at least one planned test, that is, it ran tests the plan told it to reuse. Each such shard adds one line, named by its artifact folder, with every test it ran and no reuse:
+
+```text
+Python 3.12: ran 4, reused 2 from dev run 77, flaky 0
+durations-3.12-2 fell back: ran 3, reused 0
+```
+
+In this example six tests were collected and the plan reused four of them. Shard 1 ran one unplanned test. Shard 2 ran one unplanned test and two planned ones, so those two leave the reused count and shard 2 is named with its three tests. Shards that ran only unplanned tests print no line and report as before. When every shard falls back, `reused` is 0 and every shard is named.
+
+Before [pull request 4987](https://github.com/the-cloud-clockwork/agentihooks/pull/4987) ([#4986](https://github.com/the-cloud-clockwork/agentihooks/issues/4986)) the step was inline `jq`. It counted every planned test the head collected as reused, so a shard that fell back still reported its planned tests as reused, and the summary named no shard. Red: Tests run [39345863084](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39345863084) on the tests alone failed `test_a_shard_that_fell_back_reports_zero_reused_and_its_full_run` in unit (3.11, 11) and `test_every_shard_falling_back_reuses_nothing` in unit (3.11, 7), while the reuse cases passed. Green: Tests run [39346800053](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39346800053) passed.
+
+A shard that runs a planned test also fails `Check every collected test ran in exactly one shard`, which lists each such test as `<test> ran 1 times though reused`. The summary names the shards behind that failure. Since [pull request 5245](https://github.com/the-cloud-clockwork/agentihooks/pull/5245) an unusable dev coverage database fails the shard instead of running its reused tests (see [Unusable coverage databases](#unusable-coverage-databases)), so a fell back line now comes from a shard that ran without its plan, such as a dispatch whose grader predates that change.
+
+Read the lines on a run:
+
+```bash
+RUN="<tests run id>"
+gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused|fell back: ran"
+```
+
+| Symptom | Read | Action |
+|---|---|---|
+| A `fell back` line names a shard | That shard's `Keep the reused tests' dev coverage` and `Run tests` steps | Find why the shard ran without `reused.json`; with a dispatch, merge `origin/dev` into the branch and dispatch again |
+| `reused 0 from no plan` on a run that should reuse | The `split` plan step and the `unit` job's `reused` output | The planner found no record or the run was narrowed; see [When a pull request run reuses tests](#when-a-pull-request-run-reuses-tests) |
+| The step prints `No module named tests.shard_summary` | The base checkout `shard-check` runs from | The base predates pull request 4987. The runner starts the step with `bash -e`, without `pipefail`, so the pipe into `tee` keeps it green; Tests run [39346800053](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39346800053) printed this line on both legs and passed. The summary appears once the base has the module |
+
 ### Proof and evidence gap
 
 - Prototype on dev run [39014881228](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39014881228), shard 1: with every test reused the filtered data kept arcs identical to the dev shard; filter and remap took 0.1 to 0.9 s. Each shard's coverage file is about 50 MB with per test contexts.
@@ -494,6 +550,91 @@ gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused"
 - A page capture with no test is kept whenever any test is reused, so it can carry coverage from tests that ran on the dev record but run again here.
 - The download of the dev shard's coverage has no fallback: if the artifact cannot be downloaded, the shard fails instead of running every test. An unusable downloaded database also fails the shard; see [Unusable coverage databases](#unusable-coverage-databases).
 - A dev record whose coverage artifacts expired, after 7 days, is never chosen, so a quiet dev plans no reuse until its next push.
+
+## A crashed xdist worker and coverage data
+
+A unit shard runs its tests on pytest-xdist workers with pytest-cov measuring each worker. When one worker crashes, xdist starts a replacement. The replacement leaves the other workers' coverage data files in place, so the crash costs the test that was running on the crashed worker and nothing else. Before [pull request 5034](https://github.com/the-cloud-clockwork/agentihooks/pull/5034) ([#5023](https://github.com/the-cloud-clockwork/agentihooks/issues/5023)), the replacement deleted those files and every later test on the other workers errored.
+
+### Cause
+
+xdist starts every worker with the controller's command line, `-n` included. pytest-cov reads `-n` as a distributed run and starts a `DistMaster` controller inside the worker as well. `DistMaster.start` calls `cov.erase()` unless `--cov-append` is set, and with `parallel` data `erase` removes every `.coverage.*` file next to the data file. At session start every worker does this before any test has written data, so nothing is lost. A replacement worker starts mid run and removes the data files of the workers that are still running. Each of those workers then fails its next coverage write with `no such table: context`, and every later test on it errors.
+
+The case that started the investigation was dev push Tests run [39316644629](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39316644629), unit (3.12, 4), job [118282774339](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39316644629/job/118282774339):
+
+```text
+2026-10-19T20:16:20.2074431Z Timeout (0:01:00)!
+2026-10-19T20:16:21.0419070Z [gw2] node down: Not properly terminated
+2026-10-19T20:16:21.0424783Z replacing crashed worker gw2
+...
+INTERNALERROR> E   coverage.exceptions.DataError: Couldn't use data file '/home/runner/_work/agentihooks/agentihooks/.coverage.anton-oss-xstf7-runner-xvwwh.pid412.XboGAMjx': no such table: context
+==== 2392 passed, 2 warnings, 1208 errors, 2419 rerun in 508.32s (0:08:28) =====
+```
+
+One worker timeout cost 1208 errors and an `INTERNALERROR` on the shard.
+
+Proofs run [39352981080](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39352981080) showed which code removes the files. A probe crashed one worker on purpose with a Python audit hook recording every `os.remove`. In each variant the replacement worker's stack went through `self.start(engine.DistMaster)`, then `self.cov.erase()`, then coverage's `sqldata.erase`, then `os.remove`, removing another worker's `.coverage.<host>.pid<n>.<suffix>` file.
+
+### The fix
+
+`tests/browser_coverage.py` implements `pytest_load_initial_conftests` as a wrapper hook. When `PYTEST_XDIST_WORKER` is set, which xdist does only in a worker, it sets `early_config.known_args_namespace.cov_append = True` before pytest-cov reads its options. A worker's pytest-cov then skips `cov.erase()`. The controller has no `PYTEST_XDIST_WORKER`, so it still erases old data once at the start of the run, and a fresh run never mixes in data left by an earlier one.
+
+The plugin is loaded with `-p tests.browser_coverage`. The 3.12 legs of the `unit` and `unit-selected` jobs in `.github/workflows/test.yml` pass it in `PYTEST_ADDOPTS` beside the `--cov` options:
+
+{% raw %}
+```yaml
+PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini --cov-context=test -p tests.browser_coverage -p tests.dep_inputs', github.workspace) || '-p no:pytest_cov' }}
+```
+{% endraw %}
+
+The other Python versions run with `-p no:pytest_cov` and write no coverage data, so they never had the problem. The worker branch needs no setting and works without `JS_COVERAGE_DIR`; the rest of the plugin, the JavaScript page capture, stays idle unless `JS_COVERAGE_DIR` is set. Any pytest run that measures coverage under xdist gets the same protection when it adds `-p tests.browser_coverage`:
+
+```bash
+python -m pytest tests/some_test.py -n 4 --dist loadgroup \
+  --cov=hooks --cov=scripts --cov-report= --cov-context=test \
+  -p tests.browser_coverage
+```
+
+A crash still fails the crashing test, and with `--reruns` that test is rerun on the replacement worker. The other workers keep their data, so the shard's coverage report still includes the tests they ran.
+
+### The crash probe test
+
+`tests/test_xdist_coverage_crash.py::test_a_replacement_worker_keeps_the_live_workers_coverage_data` writes a small project to a temporary folder and runs a nested pytest in it with three workers, `--dist loadgroup`, `-p tests.browser_coverage`, `--cov=.` and `--cov-context=test`. Its `test_crash` calls `os._exit(1)` the first time it runs, and 60 `test_ok` cases each sleep 0.3 seconds so the other workers are still running when the replacement starts. The test requires:
+
+- `replacing crashed worker` in the output, so a worker really was replaced;
+- no `ERROR` result line from any worker;
+- all 60 `test_ok` cases `PASSED`;
+- exactly one `FAILED` line, for `test_cases.py::test_crash`.
+
+The nested run strips `COV_CORE_*`, `COVERAGE_*` and `PYTEST_*` from its environment so the outer shard's coverage and xdist settings do not leak into it, and it is killed after 120 seconds.
+
+The same file also holds `test_a_run_whose_last_test_crashes_its_worker_ends`, from [pull request 5061](https://github.com/the-cloud-clockwork/agentihooks/pull/5061). It covers a different failure: a run whose last test crashes its worker never ends under xdist's plain scheduler. It also checks that every `test_ok` case still has its coverage context in the combined `.coverage`, which only holds while workers keep each other's data.
+
+Run the probe test on a branch through the Proofs workflow; tests do not run on this machine:
+
+```bash
+gh workflow run proofs.yml --ref "<branch>" -f proof=tests -f tests='tests/test_xdist_coverage_crash.py'
+```
+
+### Measured result
+
+The number moved is the errors one deliberately crashed worker causes in the probe.
+
+| Run | Code | Result |
+|---|---|---|
+| [39316644629](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39316644629) | dev push, before the fix | one worker timeout, 1208 errors on unit (3.12, 4) |
+| [39356878790](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39356878790) | probe test without the fix | nested run `1 failed, 2 passed, 117 errors`, probe test red |
+| [39356881427](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39356881427) | probe test with the fix | probe test passed: no errors, 60 of 60 `test_ok` passed, only `test_crash` failed |
+
+Only 2 of the 60 `test_ok` cases passed in the nested run without the fix.
+
+### Troubleshooting
+
+| Symptom | Read | Action |
+|---|---|---|
+| After `replacing crashed worker gwN`, many tests on other workers error, and the log shows `no such table: context` or `Couldn't use data file '.coverage.…'` | The job's `PYTEST_ADDOPTS` | The run measures coverage under xdist without `-p tests.browser_coverage`. Add it next to the `--cov` options. |
+| The same errors with `-p tests.browser_coverage` loaded | `pytest_load_initial_conftests` in `tests/browser_coverage.py`, and whether the run sets `PYTEST_XDIST_WORKER` itself | A run that exports `PYTEST_XDIST_WORKER` in the controller makes it skip its own start up erase. Remove it from the environment. |
+| A shard ends with `node down: Not properly terminated` and one failed or rerun test, other workers green | The crashed test's output before the `node down` line | Expected: the crash cost one test. Fix the crashing test. |
+| A shard never finishes after a crash on its last test | [Pull request 5061](https://github.com/the-cloud-clockwork/agentihooks/pull/5061) | Load `-p tests.flake_ledger`, whose scheduler drains the empty units a crashed worker leaves. |
 
 ## Retried duration uploads
 

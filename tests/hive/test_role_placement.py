@@ -418,11 +418,11 @@ def test_a_fleet_without_a_ui_hive_keeps_the_plain_reason():
     )
 
 
-def test_ui_roles_prefer_ui_hives_and_fall_back_to_a_headless_hive_that_allows_them():
+def test_ui_roles_prefer_ui_hives_and_never_fall_back_to_a_headless_hive():
     hives = [host("ws", "yes", agents=3), host("anton", "no", excluded=[])]
     for role in ("qa", "frontend", "master"):
         assert choose(role, "claude", "acct", "subscription", REPO, hives, NOW) == Choice("ws")
     beside_a_master_pc = [host("pc", "yes", excluded=["qa", "frontend", "eng", "ci", "plan", "dispatch"]), hives[1]]
-    assert choose("qa", "claude", "acct", "subscription", REPO, beside_a_master_pc, NOW) == Choice(
-        "anton", "no live UI hive takes qa"
+    assert choose("qa", "claude", "acct", "subscription", REPO, beside_a_master_pc, NOW) == Wait(
+        "no live UI hive takes qa"
     )

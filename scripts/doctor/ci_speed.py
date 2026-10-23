@@ -11,6 +11,7 @@ COUNTED = {"success", "failure"}
 SHORT_WAIT_MS = 300000
 WALL_MS = 900000
 UNCONFIRMED_WAIT_MS = SHORT_WAIT_MS + 600000
+GROWTH_MARGIN = 0.2
 JOB_FIELDS = ("id", "name", "status", "conclusion", "labels", "created_at", "started_at", "completed_at", "runner_name")
 SUMMARIES = {
     "ci runner wait": "{text} runners waited up to {minutes} minutes for {count} jobs",
@@ -277,9 +278,7 @@ def _covered(finding, identity, verdict):
     kind, _, subject = identity.partition("/")
     if kind != finding.kind.replace(" ", "-") or scope_of(subject) != scope_of(finding.subject):
         return False
-    identity = verdict.get("evidence_identity")
-    members = identity[:-1] if identity is not None else verdict["evidence"][0].rpartition(", runs ")[2].split(", ")
-    return finding.evidence_identity[-1] <= verdict["measure"] and set(finding.evidence_identity[:-1]).issubset(members)
+    return finding.evidence_identity[-1] <= verdict["measure"] * (1 + GROWTH_MARGIN)
 
 
 def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int) -> list[Finding]:
@@ -297,6 +296,7 @@ def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int)
 
 def notice_key(finding: Finding, records: dict) -> str:
     prior = records.get(finding.id)
-    if finding.evidence_identity is None or prior is None or not json.loads(prior)["verdict"]:
+    verdict = json.loads(prior)["verdict"] if prior is not None else None
+    if finding.evidence_identity is None or not verdict:
         return finding.id
-    return json.dumps([finding.id, finding.evidence_identity])
+    return json.dumps([finding.id, verdict["at"]])

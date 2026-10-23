@@ -705,3 +705,10 @@ class TestProcEnvironReads:
     @pytest.mark.parametrize("path", ["docs/environ", "proc/1/environ", "/X/proc/1/environ"])
     def test_read_tool_on_an_environ_file_elsewhere_passes(self, path):
         assert decide({"tool_name": "Read", "tool_input": {"file_path": path}}) is None
+
+    def test_grep_tool_on_proc_environ_is_refused(self):
+        verdict = decide({"tool_name": "Grep", "tool_input": {"pattern": "REDIS", "path": "/proc/1/environ"}})
+        assert verdict is not None
+        assert verdict.splitlines()[0] == "BLOCKED: searching the contents of /proc/1/environ."
+        assert 'test -n "${VAR:-}"' in verdict
+        assert ENV_NAMES_SAFE in verdict

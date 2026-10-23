@@ -128,7 +128,7 @@ def test_serve_hands_the_join_service_the_ledger_ca_it_trusts(admin, monkeypatch
 
     assert cli.main(["serve", "--redis-url", "redis://public:6379/0"]) == 0
 
-    assert calls == [((admin, "redis://public:6379/0", "127.0.0.1", 8770, None), {"ledger_ca": pem})]
+    assert calls == [((admin, "redis://public:6379/0", "127.0.0.1", 8770, None), {"ledger_ca": pem, "signer": None})]
 
 
 def test_a_master_from_a_freshly_added_hive_passes_its_ledger_join(admin, cert, pem, tls_ledger, tmp_path, monkeypatch):

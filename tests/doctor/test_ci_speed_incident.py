@@ -191,16 +191,17 @@ def test_judged_runs_do_not_notify_again_in_the_next_window(store, monkeypatch):
     [
         ({}, False),
         ({"evidence_identity": ("1", 899), "measure": 899}, False),
-        ({"evidence_identity": ("1", "2", "3", 900)}, True),
-        ({"evidence_identity": ("1", "2 attempt 2", 900)}, True),
+        ({"evidence_identity": ("1", "2", "3", 900)}, False),
+        ({"evidence_identity": ("1", "2 attempt 2", 900)}, False),
         ({"measure": 901}, False),
-        ({"evidence_identity": ("1", "2", 901)}, True),
+        ({"evidence_identity": ("1", "2", 1080)}, False),
+        ({"evidence_identity": ("1", "2", 1081)}, True),
         ({"subject": "200-pull_request"}, True),
         ({"kind": "ci queue age unconfirmed"}, True),
         ({"elapsed": 60000}, True),
     ],
 )
-def test_grouped_speed_return_uses_the_judged_members_and_measure(store, change, expected, legacy, kind, scope):  # noqa: F811
+def test_grouped_speed_return_uses_the_judged_scope_and_measure(store, change, expected, legacy, kind, scope):  # noqa: F811
     from dataclasses import replace
 
     from scripts.swarm.health.findings import Finding
@@ -231,7 +232,7 @@ def test_grouped_speed_return_uses_the_judged_members_and_measure(store, change,
 
 
 @pytest.mark.parametrize("change", ["new run", "worse wait"])
-def test_judged_group_delivers_new_evidence_once_within_the_same_window(store, monkeypatch, change):  # noqa: F811
+def test_judged_group_sends_nothing_for_new_evidence_inside_its_range(store, monkeypatch, change):  # noqa: F811
     status(monkeypatch)
     run = waiting(1, "2026-10-19T16:40:00Z")
     run["jobs"][0].update(
@@ -257,14 +258,10 @@ def test_judged_group_delivers_new_evidence_once_within_the_same_window(store, m
         run["jobs"][0]["created_at"] = "2026-10-19T16:39:59Z"
     loop.speed(store, DOCTOR, WATCHED, AFTER + 60000)
     loop.speed(store, DOCTOR, WATCHED, AFTER + 120000)
-    for texts in items(store).values():
-        assert len(texts) == 2
-        assert "ci-runner-wait/" in texts[1]
     records.append({**run, "id": 3})
     loop.speed(store, DOCTOR, WATCHED, AFTER + 180000)
     for texts in items(store).values():
-        assert len(texts) == 3
-        assert "runs 1, 2, 3" in texts[2] if change == "new run" else "runs 1, 3" in texts[2]
+        assert len(texts) == 1
 
 
 def test_a_status_page_read_failure_never_holds_findings(store, monkeypatch):  # noqa: F811

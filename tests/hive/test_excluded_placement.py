@@ -130,10 +130,10 @@ def test_a_master_lands_on_a_headed_hive_beside_a_headless_one():
     assert placement.place_master("claude", "", REPO, hives, NOW).hive == "workstation"
 
 
-def test_a_ui_role_falls_back_to_a_headless_hive_when_no_headed_hive_is_live():
+def test_a_ui_role_waits_instead_of_a_headless_hive_when_no_headed_hive_is_live():
     hives = [headless(heartbeat_at=NOW)]
-    assert placement.choose("qa", "claude", "acct", "subscription", REPO, hives, NOW) == placement.Choice(
-        "anton", "no live UI hive takes qa"
+    assert placement.choose("qa", "claude", "acct", "subscription", REPO, hives, NOW) == placement.Wait(
+        "no live UI hive takes qa"
     )
 
 
@@ -156,7 +156,7 @@ def test_a_hive_never_takes_an_agent_past_max_agents():
     [
         ("eng", "frontend", ["frontend"], "no live hive takes frontend"),
         ("eng", "engineer", ["eng"], "no live hive takes eng"),
-        ("eng", "frontend", [], "remote"),
+        ("eng", "frontend", [], "no live UI hive takes frontend"),
         ("ci", "cicd", ["master"], "remote"),
         ("eng", "planner", ["plan"], "no live hive takes plan"),
         ("eng", "planner", ["eng"], "no live hive takes plan"),

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.hive import auth, machine, registry
+from scripts.hive import auth, machine, nats_grant, registry
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -37,6 +37,7 @@ class Plan:
     bao_path: str
     antoncore: Path | None = None
     wait_s: int = 3600
+    signer: "nats_grant.Signer | None" = None
 
 
 @dataclass(frozen=True)
@@ -101,11 +102,12 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
     return f"hive {hive} drained: no agents running"
 
 
-def revoke(redis: "Redis", hive: str) -> list[str]:
+def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None) -> list[str]:
+    bus = [nats_grant.revoke(redis, signer, hive)] if signer is not None else []
     if not redis.exists(member_key(hive)):
-        return [f"{hive} holds no member credential"]
+        return [*bus, f"{hive} holds no member credential"]
     auth.revoke(redis, hive)
-    return [f"revoked member {hive} and its Redis user"]
+    return [*bus, f"revoked member {hive} and its Redis user"]
 
 
 def forget(redis: "Redis", hive: str) -> list[str]:
@@ -137,7 +139,7 @@ def unmanifest(checkout: Path | None, name: str, run: Callable[..., subprocess.C
 def remove(store: "RedisStore", bao: openbao_kv.OpenBao, plan: Plan, host: Host) -> list[str]:
     return [
         *drain(store, plan, host),
-        *revoke(store.redis, plan.hive),
+        *revoke(store.redis, plan.hive, plan.signer),
         *machine.forget(plan.label, host.known_hosts, host.run),
         *forget(store.redis, plan.hive),
         *unbank(bao, plan.bao_path),

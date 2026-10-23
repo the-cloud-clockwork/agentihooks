@@ -761,7 +761,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
 | `agentihooks swarm <id> send-message TEXT` | Message to every live agent's inbox; never posts to chat. |
-| `agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]` | The master or the operator judges a health finding: `false-positive`, `early-real`, `established`, `insufficient-evidence` or `resolved`. The finding hides for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60); after that it shows again, with its earlier verdict attached, only when its measure is above the measure recorded at the verdict. A standing `bottleneck-stage/<stage>` finding measures the stage's latest value in the unit of the writer that owns it, not how many times it fired: task hours for the stage detector, task hours in the window for Grafana alerts, minutes from push to `Gate Required` for the ci budget pass, which counts pull request Tests runs over fifteen minutes, and for a `bottleneck-stage/langfuse_account_<account>` finding the highest value to threshold ratio across that account's error rate and turn latency p95 breaches. A stage that keeps firing while its value holds or falls stays hidden after its verdict and returns once the value rises past the one judged. For example, `bottleneck-stage/merge_queue` judged `established` at 1.5 task hours stays hidden when it fires again at 1.2 and returns when it fires at 2.0. The `Fired N times` evidence line on the finding counts firings and never brings it back. Over monitoring fires past `AGENTIHOOKS_HEALTH_WATCH_MIN` (20) watch calls since the agent's last action and over `AGENTIHOOKS_HEALTH_WATCH_RATIO` (5) per action; the master, whose job is mostly watching, gets `AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN` (60) and `AGENTIHOOKS_HEALTH_MASTER_WATCH_RATIO` (15). Working on drain fires when a working agent that is not idle stays on an account the quota capacity decision marks closed, or one at or under `AGENTIHOOKS_HEALTH_DRAIN_LEFT` (10) percent routing left, the quota balancer's drain line where the tick may still place work, over `AGENTIHOOKS_HEALTH_DRAIN_MINUTES` (10) after its early quota handoff warning. The `watch` gate (`python -m scripts.gates watch`) refuses the watch call that would cross the same limits, so this finding means the gate leaked; a ledger watch re-arm with no live watcher always passes. |
+| `agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]` | The master or the operator judges a health finding: `false-positive`, `early-real`, `established`, `insufficient-evidence` or `resolved`. The finding hides for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60); after that it shows again, with its earlier verdict attached, only when its measure is above the measure recorded at the verdict. A standing `bottleneck-stage/<stage>` finding measures the stage's latest value in the unit of the writer that owns it, not how many times it fired: task hours for the stage detector, task hours in the window for Grafana alerts, minutes from push to `Gate Required` for the ci budget pass, which counts pull request Tests runs over fifteen minutes, and for a `bottleneck-stage/langfuse_account_<account>` finding the highest value to threshold ratio across that account's error rate breaches. A stage that keeps firing while its value holds or falls stays hidden after its verdict and returns once the value rises past the one judged. For example, `bottleneck-stage/merge_queue` judged `established` at 1.5 task hours stays hidden when it fires again at 1.2 and returns when it fires at 2.0. The `Fired N times` evidence line on the finding counts firings and never brings it back. Over monitoring fires past `AGENTIHOOKS_HEALTH_WATCH_MIN` (20) watch calls since the agent's last action and over `AGENTIHOOKS_HEALTH_WATCH_RATIO` (5) per action; the master, whose job is mostly watching, gets `AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN` (60) and `AGENTIHOOKS_HEALTH_MASTER_WATCH_RATIO` (15). Working on drain fires when a working agent that is not idle stays on an account the quota capacity decision marks closed, or one at or under `AGENTIHOOKS_HEALTH_DRAIN_LEFT` (10) percent routing left, the quota balancer's drain line where the tick may still place work, over `AGENTIHOOKS_HEALTH_DRAIN_MINUTES` (10) after its early quota handoff warning. The `watch` gate (`python -m scripts.gates watch`) refuses the watch call that would cross the same limits, so this finding means the gate leaked; a ledger watch re-arm with no live watcher always passes. |
 | `swarm tick` Grafana alerts | See [Grafana bottleneck alerts](../reference/grafana-bottleneck-alerts.md) for setup, an example and troubleshooting. Each scheduled tick reads the swarm bottleneck alert state history from Grafana through the gateway Grafana tools, with the gateway key in `MCP_KEY_GATEWAY` at the gateway endpoint in `LANGFUSE_MCP_URL`, the same encrypted path the [Langfuse summary pass](../reference/observability-langfuse.md#the-swarm-langfuse-summary-pass) uses; with either unset it reads nothing. It asks `grafana-get_annotations` for the alert state annotations of the last day, at most 1000, bounded at ten seconds; a failed read changes nothing. Nothing listens for Grafana pushes: the swarm timer install disables and deletes the old `agentihooks-alert-intake` user service. For each known `stage` on a `swarm=bottleneck` alert whose `ledger` label names this ledger, the latest transition decides: `Alerting` with a `threshold_hours` label and an `hours` value keeps one standing `bottleneck-stage/<stage>` health finding, its hours from that transition and each new firing, keyed by its time, counted once; `Normal` clears the finding its alert raised, never one in another unit; any other state changes nothing. Only the labels inside the braces and the `hours` value are read, never the alert text. The ci budget pass alone owns the `ci_overrun` finding, which the alert read ignores: it updates that finding for each Tests run over fifteen minutes instead of adding a follow up per run. A standing finding not updated for six hours stops showing. The rules live in antoncore's Grafana provisioning. Build, ci run and launch are productive work: the alert read ignores their alerts and the stage detector never raises a finding for them, though status still ranks them. The detector opens a finding only when a stage's task hours in its window pass that stage's threshold in `stage_detector.THRESHOLD_HOURS` (seat wait and review 4, quota and host hold 2, merge queue, intent fix and ci queue 1, ci overrun and launch failure 0.25). A task's claim wait starts at the latest event that made it claimable: its add, reopen or return to scope, the unfreeze or focus that admits it, its phase opening, or a dependency done. It is split into `seat_wait`, ready while every seat of its lane was busy, counting at most as many waiting tasks as the lane has seats in ready order, and `queue_wait`, every other ready instant, which raises no finding. The detector clears a finding it opened once the stage falls back under it; an alert's finding is left to its alert. Each tick, every standing stage finding over a nonzero threshold runs its remedy once per four hour window. At `delegate` or `full`, `seat_wait` moves one seat from the ci lane to the eng lane under the lane split's caps, `launch_failure` moves the first eng or ci lane pinned to the one harness the detector saw fail to the other harness and `quota_hold` does the same for the one harness its finding names as held, which each host sample records as `held_harness` when every quota held lane is pinned to that harness; a stage whose remedy is refused or has none raises its open task titled `Bottleneck fix for the <stage> stage` to `urgent`, which the dispatcher queue orders first, and an urgent one needs nothing more. Otherwise, and for every stage below `delegate`, the master gets one proposed task carrying the hours: to add that task, or to raise the open one. Each action goes to the gate log as rule `bottleneck-remedy` with the hours it targeted and is kept as the stage's last action. |
 | `agentihooks swarm <id> classify EXECUTION RULING --reason TEXT` | The master or the operator rules `lost` or `working` on an execution attempt the observer flagged for the operator under `AGENTIHOOKS_OBSERVATION_MODE=conservative`. The reason, author and time are kept on its observation. `lost` holds the attempt lost and writes the audit record; `working` holds it working until a newer loss reading (pod gone or ended, supervisor exited) flags it again, or it recovers on its own. Only a registered master record or the operator acts: any other name, an empty reason or an attempt that is not flagged is refused. `verdict` follows the same authority rule. |
 | `agentihooks swarm <id> terminal EXECUTION` | For a local managed Codex execution, reopen a native viewer on its recorded thread; see [Managed Codex terminals](../reference/codex-managed-terminal.md). For Kubernetes, the operator opens the worker terminal in herdr. The command takes only the swarm and the execution: the host, the generation and the host key come from the record the controller wrote when it launched the Pod. It signs a short lived certificate with the user CA key named by `AGENTIHOOKS_TERMINAL_CA_KEY`, reads the worker namespace from the Pod policy in `AGENTIHOOKS_POD_POLICY_FILE`, writes the SSH material under the operator's own home and saves the machine in herdr. The Kubernetes path refuses a master or any agent session, and an execution with no recorded host key. |
@@ -1841,7 +1841,8 @@ the repository elects a new owner with no command from anyone. The new owner con
   former owner's ledger is not filed again. That task, its claim, comments and proof stay where they are.
 - **Green runs.** A green run closes every open or blocked task whose id starts with `promo-`, and the live
   promotion alerts, in the owner's ledger and in every former owner's ledger. It then releases every held cause that
-  is not claimed or in `pr`, so the next red run with the same cause files a fresh task.
+  is not claimed or in `pr`, so the next red run with the same cause files a fresh task
+  ([Held causes and the green run](#held-causes-and-the-green-run)).
 
 ### Repeated observations and failed writes
 
@@ -1859,6 +1860,78 @@ no live task carries it. The next pass by the owner, or by a new owner after a h
 A run whose failed jobs all failed only at the `Check dev still points at this commit` step, with the annotation that
 `dev` advanced before Sonar analysis, is still reported as superseded and files nothing. Failed jobs that lost their
 runner share one [runner outage task](#runner-outage-runs).
+
+### Held causes and the green run
+
+Every promotion task the watch files maps its id to its cause in the swarm's promotion jobs record,
+`<prefix>:swarm:<id>:promotion:jobs`. Before it files for a red run, the owner reads that record in its own ledger and
+in every former owner's ledger. A cause counts as held while its record entry survives and its task is not done in that
+ledger. A failed job whose cause is held files no task, so a fixer already at work is not filed twice.
+
+A green dev push run clears that hold. For the owner and for each former owner, the watch:
+
+1. Closes every promotion task that is `open` or `blocked`, with the comment `A later dev push run of Tests passed, so
+   the swarm closed this promotion task.`, and clears the live promotion alerts.
+2. Removes from the promotion jobs record every task id that is not `claimed` or `pr` in the ledger as the watch read
+   it at the start of the pass.
+
+The removal does not depend on the close. A task the ledger keeps `blocked` through the close, or one closed by hand,
+keeps its state and its comments but no longer holds its cause. The next red run that fails on the same cause files a
+fresh `promo-<run id>-<n>` task, an alert and a master item as for any new cause.
+
+A task that is `claimed` or in `pr` keeps its record entry through the green run, so a later red run of the same cause
+files nothing while someone works it. Once that task is done, the next pass that handles a run drops its entry.
+
+The states are fixed in `scripts.swarm.promotion_watch` (`CLOSABLE` for the close, `WORKING` for the kept entries). No
+setting changes them.
+
+#### The 18 October coverage ratchet runs
+
+Before this rule, the green run only closed tasks and the record dropped an entry only when its task reached `done`.
+A task the ledger left `blocked` held its cause for good.
+
+| Run | Conclusion | Created (UTC) | What intake did |
+|---|---|---|---|
+| [39090224669](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39090224669) | failure | 18 October 02:28 | Filed `promo-39090224669-0` for `coverage-ratchet` in the watched ledger. The master blocked it at 02:44 |
+| [39101112212](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39101112212) | success | 18 October 05:36 | Closed nothing for that task, which stayed `blocked`; its cause stayed in the record |
+| [39137430735](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39137430735) | failure | 18 October 14:45 | First of four red `coverage-ratchet` push runs. Each was skipped as held and filed nothing, though the promotion alert was open |
+| [39153983422](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39153983422) | success | 18 October 18:24 | Same as the first green run |
+
+The tick journal showed `scripts.swarm.promotion_watch.refresh` ending with outcome success for both swarms on every
+pass, because skipping a held cause is a normal outcome. The watched master filed the fixer, watched task `t1116`, by
+hand.
+
+#### Checking a silent red run
+
+When a red dev push run files no fixer while its alert is open, compare the held causes with the task states:
+
+```bash
+SLUG="<swarm id>"
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli HGETALL "$P:swarm:$SLUG:promotion:jobs"   # task id, then its held cause
+agentihooks ledger --slug "$SLUG" show | jq -r '.tasks[] | select(.id | startswith("promo-")) | [.id, .state] | @tsv'
+```
+
+Run both for the owner and for every swarm in the owner record's `swarm:<id>` fields
+([Checking the owner](#checking-the-owner)).
+
+| Symptom | Cause | Action |
+|---|---|---|
+| A red run filed nothing, and its job's cause is held by a `claimed` or `pr` task | Expected. The fixer is at work | Let its holder finish it; the next red pass after it is done files again |
+| A red run filed nothing, and its job's cause is held by an `open` or `blocked` task | No green dev push run has been handled since the task was filed or left `claimed` or `pr` | Expected. Work the task, or wait for a green run, which releases the hold |
+| A red run filed nothing, and the record holds nothing for its job | The run was already handled (`seen` at or above its id), or it was reported superseded | Read `seen` in the owner record and the tick journal line for the run |
+| A held entry belongs to a `blocked` task after a green run | The task was `claimed` or in `pr` when that green run read the ledger, and was blocked later | The next green dev push run releases it |
+
+#### Delivery evidence
+
+Delivered in [pull request 4964](https://github.com/the-cloud-clockwork/agentihooks/pull/4964), with
+[issue 4963](https://github.com/the-cloud-clockwork/agentihooks/issues/4963) as the spec. Its tests cover a fixer the
+ledger keeps `blocked` through a green run, which no longer holds its cause, both alone and after a handover from the
+watched swarm to its Doctor, and a `claimed` or `pr` fixer, which keeps holding its job. Red: Tests run
+[39338933506](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39338933506) on the tests only commit
+failed both `unit-selected` jobs on `assert [] == ['promo-902-0']`. Green: Tests run
+[39339647440](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339647440) passed on the final head.
+The watched swarm's task blocked before the merge kept holding until the first green dev push run after it.
 
 ### Runner outage runs
 
@@ -1894,17 +1967,17 @@ changes them.
 
 #### What the watch files
 
-When at least one failed job lost its runner, the lost jobs become one cause, `runner outage`. Every other failed job
-keeps its own cause. `refresh-durations` is folded into the outage cause when it kept no samples
-from a durations artifact. When a lost job is a unit shard, a shard consumer job (`sonar`, `shard-check`,
-`coverage-ratchet`, `coverage-baseline`, `flake-budget`) whose failure names the missing shard output is folded too. The watch then
-files as for any red run:
+When at least one failed job lost its runner, the lost jobs become one cause, `runner outage`. A failed job whose own
+error is the output a lost unit shard never produced joins that cause, as set out in
+[Jobs that failed for want of shard output](#jobs-that-failed-for-want-of-shard-output). Every other failed job keeps
+its own cause. The watch then files as for any red run:
 
 - One urgent `ci` task titled `Promotion red: runner outage`, in the `ci` lane, or `eng` while the `ci` lane has no
   effective seats. Its id is `promo-<run id>-<n>` like any promotion task; it is `promo-<run id>-0` unless the run also
   has failing unit tests, whose grouped fixers are numbered first.
 - Its description names the run, the commit, the run link, every lost job and every sign found. With no annotation
-  sign it reads `Set up job failed or Run tests never ran`. It ends `No code change is due` instead of `Fix it on dev`.
+  sign it reads `Set up job failed or Run tests never ran`. When consumer jobs joined, it adds `the jobs <names>
+  failed for want of their unit shard output`. It ends `No code change is due` instead of `Fix it on dev`.
 - One fixer task per cause that failed on its own. Failing unit tests are grouped into one fixer per test.
 - One promotion alert for the run, replacing a live one, and one inbox item for the master naming the new tasks.
 
@@ -1916,6 +1989,58 @@ https://github.com/<owner>/<repo>/actions/runs/900. Its cause: the jobs unit (3.
 runner infrastructure (Failed to resolve action download info; The operation was canceled). No code change is due;
 the swarm closes this task when a later dev push run passes.
 ```
+
+#### Jobs that failed for want of shard output
+
+Each unit shard job, `unit (<python>, <shard>)`, uploads coverage, durations and flake reports that later jobs of the
+run read. When a shard loses its runner, those readers fail on the missing input, not on code. On the recorded dev push
+run 39226179257, intake filed the outage task plus five fixers: `refresh-durations`, `shard-check (3.11)`,
+`shard-check (3.12)`, `sonar`, and the real test failure in `unit (3.12, 10)`. With the folding, the same run files the
+outage task, which names the four consumers, and the `unit (3.12, 10)` fixer.
+
+In a run with at least one lost job, a failed job joins the outage cause in either case:
+
+- Its name before ` (` is one of the shard consumers `sonar`, `shard-check`, `coverage-ratchet`, `coverage-baseline`,
+  `flake-budget`; at least one lost job's name before ` (` is exactly `unit`; and its cause, its failed step names and
+  failure annotations, contains a missing shard sign from the table below.
+- Its name is `refresh-durations` and its cause contains `kept no samples from durations-`. This case needs no lost
+  unit shard, because the refresh line itself names the shard artifacts that never arrived.
+
+A consumer that lost its own runner is a lost job and is named once, among the lost jobs. Any other failed job,
+including a consumer whose error carries no sign, files its own fixer.
+
+| Missing shard sign | Printed by | Example failure annotation |
+|---|---|---|
+| `Missing coverage for shard ` | `.github/coverage/combine.sh`, the coverage merge before `sonar` | `Missing coverage for shard 4` |
+| `No shard durations at ` | `tests/shard_check.py` in `shard-check` | `No shard durations at shard-durations/*/durations.json, so those shards cannot be graded.` |
+| `collected tests did not run in exactly one of ` | `tests/shard_check.py` in `shard-check` | `<n> collected tests did not run in exactly one of <shards> shards.` |
+| `head shard coverage missing: ` | `tests/coverage_ratchet.py` in `coverage-ratchet` | `The coverage ratchet cannot grade: head shard coverage missing: <path>` |
+| `baseline shard coverage missing: ` | `tests/coverage_baseline.py` in `coverage-baseline` | `Cannot record the coverage baseline: baseline shard coverage missing: <path>` |
+| `No flake reports under ` | `tests/flake_budget.py` in `flake-budget` | `No flake reports under <folder>` |
+| `kept no samples from durations-` | `tests/refresh_durations.py` in `refresh-durations` | `refresh durations: ...; run 900 kept no samples from durations-3.11-2, durations-3.11-6` |
+
+The consumer names and signs are fixed in `scripts.swarm.promotion_watch` (`SHARD_JOB`, `SHARD_CONSUMERS`,
+`MISSING_SHARD_SIGNS`, `REFRESH_JOB`, `LOST_SAMPLES_SIGN`). No setting changes them. A consumer error that changes its
+wording stops folding until the sign in the watch changes with it.
+
+For the recorded run, the outage task reads:
+
+```text
+The dev push run 39226179257 of Tests lost its runner infrastructure at commit <sha>:
+https://github.com/<owner>/<repo>/actions/runs/39226179257. Its cause: the jobs unit (3.11, 1), unit (3.11, 4),
+unit (3.11, 5), unit (3.12, 4), unit (3.12, 9) lost their runner infrastructure (Failed to resolve action download
+info); the jobs refresh-durations, shard-check (3.11), shard-check (3.12), sonar failed for want of their unit shard
+output. No code change is due; the swarm closes this task when a later dev push run passes.
+```
+
+Limits:
+
+- A consumer whose own regression prints a missing shard sign beside a lost unit shard is folded. It files its fixer
+  on the next red run without a runner outage, because the outage task closes only on a green run.
+- `coverage-baseline` first compares the downloaded shard folders with the split. A missing folder fails there with
+  `downloaded shard coverage [...] is not the <n> shards the run split`, which carries no sign, so that failure files
+  its own fixer.
+- `stage-budget` reads no shard output and always files its own fixer.
 
 #### Later outages and the green run
 
@@ -1953,6 +2078,9 @@ agentihooks ledger --slug "<id>" show | jq -r --arg run "promo-$RUN-" \
 | A real failure was folded into the outage task | Its annotations contain a sign, for example a test that prints `The operation was canceled` | Read the cause in the task description. Fix the test output, or file the fixer by hand |
 | A red run with lost runners filed no outage task | An outage task that is not done already holds `runner outage` | Expected. A green dev push run closes it and the next outage files a new one |
 | A skipped `Run tests` step still got a fixer | Another step of the job failed first | Expected. The failed step is the cause |
+| `sonar`, `shard-check` or another consumer got a fixer beside a lost unit shard | Its annotations carry no missing shard sign, or the lost job's name is not exactly `unit` before ` (` | Read its annotations. A real error stays a fixer; a reworded missing input message needs a matching change to `MISSING_SHARD_SIGNS` with a test |
+| `refresh-durations` got a fixer in an outage run | Its line has no `kept no samples from durations-`, so it failed on its own cause | Read its annotation and fix that cause |
+| A consumer's real regression sits inside the outage task | It printed a missing shard sign in the same run as a lost unit shard | Expected. Read the outage task's consumer list; the next red run without an outage files its fixer |
 
 Delivered in [pull request 4829](https://github.com/the-cloud-clockwork/agentihooks/pull/4829), with
 [issue 4827](https://github.com/the-cloud-clockwork/agentihooks/issues/4827) as the spec. Its tests cover each sign,
@@ -1963,6 +2091,19 @@ download resolution, the code before the change filed seventeen tasks and the ch
 failed all seven new tests. Green: Tests run
 [39287821375](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39287821375) passed on the final head.
 No live dev outage run has been counted since the change.
+
+The shard output folding came in four pull requests:
+
+| Pull request | Change | Red | Green |
+|---|---|---|---|
+| [4955](https://github.com/the-cloud-clockwork/agentihooks/pull/4955), [issue 4953](https://github.com/the-cloud-clockwork/agentihooks/issues/4953) | Shard output consumers of a lost unit shard join the outage task. On the fixture of run 39226179257 the fixers fell from five to one, the real `unit (3.12, 10)` failure | Tests run [39336131070](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39336131070) | Tests run [39337492386](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39337492386) |
+| [5185](https://github.com/the-cloud-clockwork/agentihooks/pull/5185), [issue 5183](https://github.com/the-cloud-clockwork/agentihooks/issues/5183) | `refresh-durations` joins only when its line names shards that kept no samples | Proofs run [39392500128](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39392500128) | Proofs run [39392652550](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39392652550) |
+| [5417](https://github.com/the-cloud-clockwork/agentihooks/pull/5417), [issue 5416](https://github.com/the-cloud-clockwork/agentihooks/issues/5416) | A consumer joins only when its own error is the missing shard output | Tests run [39529046356](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39529046356) | Tests run [39530006213](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39530006213) |
+| [5646](https://github.com/the-cloud-clockwork/agentihooks/pull/5646), [issue 5645](https://github.com/the-cloud-clockwork/agentihooks/issues/5645) | `flake-budget` prints its missing reports error as an annotation and joins; `stage-budget` leaves the consumers | Tests run [39685347970](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39685347970) | Tests run [39688498915](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39688498915) |
+
+The tests in `tests/swarm/test_promotion_watch.py` cover the recorded run, a job outside the consumers, a consumer with
+no lost unit shard, each consumer and its sign, a consumer failing on its own error, a job named like a unit shard, a
+consumer that lost its own runner, and the three `refresh-durations` cases.
 
 ### Checking the owner
 
@@ -2970,6 +3111,8 @@ window boundaries and outputs.
 
 After `swarm ready` releases a seat, the tick's merge pass queues the pull request once its checks pass and then waits on the merge queue the way `wait --on merge` does. Each tick it reads the pull request again; when the pull request reads open and outside the queue it reads it a second time before judging, so a queue that is still settling is not mistaken for an exit. It is not judged while its checks are still running, nor, for five minutes after the pass queued it, while the pass has never seen it inside the queue. A pull request seen back in the queue, for example after the [Queue retry workflow](../reference/delivery-tiers.md#lost-runner-requeue) put it back for a lost runner, keeps the task waiting.
 
+A pull request that is still open but that GitHub marks unmergeable, inside or outside the queue, follows [Unmergeable entries](#unmergeable-entries) instead, once no dependency of the task holds it.
+
 When the pull request is no longer in the queue, the pass decides from its state and its checks on the current head:
 
 | Observation | Task outcome | Tick action line |
@@ -3026,6 +3169,62 @@ agentihooks swarm <id> merge state <url>
 ```
 
 `tests/swarm/test_ready.py` pins each row. `test_a_pull_request_that_leaves_the_queue_red_reopens_without_a_requeue` queues a pull request, lets it leave the queue red and asserts the reopen line, that no merge group run was read and that the pull request was queued only once. It was added by pull request [4733](https://github.com/the-cloud-clockwork/agentihooks/pull/4733) after the green exit test moved to the requeue path and the dev promotion [coverage ratchet](../reference/delivery-tiers.md#coverage-grading) reported the red exit reopen as a line no test ran any more ([red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39218945744)). The production code did not change.
+
+#### Unmergeable entries
+
+Each tick the merge pass reads every task in `pr` state with a pull request, including tasks whose engineer has not yet run `swarm ready`. A pull request is unmergeable when it reads open and either GitHub reports `mergeable: CONFLICTING` (cause `has a merge conflict`) or its merge queue entry reads `UNMERGEABLE` (cause `is marked unmergeable by GitHub`). GitHub can mark an entry `UNMERGEABLE` for a moment while the head still merges cleanly, so the pass separates a real conflict from that transient state:
+
+1. **A live owner fixes it.** When an agent of the task is still running, or not yet finished, the pass does nothing else and sends each such agent one inbox item: `Your pull request <url> <cause>. Restack it onto dev and publish the fix; keep your claim.` The item is sent once per agent execution, head and cause.
+2. **A fresh read confirms it.** The pass reads the pull request again without the tick's snapshot. If that read fails or no longer shows a cause, the queue is left alone.
+3. **The entry leaves the queue.** When the fresh read still shows the pull request queued, the pass dequeues it. A failed dequeue writes `could not dequeue <url> for task <id>: <error>` and nothing else changes. A dequeue that GitHub still reports as queued or merged writes `dequeue of <url> for task <id> awaits confirmation`, and the next tick judges again.
+4. **A transient state is held for a requeue.** For a task released by `swarm ready` whose fresh read is not `CONFLICTING`, the task keeps its claim. Its ready record switches to a `recover` wait on the head (the fresh head, or the head saved at `swarm ready` when GitHub returns an empty one), with the next attempt due after 2 to the power of `recoveries` minutes, one minute on a first episode. The task gets the comment `The swarm took <url> out of the merge queue: GitHub marked it unmergeable without a conflict. It queues the unchanged head again once it reads mergeable and green, so the task keeps its claim.` The action line is `dequeued <url> for task <id>: unmergeable without a conflict; the unchanged head is queued again once it reads mergeable and green`.
+5. **Anything else is a repair.** A real conflict, or a task that never ran `swarm ready`, reopens with `awaiting` set to `fix` and the comment `Reopened by the swarm: its pull request <url> <cause>. ...`. The action line is `task <id> reopened, <url> <cause>`.
+
+When the `recover` attempt falls due, the pass reads the pull request again and decides:
+
+| Fresh read | Outcome | Tick action line |
+|---|---|---|
+| Not yet due, or the read failed | Nothing changes. | none |
+| A head other than the saved one | Reopened for repair. | `task <id> reopened, <url> changed its head after leaving the merge queue` |
+| `CONFLICTING` | Reopened for repair. | `task <id> reopened, <url> has a merge conflict` |
+| A red check | Reopened for repair. | `task <id> reopened, <url> has red checks` |
+| Still unmergeable, or checks not all resolved green | The attempt counts; the next one is due later. | `<url> for task <id> is not yet mergeable and green; it retries later` |
+| Mergeable and green on the same head | Queued again with the comment `The swarm queued <url> again: its unmergeable state cleared on the unchanged green head.` The record returns to the merge wait described above. | `queued <url> for task <id>` |
+| Mergeable and green, but the queue call fails | A `requeue` ledger alert `The swarm could not queue <url> again for task <id> after a transient unmergeable state: <error>`; the attempt counts. | `could not requeue <url> for task <id>: <error>` |
+
+The backoff doubles from one minute: attempts fall due 1, 2, 4, 8 and 16 minutes apart, so within a first unmergeable episode the fresh reads come at about 1, 3, 7, 15 and 31 minutes after the dequeue, each on the first tick past its due time. The attempt count is kept in the record's `recoveries` field and lasts as long as the ready record, so it counts across episodes of one release: each attempt, failed or successful, adds one, and a later episode starts its backoff from that count. A reopen deletes the record, and the next `swarm ready` starts the count at zero. When an attempt would take the count to five (`QUEUE_TRIES`), or a new episode starts with five successful requeues already counted, the pass raises the `requeue` alert `The swarm gave up queueing <url> again for task <id>: it stayed unmergeable or not green; reopened.` and reopens the task with `awaiting` set to `fix` and the cause `stayed unmergeable after leaving the merge queue`. The `recoveries` count is separate from the `requeues` count of green queue exits.
+
+The `recover` wait lives in the swarm's ready record in Redis, and its due time is an absolute timestamp, so a restarted timer, or a tick from a new process, continues the same backoff. While it holds, the [stall watchdog](#stall-watchdog) treats the task as waiting and does not reopen it as dropped from the queue. A reopen for any cause above still releases the task only when no owner of it is live.
+
+Every dequeue and requeue the pass sends writes a [queue journal](../reference/delivery-tiers.md#the-queue-journal) record that carries `swarm`, `task`, `timer` (the tick process ID) and `by: "merge watcher"`. To see where a held task stands, read its ready record, the pass's queue records for its pull request, and its swarm comments and alerts on the ledger page:
+
+```bash
+redis-cli HGET "agentihooks:swarm:<id>:ready" "<task id>" | jq '{url, head, on, retry_at, recoveries, requeues}'
+jq -c --arg pull "<url>" 'select(.by == "merge watcher" and .pull == $pull) | {at, action, task, timer, expected_head, errors}' \
+  ~/.agentihooks/merge-queue-events.jsonl
+```
+
+A swarm with `AGENTIHOOKS_SWARM_KEY_PREFIX` set uses that prefix in place of `agentihooks` in the key. `retry_at` is in milliseconds since the epoch.
+
+This path was added by pull request [5049](https://github.com/the-cloud-clockwork/agentihooks/pull/5049) ([issue 4821](https://github.com/the-cloud-clockwork/agentihooks/issues/4821)). Before it, the pass dequeued a pull request whose tick snapshot read `UNMERGEABLE`, reopened its task for repair, never queued it again and wrote no journal record. Pull request 4704 left the queue that way at 09:52 UTC on 19 October, was queued again by hand at 10:29 and merged unchanged at 10:53. Pull request [5137](https://github.com/the-cloud-clockwork/agentihooks/pull/5137) added the fallback to the saved head when GitHub returns an empty head.
+
+The source task counted, from both swarm ledgers, the reopens whose cause was `is marked unmergeable by GitHub` and how many of those pull requests merged later with no commit after the reopen:
+
+| Window (UTC) | Unmergeable reopens | Merged later unchanged, never requeued |
+|---|---|---|
+| 19 October, before the fix | 14 | 6 (4704, 4680, 4838, 4864, 4819, 4835) |
+| 21 October, after the fix | 0 | 0 |
+
+From the merge of pull request 5049 to 23 October, the ledgers hold six `its unmergeable state cleared on the unchanged green head` requeue comments and no give up comment, and neither ledger holds a `requeue` alert.
+
+`tests/swarm/test_ready.py` pins the main steps: `test_a_stale_unmergeable_snapshot_is_not_dequeued_when_a_fresh_read_clears_it`, `test_a_watcher_recovery_requeue_hands_the_queue_its_journal`, `test_a_transient_unmergeable_head_is_requeued_unchanged_after_a_timer_restart`, `test_a_transient_unmergeable_head_waits_with_a_bounded_backoff_then_reopens`, `test_a_failed_requeue_raises_a_ledger_alert`, `test_a_head_that_turns_unmergeable_after_every_requeue_reopens_after_bounded_recoveries` and `test_an_unmergeable_entry_on_a_task_outside_the_merge_pass_reopens_with_its_cause`. `test_a_transient_unmergeable_requeue_backoff_holds_the_dropped_queue_reopen` in `tests/swarm/test_stall_watch.py` pins the stall watch hold.
+
+| Symptom | Check |
+|---|---|
+| A green pull request left the queue and its task kept its claim | Expected during a `recover` wait; read `retry_at` and `recoveries` in the ready record. |
+| A task reopened with `stayed unmergeable after leaving the merge queue` | Five attempts were spent across its episodes. Read the pull request's queue state with `agentihooks swarm <id> merge state <url>`; when it is mergeable and green, queue it with `agentihooks swarm <id> merge queue <url>`. |
+| A `requeue` alert names a queue error | Read the alert text and the matching journal record's `errors`; the pass retries at the next due time until the attempt count runs out. |
+| A dequeue left no journal record | The record write failed on that machine; the tick process printed `merge queue record not written: <error>` on stderr. |
 
 ### When a checks wait ends
 

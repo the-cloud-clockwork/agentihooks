@@ -220,6 +220,33 @@ hub:
       memory: 512Mi
       ephemeral-storage: 256Mi
 
+# GitHub webhook receiver: publishes signed pull request and check suite deliveries on the hub bus. It runs
+# the chart image, so the image updater rolls it with each release. secretName holds
+# AGENTIHOOKS_GITHUB_WEBHOOK_SECRET and, unless hub.bus.url is set, AGENTIHOOKS_BUS_URL. The public route
+# stays outside this chart.
+githubWebhook:
+  enabled: false
+  replicas: 1
+  port: 8790
+  secretName: ""
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
+  env: {}
+  resources:
+    requests:
+      cpu: 20m
+      memory: 96Mi
+      ephemeral-storage: 32Mi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 128Mi
+
 # Set enabled false and hub.bus.url to use an external NATS.
 nats:
   enabled: true

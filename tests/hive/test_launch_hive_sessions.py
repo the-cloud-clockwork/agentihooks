@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.hive import launch
+from scripts.hive import launch, placement
 from scripts.swarm.capacity import Account
 
 pytestmark = pytest.mark.fakeredis
@@ -21,6 +21,25 @@ def test_an_account_the_hives_already_fill_has_no_open_seat():
     hived = {"full-on-hives": 6, "room-left": 5}
 
     assert [row.name for row in launch._open_claude_rows(_rows(), hived)] == ["room_left", "last_seat"]
+
+
+def test_an_outright_account_beats_an_earlier_fallback_and_the_first_fallback_is_kept():
+    rows = _rows()
+    picks = {
+        "full_on_hives": placement.Choice("anton", "no live UI hive takes master"),
+        "room_left": placement.Choice("ws"),
+        "other": placement.Choice("pc", "second fallback"),
+        "last_seat": placement.Wait("no slot"),
+    }
+
+    assert launch._first_choice(rows, picks.__getitem__) == (rows[1], picks["room_left"])
+    del picks["room_left"]
+    fallbacks = [rows[0], rows[2], rows[3]]
+    assert launch._first_choice(fallbacks, picks.__getitem__) == (rows[0], picks["full_on_hives"])
+    assert launch._first_choice([rows[3]], picks.__getitem__) == picks["last_seat"]
+    busier = {"last_seat": placement.Choice("anton", "busier fallback"), "other": picks["other"]}
+    assert launch._first_choice([rows[3], rows[2]], busier.__getitem__) == (rows[2], picks["other"])
+    assert launch._first_choice([], picks.__getitem__) == placement.Wait("no advertised Claude account has room")
 
 
 def test_hive_sessions_count_each_remote_hive_once_and_skip_this_machine(monkeypatch):
