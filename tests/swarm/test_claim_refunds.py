@@ -172,14 +172,17 @@ def test_stop_refunds_a_pull_request_claim_and_never_a_finished_agent(store, sta
 def test_a_dev_red_block_refunds_the_held_claim_once(env, monkeypatch):  # noqa: F811
     from types import SimpleNamespace
 
-    from scripts.swarm import dev_red
+    from scripts.swarm import cli, dev_red
 
     swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setattr(dev_red, "latest", lambda repo, run=None: {"id": 41, "conclusion": "failure"})
+    agent = next(a for a in swarm.agents("sw") if a.name == "ci@a1b2c3-0001")
     generation, lives = swarm.claim_generation("sw", "t2"), swarm.claims("sw", "t2")
     assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev is red") == 0
+    assert swarm.claims("sw", "t2") == lives - 1
+    cli.block_agent(swarm, "sw", agent, "dev is red", ledger, 41)
     assert swarm.claims("sw", "t2") == lives - 1
     monkeypatch.setattr(dev_red, "latest", lambda repo, run=None: {"id": 42, "conclusion": "success"})
     rows = {t["id"]: t for t in ledger.tasks("sw")}
