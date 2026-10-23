@@ -645,6 +645,7 @@ def test_refusals_last_seen_before_the_stall_are_not_named(stalled):
         ("no hive for eng has room", [("placement", "")]),
         (f"{CPU_WAIT}, and the local machine runs 8 of its 8 agents: ram: pod full", [("cpu", "anton-1")]),
         ("no hive has room, and the local machine runs 8 of its 8 agents", [("placement", "")]),
+        ("no hive for eng has room: anton-1 cpu: load has room: none", [("cpu", "anton-1")]),
     ],
 )
 def test_each_refusal_names_its_reason_and_host(reason, expected):
@@ -659,3 +660,28 @@ def test_a_legacy_wait_without_a_seen_time_counts_from_its_start():
     waits = {"t1": {"lane": "eng", "reason": CPU_WAIT, "started_at": 5}}
     assert spawn_stall.refusals(waits, {}, 5) == "Admission refusals, latest first: cpu on anton-1 (1 task)"
     assert spawn_stall.refusals(waits, {}, 6) == ""
+
+
+def test_a_refusal_orders_by_its_latest_sighting_across_tasks():
+    waits = {
+        "t1": {"reason": CPU_WAIT, "started_at": 1, "seen_at": 9},
+        "t2": {"reason": placement._refused(HIVE_FULL, [MAX_GATE]), "started_at": 1, "seen_at": 5},
+        "t3": {"reason": CPU_WAIT, "started_at": 1, "seen_at": 1},
+    }
+    assert spawn_stall.refusals(waits, {}, 0) == (
+        "Admission refusals, latest first: cpu on anton-1 (2 tasks), max agents on anton-2 (1 task)"
+    )
+
+
+def test_a_refusal_first_seen_at_zero_keeps_its_place():
+    waits = {"t1": {"reason": placement._refused(HIVE_FULL, [MAX_GATE]), "started_at": 0, "seen_at": 0}}
+    local = {"machine": "ws", "taken": 8, "maximum": 8, "at": 0}
+    assert spawn_stall.refusals(waits, local, 0) == (
+        "Admission refusals, latest first: local cap on ws (8 of 8 agents), max agents on anton-2 (1 task)"
+    )
+
+
+def test_a_local_cap_seen_at_the_stall_start_is_named():
+    local = {"machine": "ws", "taken": 8, "maximum": 8, "at": 7}
+    assert spawn_stall.refusals({}, local, 7) == "Admission refusals, latest first: local cap on ws (8 of 8 agents)"
+    assert spawn_stall.refusals({}, local, 8) == ""

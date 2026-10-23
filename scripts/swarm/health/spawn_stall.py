@@ -88,7 +88,7 @@ def refuse_local(store, slug: str, machine: str, taken: int, maximum: int, at: i
 def _refused(reason: str) -> list[tuple[str, str]]:
     head = reason.partition(LOCAL_FULL)[0]
     _, has_room, held = head.partition(" has room: ")
-    found = [(admission.category(part), part.split(" ", 1)[0]) for part in held.split("; ")] if has_room else []
+    found = [(admission.category(part), part.partition(" ")[0]) for part in held.split("; ")] if has_room else []
     return found or ([(admission.category(head), "")] if head else [])
 
 
@@ -106,7 +106,7 @@ def refusals(waits: dict, local: dict, since: int) -> str:
             latest[found] = max(latest.get(found, 0), seen)
             counts[found] = counts.get(found, 0) + 1
     shown = {found: _label(*found, f"{count} task{'s' if count > 1 else ''}") for found, count in counts.items()}
-    if local.get("at", -1) >= since:
+    if local and local["at"] >= since:
         found = (LOCAL_CAP, local["machine"])
         latest[found] = local["at"]
         shown[found] = _label(*found, f"{local['taken']} of {local['maximum']} agents")
