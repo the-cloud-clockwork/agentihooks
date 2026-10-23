@@ -1,0 +1,6 @@
+{
+  "scripts/hive/nats_trust.py:scripts.hive.nats_trust.x_trust_values__mutmut_11:3c5c68756fccafda107196cef02b23f5d304f54a9d23e1e7021e92bfd64db518": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: trusted_operator is read only by the revoke issuer check, never by account_jwt, the only use trust_values makes of this Signer."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/hive/nats_trust.py:scripts.hive.nats_trust.x_trust_values__mutmut_72:e3d2bd603841a73ff7899735be1f281f4147e74512ae99e3c219711314083c35": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: account_jwt only tests if revocations, and None and an empty dict are both falsy, so the claims are identical."
+  }
+}
