@@ -348,6 +348,9 @@ def on_session_start(payload: dict) -> None:
     from hooks.lifecycle.guard import session_event
 
     session_event()
+    from hooks.context import operator_mode
+
+    operator_mode.reset(payload)
     _run_start_conditions(payload)
     try:
         from hooks.lifecycle.deps_kick import kick as deps_kick
