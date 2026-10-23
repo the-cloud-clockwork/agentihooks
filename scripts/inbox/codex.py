@@ -242,11 +242,14 @@ class Pump:
                     return STOPPED
                 pause, backoff = backoff, min(backoff * 2, self.timing.backoff_max_s)
         finally:
-            if self.subscription is not None:
-                self.subscription.close()
-            if self.feed is not None:
-                self.feed.close()
-            self.binding.connection.close()
+            self._close()
+
+    def _close(self) -> None:
+        if self.subscription is not None:
+            self.subscription.close()
+        if self.feed is not None:
+            self.feed.close()
+        self.binding.connection.close()
 
     def _pause(self, delay: float) -> None:
         whole, rest = divmod(delay, self.timing.reconcile_s)
