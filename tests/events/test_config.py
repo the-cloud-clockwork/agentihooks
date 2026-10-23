@@ -80,6 +80,13 @@ def test_bus_config_falls_back_to_the_default_backend_without_a_url(environ):
     assert (bus.backend, bus.url, bus.credentials) == ("memory", None, None)
 
 
+@pytest.mark.parametrize(("value", "provision"), [("1", False), ("0", True), ("", True), (None, True)])
+def test_bus_config_binds_only_when_the_bind_setting_is_one(value, provision):
+    assert config.BIND_ENV == "AGENTIHOOKS_BUS_BIND"
+    environ = {} if value is None else {"AGENTIHOOKS_BUS_BIND": value}
+    assert BusConfig.from_environ(environ).provision is provision
+
+
 BAO = {"OPENBAO_URL": "https://bao.example", "OPENBAO_TOKEN": "t"}
 
 
