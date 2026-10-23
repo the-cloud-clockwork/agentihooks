@@ -22,7 +22,7 @@ jobs:
           - 4318:4318
           - 4317:4317
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
@@ -41,13 +41,13 @@ jobs:
 
       - name: Set up Python
         if: steps.key.outputs.hit != 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
       - name: Set up uv
         if: steps.key.outputs.hit != 'true'
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.12.23"
           # Published sha256 of uv-x86_64-unknown-linux-gnu.tar.gz; this setup-uv release knows checksums only up to 0.12.17.

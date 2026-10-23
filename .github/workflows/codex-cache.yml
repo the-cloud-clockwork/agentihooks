@@ -31,7 +31,7 @@ jobs:
       - name: Restore the Codex CLI
         id: codex
         if: runner.environment == 'self-hosted'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/codex
           key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}

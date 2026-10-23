@@ -23,12 +23,12 @@ jobs:
       matrix:
         proof: [startup, rebuild, profiles]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
       - name: Pull the locked worker base with bounded rate limit retries
         run: bash docker/swarm-node/pull-base.sh
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ${{ env.WORKER_SCANNER_CACHE }}
           key: worker-scanner-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/swarm-node/scan.sh', 'docker/swarm-node/versions.lock') }}-${{ github.run_id }}
@@ -36,7 +36,7 @@ jobs:
       - name: Restore the worker image layers
         id: layers
         if: matrix.proof != 'rebuild' && runner.environment == 'self-hosted'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/worker-layers
           key: worker-layers-${{ hashFiles('docker/swarm-node/**', 'scripts/swarm_v2/worker_image.py') }}
@@ -47,12 +47,12 @@ jobs:
           WORKER_LAYERS: ${{ steps.layers.outputs.cache-matched-key && format('{0}/worker-layers', runner.temp) || '' }}
           WORKER_KEEP_IMAGE: ${{ matrix.proof == 'startup' && env.WORKER_PROVEN_IMAGE || '' }}
         run: bash docker/swarm-node/smoke.sh "$RUNNER_TEMP/worker-image-evidence" "$WORKER_PROOF"
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: success() && matrix.proof == 'startup'
         with:
           path: ${{ env.WORKER_SCANNER_CACHE }}
           key: worker-scanner-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/swarm-node/scan.sh', 'docker/swarm-node/versions.lock') }}-${{ github.run_id }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: swarm-worker-image-${{ matrix.proof }}
@@ -62,7 +62,7 @@ jobs:
         env:
           WORKER_IMAGE: ${{ env.WORKER_PROVEN_IMAGE }}
         run: bash tests/integration/swarm_node/run_health_proof.sh "$RUNNER_TEMP/worker-health-evidence"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ always() && matrix.proof == 'startup' }}
         with:
           name: swarm-worker-health-evidence
@@ -78,24 +78,24 @@ jobs:
         env:
           PROOF_STATUS: ${{ needs.worker-image.result }}
         run: '[[ "$PROOF_STATUS" == success ]]'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: swarm-worker-image-startup
           path: ${{ runner.temp }}/worker-image-evidence/startup
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: swarm-worker-image-rebuild
           path: ${{ runner.temp }}/worker-image-evidence/rebuild
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: swarm-worker-image-profiles
           path: ${{ runner.temp }}/worker-image-evidence/profiles
       - name: Compare independent startup and rebuild inventories
         run: bash docker/swarm-node/smoke.sh "$RUNNER_TEMP/worker-image-evidence" compare "$GITHUB_SHA"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: swarm-worker-image-evidence
