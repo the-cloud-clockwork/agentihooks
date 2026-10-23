@@ -189,8 +189,10 @@ Delivery evidence for pull request
   [run 39387418173](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39387418173).
 - Real Postgres 16, base against head, in
   [run 39386797215](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39386797215) of a one-off probe
-  workflow on a throwaway branch, kept nowhere on `dev`; the `Writer lock` workflow above is its committed
-  successor, from pull request [#5208](https://github.com/the-cloud-clockwork/agentihooks/pull/5208). The base printed
+  workflow on a throwaway branch, kept nowhere on `dev`. Pull request
+  [#5208](https://github.com/the-cloud-clockwork/agentihooks/pull/5208) committed the scenario as a test, and
+  [#5395](https://github.com/the-cloud-clockwork/agentihooks/pull/5395) moved it into the `Writer lock` workflow. The
+  base printed
   `FAIL second writer still waiting after 90s behind an idle holder`; the head printed
   `PASS second writer committed after 15.0s; idle holder ended by the server`.
 
