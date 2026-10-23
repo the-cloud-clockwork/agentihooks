@@ -369,7 +369,8 @@ def _drop(slug, store, ledger, rows, agent, refund=False):
 def _still_held(row, expected):
     row = row or {}
     return (
-        row.get("claimed_by") == expected["claimed_by"]
+        row.get("state") in ACTIVE
+        and row.get("claimed_by") == expected["claimed_by"]
         and row.get("claim_generation", 0) == expected["claim_generation"]
     )
 

@@ -540,7 +540,7 @@ def test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone
     assert ledger.rows["t1"]["claimed_by"] == ""
 
 
-@pytest.mark.parametrize("live", [{"claimed_by": "engineer@other-0001"}, {"claim_generation": 7}])
+@pytest.mark.parametrize("live", [{"claimed_by": "engineer@other-0001"}, {"claim_generation": 7}, {"state": "done"}])
 def test_a_tick_drop_refunds_nothing_when_one_claim_field_moved(store, live):
     ledger, runtime, agent = prepared_recovery(store)
     rows = {"t1": dict(ledger.rows["t1"])}
