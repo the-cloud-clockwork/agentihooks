@@ -3584,6 +3584,90 @@ journalctl --user -u agentihooks-swarm-waits.service --since "-1h" \
 After a recycle, `supervisor.json` names a new `pid`, the installed root, the installed revision and a `started`
 time inside the window of that log line.
 
+#### A supervisor started off the installed code exits with its starter
+
+Any process that waits on a scheduler timer or connects to the scheduler for a command calls `ensure_running`. When a
+Redis URL is configured (`REDIS_URL`, `AGENTIHOOKS_HIVE_REDIS_URL` or `AGENTIHOOKS_SWARM_REDIS_URL`) and no supervisor
+holds the machine lock, it starts a detached scheduler supervisor, logging to `scheduler.log` in the runtime folder. A ledger server, tick or command run from a worktree or
+a scratch copy, such as a scratch ledger server proof, reaches it through the process timer. Before this change that
+supervisor and its runner outlived the proof: two proofs on 19 October at 10:32 and 14:35 UTC still had their
+supervisor and runner running a day later, each with its own runtime folder (a scratch Redis endpoint gets its own
+hashed subfolder of the scheduler cache). The recycle above never reached them, because it only checks the lock holder
+of the installed scheduler's runtime folder.
+
+**Who is tied.** `ensure_running` compares the root the scheduler code was loaded from with the installed agentihooks
+(`install_root()`, the editable checkout recorded in the package metadata, else the package folder). Both paths are
+resolved, so a symlink to the installed root counts as installed.
+
+| Caller loaded from | Supervisor environment |
+|---|---|
+| The installed agentihooks | `AGENTIHOOKS_SCHEDULER_STARTER` is removed, even when the caller inherited it. The supervisor is untied and keeps outliving the short lived hooks and commands that start it. |
+| Any other checkout (worktree, scratch copy, proof home) | `AGENTIHOOKS_SCHEDULER_STARTER` is set to the pid of the process that called `ensure_running`. |
+
+The variable is set by `ensure_running` alone; never set it by hand. An empty or missing value means untied.
+
+**When a tied supervisor exits.** A tied supervisor checks once a second whether its parent pid is still its
+starter. When the starter exits, the supervisor is reparented (to `systemd --user` or init) and the check fails:
+
+- While its runner runs, it terminates the runner, waits for it to exit and returns, releasing the supervisor lock.
+- Between runners (the runner exited and would be restarted), it returns without starting another.
+
+So a tied supervisor and its runner are gone within about one second of their starter. An untied supervisor ignores
+its parent and only stops on SIGTERM or SIGINT, as before.
+
+**Two proofs that share one supervisor.** Two scratch processes on the same Redis endpoint share one runtime folder
+and so one supervisor, tied to whichever started it. When that starter exits, the other proof's wait would hang with
+no runner to fire its wake. A process timer wait therefore never blocks longer than 30 seconds (`RECHECK_S`): each
+empty wait calls `ensure_running` again, which starts a supervisor tied to the waiting process when none holds the
+lock. The scheduled wake lives in Redis, so it fires on the new runner's first pass. A wait given its own timeout
+rechecks at its deadline instead when that comes sooner.
+
+**Limits.**
+
+- The runtime folder of a tied supervisor stays on disk after it exits; only the process ends. Its `supervisor.json`
+  then names a gone pid, and nothing treats it as a holder because the lock is free.
+- The starter is the process that called `ensure_running`, not the shell that launched it. A short lived command run
+  from a worktree starts a supervisor that ends when that command ends, so its scheduled entries wait in Redis until
+  a supervisor is running again.
+- A supervisor already running from code older than this change carries no starter and is not tied; end it by hand.
+
+Check on a live machine, read only:
+
+```bash
+# Every scheduler supervisor and runner with its parent and age in seconds
+ps -eo pid,ppid,etimes,args | grep -E "scripts.scheduler.service (supervise|run)" | grep -v grep
+
+# The checkout each supervisor runs from; only the installed checkout should remain
+for pid in $(pgrep -f -- "-m scripts.scheduler.service supervise$"); do
+  echo "$pid $(readlink "/proc/$pid/cwd")"
+done
+
+# Every runtime record, and whether its pid still runs
+for record in ~/.cache/agentihooks/scheduler/supervisor.json ~/.cache/agentihooks/scheduler/*/supervisor.json; do
+  [ -f "$record" ] || continue
+  pid="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["pid"])' "$record")"
+  if [ -d "/proc/$pid" ]; then state=running; else state=gone; fi
+  echo "$record $pid $state"
+done
+```
+
+A supervisor inside a hive container has no readable `cwd` from the workstation; its parent is the hive's
+`agentihooks controller run`.
+
+**Number.** Supervisors from a worktree or scratch copy still running after their starter exited: two on 20 October,
+from the 19 October proofs. On 23 October at 15:57 UTC the workstation ran two supervisors: one from the installed
+checkout under `systemd --user` and one inside a hive container. Both 19 October runtime folders remained on disk with
+no process, and the records of two worktree supervisors from 20 October named pids that no longer ran.
+
+**Tests and runs.** `tests/scheduler/test_service.py` pins that only a supervisor off the installed code gets the
+starter variable (and that an inherited one is dropped for the installed code), that `installed()` compares the
+loaded root with `install_root()`, and that a tied supervisor stops its runner, or ends between runners, once its
+parent changes. `tests/scheduler/test_process_timer.py` pins that a wait with no wake by its recheck calls
+`ensure_running` again. Delivered by [#5228](https://github.com/the-cloud-clockwork/agentihooks/pull/5228), closing
+[#5225](https://github.com/the-cloud-clockwork/agentihooks/issues/5225). Red: Proofs run 39410168496 on the tests only
+commit, 6 failed (the new tests). Green: Proofs run 39410579532, 635 passed across `tests/scheduler` and every
+`ensure_running` consumer test.
+
 #### The Doctor finding
 
 Every Doctor detection pass runs the `scheduled tick` detector, timed as the `doctor.scheduled tick` step (see
@@ -3635,6 +3719,8 @@ no `agentihooks-swarm.timer`, and `is-enabled` reports that the unit file is mis
 | `recycling the scheduler supervisor` on every pass with a new pid each time | The installed checkout moves between passes, or git cannot read its revision. | Run `git -C <installed root> rev-parse HEAD`; an empty or failing result makes every recorded revision differ. |
 | Evidence says the last tick was delivered hundreds of seconds ago | The cron stopped firing, every tick failed, or the supervisor died. | The wait pass starts a supervisor and restores the timer, so ticks continue. Read `swarm-tick.log` for the failing tick. |
 | `could not be read` evidence | Redis is down for the scheduler. | The timer stays until Redis answers and the record proves delivery. |
+| A supervisor from a worktree or scratch copy runs after its proof ended | It was started by code older than the starter tie, or its starter is still running. | Find its parent with `ps -o ppid= -p <pid>`. A live starter is expected; otherwise stop the supervisor by hand. See [A supervisor started off the installed code exits with its starter](#a-supervisor-started-off-the-installed-code-exits-with-its-starter). |
+| A scratch proof's wait takes up to 30 seconds longer than its delay | The supervisor it shared was tied to another proof that exited. | Expected: the next recheck starts a supervisor tied to the waiting proof, and the wake fires on its first pass. |
 | `the scheduled swarm tick guard failed: OSError: …` | `systemctl` is missing or the user bus is down. | The waits keep running but nothing guards the tick. Restore the user systemd session. |
 
 ### Tick lock holder record
