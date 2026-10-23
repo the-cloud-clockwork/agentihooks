@@ -95,7 +95,7 @@ class SeatConsumer:
         return receipts
 
     def _key(self, item_id: str) -> str:
-        return f"delivery.{_identity(item_id)}"
+        return f"delivery.{_identity(self._swarm, self._address, item_id)}"
 
     def _claim(self, delivery: Delivery) -> Receipt | None:
         key = self._key(delivery.event.id)

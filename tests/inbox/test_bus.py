@@ -35,6 +35,7 @@ def test_one_consumer_is_shared_by_successor_sessions_and_seats_are_isolated(rig
     other = mail.consumer("eng-2@swarm", "first")
     assert first.durable == successor.durable
     assert first.subject == successor.subject
+    assert ".inbox." in first.subject
     assert first.durable != other.durable
     mail.send("eng-1@swarm", message())
     assert other.fetch(1, 0) == []
@@ -244,3 +245,18 @@ def test_swarms_have_distinct_durables_and_send_ids_cannot_cross_swarms(rig):
     second.send("seat", message(id="other"))
     assert left.fetch(1, 0)[0].event.id == "stable"
     assert right.fetch(1, 0)[0].event.id == "other"
+
+
+def test_altering_a_receipt_address_cannot_confirm_another_mailbox(rig):
+    from scripts.inbox.bus import SeatInbox
+
+    bus, _ = rig
+    mail = inbox(bus)
+    mail.send("seat", message())
+    original = mail.consumer("seat", "session")
+    receipt = original.fetch(1, 0)[0]
+    another_seat = mail.consumer("other", "session")
+    assert not another_seat.confirm(replace(receipt, event=replace(receipt.event, key="other")))
+    another_swarm = SeatInbox(bus, "other").consumer("seat", "session")
+    assert not another_swarm.confirm(replace(receipt, event=replace(receipt.event, swarm="other")))
+    assert original.confirm(receipt)
