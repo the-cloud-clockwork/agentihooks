@@ -838,7 +838,7 @@ def test_nats_redelivers_lost_hive_work_to_a_second_hive(tmp_path, rig, monkeypa
 def test_presence_is_renewed_before_pending_recovery_even_without_admission(rig):
     import json
 
-    seed_pending(rig, "launching")
+    seed_pending(rig, {"state": "launching"})
     rig.spoke.measure = Mock(side_effect=AssertionError("must recover first"))
     rig.spoke.clock = lambda: 777
     assert rig.spoke.poll() == "uncertain"
