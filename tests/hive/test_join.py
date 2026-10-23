@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -77,11 +78,12 @@ def test_a_refused_invite_keeps_the_current_membership(invitation, monkeypatch, 
 
 
 @pytest.mark.parametrize("content", ["", "AGENTIHOOKS_HIVE_URL=https://hub.example.test\n"])
-def test_an_incomplete_invite_is_refused_before_contacting_the_hub(invitation, monkeypatch, content):
+def test_an_incomplete_invite_is_refused_before_contacting_the_hub(invitation, monkeypatch, content, capsys):
     invite, home = invitation
     invite.write_text(content)
     monkeypatch.setattr(cli, "_post", lambda *args: pytest.fail("invalid invite reached hub"))
     assert cli.main(["join", str(invite)]) == 1
+    assert capsys.readouterr().err == "hive join refused: the invite needs a hive id, endpoint and ledger credential\n"
     assert not (home / auth.ENV_FILE).exists()
 
 
@@ -109,7 +111,7 @@ def test_multiline_invite_settings_are_refused_before_refresh(invitation, monkey
         stream.write('AGENTIHOOKS_BUS_URL="nats://bus.example.test\\nINJECTED=value"\n')
     monkeypatch.setattr(cli, "_post", lambda *args: pytest.fail("invalid invite reached hub"))
     assert cli.main(["join", str(invite)]) == 1
-    assert "one line" in capsys.readouterr().err
+    assert capsys.readouterr().err == "hive join refused: invite settings must each fit on one line\n"
     assert not (home / auth.ENV_FILE).exists()
 
 
@@ -151,3 +153,52 @@ def test_an_older_invite_without_bus_settings_still_joins(invitation, monkeypatc
     )
     assert cli.main(["join", str(invite)]) == 0
     assert "AGENTIHOOKS_BUS" not in dotenv_values(home / auth.ENV_FILE)
+
+
+def test_join_help_names_the_single_invite_file(capsys):
+    with pytest.raises(SystemExit) as exited:
+        cli.main(["join", "--help"])
+    assert exited.value.code == 0
+    assert "private member invite file shared with Kubernetes workers" in capsys.readouterr().out
+    command = next(action for action in cli._parser()._actions if action.dest == "command")
+    assert next(choice.help for choice in command._choices_actions if choice.dest == "join") == (
+        "Join this host with one invite file from hive invite"
+    )
+
+
+def test_join_keeps_invite_values_literal(invitation, monkeypatch):
+    invite, home = invitation
+    invite.write_text(invite.read_text().replace("fixture-invite", "${INVITE_REFERENCE}"))
+    monkeypatch.setenv("INVITE_REFERENCE", "a different credential")
+    seen = []
+
+    def refresh(url, path, body, action, environ):
+        seen.append(body)
+        return {"id": "fixture-member", "redis_url": "redis://fresh.example.test/0"}
+
+    monkeypatch.setattr(cli, "_post", refresh)
+    assert cli.main(["join", str(invite)]) == 0
+    assert seen == [{"ledger_credential": "${INVITE_REFERENCE}"}]
+    assert (
+        dotenv_values(home / auth.ENV_FILE, interpolate=False)["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"]
+        == "${INVITE_REFERENCE}"
+    )
+
+
+def test_join_places_the_ca_delivered_by_the_hub(invitation, monkeypatch):
+    invite, home = invitation
+    monkeypatch.setattr(
+        cli,
+        "_post",
+        lambda *args: {
+            "id": "fixture-member",
+            "redis_url": "redis://fresh.example.test/0",
+            "ledger_ca": "delivered CA",
+        },
+    )
+    placed = []
+    monkeypatch.setattr(cli.ledger_ca, "place", lambda *args: placed.append(args))
+    assert cli.main(["join", str(invite)]) == 0
+    assert len(placed) == 1
+    assert placed[0][:2] == (home, "delivered CA")
+    assert placed[0][2] is os.environ
