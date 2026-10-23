@@ -9,16 +9,16 @@ QUICKSTARTS = ("kubernetes-quick-start", "single-machine-quick-start", "add-hive
 
 
 @pytest.mark.parametrize(
-    "entry",
+    ("entry", "link"),
     [
-        "README.md",
-        "index.md",
-        "docs/getting-started/installation.md",
-        "docs/getting-started/compose-quick-start.md",
-        "docs/reference/deployment-modes.md",
-        "docs/pillars/hives.md",
+        ("README.md", "{}.md)"),
+        ("index.md", "{}/)"),
+        ("docs/getting-started/installation.md", "{}.md)"),
+        ("docs/getting-started/compose-quick-start.md", "{}.md)"),
+        ("docs/reference/deployment-modes.md", "{}.md)"),
+        ("docs/pillars/hives.md", "{}.md)"),
     ],
 )
-def test_entry_point_links_every_install_quickstart(entry):
+def test_entry_point_links_every_install_quickstart(entry, link):
     text = (ROOT / entry).read_text()
-    assert [slug for slug in QUICKSTARTS if slug not in text] == []
+    assert [slug for slug in QUICKSTARTS if link.format(slug) not in text] == []
