@@ -50,9 +50,10 @@ UPDATABLE = (
     "pull_scopes",
     "after_release",
     "applied_at",
+    "workstation",
     "recovery",
 )
-BOOL_FIELDS = ("artifact", "follow_up")
+BOOL_FIELDS = ("artifact", "follow_up", "workstation")
 DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
@@ -360,6 +361,7 @@ def _add(doc, op, ctx):
         "repository_branches",
         "slice",
         "follow_up",
+        "workstation",
     ):
         if key in op:
             task[key] = op[key]

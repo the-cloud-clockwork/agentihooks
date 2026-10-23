@@ -49,13 +49,16 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
-           [--kind K] [--must M --check C --judge J] [--push] [--scaffold] [--artifact] [--rank R] [--difficulty D]
+           [--kind K] [--must M --check C --judge J] [--push] [--scaffold] [--artifact] [--workstation] [--rank R]
+           [--difficulty D]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
                                       --push marks a proof that needs a pushed branch and a CI run, so the task
                                       always gets the engineer profile, never qa;
                                       --scaffold creates its work folder (steering, progress, proof) in the same call;
                                       --artifact marks a file the operator asked for, so the task may publish it;
+                                      --workstation keeps a task that acts on the workstation checkout or its
+                                      task folders off every remote hive (task set workstation=yes or no);
                                       R is the queue rank, urgent, high, normal (default) or low, next meaning
                                       urgent: the swarm claims eligible tasks highest rank first, then by
                                       critical path; only the master, a planner or the operator sets it;
@@ -811,7 +814,7 @@ def _task_add_fields(args):
     contract = {k: getattr(args, k) for k in ("must", "check", "judge", "push") if getattr(args, k)}
     if contract:
         lists["contract"] = contract
-    lists.update((key, True) for key in ("artifact", "follow_up") if getattr(args, key))
+    lists.update((key, True) for key in ("artifact", "follow_up", "workstation") if getattr(args, key))
     options = (
         ("kind", args.kind),
         ("profile", args.profile),
@@ -832,7 +835,7 @@ def _task_set_fields(values):
     for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls"):
         if key in fields:
             fields[key] = task_list(key, fields[key])
-    for key in [key for key in ("artifact", "follow_up") if key in fields]:
+    for key in [key for key in ("artifact", "follow_up", "workstation") if key in fields]:
         if fields[key] not in ("yes", "no"):
             sys.exit(f"task set takes {key}=yes or {key}=no")
         fields[key] = fields[key] == "yes"
@@ -1019,6 +1022,11 @@ def build_parser():
         "--scaffold", action="store_true", help="create the task's work folder now and store it as its workspace"
     )
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
+    task.add_argument(
+        "--workstation",
+        action="store_true",
+        help="the task acts on the workstation checkout, so no remote hive runs it",
+    )
     task.add_argument("--profile")
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
     task.add_argument(

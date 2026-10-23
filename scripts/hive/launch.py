@@ -214,6 +214,12 @@ class HiveLaunch:
         hives = _by_origin(hives, config.repo)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
         hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
+        if task.get("workstation"):
+            from scripts.swarm.commands import hive_id
+
+            hives = [hive for hive in hives if hive["id"] == hive_id()]
+            if not hives:
+                return self._record_wait(lane, task, placement.Wait(placement.NEEDS_WORKSTATION, role))
         moved = ""
         if (saved.get("harness") or "claude") not in ("claude", "auto"):
             moved = f"no hive places the saved {saved['harness']} harness"
