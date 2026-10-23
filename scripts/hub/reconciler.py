@@ -136,6 +136,8 @@ class Reconciler:
         self._lifecycle = self._lifecycle or Lifecycle(self._bus, self._store)
         snapshots = reports.Reports(self._store.redis).live()
         for slug in self._store.slugs():
+            if self._store.config(slug).engine != "events":
+                continue
             for agent in self._store.execution_registry.records(slug):
                 if not guard():
                     return
