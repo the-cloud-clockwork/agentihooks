@@ -800,7 +800,7 @@ A forwarded run shows the same skipped `mutation` job with the last column
 other run:
 
 ```bash
-gh run download <run-id> -n mutation-report-0 -D mutation-report
+gh run download <run id> -n mutation-report-0 -D mutation-report
 jq '{failed, not_mutated}' mutation-report/report.json
 ```
 
