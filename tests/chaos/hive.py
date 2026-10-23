@@ -104,11 +104,11 @@ def work(bus, spoke: Spoke, runtime: ChaosRuntime, journal: Journal, hive: str) 
 
 
 class OfferedRows(dict):
-    def __init__(self, rows: dict, generations: Callable[[], StateStore]):
+    def __init__(self, rows: dict, generations: Callable[[], StateStore]) -> None:
         super().__init__(rows)
         self.generations = generations
 
-    def get(self, key, default=None):
+    def get(self, key: str, default: dict | None = None) -> dict | None:
         row = super().get(key, default)
         entry = self.generations().get(key) if row is not None else None
         return row if entry is None else {**row, "claim_generation": int(entry.value)}
@@ -123,15 +123,6 @@ def readiness_view(swarm: str, generations: Callable[[], StateStore]) -> Callabl
     rows = OfferedRows({task["id"]: task for task in tasks}, generations)
     view = readiness.Snapshot(swarm, rows, doc, hierarchy.project(doc)[0], "", lambda _: False, lambda _: True)
     return lambda: view
-
-
-def record_generation(bus, task: str, generation: int) -> None:
-    store = bus.state(GENERATIONS)
-    entry = store.get(task)
-    if entry is None:
-        store.create(task, str(generation).encode())
-    else:
-        store.update(task, str(generation).encode(), entry.revision)
 
 
 def serve(args: argparse.Namespace) -> None:
