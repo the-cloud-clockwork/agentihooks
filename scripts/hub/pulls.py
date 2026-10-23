@@ -46,7 +46,7 @@ class Observation:
 
 
 def key(url: str) -> str:
-    return "pull." + hashlib.sha256(url.encode()).hexdigest()
+    return "pull." + hashlib.sha256(url.lower().encode()).hexdigest()
 
 
 def suite_result(app: dict | None, conclusion: str) -> dict:
@@ -181,8 +181,8 @@ class Pulls:
 
         written = _update(self._state, key(seen.url), change) or self._snapshot(seen.url)
         self._publish(seen.url, created)
-        if written is not None and written["state"] in TERMINAL:
-            self._index(seen.url, False)
+        if written is not None:
+            self._index(written["url"], written["state"] not in TERMINAL)
 
     def _snapshot(self, url: str) -> dict | None:
         entry = self._state.get(key(url))

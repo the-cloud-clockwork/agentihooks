@@ -91,9 +91,54 @@ def test_hub_runner_tracks_pull_requests_from_ledger_outbox_subjects():
     assert open_urls(bus) == [URL]
 
 
-def test_key_is_a_stable_digest_of_the_url():
+def test_key_is_a_stable_digest_of_the_lowercased_url():
     assert pulls.key(URL) == "pull." + hashlib.sha256(URL.encode()).hexdigest()
+    assert pulls.key(URL.replace("acme", "Acme")) == pulls.key(URL)
     assert pulls.key(URL) != pulls.key(OTHER)
+
+
+def test_names_interval_and_query():
+    assert (pulls.BUCKET, pulls.OPEN, pulls.POLLED, pulls.ENTITY, pulls.AUTHOR) == (
+        "hub-github",
+        "open",
+        "polled",
+        "pull",
+        "github",
+    )
+    assert (pulls.INTERVAL_MS, pulls.FLUSH_AFTER_MS, pulls.ATTEMPTS) == (300_000, 60_000, 8)
+    assert pulls.QUERY == (
+        "query($url: URI!) { resource(url: $url) { ... on PullRequest {\n"
+        "    state headRefOid mergeQueueEntry { id }\n"
+        "    commits(last: 1) { nodes { commit { checkSuites(first: 100) {\n"
+        "        nodes { databaseId status conclusion app { slug } }\n"
+        "    } } } }\n"
+        "} } }"
+    )
+
+
+def test_swarms_are_kept_sorted():
+    bus, hub, _ = setup()
+    hub.track("zeta", URL)
+    hub.track("alpha", URL)
+    assert snapshot(bus)["swarms"] == ["alpha", "zeta"]
+
+
+def test_a_reopened_pull_request_returns_to_the_poll():
+    bus, hub, _ = setup()
+    hub.handle(task_changed())
+    hub.observe(Observation(URL, "closed", "a1"))
+    assert open_urls(bus) == []
+    hub.observe(Observation(URL, "open", "a1"))
+    assert open_urls(bus) == [URL]
+
+
+def test_a_webhook_url_in_other_casing_reaches_the_tracked_pull_request():
+    bus, hub, consumer = setup()
+    hub.handle(task_changed())
+    hub.observe(Observation(URL.replace("acme/widgets", "Acme/Widgets"), "merged", "a1"))
+    events = drain(consumer)
+    assert [(e.type, e.key, e.data["url"]) for e in events] == [("pull.merged", URL, URL)]
+    assert open_urls(bus) == []
 
 
 def test_a_task_carrying_a_pull_request_url_tracks_it_for_its_swarm():
@@ -118,7 +163,21 @@ def test_a_task_carrying_a_pull_request_url_tracks_it_for_its_swarm():
     assert drain(consumer) == []
 
 
-@pytest.mark.parametrize("url", ["", None, 7, "https://github.com/acme/widgets/issues/7", URL + "/files", "x" + URL])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "",
+        None,
+        7,
+        "https://github.com/acme/widgets/issues/7",
+        URL + "/files",
+        "x" + URL,
+        "https://githubxcom/acme/widgets/pull/7",
+        "https://github.com/acme/widgets/pull/",
+        "http://github.com/acme/widgets/pull/7",
+        "https://github.com/acme/widgets/pull/7a",
+    ],
+)
 def test_tasks_without_a_pull_request_url_track_nothing(url):
     bus, hub, _ = setup()
     event = task_changed(url=url)

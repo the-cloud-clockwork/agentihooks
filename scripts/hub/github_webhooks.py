@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import sys
+import traceback
 from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -16,6 +17,7 @@ NO_SECRET = f"{SECRET_ENV} must be set to verify GitHub webhooks"
 PATH = "/github"
 PORT = 8790
 MAX_BODY = 25 * 1024 * 1024
+REQUEST_TIMEOUT_S = 10
 QUEUE_ACTIONS = {"enqueued": True, "dequeued": False}
 
 
@@ -56,18 +58,25 @@ class Ingress:
             seen = observations(headers.get("X-GitHub-Event", ""), json.loads(body))
         except (ValueError, KeyError, TypeError):
             return 400
-        for observed in seen:
-            self._pulls.observe(observed)
+        try:
+            for observed in seen:
+                self._pulls.observe(observed)
+        except Exception:
+            print("hub: GitHub webhook could not reach the bus", file=sys.stderr)
+            traceback.print_exc()
+            return 503
         return 202
 
 
 def handler(ingress: Ingress) -> type[BaseHTTPRequestHandler]:
     class Webhook(BaseHTTPRequestHandler):
+        timeout = REQUEST_TIMEOUT_S
+
         def do_POST(self):
             length = self.headers.get("Content-Length", "")
             if self.path != PATH:
                 status = 404
-            elif not length.isdigit():
+            elif not (length.isascii() and length.isdigit()):
                 status = 411
             elif int(length) > MAX_BODY:
                 status = 413

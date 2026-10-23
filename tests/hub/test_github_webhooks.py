@@ -4,13 +4,13 @@ import io
 import json
 
 import pytest
-from scripts.hub.github_webhooks import Ingress
-from scripts.hub.pulls import Observation, Pulls
 
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hub import github_webhooks, pulls
+from scripts.hub.github_webhooks import Ingress
+from scripts.hub.pulls import Observation, Pulls
 
 pytestmark = pytest.mark.unit
 
@@ -185,7 +185,8 @@ class Recorder:
 
 
 def request(ingress, path="/github", body=b"{}", length=None):
-    handler = github_webhooks.handler(ingress).__new__(github_webhooks.handler(ingress))
+    cls = github_webhooks.handler(ingress)
+    handler = cls.__new__(cls)
     handler.path = path
     handler.headers = {"Content-Length": str(len(body)) if length is None else length, "X-GitHub-Event": "ping"}
     handler.rfile = io.BytesIO(body)
@@ -205,14 +206,33 @@ def test_http_handler_passes_the_body_to_the_ingress_and_answers_its_status():
 
 def test_http_handler_refuses_other_paths_and_bad_lengths():
     ingress = Recorder()
+    limit = 25 * 1024 * 1024
     assert request(ingress, "/other")[0] == ("status", 404)
     assert request(ingress, length="")[0] == ("status", 411)
     assert request(ingress, length="-1")[0] == ("status", 411)
-    assert request(ingress, length=str(github_webhooks.MAX_BODY + 1))[0] == ("status", 413)
+    assert request(ingress, length="²")[0] == ("status", 411)
+    assert request(ingress, length=str(limit + 1))[0] == ("status", 413)
     assert ingress.calls == []
     body = b"x" * 3
-    assert request(ingress, body=body, length=str(github_webhooks.MAX_BODY))[0] == ("status", 202)
-    assert ingress.calls == [({"Content-Length": str(github_webhooks.MAX_BODY), "X-GitHub-Event": "ping"}, body)]
+    assert request(ingress, body=body, length=str(limit))[0] == ("status", 202)
+    assert ingress.calls == [({"Content-Length": str(limit), "X-GitHub-Event": "ping"}, body)]
+
+
+def test_http_handler_times_out_slow_clients():
+    assert github_webhooks.handler(Recorder()).timeout == 10
+
+
+def test_a_bus_failure_answers_503_so_github_redelivers(capsys):
+    class Down:
+        def observe(self, seen):
+            raise ConnectionError("bus down")
+
+    ingress = Ingress(Down(), SECRET)
+    assert deliver(ingress, "pull_request", pull_request()) == 503
+    err = capsys.readouterr().err
+    assert err.startswith("hub: GitHub webhook could not reach the bus\nTraceback")
+    assert err.endswith("ConnectionError: bus down\n")
+    assert deliver(ingress, "ping", {}) == 202
 
 
 def test_http_handler_logs_nothing():
@@ -221,7 +241,7 @@ def test_http_handler_logs_nothing():
 
 
 def test_main_refuses_to_start_without_a_secret(monkeypatch, capsys):
-    monkeypatch.delenv(github_webhooks.SECRET_ENV, raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_GITHUB_WEBHOOK_SECRET", raising=False)
     assert github_webhooks.main([]) == 2
     assert capsys.readouterr().err == (
         "agentihooks github-webhook: AGENTIHOOKS_GITHUB_WEBHOOK_SECRET must be set to verify GitHub webhooks\n"
@@ -229,9 +249,20 @@ def test_main_refuses_to_start_without_a_secret(monkeypatch, capsys):
 
 
 def test_main_serves_the_ingress_on_the_given_address(monkeypatch):
-    monkeypatch.setenv(github_webhooks.SECRET_ENV, "s")
-    monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+    monkeypatch.setenv("AGENTIHOOKS_GITHUB_WEBHOOK_SECRET", "s")
     served = []
+
+    class Bus:
+        def __init__(self, config):
+            served.append(("bus", config.backend))
+            self.inner = open_bus(BusConfig())
+            self.events = self.inner.events
+
+        def state(self, bucket):
+            return self.inner.state(bucket)
+
+        def close(self):
+            served.append(("bus closed",))
 
     class Server:
         def __init__(self, address, handler):
@@ -244,14 +275,22 @@ def test_main_serves_the_ingress_on_the_given_address(monkeypatch):
         def server_close(self):
             served.append(("close",))
 
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+    monkeypatch.setattr(github_webhooks, "open_bus", Bus)
     monkeypatch.setattr(github_webhooks, "ThreadingHTTPServer", Server)
     with pytest.raises(KeyboardInterrupt):
         github_webhooks.main(["--host", "0.0.0.0", "--port", "9001"])
-    assert served == [("init", ("0.0.0.0", 9001), "Webhook"), ("serve",), ("close",)]
+    assert served == [
+        ("bus", "memory"),
+        ("init", ("0.0.0.0", 9001), "Webhook"),
+        ("serve",),
+        ("close",),
+        ("bus closed",),
+    ]
     served.clear()
     with pytest.raises(KeyboardInterrupt):
         github_webhooks.main([])
-    assert served[0] == ("init", ("127.0.0.1", github_webhooks.PORT), "Webhook")
+    assert served[1] == ("init", ("127.0.0.1", 8790), "Webhook")
 
 
 def test_the_cli_delegates_github_webhook_to_this_module():
