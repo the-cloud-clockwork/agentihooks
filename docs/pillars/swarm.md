@@ -92,6 +92,57 @@ retired and its successor starts from the document; one that does not is retired
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
 `swarm status` flags it as a live binding finding, and it never retires the agent.
 
+### Adopting a live master with no agent record
+
+A master pane can keep running after its agent record is gone, for example when the record was dropped while the
+process lived on. Master recovery binds such a pane back into the master seat. It runs on every tick, after the pane
+sweep, execution reconciliation and master failover, and again before every forced master launch, so a live master is
+adopted before a new one is started.
+
+Recovery does nothing while any lead master record that is not finished names a live process. Otherwise its
+candidates are live processes with no master record in the swarm that are either the master seat's current occupant,
+named as a master of this swarm (`master@<code>-<n>`), or named with the prefix `<id>-master-`. It takes the seat occupant when it
+is a candidate, else the first candidate by name.
+
+| Seat's current execution | Record written for the live master |
+|---|---|
+| Names the chosen master | That execution: its execution id, generation and start time are kept. |
+| Names another master, or the seat has none | A fresh record with no execution id, started at the tick time. The other master's execution row is left unchanged. |
+
+The live pane's placement (pane, harness, account, model, profile) is copied onto that record and it is marked
+working. Lead master records whose process is gone are dropped, the seat is occupied by the adopted name when it held
+another name or none, and the tick returns the action `adopted live master <name>`, which the tick journal prints as `<id>: adopted live master <name>`.
+
+Before pull request [5335](https://github.com/the-cloud-clockwork/agentihooks/pull/5335), recovery always wrote a fresh
+record with the tick time. When the registry already held an execution for that name, it compared the start time and
+execution id with the seat's execution, refused the write with `stale or changed execution identity` and counted an
+identity conflict, so the master was never adopted and the seat stayed empty.
+
+The registry identity check itself is unchanged. Any later write that changes an immutable field of the adopted
+execution (execution id, generation, name, lane, task, seat, start time, runtime backend, transport) is still refused
+with the same message and counted. A live master never takes over another master's execution.
+
+To check adoption on a swarm, read the tick journal and the seat's current execution. The second command prints the
+swarm's identity conflict count and the master seat's execution name, id, generation and start time; run it with the
+Python environment agentihooks is installed in, from its checkout:
+
+```bash
+journalctl --user -t agentihooks-swarm --since "-1 day" --no-pager \
+  | grep -E "adopted live master|stale or changed execution identity"
+python -c '
+from scripts.swarm.store import connect
+s, slug = connect(), "my-swarm"
+print(s.execution_identity_conflicts_total(slug))
+m = s.execution_occupants(slug).get(f"master@{slug}")
+print(m and (m.name, m.execution_id, m.generation, m.started_at))'
+```
+
+| Symptom | Check |
+|---|---|
+| A master pane is live but the seat has no master record and no `adopted live master` line appears | Read the `scripts.swarm.tick._recover_master` step records in the journal. An `outcome` of `error` with `scripts.swarm.store.SwarmError` means a registry refusal; a `success` with no adoption means the pane's name is not a candidate. |
+| The identity conflict count rises on every tick | Another writer is changing an immutable field. The journal line next to the count names the step, such as `outage resume for <agent> refused: stale or changed execution identity`. |
+| The adopted master has a fresh start time | The seat's current execution named another master, so the live one got a fresh record. This is expected. |
+
 ### Interactive masters and Remote Control
 
 Claude masters prefer a valid native claude.ai login at launch and handoff;
@@ -230,6 +281,57 @@ binds, or the swarm stops, the tick ends the promotion and tells the engineer to
 promotion, prompt and hand back is a tick journal line and an event on the seat history of the master seat and the
 engineer's seat. `swarm status` prints a `promoted` line, `status --json` carries `promotion` and a `promoted` flag
 per agent, and the ledger page marks the agent row promoted.
+
+#### Orphan executions on a seat
+
+Every seat has one current execution in the swarm's execution registry. A new launch on a seat names the
+execution it replaces, and the registry refuses it with `replacement does not match the current execution` when
+that differs from the current one. An execution whose agent record is gone but which was never marked ended stays
+the seat's current execution. On a master seat this showed as forced launches that never bound: refused first
+with `replacement does not match the current execution`, then as
+`master launch refused: startup pending for <name>` in the tick journal.
+
+Each tick, before step 1 of [the minute tick](#the-minute-tick), the execution reconcile ends such an orphan. It ends the current execution of
+a seat when all of these hold:
+
+| Condition | Read from |
+|---|---|
+| Its state is `working`, or `starting` with its start at least the master startup window (two minutes) ago | The execution record |
+| The swarm has no agent record under its name | The agent records |
+| No live pane carries its name and its hook has not reported | The runtime |
+| On a remote hive, a latest report exists and omits the name; with no report the seat is kept | The hive report |
+| On a non-local backend, the runtime observes it dead | The runtime |
+| On the local machine, the checks above suffice | The runtime |
+
+The ending is atomic: under a Redis watch on the executions and agent records it requires the seat's current
+record to equal the one the reconcile read, repeats the state and window check, and writes that record with state
+`ended`. When the record changed, an agent record appeared, or a write raced it, the tick leaves the execution
+alone and tries again on the next tick. A `starting` execution inside its startup window, one with a live pane or
+a reported hook, and one a remote hive still lists are kept. Each ended orphan is a tick journal line:
+
+```text
+ended orphan execution <execution id> for <agent name>
+```
+
+With the occupant ended, the next launch on the seat replaces it and the forced master launch binds. The startup
+window applies to a `starting` execution on any seat, engineer seats included; inside it the execution is kept. A
+`working` orphan is ended with no window. To check a stuck seat:
+
+```bash
+# Launch refusals and orphan endings for the master in the last hour
+journalctl --user -t agentihooks-swarm --since "1 hour ago" \
+  | grep -E "ended orphan execution|startup pending|replacement does not match"
+# The master line lists a live master once the seat binds
+agentihooks swarm <id> status
+```
+
+A refusal that keeps repeating with no `ended orphan execution` line has one of two causes. Either a condition
+above still holds (an agent record with that name, a pane or hook report under it, or a remote hive report that
+still lists it or no report at all), or the launch is refused for another reason its error names:
+`master launch refused: unfinished lead`, `current execution publication is in flight`,
+`the controller lease is stale`, `execution history kept changing` or
+`canonical agent already belongs to another execution seat`. Read the seat history before acting; never end an
+execution by writing to Redis by hand.
 
 ### Several master seats
 
@@ -848,7 +950,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. A dependency that is not `done` turns the block into a checked wait on that task instead, keeping the claim. Before blocking, refuses while a task worktree holds commits its remote branch lacks, naming the push to run, and records a pushed branch on the task; see [Blocking with unpushed commits](#blocking-with-unpushed-commits). |
 | `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
-| `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), or until it expires after MINUTES, or 12 hours when MINUTES is omitted. When the thing resolves the tick ends the wait and sends you an inbox item; expiry sends none. For a red Actions run the item names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read; [When a checks wait ends](#when-a-checks-wait-ends) gives the green and red rule for pull request checks. A bare wait lasts MINUTES, at most 60. An accepted checked wait prints a `next` field telling the agent to finish its turn; [Wait notice and end of turn](#wait-notice-and-end-of-turn) covers it and the notice a worker gets for an undeclared wait. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), writes the branch and head as a ledger comment on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. The `one-push` gate, in the same roles on Bash calls running `git` or `gh`, keeps a pull request to one push: an eng or ci agent's `gh pr create` or `gh pr ready` is refused until the `standards-reader` and `spec-reader` sub-agents ran for its task (Claude sessions only) and its checkout is committed and on origin, with `--draft` open for the block path; a `git push` to the task branch is refused while the task's open pull request has checks running or waits in the merge queue, unless a check is red; a required check that has not reported yet counts as running. A reader counts once launched; the gate cannot see a review close. See [One push per pull request](#one-push-per-pull-request) for the refusals, configuration and troubleshooting. |
+| `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|merge PR_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, a queued pull request merges or leaves the merge queue, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), or until it expires after MINUTES, or 12 hours when MINUTES is omitted. When the thing resolves the tick ends the wait and sends you an inbox item; expiry sends none. For a red Actions run the item names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read; [When a checks wait ends](#when-a-checks-wait-ends) gives the green and red rule for pull request checks. A bare wait lasts MINUTES, at most 60. An accepted checked wait prints a `next` field telling the agent to finish its turn; [Wait notice and end of turn](#wait-notice-and-end-of-turn) covers it and the notice a worker gets for an undeclared wait. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), writes the branch and head as a ledger comment on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. The `one-push` gate, in the same roles on Bash calls running `git` or `gh`, keeps a pull request to one push: an eng or ci agent's `gh pr create` or `gh pr ready` is refused until the `standards-reader` and `spec-reader` sub-agents ran for its task (Claude sessions only) and its checkout is committed and on origin, with `--draft` open for the block path; a `git push` to the task branch is refused while the task's open pull request has checks running or waits in the merge queue, unless a check is red; a required check that has not reported yet counts as running. A reader counts once launched; the gate cannot see a review close. See [One push per pull request](#one-push-per-pull-request) for the refusals, configuration and troubleshooting. |
 | `agentihooks swarm <id> progress --doing TEXT --ends-when TEXT` | Say what you are doing and when it ends: a ledger line on your task, a line in its work folder `progress.md` and an outcome on the progress signal. The tick raises a quiet flag (`gates/quiet/<agent>`, a gate log `count` row) on an eng or ci agent holding a claimed or pr task with no progress signal (last outcome, work folder progress line, start) for 30 minutes and no live checked wait. While it stands the `quiet` gate (`python -m scripts.gates quiet`, behind a bash flag test on every tool call) refuses every call except `agentihooks ledger`, `swarm` and `msg` commands; `progress` clears it. The stale claim finding reads the same quiet minutes, and each idle tick is a gate log `count` row (`idle-ticks`) for `doctor rates`. |
 | `agentihooks swarm <id> handoff DOC [--recap FILE]` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. `--recap` adds the recap (what you did, where you stopped, what you promised) to your seat; older recaps are kept. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
 | `agentihooks swarm <id> park DOC` | Park a stacked task whose dependency is still open. Refuses unless the task's `branch` is on origin at the worktree head, the worktree holds no uncommitted changes or untracked files and, where the repo has issues, the task has an issue. Checks the document like `handoff`, writes `parked_on` (the open dependencies) and `stacked_base` (where the branch left the newest dependency branch; for a dependency whose `branch_repo` is another repository, fetched through that repository's recorded checkout or its URL, or whose pull request already merged into `dev`, the task's own fork from `origin/dev`, see [Parking on a dependency already merged into dev](#parking-on-a-dependency-already-merged-into-dev)), comments the ledger task with the blocker, comments the issue with the branch, records those other repositories in `parked_repos` (see [Park fetch and note across repositories](#park-fetch-and-note-across-repositories)), stores the handoff, ends the session and removes the worktree with `wt.sh done --pushed`, which keeps the pushed branch, since the next engineer cuts its own from the pushed branch. The tick reopens the task, which waits until its blockers are done. A read only task, any kind other than `code` or `ci`, parks without a branch or worktree: park writes only `parked_on`, the dependencies not yet done and, in a Doctor swarm, the code fixes it measures that carry no `applied_at`, comments the ledger task and stores the handoff carrying its recorded window. |
@@ -3511,7 +3613,8 @@ lock, so a minute that fires while a tick still runs starts no second tick; the 
 minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
 again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
 An outage holds the affected idle and delivery decisions until recovery (see
-[Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm:
+[Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm, before step 1 the tick ends any orphan
+execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)), then:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 20 ticks. A stale agent is nudged through its inbox
