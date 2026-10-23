@@ -119,6 +119,121 @@ and CPU comparison failed. This proves the acquisition repair on that head;
 it does not establish a fully green hierarchy workflow or a measured reduction
 in hierarchy image pull failures across a time window.
 
+## Swarm smoke Redis acquisition
+
+The `Swarm container smoke` workflow, `.github/workflows/swarm-smoke.yml`,
+starts Redis 7 and Redis 7 Alpine containers in its scenarios. It runs as the
+`swarm-image` job of the Tests workflow on every push to `dev` and on admitted
+Tests dispatches, where it is a need of `Gate — Required` and so holds
+[promotion](delivery-tiers.md) when red. `proofs.yml` also calls it, and a
+dispatch under its own name runs in a [hosted lane](../ci-timing.md).
+
+### Registry and retries
+
+[Pull request 4844](https://github.com/the-cloud-clockwork/agentihooks/pull/4844)
+moved both Redis pulls from the Google mirror to public ECR, the registry the
+ledger load Redis service (`public.ecr.aws/docker/library/redis:7-alpine`) and
+the hierarchy CPU repair use. The pulls run in the `Build the swarm image` step,
+in parallel with the image build:
+
+```bash
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &&
+  docker tag public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 &
+redis=$!
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
+  docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
+wait "$redis" || status=$?
+wait "$build" || status=$?
+exit "$status"
+```
+
+Each pull goes through the existing `scripts/packaging/pull-runtime-image.sh`;
+the change added no retry loop or setting. That script makes up to three
+attempts per image. Each attempt reads the image manifest, picks the
+`linux/amd64` digest and pulls that digest, with each command bounded by
+`PULL_ATTEMPT_SECONDS` (default 120). A failed attempt prints
+`Pull of <image> failed on attempt <n> of 3; retrying in 10 seconds` and waits
+ten seconds; the third failure exits with the pull's status.
+
+Each `docker tag` runs only after its own pull succeeds, so a failed pull never
+leaves a mirror named image behind and the step exits non zero once the build
+and both pulls have finished.
+
+### Mirror names in the scenarios
+
+The tag gives each image the `mirror.gcr.io` name the scenarios already use, so
+scenario scripts, `compose.yaml` and user facing defaults are unchanged:
+
+| Scenario | Image name it starts | Start |
+|---|---|---|
+| `hive-launch-smoke.sh` | `mirror.gcr.io/library/redis:7` | `docker compose up --pull never` |
+| `swarm-smoke.sh` | `mirror.gcr.io/library/redis:7` (from `compose.yaml`) | `docker compose up --pull never` |
+| `compose-hive-smoke.sh` | `mirror.gcr.io/library/redis:7` | `docker compose up --pull never` |
+| `swarm-init-smoke.sh` | `mirror.gcr.io/library/redis:7` | `swarm init` from the installed package |
+| `hive-join-smoke.sh` | `mirror.gcr.io/library/redis:7-alpine` | `docker run --pull never` |
+
+Each scenario still calls `pull-runtime-image.sh` with the mirror name before it
+starts Redis. The workflow sets `SWARM_SMOKE_RUNTIME_IMAGES_READY=true` on the
+scenario steps; with it set, the script exits at once for either Redis mirror
+name when that image is already present locally as `amd64`, so CI makes no
+request to the Google mirror. Without the variable, for example when a scenario
+runs on a workstation, the script pulls the mirror name as before.
+
+### Steps after a failed pull
+
+Since [pull request 5000](https://github.com/the-cloud-clockwork/agentihooks/pull/5000),
+every later step that builds on the image runs only when
+`!cancelled() && steps.build.outcome == 'success'`: the four parallel scenarios, swarm init,
+Python setup and the terminal clients check. A failed Redis pull fails the
+build step, those steps are skipped and the job ends red at once. The
+attestation proof step runs only on `workflow_dispatch` and does not depend on
+the build.
+
+### Running and inspecting
+
+Dispatch the workflow on a branch and read the pull lines from its log:
+
+```bash
+gh workflow run swarm-smoke.yml --ref "<branch>"
+gh run list --workflow swarm-smoke.yml --branch "<branch>" --limit 5
+gh run view "<run-id>" --log | grep -E 'public.ecr.aws/docker/library/redis|Pull of .* failed'
+```
+
+A healthy run shows a digest pulled from `public.ecr.aws/docker/library/redis`
+for both tags and no `Pull of` retry lines.
+
+`tests/test_ci_smoke_acquisition.py` guards the contract in CI:
+`test_smoke_pulls_redis_from_the_ledger_load_registry` reads the registry from
+the ledger load Redis service and requires both smoke pulls to use it and no
+smoke pull to name the Google mirror. To move Redis to another registry, change
+the ledger load service and the smoke pulls in the same pull request.
+`test_smoke_steps_after_the_build_run_only_when_the_build_and_redis_pulls_succeeded`
+guards the step conditions.
+
+### Troubleshooting
+
+| Observation | Meaning and action |
+|---|---|
+| `Pull of public.ecr.aws/docker/library/redis:<tag> failed on attempt 3 of 3` | Public ECR did not serve the image within three bounded attempts. Read the earlier attempt errors; the scenarios were skipped, so no scenario result exists for that run. |
+| A scenario fails because `mirror.gcr.io/library/redis:<tag>` is missing locally | The tag step did not run. Check the build step for a failed pull, or a scenario run outside the workflow without a prior pull. |
+| The log shows a pull from `mirror.gcr.io/library/redis` | The scenario ran without `SWARM_SMOKE_RUNTIME_IMAGES_READY=true`, or the local image was not `amd64`. |
+| Redis pulls succeeded but a scenario failed | Acquisition is not the cause; read that scenario's own output. |
+
+### Evidence
+
+- Red: [Tests run 39291414278](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39291414278/job/118193570242)
+  on the tests only commit failed only the new contract test, because the
+  workflow still pulled `mirror.gcr.io/library/redis:7`.
+- Green: [swarm smoke run 39292084539](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39292084539)
+  on the branch pulled both Redis digests from public ECR and passed every
+  scenario step.
+- Number: across the 78 swarm smoke jobs on `dev` pushes on 19 October, failed
+  Redis pull attempts were 0. The three of three failures named in the follow up
+  came from the ledger load Redis service in
+  [run 39206814774](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39206814774/job/117913406677),
+  so this change aligns the registry with ledger load rather than repairing a
+  measured swarm smoke failure.
+
 ## Hierarchy paired load false reds
 
 On 19 October the `Hierarchy CPU proof` went red on
