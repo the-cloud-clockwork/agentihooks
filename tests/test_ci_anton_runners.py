@@ -28,6 +28,7 @@ def pool(label):
 
 
 MOVED = {
+    ("chaos.yml", "chaos"): STANDARD,
     ("chart-release.yml", "publish"): LIGHT,
     ("mutation-line-selection-proof.yml", "compare"): BATCH,
     ("test.yml", "docs"): QUEUED,
@@ -57,7 +58,6 @@ MOVED = {
     ("mutation-replay.yml", "verify"): LIGHT,
     ("mutation-preflight.yml", "stats"): BATCH,
     ("mutation-preflight.yml", "touched-tests"): STANDARD,
-    ("proofs.yml", "chaos"): STANDARD,
     ("proofs.yml", "operations-cpu"): BATCH,
     ("proofs.yml", "operations-receipts"): BATCH,
     ("proofs.yml", "tests"): STANDARD,
