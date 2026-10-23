@@ -8,8 +8,8 @@ from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, TransportRecord
 from scripts.inbox import codex, wake
 from scripts.inbox.dispatch import Dispatcher
-from scripts.inbox.receipts import MISMATCH, RELEASED, DispatchError, Receipts
-from scripts.inbox.store import InboxStore, owner_key, owner_ttl_s
+from scripts.inbox.receipts import MISMATCH, RELEASED, DispatchError, InboxContention, Receipts, transact
+from scripts.inbox.store import MOVE_ATTEMPTS, InboxStore, owner_key, owner_ttl_s
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -1330,3 +1330,122 @@ def test_a_codex_pane_is_typed_into_only_while_no_pump_owns_its_inbox(rig):
 def test_the_pump_renews_its_inbox_lease_before_the_default_lease_expires():
     assert (codex.RECONCILE_S, codex.BACKOFF_MAX_S) == (10.0, 15.0)
     assert codex.Timing().reconcile_s + codex.Timing().backoff_max_s < owner_ttl_s({})
+
+
+def contended(target, rounds, before=lambda: None):
+    from redis.exceptions import WatchError
+
+    calls = []
+
+    def body(*args):
+        calls.append(args)
+        before()
+        if len(calls) <= rounds * MOVE_ATTEMPTS:
+            raise WatchError("a watched key changed")
+        return target(*args)
+
+    return body
+
+
+def recorded_sleeps(rig):
+    sleeps = []
+
+    def sleep(delay):
+        sleeps.append(delay)
+        rig.clock.now += delay
+
+    rig.pump.timing = replace(rig.pump.timing, sleep=sleep)
+    return sleeps
+
+
+def test_exhausted_inbox_contention_is_a_typed_dispatch_error(rig):
+    with pytest.raises(InboxContention, match="^the inbox changed meanwhile; run it again$") as failure:
+        transact(rig.store.redis, contended(lambda pipe: None, 1))
+    assert isinstance(failure.value, DispatchError)
+
+
+def test_a_contended_reservation_retries_with_backoff_and_delivers_on_the_same_server(rig, monkeypatch):
+    item = rig.store.send("alice", ME, "after contention")
+    monkeypatch.setattr(rig.pump.dispatcher, "_reserve", contended(rig.pump.dispatcher._reserve, 2))
+    sleeps = recorded_sleeps(rig)
+    assert rig.run(6) == codex.STOPPED
+    assert rig.store.get(item.id).state == "delivered"
+    assert sleeps == [codex.BACKOFF_S, codex.BACKOFF_S * 2]
+    assert rig.logged == [codex.CONTENDED_LOG.format(ME, "the inbox changed meanwhile; run it again")] * 2
+    assert rig.server.methods().count("thread/resume") == 1
+    assert rig.server.methods().count("turn/start") == 1
+    assert rig.record().state == CONNECTED
+    assert [d.state for d in deliveries(rig, item.id)] == ["accepted"]
+
+
+def test_a_contended_submission_is_released_and_delivered_once(rig, monkeypatch):
+    item = rig.store.send("alice", ME, "submitted after contention")
+    monkeypatch.setattr(rig.pump.receipts, "_submit", contended(rig.pump.receipts._submit, 1))
+    sleeps = recorded_sleeps(rig)
+    assert rig.run(4) == codex.STOPPED
+    assert rig.store.get(item.id).state == "delivered"
+    assert sleeps == [codex.BACKOFF_S]
+    assert rig.server.methods().count("thread/resume") == 1
+    assert rig.server.methods().count("turn/start") == 1
+    assert rig.server.turns[0]["inputs"][0].count("submitted after contention") == 1
+    assert [d.state for d in deliveries(rig, item.id)].count("accepted") == 1
+    assert rig.record().state == CONNECTED
+
+
+def test_owner_loss_while_retrying_contention_still_ends_the_pump(rig, monkeypatch):
+    rig.store.send("alice", ME, "never delivered")
+
+    def takeover():
+        Dispatcher(rig.store).own(ME, "host:99", takeover=True)
+
+    monkeypatch.setattr(rig.pump.dispatcher, "_reserve", contended(rig.pump.dispatcher._reserve, 99, takeover))
+    sleeps = recorded_sleeps(rig)
+    assert rig.run(20) == DEGRADED
+    assert sleeps == []
+    assert rig.logged[-1] == f"codex pump for {ME} degraded: DispatchError: {OWNER} no longer delivers for {ME}"
+    assert rig.server.methods().count("turn/start") == 0
+
+
+def test_contention_late_in_start_retries_start_and_closes_the_earlier_subscription(rig, monkeypatch):
+    subscriptions, marks = [], []
+    original_pubsub, original_mark = rig.store.redis.pubsub, codex.Transport.mark
+
+    def pubsub():
+        subscriptions.append(original_pubsub())
+        return subscriptions[-1]
+
+    def mark(transport, **changes):
+        marks.append(changes)
+        if len(marks) == 1:
+            raise InboxContention("the inbox changed meanwhile; run it again")
+        original_mark(transport, **changes)
+
+    monkeypatch.setattr(rig.store.redis, "pubsub", pubsub)
+    monkeypatch.setattr(codex.Transport, "mark", mark)
+    sleeps = recorded_sleeps(rig)
+    assert rig.run(1) == codex.STOPPED
+    assert sleeps == [codex.BACKOFF_S]
+    assert len(subscriptions) == 2
+    assert all(not subscription.subscribed for subscription in subscriptions)
+    assert rig.record().state == CONNECTED
+
+
+def test_contention_recording_an_acceptance_leaves_the_delivery_unknown_and_the_pump_running(rig, monkeypatch):
+    item = rig.store.send("alice", ME, "accepted under contention")
+    advance, accepting = rig.pump.receipts._advance, []
+
+    def contended_accept(pipe, delivery_id, owner, states, target):
+        if target == "accepted":
+            accepting.append(delivery_id)
+            if len(accepting) <= MOVE_ATTEMPTS:
+                from redis.exceptions import WatchError
+
+                raise WatchError("a watched key changed")
+        return advance(pipe, delivery_id, owner, states, target)
+
+    monkeypatch.setattr(rig.pump.receipts, "_advance", contended_accept)
+    recorded_sleeps(rig)
+    assert rig.run(4) == codex.STOPPED
+    assert rig.server.methods().count("turn/start") == 1
+    assert [d.state for d in deliveries(rig, item.id)] == ["unknown"]
+    assert rig.record().state == CONNECTED
