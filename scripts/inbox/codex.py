@@ -223,25 +223,24 @@ class Pump:
                     if stop():
                         return STOPPED
                     self.step()
-                    backoff = self.timing.backoff_s
                 except StaleExecution as failure:
                     self.log(DEGRADED_LOG.format(self.binding.recipient, type(failure).__name__, failure))
                     return DEGRADED
                 except InboxContention as failure:
                     self.log(CONTENDED_LOG.format(self.binding.recipient, failure))
-                    if stop():
-                        return STOPPED
-                    pause, backoff = backoff, min(backoff * 2, self.timing.backoff_max_s)
                     resume = resume or self._resync
                 except DispatchError as failure:
                     self._degrade(failure)
                     return DEGRADED
                 except Exception as failure:
                     self._degrade(failure)
-                    if stop():
-                        return STOPPED
-                    pause, backoff = backoff, min(backoff * 2, self.timing.backoff_max_s)
                     resume = self._reconnect
+                else:
+                    backoff = self.timing.backoff_s
+                    continue
+                if stop():
+                    return STOPPED
+                pause, backoff = backoff, min(backoff * 2, self.timing.backoff_max_s)
         finally:
             if self.subscription is not None:
                 self.subscription.close()
