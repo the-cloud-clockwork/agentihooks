@@ -483,6 +483,33 @@ class RedisStore:
         self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
         return self.redis.hincrby(self.key(slug, "started-lives"), task, -1)
 
+    def refund_held_claim(self, slug: str, task: str, agent: str, generation: int) -> bool:
+        from redis.exceptions import WatchError
+
+        key, lives = self.key(slug, "claim", task), self.key(slug, "started-lives")
+        guards = self._claim_guards(slug, task)
+        for _ in range(3):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key, f"{key}:generation", lives, *guards)
+                    if (
+                        pipe.get(key) != agent
+                        or int(pipe.get(f"{key}:generation") or 0) != generation
+                        or any(pipe.exists(guard) for guard in guards)
+                    ):
+                        return False
+                    started = self._started_lives(slug, task)
+                    if int(pipe.hget(lives, task) or started) <= 0:
+                        return False
+                    pipe.multi()
+                    pipe.hsetnx(lives, task, started)
+                    pipe.hincrby(lives, task, -1)
+                    pipe.execute()
+                    return True
+                except WatchError:
+                    continue
+        return False
+
     def claims(self, slug, task):
         counted = self.redis.hget(self.key(slug, "started-lives"), task)
         if counted is not None:
