@@ -1,5 +1,6 @@
 import json
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -217,3 +218,34 @@ def test_task_set_refuses_a_whole_object_naming_the_dotted_form(cli, monkeypatch
         cli(["task", "set", "t1", value], applied)
     assert sent == []
     assert f"one {name}.KEY=VALUE pair per key among {allowed}, e.g. {form}, not {name}=VALUE" in str(stop.value.code)
+
+
+TASKS = [
+    {"id": "t1", "state": "open", "lane": "eng", "claimed_by": "eng-1", "title": "Fix it"},
+    {"id": "t2", "state": "pr", "lane": "ci", "claimed_by": None, "title": "Speed up CI"},
+]
+
+
+@pytest.mark.parametrize(
+    ("state", "lane", "grep", "lines"),
+    [
+        (None, None, None, ["t1 open eng eng-1 Fix it", "t2 pr ci - Speed up CI"]),
+        ("open", None, None, ["t1 open eng eng-1 Fix it"]),
+        (None, "ci", None, ["t2 pr ci - Speed up CI"]),
+        (None, None, "speed", ["t2 pr ci - Speed up CI"]),
+    ],
+)
+def test_tasks_lists_filtered_rows_from_the_tasks_collection(monkeypatch, capsys, state, lane, grep, lines):
+    seen = []
+    monkeypatch.setattr(ledger, "resource", lambda slug, path, **k: seen.append((slug, path, k)) or TASKS)
+    ledger.cmd_tasks(SimpleNamespace(slug="s", state=state, lane=lane, grep=grep))
+    assert capsys.readouterr().out.splitlines() == lines
+    assert seen == [("s", "tasks", {"collection": True})]
+
+
+def test_get_prints_one_items_data_without_downloading_the_ledger(monkeypatch, capsys):
+    seen = []
+    monkeypatch.setattr(ledger, "resource", lambda slug, path, **k: seen.append((slug, path, k)) or TASKS[0])
+    ledger.cmd_get(SimpleNamespace(slug="s", item="tasks/t1"))
+    assert json.loads(capsys.readouterr().out) == TASKS[0]
+    assert seen == [("s", "tasks/t1", {})]

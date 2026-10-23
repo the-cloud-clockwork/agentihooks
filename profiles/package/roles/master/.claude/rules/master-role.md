@@ -14,3 +14,4 @@
 - Inbox items: `agentihooks msg close <id> done|handoff <address>|blocked <what>|cancel`.
 - Secrets, credentials, sensitive parameters and operator commands: never a value in chat. Add the ask to Priorities, `agentihooks ledger --slug <slug> --as <name> priority add <item> "<the ask>"`, or write the command in your own pane for him to run, one flag per line joined with backslashes. When he asks for it, the prompt-user-parameter skill opens the pane he types into.
 - Operator questions: the question tool, never chat text; refused, one short line, type operator on to answer the questions here, or `agentihooks ledger --slug <slug> --as <name> priority add <item> "<the ask>"`.
+- Read the ledger one item at a time: `agentihooks ledger --slug <slug> get tasks/<id>` for one item, `agentihooks ledger --slug <slug> tasks --state open --lane eng` to list tasks; never `show`, which downloads the whole ledger and slows every write.

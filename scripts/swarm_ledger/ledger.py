@@ -33,6 +33,11 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   delete chat|ITEM ENTRY...           delete entries (yours; the orchestrator: any agent's)
   audit                               list every agent text the filter refuses, the cleanup worklist
   show                                print the whole ledger as JSON: every task, note, answer and comment (no --as needed)
+  get ITEM                             print one item's data as JSON: tasks/<id>, phases/<id>, followups/<id> or
+                                      questions/<id> (no --as needed); never downloads the whole ledger like show
+  tasks [--state S] [--lane L] [--grep TEXT]
+                                      list tasks, one line each (id, state, lane, claimed_by, title), filtered
+                                      locally after reading only the tasks collection (no --as needed)
   priority add ITEM TEXT              ask the operator: only what blocks on his answer, at most 20 words; ITEM may
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
@@ -406,6 +411,23 @@ def cmd_events(args):
 
 def cmd_show(args):
     print(SHOW_JSON(call(args.slug)))
+
+
+def cmd_get(args):
+    print(SHOW_JSON(resource(args.slug, args.item)))
+
+
+def cmd_tasks(args):
+    for row in resource(args.slug, "tasks", collection=True):
+        if args.state and row.get("state") != args.state:
+            continue
+        if args.lane and row.get("lane") != args.lane:
+            continue
+        if args.grep and args.grep.lower() not in row.get("title", "").lower():
+            continue
+        print(
+            f"{row['id']} {row.get('state', '')} {row.get('lane', '')} {row.get('claimed_by') or '-'} {row.get('title', '')}"
+        )
 
 
 def cmd_tree(args):
@@ -970,6 +992,13 @@ def build_parser():
     delete.add_argument("entries", nargs="+")
     sub.add_parser("audit")
     sub.add_parser("show")
+    sub.add_parser("get", help="print one item's data as JSON; never the whole ledger like show").add_argument(
+        "item", help="tasks/<id>, phases/<id>, followups/<id> or questions/<id>"
+    )
+    tasks_list = sub.add_parser("tasks", help="list tasks, one line each, filtered locally; never show")
+    tasks_list.add_argument("--state")
+    tasks_list.add_argument("--lane", choices=["eng", "ci", "plan"])
+    tasks_list.add_argument("--grep", help="substring to match in the title, case insensitive")
     sub.add_parser("tree", help="print a plan, phase, slice or task and everything under it, with states").add_argument(
         "node", nargs="?", help="plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger"
     )
@@ -1066,7 +1095,7 @@ def main():
     if text := refusal(args.name, Who.from_env()):
         sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
-    if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy")):
+    if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy", "get", "tasks")):
         sys.exit("--slug and --as are required")
     with ledger_route.session(args.slug):
         globals()[f"cmd_{args.command.replace('-', '_')}"](args)
