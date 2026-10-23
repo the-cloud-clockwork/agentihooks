@@ -20,8 +20,6 @@ OWN_CLAIMANT = f"eng-2@{SLUG}"
 OTHER_ENGINEER = "engineer@abcdef-0006"
 
 
-
-
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path / "ledgers")
