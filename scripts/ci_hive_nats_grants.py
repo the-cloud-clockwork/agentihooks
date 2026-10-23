@@ -33,13 +33,7 @@ def _direction(rules) -> dict[str, frozenset[str]]:
 
 
 def member_grants(agentihooks: Path) -> dict[str, dict[str, frozenset[str]]]:
-    rendered = subprocess.run(
-        [sys.executable, "-c", RENDER_MEMBER, str(agentihooks.resolve())],
-        cwd=agentihooks,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    rendered = subprocess.run([sys.executable, "-c", RENDER_MEMBER, str(agentihooks)], capture_output=True, text=True)
     if rendered.returncode:
         raise ValueError(f"{MEMBER_SOURCE} did not render member_claims: {rendered.stderr.strip()}")
     claims = json.loads(rendered.stdout)
@@ -88,7 +82,6 @@ def main(argv: list[str] | None = None) -> int:
         OSError,
         KeyError,
         AttributeError,
-        subprocess.TimeoutExpired,
         TypeError,
         ValueError,
         yaml.YAMLError,
