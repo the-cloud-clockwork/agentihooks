@@ -117,6 +117,15 @@ def test_a_swarm_on_the_legacy_engine_is_left_to_the_tick(rig):
     assert [a.name for a in rig.store.agents("rig")] == ["engineer"]
 
 
+def test_a_swarm_removed_mid_scan_does_not_stop_the_pass(rig):
+    from scripts.swarm.store import PREFIX
+
+    rig.store.redis.sadd(f"{PREFIX}:index", "gone")
+    rig.react.poll()
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
+
+
 def test_repeated_pass_does_not_repeat_settlement(rig):
     rig.react.poll()
     rig.clock.return_value += 300_000

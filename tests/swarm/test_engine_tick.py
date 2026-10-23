@@ -6,11 +6,11 @@ from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 
-def _store(**engine):
+def _store(**config):
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, **engine))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, **config))
     return store
 
 
@@ -27,5 +27,6 @@ def test_the_tick_skips_a_swarm_on_the_event_engine():
 @pytest.mark.parametrize("engine", [{}, {"engine": "legacy"}])
 def test_the_tick_runs_a_swarm_on_the_legacy_engine(engine):
     store = _store(**engine)
-    cli.run_tick(store, "sw", FakeLedger([{"id": "t1", "title": "task"}]), FakeRuntime(), FakeHerdr({}))
+    actions = cli.run_tick(store, "sw", FakeLedger([{"id": "t1", "title": "task"}]), FakeRuntime(), FakeHerdr({}))
+    assert cli.EVENTS_ENGINE not in actions
     assert store.redis.get(store.key("sw", "control-owner")) is not None

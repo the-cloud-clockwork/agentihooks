@@ -51,7 +51,7 @@ def legacy_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
 
 
 def event_slugs(store: RedisStore) -> list[str]:
-    return [slug for slug in store.slugs() if store.config(slug).engine == "events"]
+    return [slug for slug in store.slugs() if store.redis.hget(store.key(slug, "config"), "engine") == "events"]
 
 
 def _exited(report: dict | None, event: Envelope, agent: AgentRecord, now: int) -> bool:
