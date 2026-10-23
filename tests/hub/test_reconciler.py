@@ -541,6 +541,65 @@ def test_a_rebuild_interrupted_before_its_start_records_the_claimed_start(rig, r
     assert len(rig.returned) == 1
 
 
+def test_the_rebuilt_start_and_claim_carry_the_recorded_execution(rig, restored):
+    from scripts.hive import execution_events
+
+    calls, task = [], rig.ledger.task
+    rig.ledger.task = lambda *args: calls.append(args) or task(*args)
+    rig.report["executions"]["execution"]["pane"]["state"] = "running"
+    rig.save()
+    restored.react.poll()
+    key = execution_events.identity("rig", "engineer", 3)
+    entries = list(restored.bus.state("spoke-work").watch(key))
+    start = _stored_start(restored.bus)
+    assert calls == [("rig", "task")]
+    assert [json.loads(entry.value) for entry in entries] == [
+        {"owner": "hive", "state": "claimed"},
+        {"state": "started", "claim_revision": entries[0].revision, "event": start},
+    ]
+    assert (start["id"], start["entity"], start["time"], start["author"]) == (
+        f"started:{key}",
+        "execution",
+        900_000,
+        "hub-reconciler",
+    )
+    assert start["data"] == {
+        "task": "task",
+        "task_generation": 7,
+        "claim_key": key,
+        "claim_revision": entries[0].revision,
+        "generation": 3,
+        "lane": "eng",
+        "hive": "hive",
+        "name": "engineer",
+        "pane_id": "pane",
+        "harness": "",
+        "account": "a",
+    }
+
+
+def test_a_rebuild_finds_the_hive_through_the_host_target(rig, restored):
+    agent = replace(rig.agent, hive="")
+    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    rig.store.redis.hset(rig.store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
+    restored.react.poll()
+    assert _stored_start(restored.bus)["data"]["hive"] == "hive"
+    assert rig.row["state"] == "open"
+
+
+def test_a_task_in_pull_request_is_rebuilt(rig, restored):
+    rig.row["state"] = "pr"
+    restored.react.poll()
+    assert _stored_start(restored.bus)["data"]["task"] == "task"
+    assert rig.row["state"] == "open"
+
+
+def test_a_row_without_a_claim_generation_rebuilds_generation_zero(rig, restored):
+    rig.ledger.task = lambda *_: {"state": "claimed", "claimed_by": "engineer"}
+    restored.react.poll()
+    assert _stored_start(restored.bus)["data"]["task_generation"] == 0
+
+
 def test_default_reconciler_connects_lazily_for_the_due_pass(rig, monkeypatch):
     from scripts.hub import reconciler
 
