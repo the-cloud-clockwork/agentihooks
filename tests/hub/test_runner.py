@@ -6,7 +6,7 @@ import pytest
 from scripts import cli_delegates
 from scripts.events import memory
 from scripts.events.bus import StateEntry
-from scripts.events.config import BusConfig
+from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.hub import lease, registry, runner
 
@@ -142,13 +142,58 @@ def test_two_replicas_share_the_durable_consumer_and_its_versions(bus):
     assert handler.seen == [("e1", 1)]
 
 
-def test_a_failed_handler_is_redelivered_and_records_no_version(bus):
+def test_a_failed_handler_is_redelivered_and_records_no_version(bus, clock):
     handler = Recorder(fail=1)
     hosted = hub(bus, [registry.Reactor("lifecycle", "swarm.*.task.>", handler)])
     bus.events.publish(SUBJECT, event("e1", 1))
     assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": ["failed"]}
+    clock.now += registry.REACTOR_POLICY.backoff_ms[0]
     assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": ["handled"]}
     assert handler.seen == [("e1", 1)]
+
+
+def test_a_failed_handler_waits_out_its_reactor_backoff(bus, clock):
+    hosted = hub(bus, [registry.Reactor("lifecycle", "swarm.*.task.>", Recorder(fail=2))])
+    bus.events.publish(SUBJECT, event("e1", 1))
+    first, second = registry.REACTOR_POLICY.backoff_ms[:2]
+    assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": ["failed"]}
+    clock.now += first - 1
+    assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": []}
+    clock.now += 1
+    assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": ["failed"]}
+    clock.now += second - 1
+    assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": []}
+    clock.now += 1
+    assert hosted.run_once(batch=10, timeout_ms=0) == {"lifecycle": ["handled"]}
+
+
+def test_a_reactor_outlasts_the_bus_attempt_cap_by_default(bus, clock):
+    failures = BusConfig().queue.max_deliver + 3
+    handler = Recorder(fail=failures)
+    hosted = hub(bus, [registry.Reactor("lifecycle", "swarm.*.task.>", handler)])
+    bus.events.publish(SUBJECT, event("e1", 1))
+    outcomes = []
+    for _ in range(failures + 1):
+        outcomes += hosted.run_once(batch=10, timeout_ms=0)["lifecycle"]
+        clock.now += max(registry.REACTOR_POLICY.backoff_ms)
+    assert outcomes == ["failed"] * failures + ["handled"]
+    assert handler.seen == [("e1", 1)]
+    assert registry.REACTOR_POLICY.max_deliver > BusConfig().queue.max_deliver
+    assert registry.Reactor("lifecycle", "swarm.>", Recorder()).policy == registry.REACTOR_POLICY
+
+
+def test_an_exhausted_reactor_event_is_dead_lettered_with_its_reactor_named(bus, clock):
+    policy = QueuePolicy(max_deliver=2, backoff_ms=(10,))
+    hosted = hub(bus, [registry.Reactor("lifecycle", "swarm.*.task.>", Recorder(fail=99), policy=policy)])
+    original = event("e1", 1)
+    bus.events.publish(SUBJECT, original)
+    for _ in range(4):
+        hosted.run_once(batch=10, timeout_ms=0)
+        clock.now += 10
+    letters = bus.dead.consumer("dead-reader", "dead.>").fetch(10, 0)
+    assert [letter.event.data for letter in letters] == [
+        {"event": original.to_dict(), "attempts": 2, "source": "events.hub-lifecycle"}
+    ]
 
 
 def test_a_singleton_reactor_runs_only_on_the_lease_holder(bus, clock):
