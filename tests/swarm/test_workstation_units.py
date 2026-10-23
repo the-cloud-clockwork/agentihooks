@@ -44,7 +44,7 @@ def test_a_distributed_install_writes_only_the_spoke_and_schedules_no_tick(tmp_p
 
     assert timer.ensure(BINARY, tmp_path, run=systemctl(calls))
 
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["agentihooks-spoke.service"]
+    assert sorted(path.name for path in tmp_path.glob("agentihooks-*")) == ["agentihooks-spoke.service"]
     assert calls == [
         ["systemctl", "--user", "daemon-reload"],
         ["systemctl", "--user", "enable", "--now", "agentihooks-spoke.service"],
@@ -59,7 +59,7 @@ def test_a_distributed_install_retires_every_engine_unit_it_finds(tmp_path, dist
 
     assert timer.ensure(BINARY, tmp_path, run=systemctl(calls))
 
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["agentihooks-spoke.service"]
+    assert sorted(path.name for path in tmp_path.glob("agentihooks-*")) == ["agentihooks-spoke.service"]
     assert calls[: len(engine)] == [["systemctl", "--user", "disable", "--now", name] for name in engine]
     assert calls[len(engine) :] == [
         ["systemctl", "--user", "daemon-reload"],
@@ -85,7 +85,17 @@ def test_a_distributed_reconcile_installs_the_spoke(tmp_path, monkeypatch, distr
 
     assert timer.reconcile(BINARY, tmp_path, run=systemctl([]))
 
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["agentihooks-spoke.service"]
+    assert sorted(path.name for path in tmp_path.glob("agentihooks-*")) == ["agentihooks-spoke.service"]
+
+
+def test_a_distributed_reconcile_retires_current_engine_units_instead_of_scheduling(tmp_path, monkeypatch, distributed):
+    monkeypatch.setattr(timer, "reconcile", real_reconcile)
+    for name, text in timer.units(BINARY).items():
+        (tmp_path / name).write_text(text)
+
+    assert timer.reconcile(BINARY, tmp_path, run=systemctl([]))
+
+    assert sorted(path.name for path in tmp_path.glob("agentihooks-*")) == ["agentihooks-spoke.service"]
 
 
 def test_a_distributed_tick_ticks_no_swarm_and_names_the_hub(monkeypatch, capsys, distributed):

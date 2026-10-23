@@ -402,8 +402,14 @@ def reconcile(binary, unit_dir=None, run=subprocess.run):
         print(refusal, file=sys.stderr)
         return False
     expected = units(binary)
+    from scripts.hive import workstation
+
     current = all(_current(unit_dir / name, text) for name, text in expected.items())
-    if current and not any((unit_dir / name).exists() for name in (*RETIRED, *DROPPED)):
+    if (
+        current
+        and workstation.runs_engine(os.environ)
+        and not any((unit_dir / name).exists() for name in (*RETIRED, *DROPPED))
+    ):
         names = [*_services(expected), f"{WAITS}.timer"]
         enabled = ["systemctl", "--user", "is-enabled", "--quiet"]
         if all(run([*enabled, name], capture_output=True, text=True, timeout=30).returncode == 0 for name in names):

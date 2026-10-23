@@ -61,16 +61,21 @@ def test_work_for_another_lane_is_withdrawn():
 
 
 def test_the_workstation_runs_one_master_spoke_per_swarm_as_this_hive():
-    store = SimpleNamespace(slugs=lambda: ["a", "b"], config=lambda slug: SimpleNamespace(slug=slug))
-    bus, runtime = Mock(), Mock()
+    slugs = ["a", "b"]
+    store = SimpleNamespace(slugs=lambda: list(slugs), config=lambda slug: SimpleNamespace(slug=slug))
+    bus, runtime, held = Mock(), Mock(), {}
 
-    spokes = workstation.spokes(store, bus, runtime, "workstation-1")
+    first = workstation.spokes(store, bus, runtime, "workstation-1", held)
 
-    assert [(s.config.swarm.slug, s.config.lane, s.config.hive) for s in spokes] == [
+    assert [(s.config.swarm.slug, s.config.lane, s.config.hive) for s in first] == [
         ("a", "master", "workstation-1"),
         ("b", "master", "workstation-1"),
     ]
-    assert all(s.bus is bus and s.runtime is runtime for s in spokes)
+    assert all(s.bus is bus and s.runtime is runtime for s in first)
+    slugs[:] = ["b", "c"]
+    second = workstation.spokes(store, bus, runtime, "workstation-1", held)
+    assert second[0] is first[1]
+    assert [s.config.swarm.slug for s in second] == ["b", "c"]
 
 
 def test_a_master_spoke_spawns_offered_master_work_on_the_workstation(monkeypatch):
@@ -88,7 +93,7 @@ def test_a_master_spoke_spawns_offered_master_work_on_the_workstation(monkeypatc
     )
     store = SimpleNamespace(slugs=lambda: ["rig"], config=lambda slug: SimpleNamespace(slug=slug))
 
-    assert workstation.run_once(store, bus, runtime, "workstation-1", 0) == ["started"]
+    assert workstation.run_once(store, bus, runtime, "workstation-1", 0, {}) == ["started"]
     [request] = [call.args[0] for call in runtime.spawn.call_args_list]
     assert (request.lane, request.name, request.task["execution_id"]) == ("master", "master@rig-1", "execution-a")
 
@@ -101,5 +106,6 @@ def test_the_spoke_loop_waits_only_after_a_pass_with_nothing_started(monkeypatch
 
     workstation.run("store", "bus", "runtime", "hive", waits.append, passes=range(3))
 
-    assert seen == [("store", "bus", "runtime", "hive", workstation.TAKE_MS)] * 3
+    assert [args[:5] for args in seen] == [("store", "bus", "runtime", "hive", workstation.TAKE_MS)] * 3
+    assert seen[0][5] == {} and all(args[5] is seen[0][5] for args in seen)
     assert waits == [workstation.IDLE_S, workstation.IDLE_S]

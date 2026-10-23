@@ -1,5 +1,3 @@
-"""The workstation in a distributed deployment: no swarm engine, one master lane spoke per swarm."""
-
 import itertools
 import os
 from collections.abc import Callable, Iterable, Mapping
@@ -38,13 +36,16 @@ class MasterTasks:
         return None
 
 
-def spokes(store, bus, runtime, hive: str) -> list[Spoke]:
-    tasks = MasterTasks(store.config)
-    return [Spoke(SpokeConfig(store.config(slug), LANE, hive), bus, runtime, tasks) for slug in store.slugs()]
+def spokes(store, bus, runtime, hive: str, held: dict[str, Spoke]) -> list[Spoke]:
+    slugs = store.slugs()
+    for slug in slugs:
+        if slug not in held:
+            held[slug] = Spoke(SpokeConfig(store.config(slug), LANE, hive), bus, runtime, MasterTasks(store.config))
+    return [held[slug] for slug in slugs]
 
 
-def run_once(store, bus, runtime, hive: str, timeout_ms: int) -> list[str]:
-    return [spoke.poll(timeout_ms) for spoke in spokes(store, bus, runtime, hive)]
+def run_once(store, bus, runtime, hive: str, timeout_ms: int, held: dict[str, Spoke]) -> list[str]:
+    return [spoke.poll(timeout_ms) for spoke in spokes(store, bus, runtime, hive, held)]
 
 
 def run(
@@ -55,6 +56,7 @@ def run(
     wait: Callable[[float], object] = scheduled_wait,
     passes: Iterable[int] | None = None,
 ) -> None:
+    held: dict[str, Spoke] = {}
     for _ in itertools.count() if passes is None else passes:
-        if "started" not in run_once(store, bus, runtime, hive, TAKE_MS):
+        if "started" not in run_once(store, bus, runtime, hive, TAKE_MS, held):
             wait(IDLE_S)
