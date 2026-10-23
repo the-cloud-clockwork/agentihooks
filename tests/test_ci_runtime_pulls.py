@@ -242,7 +242,9 @@ fi
         image,
         "mirror.gcr.io/library/redis:7",
     ]
-    assert [call for call in calls if " pull " in f" {call} "][-1].endswith(" pull mirror.gcr.io/library/redis:7@sha256:runtime")
+    assert [call for call in calls if " pull " in f" {call} "][-1].endswith(
+        " pull mirror.gcr.io/library/redis:7@sha256:runtime"
+    )
     assert calls[-1].endswith(f" tag mirror.gcr.io/library/redis:7@sha256:runtime {image}")
 
 
