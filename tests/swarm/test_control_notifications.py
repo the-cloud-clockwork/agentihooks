@@ -1,9 +1,10 @@
+from argparse import Namespace
 from dataclasses import replace
 
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli
+from scripts.swarm import cli, control_notifications
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
@@ -128,6 +129,22 @@ def test_a_master_named_by_its_session_sends_no_verdict_notice(controls, monkeyp
     assert cli.main(["demo", "verdict", "idle/worker", "resolved"]) == 0
     assert InboxStore(store.redis).mailbox(master.name) == []
     assert ledger.said == []
+
+
+def test_notify_takes_the_verdict_caller_before_the_environment(controls):
+    store, ledger, master = controls
+    store.put_agent("demo", AgentRecord("demo-master-2", "master", "master", seat="master-2@demo"))
+    args = Namespace(slug="demo", by="demo-master-2", name=None, finding="idle/worker", verdict="resolved")
+    control_notifications.notify(store, args, ledger, master, "verdict")
+    assert InboxStore(store.redis).mailbox(master.name) == []
+    assert ledger.said == [] and ledger.notes == []
+
+
+def test_notify_takes_the_named_caller_before_the_environment(controls):
+    store, ledger, master = controls
+    control_notifications.notify(store, Namespace(slug="demo", name=master.name), ledger, master, "pause")
+    assert InboxStore(store.redis).mailbox(master.name) == []
+    assert ledger.said == [] and ledger.notes == []
 
 
 def test_an_operator_verdict_notice_names_the_finding(controls):
