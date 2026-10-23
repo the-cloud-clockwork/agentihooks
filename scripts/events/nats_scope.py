@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from nats.js import JetStreamContext
 
 from .bus import StateStore, WorkQueue
-from .config import QueuePolicy
+from .config import SCOPED_STATE_BUCKETS, QueuePolicy
 from .nats import NatsEventLog, NatsWorkQueue, _seconds
 from .nats_state import ScopedStateStore
 from .scope import ScopedLog, queue_lane
@@ -46,6 +46,9 @@ class NatsScopedBus:
                         duplicate_window=_seconds(root._config.dedupe_window_ms),
                     )
                 )
+        if root._config.provision:
+            for bucket in SCOPED_STATE_BUCKETS:
+                self.state(bucket)
         self.events = ScopedLog(
             NatsEventLog(
                 root._loop, root._js, root._config.queue, stream_name(swarm, "EVENTS"), root._config.provision, swarm

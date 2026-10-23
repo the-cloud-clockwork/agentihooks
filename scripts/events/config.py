@@ -13,6 +13,7 @@ SCOPED_ENV = "AGENTIHOOKS_BUS_SCOPED"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
 DEFAULT_BACKEND = "memory"
+SCOPED_STATE_BUCKETS = ("spoke-work", "spoke-pending", "hive-presence", "hive-executions", "execution-starts")
 
 
 def _positive(value) -> bool:
