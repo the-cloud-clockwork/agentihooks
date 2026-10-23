@@ -169,12 +169,15 @@ class NatsEventLog:
         self._js = js
         self._policy = policy
         self._stream = stream
+        self._policies: dict[str, QueuePolicy] = {}
 
     def publish(self, subject: str, event: Envelope) -> bool:
         return self._loop.run(_publish(self._js, subject, self._stream, event))
 
     def consumer(self, durable: str, subject: str, policy: QueuePolicy | None = None) -> NatsConsumer:
         policy = policy or self._policy
+        if self._policies.setdefault(durable, policy) != policy:
+            raise ValueError(f"durable consumer {durable!r} already has another policy")
         return NatsConsumer(
             self._loop,
             self._loop.run(_pull(self._js, self._stream, durable, subject, policy)),
