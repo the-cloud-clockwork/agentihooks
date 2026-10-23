@@ -4028,7 +4028,9 @@ A full pass captured on 22 October 2026 (fields trimmed):
 {"pid": 389200, "slug": "rig-grade-swarm-doctor", "step": "scripts.doctor.cli.timer", "outcome": "success", "wall_s": 98.25, ...}
 ```
 
-The detectors overlap, so the timer step's wall time is close to its slowest detector, never their sum. Compare wall
+The detectors overlap, so the timer step's wall time is close to its slowest detector, never their sum. How the
+`doctor.trace` step bounds its wait history reads, and the `wait history partial` finding it raises when they stop
+early, are in [Wait history](../reference/observability-langfuse.md#wait-history). Compare wall
 seconds before and after a change, never CPU: `reaped_child_cpu_s` reads the process wide child counter, so one
 detector's figure can include children another detector reaped, and `own_cpu_s` leaves out CPU spent in the thread
 pools a detector starts.
