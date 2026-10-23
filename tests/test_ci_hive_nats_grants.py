@@ -19,7 +19,7 @@ def _agentihooks(tmp_path: Path, pub: dict, sub: dict, body: str | None = None) 
     source.parent.mkdir(parents=True)
     for package in (root / "scripts", source.parent):
         (package / "__init__.py").write_text("")
-    source.write_text(body or f"def member_claims():\n    return {{'pub': {pub!r}, 'sub': {sub!r}}}\n")
+    source.write_text(body or f"def member_claims(user):\n    return {{'pub': {pub!r}, 'sub': {sub!r}}}\n")
     return root
 
 
@@ -157,10 +157,33 @@ def test_the_help_states_what_the_check_fails_on(capsys):
 
 
 def test_the_member_grants_render_the_minted_member_claims():
-    claims = nats_grant.member_claims()
+    claims = nats_grant.member_claims(grants.MEMBER_KEY)
     rendered = grants.member_grants(str(ROOT))
+    assert claims["sub"] == {"allow": [grants.MEMBER_INBOX]}
     assert rendered["publish"] == {"allow": frozenset(nats_grant.MEMBER_PUBLISH), "deny": frozenset()}
-    assert rendered["subscribe"] == {"allow": frozenset(claims["sub"]["allow"]), "deny": frozenset()}
+    assert rendered["subscribe"] == {"allow": frozenset({"_INBOX.>"}), "deny": frozenset()}
+
+
+def test_the_member_reply_inbox_stands_for_the_shared_user_inbox(tmp_path, capsys):
+    _, antoncore = _matching(tmp_path)
+    agentihooks = _agentihooks(tmp_path / "own", {"allow": PUBLISH}, {"allow": ["_INBOX.UMEMBER.>"]})
+    assert _run(capsys, agentihooks, antoncore) == (
+        0,
+        ["The hive member NATS grants match antoncore: 2 publish and 1 subscribe subjects."],
+    )
+
+
+def test_another_member_inbox_differs_from_the_shared_user_inbox(tmp_path, capsys):
+    _, antoncore = _matching(tmp_path)
+    agentihooks = _agentihooks(tmp_path / "other", {"allow": PUBLISH}, {"allow": ["_INBOX.UOTHER.>"]})
+    status, lines = _run(capsys, agentihooks, antoncore)
+    assert status == 1
+    assert lines == [
+        "::error::subscribe allow _INBOX.UOTHER.> is granted only by the agentihooks member credential"
+        " (scripts/hive/nats_grant.py).",
+        "::error::subscribe allow _INBOX.> is granted only by the antoncore swarm-hive user"
+        " (k8s/values-overlays/agentihooks-swarm-nats/values.yaml).",
+    ]
 
 
 def test_lint_grades_the_member_grants_against_the_antoncore_dev_hive_user():
