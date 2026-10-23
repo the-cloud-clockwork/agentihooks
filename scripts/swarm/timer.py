@@ -118,6 +118,7 @@ RELOAD = ["systemctl", "--user", "daemon-reload"]
 
 
 def _spoke_only(binary, unit_dir, run):
+    unschedule()
     retired = [name for name in ENGINE if (unit_dir / name).exists()]
     for name in retired:
         run(["systemctl", "--user", "disable", "--now", name], **UNCHECKED)
@@ -289,6 +290,19 @@ def schedule():
         return False
     supervise()
     return True
+
+
+def unschedule():
+    from redis.exceptions import RedisError
+
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm import scheduled_tick
+    from scripts.swarm.store import redis_client
+
+    try:
+        scheduled_tick.cancel(Scheduler(redis_client()))
+    except RedisError as exc:
+        print(f"the scheduled swarm tick could not be cancelled: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def undelivered():

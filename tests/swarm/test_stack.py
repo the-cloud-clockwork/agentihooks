@@ -11,9 +11,9 @@ from scripts.gates.verdicts import Verdicts
 from scripts.handoff import check as handoff_check
 from scripts.handoff import transfers
 from scripts.inbox.seats import SeatRegistry
-from scripts.swarm import cli, dispatcher, stack, tick
+from scripts.swarm import claim_hold, cli, dispatcher, stack, tick
 from scripts.swarm.store import SwarmError
-from scripts.swarm_ledger import ledger_comments
+from scripts.swarm_ledger import ledger_comments, task_dependencies
 from tests.swarm.test_cli import HANDOFF, env
 
 _fixture = env
@@ -199,6 +199,60 @@ def test_park_refuses_a_task_with_no_open_dependency(parked, capsys):
 def test_park_refuses_when_no_open_dependency_records_a_branch(parked, capsys):
     parked[1].rows["a"]["branch"] = ""
     _refused(parked, capsys, "no open dependency records a branch, so there is nothing to stack on")
+
+
+def _branchless_ops(ledger):
+    ledger.rows["a"].update({"kind": "ops", "branch": "", "state": "claimed"})
+
+
+@pytest.mark.parametrize("kind", [{}, {"kind": "ci"}, {"kind": "plan"}])
+def test_park_refuses_a_branchless_code_ci_or_plan_dependency_beside_a_branchless_ops_one(parked, capsys, kind):
+    _branchless_ops(parked[1])
+    parked[1].rows["c"] = {"id": "c", "title": "Ship the queue", "state": "claimed", "lane": "eng", **kind}
+    parked[1].rows["t1"]["depends_on"] = ["a", "b", "c"]
+    _refused(parked, capsys, "no open dependency records a branch, so there is nothing to stack on")
+
+
+@pytest.mark.parametrize("kind", ["ops", "tune", "troubleshoot", "research"])
+def test_park_stacks_on_dev_when_every_open_dependency_is_a_branchless_non_code_task(parked, capsys, kind):
+    _, ledger, _, shell, doc = parked
+    _branchless_ops(ledger)
+    ledger.rows["a"]["kind"] = kind
+    assert park(doc) == 0
+    assert ("t1", {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": []}, AGENT) in ledger.updates
+    body = f"Parked on branch `eng-t1` until a is done. Stacked base `{BASE}`. {NOTE}"
+    assert shell.calls == [
+        ["git", "ls-remote", "--heads", "origin", "eng-t1"],
+        ["git", "rev-parse", "HEAD"],
+        ["git", "status", "--porcelain"],
+        *LOCATE,
+        ["git", "fetch", "origin", "dev"],
+        ["git", "merge-base", "HEAD", "origin/dev"],
+        ["git", "rev-list", "--count", BASE],
+        ["gh", "issue", "comment", ISSUE, "--body", body],
+        REMOVE,
+    ]
+    assert json.loads(capsys.readouterr().out)["stacked_base"] == BASE
+
+
+def test_a_task_parked_on_a_branchless_ops_dependency_waits_then_goes_to_the_next_engineer(parked):
+    store, ledger, rt, _, doc = parked
+    _branchless_ops(ledger)
+    text = doc.read_text()
+    assert park(doc) == 0
+    assert store.handoff("sw", "t1") == text
+    tick._reap("sw", store, ledger, rt, ledger.rows, 1)
+    assert ledger.rows["t1"]["state"] == "open" and ledger.rows["t1"]["parked_on"] == ["a"]
+    assert not task_dependencies.ready(ledger.rows["t1"], ledger.rows)
+    assert claim_hold.waits(ledger.rows["t1"], ledger.rows) == "it waits on task a"
+    ledger.rows["a"]["state"] = "done"
+    ledger.update_task = type(ledger).update_task.__get__(ledger)
+    before = len(rt.tasks)
+    tick.tick("sw", store, ledger, rt, now_ms=NOW + 1)
+    [launched] = [task for task in rt.tasks[before:] if task["id"] == "t1"]
+    assert (launched["parked_on"], launched["stacked_base"], launched["stack_base"]) == (["a"], BASE, [])
+    assert launched["handoff"] == text
+    assert ledger.rows["t1"]["state"] == "claimed" and store.claimant("sw", "t1") != AGENT
 
 
 def test_park_refuses_a_malformed_document(parked, capsys):
