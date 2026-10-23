@@ -28,7 +28,10 @@ def snapshot(client) -> list[dict]:
     keys.update(client.scan_iter(match=f"{root}:hive:*:inbox:item:*"))
     records = []
     for key in sorted(keys):
-        namespace, _, item_id = key.rpartition(":inbox:item:")
+        namespace, _, tail = key.rpartition(":inbox:")
+        kind, _, item_id = tail.partition(":")
+        if kind != "item":
+            continue
         with client.pipeline() as pipe:
             pipe.hgetall(key)
             pipe.lrange(f"{namespace}:inbox:history:{item_id}", 0, -1)
