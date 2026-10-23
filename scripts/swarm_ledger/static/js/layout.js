@@ -55,8 +55,13 @@ export function wireTabs() {
 let layout = {};
 let layoutSave = 0;
 
+function knownRows(next) {
+  const rows = new Set([...document.querySelectorAll("#swarm-box [data-grip]")].map((grip) => grip.dataset.row));
+  return Object.fromEntries(Object.entries(next).filter(([key]) => ["columns", "stats"].includes(key) || rows.has(key)));
+}
+
 function applyLayout(next) {
-  layout = next && typeof next === "object" && !Array.isArray(next) ? next : {};
+  layout = next && typeof next === "object" && !Array.isArray(next) ? knownRows(next) : {};
   for (const grip of document.querySelectorAll("#swarm-box [data-grip]")) {
     const row = $(grip.dataset.row), value = (layout[row.id] || {})[grip.dataset.grip];
     const [cls, prop, unit] = grip.dataset.grip === "height" ? ["sized", "--h", "px"] : ["split", "--split", "%"];

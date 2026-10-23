@@ -28,6 +28,7 @@ PATCH = {
     },
 }
 MISSING = "resource_missing"
+GONE_MS = 86400000
 
 
 def pairs(payload: dict) -> list[str]:
@@ -55,9 +56,11 @@ def masters(store: object) -> dict[str, dict]:
 def view(store: object, now_ms: int) -> list[dict]:
     loaded_hives = ports.hive().launch.loaded_hives
     leads = masters(store)
-    hives = loaded_hives(store)
+    hives = [hive for hive in loaded_hives(store) if now_ms - hive["heartbeat_at"] <= GONE_MS]
     for hive in hives:
         sessions = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
+        if hive["name"] == hive["id"]:
+            hive["name"] = store.redis.hget(f"{ports.hive().auth.PREFIX}:member:{hive['id']}", "name") or hive["id"]
         hive["live"] = registry.live(hive, now_ms)
         hive["master"] = leads.get(hive["id"])
         hive["slots"] = [

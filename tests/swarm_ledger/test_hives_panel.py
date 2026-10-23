@@ -109,14 +109,16 @@ def save(page, hive_id, field, value, shown):
     )
 
 
-def test_each_hive_shows_liveness_tags_excluded_prefer_max_agents_slots_and_master(hives_page):
+def test_each_hive_shows_liveness_tags_excluded_prefer_max_agents_and_master_without_slots(hives_page):
     page = hives_page()
     rows = page.table("swarm-hives")
+    heads = [text.lower() for text in page.tab.locator("#hives-table th").all_text_contents()]
+    assert len(heads) == 10 and "slots" not in heads
     assert [row[0] for row in rows] == ["desk", "pod", "lab"]
     assert [row[1] for row in rows] == ["LIVE", "LIVE", "QUIET"]
     assert [row[7] for row in rows] == ["2/4", "0/2", "0/4"]
-    assert [row[8] for row in rows] == ["claude luna 1"] * 3
-    assert [row[9] for row in rows] == ["master@rig-1", "—", "—"]
+    assert [row[8] for row in rows] == ["master@rig-1", "—", "—"]
+    assert "luna" not in page.text("#swarm-hives")
     assert fields(page, "pod") == [
         ["ui", "no"],
         ["ephemeral", "no"],
@@ -140,10 +142,12 @@ def test_a_failed_read_says_the_hives_could_not_be_read(browser):
         page.context.close()
 
 
-def test_the_quota_count_names_each_hive_with_its_agents_and_max(hives_page):
+def test_the_quota_count_carries_no_hive_capacity(hives_page):
     page = hives_page()
-    page.tab.wait_for_function("() => document.querySelector('#quota-count').textContent.includes('desk 2/4')")
-    assert page.text("#quota-count").lower().endswith("desk 2/4 · pod 0/2 · lab 0/4")
+    page.tab.locator("#swarm-hives tr#hive-desk").wait_for(timeout=3000)
+    page.tab.wait_for_function("() => document.querySelector('#quota-count').textContent.includes('account')")
+    count = page.text("#quota-count").lower()
+    assert not any(hive in count for hive in ("desk", "pod", "lab", "2/4", "0/2"))
 
 
 def test_editing_max_agents_writes_it_as_the_operator(hives_page):
@@ -154,7 +158,6 @@ def test_editing_max_agents_writes_it_as_the_operator(hives_page):
     wait_for(page, lambda: page.patches)
     assert page.patches == [("pod", {"max_agents": 5}, "__LEDGER_TOKEN__", "__LEDGER_SLUG__")]
     page.tab.wait_for_function("() => document.querySelector('#hive-pod').cells[7].textContent === '0/5'")
-    assert page.text("#quota-count").lower().endswith("desk 2/4 · pod 0/5 · lab 0/4")
 
 
 def test_excluded_prefer_and_flags_are_sent_in_their_api_shape(hives_page):
@@ -198,7 +201,6 @@ def test_a_hive_without_a_name_excluded_prefer_or_slots_shows_its_id_and_empty_s
         page.tab.locator("#swarm-hives tr#hive-bare").wait_for(timeout=3000)
         assert page.table("swarm-hives")[0][0] == "bare"
         assert fields(page, "bare")[2:4] == [["excluded", ""], ["prefer", ""]]
-        assert page.text("#quota-count").lower().endswith("bare 0/3")
         assert page.errors == []
     finally:
         page.context.close()
