@@ -84,7 +84,7 @@ def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
     """An agent's comment amends its own latest one on the item, unless anyone commented after it."""
     live = [e for e in thread if not e.get("deleted")]
     mine = next((e for e in reversed(live) if e.get("by") == by and "to" not in e), None)
-    if mine is None or mine is not live[-1] or "outcome" in mine:
+    if mine is None or mine is not live[-1] or "outcome" in mine or "notice" in mine:
         if any(e["id"] == entry_id for e in thread):
             return
         thread.append({"id": entry_id, "by": by, "at": ctx.at, "text": text})
@@ -116,6 +116,14 @@ def post_answer(thread, op, ctx, target):
     seen(ctx, op["by"])
 
 
+def post_notice(thread, op, ctx, target):
+    """A swarm notice records an event: it never amends a comment and is never amended."""
+    if not any(e["id"] == op["id"] for e in thread):
+        thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], "notice": True})
+        ctx.record(op["by"], "comment added", target, id=op["id"], text=op["text"])
+    seen(ctx, op["by"])
+
+
 def seen(ctx, by):
     member = ctx.meta.get("members", {}).get(by)
     if member is not None:
@@ -123,9 +131,11 @@ def seen(ctx, by):
 
 
 def check_outcome(op):
+    agent_comment = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
+    if "notice" in op and (op["notice"] is not True or not agent_comment or "outcome" in op or "to" in op):
+        raise ValueError("notice rides only on an agent add to a comment thread, as true, without outcome or to")
     if "outcome" not in op:
         return
-    agent_comment = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
     if op["outcome"] not in OUTCOMES or not agent_comment or "attachments" in op:
         raise ValueError(
             "outcome rides only on an agent add to a comment thread, as done or blocked, without attachments"
@@ -154,6 +164,9 @@ def agent_thread_op(thread, op, ctx, target, noun):
         return True
     if op["op"] == "add" and noun == "comment" and "to" in op:
         post_answer(thread, op, ctx, target)
+        return True
+    if op["op"] == "add" and noun == "comment" and "notice" in op:
+        post_notice(thread, op, ctx, target)
         return True
     if op["op"] == "add" and noun == "comment":
         post_status(thread, by, op["id"], text, ctx, target, op.get("attachments"))

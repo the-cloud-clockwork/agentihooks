@@ -63,7 +63,7 @@ PAGINATION = {
 }
 
 FIELDS = {
-    "add": "thread text by long attachments to reply_to outcome",
+    "add": "thread text by long attachments to reply_to outcome notice",
     "edit": "thread text by",
     "delete": "thread by",
     "clear": "thread",
@@ -119,6 +119,7 @@ FIELDS = {
 }
 TYPES = {
     "long": {"type": "boolean"},
+    "notice": {"const": True},
     "to": {"const": "operator"},
     "needs_operator": {"type": "boolean"},
     "artifact": {"type": "boolean"},
