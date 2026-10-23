@@ -1,6 +1,7 @@
 """Signed NATS user credentials for hive members: minted by hive serve, revoked through an account JWT update."""
 
 import asyncio
+import copy
 import json
 import time
 from collections.abc import Mapping
@@ -9,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
 from scripts.events import nkey
-from scripts.hive import auth
+from scripts.hive import auth, nats_permissions
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -64,7 +65,7 @@ def from_environ(environ: Mapping[str, str]) -> Signer | None:
 
 
 def user_claims() -> dict:
-    return {"type": "user", "version": 2, "pub": {}, "sub": {}, **UNLIMITED}
+    return {"type": "user", "version": 2, **copy.deepcopy(nats_permissions.MEMBER), **UNLIMITED}
 
 
 def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
