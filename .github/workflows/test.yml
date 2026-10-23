@@ -560,6 +560,8 @@ jobs:
       - name: Restore latest dev durations
         if: github.event_name == 'pull_request'
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.event.pull_request.base.sha }}
@@ -624,6 +626,8 @@ jobs:
         if: env.UNIT_SOURCE == ''
         id: venv
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/venv
           key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}
@@ -669,6 +673,8 @@ jobs:
       - name: Restore exact count collections
         id: counts
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ${{ runner.temp }}/count-collections
           key: ${{ steps.venv.outputs.cache-primary-key }}-counts-v1-${{ github.sha }}
@@ -848,6 +854,8 @@ jobs:
         if: github.event_name == 'push' && env.UNIT_SOURCE == ''
         id: venv
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/venv
           key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}
@@ -927,6 +935,8 @@ jobs:
       - name: Restore latest dev durations
         if: needs.select.outputs.source == '' && needs.select.outputs.key != ''
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/dev-durations
           key: ${{ needs.select.outputs.key }}
@@ -1084,6 +1094,8 @@ jobs:
         id: codex
         if: needs.split.outputs.source == '' && matrix.python-version == '3.12' && matrix.shard == 1
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/codex
           key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}
@@ -1391,6 +1403,8 @@ jobs:
         id: codex
         if: matrix.python-version == '3.12' && contains(format(' {0} ', env.FILES), ' tests/routing/test_codex_api.py ')
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/codex
           key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}
@@ -2140,6 +2154,8 @@ jobs:
         id: cached
         if: github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch'
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.base.outputs.tree }}
@@ -2462,6 +2478,8 @@ jobs:
 
       - name: Restore recent shard durations
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/durations-samples
           key: durations-samples-${{ github.sha }}
@@ -2520,6 +2538,8 @@ jobs:
 
       - name: Restore the flake history
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/flake-history
           key: flake-history-${{ github.run_id }}-${{ github.run_attempt }}
@@ -2578,6 +2598,8 @@ jobs:
 
       - name: Restore measured coverage history
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.tree.outputs.previous }}
