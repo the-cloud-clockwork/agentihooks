@@ -119,7 +119,7 @@ def _message(**fields):
 INITIALIZE = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}
 
 
-def session(store, scenario, active=None):
+def session(store, scenario, active=None, feed=None):
     """Run the channel server for bob over memory streams; scenario(send, receive) drives it as Claude would."""
     import anyio
 
@@ -133,6 +133,8 @@ def session(store, scenario, active=None):
 
         async with anyio.create_task_group() as group:
             options = () if active is None else (active,)
+            if feed is not None:
+                options = (True if active is None else active, feed)
             group.start_soon(channel.run, store, "bob", server_in, server_out, *options)
             await to_server.send(_message(id=1, method="initialize", params=INITIALIZE))
             opened = await receive()
