@@ -2,6 +2,7 @@
 set -euo pipefail
 
 chart=deploy/helm/agentihooks-swarm
+export HTTPS_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9
 out="$HOME/scratchpad/worker-hive-chart"
 mkdir -p "$out"
 helm dependency build "$chart"
