@@ -148,7 +148,7 @@ def test_the_channel_takes_its_feed_from_the_bus_setting(monkeypatch, mcp_sdk):
     monkeypatch.setattr(feed, "wait", wait)
     monkeypatch.setattr(channel, "feed_for", feed_for)
     monkeypatch.setattr(channel, "SETTLE_S", 0)
-    monkeypatch.setattr(channel, "RECHECK_S", 0.25)
+    monkeypatch.setattr(channel, "RECHECK_S", 1)
 
     async def scenario(send, receive):
         with anyio.fail_after(10):
@@ -162,7 +162,7 @@ def test_the_channel_takes_its_feed_from_the_bus_setting(monkeypatch, mcp_sdk):
     _, _, (item, pushed) = session(store, scenario)
     assert pushed["params"]["meta"]["item_id"] == item.id
     assert asked == [(store, "bob")]
-    assert set(waits) == {250}
+    assert set(waits) == {1000}
     assert store.subs == []
     assert closed.is_set()
 

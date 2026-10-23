@@ -161,7 +161,7 @@ class FeedError(RuntimeError):
 
 
 def _swarm_of(seat: str) -> str:
-    return seat.split("@")[-1]
+    return seat.partition("@")[2]
 
 
 def _nats() -> BusConfig | None:
@@ -229,6 +229,7 @@ class SeatFeed:
         self._session = session
         self._bus = None
         self._consumer = None
+        self._address = ""
         self._retry_at = 0.0
         self.held: dict[str, Receipt] = {}
 
@@ -238,12 +239,12 @@ class SeatFeed:
         address = self._seat()
         if not address:
             return None
-        if self._consumer is None or self._consumer[0] != address:
+        if address != self._address:
             if self._bus is None:
                 self._bus = self._opener()
-            inbox = SeatInbox(self._bus, _swarm_of(address))
-            self._consumer = (address, inbox.consumer(address, self._session))
-        return self._consumer[1]
+            self._consumer = SeatInbox(self._bus, _swarm_of(address)).consumer(address, self._session)
+            self._address = address
+        return self._consumer
 
     def wait(self, timeout_ms: int) -> bool:
         try:
@@ -283,7 +284,7 @@ class SeatFeed:
             return False
 
     def close(self) -> None:
-        bus, self._bus, self._consumer = self._bus, None, None
+        bus, self._bus, self._consumer, self._address = self._bus, None, None, ""
         self.held.clear()
         _drop(bus)
 
