@@ -181,6 +181,7 @@ def test_keys_another_run_created_first_are_used_instead_of_new_ones(bao, monkey
     reads = iter([({}, 0)])
 
     def read(found, path):
+        assert found is client
         return next(reads, (dict(records.get(path, {})), 1))
 
     def create(found, path, entries):
@@ -251,6 +252,7 @@ def test_cli_writes_the_trust_values_and_reports_each_user(bao, tmp_path, monkey
     account = nkey.from_seed(records[nats_trust.SIGNER_PATH]["account_seed"])
     written = yaml.safe_load(values.read_text())
     assert status == 0
+    assert records[nats_trust.SIGNER_PATH]["url"] == URL
     assert out[0].endswith(f"swarm account {account.public}")
     assert out[1:] == [
         "swarm-controller: OpenBao secret/k8s/agentihooks-swarm-nats-controller: wrote credentials (2 keys total)",
