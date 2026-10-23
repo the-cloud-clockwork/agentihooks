@@ -119,6 +119,106 @@ and CPU comparison failed. This proves the acquisition repair on that head;
 it does not establish a fully green hierarchy workflow or a measured reduction
 in hierarchy image pull failures across a time window.
 
+## Hierarchy paired load false reds
+
+On 19 October the `Hierarchy CPU proof` went red on
+[pull request 4743](https://github.com/the-cloud-clockwork/agentihooks/pull/4743),
+which changed only the workflow file. Its paired load step reported head write
+latency 22 percent and CPU 24 percent above base. Swarm task t467 and
+[issue 4818](https://github.com/the-cloud-clockwork/agentihooks/issues/4818)
+found the cause: the paired comparison margin was tighter than the noise of the
+self-hosted runners. Dev had no write regression and the base and head did not
+run on different nodes.
+
+### The grading that failed
+
+At the time the load step ran base and head gates interleaved twice in one job
+on one `anton-oss` runner (base, head, base, head). `tests.ledger_load.paired`
+then took the best write p95 and the best busiest CPU window of each side's two
+runs and failed when the head exceeded the base by more than 10 percent. The
+base was pinned at `726353637`.
+
+### How each suspected cause was tested
+
+| Suspected cause | Test | Result |
+|---|---|---|
+| Runner noise across nodes, or a busy node after the runner outage | Read the runner of each side from the job | Excluded. Both sides ran in the same job on the same runner, so they always shared a node |
+| A write regression on dev since the pinned base | Compare current dev with a base from before and after the hosted ledger fencing merge, the suspected change | No regression. Dev against the base before fencing passed. Against the pinned base, dev read 1.18, 1.75 and 1.28 times write p95 in three runs with no trend |
+| A margin too tight for paired runs | Run the comparison with identical code on both sides | Confirmed. Identical code differed 1.82 and 2.2 times in best write p95, and 1.13 to 1.15 times in the busiest CPU window, both beyond the 1.1 times margin |
+
+### Runs that settled it
+
+| Run | Comparison | Result |
+|---|---|---|
+| [39148204008](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39148204008) | Pinned base against a head that added only the hierarchy work | Green. Head matched base within 1 percent |
+| [39229149347](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39229149347) | Pinned base against the head of pull request 4743 | Red. Best write p95 0.144 s against 0.099 s, busiest CPU window 0.141 against 0.127 cores |
+| [39269966009](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39269966009) | Dev against a base before the fencing merge | Green. Best write p95 0.136 s on both sides; one base round read 0.407 s, three times its twin on the same runner |
+| [39269961106](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39269961106) | The same dev head against a base after the fencing merge | Red at 1.45 times write p95, while write p50 differed only 4 to 6 percent |
+| [39271200438](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39271200438) | Identical code on both sides | Best write p95 differed 1.82 times; it passed only because the slower side was base |
+| [39271211837](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39271211837) | Identical code on both sides | Best write p95 differed 2.2 times and the busiest CPU window 1.13 times; it passed for the same reason |
+| [39272472710](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39272472710), [39272482954](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39272482954) | Dev against the pinned base | Red at 1.75 and 1.28 times write p95. One head round read 0.657 s, 2.7 times its own other round |
+| [39272493518](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39272493518) | The hierarchy proof dispatched on dev | Red on write p95 only, 0.168 s against 0.142 s, 1.18 times |
+
+The verdict changed with the runner, not with the code. Best of two picks one
+fast round per side, so a single fast base round decides the result. A write
+p95 over about ninety writes is set by its four or five slowest writes.
+
+### Grading after the fix
+
+Swarm task t495 replaced the grading in
+[pull request 4956](https://github.com/the-cloud-clockwork/agentihooks/pull/4956).
+The current workflow grades as follows:
+
+| Part | Current behavior |
+|---|---|
+| Load pairs | A five job matrix, `pair: [1, 2, 3, 4, 5]`. Each job starts one base and one head gate side by side on its own runner, base first on odd pairs and head first on even pairs |
+| Load measures | Write p50 and the busiest CPU window. Write p95 stays an absolute budget inside each gate run |
+| Load ratio | Per pair head over base ratios, combined as the geometric mean of the base first median and the head first median, so launch order cancels out |
+| Load margin | `SAME_CODE_MARGIN: '1.25'` in the grade job |
+| Hierarchy pairs | A four job matrix of hierarchy probes graded by `tests.ledger_load.hierarchy_paired` at `HIERARCHY_SAME_CODE_MARGIN: '1.3'` |
+| Margin floor | Each grader reads its recorded same code runs and refuses a margin below their noise: the load grader below the widest single pair ratio in `tests/ledger_load/same_code_pairs.json`, the hierarchy grader below the widest per run geometric mean in `tests/ledger_load/hierarchy_same_code.json` |
+| Load base | Still `726353637` unless the dispatch names a `base` |
+
+Pull request 4956 recorded five of five same code runs green and a planted
+0.4 s delay on every ledger write red at a 4.71 times write p50 median.
+
+### Reproducing a same code control
+
+Dispatch the proof with the branch head as its own base, so both sides run the
+same code:
+
+```bash
+gh workflow run hierarchy-cpu.yml --ref "<branch>" -f base="$(git rev-parse "origin/<branch>")"
+```
+
+Read which runner took each pair and when it ran:
+
+```bash
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/jobs" --paginate \
+  -q '.jobs[] | [.name, .runner_name, .started_at, .completed_at, .conclusion] | @tsv'
+```
+
+Read each side's graded measure from the pair logs. The last line starting with
+`{"seconds"` in a log is the run the gate graded:
+
+```bash
+gh run download "<run-id>" --pattern 'load-pair-*' --dir load-evidence
+grep -h '^{"seconds"' load-evidence/load-pair-1/base.log | tail -1
+```
+
+The grade job prints the pairs, their ratios, the margin and the same code
+bound as JSON before its error lines.
+
+### Troubleshooting a paired red
+
+| Observation | Meaning and next step |
+|---|---|
+| `the margin Mx is below Bx, the widest pair ratio of the same code runs` (load) or `the margin Mx is below Bx, the widest geometric mean of the same code runs` (hierarchy) | The workflow margin is under the recorded noise. Raise the margin in the workflow, or record new same code runs if the runners changed |
+| `head write p50 order balanced pair ratio R exceeds the 1.25x margin` on a head that does not touch the ledger server | Run a same code control first. If identical code also crosses the margin, the noise grew; record the control runs and judge the margin before looking for a regression |
+| The same red on a head that changes server code | Compare dev against an older base in CI to bracket the merge that introduced it, then bisect the merges between |
+| One pair far from the rest | Read that pair's runner and start time with the jobs command above. Each pair runs on its own runner, so one busy runner skews one pair |
+| `head had N failed requests, base M` | Read the head server log in the pair artifact. Failed requests are graded apart from latency |
+
 ## Workload
 
 | Setting | Value |
