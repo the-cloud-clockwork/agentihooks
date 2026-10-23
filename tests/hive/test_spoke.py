@@ -783,6 +783,23 @@ def test_a_fresh_hive_keeps_its_claim_until_presence_expires(rig, monkeypatch, s
     rig.runtime.spawn.assert_not_called()
 
 
+@pytest.mark.parametrize("state", ["exiting", "exited"])
+def test_a_redelivered_offer_for_an_exiting_claim_is_nacked_busy(rig, state):
+    import json
+
+    from scripts.hive import spoke
+
+    store = rig.bus.state("spoke-work")
+    revision = store.create(spoke.claim_key(rig.event), json.dumps({"state": state, "owner": "hive-a"}).encode())
+    assert rig.spoke.poll() == "busy"
+    assert store.get(spoke.claim_key(rig.event)).revision == revision
+    rig.tasks.request.assert_not_called()
+    rig.runtime.spawn.assert_not_called()
+    assert rig.queue.take(0) is None
+    rig.clock.now = rig.config.policy.ack_wait_ms
+    assert rig.spoke.poll() == "busy"
+
+
 @pytest.mark.parametrize("state", ["claimed", "launching"])
 def test_nats_redelivers_lost_hive_work_to_a_second_hive(tmp_path, rig, monkeypatch, state):
     import json
