@@ -25,6 +25,7 @@ def identity(swarm: str, name: str, generation: int) -> str:
 
 
 def emit(bus: Bus, event: Envelope) -> None:
+    bus = bus.for_swarm(event.swarm)
     states = bus.state(STATE)
     key = hashlib.sha256(event.id.encode()).hexdigest()
     if states.get(key) is not None:
@@ -34,6 +35,7 @@ def emit(bus: Bus, event: Envelope) -> None:
 
 
 def prepare(bus: Bus, swarm: str, name: str, generation: int) -> None:
+    bus = bus.for_swarm(swarm)
     starts = bus.state(STARTS)
     key = identity(swarm, name, generation)
     if starts.get(key) is None:
@@ -41,6 +43,7 @@ def prepare(bus: Bus, swarm: str, name: str, generation: int) -> None:
 
 
 def started(bus: Bus, event: Envelope) -> None:
+    bus = bus.for_swarm(event.swarm)
     starts = bus.state(STARTS)
     key = identity(event.swarm, event.data["name"], event.version)
     previous = starts.get(key)
@@ -53,6 +56,7 @@ def started(bus: Bus, event: Envelope) -> None:
 
 
 def initial(bus: Bus, hive: str, execution: str, record: dict, now: int) -> Envelope | None:
+    bus = bus.for_swarm(record["slug"])
     stored = bus.state(STARTS).get(identity(record["slug"], record["name"], record["generation"]))
     if stored is not None:
         value = json.loads(stored.value)
@@ -84,7 +88,7 @@ def publish(bus: Bus, hive: str, report: dict) -> None:
         )
         if observed in ENDED:
             emit(bus, exited)
-        elif bus.state(STATE).get(hashlib.sha256(exited.id.encode()).hexdigest()) is None:
+        elif bus.for_swarm(record["slug"]).state(STATE).get(hashlib.sha256(exited.id.encode()).hexdigest()) is None:
             emit(bus, event)
 
 

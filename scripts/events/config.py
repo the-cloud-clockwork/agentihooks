@@ -9,10 +9,21 @@ BACKEND_ENV = "AGENTIHOOKS_BUS"
 URL_ENV = "AGENTIHOOKS_BUS_URL"
 CREDENTIALS_ENV = "AGENTIHOOKS_BUS_CREDENTIALS"
 BIND_ENV = "AGENTIHOOKS_BUS_BIND"
+SCOPED_ENV = "AGENTIHOOKS_BUS_SCOPED"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
 INLINE_CREDENTIALS = "-----BEGIN NATS USER JWT-----"
 DEFAULT_BACKEND = "memory"
+SHARED_SLOT_BUCKETS = ("account-slots", "hive-slot-accounts")
+SCOPED_STATE_BUCKETS = (
+    "spoke-work",
+    "spoke-pending",
+    "hive-presence",
+    "hive-executions",
+    "execution-starts",
+    "account-slots",
+    "hive-slot-accounts",
+)
 
 
 def _positive(value) -> bool:
@@ -47,6 +58,7 @@ class BusConfig:
     queue: QueuePolicy = field(default_factory=QueuePolicy)
     credentials: str | None = field(default=None, repr=False)
     provision: bool = True
+    scoped: bool = False
 
     def __post_init__(self):
         if not isinstance(self.backend, str) or not self.backend:
@@ -65,6 +77,7 @@ class BusConfig:
             url=environ.get(URL_ENV) or None,
             credentials=credentials_from(environ),
             provision=environ.get(BIND_ENV) != "1",
+            scoped=environ.get(SCOPED_ENV) == "1",
         )
 
 

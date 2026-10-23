@@ -12,11 +12,14 @@ from nats.js import JetStreamContext, api
 from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
 
 from . import nkey
-from .bus import StateConflict, StateEntry
-from .config import BusConfig, QueuePolicy
+from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
+from .config import SHARED_SLOT_BUCKETS, BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
-from .subjects import PREFIX, inbox
+from .nats_legacy import legacy_filters, legacy_target, provision_events
+from .scope import RoutedLog, queue_lane, require_owner
+from .subjects import PREFIX, inbox, stream_name
+from .subjects import subject as event_subject
 
 DEFAULT_URL = "nats://127.0.0.1:4222"
 EVENT_STREAM = "AGENTIHOOKS_EVENTS"
@@ -27,6 +30,7 @@ KV_HISTORY = 64
 MIN_FETCH_MS = 10
 LOOP_START_S = 5
 LOOP_STOP_S = 5
+ATTEMPT_BASE = "AgentiHooks-Delivery-Base"
 
 
 def queue_stream(name: str) -> str:
@@ -91,20 +95,28 @@ def _consumer_config(durable: str, subject: str, policy: QueuePolicy) -> api.Con
 
 
 async def _pull(js, stream: str, durable: str, subject: str, policy: QueuePolicy, provision: bool):
+    wanted = legacy_filters(subject) if stream == EVENT_STREAM else [subject]
     try:
         info = await js.consumer_info(stream, durable)
     except NotFoundError:
         if not provision:
             raise
     else:
-        if info.config.filter_subject != subject:
-            raise ValueError(f"durable consumer {durable!r} filters {info.config.filter_subject!r}, not {subject!r}")
+        found = info.config.filter_subjects or [info.config.filter_subject]
+        if found != wanted and not (stream == EVENT_STREAM and found == [subject]):
+            raise ValueError(f"durable consumer {durable!r} filters {found[0]!r}, not {subject!r}")
     if provision:
         config = _consumer_config(durable, subject, policy)
-        if stream == DEAD_STREAM:
+        if len(wanted) > 1:
+            config.filter_subject, config.filter_subjects = None, wanted
+        if stream.endswith("_DEAD"):
             config.max_deliver = policy.max_deliver
         await js.add_consumer(stream, config=config)
     return await js.pull_subscribe_bind(durable=durable, stream=stream)
+
+
+def _attempt(message: Msg) -> int:
+    return message.metadata.num_delivered + int((message.headers or {}).get(ATTEMPT_BASE, "0"))
 
 
 class NatsDelivery:
@@ -112,7 +124,7 @@ class NatsDelivery:
         self._loop = loop
         self._msg = msg
         self.event = Envelope.decode(msg.data)
-        self.attempt = msg.metadata.num_delivered
+        self.attempt = _attempt(msg)
 
     def ack(self) -> None:
         self._loop.run(self._msg.ack())
@@ -132,12 +144,14 @@ class NatsConsumer:
         js: JetStreamContext,
         policy: QueuePolicy,
         identity: str,
+        swarm: str | None = None,
     ):
         self._loop = loop
         self._subscription = subscription
         self._js = js
         self._policy = policy
         self._identity = identity
+        self._swarm = swarm
 
     def fetch(self, batch: int, timeout_ms: int) -> list[NatsDelivery]:
         return [NatsDelivery(self._loop, msg) for msg in self._loop.run(self._fetch(batch, timeout_ms))]
@@ -149,9 +163,9 @@ class NatsConsumer:
             return []
         deliveries = []
         for msg in messages:
-            if msg.metadata.num_delivered > self._policy.max_deliver:
+            if _attempt(msg) > self._policy.max_deliver:
                 event = Envelope.decode(msg.data)
-                await _publish_dead(self._js, event, self._identity, self._policy.max_deliver)
+                await _publish_dead(self._js, event, self._identity, self._policy.max_deliver, self._swarm)
                 await msg.term()
             else:
                 deliveries.append(msg)
@@ -163,33 +177,46 @@ async def _publish(js, subject: str, stream: str, event: Envelope) -> bool:
     return not ack.duplicate
 
 
-async def _publish_dead(js: JetStreamContext, event: Envelope, identity: str, attempts: int) -> None:
+async def _publish_dead(
+    js: JetStreamContext, event: Envelope, identity: str, attempts: int, swarm: str | None = None
+) -> None:
     letter = dead_letter(event, identity, attempts)
-    subject = f"dead.{event.swarm}.{letter.id}"
+    stream = stream_name(swarm, "DEAD") if swarm is not None else DEAD_STREAM
+    target = event_subject(swarm, "dead", letter.id) if swarm is not None else f"dead.{event.swarm}.{letter.id}"
     try:
         await js.publish(
-            subject,
+            target,
             letter.encode(),
-            stream=DEAD_STREAM,
+            stream=stream,
             headers={MSG_ID: letter.id, "Nats-Expected-Last-Subject-Sequence": "0"},
         )
     except APIError:
-        stored = await js.get_last_msg(DEAD_STREAM, subject)
+        stored = await js.get_last_msg(stream, target)
         if Envelope.decode(stored.data).id != letter.id:
             raise
 
 
 class NatsEventLog:
-    def __init__(self, loop: _Loop, js: JetStreamContext, policy: QueuePolicy, stream: str, provision: bool):
-        self._loop = loop
-        self._js = js
-        self._policy = policy
-        self._stream = stream
-        self._provision = provision
+    def __init__(
+        self,
+        loop: _Loop,
+        js: JetStreamContext,
+        policy: QueuePolicy,
+        stream: str,
+        provision: bool,
+        swarm: str | None = None,
+        credentials: str | None = None,
+    ):
+        self._loop, self._js, self._policy = loop, js, policy
+        self._stream, self._provision, self._swarm = stream, provision, swarm
+        self._permissions = (
+            nkey.claims(nkey.parse_creds(credentials)[0])["nats"].get("pub", {}) if credentials is not None else {}
+        )
         self._policies: dict[str, QueuePolicy] = {}
 
     def publish(self, subject: str, event: Envelope) -> bool:
-        return self._loop.run(_publish(self._js, subject, self._stream, event))
+        target = legacy_target(subject, self._permissions) if self._stream == EVENT_STREAM else subject
+        return self._loop.run(_publish(self._js, target, self._stream, event))
 
     def consumer(self, durable: str, subject: str, policy: QueuePolicy | None = None) -> NatsConsumer:
         policy = policy or self._policy
@@ -201,35 +228,60 @@ class NatsEventLog:
             self._js,
             policy,
             f"events.{durable}",
+            self._swarm,
         )
 
 
 class NatsWorkQueue:
-    def __init__(self, loop: _Loop, js: JetStreamContext, name: str, policy: QueuePolicy, config: BusConfig):
-        self.policy = policy
-        self._loop = loop
-        self._js = js
-        self._stream = queue_stream(name)
-        self._subject = f"{QUEUE_SUBJECT}.{name}"
+    def __init__(
+        self,
+        loop: _Loop,
+        js: JetStreamContext,
+        name: str,
+        policy: QueuePolicy,
+        config: BusConfig,
+        swarm: str | None = None,
+    ):
+        self.policy, self._loop, self._js, self._swarm = policy, loop, js, swarm
+        lane = queue_lane(swarm, name) if swarm is not None else None
+        self._stream = stream_name(swarm, f"QUEUE_{lane}") if swarm is not None else queue_stream(name)
+        base = event_subject(swarm, "queue", lane) if swarm is not None else f"{QUEUE_SUBJECT}.{name}"
+        self._subject = f"{base}.work" if swarm is not None else base
+        self._filter = f"{base}.>" if swarm is not None else base
         if config.provision:
-            loop.run(
-                js.add_stream(
-                    name=self._stream,
-                    subjects=[self._subject],
-                    retention=api.RetentionPolicy.WORK_QUEUE,
-                    duplicate_window=_seconds(config.dedupe_window_ms),
-                )
-            )
-        durable = self._stream.removeprefix("AGENTIHOOKS_QUEUE_")
+            loop.run(self._provision(config))
+        elif swarm is not None:
+            info = loop.run(js.stream_info(self._stream))
+            if (info.config.metadata or {}).get("agentihooks_import_pending"):
+                raise RuntimeError("scoped queue migration is incomplete")
+        durable = lane if swarm is not None else self._stream.removeprefix("AGENTIHOOKS_QUEUE_")
         self._consumer = NatsConsumer(
             loop,
-            loop.run(_pull(js, self._stream, durable, self._subject, policy, config.provision)),
+            loop.run(_pull(js, self._stream, durable, self._filter, policy, config.provision)),
             js,
             policy,
             f"queue.{name}",
+            swarm,
+        )
+
+    async def _provision(self, config: BusConfig) -> None:
+        if self._swarm is not None:
+            try:
+                await self._js.stream_info(self._stream)
+            except NotFoundError:
+                pass
+            else:
+                return
+        await self._js.add_stream(
+            name=self._stream,
+            subjects=[self._filter],
+            retention=api.RetentionPolicy.WORK_QUEUE,
+            duplicate_window=_seconds(config.dedupe_window_ms),
         )
 
     def offer(self, event: Envelope) -> bool:
+        if self._swarm is not None:
+            require_owner(self._swarm, event)
         return self._loop.run(_publish(self._js, self._subject, self._stream, event))
 
     def take(self, timeout_ms: int) -> NatsDelivery | None:
@@ -286,48 +338,98 @@ class NatsBus:
         self._lock = threading.Lock()
         self._queues: dict[str, NatsWorkQueue] = {}
         self._buckets: dict[str, NatsStateStore] = {}
+        self._views: dict[str, Bus] = {}
         try:
             self._nc = self._loop.run(
                 nats_client.connect(url, allow_reconnect=False, **auth_options(config.credentials))
             )
             self._js = self._nc.jetstream()
             if config.provision:
+                self._loop.run(provision_events(self._js, EVENT_STREAM, _seconds(config.dedupe_window_ms)))
                 self._loop.run(
                     self._js.add_stream(
-                        name=EVENT_STREAM,
-                        subjects=[f"{PREFIX}.>"],
-                        duplicate_window=_seconds(config.dedupe_window_ms),
-                    )
-                )
-                self._loop.run(
-                    self._js.add_stream(
-                        name=DEAD_STREAM,
-                        subjects=[DEAD_SUBJECT],
-                        duplicate_window=_seconds(config.dedupe_window_ms),
+                        name=DEAD_STREAM, subjects=[DEAD_SUBJECT], duplicate_window=_seconds(config.dedupe_window_ms)
                     )
                 )
         except BaseException:
             self._loop.close()
             raise
-        self.events = NatsEventLog(self._loop, self._js, config.queue, EVENT_STREAM, config.provision)
-        self.dead = NatsEventLog(self._loop, self._js, config.queue, DEAD_STREAM, config.provision)
+        self._legacy_events = NatsEventLog(
+            self._loop, self._js, config.queue, EVENT_STREAM, config.provision, credentials=config.credentials
+        )
+        self._legacy_dead = NatsEventLog(self._loop, self._js, config.queue, DEAD_STREAM, config.provision)
+        self.events = (
+            RoutedLog(lambda swarm: self.for_swarm(swarm).events, lambda: self._logs("events"), config.queue)
+            if config.scoped
+            else self._legacy_events
+        )
+        self.dead = (
+            RoutedLog(lambda swarm: self.for_swarm(swarm).dead, lambda: self._logs("dead"), config.queue)
+            if config.scoped
+            else self._legacy_dead
+        )
 
-    def queue(self, name: str, policy: QueuePolicy) -> NatsWorkQueue:
+    def for_swarm(self, swarm: str) -> Bus:
+        from .nats_scope import NatsScopedBus
+
+        event_subject(swarm, "events")
+        if self._loop.closed:
+            raise RuntimeError("bus is closed")
+        if not self._config.scoped:
+            return self
+        with self._lock:
+            view = self._views.get(swarm)
+            if view is None:
+                view = self._views[swarm] = NatsScopedBus(self, swarm)
+            return view
+
+    def _logs(self, kind: str) -> list[EventLog]:
+        from .nats_scope import discover_swarms
+
+        if self._config.provision:
+            for swarm in self._loop.run(discover_swarms(self._js)):
+                self.for_swarm(swarm)
+        with self._lock:
+            legacy = [getattr(self, f"_legacy_{kind}")] if self._config.provision else []
+            return legacy + [getattr(view, kind) for view in self._views.values()]
+
+    def queue(self, name: str, policy: QueuePolicy) -> WorkQueue:
+        if self._config.scoped:
+            parts = name.split(".")
+            if len(parts) != 4 or parts[0] != PREFIX or parts[2] != "ready":
+                raise ValueError("select a swarm before opening a scoped queue")
+            return self.for_swarm(parts[1]).queue(name, policy)
         with self._lock:
             queue = self._queues.get(name)
             if queue is None:
-                queue = NatsWorkQueue(self._loop, self._js, name, policy, self._config)
-                self._queues[name] = queue
+                queue = self._queues[name] = NatsWorkQueue(self._loop, self._js, name, policy, self._config)
             elif queue.policy != policy:
                 raise ValueError(f"work queue {name!r} already has another policy")
             return queue
 
     def state(self, bucket: str) -> NatsStateStore:
+        if self._config.scoped and not self._config.provision and bucket not in SHARED_SLOT_BUCKETS:
+            raise PermissionError("select a swarm before opening scoped state")
         with self._lock:
             store = self._buckets.get(bucket)
             if store is None:
                 store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket, self._config.provision)
             return store
+
+    def migrate_state(self, swarm: str, bucket: str, keys: list[str]) -> None:
+        from .nats_migration import migrate_state
+
+        migrate_state(self, swarm, bucket, keys)
+
+    def migrate_queue(self, swarm: str, name: str, policy: QueuePolicy) -> None:
+        from .nats_migration import migrate_queue
+
+        migrate_queue(self, swarm, name, policy)
+
+    def migrate_dead(self, swarm: str) -> None:
+        from .nats_migration import migrate_dead
+
+        migrate_dead(self, swarm)
 
     def close(self) -> None:
         with self._lock:

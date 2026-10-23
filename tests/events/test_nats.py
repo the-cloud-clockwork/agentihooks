@@ -112,7 +112,8 @@ def test_the_event_log_and_queue_create_only_pull_consumers(bus):
     log = _consumer_config(bus, nats.EVENT_STREAM, "watcher")
     work = _consumer_config(bus, nats.queue_stream("work"), "work")
     assert (log.deliver_subject, work.deliver_subject) == (None, None)
-    assert (log.filter_subject, work.filter_subject) == ("swarm.>", "agentihooks.queue.work")
+    assert log.filter_subjects == ["swarm.>", "legacy.swarm.>"]
+    assert work.filter_subject == "agentihooks.queue.work"
 
 
 def test_a_consumer_carries_the_queue_policy(bus):
@@ -398,7 +399,7 @@ def test_a_nak_without_a_delay_redelivers_at_once():
     async def nak(delay):
         seen.append(delay)
 
-    msg = SimpleNamespace(data=event().encode(), metadata=SimpleNamespace(num_delivered=1), nak=nak)
+    msg = SimpleNamespace(data=event().encode(), metadata=SimpleNamespace(num_delivered=1), headers=None, nak=nak)
     loop = nats._Loop()
     try:
         nats.NatsDelivery(loop, msg).nak()
@@ -409,7 +410,7 @@ def test_a_nak_without_a_delay_redelivers_at_once():
 
 def test_a_dead_letter_is_published_before_the_original_is_terminated():
     calls = []
-    message = SimpleNamespace(data=event().encode(), metadata=SimpleNamespace(num_delivered=4))
+    message = SimpleNamespace(data=event().encode(), metadata=SimpleNamespace(num_delivered=4), headers=None)
 
     async def terminate():
         calls.append("term")

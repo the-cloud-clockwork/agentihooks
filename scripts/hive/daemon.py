@@ -312,7 +312,7 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
             if result
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
-    pool = [account for account in codex_router.accounts(environ) if account.signed_in]
+    pool = codex_router.routed([account for account in codex_router.accounts(environ) if account.signed_in], environ)
     readings = codex_router.quotas(pool, environ)
     for account in pool:
         reading = readings.get(account.name)

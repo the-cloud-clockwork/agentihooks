@@ -36,7 +36,7 @@ class Lifecycle:
     def handle(self, event: Envelope) -> None:
         if event.type != "execution.exited" or event.entity != "execution":
             return
-        claims = self.bus.state("spoke-work")
+        claims = self.bus.for_swarm(event.swarm).state("spoke-work")
         key = event.data.get("claim_key")
         if not key:
             return

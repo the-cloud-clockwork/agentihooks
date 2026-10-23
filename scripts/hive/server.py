@@ -61,7 +61,11 @@ def _grant(operation: str, redis: "Redis", value: str, redis_url: str, signer: "
         return grant
     from scripts.hive import nats_grant
 
-    return {**grant, "nats_credentials": nats_grant.mint(signer, grant["id"])}
+    return {
+        **grant,
+        "nats_credentials": nats_grant.mint(signer, grant["id"]),
+        "bus_scoped": signer.member_swarms is not None,
+    }
 
 
 def _handler(
