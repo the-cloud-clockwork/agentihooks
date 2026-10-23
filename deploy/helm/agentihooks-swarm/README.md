@@ -22,6 +22,7 @@ Write the digest file only after the printed digest equals the `digest` of that 
 
 ```bash
 sha256sum deploy/helm/agentihooks-swarm/charts/nats-<version>.tgz > deploy/helm/agentihooks-swarm-deps.sha256
+git add deploy/helm/agentihooks-swarm/charts deploy/helm/agentihooks-swarm-deps.sha256
 ```
 
 # Worker GitHub authentication
