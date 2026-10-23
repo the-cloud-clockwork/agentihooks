@@ -844,13 +844,12 @@ def _owned_tasks(slug, store):
     return {agent.task for agent in store.agents(slug) if agent.state != "finished"}
 
 
-def _claimable(slug, store, rows, doc, lane, dispatched=None):
+def snapshot(slug, store, rows, doc):
     awaiting = _owned_tasks(slug, store)
-    held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
-    view = readiness.Snapshot(
+    return readiness.Snapshot(
         slug,
         rows,
         doc,
@@ -859,6 +858,11 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
         lambda task_id: task_id in awaiting or store.claimant(slug, task_id) is not None,
         lambda task: released(task) and applied(task),
     )
+
+
+def _claimable(slug, store, rows, doc, lane, dispatched=None):
+    held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
+    view = snapshot(slug, store, rows, doc)
     clear, overlapping = [], []
     for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
         if readiness.claimable(t, lane, view):
