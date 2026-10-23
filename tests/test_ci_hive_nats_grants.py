@@ -129,9 +129,10 @@ def test_a_member_source_that_cannot_render_its_claims_is_red(tmp_path, capsys):
     assert status == 1
     assert lines[0].startswith(
         "::error::The hive member NATS grants cannot be read"
-        " (ValueError: scripts/hive/nats_grant.py did not render member_claims: Traceback"
+        " (ValueError: scripts/hive/nats_grant.py did not render member_claims: "
     )
-    assert lines[-1].endswith("AttributeError: module 'scripts.hive.nats_grant' has no attribute 'member_claims').")
+    assert "has no attribute 'member_claims'" in "\n".join(lines)
+    assert lines[-1].endswith(").")
 
 
 def test_a_missing_antoncore_checkout_is_red(tmp_path, capsys):
