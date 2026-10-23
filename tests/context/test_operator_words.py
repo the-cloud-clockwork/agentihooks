@@ -1,3 +1,4 @@
+import json
 import time
 
 import pytest
@@ -638,6 +639,21 @@ def test_forget_drops_only_that_swarms_shared_words(shared, tmp_path, monkeypatc
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "merge the demo work", within=None) == ""
     assert operator_words.matching("master@a1-1", "merge the other work", within=None) == "merge the other work"
+
+
+def test_older_shared_rows_match_and_forget_drops_every_copy(shared, tmp_path, monkeypatch):
+    operator_words.record("master@a1-1", "merge the demo work", now=100, swarm="demo")
+    operator_words.record("master@a1-1", "merge the demo work", now=100, swarm="demo")
+    operator_words.record("master@a1-1", "merge the other work", now=110, swarm="other")
+    operator_words.record("master@a1-1", "merge the late work", now=120, swarm="demo")
+    _hosted(tmp_path, monkeypatch)
+    assert operator_words.matching("master@a1-1", "merge the demo work", within=None) == "merge the demo work"
+    operator_words.forget("demo")
+    from scripts.swarm.store import PREFIX
+
+    assert shared.lrange(f"{PREFIX}:operator-words:master@a1-1", 0, -1) == [
+        json.dumps({"swarm": "other", "at": 110, "words": "merge the other work"})
+    ]
 
 
 def test_an_unreachable_or_failing_shared_redis_keeps_the_local_words(tmp_path, monkeypatch):

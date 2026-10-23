@@ -133,7 +133,7 @@ def _shared_forget(swarm):
     def drop(redis):
         for name in redis.smembers(_shared_key()):
             key = _shared_key(name)
-            for row in redis.lrange(key, 0, -1):
+            for row in set(redis.lrange(key, 0, -1)):
                 if json.loads(row)["swarm"] == swarm:
                     redis.lrem(key, 0, row)
 
