@@ -55,6 +55,19 @@ def test_beat_refreshes_reported_fields_and_expires_telemetry(redis, monkeypatch
     assert json.loads(redis.get(f"{registry.key('machine')}:sessions")) == {}
 
 
+def test_hive_heartbeat_renews_account_counters_from_its_own_quota_and_executions(redis, monkeypatch):
+    from scripts.hive import account_slots
+
+    report = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    hosted = {"executions": {}, "names": []}
+    publish = Mock()
+    monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
+    monkeypatch.setattr(daemon, "execution_report", lambda *args: hosted)
+    monkeypatch.setattr(account_slots, "publish", publish)
+    daemon.beat(redis, "machine")
+    publish.assert_called_once_with("machine", report, hosted)
+
+
 def test_three_missed_beats_expire_both_keys(redis, monkeypatch):
     import time
 
