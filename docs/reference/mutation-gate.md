@@ -519,6 +519,46 @@ For example, ten covering tests of one second each form a ten-second head. Thirt
 
 Repeated measurements use the maximum observed duration; a missing duration uses at least 5.6 seconds or the largest observed test duration, whichever is greater. A test stays whole, so a single slow test or the ten-slice cap can exceed the slice target. Traced duration and estimated worker seconds are planning inputs, not a wall-time deadline or a guarantee that jobs finish together.
 
+### Pricing from recorded killing tests
+
+mutmut stops a mutant at its first failing test, and a shard runs the test that last killed a mutant of the same function first. The planner prices an unsplit mutant the same way: from that one test, not from every test traced to its function.
+
+| What the plan knows about the mutant's function | Estimated cost |
+|---|---|
+| A recorded killing test that is among the function's traced tests | `5.6 + 1.25 * killer_seconds` |
+| No recorded killing test, or one the function no longer traces | `5.6 + 1.25 * traced_seconds`, the sum of every traced test |
+| No traced tests | `5.6 + 1.25 * max(60, largest function sum)` |
+| The function is split into units | The unit costs above, unchanged |
+
+For example, a function traced by tests of 2, 8 and 30 seconds costs 55.6 worker seconds per mutant without a killer. Once the 2 second test has killed one of its mutants, each mutant costs 8.1. Durations follow the same rules as split planning: the maximum observed duration, at least 5.6 seconds or the largest observed duration when a test has none. Shard sizing, the shard target and limit, and the 1080 second shard budget are unchanged; a lower estimate places more mutants on fewer shards.
+
+Only the branch preflight (`mutation-preflight.yml`) carries killing tests between runs. A kill is recorded per function as the failing test's node id, in a file named by a digest of the function name. The preflight keeps them per branch in an actions cache:
+
+| Job | Killing test step |
+|---|---|
+| `stats`, when it plans as a single job, and `refine` | Restore the newest `mutation-killers-v1-<os>-<branch>-` cache before building the plan |
+| `mutation-shard` | Restore the same cache; `seed_measured_shard` copies it into the shard work folder, so the shard runs the priced test first. After mutating, upload this shard's kills as `mutation-killers-<shard>` |
+| `mutation` | Restore the cache, add every shard's kills on top, and save the union under a key naming this run and attempt |
+
+A branch's first preflight has no cache and prices every mutant from its traced tests; its second run is the first to use kills. The kill artifacts are kept for one day. The pull request Tests run plans without a kill cache, though each of its shards still orders tests by the kills it records during that run.
+
+Inspect a preflight's kill handling in its job logs:
+
+| Log line | Where | Meaning |
+|---|---|---|
+| `Cache restored from key: mutation-killers-v1-...` | Restore steps | Earlier kills reached this job |
+| `Cache not found for input keys: ...` | Restore steps | First run on the branch, or the cache expired |
+| `Measured mutation worker seconds: N` | `refine` | The plan's total estimate, with kill pricing applied |
+| `Functions with a recorded killing test: N` | `mutation-shard`, **Collect the tests that killed mutants** | Kills this shard uploads |
+
+```bash
+gh run view RUN_ID --log | grep -E 'mutation-killers-v1|Measured mutation worker seconds|Functions with a recorded killing test'
+```
+
+When the estimate still runs far over the **Mutate changed Python files** step time, check whether the restore found a cache, then whether the heavy mutants belong to split functions: split units keep their traced cost even when a killing test is known. A cached killer that no longer kills falls back to normal ordering in the shard, and is replaced by the next test that kills.
+
+[Pull request 4753](https://github.com/the-cloud-clockwork/agentihooks/pull/4753) delivered kill pricing and the cache. In [proof run 39237282629](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39237282629) the first attempt found no cache and planned 418.3 worker seconds for 40 mutants against 52 worker seconds of mutation; the rerun restored three killing tests and planned 226.1 against 56. [Run 39239742322](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39239742322) showed `refine`, all eight shards and the merge job restoring the cache and the merge job saving the union. Before the merge, 625 preflight shards between 18 October 09:50 UTC and 19 October 09:50 UTC had a median planned over actual ratio of 9.77, and 6.72 for shards without split units. The remaining floor is the fixed 5.6 seconds per mutant against about 1.4 seconds observed in the proof run.
+
 ### Combined grading
 
 A shard grades its unsplit mutants normally and records split results under `units` for the final `mutation` merge job. A successful unit or shard alone does not establish a successful gate.
