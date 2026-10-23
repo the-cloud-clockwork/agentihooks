@@ -1841,7 +1841,8 @@ the repository elects a new owner with no command from anyone. The new owner con
   former owner's ledger is not filed again. That task, its claim, comments and proof stay where they are.
 - **Green runs.** A green run closes every open or blocked task whose id starts with `promo-`, and the live
   promotion alerts, in the owner's ledger and in every former owner's ledger. It then releases every held cause that
-  is not claimed or in `pr`, so the next red run with the same cause files a fresh task.
+  is not claimed or in `pr`, so the next red run with the same cause files a fresh task
+  ([Held causes and the green run](#held-causes-and-the-green-run)).
 
 ### Repeated observations and failed writes
 
@@ -1859,6 +1860,78 @@ no live task carries it. The next pass by the owner, or by a new owner after a h
 A run whose failed jobs all failed only at the `Check dev still points at this commit` step, with the annotation that
 `dev` advanced before Sonar analysis, is still reported as superseded and files nothing. Failed jobs that lost their
 runner share one [runner outage task](#runner-outage-runs).
+
+### Held causes and the green run
+
+Every promotion task the watch files maps its id to its cause in the swarm's promotion jobs record,
+`<prefix>:swarm:<id>:promotion:jobs`. Before it files for a red run, the owner reads that record in its own ledger and
+in every former owner's ledger. A cause counts as held while its record entry survives and its task is not done in that
+ledger. A failed job whose cause is held files no task, so a fixer already at work is not filed twice.
+
+A green dev push run clears that hold. For the owner and for each former owner, the watch:
+
+1. Closes every promotion task that is `open` or `blocked`, with the comment `A later dev push run of Tests passed, so
+   the swarm closed this promotion task.`, and clears the live promotion alerts.
+2. Removes from the promotion jobs record every task id that is not `claimed` or `pr` in the ledger as the watch read
+   it at the start of the pass.
+
+The removal does not depend on the close. A task the ledger keeps `blocked` through the close, or one closed by hand,
+keeps its state and its comments but no longer holds its cause. The next red run that fails on the same cause files a
+fresh `promo-<run id>-<n>` task, an alert and a master item as for any new cause.
+
+A task that is `claimed` or in `pr` keeps its record entry through the green run, so a later red run of the same cause
+files nothing while someone works it. Once that task is done, the next pass that handles a run drops its entry.
+
+The states are fixed in `scripts.swarm.promotion_watch` (`CLOSABLE` for the close, `WORKING` for the kept entries). No
+setting changes them.
+
+#### The 18 October coverage ratchet runs
+
+Before this rule, the green run only closed tasks and the record dropped an entry only when its task reached `done`.
+A task the ledger left `blocked` held its cause for good.
+
+| Run | Conclusion | Created (UTC) | What intake did |
+|---|---|---|---|
+| [39090224669](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39090224669) | failure | 18 October 02:28 | Filed `promo-39090224669-0` for `coverage-ratchet` in the watched ledger. The master blocked it at 02:44 |
+| [39101112212](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39101112212) | success | 18 October 05:36 | Closed nothing for that task, which stayed `blocked`; its cause stayed in the record |
+| [39137430735](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39137430735) | failure | 18 October 14:45 | First of four red `coverage-ratchet` push runs. Each was skipped as held and filed nothing, though the promotion alert was open |
+| [39153983422](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39153983422) | success | 18 October 18:24 | Same as the first green run |
+
+The tick journal showed `scripts.swarm.promotion_watch.refresh` ending with outcome success for both swarms on every
+pass, because skipping a held cause is a normal outcome. The watched master filed the fixer, watched task `t1116`, by
+hand.
+
+#### Checking a silent red run
+
+When a red dev push run files no fixer while its alert is open, compare the held causes with the task states:
+
+```bash
+SLUG="<swarm id>"
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli HGETALL "$P:swarm:$SLUG:promotion:jobs"   # task id, then its held cause
+agentihooks ledger --slug "$SLUG" show | jq -r '.tasks[] | select(.id | startswith("promo-")) | [.id, .state] | @tsv'
+```
+
+Run both for the owner and for every swarm in the owner record's `swarm:<id>` fields
+([Checking the owner](#checking-the-owner)).
+
+| Symptom | Cause | Action |
+|---|---|---|
+| A red run filed nothing, and its job's cause is held by a `claimed` or `pr` task | Expected. The fixer is at work | Let its holder finish it; the next red pass after it is done files again |
+| A red run filed nothing, and its job's cause is held by an `open` or `blocked` task | No green dev push run has been handled since the task was filed or left `claimed` or `pr` | Expected. Work the task, or wait for a green run, which releases the hold |
+| A red run filed nothing, and the record holds nothing for its job | The run was already handled (`seen` at or above its id), or it was reported superseded | Read `seen` in the owner record and the tick journal line for the run |
+| A held entry belongs to a `blocked` task after a green run | The task was `claimed` or in `pr` when that green run read the ledger, and was blocked later | The next green dev push run releases it |
+
+#### Delivery evidence
+
+Delivered in [pull request 4964](https://github.com/the-cloud-clockwork/agentihooks/pull/4964), with
+[issue 4963](https://github.com/the-cloud-clockwork/agentihooks/issues/4963) as the spec. Its tests cover a fixer the
+ledger keeps `blocked` through a green run, which no longer holds its cause, both alone and after a handover from the
+watched swarm to its Doctor, and a `claimed` or `pr` fixer, which keeps holding its job. Red: Tests run
+[39338933506](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39338933506) on the tests only commit
+failed both `unit-selected` jobs on `assert [] == ['promo-902-0']`. Green: Tests run
+[39339647440](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339647440) passed on the final head.
+The watched swarm's task blocked before the merge kept holding until the first green dev push run after it.
 
 ### Runner outage runs
 
