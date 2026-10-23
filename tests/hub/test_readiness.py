@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.events.config import BusConfig
+from scripts.events.config import BusConfig, QueuePolicy
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.hub import registry
 from scripts.hub.runner import HubRunner
@@ -141,7 +141,7 @@ def test_hub_respects_its_lease_and_passes_clock_to_ready_offers(monkeypatch):
         reactor.poll(lambda: False)
         store.slugs.assert_not_called()
         reactor.poll()
-        queue = bus.queue(readiness.queue_name("rig", "eng"))
+        queue = bus.queue(readiness.queue_name("rig", "eng"), QueuePolicy())
         delivery = queue.take(1)
         assert delivery.event == readiness.offer(row, provider.snapshot("rig"), 73)
         delivery.ack()
@@ -158,7 +158,7 @@ def test_freeze_while_hive_waits_withdraws_the_delivered_offer(monkeypatch):
     provider = readiness.Source(store, ledger)
     with backend("memory", None) as bus:
         Readiness(bus, provider).poll()
-        queue = bus.queue(readiness.queue_name("rig", "eng"))
+        queue = bus.queue(readiness.queue_name("rig", "eng"), QueuePolicy())
         take = queue.take
 
         def freeze_during_take(timeout_ms):
