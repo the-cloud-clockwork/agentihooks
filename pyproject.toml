@@ -122,12 +122,12 @@ include = ["hooks*", "scripts*", "profiles*"]
 "scripts.swarm_ledger" = ["*.html", "*.css", "*.js", "static/**/*.js", "static/**/*.css"]
 # Ship every native config and Markdown artifact under profiles/ — personas,
 # rules, settings, and profile manifests. Recursive ** globs skip hidden
-# folders, so .claude/ trees need their own explicit entry.
+# folders, so hidden profile trees need their own explicit entry.
 # One entry per discovered profiles package; the bare "profiles" key also
 # captures files under non-package subdirs like profiles/package/rules/.
-"profiles" = ["**/.claude/**/*", "**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md", "**/*.sh", "**/*.py"]
-"profiles._base" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
-"profiles.default" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
+"profiles" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md", "**/*.sh", "**/*.py", "**/.*/**/*"]
+"profiles._base" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md", "**/.*/**/*"]
+"profiles.default" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md", "**/.*/**/*"]
 
 [project.urls]
 Homepage = "https://github.com/The-Cloud-Clockwork/agentihooks"

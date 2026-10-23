@@ -4,6 +4,7 @@ import subprocess
 import sys
 import sysconfig
 from pathlib import Path
+from zipfile import ZipFile
 
 from uv import find_uv_bin
 
@@ -31,6 +32,27 @@ def _tagged_wheel(tmp_path):
     env = {**os.environ, "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS": WHEEL_VERSION}
     _run([find_uv_bin(), "build", "--wheel", "-o", str(tmp_path / "dist"), str(src)], env=env)
     return next((tmp_path / "dist").glob("agentihooks-*.whl"))
+
+
+def test_wheel_contains_every_hidden_profile_file(tmp_path):
+    profiles = REPO / "profiles"
+    hidden_files = [
+        path
+        for path in profiles.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and any(part.startswith(".") for part in path.relative_to(profiles).parts[:-1])
+    ]
+    assert hidden_files
+    with ZipFile(_tagged_wheel(tmp_path)) as wheel:
+        missing = sorted(
+            path.relative_to(REPO).as_posix()
+            for path in hidden_files
+            if path.relative_to(REPO).as_posix() not in wheel.namelist()
+        )
+        assert not missing, f"Hidden profile files missing from wheel: {missing}"
+        for path in hidden_files:
+            assert wheel.read(path.relative_to(REPO).as_posix()) == path.read_bytes()
 
 
 def _venv_with(tmp_path, wheel):
