@@ -863,7 +863,7 @@ cat /proc/sys/kernel/random/boot_id          # must equal its boot_id
 }
 ```
 
-When `awk` prints `5683458` and the boot ids match, the holder is alive: `agentihooks gc --json --path <worktree>` carries the worktree in `findings` with action `keep` and reason `owner session alive` (the text report prints no line for a `keep`). A missing stat file or another start time means that holder is dead; a worktree whose holders are all dead is removed at the next sweep once it is clean and pushed.
+When `awk` prints `5683458` and the boot ids match, the holder is alive: `agentihooks gc --json --path <worktree>` carries the worktree in `findings` with action `keep` and reason `owner session alive`, or `a process works inside` when a shell sits in it, since that check comes first (the text report prints no line for a `keep`). A missing stat file or another start time means that holder is dead; a worktree whose holders are all dead is removed at the next sweep once it is clean and pushed.
 
 Troubleshooting:
 
