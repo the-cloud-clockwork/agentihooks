@@ -154,6 +154,11 @@ def test_a_bind_bus_creates_nothing_and_binds_what_another_bus_created(url):
             owner.state("tasks").create("k", b"v")
             owner.events.consumer("watcher", "swarm.>")
             owner.events.publish("swarm.s.task.claimed", event("l1"))
+            for log, subject in ((binder.events, "swarm.>"), (binder.dead, "dead.>")):
+                with pytest.raises(nats.NotFoundError):
+                    log.consumer("unmade", subject)
+            assert [c.name for c in owner._loop.run(owner._js.consumers_info(nats.EVENT_STREAM))] == ["watcher"]
+            assert owner._loop.run(owner._js.consumers_info(nats.DEAD_STREAM)) == []
             with pytest.raises(ValueError, match=r"^durable consumer 'watcher' filters 'swarm.>', not 'swarm.s.>'$"):
                 binder.events.consumer("watcher", "swarm.s.>")
             assert [d.event.id for d in binder.events.consumer("watcher", "swarm.>").fetch(1, 500)] == ["l1"]
