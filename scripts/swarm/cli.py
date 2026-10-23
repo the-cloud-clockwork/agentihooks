@@ -286,7 +286,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
 
     if not ledger_link.local_mode(os.environ) and not scheduled:
         return [CONTROLLER_TICKS]
-    if store.config(slug).engine == "events":
+    if store.redis.hget(store.key(slug, "config"), "engine") == "events":
         return [EVENTS_ENGINE]
     tick_stop.check()
     ledger = ledger or LedgerClient()
