@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 import threading
 from collections.abc import Iterator
