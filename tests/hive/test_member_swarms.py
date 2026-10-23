@@ -70,14 +70,16 @@ def test_assign_lists_only_unlisted_members_and_keeps_the_rest_of_the_record():
     }
 
 
-def test_assign_creates_the_entry_on_a_record_without_one():
+def test_assign_creates_the_entry_on_a_record_without_one_only_when_asked():
     fake = Bao({SIGNER: {"account_seed": "kept"}})
-    assert member_swarms.assign(_bao(fake), SIGNER, ["m1"], ("rig",)) == ["m1"]
-    assert fake.records[SIGNER]["member_swarms"] == {"m1": ["rig"]}
+    assert member_swarms.assign(_bao(fake), SIGNER, ["m1"], ("rig",)) == []
+    assert fake.written == []
+    assert member_swarms.assign(_bao(fake), SIGNER, ["m1"], ("rig",), create=True) == ["m1"]
+    assert fake.records[SIGNER] == {"account_seed": "kept", "member_swarms": {"m1": ["rig"]}}
 
 
 def test_assign_refuses_an_invalid_swarm_and_writes_nothing():
-    fake = Bao({SIGNER: {"account_seed": "kept"}})
+    fake = Bao({SIGNER: {"account_seed": "kept", "member_swarms": {}}})
     with pytest.raises(auth.HiveError) as error:
         member_swarms.assign(_bao(fake), SIGNER, ["m1"], ("bad.name",))
     assert str(error.value).startswith("member_swarms contains an invalid swarm name")
@@ -85,7 +87,7 @@ def test_assign_refuses_an_invalid_swarm_and_writes_nothing():
 
 
 def test_assign_reports_an_openbao_failure_as_a_hive_error():
-    fake = Bao({SIGNER: {}}, fail_writes=True)
+    fake = Bao({SIGNER: {"member_swarms": {}}}, fail_writes=True)
     with pytest.raises(auth.HiveError) as error:
         member_swarms.assign(_bao(fake), SIGNER, ["m1"], ("rig",))
     assert str(error.value) == "OpenBao HTTP 503: sealed"
@@ -121,22 +123,37 @@ def test_backfill_lists_every_joined_member_from_the_hive_list(admin):
     )
 
 
-def test_invite_lists_the_new_member_in_the_signer_record(admin):
-    fake = Bao({SIGNER: {"account_seed": "kept"}})
+def _scoped_line(fake):
+    return [line for line in fake.records[RECORD]["credential"].splitlines() if line.startswith("AGENTIHOOKS_BUS_S")]
+
+
+def test_invite_lists_the_new_member_in_a_backfilled_signer_record_and_marks_the_invite_scoped(admin):
+    fake = Bao({SIGNER: {"account_seed": "kept", "member_swarms": {"m0": ["old"]}}})
     request = invite.Request("lab", RECORD, url=URL, redis_url=PUBLIC, signer_path=SIGNER, swarms=("rig",))
     invite.invite(admin, _bao(fake), request, PUBLIC)
     (member,) = auth_members(admin)
-    assert fake.records[SIGNER] == {"account_seed": "kept", "member_swarms": {member: ["rig"]}}
+    assert fake.records[SIGNER] == {"account_seed": "kept", "member_swarms": {"m0": ["old"], member: ["rig"]}}
+    assert _scoped_line(fake) == ["AGENTIHOOKS_BUS_SCOPED=1"]
+
+
+def test_invite_before_the_backfill_leaves_the_record_unscoped_and_the_invite_legacy(admin):
+    fake = Bao({SIGNER: {"account_seed": "kept"}})
+    request = invite.Request("lab", RECORD, url=URL, redis_url=PUBLIC, signer_path=SIGNER, swarms=("rig",))
+    invite.invite(admin, _bao(fake), request, PUBLIC)
+    assert fake.records[SIGNER] == {"account_seed": "kept"}
+    assert _scoped_line(fake) == []
+    assert len(auth_members(admin)) == 1
 
 
 def test_invite_without_a_signer_record_leaves_member_swarms_alone(admin):
-    fake = Bao({SIGNER: {"account_seed": "kept"}})
+    fake = Bao({SIGNER: {"account_seed": "kept", "member_swarms": {}}})
     invite.invite(admin, _bao(fake), invite.Request("lab", RECORD, url=URL, redis_url=PUBLIC), PUBLIC)
-    assert fake.records[SIGNER] == {"account_seed": "kept"}
+    assert fake.records[SIGNER] == {"account_seed": "kept", "member_swarms": {}}
+    assert _scoped_line(fake) == []
 
 
 def test_an_invite_whose_member_swarms_write_fails_revokes_the_new_member(admin):
-    fake = Bao({SIGNER: {}})
+    fake = Bao({SIGNER: {"member_swarms": {}}})
     request = invite.Request("lab", RECORD, url=URL, redis_url=PUBLIC, signer_path=SIGNER, swarms=("bad.name",))
     with pytest.raises(auth.HiveError) as error:
         invite.invite(admin, _bao(fake), request, PUBLIC)

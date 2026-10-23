@@ -28,12 +28,17 @@ def swarms(redis: "Redis", named: Iterable[str]) -> tuple[str, ...]:
     return chosen
 
 
-def assign(bao: openbao_kv.OpenBao, path: str, members: Iterable[str], chosen: tuple[str, ...]) -> list[str]:
+def assign(
+    bao: openbao_kv.OpenBao, path: str, members: Iterable[str], chosen: tuple[str, ...], create: bool = False
+) -> list[str]:
     added: list[str] = []
 
     def change(record: Mapping) -> dict:
+        added.clear()
+        if FIELD not in record and not create:
+            return {}
         listed = dict(record.get(FIELD) or {})
-        added[:] = [member for member in members if member not in listed]
+        added.extend(member for member in members if member not in listed)
         merged = {**listed, **{member: list(chosen) for member in added}}
         nats_grant.member_swarms(merged)
         return {FIELD: merged}
@@ -46,6 +51,6 @@ def assign(bao: openbao_kv.OpenBao, path: str, members: Iterable[str], chosen: t
 
 
 def backfill(redis: "Redis", bao: openbao_kv.OpenBao, path: str, named: Iterable[str]) -> str:
-    added = assign(bao, path, scope.members(redis), swarms(redis, named))
+    added = assign(bao, path, scope.members(redis), swarms(redis, named), create=True)
     listed = ", ".join(added) if added else "no member"
     return f"OpenBao {openbao_kv.MOUNT}/{path}: wrote {FIELD} for {listed}"

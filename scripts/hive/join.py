@@ -8,6 +8,7 @@ from scripts.swarm_ledger import ledger_ca
 
 SETTINGS = ("AGENTIHOOKS_BUS", "AGENTIHOOKS_BUS_URL", "AGENTIHOOKS_SWARM_URL")
 REQUIRED = ("AGENTIHOOKS_HIVE_ID", "AGENTIHOOKS_HIVE_URL", "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
+SCOPED = "AGENTIHOOKS_BUS_SCOPED"
 
 
 def save(home: Path, url: str, grant: dict, settings: Mapping[str, str]) -> Path:
@@ -37,7 +38,7 @@ def enroll(path: Path, environ: Mapping[str, str]) -> str:
     grant = cli._post(url, server.REFRESH_PATH, {"ledger_credential": credential}, "join", environ)
     if grant["id"] != selected["AGENTIHOOKS_HIVE_ID"]:
         raise auth.HiveError("the hive answered for a different invited member")
-    if grant.get("nats_credentials") and not grant.get("bus_scoped"):
+    if values.get(SCOPED) == "1" and grant.get("nats_credentials") and not grant.get("bus_scoped"):
         raise auth.HiveError("the hive offered an unscoped bus credential; ask its hub to list this member's swarms")
     home = registry.home(environ)
     save(home, url, {**grant, "ledger_credential": credential}, selected)

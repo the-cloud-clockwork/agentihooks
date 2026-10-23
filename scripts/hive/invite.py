@@ -54,12 +54,12 @@ def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redi
     bus_url = request.bus_url or sample.get("AGENTIHOOKS_BUS_URL")
     if bus_url:
         member_settings.update(AGENTIHOOKS_BUS="nats", AGENTIHOOKS_BUS_URL=bus_url)
-    entries[CREDENTIAL] = auth.env_text(url, grant) + "".join(
-        f"{key}={value}\n" for key, value in member_settings.items() if value
-    )
     try:
-        if request.signer_path:
-            member_swarms.assign(bao, request.signer_path, [grant["id"]], request.swarms)
+        if request.signer_path and member_swarms.assign(bao, request.signer_path, [grant["id"]], request.swarms):
+            member_settings["AGENTIHOOKS_BUS_SCOPED"] = "1"
+        entries[CREDENTIAL] = auth.env_text(url, grant) + "".join(
+            f"{key}={value}\n" for key, value in member_settings.items() if value
+        )
         total = openbao_kv.merge(bao, request.path, entries)
     except (openbao_kv.OpenBaoError, auth.HiveError) as exc:
         try:

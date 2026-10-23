@@ -100,15 +100,17 @@ def merge(bao: OpenBao, path: str, entries: Mapping[str, str], stale: Iterable[s
 def update(bao: OpenBao, path: str, change: Callable[[dict], Mapping]) -> int:
     for _ in range(CAS_RETRIES + 1):
         current, version = read(bao, path)
-        merged = current | dict(change(current))
+        entries = dict(change(current))
+        if not entries:
+            return len(current)
         try:
-            _call(bao, path, {"options": {"cas": version}, "data": merged})
+            _call(bao, path, {"options": {"cas": version}, "data": current | entries})
         except OpenBaoError as exc:
             if not exc.conflict:
                 raise
             conflict = exc
             continue
-        return len(merged)
+        return len(current | entries)
     raise conflict
 
 

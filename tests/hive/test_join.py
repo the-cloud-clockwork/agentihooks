@@ -67,20 +67,31 @@ def test_one_invite_joins_a_machine_and_saves_the_refreshed_nats_grant(invitatio
     assert "fixture nats credentials" not in output.out + output.err
 
 
+def _unscoped(*args):
+    return {
+        "id": "fixture-member",
+        "redis_url": "redis://refreshed.example.test/0",
+        "nats_credentials": "fixture nats credentials\n",
+    }
+
+
+def test_a_legacy_invite_still_joins_with_an_unscoped_bus_credential(invitation, monkeypatch):
+    invite, home = invitation
+    monkeypatch.setattr(cli, "_post", _unscoped)
+    assert cli.main(["join", str(invite)]) == 0
+    saved = dotenv_values(home / auth.ENV_FILE)
+    assert "AGENTIHOOKS_BUS_SCOPED" not in saved
+    assert Path(saved["AGENTIHOOKS_BUS_CREDENTIALS"]).read_text() == "fixture nats credentials\n"
+
+
 def test_join_refuses_an_unscoped_bus_credential_and_keeps_the_current_membership(invitation, monkeypatch, capsys):
     invite, home = invitation
+    with invite.open("a") as stream:
+        stream.write("AGENTIHOOKS_BUS_SCOPED=1\n")
     home.mkdir()
     saved = home / auth.ENV_FILE
     saved.write_text("previous membership\n")
-
-    def unscoped(*args):
-        return {
-            "id": "fixture-member",
-            "redis_url": "redis://refreshed.example.test/0",
-            "nats_credentials": "fixture nats credentials\n",
-        }
-
-    monkeypatch.setattr(cli, "_post", unscoped)
+    monkeypatch.setattr(cli, "_post", _unscoped)
     assert cli.main(["join", str(invite)]) == 1
     assert saved.read_text() == "previous membership\n"
     assert not (home / auth.NATS_CREDS_FILE).exists()
