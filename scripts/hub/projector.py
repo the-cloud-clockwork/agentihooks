@@ -20,11 +20,11 @@ BATCH = 32
 FETCH_TIMEOUT_MS = 500
 REOPEN_S = 5.0
 STOP_S = 5.0
-_UNSAFE = re.compile(r"[^a-z0-9]+")
+_SAFE = re.compile(r"[a-z0-9]+")
 
 
 def identity(host: str, port: int) -> str:
-    return _UNSAFE.sub("-", f"{host}-{port}".lower()).strip("-")
+    return "-".join(_SAFE.findall(f"{host}-{port}".lower()))
 
 
 class Projector:
@@ -32,7 +32,6 @@ class Projector:
         self.repository = repository
         self.hub = hub
         self.name = name
-        self.worker = None
 
     def reactor(self) -> Reactor:
         return Reactor(f"projector-{self.name}", SUBJECT, self.handle)
