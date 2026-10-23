@@ -1,7 +1,6 @@
-# A hub install: the ledger, Redis and controller with the event hub on the bundled NATS.
+# A hub install on the bundled NATS; the NATS and JetStream switches repeat the defaults on purpose.
 hub:
   enabled: true
-  replicas: 2
 
 nats:
   enabled: true

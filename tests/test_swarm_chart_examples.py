@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.chart_examples import undeclared
+
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,17 +15,6 @@ NAMES = ["hub.yaml", "hive-only.yaml", "external-nats.yaml"]
 
 def example(name: str) -> dict:
     return yaml.safe_load((EXAMPLES / name).read_text())
-
-
-def undeclared(given: dict, declared: dict, prefix: str = "") -> list[str]:
-    found = []
-    for key, value in given.items():
-        path = f"{prefix}{key}"
-        if key not in declared:
-            found.append(path)
-        elif isinstance(value, dict) and isinstance(declared[key], dict) and declared[key]:
-            found += undeclared(value, declared[key], f"{path}.")
-    return found
 
 
 def test_the_chart_ships_a_hub_a_hive_only_and_an_external_nats_example():

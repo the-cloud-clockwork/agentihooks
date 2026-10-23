@@ -1,5 +1,4 @@
-# A hive only install: one worker hive that joins a swarm installed elsewhere. One release is one hive,
-# because one member credential is one hive id; `agentihooks hive invite` writes the member Secret's keys.
+# One release installs one worker hive; its member credential carries one hive id.
 hiveOnly: true
 
 nats:

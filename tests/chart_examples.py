@@ -9,6 +9,17 @@ SWARM = [("Deployment", "-controller"), ("StatefulSet", "-ledger"), ("StatefulSe
 HIVE = [("ConfigMap", "-worktrees"), ("Deployment", "-worker-hive")]
 
 
+def undeclared(given: dict, declared: dict, prefix: str = "") -> list[str]:
+    found = []
+    for key, value in given.items():
+        path = f"{prefix}{key}"
+        if key not in declared:
+            found.append(path)
+        elif isinstance(value, dict) and isinstance(declared[key], dict) and declared[key]:
+            found += undeclared(value, declared[key], f"{path}.")
+    return found
+
+
 def render(chart: str, example: Path) -> subprocess.CompletedProcess:
     return subprocess.run(["helm", "template", RELEASE, chart, "-f", str(example)], capture_output=True, text=True)
 
@@ -50,7 +61,11 @@ def hub(docs: list[dict], values: dict) -> list[str]:
 
 def hive_only(docs: list[dict], values: dict) -> list[str]:
     found = [f"renders no {kind} {suffix}" for kind, suffix in HIVE if not has(docs, kind, suffix)]
-    extra = [d for d in docs if not any(has([d], kind, suffix) for kind, suffix in HIVE)]
+    extra = [
+        d
+        for d in docs
+        if not any(d["kind"] == kind and d["metadata"]["name"].endswith(suffix) for kind, suffix in HIVE)
+    ]
     return found + [f"renders {d['kind']} {d['metadata']['name']}" for d in extra]
 
 
@@ -69,6 +84,7 @@ CHECKS = {"hub.yaml": hub, "hive-only.yaml": hive_only, "external-nats.yaml": ex
 
 def problems(chart: str) -> list[str]:
     folder = Path(chart) / "examples"
+    declared = yaml.safe_load((Path(chart) / "values.yaml").read_text())
     present = sorted(path.name for path in folder.iterdir()) if folder.is_dir() else []
     found = [f"examples/{name} has no render check" for name in present if name not in CHECKS]
     for name, check in CHECKS.items():
@@ -76,12 +92,16 @@ def problems(chart: str) -> list[str]:
         if not path.is_file():
             found.append(f"the chart has no examples/{name}")
             continue
+        values = yaml.safe_load(path.read_text())
+        found += [
+            f"examples/{name} sets {key}, which the chart does not declare" for key in undeclared(values, declared)
+        ]
         result = render(chart, path)
         if result.returncode:
             found.append(f"examples/{name} fails to render: {result.stderr.strip()}")
             continue
         docs = [d for d in yaml.safe_load_all(result.stdout) if d]
-        found += [f"examples/{name} {line}" for line in check(docs, yaml.safe_load(path.read_text()))]
+        found += [f"examples/{name} {line}" for line in check(docs, values)]
     return found
 
 
