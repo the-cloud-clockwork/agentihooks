@@ -1,6 +1,7 @@
 """The operator's own words in an append only log, indexed by normalized line hashes.
 
 A relay to the ledger is accepted only when it quotes words recorded here for a master or planner of its swarm.
+Swarm entries are mirrored into the shared swarm Redis, where a hosted ledger server reads them.
 """
 
 import hashlib
@@ -17,6 +18,7 @@ from hooks.context.swarm_heartbeat import is_operator_prompt
 
 TTL_SEC = 3600
 KEPT = 50
+SHARED_KEPT = 500
 
 
 def _dir():
@@ -72,6 +74,66 @@ def _append(connection, swarm, name, at, words):
         "INSERT INTO lines (name, hash, entry) VALUES (?, ?, ?)",
         [(name, _hash(_norm(line)), entry) for line in words.splitlines()],
     )
+
+
+def _shared():
+    from redis.exceptions import RedisError
+
+    from scripts.swarm import store
+
+    try:
+        return store.redis_client()
+    except (RedisError, OSError):
+        return None
+
+
+def _shared_key(*parts):
+    from scripts.swarm.store import PREFIX
+
+    return ":".join((PREFIX, "operator-words", *parts))
+
+
+def _shared_call(action, default):
+    from redis.exceptions import RedisError
+
+    redis = _shared()
+    if redis is None:
+        return default
+    try:
+        return action(redis)
+    except RedisError:
+        return default
+
+
+def _mirror(swarm, name, at, words):
+    def push(redis):
+        row = json.dumps({"swarm": swarm, "at": at, "words": words})
+        key = _shared_key(name)
+        redis.pipeline().sadd(_shared_key(), name).lpush(key, row).ltrim(key, 0, SHARED_KEPT - 1).execute()
+
+    _shared_call(push, None)
+
+
+def _shared_rows(name):
+    return [json.loads(row) for row in _shared_call(lambda redis: redis.lrange(_shared_key(name), 0, -1), [])]
+
+
+def _shared_match(name, needle, since):
+    for row in _shared_rows(name):
+        if (since is None or row["at"] > since) and needle in _norm(row["words"]):
+            return (row["words"],)
+    return None
+
+
+def _shared_forget(swarm):
+    def drop(redis):
+        for name in redis.smembers(_shared_key()):
+            key = _shared_key(name)
+            for row in redis.lrange(key, 0, -1):
+                if json.loads(row)["swarm"] == swarm:
+                    redis.lrem(key, 0, row)
+
+    _shared_call(drop, None)
 
 
 def _offline_swarm(name):
@@ -136,6 +198,7 @@ def _line_match(connection: sqlite3.Connection, name: str, needle: str, since: f
 def forget(swarm: str) -> None:
     with _store() as connection:
         connection.execute("DELETE FROM entries WHERE swarm = ?", (swarm,))
+    _shared_forget(swarm)
 
 
 def _load(name):
@@ -148,8 +211,9 @@ def _load(name):
 
 def recorded(pattern: str) -> list[str]:
     with _store() as connection:
-        names = connection.execute("SELECT DISTINCT name FROM entries").fetchall()
-    return sorted(name for (name,) in names if fnmatchcase(name, pattern))
+        names = {name for (name,) in connection.execute("SELECT DISTINCT name FROM entries")}
+    names |= _shared_call(lambda redis: redis.smembers(_shared_key()), set())
+    return sorted(name for name in names if fnmatchcase(name, pattern))
 
 
 def _save(name, data):
@@ -167,6 +231,8 @@ def record(name: str, words: str, now: float | None = None, swarm: str = "") -> 
         return False
     with _store(migrate=False) as connection:
         _append(connection, swarm or "", name, now, text)
+    if swarm:
+        _mirror(swarm, name, now, text)
     return True
 
 
@@ -184,6 +250,7 @@ def matching(name: str, quote: str, now: float | None = None, within: float | No
                 "AND (? IS NULL OR at > ?) ORDER BY at DESC, id DESC LIMIT 1",
                 (name, needle, since, since),
             ).fetchone()
+    row = row or _shared_match(name, needle, since)
     return row[0] if row else ""
 
 

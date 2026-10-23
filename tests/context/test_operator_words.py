@@ -588,3 +588,73 @@ def test_a_newer_recorded_quote_wins_over_older_migrated_words(tmp_path, monkeyp
     assert operator_words.record("master@abcdef-0001", "OLD  words", now=200, swarm="demo")
     assert operator_words.matching("master@abcdef-0001", "old words", within=None) == "OLD  words"
     assert operator_words.matching("master@abcdef-0001", "old", within=None) == "OLD  words"
+
+
+@pytest.fixture
+def shared(monkeypatch):
+    import fakeredis
+
+    client = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(operator_words, "_shared", lambda: client)
+    return client
+
+
+def _hosted(tmp_path, monkeypatch):
+    monkeypatch.setattr(operator_words, "_dir", lambda: tmp_path / "hosted")
+
+
+def test_swarm_words_reach_a_server_without_the_local_store_and_unowned_words_stay_local(shared, tmp_path, monkeypatch):
+    assert operator_words.record("master@a1-1", "Scale the hive  up", now=100, swarm="demo")
+    assert operator_words.record("master@a1-1", "Hold the release", now=150, swarm="demo")
+    assert operator_words.record("master@b2-1", "Local only words", now=150)
+    _hosted(tmp_path, monkeypatch)
+    assert operator_words.matching("master@a1-1", "scale the hive up", now=200) == "Scale the hive  up"
+    assert operator_words.matching("master@a1-1", "hold the", now=200) == "Hold the release"
+    assert operator_words.matching("master@a1-1", "scale the hive up", now=100 + operator_words.TTL_SEC) == ""
+    assert operator_words.matching("master@a1-1", "scale the hive up", now=10**9, within=None) == "Scale the hive  up"
+    assert operator_words.matching("master@a1-2", "scale the hive up", now=200) == ""
+    assert operator_words.matching("master@b2-1", "local only words", within=None) == ""
+    assert operator_words.recorded("master@*") == ["master@a1-1"]
+
+
+def test_the_newest_shared_words_win_and_only_the_latest_are_kept(shared, tmp_path, monkeypatch):
+    monkeypatch.setattr(operator_words, "SHARED_KEPT", 2)
+    for at, words in ((100, "ship the first build"), (110, "ship the second build"), (120, "ship the third build")):
+        operator_words.record("master@a1-1", words, now=at, swarm="demo")
+    _hosted(tmp_path, monkeypatch)
+    assert operator_words.matching("master@a1-1", "ship the", within=None) == "ship the third build"
+    assert operator_words.matching("master@a1-1", "ship the second", within=None) == "ship the second build"
+    assert operator_words.matching("master@a1-1", "ship the first", within=None) == ""
+
+
+def test_forget_drops_only_that_swarms_shared_words(shared, tmp_path, monkeypatch):
+    operator_words.record("master@a1-1", "merge the demo work", now=100, swarm="demo")
+    operator_words.record("master@a1-1", "merge the other work", now=110, swarm="other")
+    operator_words.forget("demo")
+    _hosted(tmp_path, monkeypatch)
+    assert operator_words.matching("master@a1-1", "merge the demo work", within=None) == ""
+    assert operator_words.matching("master@a1-1", "merge the other work", within=None) == "merge the other work"
+
+
+def test_an_unreachable_or_failing_shared_redis_keeps_the_local_words(tmp_path, monkeypatch):
+    import redis
+
+    from scripts.swarm import store
+
+    def refused(environ=None):
+        raise redis.exceptions.ConnectionError("refused")
+
+    monkeypatch.setattr(store, "redis_client", refused)
+    assert operator_words._shared() is None
+    assert operator_words.record("master@a1-1", "keep the local words", now=100, swarm="demo")
+    assert operator_words.matching("master@a1-1", "keep the local words", within=None) == "keep the local words"
+
+    class Failing:
+        def __getattr__(self, name):
+            raise redis.exceptions.ResponseError("NOPERM")
+
+    monkeypatch.setattr(operator_words, "_shared", lambda: Failing())
+    assert operator_words.recorded("master@*") == ["master@a1-1"]
+    operator_words.forget("demo")
+    _hosted(tmp_path, monkeypatch)
+    assert operator_words.matching("master@a1-1", "keep the local words", within=None) == ""

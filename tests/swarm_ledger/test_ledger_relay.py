@@ -5,7 +5,6 @@ import time
 import unittest
 from pathlib import Path
 
-import fakeredis
 import pytest
 
 from hooks.context import operator_words
@@ -231,8 +230,10 @@ def test_a_planners_words_count_and_an_engineers_or_another_swarms_do_not():
 
 
 def test_a_hosted_ledger_lands_a_relay_of_words_recorded_on_the_workstation_and_refuses_others(monkeypatch, tmp_path):
+    import fakeredis
+
     shared = fakeredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(operator_words, "_shared", lambda: shared, raising=False)
+    monkeypatch.setattr(operator_words, "_shared", lambda: shared)
     operator_words.record("master@a1-1", "scale the stable hive to eight agents", swarm=SLUG)
     operator_words.record("engineer@a1-3", "merge the filters work", swarm=SLUG)
     monkeypatch.setattr(operator_words, "_dir", lambda: tmp_path / "hosted")
