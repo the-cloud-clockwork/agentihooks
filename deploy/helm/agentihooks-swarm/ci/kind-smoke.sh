@@ -238,6 +238,8 @@ plant_hive_join 'the hive join command is' --set hive.join.memberRedisUrl=rediss
 plant_hive_join 'the hive join Service ports are' --set hive.join.port=8771
 plant_hive_join 'the hive join volumes are' --set hive.join.tlsSecretName=other-tls
 plant_hive_join 'the hive join env is' --set hive.join.redisSecret.name=swarm-redis
+plant_hive_join 'the hive join env is' --set hive.join.natsSigner.trustedOperator=OAOTHER
+plant_hive_join 'the hive join volumes are' --set hive.join.natsSigner.secretName=other-signer
 plant_hive_join 'the hive join tolerations are' --set-json 'hive.join.tolerations=[{"operator":"Exists"}]'
 foreign="$chart/ci/kind-hive-join-foreign-ledger.yaml"
 helm template "$release" "$chart" "${hive_join[@]}" -f "$foreign" \

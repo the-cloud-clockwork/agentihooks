@@ -16,6 +16,7 @@ RENDER_MEMBER = (
 MEMBER_INBOX = f"_INBOX.{MEMBER_KEY}.>"
 SHARED_INBOX = "_INBOX.>"
 HIVE_VALUES = "k8s/values-overlays/agentihooks-swarm-nats/values.yaml"
+SERVICE_USERS = "k8s/values-overlays/agentihooks-swarm-nats/users.yaml"
 ACCOUNT = "SWARM"
 HIVE_USER = "swarm-hive"
 EVERYTHING = frozenset({">"})
@@ -50,7 +51,11 @@ def member_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
 
 def hive_grants(antoncore: Path) -> dict[str, dict[str, frozenset[str]]]:
     values = yaml.safe_load((antoncore / HIVE_VALUES).read_text())
-    users = values["config"]["merge"]["accounts"][ACCOUNT]["users"]
+    accounts = values["config"]["merge"].get("accounts")
+    if accounts is None:
+        users = yaml.safe_load((antoncore / SERVICE_USERS).read_text())["users"]
+    else:
+        users = accounts[ACCOUNT]["users"]
     hive = next((user for user in users if user["user"] == HIVE_USER), None)
     if hive is None:
         raise ValueError(f"the {ACCOUNT} account has no {HIVE_USER} user")

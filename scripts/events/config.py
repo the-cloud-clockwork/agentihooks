@@ -11,6 +11,7 @@ CREDENTIALS_ENV = "AGENTIHOOKS_BUS_CREDENTIALS"
 BIND_ENV = "AGENTIHOOKS_BUS_BIND"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
+INLINE_CREDENTIALS = "-----BEGIN NATS USER JWT-----"
 DEFAULT_BACKEND = "memory"
 
 
@@ -71,6 +72,8 @@ def credentials_from(environ: Mapping[str, str]) -> str | None:
     reference = environ.get(CREDENTIALS_ENV)
     if not reference:
         return None
+    if reference.startswith(INLINE_CREDENTIALS):
+        return reference
     if not reference.startswith(OPENBAO_SCHEME):
         return Path(reference).read_text()
     from scripts import openbao_kv

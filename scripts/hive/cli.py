@@ -199,6 +199,22 @@ def _signer() -> "Signer | None":
     return nats_grant.from_environ(os.environ)
 
 
+def _nats_trust(args: argparse.Namespace) -> str:
+    import yaml
+
+    from scripts import openbao_kv
+    from scripts.hive import nats_trust
+
+    bao = openbao_kv.from_env(os.environ)
+    if bao is None:
+        raise auth.HiveError(
+            f"nats-trust writes OpenBao, so {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must be set"
+        )
+    values, lines = nats_trust.bootstrap(bao, nats_trust.load_users(args.users), args.url)
+    Path(args.values).write_text(yaml.safe_dump(values, sort_keys=False))
+    return "\n".join([*lines, f"wrote the public operator trust to {args.values}"])
+
+
 def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
@@ -271,6 +287,12 @@ def _parser() -> argparse.ArgumentParser:
     settings.add_argument("--keep", action="store_true", help="Leave max-agents, excluded, ui and ephemeral as stored")
     settings.add_argument("id")
     settings.add_argument("settings", nargs="*", metavar="key=value")
+    trust = sub.add_parser(
+        "nats-trust", help="Create the swarm NATS operator trust once and sign the service users of a users file"
+    )
+    trust.add_argument("--users", required=True, help="YAML file listing each service user and its OpenBao record")
+    trust.add_argument("--url", required=True, help="NATS address the hive join endpoint pushes account updates to")
+    trust.add_argument("--values", required=True, help="Helm values file to write the public operator trust to")
     sub.add_parser("show", help="Print a hive's record as JSON").add_argument("id")
     sub.add_parser("list", help="One line per hive with its liveness")
     sub.add_parser("run", help="Publish hive telemetry every fifteen seconds")
@@ -433,8 +455,8 @@ def main(argv: list[str]) -> int:
             _registry(args)
         elif args.command == "bundle-origin":
             print(bundle_origin.publish(os.environ, args.path))
-        elif args.command == "setup":
-            print(_setup(args))
+        elif args.command in ("setup", "nats-trust"):
+            print((_setup if args.command == "setup" else _nats_trust)(args))
         else:
             return _serve(args)
     except auth.HiveError as exc:
