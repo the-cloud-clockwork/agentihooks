@@ -52,14 +52,16 @@ class HiveLoss:
         by_hive = defaultdict(list)
         for key, raw in (json.loads(entry.value) if entry else {}).items():
             by_hive[raw["data"]["hive"]].append((key, Envelope.from_dict(raw)))
-        done, complete = [], True
+        done = []
         for hive, starts in by_hive.items():
             if not guard():
-                complete = False
                 break
             lost = now - self._watching >= presence.TTL_MS and presence.lost(self._bus, hive, now)
             if lost or prune:
                 done += self._settle(starts, lost, now)
+        else:
+            if prune:
+                self._pruned = now
         if done:
 
             def drop(rows: dict) -> bool:
@@ -69,8 +71,6 @@ class HiveLoss:
                 return bool(found)
 
             self._edit(drop)
-        if prune and complete:
-            self._pruned = now
 
     def _settle(self, starts: list[tuple[str, Envelope]], lost: bool, now: int) -> list[str]:
         done = []

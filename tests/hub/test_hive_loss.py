@@ -264,7 +264,9 @@ def test_starts_without_a_claim_or_hive_are_not_indexed(rig):
     rig.loss.handle(replace(start, type="execution.exited"))
     assert rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX) is None
     rig.loss.handle(start)
+    revision = rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).revision
     rig.loss.handle(replace(start, id="started:y", data={**data, "hive": "hive-b"}))
+    assert rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).revision == revision
     rig.loss.handle(replace(start, id="started:z", data={**data, "claim_revision": 1, "hive": "hive-c"}))
     rows = json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value)
     assert rows == {"c": start.to_dict()}
@@ -294,6 +296,7 @@ def test_default_registry_runs_hive_loss_before_lifecycle(rig):
         True,
         True,
     )
+    assert reactor.poll.__self__._clock is rig.clock
 
 
 def test_a_lease_lost_mid_pass_still_drops_the_starts_it_settled(rig):
@@ -314,9 +317,33 @@ def test_a_lease_lost_mid_pass_still_drops_the_starts_it_settled(rig):
     rig.loss.poll(Mock(side_effect=[True, False]))
     assert [call.args[1].key for call in rig.loss._emit.call_args_list] == ["hive-a"]
     assert list(json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value)) == ["claim-hive-b"]
+    assert rig.loss._pruned == T0
     rig.loss.poll()
     assert [call.args[1].key for call in rig.loss._emit.call_args_list] == ["hive-a", "hive-b"]
     assert json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value) == {}
+    assert rig.loss._pruned == T0 + hive_loss.PRUNE_MS
+
+
+def test_one_pass_prunes_a_live_hive_and_settles_a_lost_one(rig):
+    from scripts.events.envelope import Envelope
+    from scripts.hive import presence
+    from scripts.hub import hive_loss
+
+    claims = rig.bus.state("spoke-work")
+    starts = [("running", "hive-a", "started"), ("ended", "hive-a", "exited"), ("lost", "hive-b", "started")]
+    for key, hive, state in starts:
+        presence.beat(rig.bus, hive, T0)
+        claims.create(key, json.dumps({"state": state, "claim_revision": 1}).encode())
+        data = {"claim_key": key, "claim_revision": 1, "hive": hive, "task": key}
+        rig.loss.handle(Envelope(f"started:{key}", "execution.started", "rig", "execution", key, 1, T0, hive, data))
+    while rig.clock() < T0 + hive_loss.PRUNE_MS:
+        rig.clock.return_value = rig.clock() + 5_000
+        rig.loss.poll(lambda: False)
+    presence.beat(rig.bus, "hive-a", rig.clock())
+    rig.loss._emit = Mock()
+    rig.loss.poll()
+    assert [call.args[1].key for call in rig.loss._emit.call_args_list] == ["lost"]
+    assert list(json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value)) == ["running"]
 
 
 def test_index_writes_retry_a_conflict_and_give_up_after_eight(rig):
