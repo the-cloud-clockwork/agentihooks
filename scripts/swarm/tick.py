@@ -1210,6 +1210,17 @@ def _expire_launch(config, runtime, agent, error):
     return error if kept is False else SpawnError(ACK_EXPIRED)
 
 
+def _finished_launch(slug, store, doc, agent):
+    _release_hive_launch(slug, store, agent)
+    store.count_claim(slug, agent.task)
+    store.count_spawn(slug, agent.harness)
+    store.record_launch(
+        slug, agent, "started", after=store.take_restart(slug, agent.task) or _master_set(doc, agent.task)
+    )
+    store.redis.hdel(store.key(slug, "launch-assignments"), agent.task)
+    return f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement"
+
+
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     from scripts.swarm_v2.runtime import codex
 
@@ -1217,18 +1228,15 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
         if agent.state == "finished" and task.get("state") == "done":
-            _release_hive_launch(slug, store, agent)
-            store.count_claim(slug, agent.task)
-            store.count_spawn(slug, agent.harness)
-            store.record_launch(
-                slug, agent, "started", after=store.take_restart(slug, agent.task) or _master_set(doc, agent.task)
-            )
-            actions.append(f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement")
+            actions.append(_finished_launch(slug, store, doc, agent))
             continue
         try:
             placed = runtime.collect(
-                config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True}
+                config, agent.lane, agent.name, {**task, "id": agent.task, "seat": agent.seat, ACK_LATER: True}
             )
+            if agent.state == "finished" and task.get("state") == "blocked":
+                actions.append(_finished_launch(slug, store, doc, agent))
+                continue
             launched = codex.admit_legacy(store, slug, placed_record(agent, placed), runtime)
         except Exception as exc:
             error = exc

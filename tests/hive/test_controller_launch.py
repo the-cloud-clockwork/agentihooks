@@ -708,6 +708,7 @@ def test_a_blocked_worker_receipt_is_collected_once_without_reviving_it(setup):
     store.put_agent(slug, worker)
     store.record_launch(slug, worker, ACKNOWLEDGING)
     store.mark_restart(slug, worker.task, "reclaimed")
+    store.redis.hset(store.key(slug, "launch-assignments"), worker.task, "assignment")
     lives = store.claims(slug, worker.task)
     task = {"id": worker.task, "lane": "eng", "state": "blocked", "claimed_by": worker.name}
     doc = {"tasks": [task]}
@@ -728,11 +729,59 @@ def test_a_blocked_worker_receipt_is_collected_once_without_reviving_it(setup):
     assert store.claims(slug, worker.task) == lives + 1
     assert store.spawns(slug) == {"claude": 1}
     assert store.take_restart(slug, worker.task) == ""
+    assert store.redis.hget(store.key(slug, "launch-assignments"), worker.task) is None
     assert _collect_acks(slug, setup.config, store, ledger, runtime, doc, 3_000) == []
     assert store.claims(slug, worker.task) == lives + 1
     assert store.spawns(slug) == {"claude": 1}
     assert setup.launcher.slots.rows("claude:account") == {}
     ledger.task_set.assert_not_called()
+
+
+@pytest.mark.parametrize("receipt", ["missing", "failed"])
+def test_a_finished_blocked_worker_without_a_successful_receipt_is_refused(setup, receipt):
+    from scripts.hive.launch import GONE
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    request, order, ack = live_order(setup)
+    worker = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.put_agent("fixture", replace(worker, state="finished"))
+    request = replace(request, task={**request.task, "state": "blocked"})
+    if receipt == "missing":
+        setup.store.redis.hdel(setup.launcher.orders.receipt(order), "ack")
+    else:
+        setup.launcher.orders.finish("remote", "0-0", order, replace(ack, status="failed", failure="identity"))
+    assert setup.launcher.collect(request) == Outcome("spawn", Status.REFUSED, "hive", detail=GONE)
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "finished"
+
+
+@pytest.mark.parametrize("bad", ["claimant", "seat", "generation", "ack host", "request epoch", "order epoch"])
+def test_a_finished_blocked_worker_receipt_keeps_the_launch_fences(setup, bad):
+    from scripts.swarm.store import SwarmError
+
+    request, order, ack = live_order(setup)
+    worker = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.put_agent("fixture", replace(worker, state="finished"))
+    request = replace(request, task={**request.task, "state": "blocked"})
+    if bad == "claimant":
+        request = replace(request, name="other")
+    elif bad == "seat":
+        request = replace(request, task={**request.task, "seat": "eng-2@fixture"})
+    elif bad == "generation":
+        worker = replace(worker, state="finished", generation=worker.generation + 1)
+        setup.store.execution_registry.update("fixture", worker)
+    elif bad == "ack host":
+        setup.launcher.orders.finish("remote", "0-0", order, replace(ack, target={"host_id": "other"}))
+    elif bad == "request epoch":
+        request = replace(request, task={**request.task, "controller_epoch": setup.held.epoch + 1})
+    else:
+        order = replace(order, epoch=setup.held.epoch + 1)
+        setup.store.redis.hset(
+            setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__)
+        )
+    with pytest.raises(SwarmError) as raised:
+        setup.launcher.collect(request)
+    assert ("epoch" if bad.endswith("epoch") else bad) in str(raised.value)
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "finished"
 
 
 @pytest.mark.parametrize("route", ["subscription", "interactive"])
