@@ -107,6 +107,10 @@ Placement drops a hive whose list lacks the task's repo, with "no hive for `<rol
 When a launch names the repo by origin identity, the hive starts the agent in its own checkout with that origin,
 the first by path when it holds several. A repo given as a path launches in that path.
 
+`swarm prepare` and `swarm publish` search the same `HIVE_REPO_ROOT` checkouts by repository name when a task
+repository entry is not a directory on this host, such as a path recorded on another host; see
+[Repositories recorded on another host](swarm.md#repositories-recorded-on-another-host).
+
 ## Hive endpoint limits
 
 `agentihooks hive serve` answers `POST /hive/refresh` (a ledger credential for a new Redis password) on one thread
