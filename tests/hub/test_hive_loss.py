@@ -43,9 +43,7 @@ def rig():
 
     def offer(version):
         queue.offer(
-            Envelope(
-                f"ready-{version}", "task.ready", "rig", "task", "task", version, T0, "readiness", {"lane": "eng"}
-            )
+            Envelope(f"ready-{version}", "task.ready", "rig", "task", "task", version, T0, "readiness", {"lane": "eng"})
         )
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -101,8 +99,8 @@ def rig():
 
 
 def claim_state(rig):
-    from scripts.hive.spoke import claim_key
     from scripts.events.envelope import Envelope
+    from scripts.hive.spoke import claim_key
 
     key = claim_key(Envelope("ready-0", "task.ready", "rig", "task", "task", 0, T0, "readiness", {}))
     return json.loads(rig.bus.state("spoke-work").get(key).value)["state"]
@@ -176,8 +174,8 @@ def test_a_start_that_already_exited_is_dropped_without_an_exit(rig):
     assert rig.first.spoke.poll() == "started"
     rig.hub.run_once()
     claims = rig.bus.state("spoke-work")
-    from scripts.hive.spoke import claim_key
     from scripts.events.envelope import Envelope
+    from scripts.hive.spoke import claim_key
 
     key = claim_key(Envelope("ready-0", "task.ready", "rig", "task", "task", 0, T0, "readiness", {}))
     entry = claims.get(key)
@@ -190,9 +188,9 @@ def test_a_start_that_already_exited_is_dropped_without_an_exit(rig):
 
 
 def test_a_live_hive_prunes_ended_starts_on_the_prune_cadence(rig):
+    from scripts.events.envelope import Envelope
     from scripts.hive import presence
     from scripts.hive.spoke import claim_key
-    from scripts.events.envelope import Envelope
     from scripts.hub import hive_loss
 
     assert rig.first.spoke.poll() == "started"
