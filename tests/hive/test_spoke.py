@@ -380,7 +380,7 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
         assert rig.tasks.reopen.call_args.args == (rig.event,)
 
 
-def test_an_ambiguous_spawn_keeps_its_identity_and_never_launches_again(rig):
+def test_a_restarted_spoke_relaunches_its_own_ambiguous_spawn_under_a_new_claim_fence(rig):
     import json
 
     from scripts.hive.spoke import Spoke, claim_key
@@ -396,8 +396,12 @@ def test_an_ambiguous_spawn_keeps_its_identity_and_never_launches_again(rig):
     assert rig.spoke.poll() == "retry"
     rig.clock.now = 10
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, reading)
-    assert restarted.poll() == "uncertain"
-    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+    rig.runtime.spawn.side_effect = None
+    assert restarted.poll() == "started"
+    first, second = (call.args[0].task["claim_fence"] for call in rig.runtime.spawn.call_args_list)
+    assert second["key"] == first["key"]
+    assert second["revision"] > first["revision"]
+    assert claim(rig)["state"] == "started"
     rig.tasks.reopen.assert_not_called()
 
 
@@ -581,8 +585,24 @@ def test_ready_recovery_retries_below_the_cap_and_reopens_at_the_cap(rig, attemp
     assert pending.get(rig.spoke._pending_key).value == b"{}"
 
 
+@pytest.mark.parametrize("attempt", [1, 3])
+def test_own_launching_recovery_releases_the_claim_and_takes_new_work(rig, attempt):
+    pending = seed_pending(rig, {"state": "launching", "owner": "hive-a", "name": "agent-a"}, attempt)
+    rig.spoke.measure = lambda: None
+    if attempt == 1:
+        assert rig.spoke.poll() == "held"
+        assert claim(rig) == {"state": "ready"}
+        rig.tasks.reopen.assert_not_called()
+    else:
+        assert rig.spoke.poll() == "dead"
+        assert claim(rig) == {"state": "dead"}
+        rig.tasks.reopen.assert_called_once_with(rig.event)
+    assert pending.get(rig.spoke._pending_key).value == b"{}"
+    rig.runtime.spawn.assert_not_called()
+
+
 def test_uncertain_recovery_retains_ownership_and_does_not_measure_or_take(rig):
-    pending = seed_pending(rig, {"state": "launching", "owner": "hive-a", "name": "agent-a"})
+    pending = seed_pending(rig, {"state": "launching", "owner": "hive-b", "name": "agent-a"})
     before = pending.get(rig.spoke._pending_key)
     rig.spoke.measure = Mock(side_effect=AssertionError("must not measure"))
     rig.queue.take = Mock(wraps=rig.queue.take)
@@ -874,6 +894,71 @@ def test_nats_redelivers_lost_hive_work_to_a_second_hive(tmp_path, rig, monkeypa
         finally:
             old_bus.close()
             new_bus.close()
+
+
+def test_a_spoke_settles_its_own_launch_after_nats_drops_mid_launch_and_takes_new_work(tmp_path, rig):
+    import contextlib
+    import json
+    import subprocess
+
+    from scripts.events import nats
+    from scripts.events.config import BusConfig, QueuePolicy
+    from scripts.hive import spoke
+    from tests.events import nats_server
+
+    policy = QueuePolicy(ack_wait_ms=200, max_deliver=10)
+    port = nats_server.free_port()
+    command = [nats_server.binary(), "-js", "-a", "127.0.0.1", "-p", str(port), "-sd", str(tmp_path / "store")]
+    config = BusConfig(backend="nats", url=f"nats://127.0.0.1:{port}")
+    hive = replace(rig.config, policy=policy)
+    servers, buses = [], []
+
+    def start():
+        servers.append(subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+        nats_server.wait_listening(port, servers[-1])
+        buses.append(nats.open_bus(config))
+        return buses[-1]
+
+    try:
+        before = start()
+        dropped = spoke.Spoke(hive, before, rig.runtime, rig.tasks, reading)
+        assert dropped.poll() == "empty"
+        before.queue("swarm.rig.ready.eng", policy).offer(rig.event)
+        launched = rig.runtime.spawn.return_value
+
+        def spawn(request):
+            servers[-1].kill()
+            servers[-1].wait(10)
+            return launched
+
+        rig.runtime.spawn.side_effect = spawn
+        assert dropped.poll(500) == "retry"
+        rig.runtime.spawn.side_effect = None
+        after = start()
+        key = spoke.claim_key(rig.event)
+        stranded = after.state("spoke-work").get(key)
+        assert json.loads(stranded.value) == {"state": "launching", "owner": "hive-a", "name": "agent-a"}
+        after.queue("swarm.rig.ready.eng", policy).offer(replace(rig.event, id="ready-b", key="task-b"))
+        recovered = spoke.Spoke(hive, after, rig.runtime, rig.tasks, reading)
+        outcomes = []
+        for _ in range(20):
+            outcomes.append(recovered.poll(500))
+            if outcomes.count("started") == 2:
+                break
+        assert outcomes.count("started") == 2, outcomes
+        assert "uncertain" not in outcomes
+        assert json.loads(after.state("spoke-work").get(key).value)["state"] == "started"
+        assert json.loads(after.state("spoke-pending").get(recovered._pending_key).value) == {}
+        fences = [call.args[0].task["claim_fence"] for call in rig.runtime.spawn.call_args_list[1:]]
+        assert {fence["key"] for fence in fences} == {key, spoke.claim_key(replace(rig.event, key="task-b"))}
+        assert all(fence["revision"] > stranded.revision for fence in fences if fence["key"] == key)
+    finally:
+        for bus in buses:
+            with contextlib.suppress(Exception):
+                bus.close()
+        for server in servers:
+            server.terminate()
+            server.wait(10)
 
 
 def test_presence_is_renewed_before_pending_recovery_even_without_admission(rig):

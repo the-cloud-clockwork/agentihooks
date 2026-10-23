@@ -73,8 +73,8 @@ agentihooks hive install          # user service that runs agentihooks hive run
   the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step skips a
   piece that is already gone, so a rerun finishes an interrupted remove. `OPENBAO_URL` and `OPENBAO_TOKEN` must
   be set.
-- `agentihooks hive list` prints one line per hive: id, `live` or `stale`, ui, max agents and excluded (`none` when
-  empty).
+- `agentihooks hive list` prints one line per hive: id, `live` or `stale`, ui, max agents, excluded (`none` when
+  empty) and its [headroom](#headroom) reading.
   `agentihooks hive show <id>` prints the full record as JSON.
 
 A Kubernetes worker pod joins the same way, waiting for `hive add` to deliver its credential; see
@@ -389,6 +389,59 @@ When no live hive takes the role:
 
 A hive counts as live while its last heartbeat is under ninety seconds old. Codex launches are not placed on hives.
 
+### Headroom
+
+A hive's room is the smaller of its `max-agents` left and what its measured headroom fits. `hive run` publishes the
+headroom reading to `<root>:hive:<id>:headroom`, and placement, the launch reservation and `hive list` read it from
+there.
+
+A reading holds:
+
+| Field | Source |
+|---|---|
+| `cpus`, `load5` | CPU count and the five minute load average from `/proc/loadavg`. |
+| `available_mb`, `total_mb` | Available and total memory from `/proc/meminfo`. |
+| `pod_total_mb`, `pod_available_mb` | The cgroup v2 `memory.max` limit and that limit minus current use less inactive file pages, only when the limit is set. |
+| `pod_cpus`, `pod_cpu_usec`, `pod_load` | The cgroup v2 `cpu.max` quota and usage; `pod_load` needs a previous reading under 30 seconds old, so the pod CPU limit does not apply to the first reading after a start or a gap. |
+| `pending` | Launch orders waiting in the hive's order stream, shown by `hive list`. Room counts the hive's pending launch reservations instead. |
+| `measured_at` | Milliseconds when the reading was taken. |
+
+The reading expires after 30 seconds, and a reader treats one older than that as absent. With no fresh reading the
+hive's room is 0, the refusal reads `missing telemetry: no fresh headroom reading`, and `hive list` shows
+`headroom=missing`. Otherwise each limit fits whole agents at 0.5 CPU and 700 MB each under 80 percent of the host,
+and of the pod when the cgroup sets a limit; launches reserved on the hive in the last fifteen minutes count against
+each limit, and the smallest limit wins.
+
+`hive run` publishes headroom on two paths:
+
+- **Every beat,** right after the heartbeat is written and before launch orders, herdr reports and execution reports,
+  stamped with the heartbeat time. A beat that fails after the heartbeat still leaves a fresh reading.
+- **Every 10 seconds on its own thread,** started for each Redis connection. A launch inside a beat can run
+  `init-agent` for minutes; the thread keeps the reading fresh while it does, and also renews the daemon's order
+  consumer marker (45 seconds), so a launch it still holds is not taken for an orphan. The thread paces with the
+  scheduler process timer, like the beat. A Redis error, or a reading that cannot be parsed, prints
+  `hive headroom publish failed (<error>: <detail>)` to stderr and the thread keeps going. When its timer connection
+  is lost the thread ends, and the reconnect starts a new one. Any other error ends the thread with a traceback until
+  the next reconnect; the beat still publishes on its own path, but a launch longer than 30 seconds then lapses the
+  reading.
+
+`hive list` appends the reading to each hive's line, its fields separated by tabs (shown aligned here):
+
+```bash
+agentihooks hive list
+# vm  live  ui=no  max-agents=20  excluded=none  cpus=8  load5=1.42  available-mb=21034  pending=0
+```
+
+Hive workers load code at start. A hive still on code from before the 10 second publisher writes headroom only
+after the beat's launch poll, so its reading lapses during a long launch; restart its `agentihooks-hive` service,
+or roll its pod, to pick up the publisher.
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `hive list` shows `headroom=missing` on a `live` hive | `journalctl --user -u agentihooks-hive`, or the pod log, for `hive headroom publish failed` | Fix the error it names; a Redis error clears when the connection returns. |
+| A launch waits with `missing telemetry` while another launch runs on that hive | The hive's agentihooks version | Upgrade and restart the hive service so the 10 second publisher runs. |
+| Room reads 0 with a fresh reading | The refusal detail: `cpu`, `ram` or `max agents` | The named limit is spent; wait for agents to finish or raise `max-agents` when the host has room. |
+
 ### Account caps on every hive
 
 Quota belongs to the account, so every hive reports the same cap for it. A subscription slot whose own reading is
@@ -575,6 +628,7 @@ newer hive. Deploy the controller first, then the hives.
 | Clock | Value | Effect |
 |---|---|---|
 | Hive heartbeat | every 15 seconds | Sessions, quota and reports expire after 45 seconds without a beat. |
+| Headroom | every 10 seconds and every beat | A reading older than 30 seconds counts as missing and the hive's room reads 0; see [Headroom](#headroom). |
 | Live window | 90 seconds | A hive past it is stale and gets no new launches. |
 | Minute tick | 60 seconds (`AGENTIHOOKS_CONTROLLER_TICK_SECONDS`) | Each tick checks the master's hive. |
 | `master-move-grace` | 300 seconds | How long the master's hive may go without a heartbeat before the tick moves the master. |

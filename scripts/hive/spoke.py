@@ -129,6 +129,11 @@ class Spoke:
         entry = self.bus.state("spoke-work").get(claim_key(event))
         state = json.loads(entry.value)
         status = state["state"]
+        if status == "launching" and state.get("owner") == self.config.hive:
+            self.bus.state("spoke-work").update(
+                claim_key(event), json.dumps({"state": "ready"}).encode(), entry.revision
+            )
+            status = "ready"
         if status == "started":
             self._publish(Envelope.from_dict(state["event"]))
         elif status == "dead_pending" or (status == "ready" and record["attempt"] >= self.config.policy.max_deliver):
