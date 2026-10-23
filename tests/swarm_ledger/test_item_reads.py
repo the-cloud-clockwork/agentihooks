@@ -92,3 +92,26 @@ def test_tasks_filters_open_tasks_by_state_lane_and_title_text(reads, capsys, mo
     monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "tasks", *flags])
     ledger.main()
     assert [line.split()[0] for line in capsys.readouterr().out.splitlines()] == ids
+
+
+def test_tasks_prints_a_task_without_lane_or_title_with_empty_fields(monkeypatch, capsys):
+    monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: [{"id": "t9", "state": "open"}])
+    ledger.cmd_tasks(SimpleNamespace(slug=SLUG, state=None, lane=None, text=None))
+    assert capsys.readouterr().out == "t9  open    \n"
+
+
+def test_get_names_the_item_forms_when_it_refuses_one(capsys):
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(["--slug", SLUG, "get", "chat/c1"])
+    assert "name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>" in capsys.readouterr().err
+
+
+def test_get_and_tasks_document_their_forms(capsys):
+    parser = ledger.build_parser()
+    for argv in (["--help"], ["get", "--help"], ["tasks", "--help"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(argv)
+    out = " ".join(capsys.readouterr().out.split())
+    assert "get print one task, phase, follow up or priority through the ledger API" in out
+    assert "item tasks/<id>, phases/<id>, followups/<id> or priorities/<id>" in out
+    assert "tasks list open tasks, one line each, filtered by state, lane or title text" in out

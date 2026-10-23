@@ -11,8 +11,11 @@ def test_master_prompt_reads_one_item_at_a_time_and_forbids_a_full_show():
     text = prompt.build("sw", "/repo", "master", "master", {"id": "master", "title": "Master"})
 
     assert "read the ledger in full" not in text
-    assert GET in text and TASKS in text
-    assert "Never run agentihooks ledger --slug sw show" in text
+    assert (
+        "Never run agentihooks ledger --slug sw show: it downloads the whole ledger and slows every write for the "
+        f"swarm. Read through the ledger API one item at a time: {GET} prints one task (phases/<id>, followups/<id> "
+        f"and priorities/<id> work the same way), and {TASKS} lists the open tasks, each filter optional." in text
+    )
 
 
 def test_master_role_rule_names_the_item_reads_and_forbids_ledger_show():
