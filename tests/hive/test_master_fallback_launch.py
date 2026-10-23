@@ -116,6 +116,35 @@ def test_controller_routes_an_unpinned_primary_master_through_hive_placement(set
     )
 
 
+@pytest.mark.parametrize("login", [False, True])
+def test_controller_keeps_only_the_workstation_login_master_off_hive_placement(setup, monkeypatch, login):
+    from scripts import master_claude_login
+    from scripts.swarm import controller
+    from scripts.swarm_v2 import masters
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    monkeypatch.setattr(master_claude_login.hooks_config, "MASTER_CLAUDE_LOGIN", login)
+    eligible = Mock(wraps=master_claude_login.enabled)
+    monkeypatch.setattr(master_claude_login, "enabled", eligible)
+    masters.MasterSeats(setup.store.redis).set_count(setup.config.slug, 3)
+    task = master(setup)
+    assert controller._master_seats(setup.store, setup.config.slug) == (
+        frozenset({"master-2", "master-3"}) if login else frozenset({"master", "master-2", "master-3"})
+    )
+    assert eligible.call_args_list == [
+        ((setup.config.slug, f"{seat}@{setup.config.slug}", "master", "claude"),)
+        for seat in ("master", "master-2", "master-3")
+    ]
+    fenced = controller.FencedRuntime(
+        setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
+    )
+    assert fenced.runtime.router.placed_backend("master", task) == ("local" if login else "hive")
+    assert fenced.runtime.router.placed_backend("master", {"id": "master-2"}) == "hive"
+    assert fenced.runtime.router.placed_backend("master", {"id": "master-3"}) == "hive"
+    assert fenced.runtime.router.placed_backend("master", {"id": "master-4"}) == "local"
+
+
 @pytest.mark.parametrize("route", ["interactive", "subscription", "api"])
 def test_master_order_preserves_placement_health_through_the_consumer(setup, route):
     from types import SimpleNamespace
