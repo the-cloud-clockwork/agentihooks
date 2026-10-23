@@ -774,7 +774,22 @@ init runs again on the package roles alone, with the bundle unlinked; a failed i
 pod. A failed `deps ensure` logs its reason and each launch retries it. The image carries node, npm, uv and gh; npm
 global installs and uv tools land in `~/.local` under the worker home.
 
-`workers.credentialSecret` is required; it carries the member credential and, with `workers.ssh.enabled`, also the
+`agentihooks hive join /path/to/invite` enrolls a machine from one private invite
+file. It reads the file without executing it, refreshes the member through the
+hive endpoint and saves its Redis and NATS credentials privately. The hub operator
+issues that file with `agentihooks hive invite`, using `--bus-url` for the NATS
+address reachable by the member. A `--like` invite copies that address. Bus and
+ledger addresses survive later credential refreshes. A private hub CA must be
+trusted before joining, for example through `SSL_CERT_FILE`.
+
+The hive only Helm example uses the same invite: create a Secret with
+`kubectl create secret generic hive-invite --from-file=invite=/path/to/invite`,
+then install the chart with `-f deploy/helm/agentihooks-swarm/examples/hive-only.yaml`.
+It deploys one worker and no hub or NATS server. Worker startup runs `hive join`
+before configuring the hive or accepting work, and refuses startup if enrollment
+fails. GitHub and provider account credentials remain separate Secret references.
+
+`workers.credentialSecret` is required; it carries the member invite and, with `workers.ssh.enabled`, also the
 sshd `authorized_keys` and host key the pod installs for `agentihooks hive add` to reach it. Credentials come from
 ExternalSecrets by name. Replicas that mount the same credential would report the same hive id and agent limit, so
 the chart refuses `workers.replicas` above 1. Scale with `workers.hives`: each entry, `name` plus its own

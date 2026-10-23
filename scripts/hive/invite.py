@@ -26,6 +26,7 @@ class Request:
     redis_url: str | None = None
     swarm_url: str | None = None
     ledger_ca: str | None = None
+    bus_url: str | None = None
 
 
 def default_path(label: str) -> str:
@@ -47,7 +48,13 @@ def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redi
     }
     entries = {key: value for key, value in entries.items() if value}
     grant = auth.mint(redis, request.label, request.redis_url or sample.get(REDIS_URL) or local_redis_url)
-    entries[CREDENTIAL] = auth.env_text(url, grant)
+    member_settings = {"AGENTIHOOKS_SWARM_URL": entries.get(SWARM_URL)}
+    bus_url = request.bus_url or sample.get("AGENTIHOOKS_BUS_URL")
+    if bus_url:
+        member_settings.update(AGENTIHOOKS_BUS="nats", AGENTIHOOKS_BUS_URL=bus_url)
+    entries[CREDENTIAL] = auth.env_text(url, grant) + "".join(
+        f"{key}={value}\n" for key, value in member_settings.items() if value
+    )
     try:
         total = openbao_kv.merge(bao, request.path, entries)
     except openbao_kv.OpenBaoError as exc:

@@ -643,6 +643,8 @@ agentihooks lease <dir> --kind scratch|ephemeral
 agentihooks scratch new                 # mkdir ~/scratchpad/<repo>/<task> + lease, prints the path; the name is built
                                         # from the session (<swarm>-<task> or its session base), another name is refused
 agentihooks name worktree|tmp [--check NAME]  # the built worktree name wt.sh uses: the session base, then -2, -3
+agentihooks host-guard install|check     # link and schedule the host process guard, or report its drift;
+                                        # see host-process-guard.md
 agentihooks scratch rm <task-dir>       # safe replacement for rm -rf "$dir": refuses when another
                                         # process works inside, another live session holds the lease,
                                         # or a nested worktree has uncommitted or unpushed work

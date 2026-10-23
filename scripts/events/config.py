@@ -41,6 +41,7 @@ class BusConfig:
     dedupe_window_ms: int = 120_000
     queue: QueuePolicy = field(default_factory=QueuePolicy)
     credentials: str | None = field(default=None, repr=False)
+    provision: bool = True
 
     def __post_init__(self):
         if not isinstance(self.backend, str) or not self.backend:

@@ -358,6 +358,16 @@ def test_an_exited_pump_retires_the_server_and_finishes_the_execution(tmp_path, 
     assert seen["finished"] == [("store", "sw", started, 1500)]
 
 
+def test_an_exited_pump_names_its_status_before_the_server_stops(tmp_path, monkeypatch, capsys):
+    started, seen = supervised(monkeypatch, lambda: pytest.fail("server must not wait without its pump"))
+    seen["pump"].poll = lambda: 1
+    seen["pump"].returncode = 1
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == 1
+    assert capsys.readouterr().err == serve.PUMP_EXITED.format(1) + "\n"
+    assert seen["stopped"] == [seen["pump"], started.process]
+
+
 def test_a_failed_pump_spawn_retires_the_server_and_finishes_the_execution(tmp_path, monkeypatch):
     started, seen = supervised(monkeypatch, lambda: pytest.fail("server must not wait without its pump"))
 
