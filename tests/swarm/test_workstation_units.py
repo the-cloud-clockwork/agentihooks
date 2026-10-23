@@ -100,6 +100,7 @@ def test_a_distributed_install_without_redis_still_enables_the_spoke(tmp_path, d
     assert timer.ensure(BINARY, tmp_path, run=systemctl([]))
     assert "the scheduled swarm tick could not be cancelled: ConnectionError: refused" in capsys.readouterr().err
 
+
 def test_retiring_an_engine_unit_beside_a_current_spoke_still_reloads(tmp_path, distributed):
     timer.ensure(BINARY, tmp_path, run=systemctl([]))
     (tmp_path / "agentihooks-inbox-waker.service").write_text("[Unit]\n")
