@@ -490,3 +490,51 @@ def test_the_default_registry_reconciler_uses_the_hub_clock(rig, monkeypatch):
     reactors["reconciler"].poll()
     assert len(rig.returned) == 1
     assert rig.bus.state(reconciler.BUCKET).get(reconciler.COMPLETED).value == b"1000000"
+
+
+def _stop_reporting(rig, expires_ms):
+    from scripts.hive import presence, reports
+
+    rig.store.redis.delete(reports.key("hive"))
+    presence.beat(rig.bus, "hive", expires_ms - presence.TTL_MS)
+
+
+@pytest.mark.parametrize("expires,settled", [(1_000_000, True), (1_000_001, False)])
+def test_an_execution_on_a_hive_whose_presence_expired_is_settled_once_as_lost(rig, expires, settled):
+    _stop_reporting(rig, expires)
+    handled = Mock(wraps=rig.life.handle)
+    rig.life.handle = handled
+    rig.react.poll()
+    if settled:
+        rig.clock.return_value += 300_000
+        rig.react.poll()
+    assert len(rig.returned) == len(rig.ledger.writes) == int(settled)
+    assert rig.row["state"] == ("open" if settled else "claimed")
+    if settled:
+        lost = handled.call_args_list[0].args[0]
+        assert (lost.id, lost.type, lost.time, lost.cause) == ("lost:started", "execution.exited", 1_000_000, "started")
+        assert lost.data == {**rig.event.data, "reason": "lost"}
+        assert rig.store.agents("rig") == []
+
+
+def test_a_hive_that_reports_again_keeps_its_live_executions(rig):
+    from scripts.hive import presence
+
+    _stop_reporting(rig, 1_000_000)
+    presence.beat(rig.bus, "hive", rig.clock())
+    rig.report["executions"]["execution"]["pane"]["state"] = "working"
+    rig.save()
+    rig.react.poll()
+    assert rig.returned == []
+    assert rig.row["state"] == "claimed"
+    assert rig.store.agents("rig") == [rig.agent]
+
+
+def test_another_hive_losing_presence_cannot_settle_this_execution(rig):
+    from scripts.hive import presence
+
+    agent = replace(rig.agent, hive="other", runtime_target={"host_id": "other"})
+    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    presence.beat(rig.bus, "other", 0)
+    rig.react.poll()
+    assert rig.returned == []
