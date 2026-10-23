@@ -82,9 +82,13 @@ def test_a_master_spoke_spawns_offered_master_work_on_the_workstation(monkeypatc
     from scripts.events.config import BusConfig
     from scripts.events.memory import open_bus
     from scripts.hive import spoke
+    from scripts.swarm import readiness
     from scripts.swarm_v2.runtime.base import Outcome, Status
+    from tests.swarm.test_readiness import doc, snapshot, task
 
     monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: reading())
+    view = snapshot(doc([task("master", lane="master")]))
+    monkeypatch.setattr(readiness.Source, "snapshot", lambda self, slug: view)
     bus = open_bus(BusConfig())
     bus.queue("swarm.rig.ready.master", spoke.QueuePolicy()).offer(master_event())
     runtime = Mock()
