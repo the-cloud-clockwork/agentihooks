@@ -316,7 +316,7 @@ that settles leaves no trace in the action line: the read reports
 
 ### Which runs count toward tier wall time
 
-The `ci tier wall time` finding measures how long a Tests run took on the
+The `ci tier wall time` finding measures how long a workflow run took on the
 pull request tier (`pull_request` event) or the queue tier (`merge_group`
 event). Runs of other events are not measured. A pull request run is measured
 only when it has a `Gate — Required` job or runs
@@ -345,7 +345,7 @@ Wall time runs from the earliest job creation in the run to the latest
 at its latest job completion instead. A finding needs more than 15 minutes
 (`WALL_MS`, 900000 milliseconds); exactly 15 minutes raises none.
 
-Each judged run adds one evidence line that names its conclusion:
+Each judged run over 15 minutes adds one evidence line that names its conclusion:
 
 ```text
 run 39788224362, tier pull_request, conclusion success, wall time 1223 seconds
@@ -375,32 +375,7 @@ gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run id> \
 | A finding's evidence names a run whose conclusion is now `cancelled` | Read the conclusion the evidence states. A notice written before the detector judged only completed runs could name a run as `in_progress` or `queued` that was cancelled later; a current notice names only `success` or `failure`. |
 | A superseded pull request run raises no finding though it ran over 15 minutes | Expected: its conclusion is `cancelled`. Measure the run that replaced it. |
 | A run over 15 minutes raises no finding yet | Check its status. An unfinished run is judged when a later pass reads it completed. |
-| A pull request run over 15 minutes never raises a finding | Check that it is a Tests run: it needs a `Gate — Required` job or the `.github/workflows/test.yml` path. |
-
-[Pull request 4760](https://github.com/the-cloud-clockwork/agentihooks/pull/4760)
-merged on 19 October 2026 and added the conclusion rule. Its source report was
-pull request run 39166378179, which ended cancelled with 22 jobs cancelled
-after a newer push, yet was raised as a 15.3 minute pull request tier time. Its
-[red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39237322057)
-failed 22 new assertions on the old code, covering each excluded conclusion,
-the missing conclusion in the evidence and a 22 job superseded run fixture;
-its [green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39237817270)
-passed on the merged head.
-[Pull request 5901](https://github.com/the-cloud-clockwork/agentihooks/pull/5901)
-merged on 22 October 2026 and moved judging to completed runs only, so a run
-is no longer judged while it is unfinished.
-
-The source task counted tier wall time evidence lines in Doctor timer notices
-to both masters and read each run's current conclusion. Over the 24 hours
-from 18 October 2026, 11:00 UTC, before the merge, 16 of 134 findings were on
-runs whose conclusion is now `cancelled`, run 39166378179 among them. Over
-the 24 hours from 19 October 2026, 13:15 UTC, after the merge, 47 of 198
-were, but none of the 198 evidence lines stated `cancelled`: they stated
-`in_progress` 102 times, `queued` 38, `success` 52 and `failure` 6, so the
-cancelled runs were judged while still running and cancelled afterwards.
-Over the 12 hours from 22 October 2026, 14:30 UTC, after pull request 5901
-applied, the notices held no tier wall time evidence lines. That window
-carried no findings at all and is not an equal-load comparison.
+| A pull request run over 15 minutes never raises a finding | Check that it has a `Gate — Required` job or runs the `.github/workflows/test.yml` workflow. |
 
 ### Inspect and diagnose a read
 
@@ -491,6 +466,31 @@ boundaries set to 22 October 2026, 15:00–15:30 UTC, against the running
 Doctor after the merge, returned 10 reads, all `complete`, none with the budget error, the
 largest discovering 16 runs. That window had no gap to catch up and is not an
 equal-load comparison with the outage window.
+
+[Pull request 4760](https://github.com/the-cloud-clockwork/agentihooks/pull/4760)
+merged on 19 October 2026 and added the conclusion rule. Its source report was
+pull request run 39166378179, which ended cancelled with 22 jobs cancelled
+after a newer push, yet was raised as a 15.3 minute pull request tier time. Its
+[red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39237322057)
+failed 22 new assertions on the old code, covering each excluded conclusion,
+the missing conclusion in the evidence and a 22 job superseded run fixture;
+its [green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39237817270)
+passed on the merged head.
+[Pull request 5901](https://github.com/the-cloud-clockwork/agentihooks/pull/5901)
+merged on 22 October 2026 and moved judging to completed runs only, so a run
+is no longer judged while it is unfinished.
+
+The source task counted tier wall time evidence lines in Doctor timer notices
+to both masters and read each run's current conclusion. Over the 24 hours
+from 18 October 2026, 11:00 UTC, before the merge, 16 of 134 findings were on
+runs whose conclusion is now `cancelled`, run 39166378179 among them. Over
+the 24 hours from 19 October 2026, 13:15 UTC, after the merge, 47 of 198
+were, but none of the 198 evidence lines stated `cancelled`: they stated
+`in_progress` 102 times, `queued` 38, `success` 52 and `failure` 6, so the
+cancelled runs were judged while still running and cancelled afterwards.
+Over the 12 hours from 22 October 2026, 14:30 UTC, after pull request 5901
+applied, the notices held no tier wall time evidence lines. That window
+carried no findings at all and is not an equal-load comparison.
 
 ## Delivery tiers
 
