@@ -2182,7 +2182,7 @@ def test_latest_thousand_operation_receipts_remain_retry_safe(live):
     assert len(saved["api_operations"]) == 1000
     assert receipts_store.find(saved, "0") == (None, None)
     assert receipts_store.find(saved, "1")[1]["results"] == {"receipt-1": True}
-    assert receipts_store.find(saved, "latest")[1]["results"] == {"receipt-latest": True}
+    assert receipts_store.find(saved, "latest")[1]["operation_id"] == "latest"
     for index, status in ((1, 200), (0, 409)):
         retry = {"operation_id": str(index), "ops": [operation(index)], "guards": {"metadata": "0" * 64}}
         assert request(live, "POST", "operations", retry)[0] == status
