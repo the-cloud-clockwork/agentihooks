@@ -325,7 +325,9 @@ first in each pair, with the three graded fields:
 `same_code_bound` in `tests.ledger_load.paired` takes every single pair ratio of
 write p50 and the busiest CPU window across all recorded runs, folds each below
 1 to its inverse, and returns the widest. The record holds runs 39148204008,
-39336613129, 39336616389 and 39336620008, and its bound is 1.21, under the
+39336613129, 39336616389 and 39336620008. Run 39148204008 holds two pairs from
+the earlier single job layout; the other three hold five pairs from the matrix.
+Its bound is 1.21, under the
 workflow margin of 1.25. The grade job passes the record with `--same-code`, so
 a margin below the bound turns the run red before any ratio is graded.
 
@@ -358,8 +360,8 @@ Each problem prints as a `::error::` line after the JSON summary:
 | `the <side> run of pair N printed no load measure` | That pair's log is missing or has no measure line; no ratio is graded while any is missing |
 | `no paired runs were given` | The grade job received no pairs |
 | `head had N failed requests, base M` | Head errors summed over every pair exceed the base sum |
-| `<measure> was not measured on the <side> run of pair N` | That run recorded zero or no value for write p50 or the busiest CPU window |
-| `head <measure> order balanced pair ratio R exceeds the 1.25x margin` | The order balanced ratio of that measure is over the margin |
+| `<measure> was not measured on the <side> run of pair N` | That run recorded zero or null for write p50 or the busiest CPU window |
+| `head <measure> order balanced pair ratio R exceeds the Mx margin` | The order balanced ratio of that measure is over M, the value passed with `--margin` |
 
 `--base` and `--head` must name the same number of logs; otherwise the grader
 stops with a usage error.
@@ -370,7 +372,7 @@ stops with a usage error.
 |---|---|---|
 | False reds on identical code | 2 of 2 same code runs, [39271200438](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39271200438) and [39271211837](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39271211837), had a best of two write p95 gap of 1.82 and 2.2 times against the 1.1 times margin | 0 of 5: runs [39339759775](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339759775), [39339766728](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339766728), [39339774291](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339774291), [39339781067](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339781067) and [39339788390](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339788390) graded green, write p50 medians 0.91 to 1.14, CPU medians 0.98 to 1.16 |
 | Planted slowdown | none | [39339887280](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339887280), a 0.4 s delay on every ledger API write, red at a 4.71 times write p50 median, pair ratios 3.94 to 5.70 |
-| Load job time | 8m34s ([39148204008](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39148204008)) and 8m29s ([39229149347](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39229149347)) in one job | 4m20s to 5m05s from the first load job start to the grade result |
+| Load job time | 8 minutes 34 seconds ([39148204008](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39148204008)) and 8 minutes 29 seconds ([39229149347](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39229149347)) in one job | 4 minutes 20 seconds to 5 minutes 5 seconds from the first load job start to the grade result |
 
 Runs 39339766728 and 39339788390 also failed the separate hierarchy CPU job on
 same code. That job was graded by its own assertion at the time and is outside
