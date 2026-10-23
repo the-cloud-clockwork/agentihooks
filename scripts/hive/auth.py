@@ -225,11 +225,11 @@ def revoke(redis: "Redis", member_id: str) -> None:
 
 
 def write_env(home: Path | str, url: str, grant: dict) -> Path:
+    creds = Path(home) / NATS_CREDS_FILE
     if grant.get("nats_credentials"):
-        grant = {
-            **grant,
-            "bus_credentials": str(_write_private(Path(home) / NATS_CREDS_FILE, grant["nats_credentials"])),
-        }
+        grant = {**grant, "bus_credentials": str(_write_private(creds, grant["nats_credentials"]))}
+    else:
+        creds.unlink(missing_ok=True)
     return _write_private(Path(home) / ENV_FILE, env_text(url, grant))
 
 

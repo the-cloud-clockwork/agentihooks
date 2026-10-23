@@ -22,6 +22,8 @@ LOCK_FILE = "hive.lock"
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.hive.nats_grant import Signer
+
 
 def redis_client() -> "Redis":
     from scripts.swarm.store import redis_client as connect
@@ -188,7 +190,7 @@ def _drain(wait_s: int) -> str:
     return remove.settle(RedisStore(redis_client()), hive_id(), wait_s, remove.Host())
 
 
-def _signer():
+def _signer() -> "Signer | None":
     from scripts.hive import nats_grant
 
     return nats_grant.from_environ(os.environ)

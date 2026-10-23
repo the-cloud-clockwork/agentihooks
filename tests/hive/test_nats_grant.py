@@ -2,6 +2,7 @@ import json
 import socket
 import subprocess
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -172,4 +173,47 @@ def test_refresh_writes_the_bus_credential_beside_the_member_env(tmp_path):
     assert creds.read_text() == "creds text"
     assert oct(creds.stat().st_mode & 0o777) == "0o600"
     assert env.endswith(f"AGENTIHOOKS_BUS_CREDENTIALS={creds}\n")
-    assert "AGENTIHOOKS_BUS_CREDENTIALS" not in auth.env_text("https://hive", {**grant, "nats_credentials": None})
+    env = auth.write_env(tmp_path, "https://hive", {**grant, "nats_credentials": None}).read_text()
+    assert "AGENTIHOOKS_BUS_CREDENTIALS" not in env
+    assert not creds.exists()
+
+
+@pytest.fixture
+def wired(admin, monkeypatch):
+    from scripts.hive import cli
+
+    signed, revoked = object(), []
+    monkeypatch.setattr(cli, "redis_client", lambda: admin)
+    monkeypatch.setattr(nats_grant, "from_environ", lambda environ: signed)
+    monkeypatch.setattr(
+        nats_grant, "revoke", lambda redis, signer, member: (revoked.append((signer, member)), "bus")[1]
+    )
+    return cli, signed, revoked
+
+
+def test_hive_revoke_revokes_the_bus_credential_then_the_member(admin, wired, capsys):
+    cli, signed, revoked = wired
+    member = auth.mint(admin, "h1", PUBLIC)
+    assert cli.main(["revoke", member["id"]]) == 0
+    assert capsys.readouterr().out == f"bus\nrevoked {member['id']}\n"
+    assert revoked == [(signed, member["id"])]
+    assert not admin.exists(remove.member_key(member["id"]))
+
+
+def test_hive_remove_and_serve_carry_the_signer(admin, wired, monkeypatch):
+    cli, signed, _ = wired
+    plans, served = [], []
+    monkeypatch.setenv(openbao_kv.URL_ENV, "https://bao.example")
+    monkeypatch.setenv(openbao_kv.TOKEN_ENV, "t")
+    monkeypatch.setattr(remove, "remove", lambda store, bao, plan, host: (plans.append(plan), [])[1])
+    assert cli.main(["remove", auth.mint(admin, "h1", PUBLIC)["id"]]) == 0
+    assert [plan.signer for plan in plans] == [signed]
+
+    def make_server(*args, **kwargs):
+        served.append(kwargs["signer"])
+        return SimpleNamespace(server_address=("127.0.0.1", 1), serve_forever=lambda: None)
+
+    monkeypatch.setattr(server, "make_server", make_server)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://own:6379/0")
+    assert cli.main(["serve"]) == 0
+    assert served == [signed]

@@ -107,6 +107,8 @@ def push(signer: Signer, jwt: str) -> None:
 
 
 def revoke(redis: "Redis", signer: Signer, member_id: str) -> str:
-    redis.hset(REVOKED, member_user(signer, member_id).public, int(time.time()))
-    push(signer, account_jwt(signer, {key: int(value) for key, value in redis.hgetall(REVOKED).items()}))
+    public = member_user(signer, member_id).public
+    revocations = {**{key: int(value) for key, value in redis.hgetall(REVOKED).items()}, public: int(time.time())}
+    push(signer, account_jwt(signer, revocations))
+    redis.hset(REVOKED, public, revocations[public])
     return f"revoked the NATS credential of {member_id}"

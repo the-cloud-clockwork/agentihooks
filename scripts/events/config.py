@@ -57,11 +57,11 @@ class BusConfig:
         return cls(
             backend=environ.get(BACKEND_ENV) or DEFAULT_BACKEND,
             url=environ.get(URL_ENV) or None,
-            credentials=credentials(environ),
+            credentials=credentials_from(environ),
         )
 
 
-def credentials(environ: Mapping[str, str]) -> str | None:
+def credentials_from(environ: Mapping[str, str]) -> str | None:
     reference = environ.get(CREDENTIALS_ENV)
     if not reference:
         return None

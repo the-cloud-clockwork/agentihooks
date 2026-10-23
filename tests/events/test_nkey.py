@@ -53,9 +53,17 @@ def test_a_key_pair_keeps_its_seed_out_of_its_repr():
     assert pair.seed not in repr(pair)
 
 
-@pytest.mark.parametrize("seed", ["not base32!", "AAAA", nkey.from_raw(nkey.USER, SEED).seed[:-1] + "A"])
-def test_a_broken_seed_is_refused(seed):
-    with pytest.raises(nkey.NkeyError):
+@pytest.mark.parametrize(
+    ("seed", "message"),
+    [
+        ("not base32!", "^an nkey must be base32 text$"),
+        ("AA", "^the nkey checksum does not match$"),
+        ("AAAA", "^the nkey checksum does not match$"),
+        (nkey.from_raw(nkey.USER, SEED).seed[:-1] + "A", "^the nkey checksum does not match$"),
+    ],
+)
+def test_a_broken_seed_is_refused(seed, message):
+    with pytest.raises(nkey.NkeyError, match=message):
         nkey.from_seed(seed)
 
 
@@ -91,6 +99,10 @@ def test_creds_text_round_trips_its_jwt_and_seed():
     assert nkey.parse_creds(text) == ("a.b.c", user)
 
 
-def test_creds_text_without_both_blocks_is_refused():
+JWT_BLOCK = "-----BEGIN NATS USER JWT-----\na.b.c\n------END NATS USER JWT------\n"
+
+
+@pytest.mark.parametrize("text", [JWT_BLOCK, nkey.creds("a.b.c", nkey.from_raw(nkey.USER, SEED).seed) + JWT_BLOCK])
+def test_creds_text_without_exactly_one_jwt_and_seed_is_refused(text):
     with pytest.raises(nkey.NkeyError, match="^a NATS creds file holds one user JWT and one seed$"):
-        nkey.parse_creds("-----BEGIN NATS USER JWT-----\na.b.c\n------END NATS USER JWT------\n")
+        nkey.parse_creds(text)
