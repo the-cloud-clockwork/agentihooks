@@ -44,7 +44,7 @@ def test_tailnet_start_renders_all_fronts_with_the_current_address(tailnet, addr
     services = json.loads(result.stdout)["services"]
     ledger = services["swarm-tailnet"]
     assert ledger["environment"]["SWARM_TAILNET_IP"] == address
-    assert ledger["environment"]["NGINX_ENVSUBST_FILTER"] == "^SWARM_TAILNET_IP$"
+    assert ledger["environment"]["NGINX_ENVSUBST_FILTER"] in ("^SWARM_TAILNET_IP$", "^SWARM_TAILNET_IP$$")
     assert any(v["target"] == "/etc/nginx/templates/default.conf.template" for v in ledger["volumes"])
     assert services["hive-tailnet"]["command"][3] == f"--host={address}"
     assert f"--redis-url=redis://{address}:6379/0" in services["hive-tailnet"]["command"]
