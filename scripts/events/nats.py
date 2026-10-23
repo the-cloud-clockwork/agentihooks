@@ -16,7 +16,7 @@ from .bus import StateConflict, StateEntry
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
-from .subjects import PREFIX
+from .subjects import PREFIX, inbox
 
 DEFAULT_URL = "nats://127.0.0.1:4222"
 EVENT_STREAM = "AGENTIHOOKS_EVENTS"
@@ -45,6 +45,7 @@ def auth_options(credentials: str | None) -> dict:
     return {
         "user_jwt_cb": lambda: jwt.encode(),
         "signature_cb": lambda nonce: base64.b64encode(user.sign(nonce.encode())),
+        "inbox_prefix": inbox(user.public),
     }
 
 
