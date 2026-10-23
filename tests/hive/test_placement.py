@@ -177,3 +177,34 @@ def test_the_codex_harness_matches_its_own_slot_and_login():
     ]
     assert place("eng", "codex", "acct", "interactive", REPO, hives, NOW) == "b"
     assert place("eng", "codex", "acct", "subscription", REPO, hives, NOW) == "a"
+
+
+@pytest.mark.parametrize("role", ["eng", "ci", "plan", "dispatch"])
+@pytest.mark.parametrize(
+    ("records", "expected"),
+    [
+        ([hive("large", ui="no", max_agents=10, agents=5), hive("small", ui="no", max_agents=2)], "small"),
+        ([hive("small", ui="no", max_agents=2, agents=1), hive("large", ui="no", max_agents=10, agents=2)], "large"),
+        ([hive("headless", ui="no", agents=1), hive("workstation", ui="yes")], "workstation"),
+        ([hive("headless", ui="no"), hive("workstation", ui="yes", agents=1)], "headless"),
+        (
+            [
+                hive("headless", ui="no"),
+                hive("workstation", ui="yes", agents=1, prefer={"eng": 1, "ci": 1, "plan": 1, "dispatch": 1}),
+            ],
+            "workstation",
+        ),
+    ],
+    ids=["occupied share", "unequal positive shares", "emptier workstation", "emptier headless", "explicit preference"],
+)
+def test_workers_use_the_least_filled_eligible_environment(role, records, expected):
+    from scripts.hive import placement
+
+    assert placement.choose(role, "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice(expected)
+
+
+def test_a_master_compares_a_full_one_slot_hive_with_a_partly_filled_hive():
+    from scripts.hive import placement
+
+    records = [hive("a", max_agents=1, agents=1), hive("b", max_agents=4, agents=3)]
+    assert placement.choose("master", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice("b")

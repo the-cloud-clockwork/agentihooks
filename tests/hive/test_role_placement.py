@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.hive.placement import Choice, Wait, choose, place
-from tests.hive.test_controller_launch import NO_RAM, publish_room, write_hive
+from tests.hive.test_controller_launch import publish_room, write_hive
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_placement import NOW, REPO, hive
 
@@ -41,28 +41,28 @@ def test_each_role_lands_on_its_host_kind(setup, lane, profile, task, host):
     assert selected.fallback == ""
 
 
-def test_a_full_headless_fleet_falls_back_to_the_workstation_with_the_reason_recorded(setup):
+def test_a_full_headless_fleet_uses_the_workstation_without_a_fallback(setup):
     from scripts.swarm_v2.runtime.base import SpawnRequest
 
     two_hosts(setup, anton_agents=2)
     task = {"id": "task", "seat": "eng-1@fixture", "controller_epoch": setup.held.epoch}
     selected = setup.launcher.select(setup.config, "eng", task)
     assert selected.hive == "workstation"
-    assert selected.fallback == f"no headless hive for eng has room: anton {NO_RAM}"
+    assert selected.fallback == ""
     name = setup.store.next_name(setup.config.slug, "eng")
     admitted = setup.launcher.admit(SpawnRequest(setup.config, "eng", name, task), selected)
-    assert admitted.profile_decision["placement_fallback"] == f"no headless hive for eng has room: anton {NO_RAM}"
+    assert "placement_fallback" not in admitted.profile_decision
 
 
-def test_a_task_pinned_to_a_ui_hive_records_the_pin_as_its_reason(setup):
+def test_a_task_pinned_to_a_hive_uses_it_without_a_fallback(setup):
     two_hosts(setup)
     selected = setup.launcher.select(setup.config, "eng", {"id": "task", "hive": "workstation"})
-    assert (selected.hive, selected.fallback) == ("workstation", "the task is pinned to workstation")
+    assert (selected.hive, selected.fallback) == ("workstation", "")
     selected = setup.launcher.select(setup.config, "eng", {"id": "task", "hive": "anton"})
     assert (selected.hive, selected.fallback) == ("anton", "")
 
 
-def test_an_account_a_headless_hive_advertises_wins_over_an_earlier_account_that_only_fits_the_workstation(setup):
+def test_an_earlier_eligible_account_can_use_the_workstation_beside_a_headless_hive(setup):
     from scripts.swarm.capacity import Account
 
     two_hosts(setup)
@@ -91,11 +91,11 @@ def test_an_account_a_headless_hive_advertises_wins_over_an_earlier_account_that
         Account("claude", "second", "room", 1, 80, 80, 6),
     ]
     selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
-    assert (selected.hive, selected.account.name, selected.fallback) == ("anton", "second", "")
+    assert (selected.hive, selected.account.name, selected.fallback) == ("workstation", "first", "")
     publish_room(setup.store, "anton", 0)
     selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
     assert (selected.hive, selected.account.name) == ("workstation", "first")
-    assert selected.fallback == f"no headless hive for eng has room: anton {NO_RAM}"
+    assert selected.fallback == ""
 
 
 def test_the_hive_controller_routes_the_plan_lane_through_hive_placement(setup):
@@ -144,7 +144,7 @@ def test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_when_headle
         fenced.spawn(setup.config, "master", "master name", {"id": "master"})
 
 
-def test_a_dispatcher_spawn_lands_on_a_headless_hive_and_takes_the_workstation_only_when_none_has_room(setup):
+def test_a_dispatcher_spawn_uses_an_eligible_hive_without_a_display_fallback(setup):
     from scripts.swarm import controller
     from scripts.swarm.dispatch_seat import SEAT
     from scripts.swarm.profile_choice import ProfileDecision
@@ -161,12 +161,11 @@ def test_a_dispatcher_spawn_lands_on_a_headless_hive_and_takes_the_workstation_o
     selected = fenced.runtime.hive_launch.select(setup.config, "dispatch", task)
     assert (selected.hive, selected.fallback) == ("anton", "")
     publish_room(setup.store, "anton", 0)
-    full = f"no headless hive for dispatch has room: anton {NO_RAM}"
     selected = fenced.runtime.hive_launch.select(setup.config, "dispatch", task)
-    assert (selected.hive, selected.fallback) == ("workstation", full)
+    assert (selected.hive, selected.fallback) == ("workstation", "")
     name = setup.store.next_name(setup.config.slug, "dispatch")
     admitted = setup.launcher.admit(SpawnRequest(setup.config, "dispatch", name, task), selected)
-    assert admitted.profile_decision["placement_fallback"] == full
+    assert "placement_fallback" not in admitted.profile_decision
 
 
 def hive_controller(setup):
@@ -353,54 +352,54 @@ def host(hive_id: str, ui: str, **fields) -> dict:
 
 
 FALLBACKS = {
-    "headless with room": ([host("ws", "yes"), host("anton", "no", agents=3)], Choice("anton"), "subscription"),
+    "less occupied workstation": ([host("ws", "yes"), host("anton", "no", agents=3)], Choice("ws"), "subscription"),
     "headless full": (
         [host("ws", "yes"), host("anton", "no", agents=4)],
-        Choice("ws", "no headless hive for eng has room"),
+        Choice("ws"),
         "subscription",
     ),
     "no headless live": (
         [host("ws", "yes"), host("anton", "no", heartbeat_at=0)],
-        Choice("ws", "no live headless hive takes eng"),
+        Choice("ws"),
         "subscription",
     ),
-    "headless without the repo falls back": (
+    "headless without the repo": (
         [host("ws", "yes"), host("anton", "no", repos=["other"])],
-        Choice("ws", "no headless hive for eng lists the repo agentihooks"),
+        Choice("ws"),
         "subscription",
     ),
-    "headless with one free place but without the slot falls back": (
+    "headless without the slot": (
         [host("ws", "yes"), host("anton", "no", agents=3, slots=[])],
-        Choice("ws", "no headless hive for eng advertises the claude slot acct"),
+        Choice("ws"),
         "subscription",
     ),
-    "the fallback honours prefer among UI hives": (
+    "explicit preference wins": (
         [
             host("ws", "yes"),
             host("vm", "yes", agents=3, prefer={"eng": 1}),
             host("anton", "no", agents=4),
         ],
-        Choice("vm", "no headless hive for eng has room"),
+        Choice("vm"),
         "subscription",
     ),
-    "the fallback checks the login on the UI hive": (
+    "UI hive without the login": (
         [host("ws", "yes", interactive={"claude": ""}), host("anton", "no", agents=4)],
-        Wait("no headless hive for eng has room"),
+        Wait("no hive for eng holds the claude login for acct"),
         "interactive",
     ),
-    "headless without the login falls back": (
+    "headless without the login": (
         [host("ws", "yes"), host("anton", "no", interactive={"claude": ""})],
-        Choice("ws", "no headless hive for eng holds the claude login for acct"),
+        Choice("ws"),
         "interactive",
     ),
-    "one full and one without the slot falls back": (
+    "headless full or without the slot": (
         [host("ws", "yes"), host("anton", "no", agents=4), host("pod", "no", slots=[])],
-        Choice("ws", "no headless hive for eng advertises the claude slot acct"),
+        Choice("ws"),
         "subscription",
     ),
     "full headless and a full workstation wait": (
         [host("ws", "yes", agents=4), host("anton", "no", agents=4)],
-        Wait("no headless hive for eng has room"),
+        Wait("no hive for eng has room"),
         "subscription",
     ),
     "only headless": ([host("anton", "no", agents=1), host("pod", "no", agents=2)], Choice("anton"), "subscription"),
@@ -408,7 +407,7 @@ FALLBACKS = {
 
 
 @pytest.mark.parametrize("case", FALLBACKS.values(), ids=FALLBACKS.keys())
-def test_a_non_ui_role_takes_a_ui_hive_only_when_no_headless_hive_takes_it(case):
+def test_a_non_ui_role_selects_across_all_eligible_hives(case):
     hives, expected, route = case
     assert choose("eng", "claude", "acct", route, REPO, hives, NOW) == expected
 
