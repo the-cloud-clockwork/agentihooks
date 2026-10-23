@@ -50,6 +50,10 @@ def legacy_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
         bus.close()
 
 
+def event_slugs(store: RedisStore) -> list[str]:
+    return [slug for slug in store.slugs() if store.config(slug).engine == "events"]
+
+
 def _exited(report: dict | None, event: Envelope, agent: AgentRecord, now: int) -> bool:
     if report is None:
         return False
@@ -135,9 +139,7 @@ class Reconciler:
             self._store = connect()
         self._lifecycle = self._lifecycle or Lifecycle(self._bus, self._store)
         snapshots = reports.Reports(self._store.redis).live()
-        for slug in self._store.slugs():
-            if self._store.config(slug).engine != "events":
-                continue
+        for slug in event_slugs(self._store):
             for agent in self._store.execution_registry.records(slug):
                 if not guard():
                     return
