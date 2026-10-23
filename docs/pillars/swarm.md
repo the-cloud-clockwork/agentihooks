@@ -92,6 +92,57 @@ retired and its successor starts from the document; one that does not is retired
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
 `swarm status` flags it as a live binding finding, and it never retires the agent.
 
+### Adopting a live master with no agent record
+
+A master pane can keep running after its agent record is gone, for example when the record was dropped while the
+process lived on. Master recovery binds such a pane back into the master seat. It runs on every tick, after the pane
+sweep, execution reconciliation and master failover, and again before every forced master launch, so a live master is
+adopted before a new one is started.
+
+Recovery does nothing while any lead master record that is not finished names a live process. Otherwise its
+candidates are live processes with no master record in the swarm that are either the master seat's current occupant,
+named as a master of this swarm (`master@<code>-<n>`), or named with the prefix `<id>-master-`. It takes the seat occupant when it
+is a candidate, else the first candidate by name.
+
+| Seat's current execution | Record written for the live master |
+|---|---|
+| Names the chosen master | That execution: its execution id, generation and start time are kept. |
+| Names another master, or the seat has none | A fresh record with no execution id, started at the tick time. The other master's execution row is left unchanged. |
+
+The live pane's placement (pane, harness, account, model, profile) is copied onto that record and it is marked
+working. Lead master records whose process is gone are dropped, the seat is occupied by the adopted name when it held
+another name or none, and the tick returns the action `adopted live master <name>`, which the tick journal prints as `<id>: adopted live master <name>`.
+
+Before pull request [5335](https://github.com/the-cloud-clockwork/agentihooks/pull/5335), recovery always wrote a fresh
+record with the tick time. When the registry already held an execution for that name, it compared the start time and
+execution id with the seat's execution, refused the write with `stale or changed execution identity` and counted an
+identity conflict, so the master was never adopted and the seat stayed empty.
+
+The registry identity check itself is unchanged. Any later write that changes an immutable field of the adopted
+execution (execution id, generation, name, lane, task, seat, start time, runtime backend, transport) is still refused
+with the same message and counted. A live master never takes over another master's execution.
+
+To check adoption on a swarm, read the tick journal and the seat's current execution. The second command prints the
+swarm's identity conflict count and the master seat's execution name, id, generation and start time; run it with the
+Python environment agentihooks is installed in, from its checkout:
+
+```bash
+journalctl --user -t agentihooks-swarm --since "-1 day" --no-pager \
+  | grep -E "adopted live master|stale or changed execution identity"
+python -c '
+from scripts.swarm.store import connect
+s, slug = connect(), "my-swarm"
+print(s.execution_identity_conflicts_total(slug))
+m = s.execution_occupants(slug).get(f"master@{slug}")
+print(m and (m.name, m.execution_id, m.generation, m.started_at))'
+```
+
+| Symptom | Check |
+|---|---|
+| A master pane is live but the seat has no master record and no `adopted live master` line appears | Read the `scripts.swarm.tick._recover_master` step records in the journal. An `outcome` of `error` with `scripts.swarm.store.SwarmError` means a registry refusal; a `success` with no adoption means the pane's name is not a candidate. |
+| The identity conflict count rises on every tick | Another writer is changing an immutable field. The journal line next to the count names the step, such as `outage resume for <agent> refused: stale or changed execution identity`. |
+| The adopted master has a fresh start time | The seat's current execution named another master, so the live one got a fresh record. This is expected. |
+
 ### Interactive masters and Remote Control
 
 Claude masters prefer a valid native claude.ai login at launch and handoff;
