@@ -217,3 +217,41 @@ def test_a_real_sync_that_adds_a_declared_dependency_leaves_it_importable(tmp_pa
     installed = tool_deps.pull(str(checkout), tool_deps.call, python, source=checkout.resolve())
     assert installed == ["fakedep-t442>=1.0"]
     assert subprocess.run(probe, capture_output=True, text=True).stdout == "442\n"
+
+
+def _upstream_and_checkout(tmp_path, monkeypatch):
+    for key in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(key, "t")
+    upstream, checkout = tmp_path / "upstream", tmp_path / "checkout"
+    _git("init", "-q", "-b", "dev", str(upstream))
+    _git("-C", str(upstream), "commit", "-q", "--allow-empty", "-m", "before")
+    _git("clone", "-q", "-b", "dev", str(upstream), str(checkout))
+    _git("-C", str(upstream), "commit", "-q", "--allow-empty", "-m", "after")
+    return upstream, checkout
+
+
+def _rev(repo, ref):
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", ref], capture_output=True, text=True).stdout.strip()
+
+
+def test_a_fetch_that_records_dev_twice_still_fast_forwards_the_checkout(tmp_path, monkeypatch):
+    upstream, checkout = _upstream_and_checkout(tmp_path, monkeypatch)
+
+    def twice(argv):
+        if argv[-2:] == ["origin", "dev"]:
+            argv = [*argv, "dev"]
+        return tool_deps.call(argv)
+
+    assert tool_deps.pull(str(checkout), twice, "/tool/python") == []
+    assert (checkout / ".git" / "FETCH_HEAD").read_text().count("branch 'dev'") == 2
+    assert _rev(checkout, "HEAD") == _rev(upstream, "HEAD")
+
+
+def test_a_checkout_that_already_contains_origin_dev_pulls_as_success(tmp_path, monkeypatch):
+    upstream, checkout = _upstream_and_checkout(tmp_path, monkeypatch)
+    _git("-C", str(checkout), "pull", "-q", "--ff-only", "origin", "dev")
+    _git("-C", str(checkout), "commit", "-q", "--allow-empty", "-m", "local")
+    local = _rev(checkout, "HEAD")
+    assert tool_deps.pull(str(checkout), tool_deps.call, "/tool/python") == []
+    assert _rev(checkout, "HEAD") == local
+    assert _rev(checkout, "origin/dev") == _rev(upstream, "HEAD")
