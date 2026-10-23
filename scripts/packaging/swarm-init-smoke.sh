@@ -11,6 +11,7 @@ work="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 export AGENTIHOOKS_HOME="$work/agentihooks-home" NO_COLOR=1
 trap 'docker compose --project-name agentihooks-swarm down --volumes >/dev/null 2>&1 || true' EXIT
 bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/nats:2.15.1-alpine
 if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
   docker tag "$SWARM_SMOKE_IMAGE" ghcr.io/the-cloud-clockwork/agentihooks-swarm:release
 else
@@ -21,7 +22,7 @@ SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 "$work/venv/bin/pip" install --quiet .
 cd "$work"
 for run in first second; do
   "$work/venv/bin/agentihooks" swarm init smoke-swarm --operator-asked "run the swarm init smoke" | tee "$work/$run.log"
-  grep -qx 'Swarm stack ready: redis, swarm and controller are healthy.' "$work/$run.log"
+  grep -qx 'Swarm stack ready: redis, nats, swarm and controller are healthy.' "$work/$run.log"
 done
 first="$(sed -n 's/^  1\. Open the ledger: //p' "$work/first.log")"
 second="$(sed -n 's/^  1\. Open the ledger: //p' "$work/second.log")"

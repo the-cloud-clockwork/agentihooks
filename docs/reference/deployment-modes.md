@@ -23,6 +23,9 @@ one Redis, which every ledger server and controller of the swarm share.
 | `compose` | `compose.yaml`: services `swarm`, `controller`, `redis`, and `hive` under `--profile join` | The `controller` service | The `swarm` service on `SWARM_BIND:SWARM_PORT` (default `127.0.0.1:8765`); the stack Redis with per hive ACL users | On joined [hives](../pillars/hives.md): engineer and CI work, master work on UI hives only, and any task pinned to a hive. Other lanes are refused with "the workstation hive spawns" that lane's work. With no hive placement the controller reconciles without spawning. |
 | `distributed` | The `agentihooks-swarm` Helm chart (`deployment: distributed`) | The chart's controller | One ledger replica and the chart Redis, or the hosted ledger through `SWARM_URL` | On hives as in `compose`, including worker hive pods; without hive placement, only through the Kubernetes runtime. |
 
+- With `distributed` set on a workstation the hub runs the swarm engine: `agentihooks swarm tick` ticks no swarm, and
+  the swarm user services hold only the `agentihooks-spoke` service, which takes master work from the bus. The tick,
+  wait, waker, prober and tick watch units are retired and no scheduled tick is registered.
 - In any mode other than `local`, `AGENTIHOOKS_HIVE_REDIS_URL` wins over the swarm Redis URL, and the workstation
   host capacity checks are off.
 - A client with `SWARM_URL` set, with `LEDGER_URL` set and no mode, or in a mode other than `local`, uses the

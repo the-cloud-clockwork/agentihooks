@@ -19,7 +19,7 @@ the values merge and prints the wall time of each, up to the first engineer the 
 
 | Piece | Where it lives | Written by |
 |---|---|---|
-| The release: worker hive Deployment and its worktrees ConfigMap | the agentihooks chart with `hiveOnly: true`, values in antoncore `k8s/values-overlays/<release>/values.yaml` | a pull request into antoncore `dev` |
+| The release: worker hive Deployment and its worktrees ConfigMap | the agentihooks chart with `hiveOnly: true` and `nats.enabled: false`, values in antoncore `k8s/values-overlays/<release>/values.yaml` | a pull request into antoncore `dev` |
 | The ArgoCD application, which creates the namespace | antoncore `k8s/argocd/apps/<release>.yaml` | the same pull request |
 | ExternalSecrets for the member credential, ledger address and CA, accounts and settings | antoncore `k8s/manifests/<release>/` | the same pull request |
 | The member credential (`credential`), ledger address (`swarm_url`) and ledger CA (`ca_pem`) | OpenBao `secret/k8s/<release>` | `agentihooks hive invite` |
@@ -27,6 +27,8 @@ the values merge and prints the wall time of each, up to the first engineer the 
 
 `hiveOnly: true` renders only the worker hive: no controller, ledger, Redis, network policy or ledger test hook, so a
 second release never starts a second swarm. One release is one hive, because one credential is one hive id.
+
+`nats.enabled: false` leaves out the bundled NATS, which the chart otherwise installs with every release.
 
 ## Create a hive from nothing
 

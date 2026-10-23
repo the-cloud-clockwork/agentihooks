@@ -377,6 +377,113 @@ gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run id> \
 | A run over 15 minutes raises no finding yet | Check its status. An unfinished run is judged when a later pass reads it completed. |
 | A pull request run over 15 minutes never raises a finding | Check that it has a `Gate — Required` job or runs the `.github/workflows/test.yml` workflow. |
 
+### Confirmed runner waits and unconfirmed queue age
+
+The Doctor checks old queued job snapshots before calling them runner waits.
+A job has a confirmed start when it has `started_at` and either its status is
+`in_progress` or `completed`, or it has a nonempty `runner_name`. A queued
+status with both a runner name and a start timestamp therefore counts as
+started. A timestamp alone on a queued job does not confirm pickup.
+
+For active jobs without a confirmed start, the reader requests the single
+job endpoint once their age exceeds five minutes. A successful response
+replaces the snapshot row before findings are calculated. Up to 20 jobs are
+reread per pass, sharing the reader's API and time budget. Failed requests
+and candidates beyond that cap contribute to `queued jobs not reread` in
+the timer status line. That count describes missing rereads, not runner
+shortage; a successful reread can still leave a job unconfirmed.
+
+| Evidence | Result |
+|---|---|
+| Confirmed start within five minutes of creation | No runner wait |
+| Confirmed start more than five minutes after creation | Eligible for `ci runner wait`, once the run completes with `success` or `failure` |
+| No confirmed start, age at most 15 minutes | No queue age finding |
+| No confirmed start, age more than 15 minutes | Eligible for `ci queue age unconfirmed`; elapsed time ends at the read time |
+
+Exactly five minutes is below the runner wait trigger; exactly 15 minutes is
+below the unconfirmed age trigger. Unconfirmed age does not establish a
+runner supply problem. When the same run attempt and label set already has
+a confirmed long wait, that wait takes precedence over its unconfirmed age.
+The timer aggregates findings across runs; evidence names the runs, label
+sets, affected jobs, longest wait and median wait.
+
+#### Inspect a named job
+
+From the watched repository, replace the example numbers with the run and
+job identifiers in the finding:
+
+```bash
+run_id=39278021878
+job_id=123456789
+repo=the-cloud-clockwork/agentihooks
+gh api "repos/$repo/actions/runs/$run_id/jobs?filter=latest" \
+  --jq '.jobs[] | {id, name, status, runner_name, labels, created_at, started_at}'
+gh api "repos/$repo/actions/jobs/$job_id" \
+  --jq '{id, status, runner_name, created_at, started_at, completed_at}'
+```
+
+For example, a queued snapshot created at `12:00:00Z` reread at `12:06:00Z`
+may return `started_at=12:00:06Z` and a runner name. Its pickup took six
+seconds, so it raises no runner wait. If the reread still has no confirmed
+start, it remains unconfirmed; after `12:15:00Z` its queue age can qualify
+without asserting a runner wait.
+
+A workflow concurrency hold can leave a run `pending` with an empty jobs
+response. The recorded boundary in [pull request 4835](https://github.com/the-cloud-clockwork/agentihooks/pull/4835)
+was run `39287956231`, held by `promotion-dev`, whose jobs API returned
+`{"jobs":[],"total_count":0}`. With no job, the detector raises no runner
+wait. It does not label workflow or job concurrency holds or diagnose their
+cause; inspect the workflow's concurrency configuration and Actions state.
+Runner lane limits are unchanged by this confirmation behavior.
+
+#### Retractions, configuration and troubleshooting
+
+A corrected read can supersede an earlier finding. All jobs in a run attempt
+and label set confirmed within five minutes clear its runner wait and
+unconfirmed age entries. A confirmed long wait supersedes its unconfirmed
+age entry while preserving the real wait. The timer prunes corrected members
+from its aggregates and retracts stored findings that no longer apply. It
+removes their finding detail, adds `retracted_at` to an existing verdict and
+sends an FYI notice to both the watched master and the Doctor master:
+
+```text
+Retracted Doctor findings on the swarm rig-grade-swarm: a corrected read of their jobs supersedes them.
+```
+
+The status line reports the number actually retracted. Historical notices
+remain historical evidence; use the corrected finding and retraction notice
+when judging the current state.
+
+Confirmation is automatic. There is no enable switch or environment override.
+`SHORT_WAIT_MS` is 300000, `UNCONFIRMED_WAIT_MS` is 900000 and `REREADS` is 20;
+these are code constants changed through CI. The existing
+[reader budgets](#budgets-and-configuration) apply to rereads too.
+
+| Symptom | Check and action |
+|---|---|
+| A queued snapshot suggests a long wait | Read the single job endpoint and compare creation, start and runner assignment before attributing it to runners. |
+| `queued jobs not reread` is nonzero | Check the read error and API budget; later passes can reread candidates. Do not interpret the count as confirmed waits. |
+| Queue age appears without a runner wait | Expected when pickup is unconfirmed; inspect current Actions state and concurrency configuration. |
+| A corrected fast start still has an older notice | Check the later retraction notice and current finding; a grouped finding can remain while other members still qualify. |
+
+#### Delivery evidence
+
+[Pull request 4835](https://github.com/the-cloud-clockwork/agentihooks/pull/4835)
+merged on 19 October 2026 and was applied at 20:40:31 UTC. Its recorded stale
+snapshot regression failed in [red Proofs run 39289504095](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39289504095):
+a job started in seconds had raised a 336 second runner wait. The fix passed
+[Tests run 39292565892](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39292565892)
+and [Mutation preflight run 39292554608](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39292554608).
+
+The [source task's measurement](https://github.com/the-cloud-clockwork/agentihooks/issues/4834)
+compared two hour windows on 19 October. From 15:00 to 17:00 UTC, 114 of 124
+runner wait findings referred to job groups whose every job started within
+60 seconds by the jobs API: 57 false findings per hour. From 20:41 to 22:41 UTC,
+after application, eight runner wait findings remained and zero were in that
+false class: 0 per hour. The eight retained findings had confirmed waits of
+306 to 696 seconds. This measures removal of false findings, not increased
+runner capacity.
+
 ### Inspect and diagnose a read
 
 Read the existing timer actions without starting another timer:
