@@ -156,12 +156,15 @@ class Comments(unittest.TestCase):
 
     def test_notice_rides_only_on_an_agent_comment_add(self):
         core.check_body({"ops": [post("swarm", "Queued again.", 1, self.thread, notice=True)]})
+        refusal = "^notice rides only on an agent add to a comment thread, as true, without outcome or to$"
         for op in (
             post("boss", "Queued again.", 2, "chat", notice=True),
             {"op": "add", "thread": self.thread, "id": "op-1", "text": "why?", "notice": True},
             post("swarm", "Queued again.", 3, self.thread, notice="yes"),
+            post("swarm", "Queued again.", 4, self.thread, notice=True, to="operator"),
+            post("swarm", "Queued again.", 5, self.thread, notice=True, outcome="done"),
         ):
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, refusal):
                 core.check_body({"ops": [op]})
 
     def test_the_api_takes_a_notice_comment(self):
