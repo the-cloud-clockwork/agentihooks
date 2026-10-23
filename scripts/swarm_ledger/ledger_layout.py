@@ -11,7 +11,6 @@ ROWS = {
     "hives-box": ("height",),
     "overlays-box": ("height",),
     "agents-box": ("height",),
-    "health-box": ("height",),
     "handoff-box": ("height",),
 }
 LIMITS = {"height": (48, 4000, 0), "split": (15, 85, 1)}
