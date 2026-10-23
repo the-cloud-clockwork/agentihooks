@@ -46,6 +46,10 @@ export function held(d, key) {
   return marked(d.marks.held, key);
 }
 
+export function snowflakeState(d, key) {
+  return frozen(d, key) ? "frozen" : held(d, key) ? "held" : "";
+}
+
 export function setFreeze(d, op, at) {
   if (d.freezes.some((r) => r.verb === op.verb && r.target === op.target)) return;
   d.freezes.push({ id: op.id, verb: op.verb, target: op.target, by: "operator", at, reason: op.reason || "" });

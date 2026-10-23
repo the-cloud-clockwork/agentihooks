@@ -17,6 +17,7 @@ ORDER = (
     "api",
     "patch",
     "freezes",
+    "frozen_view",
     "state",
     "sync",
     "markdown",
