@@ -21,7 +21,7 @@ class FakeGit:
 
     def __call__(self, argv):
         self.calls.append(argv)
-        if "pull" in argv:
+        if "merge" in argv:
             self.text = self.after
         return self.text if "show" in argv else ""
 
@@ -31,7 +31,7 @@ def show(repo):
 
 
 def pull(repo):
-    return ["git", "-C", repo, "pull", "--ff-only", "origin", "dev"]
+    return [["git", "-C", repo, "fetch", "origin", "dev"], ["git", "-C", repo, "merge", "--ff-only", "origin/dev"]]
 
 
 def test_declared_reads_the_project_dependencies():
@@ -73,7 +73,7 @@ def test_pull_that_adds_a_declared_dependency_installs_it_into_the_tool_environm
     assert tool_deps.pull(repo, git, "/tool/python", source=tmp_path) == ["croniter>=6.2.4,<7"]
     assert git.calls == [
         show(repo),
-        pull(repo),
+        *pull(repo),
         show(repo),
         ["uv", "pip", "install", "--python", "/tool/python", "croniter>=6.2.4,<7"],
     ]
@@ -88,7 +88,7 @@ def test_pull_that_changes_a_declared_version_installs_the_new_spec(tmp_path):
 def test_pull_with_unchanged_dependencies_installs_nothing(tmp_path):
     git, repo = FakeGit(BEFORE, BEFORE), str(tmp_path)
     assert tool_deps.pull(repo, git, "/tool/python", source=tmp_path) == []
-    assert git.calls == [show(repo), pull(repo), show(repo)]
+    assert git.calls == [show(repo), *pull(repo), show(repo)]
 
 
 def test_pull_with_unchanged_dependencies_installs_a_declared_spec_still_missing(tmp_path):
@@ -114,13 +114,13 @@ def test_pull_installs_a_new_spec_once_even_when_it_is_also_missing(tmp_path):
 def test_pull_that_only_removes_a_dependency_installs_nothing(tmp_path):
     git, repo = FakeGit(AFTER, BEFORE), str(tmp_path)
     assert tool_deps.pull(repo, git, "/tool/python", source=tmp_path) == []
-    assert git.calls == [show(repo), pull(repo), show(repo)]
+    assert git.calls == [show(repo), *pull(repo), show(repo)]
 
 
 def test_pull_of_another_repository_never_installs_its_dependencies(tmp_path):
     git, repo = FakeGit(BEFORE, AFTER), str(tmp_path / "other")
     assert tool_deps.pull(repo, git, "/tool/python", source=tmp_path) == []
-    assert git.calls == [pull(repo)]
+    assert git.calls == pull(repo)
 
 
 def test_call_returns_stdout_and_raises_with_stderr_on_failure():
