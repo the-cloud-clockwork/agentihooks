@@ -35,7 +35,7 @@ class HiveLoss:
             return
 
         def add(rows: dict) -> bool:
-            if key in rows:
+            if key in rows and rows[key]["data"]["claim_revision"] >= event.data["claim_revision"]:
                 return False
             rows[key] = event.to_dict()
             return True

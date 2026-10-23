@@ -257,17 +257,30 @@ def test_starts_without_a_claim_or_hive_are_not_indexed(rig):
     from scripts.events.envelope import Envelope
     from scripts.hub import hive_loss
 
-    start = Envelope(
-        "started:x", "execution.started", "rig", "execution", "x", 1, T0, "hive-a", {"claim_key": "c", "hive": ""}
-    )
-    rig.loss.handle(start)
-    rig.loss.handle(replace(start, data={"hive": "hive-a"}))
-    rig.loss.handle(replace(start, type="execution.exited", data={"claim_key": "c", "hive": "hive-a"}))
+    data = {"claim_key": "c", "claim_revision": 2, "hive": "hive-a"}
+    start = Envelope("started:x", "execution.started", "rig", "execution", "x", 1, T0, "hive-a", data)
+    rig.loss.handle(replace(start, data={**data, "hive": ""}))
+    rig.loss.handle(replace(start, data={"claim_revision": 2, "hive": "hive-a"}))
+    rig.loss.handle(replace(start, type="execution.exited"))
     assert rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX) is None
-    rig.loss.handle(replace(start, data={"claim_key": "c", "hive": "hive-a"}))
-    rig.loss.handle(replace(start, id="started:y", data={"claim_key": "c", "hive": "hive-b"}))
+    rig.loss.handle(start)
+    rig.loss.handle(replace(start, id="started:y", data={**data, "hive": "hive-b"}))
+    rig.loss.handle(replace(start, id="started:z", data={**data, "claim_revision": 1, "hive": "hive-c"}))
     rows = json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value)
-    assert rows == {"c": replace(start, data={"claim_key": "c", "hive": "hive-a"}).to_dict()}
+    assert rows == {"c": start.to_dict()}
+
+
+def test_a_reclaim_of_the_same_claim_on_another_hive_replaces_the_watched_start(rig):
+    from scripts.events.envelope import Envelope
+    from scripts.hub import hive_loss
+
+    data = {"claim_key": "c", "claim_revision": 2, "hive": "hive-a"}
+    start = Envelope("started:x", "execution.started", "rig", "execution", "x", 1, T0, "hive-a", data)
+    rig.loss.handle(start)
+    reclaimed = replace(start, id="started:y", data={**data, "claim_revision": 3, "hive": "hive-b"})
+    rig.loss.handle(reclaimed)
+    rows = json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value)
+    assert rows == {"c": reclaimed.to_dict()}
 
 
 def test_default_registry_runs_hive_loss_before_lifecycle(rig):
