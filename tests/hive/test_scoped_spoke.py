@@ -5,8 +5,8 @@ import pytest
 
 from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
-from scripts.hive import execution_events
-from scripts.hive.spoke import Spoke, claim_key
+from tests.hive.test_nats_grant import admin as admin
+from tests.hive.test_nats_grant import signer as signer
 from tests.hive.test_spoke import reading
 from tests.hive.test_spoke import rig as rig
 
@@ -14,6 +14,8 @@ pytestmark = pytest.mark.unit
 
 
 def test_spoke_claims_and_presence_stay_in_its_swarm(rig):
+    from scripts.hive.spoke import Spoke, claim_key
+
     bus = open_bus(BusConfig(scoped=True), clock=lambda: rig.clock.now)
     try:
         own = bus.for_swarm("rig")
@@ -31,6 +33,8 @@ def test_spoke_claims_and_presence_stay_in_its_swarm(rig):
 def test_execution_markers_and_start_fences_follow_the_event_swarm(rig):
     from dataclasses import replace
 
+    from scripts.hive import execution_events
+
     bus = open_bus(BusConfig(scoped=True))
     event = replace(rig.event, id="started", type="execution.started", data={"name": "agent", "generation": 7})
     try:
@@ -43,3 +47,17 @@ def test_execution_markers_and_start_fences_follow_the_event_swarm(rig):
         assert bus.for_swarm("other").state(execution_events.STARTS).get(key) is None
     finally:
         bus.close()
+
+
+def test_scoped_join_grant_enables_the_scoped_client_layout(admin, signer):
+    from dataclasses import replace
+
+    from scripts.hive import auth
+    from tests.hive.test_nats_grant import PUBLIC, _refresh
+
+    member = auth.mint(admin, "hive", PUBLIC)
+    configured = replace(signer, member_swarms={member["id"]: ("rig",)})
+    grant = _refresh(admin, configured, member["ledger_credential"])
+    assert grant["bus_scoped"] is True
+    text = auth.env_text("https://hive", {**grant, "bus_credentials": "/member/bus.creds"})
+    assert "AGENTIHOOKS_BUS_SCOPED=1" in text.splitlines()

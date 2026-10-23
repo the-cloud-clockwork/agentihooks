@@ -151,3 +151,13 @@ def test_legacy_bus_and_scoped_bus_keep_working_on_the_same_server(signer):
     finally:
         modern.close()
         legacy.close()
+
+
+def test_hub_fans_in_scoped_event_streams_with_existing_reactor_filters(hub):
+    consumer = hub.events.consumer("aggregate", "swarm.*.execution.started")
+    assert hub.events.publish(subject("rig", "execution", "started"), event())
+    assert hub.events.publish(subject("other", "execution", "started"), event("other", "second"))
+    deliveries = consumer.fetch(10, 1000)
+    assert {delivery.event.swarm for delivery in deliveries} == {"rig", "other"}
+    for delivery in deliveries:
+        delivery.ack()
