@@ -234,14 +234,13 @@ per agent, and the ledger page marks the agent row promoted.
 #### Orphan executions on a seat
 
 Every seat has one current execution in the swarm's execution registry. A new launch on a seat names the
-execution it replaces, and the registry accepts it only when that matches the current one. Hive admission names
-the occupant as the replaced execution only once it has ended, so an execution whose agent record is gone but
-which was never marked ended keeps the seat: launches on it are refused with
-`replacement does not match the current execution`, and a master launch then reads as
-`master launch refused: startup pending for <name>` in the tick journal, so the forced launches of an outage
-never bind.
+execution it replaces, and the registry refuses it with `replacement does not match the current execution` when
+that differs from the current one. An execution whose agent record is gone but which was never marked ended stays
+the seat's current execution. On a master seat this showed as forced launches that never bound: refused first
+with `replacement does not match the current execution`, then as
+`master launch refused: startup pending for <name>` in the tick journal.
 
-Each tick, before any master step, the execution reconcile ends such an orphan. It ends the current execution of
+Each tick, before the master steps, the execution reconcile ends such an orphan. It ends the current execution of
 a seat when all of these hold:
 
 | Condition | Read from |
@@ -251,6 +250,7 @@ a seat when all of these hold:
 | No live pane carries its name and its hook has not reported | The runtime |
 | On a remote hive, a latest report exists and omits the name; with no report the seat is kept | The hive report |
 | On a non-local backend, the runtime observes it dead | The runtime |
+| On the local machine, the checks above suffice | The runtime |
 
 The ending is atomic: under a Redis watch on the executions and agent records it requires the seat's current
 record to equal the one the reconcile read, repeats the state and window check, and writes that record with state
@@ -262,10 +262,9 @@ a reported hook, and one a remote hive still lists are kept. Each ended orphan i
 ended orphan execution <execution id> for <agent name>
 ```
 
-With the occupant ended, hive admission names it as the execution the next launch replaces, so the forced master
-launch binds. The startup window applies to a `starting` execution on any seat, engineer seats included, and
-a `starting` orphan inside it blocks launches on its seat until it expires; a `working` orphan is ended with no
-window. To check a stuck seat:
+With the occupant ended, the next launch on the seat replaces it and the forced master launch binds. The startup
+window applies to a `starting` execution on any seat, engineer seats included; inside it the execution is kept. A
+`working` orphan is ended with no window. To check a stuck seat:
 
 ```bash
 # Launch refusals and orphan endings for the master in the last hour
@@ -3460,7 +3459,7 @@ An outage holds the affected idle and delivery decisions until recovery (see
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 20 ticks. A stale agent is nudged through its inbox
    (see Stale nudge).
 3. Reopen claimed tasks that have no agent.
-4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)). Before step 1, the tick ends any orphan execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)).
+4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)). Before the master steps, the tick ends any orphan execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)).
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
    under its session cap. Claimable tasks are taken highest [queue rank](#queue-rank) first. Sessions go to the
    lanes in rounds: a lane with fewer live agents spawns before one holding more, ties in eng, ci, plan order, so
