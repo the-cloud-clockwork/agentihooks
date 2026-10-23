@@ -248,6 +248,20 @@ spec:
             {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
             - name: AGENTIHOOKS_HOME
               value: /run/agentihooks
+            - name: AGENTIHOOKS_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: AGENTIHOOKS_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: AGENTIHOOKS_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: AGENTIHOOKS_POD_CONTAINER
+              value: controller
             {{- with .Values.controller.hostSwarms }}
             - name: AGENTIHOOKS_CONTROL_HOST_SWARMS
               value: {{ join "," . | quote }}
