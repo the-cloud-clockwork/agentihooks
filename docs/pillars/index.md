@@ -44,7 +44,7 @@ See [hives](hives.md) for joining machines, roles, placement, launches on a hive
 
 See [hive endpoint limits](hives.md#hive-endpoint-limits) for the hive endpoint request, handler and Redis time limits, the 503 it answers when Redis does not reply, and what a client does after it.
 
-See [promotion fixer intake](swarm.md#promotion-fixer-intake) for how one swarm per repository files and closes promotion fixer tasks, hands intake over and shows its owner, and [runner outage runs](swarm.md#runner-outage-runs) for the one task filed when failed jobs lost their runner. See [red dev workflows outside the promotion gate](swarm.md#red-dev-workflows-outside-the-promotion-gate) for the Doctor finding raised when any other workflow fails five dev push runs in a row.
+See [promotion fixer intake](swarm.md#promotion-fixer-intake) for how one swarm per repository files and closes promotion fixer tasks, hands intake over and shows its owner, and [runner outage runs](swarm.md#runner-outage-runs) for the one task filed when failed jobs lost their runner, with the jobs that failed for want of a lost unit shard's output in [jobs that failed for want of shard output](swarm.md#jobs-that-failed-for-want-of-shard-output). See [red dev workflows outside the promotion gate](swarm.md#red-dev-workflows-outside-the-promotion-gate) for the Doctor finding raised when any other workflow fails five dev push runs in a row.
 
 See [agent status comments](swarm.md#agent-status-comments) for when an agent's status comment amends its earlier one and when it posts a new comment at the end.
 
