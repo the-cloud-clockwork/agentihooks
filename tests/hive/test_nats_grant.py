@@ -102,6 +102,75 @@ def test_hive_serve_mints_a_member_credential_the_bus_opens_with(admin, signer):
     assert _opens(signer, grant["nats_credentials"])
 
 
+def _violations(signer: nats_grant.Signer, credentials: str, act, refused: bool = False) -> list[str]:
+    import asyncio
+
+    import nats as nats_client
+
+    from scripts.events.nats import auth_options
+
+    async def run() -> list[str]:
+        seen, violated = [], asyncio.Event()
+
+        async def error_cb(exc):
+            seen.append(str(exc))
+            violated.set()
+
+        nc = await nats_client.connect(
+            signer.url, allow_reconnect=False, error_cb=error_cb, **auth_options(credentials)
+        )
+        try:
+            await act(nc)
+            await nc.flush()
+            if refused:
+                # nats-py writes the flush PING ahead of buffered commands, so the -ERR can follow its PONG.
+                await asyncio.wait_for(violated.wait(), 5)
+        finally:
+            await nc.close()
+        return seen
+
+    return asyncio.run(run())
+
+
+def test_a_member_credential_cannot_publish_outside_the_swarm_prefix(signer):
+    async def act(nc):
+        await nc.publish("outside.events", b"x")
+
+    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
+        'nats: permissions violation for publish to "outside.events"'
+    ]
+
+
+def test_a_member_credential_cannot_subscribe_outside_the_swarm_prefix(signer):
+    async def act(nc):
+        await nc.subscribe("outside.>")
+
+    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
+        'nats: permissions violation for subscription to "outside.>"'
+    ]
+
+
+def test_a_member_credential_cannot_read_the_replies_of_other_members(signer):
+    async def act(nc):
+        await nc.subscribe("_INBOX.>")
+
+    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
+        'nats: permissions violation for subscription to "_inbox.>"'
+    ]
+
+
+@pytest.mark.parametrize("verb", ["DELETE", "PURGE", "UPDATE"])
+def test_a_member_credential_cannot_change_a_stream(signer, verb):
+    subject = f"$JS.API.STREAM.{verb}.AGENTIHOOKS_EVENTS"
+
+    async def act(nc):
+        await nc.publish(subject, b"{}")
+
+    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
+        f'nats: permissions violation for publish to "{subject.lower()}"'
+    ]
+
+
 def _refused(signer: nats_grant.Signer, credentials: str) -> list[str]:
     import asyncio
 
@@ -486,7 +555,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         "type": "user",
         "version": 2,
         "pub": {"allow": publish},
-        "sub": {"allow": ["_INBOX.>"]},
+        "sub": {"allow": [f"_INBOX.{user.public}.>"]},
         "subs": -1,
         "data": -1,
         "payload": -1,
@@ -542,16 +611,18 @@ def test_a_push_connects_once_without_reconnecting_and_bounds_both_waits(monkeyp
             seen["closed"] = True
 
     async def connect(url, **kwargs):
-        seen["connect"] = (url, {key: kwargs[key] for key in ("allow_reconnect", "connect_timeout")}, sorted(kwargs))
+        named = ("allow_reconnect", "connect_timeout", "inbox_prefix")
+        seen["connect"] = (url, {key: kwargs[key] for key in named}, sorted(kwargs))
         return Client()
 
     monkeypatch.setattr(nats_client, "connect", connect)
     nats_grant.push(signed, "a.b.c")
+    system = nkey.parse_creds(signed.system_credentials)[1]
     assert seen == {
         "connect": (
             "nats://x",
-            {"allow_reconnect": False, "connect_timeout": 10},
-            ["allow_reconnect", "connect_timeout", "signature_cb", "user_jwt_cb"],
+            {"allow_reconnect": False, "connect_timeout": 10, "inbox_prefix": f"_INBOX.{system.public}"},
+            ["allow_reconnect", "connect_timeout", "inbox_prefix", "signature_cb", "user_jwt_cb"],
         ),
         "request": ("$SYS.REQ.CLAIMS.UPDATE", b"a.b.c", {"timeout": 10}),
         "closed": True,
