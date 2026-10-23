@@ -81,7 +81,7 @@ def test_an_acknowledged_and_ended_execution_keeps_its_placement_fallback(setup,
         setup.config.slug,
         admitted.execution_id,
         admitted.generation,
-        "remote",
+        "master",
         "eng",
         "master",
         "account",
@@ -90,6 +90,7 @@ def test_an_acknowledged_and_ended_execution_keeps_its_placement_fallback(setup,
         "prompt",
         setup.held.epoch,
         lease.now_ms(setup.store) + 60000,
+        hive="remote",
     )
     ack = orders.Ack("live", {"host_id": "remote"}, execution={"profile_decision": {"validation": {"pid": 12}}})
     expected = {"validation": {"pid": 12}, **({"placement_fallback": fallback} if kept else {})}
