@@ -2,9 +2,12 @@
 set -euo pipefail
 
 chart=deploy/helm/agentihooks-swarm
+export HTTPS_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9
 out="$HOME/scratchpad/worker-hive-chart"
 mkdir -p "$out"
 sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
+helm lint "$chart"
+helm package "$chart" --version 0.0.1-plant --destination "$out" && tar tzf "$out/agentihooks-swarm-0.0.1-plant.tgz" | grep nats/Chart.yaml
 helm template proof "$chart" --set workers.replicas=1 --set workers.maxAgents=3 \
   --set workers.credentialSecret.name=member --set workers.credentialSecret.key=credential > "$out/rendered.yaml"
 python3 - "$out/rendered.yaml" <<'PY'
