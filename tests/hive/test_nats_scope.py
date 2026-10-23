@@ -89,3 +89,70 @@ def test_scoped_claims_keep_the_member_reply_inbox(signer):
     scoped = replace(signer, member_swarms={"m1": ("rig",)})
     jwt, user = nkey.parse_creds(nats_grant.mint(scoped, "m1"))
     assert nkey.claims(jwt)["nats"]["sub"]["allow"] == ["swarm.rig.>", f"_INBOX.{user.public}.>"]
+
+
+@pytest.mark.parametrize("kind", ["EVENTS", "DEAD", "QUEUE_eng", "STATE_spoke-work"])
+def test_scoped_credentials_use_their_own_stream_and_consumer(signer, kind):
+
+    import nats as nats_client
+    from nats.js import api
+
+    from scripts.events.nats import auth_options
+    from tests.hive.test_nats_grant import _user_creds
+
+    scoped = replace(signer, member_swarms={"m1": ("rig",)})
+    credentials = nats_grant.mint(scoped, "m1")
+    stream = f"AGENTIHOOKS_726967_{kind}"
+    subject = "swarm.rig." + kind.lower().replace("_", ".")
+
+    async def act(nc):
+        hub = await nats_client.connect(
+            signer.url, allow_reconnect=False, **auth_options(_user_creds(signer.account, "hub"))
+        )
+        try:
+            js = hub.jetstream()
+            await js.add_stream(name=stream, subjects=[subject])
+            await js.add_consumer(stream, config=api.ConsumerConfig(durable_name="member", filter_subject=subject))
+            member_js = nc.jetstream()
+            assert (await member_js.stream_info(stream)).config.name == stream
+            assert (await member_js.consumer_info(stream, "member")).name == "member"
+            await member_js.publish(subject, b"own work", stream=stream)
+            assert (await member_js.get_last_msg(stream, subject)).data == b"own work"
+            consumer = await member_js.pull_subscribe_bind(durable="member", stream=stream)
+            [message] = await consumer.fetch(1, timeout=5)
+            assert message.data == b"own work"
+            await message.ack_sync()
+        finally:
+            await hub.close()
+
+    assert _violations(scoped, credentials, act) == []
+
+
+@pytest.mark.parametrize("swarm", ["*", ">", "rig.other", "", "rig other"])
+def test_scoped_credentials_refuse_invalid_swarm_tokens(signer, swarm):
+    scoped = replace(signer, member_swarms={"m1": (swarm,)})
+    with pytest.raises(ValueError, match="invalid event subject token"):
+        nats_grant.mint(scoped, "m1")
+
+
+def test_hub_record_supplies_member_swarm_membership(monkeypatch):
+    from scripts import openbao_kv
+    from tests.hive.test_nats_grant import BAO_ENV, SIGNER_PATH, _signer_record
+
+    operator, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)
+    record = {**_signer_record(operator, account), "member_swarms": {"m1": ["rig", "second"]}}
+    monkeypatch.setattr(openbao_kv, "read", lambda *_: (record, 1))
+    loaded = nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV})
+    assert loaded.member_swarms == {"m1": ("rig", "second")}
+
+
+@pytest.mark.parametrize("membership", [None, [], "rig", {"m1": "rig"}, {"m1": ["*"]}, {"m1": [None]}])
+def test_hub_record_refuses_malformed_member_swarm_membership(monkeypatch, membership):
+    from scripts import openbao_kv
+    from tests.hive.test_nats_grant import BAO_ENV, SIGNER_PATH, _signer_record
+
+    operator, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)
+    record = {**_signer_record(operator, account), "member_swarms": membership}
+    monkeypatch.setattr(openbao_kv, "read", lambda *_: (record, 1))
+    with pytest.raises(auth.HiveError, match="member_swarms"):
+        nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH, **BAO_ENV})

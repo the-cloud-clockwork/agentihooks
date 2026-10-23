@@ -57,6 +57,43 @@ class Signer:
     system_credentials: str = field(repr=False)
     url: str
     trusted_operator: str
+    member_swarms: Mapping[str, tuple[str, ...]] | None = None
+
+
+def _member_swarms(value) -> dict[str, tuple[str, ...]]:
+    if not isinstance(value, dict) or any(not isinstance(swarms, (list, tuple)) for swarms in value.values()):
+        raise auth.HiveError("member_swarms must map member ids to lists of swarm names")
+    try:
+        for swarms in value.values():
+            for swarm in swarms:
+                subjects.subject(swarm, "execution")
+    except ValueError as exc:
+        raise auth.HiveError(f"member_swarms contains an invalid swarm name ({exc})") from None
+    return {member: tuple(swarms) for member, swarms in value.items()}
+
+
+def swarm_publish(swarm: str) -> list[str]:
+    resources = (
+        "EVENTS",
+        "DEAD",
+        *(f"QUEUE_{lane}" for lane in ("eng", "ci", "plan")),
+        *(f"STATE_{bucket}" for bucket in buckets.NAMES),
+    )
+    streams = [subjects.stream_name(swarm, resource) for resource in resources]
+    return [
+        f"{subjects.PREFIX}.{swarm}.>",
+        *(
+            subject
+            for stream in streams
+            for subject in (
+                f"$JS.API.STREAM.INFO.{stream}",
+                f"$JS.API.STREAM.MSG.GET.{stream}",
+                f"$JS.API.CONSUMER.INFO.{stream}.*",
+                f"$JS.API.CONSUMER.MSG.NEXT.{stream}.*",
+                f"$JS.ACK.{stream}.>",
+            )
+        ),
+    ]
 
 
 def from_environ(environ: Mapping[str, str]) -> Signer | None:
@@ -87,6 +124,7 @@ def from_environ(environ: Mapping[str, str]) -> Signer | None:
             record["system_credentials"],
             record["url"],
             trusted,
+            _member_swarms(record["member_swarms"]) if "member_swarms" in record else None,
         )
     except (openbao_kv.OpenBaoError, KeyError, nkey.NkeyError) as exc:
         raise auth.HiveError(f"the NATS signer record {path} cannot be used ({exc})") from None
@@ -96,8 +134,19 @@ def user_claims() -> dict:
     return {"type": "user", "version": 2, "pub": {}, "sub": {}, **UNLIMITED}
 
 
-def member_claims(user: str) -> dict:
-    return {**user_claims(), "pub": {"allow": list(MEMBER_PUBLISH)}, "sub": {"allow": [f"{subjects.inbox(user)}.>"]}}
+def member_claims(user: str, swarms: tuple[str, ...] | None = None) -> dict:
+    if swarms is None:
+        return {
+            **user_claims(),
+            "pub": {"allow": list(MEMBER_PUBLISH)},
+            "sub": {"allow": [f"{subjects.inbox(user)}.>"]},
+        }
+    publish = [subject for swarm in swarms for subject in swarm_publish(swarm)]
+    return {
+        **user_claims(),
+        "pub": {"allow": publish} if publish else {"deny": [">"]},
+        "sub": {"allow": [*(f"{subjects.PREFIX}.{swarm}.>" for swarm in swarms), f"{subjects.inbox(user)}.>"]},
+    }
 
 
 def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
@@ -106,7 +155,8 @@ def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
 
 def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
-    claims = member_claims(user.public)
+    swarms = None if signer.member_swarms is None else signer.member_swarms.get(member_id, ())
+    claims = member_claims(user.public, swarms)
     return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 
 
