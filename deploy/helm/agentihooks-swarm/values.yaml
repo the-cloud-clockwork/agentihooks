@@ -230,7 +230,7 @@ hub:
 
 # GitHub webhook receiver: publishes signed pull request and check suite deliveries on the hub bus. It runs
 # the chart image, so the image updater rolls it with each release. secretName holds
-# AGENTIHOOKS_GITHUB_WEBHOOK_SECRET and, unless hub.bus.url is set, AGENTIHOOKS_BUS_URL. The public route
+# AGENTIHOOKS_GITHUB_WEBHOOK_SECRET and its own AGENTIHOOKS_BUS_URL. The public route
 # stays outside this chart.
 githubWebhook:
   enabled: false
