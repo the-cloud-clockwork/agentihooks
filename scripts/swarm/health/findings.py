@@ -330,17 +330,16 @@ def waiting_on_input(agents: list[dict], tasks: dict[str, dict]) -> list[Finding
 def master_blocked_on_prompt(agents: list[dict]) -> list[Finding]:
     found = []
     for agent in agents:
-        ticks = agent.get("input_ticks", 0)
-        if agent.get("lane") != "master" or ticks <= 3 or not agent.get("input_prompt"):
+        if agent.get("lane") != "master" or not agent.get("input_prompt") or agent["input_ticks"] <= 3:
             continue
         found.append(
             Finding(
                 "master blocked on prompt",
                 agent.get("seat") or agent["name"],
-                f"the master pane has waited on a question prompt for {ticks} ticks",
+                f"the master pane has waited on a question prompt for {agent['input_ticks']} ticks",
                 (f"prompt: {agent['input_prompt']}", f"agent {agent['name']}"),
                 "more than 3 consecutive ticks on a question prompt",
-                ticks,
+                agent["input_ticks"],
             )
         )
     return found

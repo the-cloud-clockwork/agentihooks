@@ -115,6 +115,29 @@ def test_a_worker_question_is_left_to_the_operator_gate(master, monkeypatch):
     assert master.questions == []
 
 
+def test_a_seated_master_without_swarm_env_moves_under_its_ledger_binding(master, monkeypatch, tmp_path):
+    import json
+
+    from hooks.context import master_coding
+
+    for key in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_AGENT_NAME"):
+        monkeypatch.delenv(key)
+    master_coding.record_seat(SID, "rig", "master@rig-1")
+    sessions = tmp_path / "ledgers" / ".sessions"
+    sessions.mkdir(parents=True)
+    (sessions / f"{SID}.json").write_text(json.dumps({"slug": "rig", "name": "master@rig-1"}))
+    assert master_question.move(ask(FREEZE), master, now=NOW)
+    assert [(slug, by) for slug, _, by, _ in master.questions] == [("rig", "master@rig-1")]
+
+
+def test_the_ledger_client_is_built_when_none_is_given(master, monkeypatch):
+    from scripts.swarm import ledger_client
+
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: master)
+    assert master_question.move(ask(FREEZE), now=NOW)
+    assert len(master.questions) == 1
+
+
 def test_the_moved_question_shows_in_the_operator_priorities(master):
     from scripts.swarm_ledger.ledger_priorities import wanted
 
@@ -154,9 +177,11 @@ def test_the_ledger_client_adds_a_question_under_a_stable_operation_id(monkeypat
 
 def test_a_master_blocked_on_a_prompt_raises_a_finding():
     agents = [
-        {"name": NAME, "lane": "master", "seat": "master@sw", "input_prompt": FOCUS["question"], "input_ticks": 4},
-        {"name": "master@a1b2c3-0002", "lane": "master", "input_prompt": FOCUS["question"], "input_ticks": 3},
         {"name": "engineer@a1b2c3-0003", "lane": "eng", "input_prompt": FOCUS["question"], "input_ticks": 9},
+        {"name": "master@a1b2c3-0002", "lane": "master", "input_prompt": FOCUS["question"], "input_ticks": 3},
+        {"name": "master@a1b2c3-0004", "lane": "master", "input_prompt": "", "input_ticks": 9},
+        {"name": NAME, "lane": "master", "seat": "master@sw", "input_prompt": FOCUS["question"], "input_ticks": 4},
+        {"name": "master@a1b2c3-0005", "lane": "master", "input_prompt": "Ship it?", "input_ticks": 5},
     ]
     assert master_blocked_on_prompt(agents) == [
         Finding(
@@ -166,7 +191,15 @@ def test_a_master_blocked_on_a_prompt_raises_a_finding():
             (f"prompt: {FOCUS['question']}", f"agent {NAME}"),
             "more than 3 consecutive ticks on a question prompt",
             4,
-        )
+        ),
+        Finding(
+            "master blocked on prompt",
+            "master@a1b2c3-0005",
+            "the master pane has waited on a question prompt for 5 ticks",
+            ("prompt: Ship it?", "agent master@a1b2c3-0005"),
+            "more than 3 consecutive ticks on a question prompt",
+            5,
+        ),
     ]
 
 
