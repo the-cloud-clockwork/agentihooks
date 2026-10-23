@@ -87,11 +87,11 @@ class Readiness:
         live = {event.id: event for event in self.outstanding(view.slug) if not self._settled(event, view)}
         placed = []
         for event in readiness.offers(view, now):
-            if not self._lift(event):
+            if event.id in live or not self._lift(event):
                 continue
             if self._bus.queue(readiness.queue_name(view.slug, event.data["lane"]), self._policy).offer(event):
                 placed.append(event.id)
-            live[event.id] = event
+                live[event.id] = event
         self._save(view.slug, list(live.values()))
         return placed
 

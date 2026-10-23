@@ -149,11 +149,35 @@ def test_an_unfrozen_task_has_its_withdrawal_lifted(rig):
     rig.views[SLUG] = snapshot(doc([task("a")], freezes=[{"verb": "freeze", "target": "tasks/a"}]))
     rig.later()
     rig.hub.poll()
+    assert rig.queued() == ["ready:sw:a:0"]
     rig.views[SLUG] = live
     rig.later()
     rig.hub.poll()
     assert rig.claim(offered(live, "a")) == {"state": "ready"}
     assert [event.id for event in rig.hub.outstanding(SLUG)] == ["ready:sw:a:0"]
+    assert rig.queued() == ["ready:sw:a:0"]
+
+
+def test_an_outstanding_offer_is_queued_once_across_passes(rig):
+    rig.views[SLUG] = snapshot(doc([task("a")]))
+    for _ in range(4):
+        rig.hub.poll()
+        rig.later()
+    assert rig.queued() == ["ready:sw:a:0"]
+
+
+def test_a_revived_offer_inside_the_dedupe_window_waits_unrecorded_until_it_lands(rig):
+    live = snapshot(doc([task("a")]))
+    rig.hub.offer(live, NOW)
+    rig.hub.offer(snapshot(doc([task("a")], freezes=[{"verb": "freeze", "target": "tasks/a"}])), NOW)
+    rig.queued()
+    window = BusConfig().dedupe_window_ms
+    rig.clock.now = NOW + window - 1
+    assert rig.hub.offer(live, rig.clock.now) == []
+    assert rig.hub.outstanding(SLUG) == []
+    rig.clock.now = NOW + window
+    assert rig.hub.offer(live, rig.clock.now) == ["ready:sw:a:0"]
+    assert rig.queued() == ["ready:sw:a:0"]
 
 
 def test_a_withdrawal_the_spoke_wrote_is_not_lifted(rig):
