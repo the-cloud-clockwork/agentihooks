@@ -5327,12 +5327,13 @@ information only item, so neither the tick wake pass nor the Codex `wake_now` pa
 and `scripts.doctor.inbox.past_window` skips it before any receiver check. Work items keep the behaviour
 described under [Inbox escalation sender exclusion](#inbox-escalation-sender-exclusion) and
 [Inbox receiver read](#inbox-receiver-read). The swarm itself sends some notices as information only, for example
-the [merge priority owner notices](#merge-priority-owner-notices) and every non master copy of a chat line sent
-To swarm.
+the [merge priority owner notices](#merge-priority-owner-notices) and every non master copy of a page chat line
+sent To swarm (`@swarm`).
 
 #### Usage
 
-The flag is the first or last word of the text, for a new item, a reply or a swarm chat line:
+For `msg send` and `msg reply`, `--fyi` must be the first or last word of the text; for `swarm say` it is an
+ordinary option and can go anywhere:
 
 ```bash
 agentihooks msg send eng-1@<slug> --fyi "Your pull request merged; nothing to do."
@@ -5376,8 +5377,10 @@ close, and never a `woken`, `escalated_master` or `escalated_operator` event.
 the [Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39365109171) on the final head
 passed. The cases in `tests/inbox/test_wake.py` assert that an idle pane holding only information mail gets no
 wake on the tick pass or the Codex path, that information mail to a vacated seat gets no event before or after a
-successor binds, and that a work item beside it is still woken. The case in `tests/doctor/test_inbox.py` asserts
-the past window detector skips the information item and still reports the work item next to it.
+successor binds, and that a work item beside it is still woken. The case in `tests/doctor/test_inbox.py` asserted
+the past window detector skips the information item and still reports the work item next to it; pull request 5742
+later rewrote it as `test_an_item_on_an_empty_seat_awaiting_a_successor_is_not_counted_and_a_live_occupant_item_still_is`,
+which still reports the work item to a live occupant and never the information item.
 
 The measured number is information only items in Doctor seat wait findings per day. The source task replayed the
 24 hours before the fix over both swarms: 25 information only seat items were open past the window. After the fix
