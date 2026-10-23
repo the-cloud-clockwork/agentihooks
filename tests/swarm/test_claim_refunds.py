@@ -104,3 +104,29 @@ def test_retirement_does_not_refund_an_already_reset_claim(store, ending):  # no
         tick("sw", store, ledger, runtime, now_ms=3_000)
     assert store.claims("sw", "t1") == 0
     assert agent.name in runtime.killed
+
+
+def test_stop_refunds_nothing_once_the_agent_no_longer_holds_its_claim(store):  # noqa: F811
+    from scripts.swarm.cli import stop_now
+
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    agent = workers(store)[0]
+    lives = store.claims("sw", "t1")
+    assert store.release("sw", "t1", agent.name)
+    stop_now(store, "sw", runtime, ledger)
+    assert store.claims("sw", "t1") == lives
+    assert agent.name in runtime.killed
+
+
+def test_a_parked_retirement_refunds_nothing_once_the_agent_no_longer_holds_its_claim(store):  # noqa: F811
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    agent = workers(store)[0]
+    store.put_handoff("sw", "t1", "continue here", seat=agent.seat, envelope={"reason": "quota"})
+    store.put_agent("sw", replace(agent, state="finished"))
+    assert store.release("sw", "t1", agent.name)
+    lives, spawned = store.claims("sw", "t1"), len(runtime.spawned)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert agent.name in runtime.killed
+    assert store.claims("sw", "t1") == lives + len(runtime.spawned) - spawned
