@@ -31,7 +31,7 @@ class Agent:
     task: str
     claim: str
     ends_ms: int
-    name: str = ""
+    name: str
 
 
 class ChaosRuntime:

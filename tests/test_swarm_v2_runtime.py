@@ -697,10 +697,9 @@ def test_routed_reads_the_process_environment_and_builds_a_herdr_runtime(monkeyp
     assert runtime.router.runtimes[LOCAL].herdr is runtime.herdr_runtime
 
 
-@pytest.mark.parametrize("live", [{"agent-a", "agent-b"}, {"agent-b"}])
-def test_the_local_runtime_finds_a_live_agent_by_its_launch_name(live):
+@pytest.mark.parametrize(("live", "found"), [({"agent-a", "agent-b"}, "agent-a"), ({"agent-b"}, None)])
+def test_the_local_runtime_finds_a_live_agent_by_its_launch_name(live, found):
     adapter = LocalHerdrRuntime(SimpleNamespace(live_names=lambda: live))
-    found = "agent-a" if "agent-a" in live else None
     assert adapter.find("agent-a") == Outcome("find", Status.OK, LOCAL, found)
 
 

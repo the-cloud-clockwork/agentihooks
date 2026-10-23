@@ -11,7 +11,7 @@ from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
 from scripts.hive import admission, execution_events, headroom, presence
 from scripts.swarm import readiness
-from scripts.swarm_v2.runtime.base import Runtime, SpawnRequest
+from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest
 
 
 class Tasks(Protocol):
@@ -39,7 +39,7 @@ class Spoke:
         self,
         config: SpokeConfig,
         bus: Bus,
-        runtime: Runtime,
+        runtime: NamedRuntime,
         tasks: Tasks,
         measure: Callable[[], dict | None] | None = None,
         clock: Callable[[], int] | None = None,
