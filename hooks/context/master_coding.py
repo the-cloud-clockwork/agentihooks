@@ -1,4 +1,5 @@
-"""The master hotfix window: the operator's typed allow-master-coding lets the master seat code for thirty minutes.
+"""The master hotfix window: the operator's typed allow-master-coding lets the master seat code until the operator types
+deny-master-coding or disallow-master-coding, or the session restarts.
 
 Only a prompt the operator typed in the master pane opens or closes it; agent text, tool output and relays never do.
 """
@@ -9,15 +10,14 @@ import re
 import time
 from pathlib import Path
 
-WINDOW_SEC = 1800
 OPEN = re.compile(r"(?<![\w-])allow-master-coding(?![\w-])")
-CLOSE = re.compile(r"(?<![\w-])disallow-master-coding(?![\w-])")
+CLOSE = re.compile(r"(?<![\w-])(?:deny|disallow)-master-coding(?![\w-])")
 PERMISSION_TOOLS = ("AskUserQuestion", "ExitPlanMode")
 PROTECTION = re.compile(r"\bgh\s+(?:ruleset\b|api\b[^\n;&|]*(?:/rulesets\b|/branches/[^\s/]+/protection\b))")
 NOTICES = {
-    "open": "Master hotfix window open for thirty minutes: the master may create a worktree with wt.sh new, edit "
+    "open": "Master hotfix window open until deny-master-coding or a session restart: the master may create a worktree with wt.sh new, edit "
     "inside it, commit, push its branch and merge its pull request into dev on green. Main, rulesets, branch "
-    "protection, condition folders, credential files and secrets stay closed. disallow-master-coding ends it.",
+    "protection, condition folders, credential files and secrets stay closed. deny-master-coding ends it.",
     "closed": "Master hotfix window closed: the master no longer edits code.",
 }
 CREDENTIALS = re.compile(
@@ -66,7 +66,7 @@ def observe(session_id: str | None, prompt: str | None, typed: bool, now: float 
     if not (session_id and typed and is_master(session_id)):
         return ""
     if CLOSE.search(str(prompt)):
-        path(session_id).unlink(missing_ok=True)
+        close(session_id)
         return "closed"
     if not OPEN.search(str(prompt)):
         return ""
@@ -75,14 +75,13 @@ def observe(session_id: str | None, prompt: str | None, typed: bool, now: float 
     return "open"
 
 
-def is_open(session_id: str, now: float | None = None) -> bool:
-    if not (session_id and is_master(session_id)):
-        return False
-    try:
-        opened = json.loads(path(session_id).read_text())["at"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
-    return (time.time() if now is None else now) - opened < WINDOW_SEC
+def close(session_id: str | None) -> None:
+    if session_id:
+        path(session_id).unlink(missing_ok=True)
+
+
+def is_open(session_id: str) -> bool:
+    return bool(session_id) and is_master(session_id) and path(session_id).is_file()
 
 
 def closed_in_window(value: str, cwd: Path) -> bool:
