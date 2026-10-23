@@ -697,6 +697,44 @@ def live_order(setup, route="subscription"):
     return request, order, ack
 
 
+def test_a_blocked_worker_receipt_is_collected_once_without_reviving_it(setup):
+    from scripts.swarm import controller
+    from scripts.swarm.tick import ACKNOWLEDGING, _collect_acks
+
+    request, order, _ = live_order(setup)
+    store, slug = setup.store, setup.config.slug
+    worker = store.execution_registry.get(slug, order.execution_id)
+    worker = replace(worker, state="finished")
+    store.put_agent(slug, worker)
+    store.record_launch(slug, worker, ACKNOWLEDGING)
+    store.mark_restart(slug, worker.task, "reclaimed")
+    lives = store.claims(slug, worker.task)
+    task = {"id": worker.task, "lane": "eng", "state": "blocked", "claimed_by": worker.name}
+    doc = {"tasks": [task]}
+    ledger = Mock()
+    routed = Mock()
+    routed.hive_launch = setup.launcher
+    routed.spawn.side_effect = AssertionError("collection must not launch another worker")
+    runtime = controller.FencedRuntime(store, slug, setup.held, routed, "compose")
+
+    actions = _collect_acks(slug, setup.config, store, ledger, runtime, doc, 2_000)
+
+    assert actions == [f"{worker.name} finished task before the tick collected its hive acknowledgement"]
+    assert task == {"id": "task", "lane": "eng", "state": "blocked", "claimed_by": worker.name}
+    assert store.execution_registry.get(slug, order.execution_id) == worker
+    assert [(row["agent"], row["state"], row["error"], row["after"]) for row in store.launches(slug)] == [
+        (worker.name, "started", "", "reclaimed")
+    ]
+    assert store.claims(slug, worker.task) == lives + 1
+    assert store.spawns(slug) == {"claude": 1}
+    assert store.take_restart(slug, worker.task) == ""
+    assert _collect_acks(slug, setup.config, store, ledger, runtime, doc, 3_000) == []
+    assert store.claims(slug, worker.task) == lives + 1
+    assert store.spawns(slug) == {"claude": 1}
+    assert setup.launcher.slots.rows("claude:account") == {}
+    ledger.task_set.assert_not_called()
+
+
 @pytest.mark.parametrize("route", ["subscription", "interactive"])
 def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
     from scripts.swarm.tick import Placed
