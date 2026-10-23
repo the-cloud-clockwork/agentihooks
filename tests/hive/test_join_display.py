@@ -155,10 +155,18 @@ def test_hive_list_lists_each_live_local_agent_once_and_only_on_its_own_hive(sto
     pod = local(
         store, "eng-3", runtime_backend="kubernetes", runtime_target={"pod_namespace": "swarm", "pod_name": "eng-3"}
     )
+    moved = local(store, "eng-4", hive="elsewhere")
+    local(store, "eng-5")
     reported = running(store, "eng-9", "worker")
     join_report.start(store.redis, "sw", reported, "session", checks(), {}, 1000)
-    live = Herdr({agent.name for agent in (plain, finished, remote, pod, reported)})
+    live = Herdr({agent.name for agent in (plain, finished, remote, pod, moved, reported)})
     monkeypatch.setattr(runtime, "HerdrRuntime", lambda: live)
     cli._list()
-    assert listed_by_hive(capsys.readouterr().out) == {"worker": [reported.name, plain.name]}
+    listed = listed_by_hive(capsys.readouterr().out)
+    assert listed == {"worker": [reported.name, plain.name, finished.name], "elsewhere": [moved.name]}
     assert [status.agent_hive(agent) for agent in (plain, remote, pod)] == ["worker", "old", ""]
+    placed = {}
+    for row in status.status_report(store, "sw", {"tasks": []}, runtime=live)["agents"]:
+        if row["hive"] in listed:
+            placed.setdefault(row["hive"], set()).add(row["name"])
+    assert placed == {hive: set(names) for hive, names in listed.items()}
