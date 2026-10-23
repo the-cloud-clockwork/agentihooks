@@ -202,6 +202,78 @@ agentihooks swarm <slug> merge queue https://github.com/the-cloud-clockwork/agen
 
 For agentibrain-kernel, whose `dev` rules require `Gate — Required` reported by GitHub Actions (`gh api repos/the-cloud-clockwork/agentibrain-kernel/rules/branches/dev` lists it with `integration_id` 15368), the command grades that check, not a Tests run, and enqueues into the kernel's `dev` merge queue. A repository with no merge queue on `dev`, such as antoncore, takes the squash merge described above. The checks wait accepts a pull request or an Actions run in another repository the same way: `agentihooks swarm <slug> wait --on checks https://github.com/<owner>/<repo>/actions/runs/<id>` reads only that repository's run and, when it is red, its jobs.
 
+## Queue shard sizing
+
+A merge group runs its unit suite as one wave of shards on the `anton-oss-queue` runner pool. The queue shard planner, `tests.queue_shards`, never plans more shards than that pool holds, so no shard waits for another shard's runner to free up.
+
+### How the plan is built
+
+The `split` job's `Size queue shards from conservative durations` step runs only on `merge_group` events, once per Python version in the matrix (3.12 today):
+
+```bash
+python -m tests.queue_shards --root . --collection collected.json --version "$PYTHON_VERSION" --reused reused.json --output queue-plan.txt
+python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
+```
+
+1. The first command prices every collected test from the slowest recent dev durations, drops tests the queue reuses, and starts at 12 shards. It adds one shard at a time until the predicted slowest shard is under half the step timeout, or until it reaches `MAX_SHARDS`. It writes `queue_312=<legs>` to `queue-plan.txt` and prints `Python 3.12: <n> queue shards, predicted slowest <s>s of <half>s`.
+2. `combine` reads the plan back and grades it against the pool. The `unit` matrix takes its `include` list from that output.
+
+| Setting | Value | Where it comes from |
+|---|---|---|
+| `MAX_SHARDS` | 30 | The `maxRunners` of the antoncore `anton-oss-queue` scale set, less the queue tier jobs that run during the unit stage (none today) |
+| `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import |
+| Half step timeout | 360 s | The target a plan must predict under |
+| `SLOWDOWN` | 1.15 | Factor applied to the predicted slowest shard, calibrated from recorded queue runs |
+| `STARTUP_SECONDS` | 30 | Added to every shard's prediction |
+
+### What combine decides
+
+Every plan that is not refused ends with the line `<n> queue jobs fit one wave of 30 runners; predicted slowest test step <s>s`; a capped plan prints its warnings before it.
+
+| Plan | Outcome | Log line |
+|---|---|---|
+| At most 30 jobs, slowest under 360 s | Runs as one wave | `<n> queue jobs fit one wave of 30 runners; predicted slowest test step <s>s` |
+| At most 30 jobs, slowest at or over 360 s | The step fails and the merge group goes red | `Queue plan exceeds 360s of the step timeout: <s>s` |
+| More than 30 jobs, from `--from-output` with `--root` and `--inputs` | Replanned at 30 shards for every version and written back to `queue-plan.txt` | `::warning::<n> queue jobs exceed the pool of 30; capped at 30 shards` |
+| Capped plan whose slowest shard reaches 720 s | Still runs at 30 shards, with a warning | `::warning::The capped queue plan predicts <s>s, over 720s of the step timeout` |
+| More than 30 jobs from `--plans` | Refused | `<n> queue jobs exceed the pool of 30` |
+
+The capped path caps the total across Python versions, not each version, so two versions share the 30 runners. With 3.12 alone the first command already stops at 30, so a plan that cannot reach 360 s at 30 shards is refused rather than capped. A single test too slow to fit any shard produces that refusal.
+
+### Changing the pool
+
+`MAX_SHARDS` must equal the queue pool `maxRunners` less any queue pool job that runs at the same time as the unit stage. When the antoncore scale set changes, change `MAX_SHARDS` in `tests/queue_shards.py` by pull request in the same window. Raising the pool is an antoncore change and stays with the operator. `tests/test_queue_shards.py` pins the cap: `test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool` plants a 40 job plan and expects `40 queue jobs exceed the pool of 30; capped at 30 shards`.
+
+### Checking a queue shard run
+
+Read the plan from the `split` job log, then list the unit shards and their runner waits:
+
+```bash
+run="<merge group run id>"
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/attempts/1/jobs" --paginate \
+  --jq '.jobs[] | select(.name | startswith("unit (")) | [.name, .created_at, .started_at, .completed_at] | @tsv'
+```
+
+A shard's runner wait is `started_at` minus `created_at`. Count the shards: more than 30, or start times that fall into two groups minutes apart, means a second wave. The Doctor measure prints the run attempt's queue tier wall time in seconds:
+
+```bash
+agentihooks doctor rig-grade-swarm measure "ci-tier-wall-time/<run id>-<attempt>"
+```
+
+It prints `<finding> <seconds>`, for example `ci-tier-wall-time/39269601765-1 573`. A finding fires when the tier wall time passes 15 minutes, 900 s. A run with no recorded tier wall time is refused with `has no tier wall time`.
+
+### Troubleshooting queue shard sizing
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Queue plan exceeds 360s of the step timeout` | 30 shards cannot bring the slowest shard under half the step timeout, often one slow test or a slow serial group | Split or speed up the slow test file; the planner log names the predicted seconds |
+| Shards wait minutes for a runner while each group plans 30 or fewer | Several merge groups build at once and share the 30 runners; the queue builds up to three entries at a time | Read the runner waits of every group running in the same minutes before changing the plan |
+| More than 30 `unit` jobs in one run | `MAX_SHARDS` no longer matches the pool, or a second Python version was added without the capped path | Compare `MAX_SHARDS` with the antoncore scale set `maxRunners` |
+
+### Delivery evidence
+
+Delivered by pull request [4803](https://github.com/the-cloud-clockwork/agentihooks/pull/4803) for issue [4801](https://github.com/the-cloud-clockwork/agentihooks/issues/4801), which lowered `MAX_SHARDS` from 40 to 30. Before: merge group run [39249741419](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39249741419) planned 40 unit shards on the 30 runner pool, 10 waited for a second wave with runner waits up to 346 s, and the queue tier took 948 s. After: the first successful merge group run started after the merge, [39269601765](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39269601765), ran 30 unit shards in one wave, all started within 63 s, with a 308 s unit stage and a 574 s tier wall. Runner wait was median 29 s and worst 82 s; 8 of 30 shards still waited over 30 s, which overlapping merge groups explain. Later changes on the same planner balanced capped shards by predicted slowest shard ([4884](https://github.com/the-cloud-clockwork/agentihooks/pull/4884)), read the step timeout from the workflow ([5043](https://github.com/the-cloud-clockwork/agentihooks/pull/5043)), dropped Python 3.11 from CI ([5327](https://github.com/the-cloud-clockwork/agentihooks/pull/5327)) and calibrated `SLOWDOWN` ([5659](https://github.com/the-cloud-clockwork/agentihooks/pull/5659)).
+
 ## Lost unit shard rerun
 
 A merge group unit shard that loses its runner is rerun once inside the same Tests run, so the pull request stays in the queue and merges on the rerun's green.
