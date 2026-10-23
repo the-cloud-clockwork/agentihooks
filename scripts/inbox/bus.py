@@ -13,7 +13,7 @@ def _identity(*parts: str) -> str:
 
 
 def _encode(value: dict) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return json.dumps(value).encode()
 
 
 @dataclass(frozen=True)
@@ -95,19 +95,19 @@ class SeatConsumer:
         return receipts
 
     def _key(self, item_id: str) -> str:
-        return f"delivery.{_identity(self._swarm, self._address, item_id)}"
+        return f"delivery.{_identity(item_id)}"
 
     def _claim(self, delivery: Delivery) -> Receipt | None:
         key = self._key(delivery.event.id)
         entry = self._state.get(key)
         if entry is not None:
             previous = json.loads(entry.value)
-            if previous["state"] == "confirmed":
+            if previous["confirmed"]:
                 delivery.ack()
                 return None
             if previous["attempt"] >= delivery.attempt:
                 return None
-        value = _encode({"state": "delivered", "session": self._session, "attempt": delivery.attempt})
+        value = _encode({"confirmed": False, "session": self._session, "attempt": delivery.attempt})
         try:
             revision = (
                 self._state.create(key, value) if entry is None else self._state.update(key, value, entry.revision)
@@ -130,13 +130,13 @@ class SeatConsumer:
         record = json.loads(entry.value)
         if record["session"] != self._session:
             return False
-        if record["state"] == "confirmed":
+        if record["confirmed"]:
             if record["claim"] != receipt.revision:
                 return False
         else:
             if entry.revision != receipt.revision:
                 return False
-            record.update(state="confirmed", claim=receipt.revision)
+            record.update(confirmed=True, claim=receipt.revision)
             try:
                 self._state.update(key, _encode(record), entry.revision)
             except StateConflict:
