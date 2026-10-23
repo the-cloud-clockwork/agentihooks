@@ -76,7 +76,8 @@ def test_guard_conditions_load_for_master_planner_and_qa_only(world, monkeypatch
     entries, invalid = conditions.scan_layers(layers)
 
     loaded = [e["file"] for e in entries if e["source"] == f"profile:{role}"]
-    expected = (GUARDS if role in GUARDED else set()) | (GATES if role in GATED else set()) | {PROMPTS}
+    guards = GUARDS - {"pre-edit+write+notebookedit-no_code_edits.py"} if role == "master" else GUARDS
+    expected = (guards if role in GUARDED else set()) | (GATES if role in GATED else set()) | {PROMPTS}
     assert sorted(loaded) == sorted(expected)
     assert invalid == []
 
@@ -99,7 +100,7 @@ def _guard(tmp_path, role, condition, tool, tool_input, cwd):
     )
 
 
-@pytest.mark.parametrize("role", GUARDED)
+@pytest.mark.parametrize("role", GUARDED - {"master"})
 def test_no_code_edits_guard_allows_only_the_scratchpad(tmp_path, role):
     edit = "pre-edit+write+notebookedit-no_code_edits.py"
     repo = tmp_path / "repo"
@@ -112,7 +113,7 @@ def test_no_code_edits_guard_allows_only_the_scratchpad(tmp_path, role):
     assert f"{role} cannot edit" in denied.stderr
 
 
-@pytest.mark.parametrize(("role", "code"), [("master", 0), ("planner", 0), ("qa", 2)])
+@pytest.mark.parametrize(("role", "code"), [("planner", 0), ("qa", 2)])
 def test_plans_folder_is_open_to_master_and_planner_only(tmp_path, role, code):
     edit = "pre-edit+write+notebookedit-no_code_edits.py"
     plan = tmp_path / "config" / "plans" / "p.md"

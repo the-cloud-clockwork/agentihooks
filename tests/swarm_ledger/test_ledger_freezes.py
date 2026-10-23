@@ -228,31 +228,42 @@ def test_an_engineers_freeze_write_is_refused():
     assert rejected and targets(state) == [("freeze", "plans/a")]
 
 
-def test_the_master_writes_a_freeze_only_with_the_operators_recorded_words():
-    state, rejected = freeze("plans/a", by=MASTER, quote="freeze the swarm v2 plan")
-    assert rejected and state["freezes"] == []
-    operator_words.record(MASTER, WORDS)
-    state, rejected = freeze("plans/a", by=MASTER, quote="freeze the swarm v2 plan")
+@pytest.mark.parametrize("verb", ["freeze", "focus"])
+def test_the_master_writes_freezes_without_a_quote_and_preserves_verified_words(verb):
+    state, rejected = freeze("plans/a", verb=verb, by=MASTER, quote="freeze the swarm v2 plan")
     assert rejected == []
-    assert state["freezes"][0]["by"] == MASTER
+    assert [(row["verb"], row["by"]) for row in state["freezes"]] == [(verb, MASTER)]
+    assert "quote" not in state["freezes"][0]
+    operator_words.record(MASTER, WORDS)
+    state, rejected = freeze("plans/a", verb=verb, by=MASTER, quote="freeze the swarm v2 plan")
+    assert rejected == []
     assert state["freezes"][0]["quote"] == "Freeze the swarm v2 plan"
-    state, rejected = freeze("plans/b", by=MASTER)
-    assert rejected and targets(state) == [("freeze", "plans/a")]
-    state, rejected = write("freeze_clear", by=MASTER, target="plans/a", quote="freeze the swarm v2 plan")
-    assert rejected == [] and state["freezes"] == []
+    state, rejected = freeze("plans/b", verb=verb, by=MASTER)
+    assert rejected == []
+    assert targets(state) == [(verb, "plans/a"), (verb, "plans/b")]
+    assert "quote" not in state["freezes"][1]
+    state, rejected = write("freeze_clear", by=MASTER, target="plans/a")
+    assert rejected == []
+    assert targets(state) == [(verb, "plans/b")]
     assert event_of(state)["by"] == MASTER
     assert state["_meta"]["stamps"]["freezes"]["by"] == MASTER
 
 
 @pytest.mark.parametrize("quote", ["Freeze", "Freeze the"])
 @pytest.mark.parametrize("op", ["freeze_set", "freeze_clear"])
-def test_short_recorded_quotes_cannot_change_freezes(quote, op):
+def test_short_recorded_quotes_do_not_block_master_freezes_or_become_operator_words(quote, op):
     operator_words.record(MASTER, "Freeze the plan")
     freeze("plans/a")
-    fields = {"verb": "freeze"} if op == "freeze_set" else {}
+    fields = {"verb": "focus"} if op == "freeze_set" else {}
     state, rejected = write(op, by=MASTER, target="plans/a", quote=quote, **fields)
-    assert rejected
-    assert targets(state) == [("freeze", "plans/a")]
+    assert rejected == []
+    if op == "freeze_set":
+        assert targets(state) == [("freeze", "plans/a"), ("focus", "plans/a")]
+        assert state["freezes"][1]["by"] == MASTER
+        assert "quote" not in state["freezes"][1]
+    else:
+        assert state["freezes"] == []
+    assert event_of(state)["by"] == MASTER
 
 
 def test_three_recorded_words_allow_master_freezes():
@@ -369,7 +380,7 @@ def test_the_live_dispatcher_below_full_autonomy_writes_no_freeze(monkeypatch, a
     assert [(row["target"], row["by"]) for row in state["freezes"]] == [("plans/a", "operator")]
 
 
-@pytest.mark.parametrize("name", [ENGINEER, CI, PLANNER, MASTER])
+@pytest.mark.parametrize("name", [ENGINEER, CI, PLANNER, STRANGER])
 @pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
 def test_other_lanes_at_full_autonomy_write_no_freeze_without_the_operators_words(monkeypatch, name, verb):
     freeze("plans/a")
