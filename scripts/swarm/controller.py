@@ -247,6 +247,13 @@ class FencedRuntime:
             raise SpawnError(outcome.detail, outcome.status)
         return outcome.value
 
+    def launched(self, config, lane, name, task):
+        from scripts.swarm_v2.runtime.base import SpawnRequest
+
+        request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+        with lease.kept(self.store, self.slug, self.held):
+            return self.runtime.hive_launch.launched(request)
+
     def expire(self, config, lane, name, task):
         from scripts.swarm_v2.runtime.base import SpawnRequest
 
