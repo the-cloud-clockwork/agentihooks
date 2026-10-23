@@ -46,13 +46,15 @@ exit "$status"
         assert step["with"]["context"] == "."
         assert step["with"]["load"] is True
         assert step["with"]["tags"] == IMAGE
-    for script in ("hive-launch-smoke", "swarm-smoke", "hive-join-smoke", "compose-hive-smoke"):
+    for script in ("hive-launch-smoke", "swarm-smoke", "hive-join-smoke", "compose-hive-smoke", "compose-task-smoke"):
         assert build < next(
             i for i, step in enumerate(steps) if f"scripts/packaging/{script}.sh" in step.get("run", "").split()
         )
 
 
-@pytest.mark.parametrize("script", ["hive-launch-smoke", "swarm-smoke", "hive-join-smoke", "compose-hive-smoke"])
+@pytest.mark.parametrize(
+    "script", ["hive-launch-smoke", "swarm-smoke", "hive-join-smoke", "compose-hive-smoke", "compose-task-smoke"]
+)
 @pytest.mark.parametrize("shared", [False, True])
 def test_smoke_uses_supplied_image_without_building_or_pulling_it(tmp_path, script, shared):
     tools = tmp_path / "bin"
