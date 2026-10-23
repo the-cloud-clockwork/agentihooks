@@ -226,8 +226,21 @@ the controller loop run it. A tick another swarm command runs inline (`start`,
 `reopen`, `pause`, `stop`, `set`, `restore`, and so `doctor start` and rig
 doctor) runs every other detector and leaves telemetry to the next scheduled
 pass, because the calling terminal may export keys for another project under the
-same names. `swarm tick` run by hand and `doctor measure` read with the caller's
-keys, so run them where those keys open the swarm's project.
+same names. `swarm tick` run by hand reads with the caller's keys, so run it
+where those keys open the swarm's project.
+
+`doctor measure` ignores the caller's `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and
+`LANGFUSE_SECRET_KEY`. It reads with the key pair in the AgentiHooks env files,
+loaded by `profile_telemetry.agentihooks_langfuse_keys` (`OTEL_LANGFUSE_*`
+first, else `LANGFUSE_*`, first assignment wins across the files), against the
+default host; `traces_read.installed_env` swaps them in. Before any read,
+`traces_read.measured_client` asks Langfuse which project the keys serve and
+refuses to read unless the answer is exactly `agent-swarm`, failing with
+`the installed Langfuse keys serve project <name>, not the watched swarm project
+agent-swarm`, or with `Langfuse project identity is unavailable` when the
+question fails or names no project. A refusal fails the `trace` detector: its
+error is printed on stderr and the measure counts it among the failed
+detectors. The caller's terminal keys never change what `doctor measure` reads.
 
 ### Active telemetry
 
@@ -455,8 +468,10 @@ fields:
 | `complete` | no listing failure and `covered` plus `capped` equals `traces` |
 | `unreadable` | one line per listed trace whose own read failed |
 
-Both read with the caller's `LANGFUSE_*` keys; run them where those keys open
-the swarm's project.
+The first reads with the env file keys and refuses any project other than
+`agent-swarm` (see [How the Doctor reads traces](#how-the-doctor-reads-traces)).
+The second reads with the caller's `LANGFUSE_*` keys; run it where those keys
+open the swarm's project.
 
 | Symptom | Read |
 |---|---|
