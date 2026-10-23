@@ -4,13 +4,13 @@ import io
 import json
 
 import pytest
+from scripts.hub.github_webhooks import Ingress
+from scripts.hub.pulls import Observation, Pulls
 
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hub import github_webhooks, pulls
-from scripts.hub.github_webhooks import Ingress
-from scripts.hub.pulls import Observation, Pulls
 
 pytestmark = pytest.mark.unit
 
@@ -162,9 +162,7 @@ def test_observations_from_payloads():
     ]
     payload = check_suite()
     payload["check_suite"]["app"] = None
-    assert github_webhooks.observations("check_suite", payload)[0].suites == {
-        "9": {"app": "", "conclusion": "success"}
-    }
+    assert github_webhooks.observations("check_suite", payload)[0].suites == {"9": {"app": "", "conclusion": "success"}}
     assert github_webhooks.observations("check_suite", check_suite(numbers=())) == []
     assert github_webhooks.observations("check_suite", check_suite("rerequested")) == []
     assert github_webhooks.observations("check_run", check_suite()) == []

@@ -3,13 +3,13 @@ import json
 import subprocess
 
 import pytest
+from scripts.hub.pulls import Observation, Pulls
 
 from scripts.events.bus import StateConflict
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hub import pulls
-from scripts.hub.pulls import Observation, Pulls
 from scripts.swarm.store import SwarmError
 
 pytestmark = pytest.mark.unit
