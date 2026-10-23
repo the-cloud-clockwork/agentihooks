@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.hive import auth
+from scripts.hive import auth, member_swarms
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -27,6 +27,8 @@ class Request:
     swarm_url: str | None = None
     ledger_ca: str | None = None
     bus_url: str | None = None
+    signer_path: str | None = None
+    swarms: tuple[str, ...] = ()
 
 
 def default_path(label: str) -> str:
@@ -56,8 +58,10 @@ def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redi
         f"{key}={value}\n" for key, value in member_settings.items() if value
     )
     try:
+        if request.signer_path:
+            member_swarms.assign(bao, request.signer_path, [grant["id"]], request.swarms)
         total = openbao_kv.merge(bao, request.path, entries)
-    except openbao_kv.OpenBaoError as exc:
+    except (openbao_kv.OpenBaoError, auth.HiveError) as exc:
         try:
             auth.revoke(redis, grant["id"])
         except auth.HiveError as revoked:

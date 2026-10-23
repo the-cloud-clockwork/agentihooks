@@ -1,4 +1,4 @@
-"""agentihooks hive add|invite|create|refresh|revoke|remove|controller|serve|set|show|list|run|install|bundle-origin|setup."""
+"""agentihooks hive add|invite|scope|create|refresh|revoke|remove|controller|serve|set|show|list|run|install|bundle-origin|setup."""
 
 import argparse
 import contextlib
@@ -122,8 +122,10 @@ def _add(args: argparse.Namespace, label: str) -> dict:
 
 
 def _invite(args: argparse.Namespace) -> str:
+    from dataclasses import replace
+
     from scripts import openbao_kv
-    from scripts.hive import invite
+    from scripts.hive import invite, member_swarms
     from scripts.swarm.store import redis_url
 
     bao = openbao_kv.from_env(os.environ)
@@ -139,7 +141,24 @@ def _invite(args: argparse.Namespace) -> str:
         ledger_ca.served(),
         bus_url=args.bus_url,
     )
-    return invite.invite(redis_client(), bao, request, redis_url(os.environ))
+    redis = redis_client()
+    if signer_path := member_swarms.signer_path(os.environ):
+        request = replace(request, signer_path=signer_path, swarms=member_swarms.swarms(redis, args.swarm))
+    return invite.invite(redis, bao, request, redis_url(os.environ))
+
+
+def _scope(args: argparse.Namespace) -> str:
+    from scripts import openbao_kv
+    from scripts.hive import member_swarms, nats_grant
+
+    bao = openbao_kv.from_env(os.environ)
+    path = member_swarms.signer_path(os.environ)
+    if bao is None or path is None:
+        raise auth.HiveError(
+            f"{openbao_kv.URL_ENV}, {openbao_kv.TOKEN_ENV} and {nats_grant.SIGNER_ENV} must all be set "
+            "to list member swarms"
+        )
+    return member_swarms.backfill(redis_client(), bao, path, args.swarm)
 
 
 def _create(args: argparse.Namespace) -> str:
@@ -223,6 +242,7 @@ def _serve(args: argparse.Namespace) -> int:
     tls = (args.tls_cert, args.tls_key) if args.tls_cert else None
     redis = redis_client()
     auth.regrant(redis)
+    _signer()
     httpd = server.make_server(
         redis,
         args.redis_url or redis_url(os.environ),
@@ -230,7 +250,7 @@ def _serve(args: argparse.Namespace) -> int:
         args.port,
         tls,
         ledger_ca=ledger_ca.served(),
-        signer=_signer(),
+        signer=_signer,
     )
     scheme = "https" if tls else "http"
     print(f"hive endpoint on {scheme}://{args.host}:{httpd.server_address[1]}{server.REFRESH_PATH}", flush=True)
@@ -253,6 +273,11 @@ def _parser() -> argparse.ArgumentParser:
     invited.add_argument("--redis-url", help="Redis URL the new hive connects to")
     invited.add_argument("--swarm-url", help="ledger address the new hive reaches")
     invited.add_argument("--bus-url", help="NATS address the new hive reaches; copied from --like when omitted")
+    invited.add_argument(
+        "--swarm", action="append", default=[], help="swarm the member's bus credential reaches; every swarm if omitted"
+    )
+    scoped = sub.add_parser("scope", help="List member swarms in the hub NATS signer record for every unlisted member")
+    scoped.add_argument("--swarm", action="append", default=[], help="swarm to list; every swarm if omitted")
     created = sub.add_parser("create", help="Create a Kubernetes hive from nothing and add it to herdr")
     created.add_argument("--repo", help="GitOps repository of the hive; defaults to antoncore")
     created.add_argument("--base", help="branch the hive pull request merges into; defaults to dev")
@@ -433,8 +458,8 @@ def main(argv: list[str]) -> int:
             label = machine.label(time.time())
             grant = _add(args, label)
             print(f"added {args.target} to herdr as {label}; its hive member is {grant['id']}")
-        elif args.command in ("invite", "create"):
-            print((_invite if args.command == "invite" else _create)(args))
+        elif args.command in ("invite", "create", "scope"):
+            print({"invite": _invite, "create": _create, "scope": _scope}[args.command](args))
         elif args.command in ("join", "refresh"):
             from scripts.hive import join
 
