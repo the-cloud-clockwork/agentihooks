@@ -244,10 +244,12 @@ def test_http_handler_logs_one_line_per_delivery(capsys):
     request(Recorder(), headers={"X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "d-1"})
     request(Recorder(401), headers={"X-GitHub-Event": "check_suite", "X-GitHub-Delivery": "d-2"})
     request(Recorder(), "/other")
+    request(Recorder(401), headers={"X-GitHub-Event": "e" * 65, "X-GitHub-Delivery": "d" * 64})
     assert capsys.readouterr().err == (
         "github-webhook: delivery d-1 event pull_request answered 200\n"
         "github-webhook: delivery d-2 event check_suite answered 401\n"
         "github-webhook: delivery None event ping answered 404\n"
+        f"github-webhook: delivery {'d' * 64} event {'e' * 64} answered 401\n"
     )
     handler = github_webhooks.handler(Recorder())
     assert handler.log_message(None, "%s", "x") is None
