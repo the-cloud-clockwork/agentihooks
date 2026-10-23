@@ -138,7 +138,7 @@ TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("ta
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
-ITEM_ID = re.compile(r"[A-Za-z0-9._-]+")
+ITEM_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (

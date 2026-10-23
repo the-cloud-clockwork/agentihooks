@@ -60,7 +60,9 @@ def test_get_prints_one_item_read_through_the_ledger_api(reads, capsys, monkeypa
     assert reads == [(SLUG, item, False)]
 
 
-@pytest.mark.parametrize("item", ["chat/c1", "tasks/", "tasks/a/b", "tasks/t1?state=done", "tasks/a#b"])
+@pytest.mark.parametrize(
+    "item", ["chat/c1", "tasks/", "tasks/a/b", "tasks/t1?state=done", "tasks/a#b", "tasks/.", "tasks/.."]
+)
 def test_get_refuses_an_item_outside_tasks_phases_followups_and_priorities(item):
     with pytest.raises(SystemExit):
         ledger.build_parser().parse_args(["--slug", SLUG, "get", item])
