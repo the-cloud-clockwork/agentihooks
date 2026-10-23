@@ -81,7 +81,7 @@ def can_change(entry, by, members):
 
 
 def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
-    """An agent's comment amends its own latest one on the item, unless anyone commented after it."""
+    """An agent's comment amends its own latest one on the item, unless anyone commented after it or it is a notice."""
     live = [e for e in thread if not e.get("deleted")]
     mine = next((e for e in reversed(live) if e.get("by") == by and "to" not in e), None)
     if mine is None or mine is not live[-1] or "outcome" in mine or "notice" in mine:
