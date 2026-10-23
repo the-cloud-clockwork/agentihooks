@@ -87,7 +87,8 @@ class Readiness:
         live = {event.id: event for event in self.outstanding(view.slug) if not self._settled(event, view)}
         placed = []
         for event in readiness.offers(view, now):
-            self._lift(event)
+            if not self._lift(event):
+                continue
             if self._bus.queue(readiness.queue_name(view.slug, event.data["lane"]), self._policy).offer(event):
                 placed.append(event.id)
             live[event.id] = event
@@ -115,14 +116,15 @@ class Readiness:
             return False
         return True
 
-    def _lift(self, event: Envelope) -> None:
+    def _lift(self, event: Envelope) -> bool:
         entry = self._claims.get(claim_key(event))
         if entry is None or json.loads(entry.value) != WITHDRAWN:
-            return
+            return True
         try:
             self._claims.update(entry.key, json.dumps(READY).encode(), entry.revision)
         except StateConflict:
-            pass
+            return False
+        return True
 
     def _save(self, slug: str, events: list[Envelope]) -> None:
         key = offers_key(slug)
@@ -134,4 +136,4 @@ class Readiness:
             else:
                 self._offers.update(key, value, entry.revision)
         except StateConflict:
-            pass
+            print(f"hub: readiness offers for swarm {slug} changed under the pass", file=sys.stderr)

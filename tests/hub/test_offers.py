@@ -299,3 +299,46 @@ def test_the_reactor_is_a_singleton_poll_reactor(rig):
 def test_the_hub_registers_the_readiness_reactor():
     names = [reactor.name for reactor in registry.configured(memory.open_bus(BusConfig()))]
     assert "readiness" in names
+
+
+class Conflicting:
+    def __init__(self, store):
+        self.store = store
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def create(self, key, value):
+        raise offers.StateConflict
+
+    def update(self, key, value, revision):
+        raise offers.StateConflict
+
+
+def test_a_withdrawal_that_loses_its_race_keeps_the_offer_outstanding(rig):
+    rig.views[SLUG] = live = snapshot(doc([task("a")]))
+    rig.hub.poll()
+    rig.hub._claims = Conflicting(rig.hub._claims)
+    rig.views[SLUG] = snapshot(doc([task("a")], freezes=[{"verb": "freeze", "target": "tasks/a"}]))
+    rig.later()
+    rig.hub.poll()
+    assert rig.claim(offered(live, "a")) is None
+    assert [event.id for event in rig.hub.outstanding(SLUG)] == ["ready:sw:a:0"]
+
+
+def test_a_lift_that_loses_its_race_offers_nothing_until_the_next_pass(rig):
+    view = snapshot(doc([task("a")]))
+    rig.bus.state(offers.CLAIMS).create(claim_key(offered(view, "a")), json.dumps(offers.WITHDRAWN).encode())
+    claims = rig.hub._claims
+    rig.hub._claims = Conflicting(claims)
+    assert rig.hub.offer(view, NOW) == []
+    assert rig.hub.outstanding(SLUG) == []
+    rig.hub._claims = claims
+    assert rig.hub.offer(view, NOW) == ["ready:sw:a:0"]
+    assert rig.claim(offered(view, "a")) == {"state": "ready"}
+
+
+def test_a_lost_offer_record_write_is_reported(rig, capsys):
+    rig.hub._offers = Conflicting(rig.hub._offers)
+    rig.hub.offer(snapshot(doc([task("a")])), NOW)
+    assert capsys.readouterr().err == "hub: readiness offers for swarm sw changed under the pass\n"
