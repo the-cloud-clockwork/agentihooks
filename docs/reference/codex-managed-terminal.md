@@ -372,9 +372,9 @@ the pane rename before the first ready wait, the session rename, which
 confirms within 15 seconds (`RENAME_CONFIRM_S`), and typing the opening
 prompt, still run after the deadline is spent. Each herdr command has its own
 30 second subprocess timeout. The 30 seconds between the 270 second deadline
-and the 300 second spawn timeout cover the session rename confirm
-(`tests/test_launch_deadline.py` checks that 270 plus 15 stays below 300);
-a launch whose herdr commands all stall can still reach the spawn timeout.
+and the 300 second spawn timeout hold the session rename confirm
+(`tests/test_launch_deadline.py` checks that 270 plus 15 stays below 300). A
+launch whose herdr commands all stall can still reach the spawn timeout.
 
 ### Worked budget
 
@@ -391,7 +391,7 @@ there. A canary wait that is cut short and then runs out fails the launch, and
 the reason on stderr first names the deadline, the first wait that was granted
 less than its own limit and the seconds each wait spent so far. The example
 uses whole seconds; a live launch prints the fractional grant, such as
-`within 29.87s`:
+`within 29.8741s`:
 
 ```text
 agentihooks init-agent: the 270s launch deadline ran out in the profile canary wait after Codex ready 120s, Codex ready for the opening prompt 120s, profile canary 30s: the codex agent reported no canary within 30s
@@ -435,8 +435,9 @@ history.
 ready waits at 120 seconds grants the canary 30 seconds, ends inside the spawn
 timeout and prints the message above; a wait after the deadline is spent gets
 no time and the first cut wait stays named; a wait that fails inside its own
-limit keeps its own error; a wait run again under the same name adds its time to that name's total; and
-`LAUNCH_DEADLINE_S` plus `RENAME_CONFIRM_S` stays below `SPAWN_TIMEOUT_S`.
+limit keeps its own error; a wait run again under the same name adds its time
+to that name's total; and `LAUNCH_DEADLINE_S` plus `RENAME_CONFIRM_S` stays
+below `SPAWN_TIMEOUT_S`.
 Delivered in
 [pull request 5288](https://github.com/the-cloud-clockwork/agentihooks/pull/5288):
 [red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39431053228/job/118655912523),
