@@ -17,8 +17,9 @@ class BusRig(Rig):
 
         self.bus_clock = [0]
         self.bus = memory.open_bus(BusConfig(), clock=lambda: self.bus_clock[0])
-        self.feed_for = lambda store: SeatFeed(lambda: self.bus, store, ME, OWNER, seat=lambda: SEAT)
+        self.feed_for = lambda store: SeatFeed(lambda: self.bus, store, ME, THREAD, seat=lambda: SEAT)
         super().__init__()
+        self.store.session_id = THREAD
 
     def new_pump(self):
         binding = codex.Binding(
@@ -58,7 +59,11 @@ def test_the_pump_wakes_on_a_bus_delivery_and_confirms_it_once_accepted(rig):
     SeatInbox(rig.bus, SLUG).send(SEAT, Message(item.id, "alice", "hello"))
     rig.pump.step()
     assert rig.server.turns[0]["inputs"][0].endswith("\n\nhello")
-    assert rig.store.get(item.id).state == "delivered"
+    delivered = rig.store.get(item.id)
+    assert delivered.state == "delivered"
+    assert set(rig.pump.feed.held) == {item.id}
+    rig.store.confirm_shown(ME, delivered.updated_at + 1)
+    assert rig.pump.feed.settle() == [item.id]
     assert rig.pump.feed.held == {}
     rig.bus_clock[0] += 60_000
     assert SeatInbox(rig.bus, SLUG).consumer(SEAT, "later").fetch(5, 0) == []
@@ -84,6 +89,7 @@ def test_a_bus_failure_leaves_the_pump_on_its_redis_reconcile(rig, monkeypatch):
 
 def test_main_gives_the_pump_a_feed_for_its_agent_and_execution(monkeypatch):
     import signal
+    from types import SimpleNamespace
 
     from scripts.codex_session.binding import TransportRecord
     from scripts.inbox import store as inbox_store
@@ -91,6 +97,7 @@ def test_main_gives_the_pump_a_feed_for_its_agent_and_execution(monkeypatch):
 
     record = TransportRecord(EXECUTION, 1, SEAT, ME, "task", "unix:///run/cx/s", thread_id=THREAD)
     asked, pumps = [], []
+    inbox = SimpleNamespace()
 
     class Pump:
         def __init__(self, store, binding, feed=None):
@@ -100,7 +107,7 @@ def test_main_gives_the_pump_a_feed_for_its_agent_and_execution(monkeypatch):
             return codex.STOPPED
 
     monkeypatch.setattr(swarm_store, "connect", lambda: "swarm redis")
-    monkeypatch.setattr(inbox_store, "connect", lambda: "inbox store")
+    monkeypatch.setattr(inbox_store, "connect", lambda: inbox)
     monkeypatch.setattr(codex, "BindingStore", lambda redis: redis)
     monkeypatch.setattr(codex.Transport, "require", lambda transport: record)
     monkeypatch.setattr(protocol, "connect", lambda path, timeout: ("connection", None))
@@ -108,7 +115,8 @@ def test_main_gives_the_pump_a_feed_for_its_agent_and_execution(monkeypatch):
     monkeypatch.setattr(codex, "Pump", Pump)
     monkeypatch.setattr(signal, "signal", lambda signum, handler: None)
     assert codex.main([SLUG, EXECUTION]) == 0
-    assert asked == [("inbox store", ME, EXECUTION)]
+    assert asked == [(inbox, ME, THREAD)]
+    assert inbox.session_id == THREAD
     [(store, binding, feed)] = pumps
-    assert (store, feed) == ("inbox store", "feed")
+    assert (store, feed) == (inbox, "feed")
     assert (binding.recipient, binding.owner, binding.thread_id) == (ME, EXECUTION, THREAD)
