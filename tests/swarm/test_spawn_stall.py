@@ -562,3 +562,74 @@ def test_a_doctor_held_by_the_watched_focus_is_not_a_spawn_stall(stalled, monkey
     assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
     watched["freezes"] = [{"verb": "focus", "target": "lane:ci"}]
     assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+
+
+CPU_WAIT = (
+    "no hive for eng has room: anton-1 cpu: five minute load 9.00 on 8 CPUs, fits 0 more under the 80 percent line"
+)
+FULL_WAIT = (
+    "no hive for eng has room: anton-1 cpu: five minute load 9.00 on 8 CPUs, fits 0 more under the 80 percent line; "
+    "anton-2 max agents: 3 of 3 agents on the hive, fits 0 more, and the local machine runs 8 of its 8 agents"
+)
+REFUSALS = (
+    "Admission refusals, latest first: cpu on anton-1 (2), local cap on local machine (1), max agents on anton-2 (1)"
+)
+
+
+def seed_refusals(store, clock):
+    from scripts.hive import placement_waits
+
+    placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0] - 2)
+    placement_waits.observe(store, "sw", "ci", "t2", FULL_WAIT, clock[0] - 1)
+
+
+def test_admission_refusals_without_a_failed_launch_are_named_in_the_alarm(stalled):
+    store, ledger, runtime, clock, _ = stalled
+    seed_refusals(store, clock)
+    for _ in range(2):
+        with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
+            pass
+        clock[0] += 600_000
+    with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
+        pass
+    (finding,) = spawn_stall.findings(store, "sw")
+    assert finding.evidence == ("A lane has a free seat, quota and claimable work", REFUSALS)
+    (mail,) = InboxStore(store.redis).pending_mail("master@sw")
+    assert mail.text == (
+        "Spawn stall on sw: No agent has launched for ten minutes. "
+        f"A lane has a free seat, quota and claimable work; {REFUSALS}"
+    )
+
+
+def test_a_fresh_failed_launch_follows_the_admission_refusals(stalled):
+    store, _, _, clock, _ = stalled
+    seed_refusals(store, clock)
+    tick_failure(stalled)
+    clock[0] += 600_000
+    tick_failure(stalled)
+    (finding,) = alarms(stalled)
+    assert finding["evidence"] == [
+        "A lane has a free seat, quota and claimable work",
+        REFUSALS,
+        "Last failed step tests.swarm.test_spawn_stall.stalled.<locals>.broken: RuntimeError: forced phase failure",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        ("no hive for eng has room: anton-1 ram: 1 of 8 MB available", [("ram", "anton-1")]),
+        ("no Claude account has room after hive sessions: 2", [("quota", "")]),
+        (
+            "no live hive takes eng, and the local machine runs 8 of its 8 agents",
+            [("placement", ""), ("local cap", "local machine")],
+        ),
+        ("no hive for eng has room", [("placement", "")]),
+    ],
+)
+def test_each_refusal_names_its_reason_and_host(reason, expected):
+    assert spawn_stall._refused(reason) == expected
+
+
+def test_no_refusals_leave_no_evidence_line():
+    assert spawn_stall.refusals({}) == ""
