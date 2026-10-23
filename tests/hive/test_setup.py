@@ -73,7 +73,7 @@ LEFT_OUT = (
     ("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "fixture-ledger-agent", "tick only"),
 )
 REASONS = {name: reason for name, _, reason in LEFT_OUT}
-WRITTEN = sorted([*LIVE_KEYS, "HIVE_BUNDLE_URL", "HIVE_BUNDLE_REF"])
+WRITTEN = sorted([*LIVE_KEYS, "HIVE_BUNDLE_URL", "HIVE_BUNDLE_REF", "HIVE_LINKED_PROFILES"])
 MEMBER = "fixture-member"
 
 
@@ -174,6 +174,7 @@ def test_publish_merges_the_full_record_and_prints_only_key_names(tmp_path):
         "OPENBAO_TOKEN": BAO_TOKEN,
         "HIVE_BUNDLE_URL": BUNDLE_URL,
         "HIVE_BUNDLE_REF": "dev",
+        "HIVE_LINKED_PROFILES": "[]",
     }
     assert fake.version == 3
     assert printed_values(report) == []
@@ -206,7 +207,7 @@ def test_a_dry_run_with_every_key_kept_leaves_out_nothing(tmp_path):
     (home / ".env").write_text("LITELLM_URL=file-value\n")
     report = setup.publish({"AGENTIHOOKS_HOME": str(home), "LITELLM_URL": "https://litellm.example.test"}, "x", True)
     assert report == (
-        "dry run, nothing written to OpenBao secret/x: would write HIVE_BUNDLE_REF, HIVE_BUNDLE_URL, LITELLM_URL; "
+        "dry run, nothing written to OpenBao secret/x: would write HIVE_BUNDLE_REF, HIVE_BUNDLE_URL, HIVE_LINKED_PROFILES, LITELLM_URL; "
         "left out nothing; no bundle is linked"
     )
 

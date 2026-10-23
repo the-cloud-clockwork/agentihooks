@@ -5,7 +5,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from types import ModuleType
 
-from . import hierarchy
+from . import hierarchy, refresh
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Snapshot, SQLiteLedgerRepository
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
@@ -22,6 +22,8 @@ SESSION = {
     "keepalives_count": 3,
 }
 READ_SNAPSHOT = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"
+# the first start after an upgrade builds row indexes over every stored ledger
+SCHEMA_STATEMENTS_UNTIMED = "SET LOCAL statement_timeout = 0"
 TABLES = "SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema()"
 STATEMENTS = {
     BEGIN_IMMEDIATE: f"SELECT pg_advisory_xact_lock({WRITER_LOCK})",
@@ -250,7 +252,8 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
                 return
             with connection:
                 connection.execute(BEGIN_IMMEDIATE)
-                connection.executescript(SCHEMA + hierarchy.SCHEMA + ROWS_SCHEMA)
+                connection.execute(SCHEMA_STATEMENTS_UNTIMED)
+                connection.executescript(SCHEMA + hierarchy.SCHEMA + ROWS_SCHEMA + refresh.SCHEMA)
             self._ready.add(address)
 
     @contextmanager

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, heap, hierarchy, media_files, outbox
+from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
@@ -39,15 +39,16 @@ DATABASE = "ledgers.sqlite3"
 BEGIN = "BEGIN"
 REGISTRY = "SELECT path,value FROM registry WHERE slug=?"
 PATH_END = "\x7f"
-PER_LEDGER = (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events")
+PER_LEDGER = (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events", "row_changes")
 GENERATION_SHIFT = 20
+CHANGES_KEPT = 256
 BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
 SLUGS = "SELECT slug FROM ledgers ORDER BY slug"
-ROOT = "[]"
+ROOT = refresh.ROOT
 REGISTRY_TABLE = "registry"
 UPDATE = "UPDATE ledgers SET revision=?, generation=?, summary=?, touched_at=? WHERE slug=?"
 INSERT = "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?, ?)"
@@ -441,6 +442,7 @@ class SQLiteLedgerRepository:
             connection.executescript(SCHEMA)
             connection.executescript(hierarchy.SCHEMA)
             connection.executescript(ROWS_SCHEMA)
+            connection.executescript(refresh.SCHEMA)
             self._ready.add(path)
 
     def _key(self, slug):
@@ -460,14 +462,22 @@ class SQLiteLedgerRepository:
             cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
                 return cached
-            state = assemble(read_rows(connection, slug))
+            state = None if cached is None else self._refreshed(connection, slug, cached, row[0])
+            whole = state is None
+            if whole:
+                state = assemble(read_rows(connection, slug))
             if "events" in state["_meta"]:
-                state["_meta"]["events"] = read_events(connection, slug)
-            fragments = document(state)
+                state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
+            fragments = document(state, None if whole else cached.fragments)
             entry = Entry(row[0], None, fragments.value, fragments)
             self._remember(slug, entry)
-        heap.release()
+        if whole:
+            heap.release()
         return entry
+
+    def _refreshed(self, connection, slug: str, cached: Entry, generation: int) -> dict | None:
+        paths = refresh.changed_paths(connection, slug, cached.generation, generation, CHANGES_KEPT)
+        return None if paths is None else refresh.refreshed(connection, slug, cached.state, paths)
 
     def _remember(self, slug: str, entry: Entry) -> None:
         with self._guard:
@@ -551,7 +561,7 @@ class SQLiteLedgerRepository:
         fragments = document(state, entry.fragments)
         state = fragments.value
         before, after = diff(*(without_events(value) for value in (entry.state, state)))
-        write_rows(connection, slug, before, after)
+        paths = write_rows(connection, slug, before, after)
         hierarchy.sync(connection, slug, state)
         kept = len(state["_meta"].get("events", []))
         append_events(connection, slug, events, kept)
@@ -559,6 +569,7 @@ class SQLiteLedgerRepository:
             trim_events(connection, slug, kept)
         outbox.write(connection, slug, state["_meta"]["rev"], entry.state, state)
         generation = entry.generation + 1
+        refresh.record(connection, slug, generation, paths, CHANGES_KEPT)
         connection.execute(
             UPDATE,
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),

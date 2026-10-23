@@ -339,10 +339,17 @@ def test_the_status_line_names_the_promoted_engineer():
     assert tick_master.status_line({"since": 1}) == ""
 
 
-def test_a_recycled_master_saved_without_a_profile_launches_on_the_master_profile(store):  # noqa: F811
-    launch = {"profile": "", "harness": "claude", "model": "claude-opus-5-5", "effort": "high", "account": ""}
+@pytest.mark.parametrize("profile", ["", "custom-master"])
+def test_a_recycled_master_fills_its_empty_profile_and_keeps_saved_choices(store, profile):  # noqa: F811
+    launch = {"profile": profile, "harness": "claude", "model": "claude-opus-5-5", "effort": "high", "account": ""}
     store.put_handoff("sw", MASTER, "continue", MASTER_SEAT, {"reason": "recycle", "launch": launch})
     runtime = FakeRuntime()
     assert "spawned master master@a1b2c3-0001" in tick("sw", store, tasks(), runtime, 1)
     ((_, task),) = runtime.masters
-    assert task["handoff_envelope"]["launch"]["profile"] == "master"
+    saved = task["handoff_envelope"]["launch"]
+    assert saved["profile"] == (profile or "master")
+    assert {key: saved[key] for key in ("harness", "model", "effort")} == {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "high",
+    }

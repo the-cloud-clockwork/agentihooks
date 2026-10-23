@@ -418,7 +418,7 @@ class RedisStore:
     def agents(self, slug):
         return self.execution_registry.agents(slug)
 
-    def drop_agent(self, slug, name, at=None):
+    def drop_agent(self, slug, name, at=None, expected=None, before=None):
         from redis.exceptions import WatchError
 
         ended = int(time.time() * 1000) if at is None else at
@@ -427,8 +427,12 @@ class RedisStore:
                 try:
                     pipe.watch(self.key(slug, "agents"), self.key(slug, "executions"))
                     previous = pipe.hget(self.key(slug, "agents"), name)
-                    executions = [a for a in self.execution_registry.occupants(slug).values() if a.name == name]
+                    executions = [a for a in self.execution_registry.occupants(slug, pipe).values() if a.name == name]
+                    if expected is not None and expected.execution_id not in {a.execution_id for a in executions}:
+                        return False
                     pipe.multi()
+                    if before is not None:
+                        before(pipe)
                     if previous:
                         row = json.loads(previous)
                         reason = "finished" if row["state"] == "finished" else "retired"
@@ -446,12 +450,17 @@ class RedisStore:
                     pipe.hdel(self.key(slug, "desired-routes"), name)
                     pipe.hdel(self.key(slug, "state-since"), name)
                     pipe.hdel(self.key(slug, "retire-failures"), name)
+                    self._retire_name(pipe, name, ended)
                     pipe.execute()
-                    self.names.retire(name, ended)
-                    return
+                    return True
                 except WatchError:
                     continue
         raise SwarmError("agent registry kept changing; retirement was not committed")
+
+    def _retire_name(self, pipe, name, ended):
+        row = self.names.entry(name)
+        if row and not row["retired_at"]:
+            pipe.hset(self.names.key("name", name), "retired_at", ended)
 
     def count_spawn(self, slug, harness):
         self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)

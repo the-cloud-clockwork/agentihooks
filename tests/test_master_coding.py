@@ -204,18 +204,28 @@ def test_the_window_opens_serena_edits_by_project_relative_path(master):
     assert "cannot edit outside" in GUARD["deny_reason"](payload, "master", master)
 
 
-def test_an_expired_window_record_no_longer_opens_edits(master):
+def test_an_old_window_record_opens_edits_until_explicitly_closed(master):
     record = master_coding.path(SID)
     record.parent.mkdir(parents=True)
     record.write_text(json.dumps({"at": 0}))
-    assert "cannot edit outside" in guard(master, master / "dev" / "worktrees" / "a" / "b" / "x.py")
+    target = master / "dev" / "worktrees" / "a" / "b" / "x.py"
+    assert guard(master, target) == ""
+    master_coding.close(SID)
+    assert "cannot edit outside" in guard(master, target)
 
 
 def test_the_typed_prompt_opens_the_window_and_tells_the_master(master, monkeypatch):
     shown = Mock()
     monkeypatch.setattr("hooks.common.inject_context", shown)
     hook_manager._master_coding({"session_id": SID, "prompt": "allow-master-coding"}, True)
-    shown.assert_called_once_with(master_coding.NOTICES["open"], also_log=False, skip_compression=True, kind="alert")
+    shown.assert_called_once_with(
+        "Master hotfix window open until deny-master-coding or a session restart: the master may create a worktree with wt.sh new, edit "
+        "inside it, commit, push its branch and merge its pull request into dev on green. Main, rulesets, branch "
+        "protection, condition folders, credential files and secrets stay closed. deny-master-coding ends it.",
+        also_log=False,
+        skip_compression=True,
+        kind="alert",
+    )
     assert master_coding.is_open(SID)
 
 

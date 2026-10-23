@@ -15,33 +15,61 @@ def master(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_the_window_stays_open_until_the_operator_denies_it(master):
+@pytest.mark.parametrize("signal", ["deny-master-coding", "disallow-master-coding"])
+def test_the_window_lasts_until_typed_denial(master, monkeypatch, signal):
     assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
+    monkeypatch.setattr(master_coding.time, "time", lambda: 100000)
     assert master_coding.is_open(SID)
-    assert master_coding.observe(SID, "deny-master-coding", typed=False) == ""
+    assert master_coding.observe(SID, signal, typed=False) == ""
     assert master_coding.is_open(SID)
-    assert master_coding.observe(SID, "deny-master-coding", typed=True) == "closed"
+    assert master_coding.observe(SID, signal, typed=True) == "closed"
     assert not master_coding.is_open(SID)
 
 
-class _Stop(Exception):
-    pass
-
-
-def _stop(*args):
-    raise _Stop
-
-
-@pytest.mark.parametrize(("source", "open_after"), [("startup", False), ("resume", False), ("compact", True)])
-def test_a_session_restart_closes_the_window_and_a_compaction_keeps_it(master, monkeypatch, source, open_after):
+@pytest.mark.parametrize("source", ["startup", "resume", "clear", "compact", None, "unknown"])
+def test_session_start_revokes_the_window_except_during_compaction(master, monkeypatch, source):
     from hooks import hook_manager
+
+    def stop():
+        raise RuntimeError("session event reached")
 
     master_coding.observe(SID, "allow-master-coding", typed=True)
     monkeypatch.setattr(hook_manager, "_inject_refocus", lambda *args: None)
-    monkeypatch.setattr("hooks.lifecycle.guard.session_event", _stop)
-    with pytest.raises(_Stop):
+    monkeypatch.setattr("hooks.lifecycle.guard.session_event", stop)
+    with pytest.raises(RuntimeError, match="^session event reached$"):
         hook_manager.on_session_start({"session_id": SID, "source": source})
-    assert master_coding.is_open(SID) is open_after
+    assert master_coding.is_open(SID) is (source == "compact")
+
+
+def test_close_is_session_scoped_and_idempotent(master):
+    master_coding.observe(SID, "allow-master-coding", typed=True)
+    for session in (None, "", "other"):
+        master_coding.close(session)
+        assert master_coding.is_open(SID)
+    assert not master_coding.is_open("")
+    master_coding.close(SID)
+    master_coding.close(SID)
+    assert not master_coding.is_open(SID)
+
+
+def test_a_window_close_failure_is_logged(master, monkeypatch):
+    from unittest.mock import Mock
+
+    from hooks import hook_manager
+
+    close = Mock(side_effect=RuntimeError("close failed"))
+    logged = Mock()
+    monkeypatch.setattr(master_coding, "close", close)
+    monkeypatch.setattr(hook_manager, "log", logged)
+    hook_manager._close_master_coding(SID, "startup")
+    close.assert_called_once_with(SID)
+    logged.assert_called_once_with("master coding window close failed", {"error": "close failed"})
+
+
+def test_reopening_an_open_window_refreshes_it(master):
+    assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
+    assert master_coding.observe(SID, "allow-master-coding", typed=True, now=2000) == "open"
+    assert master_coding.is_open(SID)
 
 
 def test_an_open_record_is_ignored_once_the_session_is_no_longer_the_master(master, monkeypatch):
