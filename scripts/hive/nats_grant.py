@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.events import nkey
+from scripts.events import nkey, subjects
+from scripts.events.dead import DEAD_SUBJECT
 from scripts.hive import auth
 
 if TYPE_CHECKING:
@@ -20,6 +21,12 @@ REVOKED = f"{auth.PREFIX}:nats-revoked"
 CLAIMS_UPDATE = "$SYS.REQ.CLAIMS.UPDATE"
 PUSH_TIMEOUT_S = 10
 UNLIMITED = {"subs": -1, "data": -1, "payload": -1}
+OPEN = {"pub": {}, "sub": {}}
+SWARM_SUBJECTS = f"{subjects.PREFIX}.>"
+MEMBER_PERMISSIONS = {
+    "pub": {"allow": [SWARM_SUBJECTS, DEAD_SUBJECT, "agentihooks.queue.>", "$KV.>", "$JS.API.>", "$JS.ACK.>"]},
+    "sub": {"allow": [SWARM_SUBJECTS, "_INBOX.>"]},
+}
 ACCOUNT_LIMITS = {
     **UNLIMITED,
     "imports": -1,
@@ -63,8 +70,8 @@ def from_environ(environ: Mapping[str, str]) -> Signer | None:
         raise auth.HiveError(f"the NATS signer record {path} cannot be used ({exc})") from None
 
 
-def user_claims() -> dict:
-    return {"type": "user", "version": 2, "pub": {}, "sub": {}, **UNLIMITED}
+def user_claims(permissions: Mapping[str, dict] = OPEN) -> dict:
+    return {"type": "user", "version": 2, **permissions, **UNLIMITED}
 
 
 def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
@@ -73,7 +80,9 @@ def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
 
 def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
-    return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", user_claims()), user.seed)
+    return nkey.creds(
+        nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", user_claims(MEMBER_PERMISSIONS)), user.seed
+    )
 
 
 def account_jwt(signer: Signer, revocations: Mapping[str, int]) -> str:
