@@ -105,6 +105,25 @@ def test_lint_setup_python_caches_pip_keyed_on_pyproject():
     assert step["env"]["SEGMENT_DOWNLOAD_TIMEOUT_MINS"] == "1"
 
 
+def _tests_workflow_steps() -> list[dict]:
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
+    for action in {step["uses"] for step in steps if step.get("uses", "").startswith("./.github/actions/")}:
+        steps += yaml.safe_load((_ROOT / action / "action.yml").read_text())["runs"].get("steps", [])
+    return steps
+
+
+def test_tests_workflow_cache_restores_bound_a_refused_download_to_one_minute():
+    restores = [
+        step
+        for step in _tests_workflow_steps()
+        if step.get("uses", "").startswith("actions/cache/restore") and not step.get("with", {}).get("lookup-only")
+    ]
+    assert len(restores) >= 12
+    for step in restores:
+        assert step.get("env", {}).get("SEGMENT_DOWNLOAD_TIMEOUT_MINS") == "1", step.get("name", step["with"]["path"])
+
+
 def test_unit_setup_python_restores_no_pip_cache():
     (step,) = _setup_python_steps("unit")
     assert "cache" not in step["with"]
