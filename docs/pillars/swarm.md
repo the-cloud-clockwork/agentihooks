@@ -231,6 +231,57 @@ promotion, prompt and hand back is a tick journal line and an event on the seat 
 engineer's seat. `swarm status` prints a `promoted` line, `status --json` carries `promotion` and a `promoted` flag
 per agent, and the ledger page marks the agent row promoted.
 
+#### Orphan executions on a seat
+
+Every seat has one current execution in the swarm's execution registry. A new launch on a seat names the
+execution it replaces, and the registry refuses it with `replacement does not match the current execution` when
+that differs from the current one. An execution whose agent record is gone but which was never marked ended stays
+the seat's current execution. On a master seat this showed as forced launches that never bound: refused first
+with `replacement does not match the current execution`, then as
+`master launch refused: startup pending for <name>` in the tick journal.
+
+Each tick, before step 1 of [the minute tick](#the-minute-tick), the execution reconcile ends such an orphan. It ends the current execution of
+a seat when all of these hold:
+
+| Condition | Read from |
+|---|---|
+| Its state is `working`, or `starting` with its start at least the master startup window (two minutes) ago | The execution record |
+| The swarm has no agent record under its name | The agent records |
+| No live pane carries its name and its hook has not reported | The runtime |
+| On a remote hive, a latest report exists and omits the name; with no report the seat is kept | The hive report |
+| On a non-local backend, the runtime observes it dead | The runtime |
+| On the local machine, the checks above suffice | The runtime |
+
+The ending is atomic: under a Redis watch on the executions and agent records it requires the seat's current
+record to equal the one the reconcile read, repeats the state and window check, and writes that record with state
+`ended`. When the record changed, an agent record appeared, or a write raced it, the tick leaves the execution
+alone and tries again on the next tick. A `starting` execution inside its startup window, one with a live pane or
+a reported hook, and one a remote hive still lists are kept. Each ended orphan is a tick journal line:
+
+```text
+ended orphan execution <execution id> for <agent name>
+```
+
+With the occupant ended, the next launch on the seat replaces it and the forced master launch binds. The startup
+window applies to a `starting` execution on any seat, engineer seats included; inside it the execution is kept. A
+`working` orphan is ended with no window. To check a stuck seat:
+
+```bash
+# Launch refusals and orphan endings for the master in the last hour
+journalctl --user -t agentihooks-swarm --since "1 hour ago" \
+  | grep -E "ended orphan execution|startup pending|replacement does not match"
+# The master line lists a live master once the seat binds
+agentihooks swarm <id> status
+```
+
+A refusal that keeps repeating with no `ended orphan execution` line has one of two causes. Either a condition
+above still holds (an agent record with that name, a pane or hook report under it, or a remote hive report that
+still lists it or no report at all), or the launch is refused for another reason its error names:
+`master launch refused: unfinished lead`, `current execution publication is in flight`,
+`the controller lease is stale`, `execution history kept changing` or
+`canonical agent already belongs to another execution seat`. Read the seat history before acting; never end an
+execution by writing to Redis by hand.
+
 ### Several master seats
 
 `swarm <id> set masters=N` gives a swarm N master seats: `master@<id>` is the lead, the address every single master
@@ -3511,7 +3562,8 @@ lock, so a minute that fires while a tick still runs starts no second tick; the 
 minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
 again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
 An outage holds the affected idle and delivery decisions until recovery (see
-[Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm:
+[Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm, before step 1 the tick ends any orphan
+execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)), then:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 20 ticks. A stale agent is nudged through its inbox
