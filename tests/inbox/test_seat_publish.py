@@ -58,6 +58,38 @@ def test_direct_swarm_mail_publishes_a_message_keyed_wake_event(mail, monkeypatc
     assert [event.data["address"] for event in events] == [first.address, second.address]
 
 
+def test_direct_publication_without_a_swarm_does_not_open_an_inbox(mail):
+    from scripts.inbox import bus
+
+    store, shared = mail
+    item = store.send("alice", "unregistered", "request")
+    bus.SeatPublisher(lambda: shared).publish(item)
+    bus.publish(item)
+    assert shared.events.entries == []
+
+
+def test_seat_publication_does_not_resolve_an_unneeded_direct_swarm(mail, monkeypatch):
+    store, shared = mail
+
+    def refuse_lookup(name):
+        pytest.fail("a seat already identifies its swarm")
+
+    monkeypatch.setattr(store.names, "slug_of", refuse_lookup)
+    item = store.send("alice", SEAT, "request")
+    [delivery] = shared.events.consumer("seat-lookup-proof", "swarm.swarm.inbox-wake.requested").fetch(10, 0)
+    assert delivery.event.version == 1
+    assert delivery.event.key == item.id
+
+
+def test_direct_wake_publication_keeps_the_initial_generation(mail, monkeypatch):
+    store, shared = mail
+    monkeypatch.setattr(store.names, "slug_of", lambda name: "swarm")
+    item = store.send("alice", "unregistered", "request")
+    [delivery] = shared.events.consumer("direct-version-proof", "swarm.swarm.inbox-wake.requested").fetch(10, 0)
+    assert delivery.event.version == 1
+    assert delivery.event.key == item.id
+
+
 def test_without_the_nats_bus_nothing_is_published(mail, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_BUS")
     store, shared = mail

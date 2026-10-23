@@ -304,3 +304,225 @@ def test_pooled_master_arrival_is_recovered_by_the_outbox_and_escalates(rig):
     advance(rig, 1000 + W)
     assert steps(rig, item) == ["escalated_operator"]
     assert rig.ledger.flagged == [True]
+
+
+def test_configured_hub_routes_arrivals_and_expiry_using_its_clock(rig, monkeypatch):
+    from scripts.hub import inbox_wake, registry
+    from scripts.hub.runner import HubRunner
+
+    monkeypatch.setattr(inbox_wake, "connect", lambda: rig.reactor.store)
+    reactors = registry.configured(rig.bus, clock=lambda: rig.clock.now)
+    selected = [reactor for reactor in reactors if reactor.name in {"inbox-wake", "inbox-wake-expiry", "timers"}]
+    assert len(selected) == 3
+    assert all(reactor.singleton is True for reactor in selected)
+    hub = HubRunner(rig.bus, registry.Registry(selected), "hub-one", clock=lambda: rig.clock.now)
+    standby = HubRunner(rig.bus, registry.Registry(selected), "hub-two", clock=lambda: rig.clock.now)
+    rig.inbox.seats.occupy("eng-1@sw", "worker", at=1000)
+    item = rig.inbox.send("sender", "eng-1@sw", "wake through configured hub")
+    for _ in range(6):
+        hub.run_once(timeout_ms=0)
+    assert steps(rig, item) == ["woken"]
+    assert standby.run_once(timeout_ms=0) == {
+        "timers": ["standby"],
+        "inbox-wake": ["standby"],
+        "inbox-wake-expiry": ["standby"],
+    }
+    rig.clock.now += W
+    for _ in range(6):
+        hub.run_once(timeout_ms=0)
+    assert steps(rig, item) == ["woken", "woken"]
+
+
+def test_default_hub_ledger_uses_service_identity_and_stable_timer_namespace(rig):
+    from scripts.hub.inbox_wake import InboxWake
+
+    default = InboxWake(rig.bus)
+    assert default.ledger.service is True
+    item, _ = send(rig)
+    key = rig.reactor._key("sw", item.id)
+    stored = rig.bus.state("inbox-wake").get(key)
+    assert stored is not None
+
+
+def test_outbox_retry_preserves_every_message_field_and_resolves_the_actual_recipient(rig, monkeypatch):
+    from scripts.swarm.naming import NameRegistry
+
+    monkeypatch.setattr(NameRegistry, "slug_of", lambda self, name: "sw" if name == "worker" else "")
+    item = rig.inbox.send("sender", "worker", "preserve payload", ref="ledger:1", fyi=True, task="task42")
+    rig.reactor.flush()
+    [delivery] = rig.bus.events.consumer("payload-proof", "swarm.sw.inbox.*").fetch(10, 0)
+    assert delivery.event.data == {
+        "id": item.id,
+        "sender": "sender",
+        "text": "preserve payload",
+        "ref": "ledger:1",
+        "fyi": True,
+        "task": "task42",
+    }
+
+
+def test_outbox_retry_is_bounded_to_thirty_two_messages_per_pass(rig):
+    for number in range(33):
+        rig.inbox.send("sender", "eng-1@sw", f"request {number}")
+    rig.reactor.flush()
+    assert rig.inbox.redis.scard(rig.inbox.key("wake-outbox")) == 1
+    rig.reactor.flush()
+    assert rig.inbox.redis.scard(rig.inbox.key("wake-outbox")) == 0
+
+
+def test_outbox_keeps_an_invalid_swarm_address_for_a_later_repair(rig):
+    item = rig.inbox.send("sender", "eng-1@sw.part@elsewhere", "invalid swarm address")
+    with pytest.raises(ValueError, match="invalid event subject token"):
+        rig.reactor.flush()
+    assert rig.inbox.redis.smembers(rig.inbox.key("wake-outbox")) == {item.id}
+
+
+@pytest.mark.parametrize("state", ["read", "confirmed", "done", "fyi"])
+def test_settled_or_information_items_cancel_their_timer(rig, state):
+    item = rig.inbox.send("sender", "worker", "request", fyi=state == "fyi")
+    SeatInbox(rig.bus, "sw").send(item.address, Message(item.id, item.sender, item.text, fyi=item.fyi))
+    pump(rig)
+    if state == "read":
+        rig.inbox.read(item.id, "worker")
+    elif state == "confirmed":
+        rig.inbox.deliver(item.id, "worker")
+        rig.inbox.confirm(item.id, "worker")
+    elif state == "done":
+        rig.inbox.close(item.id, "worker", "done", "handled")
+    advance(rig, 1000)
+    [cancelled] = rig.bus.events.consumer("cancel-proof", "swarm.*.deadline.cancelled").fetch(10, 0)
+    assert cancelled.event.data["entity"] == "inbox-wake"
+    assert rig.herdr.prompts == []
+    assert rig.ledger.followups == []
+
+
+def test_a_missing_message_cancels_cleanly(rig):
+    SeatInbox(rig.bus, "sw").send("worker", Message("missing", "sender", "request"))
+    pump(rig)
+    advance(rig, 1000)
+    [cancelled] = rig.bus.events.consumer("missing-proof", "swarm.*.deadline.cancelled").fetch(10, 0)
+    assert cancelled.event.data["key"] == "missing"
+    assert rig.herdr.prompts == []
+
+
+def test_operator_escalation_cancels_the_timer_with_a_stable_target(rig):
+    item, _ = send(rig, "boss")
+    [original] = rig.bus.events.consumer("original-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
+    advance(rig, 1000 + W)
+    [cancelled] = rig.bus.events.consumer("completed-proof", "swarm.*.deadline.cancelled").fetch(10, 0)
+    assert cancelled.event.key == original.event.key
+    assert cancelled.event.data == {"kind": "inbox", "entity": "inbox-wake", "key": item.id, "deadline_ms": None}
+
+
+def test_unknown_expiry_cause_or_version_cannot_advance_a_message(rig):
+    from scripts.events import deadlines
+
+    item, _ = send(rig)
+    [request] = rig.bus.events.consumer("fence-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
+    forged = replace(deadlines.expired(request.event), id="forged", cause="wrong", version=99)
+    rig.reactor.handle(forged)
+    assert steps(rig, item) == []
+    assert rig.herdr.prompts == []
+
+
+@pytest.mark.parametrize("redelivery", ["1", "1000"])
+def test_redelivery_window_uses_the_reactors_environment(rig, redelivery):
+    rig.reactor.environ = {"AGENTIHOOKS_INBOX_REDELIVER_S": redelivery}
+    item, _ = send(rig)
+    rig.inbox.deliver(item.id, "worker")
+    advance(rig, 1000)
+    requests = rig.bus.events.consumer("redelivery-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
+    assert requests[-1].event.data["deadline_ms"] == (1000 + W if redelivery == "1" else 1_001_000)
+    advance(rig, 1000 + W)
+    assert rig.inbox.get(item.id).state == ("pending" if redelivery == "1" else "delivered")
+    if redelivery == "1":
+        pending = [row for row in rig.inbox.history(item.id) if row.get("reason", "").startswith("redelivered")]
+        assert len(pending) == 1
+        assert pending[0]["by"] == "inbox"
+        assert pending[0]["reason"] == "redelivered: never confirmed inside the redelivery window"
+
+
+def test_custom_quiet_window_protects_a_recent_operator_prompt(rig):
+    from scripts.swarm import idle
+
+    rig.reactor.environ = {"AGENTIHOOKS_INBOX_QUIET_S": "7"}
+    item, _ = send(rig)
+    idle.prompted(rig.inbox.redis, "sw", "worker", 999)
+    advance(rig, 1000)
+    assert rig.herdr.prompts == []
+    assert steps(rig, item) == []
+
+
+def test_finished_panes_are_not_woken(rig):
+    agents = rig.reactor.store.agents("sw")
+    rig.reactor.store.agents = lambda slug: [replace(agents[0], state="finished"), agents[1]]
+    item, _ = send(rig)
+    advance(rig, 1000)
+    assert rig.herdr.prompts == []
+    assert steps(rig, item) == []
+
+
+def test_partial_outage_keeps_the_remaining_window_instead_of_restarting_it(rig):
+    from scripts.swarm import outage
+
+    rig.herdr.status["p1"] = "working"
+    item, _ = send(rig)
+    outage.observe("sw", "provider", ["worker (codex): stream disconnected before completion"], 1100)
+    outage.observe("sw", "provider", [], 1100 + W)
+    advance(rig, 1000 + W + 100)
+    requests = rig.bus.events.consumer("remaining-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
+    assert requests[-1].event.data["deadline_ms"] == 1000 + 2 * W
+    advance(rig, 1000 + 2 * W)
+    assert steps(rig, item) == ["escalated_master"]
+
+
+def test_seat_binding_mid_window_uses_the_binding_clock(rig):
+    item, _ = send(rig, "eng-1@sw")
+    advance(rig, 1000)
+    rig.inbox.seats.occupy("eng-1@sw", "worker", at=1000 + W // 2)
+    rig.herdr.status["p1"] = "working"
+    advance(rig, 1000 + W)
+    requests = rig.bus.events.consumer("binding-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
+    assert requests[-1].event.data["deadline_ms"] == 1000 + W + W // 2
+    advance(rig, 1000 + W + W // 2)
+    assert steps(rig, item) == ["escalated_master"]
+
+
+def test_stopped_swarm_seat_mail_does_not_wait_for_an_unavailable_successor(rig):
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(rig.inbox.redis)
+    store.create(SwarmConfig("sw", "/repo", state="stopped"))
+    rig.reactor.store = store
+    item, _ = send(rig, "eng-1@sw")
+    advance(rig, 1000)
+    advance(rig, 1000 + W)
+    assert rig.ledger.flagged == [True]
+
+
+def test_inbox_maintenance_keeps_redelivery_actions_from_each_world(rig, monkeypatch):
+    from types import SimpleNamespace
+
+    first = SimpleNamespace(pending=lambda: [], redeliver=lambda now, window: [SimpleNamespace(id="first")])
+    second = SimpleNamespace(pending=lambda: [], redeliver=lambda now, window: [SimpleNamespace(id="second")])
+    monkeypatch.setattr(rig.inbox, "worlds", lambda: [first, second])
+    monkeypatch.setattr(wake.addresses, "settle_unresolved", lambda *args: [])
+    assert wake.maintenance(rig.inbox, "sw", [], 1000, W) == [
+        "redelivered message first",
+        "redelivered message second",
+    ]
+
+
+def test_non_inbox_deadlines_and_wrong_arrival_entities_are_ignored(rig):
+    from scripts.events import deadlines
+
+    item, _ = send(rig)
+    [arrival] = rig.bus.events.consumer("wrong-arrival-proof", "swarm.*.inbox-wake.requested").fetch(10, 0)
+    [request] = rig.bus.events.consumer("wrong-kind-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
+    before = len(rig.bus.events.entries)
+    rig.reactor.handle(replace(arrival.event, entity="other", key="other-item"))
+    rig.reactor.handle(replace(arrival.event, type="execution.changed", key="another-item"))
+    expired = deadlines.expired(request.event)
+    rig.reactor.handle(replace(expired, data={**expired.data, "kind": "idle"}))
+    assert len(rig.bus.events.entries) == before
+    assert steps(rig, item) == []
