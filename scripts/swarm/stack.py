@@ -161,9 +161,13 @@ def https_url(url: str) -> str:
     return f"https://{host}/{path}" if host and path else ""
 
 
-def _over_https(git: list[str], first, url: str, refspec: str, refused: str) -> None:
-    error = first.stderr.strip()
-    https = https_url(url) if any(mark in error for mark in SSH_UNVERIFIED) else ""
+def _over_https(git: list[str], error: str, url_of, refspec: str, refused: str) -> None:
+    if not any(mark in error for mark in SSH_UNVERIFIED):
+        raise SwarmError(f"{refused}: {error}")
+    try:
+        https = https_url(url_of())
+    except SwarmError as exc:
+        raise SwarmError(f"{refused}: {error}; {exc}") from exc
     if not https:
         raise SwarmError(f"{refused}: {error}")
     try:
@@ -177,15 +181,18 @@ def _over_https(git: list[str], first, url: str, refspec: str, refused: str) -> 
 def _fetch_origin(git: list[str], branch: str, refused: str) -> None:
     first = shell([*git, "fetch", "origin", *([branch] if branch else [])])
     if first.returncode != 0:
-        url = shell([*git, "remote", "get-url", "origin"]).stdout.strip()
         refspec = f"+refs/heads/{branch or '*'}:refs/remotes/origin/{branch or '*'}"
-        _over_https(git, first, url, refspec, refused)
+        _over_https(git, first.stderr.strip(), lambda: _origin_url(git), refspec, refused)
+
+
+def _origin_url(git: list[str]) -> str:
+    return shell([*git, "remote", "get-url", "origin"]).stdout.strip()
 
 
 def _fetch_url(url: str, branch: str, refused: str) -> None:
     first = shell(["git", "fetch", "--", url, branch])
     if first.returncode != 0:
-        _over_https(["git"], first, url, branch, refused)
+        _over_https(["git"], first.stderr.strip(), lambda: url, branch, refused)
 
 
 def _fetch_foreign(dep, branch):

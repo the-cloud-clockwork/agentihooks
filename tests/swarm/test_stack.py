@@ -730,6 +730,21 @@ def test_park_names_the_ssh_error_when_the_https_retry_cannot_run(parked, monkey
     assert "parked_on" not in ledger.rows["t1"]
 
 
+def test_park_names_the_ssh_error_when_the_origin_url_cannot_be_read(parked, monkeypatch, capsys):
+    _, ledger, _, shell, doc = parked
+    inner = _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]])
+
+    def answer(argv):
+        if argv == ["git", "remote", "get-url", "origin"]:
+            raise SwarmError("git remote could not run: timed out")
+        return inner(argv)
+
+    monkeypatch.setattr(stack, "shell", answer)
+    assert park(doc) == 1
+    assert capsys.readouterr().err == f"swarm: cannot fetch eng-a: {UNVERIFIED}; git remote could not run: timed out\n"
+    assert [c for c in shell.calls if c[:2] == PROMPTLESS] == []
+
+
 def test_park_never_retries_over_https_when_the_ssh_failure_is_not_verification(parked, capsys):
     _, ledger, _, shell, doc = parked
     ledger.rows["a"]["branch_repo"] = "git@github.com:O/bundle.git"
