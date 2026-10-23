@@ -224,6 +224,47 @@ def test_a_successful_launch_restarts_the_clock(stalled):
     assert len(alarms(stalled)) == 1
 
 
+def test_a_failure_from_before_the_stall_is_not_named_as_its_cause(stalled):
+    store, ledger, runtime, clock, _ = stalled
+    tick_failure(stalled)
+    stored = store.redis.get(store.key("sw", "tick-failure"))
+    assert '"at": 10000000' in stored
+    clock[0] += 1
+    store.record_launch("sw", AgentRecord("finished", "eng", "t1", started_at=clock[0]), "started")
+    for _ in range(2):
+        with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
+            pass
+        clock[0] += 600_000
+    (finding,) = spawn_stall.findings(store, "sw")
+    assert finding.evidence == ("A lane has a free seat, quota and claimable work",)
+    tick_failure(stalled)
+    (finding,) = spawn_stall.findings(store, "sw")
+    assert finding.evidence[-1].startswith("Last failed step ")
+
+
+def test_a_failure_recorded_at_the_start_of_the_stall_is_named(stalled):
+    store, _, _, clock, _ = stalled
+    tick_failure(stalled)
+    clock[0] += 600_000
+    with spawn_stall.watch(store, "sw", stalled[1], lambda: clock[0], stalled[2]):
+        pass
+    (finding,) = spawn_stall.findings(store, "sw")
+    assert finding.evidence[-1] == (
+        "Last failed step tests.swarm.test_spawn_stall.stalled.<locals>.broken: RuntimeError: forced phase failure"
+    )
+
+
+def test_a_stored_failure_without_a_time_is_not_named(stalled):
+    store, ledger, runtime, clock, _ = stalled
+    for _ in range(2):
+        with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
+            pass
+        store.redis.set(store.key("sw", "tick-failure"), '{"step": "old", "error": "RuntimeError: old"}')
+        clock[0] += 600_000
+    (finding,) = spawn_stall.findings(store, "sw")
+    assert finding.evidence == ("A lane has a free seat, quota and claimable work",)
+
+
 def test_failure_callback_is_restored_and_outer_steps_preserve_the_cause(stalled):
     from scripts.swarm import timing
 
