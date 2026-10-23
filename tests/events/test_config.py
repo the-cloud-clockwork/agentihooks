@@ -39,6 +39,16 @@ def test_queue_policy_refuses_a_backoff_longer_than_its_deliveries():
         QueuePolicy(max_deliver=2, backoff_ms=(0, 0, 0))
 
 
+def test_queue_policy_keeps_an_inactive_threshold_only_when_given():
+    assert (QueuePolicy().inactive_ms, QueuePolicy(inactive_ms=1).inactive_ms) == (None, 1)
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "1"])
+def test_queue_policy_refuses_an_inactive_threshold_not_a_positive_integer(value):
+    with pytest.raises(ValueError, match=r"^queue inactive threshold must be a positive integer$"):
+        QueuePolicy(inactive_ms=value)
+
+
 def test_bus_config_defaults():
     bus = BusConfig()
     assert (bus.backend, bus.url, bus.dedupe_window_ms, bus.queue) == ("memory", None, 120_000, QueuePolicy())

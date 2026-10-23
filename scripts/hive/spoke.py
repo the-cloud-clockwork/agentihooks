@@ -218,7 +218,14 @@ class Spoke:
             return None
         intent = json.dumps({"state": "launching", "owner": self.config.hive, "name": request.name}).encode()
         revision = claims.update(key, intent, revision)
-        request = replace(request, task={**request.task, "claim_fence": {"key": key, "revision": revision}})
+        request = replace(
+            request,
+            task={
+                **request.task,
+                "claim_fence": {"key": key, "revision": revision},
+                "account_slot_hive": self.config.hive,
+            },
+        )
         execution_events.prepare(self.bus, event.swarm, request.name, generation)
         outcome = self.runtime.spawn(request)
         if not outcome.ok:

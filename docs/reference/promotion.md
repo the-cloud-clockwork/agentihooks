@@ -16,7 +16,9 @@ The `promote` job in `.github/workflows/test.yml` is the last job of a `dev` pus
 |---|---|
 | The event is `push` and the ref is `refs/heads/dev` | job `if` in `test.yml`, repeated in `promote.yml` and `promote.cjs` |
 | `Gate — Required` succeeded | `needs.gate-required.result == 'success'` |
-| No dependency failed or was cancelled | `gate-required`, `refresh-durations`, `coverage-baseline` and `flake-budget`; `!contains(needs.*.result, 'failure')` and `'cancelled'` |
+| Hierarchy CPU proof succeeded | `needs.hierarchy-cpu.result == 'success'`; see [Hierarchy CPU proof at promotion](delivery-tiers.md#hierarchy-cpu-proof-at-promotion) |
+| Sonar produced an analysis | `needs.sonar.outputs.analysis != ''` |
+| No dependency failed or was cancelled | `gate-required`, `refresh-durations`, `coverage-baseline`, `flake-budget`, `sonar` and `hierarchy-cpu`; `!contains(needs.*.result, 'failure')` and `'cancelled'` |
 | The run was not cancelled | `!cancelled()` |
 
 Pull request and merge queue runs never promote. A dispatched Tests run never promotes.
