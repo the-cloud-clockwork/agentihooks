@@ -269,6 +269,25 @@ def test_scoped_event_consumers_dead_letter_within_their_own_swarm(hub, signer):
         client.close()
 
 
+def test_a_scoped_member_reaches_the_hub_slot_service_only_through_its_own_swarm(hub, signer):
+    from scripts.hive import account_slots
+    from scripts.hub import slots
+
+    slots.serve(hub, clock=lambda: 1000)
+    report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+    client = member(signer)
+    try:
+        own = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig"), "m1", lambda: report)
+        assert own.take("one", "claude") == "a"
+        foreign = account_slots.Remote(account_slots.asker(client, "other", 500), "m1", lambda: report)
+        with pytest.raises(TimeoutError, match="^no responders for 'swarm.other.slots'$"):
+            foreign.take("two", "claude")
+        own.release("one", "claude", "a")
+        assert own.take("two", "claude") == "a"
+    finally:
+        client.close()
+
+
 def test_scoped_members_share_only_the_two_approved_account_slot_buckets(hub, signer):
     from scripts.hive import account_slots
 

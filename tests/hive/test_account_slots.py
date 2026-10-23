@@ -4,6 +4,7 @@ import pytest
 
 from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
+from scripts.hub import slots
 
 
 def reading(cap=1, sessions=0):
@@ -22,6 +23,7 @@ def rig():
     report = [reading()]
     first = account_slots.Slots(bus, "one", lambda: report[0], lambda: now[0])
     second = account_slots.Slots(bus, "two", lambda: reading(), lambda: now[0])
+    slots.serve(bus, clock=lambda: now[0])
     yield first, second, now, report, bus
     bus.close()
 
@@ -414,8 +416,6 @@ def test_published_exit_uses_the_current_hive_and_real_execution_report(rig, mon
 
     first, second, now, _, bus = rig
     assert first.take("one", "claude") == "a"
-    original = account_slots.Slots
-    monkeypatch.setattr(account_slots, "Slots", lambda bus, hive, read: original(bus, hive, read, lambda: now[0]))
     monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig(backend="nats"))
     closed = []
 

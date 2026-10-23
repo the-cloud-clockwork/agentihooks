@@ -243,9 +243,10 @@ def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_dur
     assert f"permissions violation for publish to {durable}" in refused
 
 
-def test_hive_members_bind_hub_provisioned_account_slots_and_share_capacity(admin, signer):
+def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin, signer):
     from scripts.events import nats
     from scripts.hive import account_slots, buckets
+    from scripts.hub import slots
 
     hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
     members = [
@@ -256,9 +257,10 @@ def test_hive_members_bind_hub_provisioned_account_slots_and_share_capacity(admi
     ]
     try:
         buckets.provision(hub)
+        slots.serve(hub, clock=lambda: 1000)
         report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
-        first = account_slots.Slots(members[0], "m1", lambda: report, lambda: 1000)
-        second = account_slots.Slots(members[1], "m2", lambda: report, lambda: 1000)
+        first = account_slots.Remote(account_slots.asker(members[0], "rig"), "m1", lambda: report)
+        second = account_slots.Remote(account_slots.asker(members[1], "other"), "m2", lambda: report)
         assert first.take("one", "claude") == "a"
         assert second.take("two", "claude") is None
         first.release("one", "claude", "a")
@@ -267,6 +269,16 @@ def test_hive_members_bind_hub_provisioned_account_slots_and_share_capacity(admi
         for member in members:
             member.close()
         hub.close()
+
+
+@pytest.mark.parametrize("bucket", ["account-slots", "hive-slot-accounts"])
+def test_a_member_credential_cannot_read_the_hub_owned_account_buckets(signer, bucket):
+    async def act(nc):
+        await nc.publish(f"$JS.API.STREAM.INFO.KV_{bucket}", b"")
+        await nc.publish(f"$KV.{bucket}.key", b"")
+
+    seen = " ".join(_violations(signer, nats_grant.mint(signer, "m1"), act, refused=True)).lower()
+    assert f'permissions violation for publish to "$js.api.stream.info.kv_{bucket}"' in seen
 
 
 def test_a_hive_endpoint_without_a_signer_mints_no_bus_credential(admin):
@@ -635,11 +647,10 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         "hive-presence",
         "hive-executions",
         "execution-starts",
-        "account-slots",
-        "hive-slot-accounts",
     )
     publish = [
         "swarm.*.execution.>",
+        "swarm.*.slots",
         "dead.*",
         "dead.*.*",
         "$JS.API.INFO",

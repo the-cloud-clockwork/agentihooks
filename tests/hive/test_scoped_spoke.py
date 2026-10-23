@@ -60,9 +60,11 @@ def test_scoped_join_grant_enables_the_scoped_client_layout(admin, signer):
     configured = replace(signer, member_swarms={member["id"]: ("rig",)})
     grant = _refresh(admin, configured, member["ledger_credential"])
     assert grant["bus_scoped"] is True
+    assert grant["bus_swarms"] == ["rig"]
     text = auth.env_text(
         "https://hive",
         {**grant, "ledger_credential": member["ledger_credential"], "bus_credentials": "/member/bus.creds"},
     )
     assert "AGENTIHOOKS_BUS_SCOPED=1" in text.splitlines()
+    assert "AGENTIHOOKS_BUS_SWARMS=rig" in text.splitlines()
     assert "AGENTIHOOKS_BUS_CREDENTIALS=/member/bus.creds" in text.splitlines()
