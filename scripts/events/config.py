@@ -12,6 +12,7 @@ BIND_ENV = "AGENTIHOOKS_BUS_BIND"
 SCOPED_ENV = "AGENTIHOOKS_BUS_SCOPED"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
+INLINE_CREDENTIALS = "-----BEGIN NATS USER JWT-----"
 DEFAULT_BACKEND = "memory"
 SHARED_SLOT_BUCKETS = ("account-slots", "hive-slot-accounts")
 SCOPED_STATE_BUCKETS = (
@@ -84,6 +85,8 @@ def credentials_from(environ: Mapping[str, str]) -> str | None:
     reference = environ.get(CREDENTIALS_ENV)
     if not reference:
         return None
+    if reference.startswith(INLINE_CREDENTIALS):
+        return reference
     if not reference.startswith(OPENBAO_SCHEME):
         return Path(reference).read_text()
     from scripts import openbao_kv

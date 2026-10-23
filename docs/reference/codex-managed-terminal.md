@@ -588,6 +588,130 @@ arrived later in [pull request
 tests use fixture panes and folders; no live retirement of a herdr viewer is
 cited here.
 
+## Reclaim orphan execution homes
+
+Retirement and the reclaim a launch runs first both start from a transport
+binding: a home that no binding names is never removed by them. Such homes
+stay behind when a binding was lost or predates the current layout, for
+example homes created in the user runtime folder before the runtime root
+moved to `$HOME/.agentihooks/cx`. Each holds a full Codex home with its
+plugin cache, so on the runtime folder's tmpfs they fill it. The lifecycle
+sweep reclaims every execution home that no live process owns, whether or not
+a binding names it.
+
+### Where the sweep looks
+
+The sweep reads two roots, in this order:
+
+| Root | Origin |
+|---|---|
+| `$XDG_RUNTIME_DIR/cx`, else `/run/user/<uid>/cx` | The runtime folder older launches used, a tmpfs on most hosts. |
+| `$HOME/.agentihooks/cx` | The current runtime root (`runtime_root`), where every new execution folder is created. |
+
+Every directory directly inside a root is a candidate, whatever its name. A
+root that is missing, is a symbolic link or cannot be listed is skipped and
+the other root is still swept. Symbolic links and plain files inside a root
+are skipped.
+
+New homes already live under `$HOME/.agentihooks/cx`, so their plugin caches
+sit on disk wherever `$HOME` is not itself a tmpfs. Only homes left in the
+older runtime root occupy the tmpfs, and the sweep removes them once they are
+orphans.
+
+### Owned homes are never touched
+
+A home is owned, and kept, when any of these holds at the sweep's process
+snapshot:
+
+- A live process has its working folder inside the home.
+- A live process has an argument containing a path inside the home, such as
+  a viewer started with `codex resume --remote unix://<home>/s`.
+- A live process has an open file inside the home.
+- The home's server socket `<home>/s` accepts a connection within one second.
+  A socket file left by a server that has exited refuses the connection and
+  does not keep the home.
+
+The process checks come first, from the snapshot; a process whose open files
+cannot be read is skipped and the others are still checked. A home counts as
+"inside" a reference when the reference contains the home's path followed by
+`/`.
+
+A home that is not owned is still kept while anything in it changed in the
+last ten minutes (`SETTLE_S`, 600 seconds), judged by the newest modification
+time anywhere in its tree. A launch copies the home before its server starts,
+so a new home has no owner for a moment.
+
+### Removal and transcripts
+
+`agentihooks gc` reports orphan homes as `would remove` and leaves them.
+`agentihooks gc --enforce`, which the hourly `agentihooks-gc` cron runs,
+removes them on the first sweep that finds them; the two sweep confirmation
+that other lifecycle findings wait for does not apply here. Removal uses the
+same step as retirement: rollouts under the home's `sessions` and
+`archived_sessions` folders are appended to the canonical Codex home first,
+under the rules in step 3 of [Retire a managed
+execution](#retire-a-managed-execution), then the execution folder is deleted.
+The sweep then checks that the folder is gone.
+
+Each removed home is appended as one JSON line to
+`~/.agentihooks/gc-codex-homes.jsonl` (the AgentiHooks home), the only lasting
+record of what was removed: `gc-last.json` is overwritten by the next sweep.
+
+### Read the report
+
+```bash
+agentihooks gc --json | jq '.codex_homes'                      # every orphan home this sweep found
+agentihooks gc --json --path ~/.agentihooks/cx | jq '.codex_homes'
+jq '.codex_homes' ~/.agentihooks/gc-last.json                  # latest sweep, hourly cron included
+jq -s '{homes: length, bytes: (map(.bytes) | add)}' ~/.agentihooks/gc-codex-homes.jsonl
+```
+
+The text output of `agentihooks gc` prints no line for Codex homes; read them
+from the JSON report. `--path` limits the sweep to homes under that path. Owned
+homes and homes inside the ten minute window do not appear. Each entry is one
+of:
+
+```json
+{"path": "/run/user/1000/cx/69aede3172ac4d86", "bytes": 131362816, "action": "would remove"}
+{"path": "/run/user/1000/cx/69aede3172ac4d86", "bytes": 131362816, "action": "removed"}
+{"path": "/home/me/.agentihooks/cx/a1b2c3d4e5f60718", "action": "error", "error": "home still present after removal"}
+```
+
+`bytes` is the space the home's files occupy on disk. A `removed` entry gains
+`log_error` when the line could not be written to `gc-codex-homes.jsonl`; the
+home is still removed. An error on one home is reported and the sweep goes on
+to the next. While another sweep holds the lifecycle lock, the report is
+`{"skipped": "another sweep is running"}` and no home is considered.
+
+### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| An orphan home never appears in `codex_homes` | Something still owns it or wrote to it in the last ten minutes. `pgrep -af <home>` lists processes whose arguments name it; `lsof +D <home>` lists open files and working folders inside it. A shell left in the folder or a hand opened viewer keeps the home until it exits. |
+| `action: error` with a TOML parse message | The home's `config.toml` is malformed, so the canonical Codex home for its rollouts cannot be read. The home is kept. Copy any rollouts under its `sessions` folder to `~/.codex/sessions` by hand, then fix or remove the file; the next sweep removes the home. |
+| `action: error` with `home still present after removal` | Deletion returned but the folder is still there, for example a process recreated files in it. The next sweep tries again. |
+| `action: error` with a permission message | The sweep's user cannot read or delete the folder. Fix the folder's owner or mode. |
+| `codex_homes` is missing and the report says `skipped` | Another sweep was running. Run `agentihooks gc --json` again once it ends. |
+| The runtime folder tmpfs is still full after an enforcing sweep | Read `codex_homes` for `error` entries and `df -h "$XDG_RUNTIME_DIR"` for other users of the folder. A home that is owned is kept by design. |
+
+### Evidence
+
+Delivered by [pull request
+5307](https://github.com/the-cloud-clockwork/agentihooks/pull/5307) ([issue
+5305](https://github.com/the-cloud-clockwork/agentihooks/issues/5305)), red on
+the test only head in [run
+39462556198](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39462556198)
+and green on the delivered head in [run
+39470242818](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39470242818).
+`tests/lifecycle/test_codex_homes.py` covers both roots, each ownership check,
+the ten minute window, transcript preservation, the removal log, scope and
+every error path. Before the fix, a dry run of the branch against the live
+runtime folder found eight orphan homes holding 986300416 bytes. On 23 October
+2026, `~/.agentihooks/gc-codex-homes.jsonl` on the workstation listed twelve
+removed homes, eight from `/run/user/1000/cx` and four from
+`~/.agentihooks/cx`, together 1514475520 bytes; `/run/user/1000/cx` no longer
+existed and the latest sweep's `codex_homes` was empty.
+
 See [Swarm inbox delivery](../pillars/swarm.md#delivered-then-confirmed) for
 receipt, redelivery and closure rules, and [Codex compatibility](CODEX-COMPAT.md)
 for the hook and profile contract.

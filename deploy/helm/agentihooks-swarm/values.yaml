@@ -20,6 +20,11 @@ hive:
     redisSecret:
       name: ""
       key: ""
+    # Secret with one key per field of the hub NATS signer record, and the operator public key NATS trusts:
+    # with both set the endpoint mints each refreshing member its own signed NATS credential.
+    natsSigner:
+      secretName: ""
+      trustedOperator: ""
     affinity: {}
     tolerations: []
     ingressFrom: []
@@ -211,6 +216,9 @@ hub:
   tolerations: []
   terminationGracePeriodSeconds: 30
   env: {}
+  # Secret keys as hub env, such as AGENTIHOOKS_BUS_CREDENTIALS for a NATS that signs its users:
+  # [{name, secretName, key, optional}].
+  secretEnv: []
   resources:
     requests:
       cpu: 50m
@@ -220,10 +228,7 @@ hub:
       memory: 512Mi
       ephemeral-storage: 256Mi
 
-# GitHub webhook receiver: publishes signed pull request and check suite deliveries on the hub bus. It runs
-# the chart image, so the image updater rolls it with each release. secretName holds
-# AGENTIHOOKS_GITHUB_WEBHOOK_SECRET and, unless hub.bus.url is set, AGENTIHOOKS_BUS_URL. The public route
-# stays outside this chart.
+# secretName must hold AGENTIHOOKS_GITHUB_WEBHOOK_SECRET and the receiver's own AGENTIHOOKS_BUS_URL.
 githubWebhook:
   enabled: false
   replicas: 1

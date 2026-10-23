@@ -223,7 +223,8 @@ def tick(slug, store, ledger, runtime, now_ms):
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    actions += skip_refused(_orphans, slug, store, ledger, rows)
+    if config.engine != EVENTS_ENGINE:
+        actions += skip_refused(_orphans, slug, store, ledger, rows)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
@@ -356,11 +357,11 @@ def _drop(slug, store, ledger, rows, agent, refund=False):
     held = held and not awaiting_merge(rows[agent.task])
     expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}
     refund = refund and held and store.claims(slug, agent.task) > 0
-    refund = refund and _still_held(ledger.task(slug, agent.task), expected)
+    generation = store.claim_generation(slug, agent.task)
+    if refund and _still_held(ledger.task(slug, agent.task), expected):
+        store.refund_held_claim(slug, agent.task, agent.name, generation)
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
-    if refund:
-        store.refund_claim(slug, agent.task)
     reopen = held and _reopen(slug, ledger, rows, agent.task, expected)
     exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
     return f", task {agent.task} reopened" if reopen else ""
@@ -1210,25 +1211,33 @@ def _expire_launch(config, runtime, agent, error):
     return error if kept is False else SpawnError(ACK_EXPIRED)
 
 
+def _finished_launch(slug, store, doc, agent):
+    _release_hive_launch(slug, store, agent)
+    store.count_claim(slug, agent.task)
+    store.count_spawn(slug, agent.harness)
+    store.record_launch(
+        slug, agent, "started", after=store.take_restart(slug, agent.task) or _master_set(doc, agent.task)
+    )
+    store.redis.hdel(store.key(slug, "launch-assignments"), agent.task)
+    return f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement"
+
+
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
+    if config.engine == EVENTS_ENGINE:
+        return []
     from scripts.swarm_v2.runtime import codex
 
     rows, actions = {t["id"]: t for t in doc["tasks"]}, []
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
         if agent.state == "finished" and task.get("state") == "done":
-            _release_hive_launch(slug, store, agent)
-            store.count_claim(slug, agent.task)
-            store.count_spawn(slug, agent.harness)
-            store.record_launch(
-                slug, agent, "started", after=store.take_restart(slug, agent.task) or _master_set(doc, agent.task)
-            )
-            actions.append(f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement")
+            actions.append(_finished_launch(slug, store, doc, agent))
             continue
         try:
-            placed = runtime.collect(
-                config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True}
-            )
+            placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})
+            if agent.state == "finished" and task.get("state") == "blocked":
+                actions.append(_finished_launch(slug, store, doc, agent))
+                continue
             launched = codex.admit_legacy(store, slug, placed_record(agent, placed), runtime)
         except Exception as exc:
             error = exc

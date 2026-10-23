@@ -225,6 +225,134 @@ def test_a_refunded_claim_gives_back_one_started_life(store):
     assert (store.refund_claim("smoke", "t2"), store.claims("smoke", "t2")) == (0, 0)
 
 
+def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generation_match(store):
+    store.record_launch("smoke", AgentRecord("first", "eng", "t1"), "started")
+    store.record_launch("smoke", AgentRecord("second", "eng", "t1"), "started")
+    store.claim("smoke", "t1", "second", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+
+    assert store.refund_held_claim("smoke", "t1", "first", generation) is False
+    assert store.refund_held_claim("smoke", "t1", "second", generation + 1) is False
+    assert store.claims("smoke", "t1") == 2
+    assert store.refund_held_claim("smoke", "t1", "second", generation) is True
+    assert store.claims("smoke", "t1") == 1
+    assert store.claimant("smoke", "t1") == "second"
+
+
+def test_a_held_claim_refund_reads_a_missing_generation_as_zero(store):
+    store.count_claim("smoke", "t1")
+    store.redis.set(store.key("smoke", "claim", "t1"), "agent")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", 1) is False
+    assert store.refund_held_claim("smoke", "t1", "agent", 0) is True
+    assert store.claims("smoke", "t1") == 0
+
+
+def test_a_held_claim_refund_refuses_after_the_hub_released_the_claim(store):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.release("smoke", "t1", "agent")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 1
+
+
+def test_a_held_claim_refund_refuses_after_the_same_claimant_claimed_again(store):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.release("smoke", "t1", "agent")
+    store.claim("smoke", "t1", "agent", 60_000)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 1
+
+
+@pytest.mark.parametrize(
+    ("moved_key", "move", "lives"),
+    [
+        ("claim", lambda redis, key: redis.set(key, "other"), 1),
+        ("claim", lambda redis, key: redis.incr(f"{key}:generation"), 1),
+        ("started-lives", lambda redis, key: redis.hset(key, "t1", 5), 5),
+        ("task-authority", lambda redis, key: redis.set(key, "hub"), 1),
+        ("claim-journal", lambda redis, key: redis.set(key, "hub"), 1),
+    ],
+)
+def test_a_held_claim_refund_refuses_when_a_watched_key_moves_during_the_watch(
+    store, monkeypatch, moved_key, move, lives
+):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    started = store._started_lives
+    key = store.key("smoke", moved_key) if moved_key == "started-lives" else store.key("smoke", moved_key, "t1")
+
+    def moved(slug, task):
+        move(store.redis, key)
+        return started(slug, task)
+
+    monkeypatch.setattr(store, "_started_lives", moved)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == lives
+
+
+@pytest.mark.parametrize("guard", ["task-authority", "claim-journal"])
+def test_a_held_claim_refund_refuses_while_a_claim_guard_is_set(store, guard):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.redis.set(store.key("smoke", guard, "t1"), "hub")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 1
+
+
+def test_a_held_claim_refund_refuses_when_no_started_life_is_left(store):
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.redis.hset(store.key("smoke", "started-lives"), "t1", 0)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.redis.hget(store.key("smoke", "started-lives"), "t1") == "0"
+
+
+def test_a_held_claim_refund_retries_after_another_task_moved_the_lives_hash(store, monkeypatch):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    started, calls = store._started_lives, []
+
+    def moved(slug, task):
+        calls.append(task)
+        if len(calls) == 1:
+            store.redis.hincrby(store.key("smoke", "started-lives"), "t2", 1)
+        return started(slug, task)
+
+    monkeypatch.setattr(store, "_started_lives", moved)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is True
+    assert (len(calls), store.claims("smoke", "t1"), store.claims("smoke", "t2")) == (2, 0, 1)
+
+
+def test_a_held_claim_refund_gives_up_after_three_watch_conflicts(store, monkeypatch):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    started, calls = store._started_lives, []
+
+    def moved(slug, task):
+        calls.append(task)
+        store.redis.hincrby(store.key("smoke", "started-lives"), "t2", 1)
+        return started(slug, task)
+
+    monkeypatch.setattr(store, "_started_lives", moved)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert (len(calls), store.claims("smoke", "t1")) == (3, 1)
+
+
 def test_launch_rows_merge_recorded_launches_with_verified_history(store):
     history, validated = store.key("smoke", "history"), {"validation": {"state": "validated"}}
     store.redis.rpush(

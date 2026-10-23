@@ -29,6 +29,64 @@ tasks of one swarm ledger (`agentihooks ledger`), and every task belongs to a la
 Agents run on [hives](hives.md), the machines joined to the swarm; [Deployment modes](../reference/deployment-modes.md)
 says where the controller, ledger and Redis run.
 
+## Event driven engine
+
+Each swarm runs one of two engines, chosen by its `engine` setting:
+
+| Engine | Who starts lane agents |
+|---|---|
+| `legacy` (default) | The minute tick spawns, reaps and acknowledges agents itself. |
+| `events` | The hub offers ready tasks on the NATS JetStream bus and hives pull them. |
+
+```bash
+agentihooks swarm <slug> set engine=events
+agentihooks swarm <slug> set engine=legacy   # switch back
+```
+
+Swarms created before the setting existed read as `legacy`. Any other value is refused.
+
+### The life of a task
+
+1. **Ledger write.** Every task and phase change goes through the ledger outbox, which relays it within a second as a
+   `task.changed`, `task.removed`, `phase.changed` or `phase.removed` event on `swarm.<slug>.task.<id>` or
+   `swarm.<slug>.phase.<id>`. All events live in the `AGENTIHOOKS_EVENTS` stream. Each time `claimed_by` changes, the
+   task's `claim_generation` goes up by one.
+2. **Offer.** The hub's `readiness` reactor offers each claimable task of an `events` swarm on every pass. The
+   offer is a `task.ready` event, with id `ready:<slug>:<task>:<generation>`, on the lane work queue
+   `swarm.<slug>.ready.<lane>`. The bus drops a repeat of the same id that arrives within 120 seconds, so a task
+   nobody claims is offered again after that window. Each work queue is its own
+   stream on `agentihooks.queue.<name>`.
+3. **Pull.** A hive's spoke takes an offer only when it has room. Before it acts, it checks the offer against a fresh
+   ledger read. It terminates an offer that is stale: the task is gone, claimed, no longer open, on a different
+   generation or lane, or held.
+4. **Claim and launch.** The spoke records its claim in the hive buckets and launches the agent. It publishes
+   `execution.started` with the claim, the task generation, the hive and the pane, then acknowledges the offer.
+5. **Lease.** The claim has no timer of its own. It holds for as long as the hive's presence keeps beating. When the
+   presence expires, the hub treats the hive as lost and ends the claim.
+6. **Redelivery.**
+   - An offer that is not acknowledged within 30 seconds comes back, up to 5 deliveries.
+   - A claim conflict, or another live hive holding the claim, sends the offer back for later.
+   - After the last delivery the spoke writes a `dead_lettered` event to `AGENTIHOOKS_DEAD` and reopens the task.
+7. **Exit.** When the agent ends, `execution.exited` reaches the hub's `lifecycle` reactor. Only for the claim and
+   generation it started, it releases the slot and the claim, then settles the task: `done`, or back to `open` with no
+   claimant.
+8. **Reopen.** A reopen clears the claimant, which raises the claim generation. The next offer and claim therefore
+   carry new ids, and nothing from the old generation can block them.
+
+When a hive disappears its agents end as if they had exited; see
+[Pulling work from the hub](hives.md#pulling-work-from-the-hub).
+
+### What the minute tick still does
+
+For an `events` swarm the tick spawns no lane agent, reaps no lane agent, runs no orphan pass and collects no
+acknowledgement: those moved to the hub and the hives. It still runs master failover and recovery, pane evidence,
+exits, verification, the dispatcher, the lane split, master scaling and the promotion and release watches for both
+engines. Master agents are reaped by the tick under either engine.
+
+The hub offers eng, ci and plan tasks, and the spoke code is the same for every lane. With
+`AGENTIHOOKS_DEPLOYMENT=distributed`, a workstation runs the master lane spoke with `agentihooks swarm spoke`. That
+spoke launches only master offers that carry an execution identity.
+
 ## Agent names
 
 Run `agentihooks swarm rename` to rename every live registered swarm's agents and spaces, or
@@ -3525,6 +3583,69 @@ The ending outcome is one line, used in the tick action line and the inbox notic
 
 `tests/swarm/test_waits.py` pins the rule: `test_a_queued_required_check_holds_the_wait_after_the_gate_passed` holds the wait for a queued, pending, expected and cancelled required check beside a passed gate; `test_a_result_read_from_an_older_commit_never_ends_the_wait` holds it for a reading whose newest commit is not the head; `test_a_green_wait_holds_until_the_branch_rules_confirm_every_required_check` and `test_a_red_wait_ends_without_asking_the_branch_rules` cover the confirmation. `tests/swarm/test_ready.py::test_the_merge_pass_queues_only_once_a_fresh_read_confirms_green` covers the merge pass. The behavior was delivered in [pull request 4114](https://github.com/the-cloud-clockwork/agentihooks/pull/4114); its tests failed first in [run 39043964843](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39043964843).
 
+### Stop gates and a declared wait
+
+Two Stop gates run when an eng or ci agent holding a claimed task ends its turn. The `claim-stop` gate refuses the stop while the task owes work: a merged pull request not yet closed with `done`, failed checks with nothing pushed, a green pull request not merged, or a claim with no pull request and no wait. The `push-stop` gate pushes the task branch and refuses the stop over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Each gate's mode is set with `agentihooks swarm <id> set claim-stop-gate=...` or `push-stop-gate=...`, as the gate table under [Commands](#commands) lists.
+
+A live checked wait changes what each gate grades. Declare it before the turn ends:
+
+```bash
+# a prerequisite pull request this task depends on
+agentihooks swarm <id> wait --on checks https://github.com/<owner>/<repo>/pull/<other>
+# a workflow run, such as a dispatched proof run
+agentihooks swarm <id> wait --on checks https://github.com/<owner>/<repo>/actions/runs/<run id>
+# the merge of a queued pull request
+agentihooks swarm <id> wait --on merge https://github.com/<owner>/<repo>/pull/<number>
+```
+
+#### Which pull request the claim stop gate grades
+
+| Live wait | What the gate grades | The stop passes when |
+|---|---|---|
+| None, or a wait on `reply` or `task` | The task's recorded pull request, as before | The task owes nothing, or a `task` wait's dependency is still open |
+| `checks` on the task's own pull request | The task's own pull request | Its checks still run or it is green; failed checks refuse |
+| `checks` on another pull request | That pull request only | It is pending, green, merged, closed or unreadable. Only failed checks on that pull request while it is open, with the required gate not passed, refuse the stop |
+| `checks` on an Actions run | Nothing | Always; the tick ends the wait on the run's conclusion |
+| Any `checks` wait while the task's own pull request has merged | The task's own pull request | For a code or ci task, never until it closes: `your pull request <url> merged: close the task now with agentihooks swarm <id> done --pr <url>`. An ops, tune, troubleshoot or research task, which closes on its proof contract, passes while a wait on another target holds |
+
+A wait is live until its `until` time passes; a lapsed wait counts as no wait. A refusal for a named pull request names that pull request and its failed checks, not the task's own:
+
+```text
+checks failed on https://github.com/<owner>/<repo>/pull/<other>: tests (1), lint. Fix them and push, or block with agentihooks swarm <id> block "<why>" (stop block 1 of 2; the next one blocks the task)
+```
+
+The streak counts refusals for a named target the same way as any other: the third refusal in a row blocks the task. A stop that passes on a named target keeps the declared wait as it was. The gate replaces the wait with a 12 hour checks wait on the task's own pull request only when it grades that pull request, finds its checks running and no `reply`, `task` or run wait holds.
+
+Before this rule the gate always graded the task's recorded pull request. An agent that declared a checks wait on a prerequisite pull request was refused with the old failures of an earlier pull request on the same task. Four `claim-stop` denies on 20 October graded a pull request other than the declared wait target.
+
+#### A merge wait and the push stop gate
+
+The `push-stop` gate lets the stop through, without a refusal, while a live `merge` wait names a pull request still open and no worktree of the agent holds uncommitted changes. A push in that state would drop the pull request from the merge queue, and refusing the stop would leave the agent between a push guard that forbids the push and a stop gate that demands it. The gate reads the named pull request each time. A merged, closed or unreadable pull request, or any uncommitted change, returns the normal refusal:
+
+```text
+You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull request. If not, update the issue and the pull request and record progress on the ledger.
+```
+
+A live `task` wait on another task not yet done holds the stop as before.
+
+#### Troubleshooting stop refusals under a wait
+
+| Symptom | Cause and action |
+|---|---|
+| `checks failed on <url>` names a pull request the agent is not waiting on | The wait lapsed, was declared on `reply` or `task`, or names the task's own pull request. Declare `wait --on checks <prerequisite url>` and stop again. |
+| `checks failed on <url>` names the prerequisite pull request | Its checks failed while it is open. Fix it if the task owns it, or `block` naming the prerequisite. |
+| `your pull request <url> merged: close the task now` under a checks wait on another pull request | The task's own pull request merged; a named target never defers `done`. Run `swarm done --pr <url>`. |
+| The stop is refused with uncommitted changes during a merge wait | A merge wait holds only committed work. Commit and let the gate push, or dequeue first with `swarm merge dequeue <url>`. |
+| The stop is refused after the queued pull request merged | The merge wait no longer holds an open pull request. Close the task with `done`. |
+
+Recent `claim-stop` refusals and blocks, with the pull request each one names, are in the swarm gate log:
+
+```bash
+jq -c 'select(.gate == "claim-stop") | {at, kind, agent, task, reason}' ~/.agentihooks/swarm/<swarm>/gates/log.jsonl | tail -20
+```
+
+`tests/gates/test_claim_stop.py` pins the grading: `test_a_live_checks_wait_on_another_pull_request_grades_that_pull_request_only`, `test_a_live_checks_wait_on_a_run_lets_a_red_pull_request_stop`, `test_a_checks_wait_on_the_task_pull_request_keeps_grading_it` and `test_a_merged_task_pull_request_still_owes_done_while_a_checks_wait_names_another`. `tests/gates/test_push_stop.py` pins the merge wait: `test_a_live_merge_wait_on_an_open_pull_request_lets_a_refused_push_stop`, `test_a_merge_wait_on_a_pull_request_no_longer_open_still_refuses_the_stop` and `test_a_merge_wait_never_holds_uncommitted_changes`. The behavior was delivered in [pull request 5312](https://github.com/the-cloud-clockwork/agentihooks/pull/5312); its new tests failed first in [run 39466142797](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39466142797) and passed in [run 39466488932](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39466488932).
+
 ### Wait notice and end of turn
 
 An eng or ci agent that sleeps or polls inside its turn without a declared wait reads to the health check as a stale claim, and on Codex it also keeps the turn open, so the tick's next prompt has no turn to start. Two pieces keep a worker's waits visible and short: a hook notice that tells an agent starting an undeclared wait to declare it, and a `next` field in the output of a checked `swarm wait` that tells the agent to finish its turn.
@@ -5104,6 +5225,7 @@ ledger sends nothing.
 | A task still in `pr` 10 minutes after its pull request merged | Its engineer, told to run `done`; at 20 minutes the master |
 | A task's pull request closed without merging | Its engineer |
 | A task's pull request with red checks and no push for 20 minutes | Its engineer, once per push |
+| A master asks the question tool when the operator has not typed in its pane for 10 minutes | The operator's Priorities: a hook before the tool denies it and adds each question with its options as a ledger question, and the denial tells the master they moved. A prompt that still sits open past three ticks shows as a `master blocked on prompt` finding in `swarm status` |
 
 A follow up already closed or flagged for the operator is not raised. Pull request state comes from `gh pr view`;
 a pull request `gh` cannot read is skipped until a later tick. An engineer that is gone falls back to the master.
@@ -5719,7 +5841,12 @@ every other agent's copy is information only and asks for no reply. With no live
 master seat for the next one, and the tick tells the page chat that the master is down.
 A stopped swarm whose master seat holds a pending item is paused, so the tick starts its master and no engineer.
 The ledger hook, the ledger watch and the inbox share one seen mark per agent and write. Stable item ids keep
-relay retries from creating a second item; an unconfirmed delivery may still be shown again.
+relay retries from creating a second item; an unconfirmed delivery may still be shown again through another
+transport. While it runs, the inbox channel pushes an item into its session once, however often redelivery returns
+it, and holds at most ten pushed items the session has not confirmed, read or closed; further items wait pending
+until the session settles one or one moves to another inbox, so a stalled session never collects a growing queue
+of copies. An item that moves to another inbox and back is not pushed again, and a restarted channel starts with
+no record of earlier pushes.
 
 ### Inbox escalation sender exclusion
 

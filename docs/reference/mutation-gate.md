@@ -974,6 +974,190 @@ needed its `mutation` job skipped and the inline step successful. Other
 mutation changes merged between the two windows, so the 62 s drop in the median
 is not attributable to this change alone.
 
+## Plan job dependencies
+
+The `mutation-plan` job of the Tests run installs only the third party
+packages that the shard planner and the empty change grade import: mutmut,
+pytest, pyyaml and tomlkit, at the specifiers `pyproject.toml` declares. Before
+[pull request 5439](https://github.com/the-cloud-clockwork/agentihooks/pull/5439)
+the job installed the whole project with `.[dev,all]`, 95 packages, only to
+size shards. It now resolves and installs 20 packages in about one second. The
+plan outputs, the shard and part counts, the graded bases and the planned test
+selection are unchanged. The `mutation-stats`, `mutation` and unit test jobs
+still install `.[dev,all]`.
+
+### What the step runs
+
+```yaml
+      - name: Install dependencies
+        if: steps.reuse.outputs.reused != 'true'
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+```
+
+| Package | Specifier | Declared in `pyproject.toml` | Planner module that imports it at module level |
+|---|---|---|---|
+| `mutmut` | `==3.6.0` | `dev` extra | `scripts.ci_mutation.selection` |
+| `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `tests.test_collection_imports` |
+| `pyyaml` | `>=6.0` | project dependencies | `tests.dep_manifest` (imported as `yaml`) |
+| `tomlkit` | `>=0.12` | project dependencies | `scripts.ci_mutation.runner` |
+
+- The packages go into the runner's system Python 3.12. The project itself is
+  not installed: **Size mutation shards from stored timings** runs
+  `python -m scripts.ci_mutation.plan` and **Grade the empty change set** runs
+  `python -m scripts.ci_mutation` from the checkout root.
+- The step runs only when **Reuse the branch preflight report graded on this
+  head and base** reused nothing. A reused run skips the install and the
+  planning, as described under
+  [Reused and empty pull request runs](#reused-and-empty-pull-request-runs).
+- `pypi-retry.sh` comes from the workflow revision through **Take the helper
+  scripts from the workflow revision**. It retries the install only when the
+  output names a package index or network outage, waiting 5 s and doubling to
+  at most 30 s, until `PYPI_RETRY_SECONDS` (default 150) of backoff has passed.
+  Any other failure fails the step at once.
+
+### Adding a planner dependency
+
+`test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pins`
+in `tests/test_ci_workflow.py` keeps the step, the planner and `pyproject.toml`
+in agreement. `PLANNER_PACKAGES` in the same file maps each installed
+distribution to its import name:
+
+```python
+PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "tomlkit": "tomlkit"}
+```
+
+The test makes two checks:
+
+1. The step's `run` line equals the retry wrapper followed by
+   `uv pip install --system` and the `pyproject.toml` specifier of every
+   `PLANNER_PACKAGES` distribution, quoted and sorted by distribution name.
+   Specifiers are looked up in the project dependencies and the `dev` extra.
+2. The third party top level modules imported by `scripts.ci_mutation.plan`,
+   `scripts.ci_mutation.__main__` and every `scripts` or `tests` module they
+   reach equal the `PLANNER_PACKAGES` import names. Module level imports count,
+   including those inside `if`, `try`, `with` and class blocks. Inside a
+   function only `scripts` and `tests` imports are followed, because a third
+   party import there loads only when that function runs.
+
+When a planner module gains a module level import of another third party
+package, change three places in one pull request:
+
+1. Declare the package in the project dependencies or the `dev` extra of
+   `pyproject.toml`, if it is not there yet.
+2. Add it to `PLANNER_PACKAGES`, distribution name to import name.
+3. Add its `pyproject.toml` specifier to the step, in sorted order. For a
+   hypothetical `packaging>=24.0` dependency the step becomes:
+
+```yaml
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "packaging>=24.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+```
+
+A changed specifier in `pyproject.toml`, such as a new mutmut pin, also needs
+the same change in the step, or the test fails.
+
+### Inspect the plan job
+
+List the plan job's steps with their times:
+
+```bash
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/RUN_ID/attempts/1/jobs?per_page=100" --paginate \
+  --jq '.jobs[] | select(.name == "mutation-plan") | .steps[] | [.name, .conclusion, .started_at, .completed_at] | @tsv'
+```
+
+The job log shows the install and the plan it fed:
+
+```bash
+JOB_ID=$(gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/RUN_ID/attempts/1/jobs?per_page=100" --paginate \
+  --jq '.jobs[] | select(.name == "mutation-plan") | .id')
+gh api "repos/the-cloud-clockwork/agentihooks/actions/jobs/$JOB_ID/logs" \
+  | grep -E "Resolved|Installed|Mutation shards|Stats parts"
+```
+
+On run 39550510897, the first sampled run after the change:
+
+```text
+Resolved 20 packages in 273ms
+Installed 20 packages in 23ms
+Mutation shards: 1
+Stats parts: 1
+```
+
+### Plan job dependency troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| **Size mutation shards from stored timings** or **Grade the empty change set** fails with `ModuleNotFoundError` | A planner path imports a package the step does not install. A module level import also fails the contract test; an import inside a function does not. Add the package as described in [Adding a planner dependency](#adding-a-planner-dependency). |
+| The contract test fails on the `run` line | The step and `pyproject.toml` disagree on a specifier, the order or the retry wrapper. Copy the specifier from `pyproject.toml` into the step. |
+| The contract test fails on the import set | A planner module gained or dropped a third party import. Add or remove the package in `PLANNER_PACKAGES` and in the step. |
+| The test raises `KeyError` with a package name | A `PLANNER_PACKAGES` entry is declared in neither the project dependencies nor the `dev` extra. Declare it there. |
+| **Install dependencies** is skipped | The job reused the branch preflight report; no plan was computed. |
+| The step fails with `Python package index unavailable` | The package index did not answer within the retry window. This is not a code verdict; rerun the job. |
+
+### Plan job dependency delivery evidence
+
+Pull request 5439 merged on 21 October 2026 at 05:02 UTC and closed
+[issue 5437](https://github.com/the-cloud-clockwork/agentihooks/issues/5437).
+Its [red run 39543828313](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39543828313)
+on the tests only head failed only the new contract test, which found the full
+`.[dev,all]` install. Its
+[green run 39544257187](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39544257187)
+installed 20 packages in about one second in a 54 s plan job and passed Gate
+Required. The retry wrapper came later, with
+[pull request 5665](https://github.com/the-cloud-clockwork/agentihooks/pull/5665);
+[pull request 6020](https://github.com/the-cloud-clockwork/agentihooks/pull/6020)
+then took the helper from the workflow revision.
+
+Both samples are ten successful first attempts of pull request Tests runs
+whose plan job ran **Install dependencies**, with one statistics part and the
+`mutation` job skipped. Plan to grade is the time from the plan job's start to
+the end of `mutation-stats (0)`.
+
+| Measure | Before, median and mean | After, median and mean |
+|---|---|---|
+| Plan job wall | 60.5 s, 61.1 s | 49.5 s, 51.6 s |
+| **Install dependencies** step | 8.5 s, 8.3 s | 1.0 s, 0.9 s |
+| Plan to grade | 82.5 s, 88.2 s | 77.5 s, 93.6 s |
+
+Before runs, recorded by the source task, were created on 21 October from
+00:00 to 03:13 UTC: 39518577449, 39521917584, 39521996438, 39524995859,
+39529046356, 39529540156, 39529843243, 39530006213, 39536567127 and
+39537333298. After runs, sampled for this page, were created on 21 October
+from 05:36 to 11:02 UTC: 39550510897, 39551689495, 39554637694, 39554885886,
+39555030857, 39571379733, 39574555819, 39578496930, 39580532724 and
+39588941249.
+
+The install fell by about 7.5 s per run. The plan job wall fell by 11 s at the
+median, more than the install saving, so runner variation also moved it. Most
+of the job is not the install: on run 39550510897 the 44 s job spent 9 s in
+job setup, 12 s in checkout, 1 s installing and 14 s in **Size mutation shards
+from stored timings**. Plan to grade is dominated by the statistics job, which ran 50 to
+163 s from plan start in the after sample, and shows no change attributable
+to this pull request.
+
+To repeat the measurement on another window, list the runs and compute the
+three numbers per run:
+
+```bash
+R=repos/the-cloud-clockwork/agentihooks
+gh api "$R/actions/workflows/test.yml/runs?event=pull_request&status=success&created=2026-10-21T05:02:17Z..2026-10-21T16:00:00Z&per_page=100" --paginate \
+  --jq '.workflow_runs[] | select(.run_attempt == 1) | .id' |
+while read -r id; do
+  gh api "$R/actions/runs/$id/attempts/1/jobs?per_page=100" --paginate --jq '.jobs[] | select(.name | startswith("mutation"))' |
+    jq -rs --arg id "$id" 'def t: fromdateiso8601;
+      (map(select(.name == "mutation-plan"))[0]) as $p
+      | (map(select(.name == "mutation-stats (0)"))[0]) as $s
+      | (map(select(.name == "mutation"))[0]) as $m
+      | ([$p.steps[]? | select(.name == "Install dependencies")][0]) as $i
+      | select($p and $s and $m and $m.conclusion == "skipped" and $i.conclusion == "success")
+      | "\($id) plan=\(($p.completed_at|t) - ($p.started_at|t)) install=\(($i.completed_at|t) - ($i.started_at|t)) grade=\(($s.completed_at|t) - ($p.started_at|t))"'
+done
+```
+
+The `mutation` job is skipped only when the plan had one shard and one part,
+so the filter keeps one shard runs and drops plans with more statistics
+parts. The same expressions reproduce the source task's before figures, for
+example 69, 9 and 99 s on run 39537333298.
+
 ## Suite speed contracts in the branch preflight
 
 A branch push that changes a test module runs the suite speed contracts in the

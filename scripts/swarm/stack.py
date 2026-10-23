@@ -12,6 +12,7 @@ from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
 WORK_KINDS = ("ops", "tune", "troubleshoot", "research")
 READ_ONLY_NOTE = "Released its seat while it waits on {names}. The next engineer continues it from the recorded window."
+SSH_UNVERIFIED = ("Host key verification failed", "Permission denied (publickey")
 WT_SCRIPT = Path(__file__).resolve().parents[2] / "profiles" / "package" / "skills" / "worktree" / "scripts" / "wt.sh"
 
 
@@ -144,20 +145,70 @@ def _merged_into_dev(dep):
         raise SwarmError(f"cannot read the dependency pull request: {exc}") from exc
 
 
+def https_url(url: str) -> str:
+    scheme, sep, rest = url.partition("://")
+    if sep:
+        if scheme.lower() not in ("ssh", "git+ssh"):
+            return ""
+        host, _, path = rest.partition("/")
+        host = host.rpartition("@")[2].partition(":")[0]
+    else:
+        host, colon, path = url.partition(":")
+        if not colon or "/" in host:
+            return ""
+        host = host.rpartition("@")[2]
+    path = path.lstrip("/")
+    return f"https://{host}/{path}" if host and path else ""
+
+
+def _over_https(git: list[str], error: str, url_of, refspec: str, refused: str) -> None:
+    if not any(mark in error for mark in SSH_UNVERIFIED):
+        raise SwarmError(f"{refused}: {error}")
+    try:
+        https = https_url(url_of())
+    except SwarmError as exc:
+        raise SwarmError(f"{refused}: {error}; {exc}") from exc
+    if not https:
+        raise SwarmError(f"{refused}: {error}")
+    try:
+        retry = shell(["env", "GIT_TERMINAL_PROMPT=0", *git, "fetch", "--", https, refspec])
+    except SwarmError as exc:
+        raise SwarmError(f"{refused}: {error}; over {https}: {exc}") from exc
+    if retry.returncode != 0:
+        raise SwarmError(f"{refused}: {error}; over {https}: {retry.stderr.strip()}")
+
+
+def _fetch_origin(git: list[str], branch: str, refused: str) -> None:
+    first = shell([*git, "fetch", "origin", *([branch] if branch else [])])
+    if first.returncode != 0:
+        refspec = f"+refs/heads/{branch or '*'}:refs/remotes/origin/{branch or '*'}"
+        _over_https(git, first.stderr.strip(), lambda: _origin_url(git), refspec, refused)
+
+
+def _origin_url(git: list[str]) -> str:
+    return shell([*git, "remote", "get-url", "origin"]).stdout.strip()
+
+
+def _fetch_url(url: str, branch: str, refused: str) -> None:
+    first = shell(["git", "fetch", "--", url, branch])
+    if first.returncode != 0:
+        _over_https(["git"], first.stderr.strip(), lambda: url, branch, refused)
+
+
 def _fetch_foreign(dep, branch):
     wanted = repo_key(dep["branch_repo"])
     checkouts = [path for path in dep.get("repository_branches") or {} if origin_key(path) == wanted]
     if checkouts:
-        _out(["git", "-C", checkouts[0], "fetch", "origin", branch], f"cannot fetch {branch} in {checkouts[0]}")
+        _fetch_origin(["git", "-C", checkouts[0]], branch, f"cannot fetch {branch} in {checkouts[0]}")
     else:
-        _out(["git", "fetch", "--", dep["branch_repo"], branch], f"cannot fetch {branch} from {dep['branch_repo']}")
+        _fetch_url(dep["branch_repo"], branch, f"cannot fetch {branch} from {dep['branch_repo']}")
 
 
 def _base_of(dep, foreign):
     branch = dep["branch"]
     merged = _merged_into_dev(dep)
     if dep not in foreign and not merged:
-        _out(["git", "fetch", "origin", branch], f"cannot fetch {branch}")
+        _fetch_origin(["git"], branch, f"cannot fetch {branch}")
         return _out(["git", "merge-base", "HEAD", f"origin/{branch}"], f"{branch} shares no history")
     if not merged:
         _fetch_foreign(dep, branch)
@@ -165,7 +216,7 @@ def _base_of(dep, foreign):
 
 
 def _dev_base():
-    _out(["git", "fetch", "origin", "dev"], "cannot fetch dev")
+    _fetch_origin(["git"], "dev", "cannot fetch dev")
     return _out(["git", "merge-base", "HEAD", "origin/dev"], "the task shares no history with dev")
 
 
@@ -306,7 +357,7 @@ def restack(slug: str, agent, ledger) -> dict:
     if any(rows.get(dep, {}).get("state") != "done" for dep in row["parked_on"]):
         raise SwarmError("this task still has an unfinished parked dependency")
     branch = _restack_branch()
-    _out(["git", "fetch", "origin"], "cannot fetch origin")
+    _fetch_origin(["git"], "", "cannot fetch origin")
     base, path = _restack_base(row, [slug, agent.task, branch, row["stacked_base"]])
     _rebase(base)
     shell(["git", "branch", "--unset-upstream"])

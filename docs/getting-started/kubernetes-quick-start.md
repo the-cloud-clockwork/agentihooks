@@ -62,7 +62,7 @@ nats:
   enabled: false
 ```
 
-The server needs JetStream enabled for the hub's durable consumers.
+The server needs JetStream enabled for the hub's durable consumers. A server that signs its users takes the hub's credential from a Secret through `hub.secretEnv`, as `AGENTIHOOKS_BUS_CREDENTIALS`.
 
 ### Use your own Redis
 

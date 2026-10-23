@@ -76,7 +76,7 @@ def view():
 def seed(offered):
     tasks = [{"title": f"Drill task {n}", "phase": "p1", "lane": "eng"} for n in range(1, len(TASKS) + 1)]
     create(slug, {"title": "Recovery drill", "phases": [{"title": "Survive a JetStream restore"}], "tasks": tasks}, "swarm")
-    store.create(SwarmConfig(slug, "/data", len(TASKS), 1))
+    store.create(SwarmConfig(slug, "/data", len(TASKS), 1, engine="events"))
     for task in TASKS:
         ledger.update_task(slug, task, {"kind": "ops"})
     current = view()
