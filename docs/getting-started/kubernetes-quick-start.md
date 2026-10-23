@@ -38,7 +38,7 @@ nats:
       enabled: true
 ```
 
-Install it, naming the release version you want:
+Install it, naming the release tag you want without its `v` prefix, such as `2.4.1` for `v2.4.1`:
 
 ```bash
 helm upgrade --install agentihooks-swarm \
@@ -46,7 +46,7 @@ helm upgrade --install agentihooks-swarm \
   --version <version> --namespace agentihooks -f values.yaml
 ```
 
-The chart repository's `examples/` folder holds the same hub values as `hub.yaml`, a hub on a NATS outside the release as `external-nats.yaml`, and a worker hive with no hub as `hive-only.yaml`.
+The repository's `deploy/helm/agentihooks-swarm/examples/` folder holds the same hub values as `hub.yaml`, a hub on a NATS outside the release as `external-nats.yaml`, and a worker hive with no hub as `hive-only.yaml`.
 
 ### Use an existing NATS
 
@@ -75,7 +75,7 @@ redis:
     key: url
 ```
 
-Create that Secret from your secret manager, for example through an ExternalSecret; never put the URL in values or a shell history. With `existingSecret` set the bundled Redis is not rendered.
+Create that Secret from your secret manager, for example through an ExternalSecret; never put the URL in values or a shell history. With `existingSecret` set the bundled Redis is not rendered. That URL reaches every swarm container; to give the ledger, the controller and the workers their own least privilege users, set `redis.roles.ledger`, `redis.roles.controller` and `redis.roles.worker` to their own Secrets, all three or none.
 
 ## Verify
 
@@ -108,4 +108,4 @@ The hub runs no agents. Each machine or worker pod that runs agents joins as a h
 | The hub logs bus connection errors | `kubectl -n agentihooks logs deployment/agentihooks-swarm-hub`; with the bundled NATS check its pod is ready, with an external NATS check `hub.bus.url` |
 | `helm test` fails | `kubectl -n agentihooks logs agentihooks-swarm-ledger-healthz`; the ledger did not answer its health route |
 
-A release name other than `agentihooks-swarm` prefixes every resource with `<release>-agentihooks-swarm` instead.
+A release name without `agentihooks-swarm` in it prefixes every resource with `<release>-agentihooks-swarm`; a name that contains it is used as is.
