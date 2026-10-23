@@ -79,3 +79,16 @@ def test_heartbeat_ends_only_reports_of_executions_their_swarm_no_longer_runs(st
         assert after[label]["ended_at"] == 1001
         assert after[label]["exit_reason"] == "agent gone from the swarm"
         assert after[label]["status"] == "ended"
+
+
+@pytest.mark.parametrize("state", ["finished", "ended"])
+def test_heartbeat_ends_the_report_of_an_agent_whose_life_ended(store, monkeypatch, state):
+    from scripts.hive import join_report
+
+    agent = running(store, "swarm", "eng-1")
+    join_report.start(store.redis, "swarm", replace(agent, hive="worker"), "session", passing(), {}, 1000)
+    store.put_agent("swarm", replace(agent, state=state))
+    monkeypatch.setattr(join_report, "cheap_checks", lambda *args: {})
+    join_report.heartbeat(store.redis, "worker", 1001)
+    report = json.loads(store.redis.hget(join_report.key("worker"), agent.execution_id))
+    assert {key: report[key] for key in ("ended_at", "exit_reason", "status")} == {"ended_at": 1001, **ENDED}
