@@ -3174,7 +3174,7 @@ it checks any wait:
 1. **Recycle a stale supervisor.** When the supervisor's record (`supervisor.json` in the scheduler runtime folder)
    names no code, another checkout than the installed one, or another git revision than the installed one, the pass
    prints `recycling the scheduler supervisor: <why>` and sends it SIGTERM, then waits up to 30 seconds for its lock
-   to free.
+   to free. See [Supervisor recycle](#supervisor-recycle).
 2. **Start a missing supervisor.** With no supervisor holding the machine lock, it starts one from the installed
    code. A supervisor that died is back within 15 seconds.
 3. **Restore the timer while delivery is unproven.** When the tick units on disk are current and the timer is
@@ -3193,6 +3193,75 @@ The `agentihooks-tick-watch` service is a second, independent restart path: whil
 the supervisor and registers the tick again from the installed code (see
 [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher)). The wait pass acts within 15 seconds of a
 dead supervisor; the watcher acts once the tick has been stale for 10 minutes.
+
+#### Supervisor recycle
+
+A supervisor keeps the root and code it loaded at start. Before this guard, a supervisor started from the main
+checkout, a worktree or an older revision kept running after an install until someone restarted it by hand. On
+19 October a supervisor started at 05:27 UTC was still running twelve hours later, after the tick delivery record
+had merged and been installed; its old code never wrote the record, so the systemd timer and the Doctor finding
+stayed up.
+
+**The supervisor record.** When a supervisor takes its machine lock it writes `supervisor.json` in the scheduler
+runtime folder:
+
+```json
+{"pid": 41237, "root": "/home/me/.local/share/agentihooks", "revision": "6a3cc6a66...", "started": 1792736201.5}
+```
+
+`root` is the checkout the supervisor's code was loaded from, `revision` is `git rev-parse HEAD` of that checkout read
+once before the lock is taken (empty when git fails or the root is not a git checkout), and `started` is the time the
+lock was taken. The guard trusts the record only while its `pid` matches the pid in `supervisor.lock`; a missing,
+unreadable or mismatched record counts as no record.
+
+**When it recycles.** Each wait pass compares the lock holder with the installed agentihooks and recycles it on the
+first reason that applies:
+
+| Reason printed after `recycling the scheduler supervisor:` | Meaning |
+|---|---|
+| `the scheduler supervisor <pid> left no record of the code it loaded` | No usable record: a supervisor from code older than this guard, or a record from another process. |
+| `the scheduler supervisor <pid> runs <root>, not the installed <installed>` | The supervisor runs another checkout. Both paths are resolved, so a symlink to the installed root counts as installed. |
+| `the scheduler supervisor <pid> loaded revision <loaded>, not the installed revision <current>` | Same root, but the installed checkout moved on since the supervisor started. |
+
+No lock holder, or a holder that matches root and revision, is left alone.
+
+**Drain without dropping a tick.** The pass sends SIGTERM to the supervisor. The supervisor stops its runner, and the
+runner finishes the dispatch pass it is in before it exits; it starts no new pass. The wait pass then polls the
+supervisor lock once a second for up to 30 seconds. When the lock frees, the same pass starts a supervisor from the
+installed code (step 2 above). Scheduled entries live in Redis, not in the supervisor, so a minute that falls due
+while no runner is up stays due and fires once on the restarted runner's first pass. A supervisor that still holds
+its lock after 30 seconds is left running and the pass prints
+`the scheduler supervisor <pid> still holds its lock; the next wait pass tries again`; the recycle repeats every
+15 seconds until it succeeds. A runner in the middle of a long dispatch can outlast the first 30 seconds, so one
+such line before the next recycle is normal.
+
+**Retiring the timer again.** While a stale supervisor ran, the timer was restored (step 3). The guard retires it
+only when the latest scheduled delivery happened at or after the running supervisor's `started` time, so the
+delivery has to come from the restarted supervisor, not from the one that was recycled. The tick service group must
+also be idle. The Doctor `scheduled-tick/<hostname>` finding clears on that same delivery.
+
+**Number.** Time a foreign or stale supervisor stays up after detection: unbounded before this guard (the twelve
+hour case above), one wait pass after it, drained within 30 seconds or on a following pass. Then one scheduled minute later the new
+supervisor proves delivery, and the next wait pass retires the timer.
+
+Check a recycle on a live machine, read only:
+
+```bash
+# The running supervisor's record against the installed checkout. A Redis endpoint other than the
+# local default keeps its record in a hashed subfolder; the newest record is the live one.
+ls -t ~/.cache/agentihooks/scheduler/supervisor.json ~/.cache/agentihooks/scheduler/*/supervisor.json \
+  2>/dev/null | head -1 | xargs cat
+PY="$(dirname "$(readlink -f "$(command -v agentihooks)")")/python"
+INSTALLED="$("$PY" -c 'from scripts.install import install_root; print(install_root())')"
+echo "$INSTALLED"; git -C "$INSTALLED" rev-parse HEAD
+
+# Recycles and drain timeouts on recent wait passes
+journalctl --user -u agentihooks-swarm-waits.service --since "-1h" \
+  | grep -E "recycling the scheduler supervisor|still holds its lock"
+```
+
+After a recycle, `supervisor.json` names a new `pid`, the installed root, the installed revision and a `started`
+time inside the window of that log line.
 
 #### The Doctor finding
 
@@ -3241,6 +3310,8 @@ no `agentihooks-swarm.timer`, and `is-enabled` reports that the unit file is mis
 |---|---|---|
 | `the agentihooks-swarm timer stays` on every pass after an install | The scheduler has not delivered a tick since the install. | Wait one scheduled minute. When it persists, read `scheduler.log` and `swarm-tick.log` in the scheduler runtime folder for the failed delivery. |
 | Evidence names a foreign root | The supervisor started from a worktree or an older checkout. | The next wait pass recycles it. When it stays, check `systemctl --user status agentihooks-swarm-waits.timer`. |
+| `still holds its lock` on many passes in a row | The supervisor or its runner does not exit on SIGTERM. | Read `scheduler.log` in the scheduler runtime folder for the runner's last pass. The timer stays, so ticks continue meanwhile. |
+| `recycling the scheduler supervisor` on every pass with a new pid each time | The installed checkout moves between passes, or git cannot read its revision. | Run `git -C <installed root> rev-parse HEAD`; an empty or failing result makes every recorded revision differ. |
 | Evidence says the last tick was delivered hundreds of seconds ago | The cron stopped firing, every tick failed, or the supervisor died. | The wait pass starts a supervisor and restores the timer, so ticks continue. Read `swarm-tick.log` for the failing tick. |
 | `could not be read` evidence | Redis is down for the scheduler. | The timer stays until Redis answers and the record proves delivery. |
 | `the scheduled swarm tick guard failed: OSError: …` | `systemctl` is missing or the user bus is down. | The waits keep running but nothing guards the tick. Restore the user systemd session. |
