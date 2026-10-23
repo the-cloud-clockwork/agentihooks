@@ -603,6 +603,115 @@ gh api -X GET repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/r
 Then read each run's `attempts/1/jobs` with the job query under
 [Inspect a run](#inspect-a-run).
 
+## Shard planning from the batch runner CPU quota
+
+The mutation planner sizes shards and statistics parts for the number of test
+workers a batch runner starts, which is three under the batch runner's CPU
+limit of three. Before this change it assumed four, so its estimates were
+optimistic by a third and a shard could run past its budget.
+
+The planning steps run on the light runner, whose own CPU limit is two, so
+the planner cannot read the batch quota from its cgroup. Each planning step
+passes the batch runner's quota in `MUTATION_SHARD_CPU_QUOTA`, and
+`shard_workers` in `scripts.ci_mutation.plan` turns it into a worker count
+with `worker_count` from `scripts.ci_cpu_quota`, the same function the unit
+shards and the Proofs `tests` proof use to choose their pytest workers.
+
+| `MUTATION_SHARD_CPU_QUOTA` | Planned workers |
+|---|---|
+| unset or empty | 4 |
+| `3` | 3 |
+| `4` or higher | 4 |
+| `2.5` | 2 (a fractional quota is truncated) |
+| `0.5` | 1 (never below one) |
+| not a number | the planning step fails with a `ValueError` |
+
+The rule is `max(1, min(4, int(quota)))`, with four as the CPU count, so the
+variable can lower the planned workers but never raise them above four.
+
+### What the worker count sizes
+
+| Planner call | Step | Effect of fewer workers |
+|---|---|---|
+| `shard_count` | **Size mutation shards from stored timings** (`plan`, target 120 s) and **Refine mutation shards from measured statistics** (`refine`, target 240 s) | Shards = `ceil(worker seconds / (workers * target))`, capped by the shard limit of ten and the mutant count, so more shards are planned for the same work |
+| `slowest_bucket` and `stats_part_count` | **Size mutation shards from stored timings** | Each statistics part forks one bucket per worker; the slowest bucket grows, so the step can choose more `Stats parts` to stay within the 30 s statistics target |
+| `plan_shards` | **Refine mutation shards from measured statistics** | The measured plan records the count in its `workers` field |
+
+For example, a measured plan of 2880 worker seconds with the 240 second
+target gets `ceil(2880 / (3 * 240))` = 4 shards at a quota of 3, and
+`ceil(2880 / (4 * 240))` = 3 shards at a quota of 4. Twelve test files of ten
+seconds each in one statistics part give a slowest bucket of 40 seconds at
+three workers and 30 seconds at four.
+
+### Configuration
+
+Every step that runs a mutation planner sets the variable to the batch
+runner's CPU limit:
+
+| Workflow | Step |
+|---|---|
+| `mutation-preflight.yml` | **Size mutation shards from stored timings** and both **Refine mutation shards from measured statistics** steps |
+| `test.yml` | **Size mutation shards from stored timings** in the `mutation-plan` job |
+| `mutation-replay.yml` | **Preserve retained scope and refine its mutation plan** |
+| `mutation-refinement-proof.yml` | **Baseline refinement planning** and **Optimized refinement planning** |
+
+A new planning step needs the same entry:
+
+```yaml
+      - name: Refine mutation shards from measured statistics
+        env:
+          MUTATION_SHARD_CPU_QUOTA: "3"
+        run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
+```
+
+`test_every_mutation_planning_step_reads_the_batch_runner_cpu_quota` scans
+every workflow for steps that run `scripts.ci_mutation.plan`,
+`scripts.ci_mutation.measured`, `scripts.ci_mutation.replay prepare` or
+`.refinement-proof/run.py`, and fails when any of them lacks
+`MUTATION_SHARD_CPU_QUOTA: "3"`. When the batch runner's CPU limit changes,
+change the value in every one of those steps and in that test together.
+
+The variable only affects planning. The mutation and statistics jobs still
+choose their own workers from the quota they read on the batch runner, as
+described under
+[Mutation statistics and shard worker sizing](#mutation-statistics-and-shard-worker-sizing).
+
+### Inspect a plan
+
+The plan step prints `Mutation shards: N` and `Stats parts: P`; the `refine`
+step prints `Measured mutation worker seconds` and `Measured mutation shards`.
+The measured plan carries the worker count it was sized with:
+
+```bash
+gh run download RUN_ID --name mutation-plan --dir EVIDENCE_DIR/plan
+jq '{workers, shards, estimated_worker_seconds, shard_worker_seconds}' \
+  EVIDENCE_DIR/plan/plan.json
+```
+
+`workers` reads 3 on a current preflight. To confirm the batch runner's real
+quota, run `python -m scripts.ci_cpu_quota` in a CI step on the batch runner
+label; it prints `pytest workers N: cpu quota Q, affinity A`.
+
+| Symptom | Check |
+|---|---|
+| `workers` is 4 in a measured plan | The planning step does not set `MUTATION_SHARD_CPU_QUOTA`, or the head predates pull request 5140. |
+| Shards still run out of budget with `workers` at 3 | Compare the batch runner's `cpu quota` with the variable; a lower quota on the runner means the value in the workflows is stale. |
+| A planning step fails with `could not convert string to float` | `MUTATION_SHARD_CPU_QUOTA` holds a non-numeric value. |
+| The workflow scan test fails | A planning step was added or renamed without `MUTATION_SHARD_CPU_QUOTA: "3"`. |
+
+### Shard planning delivery evidence
+
+[Pull request 5140](https://github.com/the-cloud-clockwork/agentihooks/pull/5140)
+merged on 20 October 2026 at 08:41 UTC. Its
+[red Proofs run 39376352913](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39376352913)
+on the tests only head planned three shards at a quota of 3 where three
+workers need four, and failed the workflow scan; the quota 4 case passed. The
+[green Proofs run 39376809049](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39376809049)
+passed 151 plan, preflight and selection tests. The regression
+`test_shards_are_sized_by_the_workers_the_batch_runner_quota_starts` covers
+quotas of 3 and 4 across `shard_count`, `slowest_bucket` and `plan_shards`.
+No shard wall time comparison was recorded for this change.
+
 ## Suite speed contracts in the branch preflight
 
 A branch push that changes a test module runs the suite speed contracts in the
@@ -748,7 +857,7 @@ These are implementation defaults, with no environment variable or workflow disp
 | `HEAD_SECONDS` | 20 traced seconds | Select the fastest covering tests up to this budget, always including at least one test when available |
 | `SLICE_SECONDS` | 120 traced seconds | Divide the remaining duration by this value, rounding up to choose the slice count |
 | Split limit | 10 slices | Cap a mutant's units; fewer than two slices leaves it unsplit |
-| Shard target and limit | 240 seconds, 10 shards | Size the plan using estimated work and four workers, ensuring enough shards to place a mutant's units separately |
+| Shard target and limit | 240 seconds, 10 shards | Size the plan using estimated work and the [batch runner's planned workers](#shard-planning-from-the-batch-runner-cpu-quota), ensuring enough shards to place a mutant's units separately |
 
 For example, ten covering tests of one second each form a ten-second head. Thirty more tests of twenty seconds each make a 600-second tail, split into five 120-second slices. Each unit runs the ten head tests and six tail tests on its own shard. All forty distinct tests remain covered, although the head runs five times. Unit cost is estimated as `5.6 + 1.25 * (head_seconds + slice_seconds)`, or 168.1 worker seconds here. A split mutant's total estimated cost includes every repeated head.
 
