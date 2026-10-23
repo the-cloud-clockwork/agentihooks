@@ -247,8 +247,9 @@ def test_a_task_parked_on_a_branchless_ops_dependency_waits_then_goes_to_the_nex
     assert claim_hold.waits(ledger.rows["t1"], ledger.rows) == "it waits on task a"
     ledger.rows["a"]["state"] = "done"
     ledger.update_task = type(ledger).update_task.__get__(ledger)
+    before = len(rt.tasks)
     tick.tick("sw", store, ledger, rt, now_ms=NOW + 1)
-    [launched] = [task for task in rt.tasks if task["id"] == "t1"]
+    [launched] = [task for task in rt.tasks[before:] if task["id"] == "t1"]
     assert (launched["parked_on"], launched["stacked_base"], launched["stack_base"]) == (["a"], BASE, [])
     assert launched["handoff"] == text
     assert ledger.rows["t1"]["state"] == "claimed" and store.claimant("sw", "t1") != AGENT
