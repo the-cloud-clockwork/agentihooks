@@ -118,6 +118,15 @@ def served(slug, artifact_id):
     return read(slug, artifact_id, adopt=True)
 
 
+def adopt_disk(slug):
+    """Every stored file only this host's disk holds, copied into the shared database so any host serves it."""
+    for path in sorted(media.folder(slug).glob("*")):
+        if ID_RE.match(path.name) and artifact_files.load(slug, path.name) is None:
+            artifact_files.save(slug, path.name, path.read_bytes())
+        if media.ID_RE.match(path.name) and media.media_files.load(slug, path.name) is None:
+            media.media_files.save(slug, path.name, path.read_bytes(), core.now_ms())
+
+
 def entry(slug, artifact_id):
     data = read(slug, artifact_id)
     ext = artifact_id.rsplit(".", 1)[1]
