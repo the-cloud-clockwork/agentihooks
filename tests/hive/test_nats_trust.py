@@ -43,6 +43,7 @@ def bao(monkeypatch):
         return len(records[path])
 
     def create(found, path, entries):
+        assert found.url == "https://bao.example"
         if path in records:
             return False
         records[path] = dict(entries)
