@@ -559,6 +559,31 @@ When the estimate still runs far over the **Mutate changed Python files** step t
 
 [Pull request 4753](https://github.com/the-cloud-clockwork/agentihooks/pull/4753) delivered kill pricing and the cache. In [proof run 39237282629](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39237282629) the first attempt found no cache and planned 418.3 worker seconds for 40 mutants against 52 worker seconds of mutation; the rerun restored three killing tests and planned 226.1 against 56. [Seeding proof run 39239742322](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39239742322) showed `refine`, all eight shards and the merge job restoring the cache and the merge job saving the union. Before the merge, 625 preflight shards between 18 October 09:50 UTC and 19 October 09:50 UTC had a median planned over actual ratio of 9.77, and 6.72 for shards without split units. The remaining floor is the fixed 5.6 seconds per mutant against about 1.4 seconds observed in the proof run.
 
+### Test durations adjusted for statistics contention
+
+The statistics job forks one bucket per visible CPU onto a runner whose CPU quota is smaller, so buckets wait on each other and every recorded test duration carries that wait. Before pricing, the planner divides each recorded duration by the contention ratio of the statistics it read:
+
+| Input | How the planner reads it |
+|---|---|
+| Recorded wall per test | The largest duration recorded for that test across the statistics results, so a test repeated by overlapping cached entries counts once |
+| CPU per result | `cpu` in each statistics result: the bucket's process CPU seconds, or for a cache entry an equal share of the fresh collection that wrote it |
+| Results used for the ratio | Only results with a nonzero `cpu` and at least one recorded duration; empty buckets and results without `cpu` are left out |
+| Contention ratio | `max(1, sum of recorded walls / sum of CPU)`, computed separately for each statistics group the plan loads; `1` when no result qualifies |
+
+The adjusted duration, `recorded / ratio`, replaces the recorded one everywhere the measured plan uses durations: unsplit mutant cost, killing test cost, the fallback for a test with no duration (at least 5.6 seconds or the largest adjusted duration), the no traced tests fallback, and split head and slice sizing. No test leaves a mutant's covering set, and shard execution, grading and the 1080 second shard budget are unchanged; only the estimates fall, so the plan can place mutants on fewer shards and split fewer functions.
+
+For example, one bucket records tests of 6 and 12 seconds with 6 CPU seconds, and a second bucket records an 18 second test with 6 CPU seconds. The ratio is 36 / 12 = 3. A function traced by the 6 and 18 second tests was priced at `5.6 + 1.25 * 24 = 35.6` worker seconds per mutant; with adjusted durations of 2 and 6 seconds it costs `5.6 + 1.25 * 8 = 15.6`. A ratio below one, where CPU exceeded wall, is floored at one, so durations are never inflated.
+
+There is no setting for the ratio, and no log line prints it. Compare `Measured mutation worker seconds` and `Measured mutation shards` in the `refine` log against an earlier run on the same head, or recompute the ratio from the downloaded statistics results: sum each test's largest duration across the results that carry `cpu`, then divide by the summed `cpu`.
+
+| Symptom | Check |
+|---|---|
+| The estimate did not fall after this change | Statistics results without a nonzero `cpu` or without durations are left out of the ratio; with no qualifying result the ratio is one |
+| The estimate is below the observed **Mutate changed Python files** step time | The ratio removes waiting recorded during statistics, while mutation shards add their own instrumentation and setup; compare planned over actual on the same run before treating it as a regression |
+| One group's mutants are priced differently from another's | Each statistics group the plan loads has its own ratio |
+
+[Pull request 4786](https://github.com/the-cloud-clockwork/agentihooks/pull/4786) delivered the adjustment. Replaying the planner on the same statistics artifacts, the account scan head of [run 39207424222](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39207424222) fell from 48.2 to 16.2 estimated minutes per mutant and from 100 to 60 units on ten shards; five other recent pull request runs fell between two and four times, and two of them needed fewer shards (10 to 6, and 5 to 3). Predicted over actual shard wall stayed between 1.6 and 4.9 across all six runs, so the estimate still exceeds observed work. On the account scan head every one of the 1881 traced tests executes the changed one statement function, so line level narrowing could not have cut its test set.
+
 ### Combined grading
 
 A shard grades its unsplit mutants normally and records split results under `units` for the final `mutation` merge job. A successful unit or shard alone does not establish a successful gate.
