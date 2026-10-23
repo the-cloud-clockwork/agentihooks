@@ -180,6 +180,7 @@ def hosted_controls(live, hive, monkeypatch):
     hive.hset(store.names.key("name", MASTER), mapping={"swarm": SLUG, "code": "323133"})
     store.start_execution(SLUG, AgentRecord(MASTER, "master", "master", seat=f"master@{SLUG}", hive="member-1"))
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "compose")
+    monkeypatch.setenv("SWARM_URL", ledger.BASE)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", MASTER)
     monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", authority.hive_agent_token("member-1", SLUG, MASTER))
