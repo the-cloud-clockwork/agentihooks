@@ -19,7 +19,7 @@ BATCH = 32
 FETCH_TIMEOUT_MS = 500
 REOPEN_S = 5.0
 STOP_S = 5.0
-_UNSAFE = re.compile(r"[^a-z0-9-]+")
+_UNSAFE = re.compile(r"[^a-z0-9]+")
 
 
 def identity(host: str, port: int) -> str:
