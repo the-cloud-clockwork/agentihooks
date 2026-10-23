@@ -1345,9 +1345,10 @@ def serve():
     PIDFILE.write_text(str(os.getpid()))
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
     try:
+        from scripts.hub import projector
         from scripts.swarm_ledger import outbox_host
 
-        with outbox_host.running(stored):
+        with outbox_host.running(stored), projector.running(repository, HUB, PORT):
             server.serve_forever()
     finally:
         stopped.set()
