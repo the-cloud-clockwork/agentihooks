@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
 from scripts.events import nkey, subjects
-from scripts.events.dead import DEAD_SUBJECT
-from scripts.hive import auth
+from scripts.events.dead import DEAD_STREAM
+from scripts.hive import auth, buckets
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -23,20 +23,6 @@ REVOKED = f"{auth.PREFIX}:nats-revoked"
 CLAIMS_UPDATE = "$SYS.REQ.CLAIMS.UPDATE"
 PUSH_TIMEOUT_S = 10
 UNLIMITED = {"subs": -1, "data": -1, "payload": -1}
-OPEN = {"pub": {}, "sub": {}}
-SWARM_SUBJECTS = f"{subjects.PREFIX}.>"
-MEMBER_PUBLISH = [
-    SWARM_SUBJECTS,
-    DEAD_SUBJECT,
-    "agentihooks.queue.>",
-    "$KV.>",
-    "$JS.ACK.>",
-    "$JS.API.STREAM.CREATE.*",
-    "$JS.API.STREAM.MSG.GET.*",
-    "$JS.API.CONSUMER.INFO.*.*",
-    "$JS.API.CONSUMER.DURABLE.CREATE.*.*",
-    "$JS.API.CONSUMER.MSG.NEXT.*.*",
-]
 ACCOUNT_LIMITS = {
     **UNLIMITED,
     "imports": -1,
@@ -49,6 +35,19 @@ ACCOUNT_LIMITS = {
     "streams": -1,
     "consumer": -1,
 }
+MEMBER_PUBLISH = (
+    "swarm.*.execution.>",
+    "dead.*",
+    "dead.*.*",
+    "$JS.API.INFO",
+    f"$JS.API.STREAM.MSG.GET.{DEAD_STREAM}",
+    "$JS.API.CONSUMER.INFO.>",
+    "$JS.API.CONSUMER.MSG.NEXT.>",
+    "$JS.ACK.>",
+    *(f"$KV.{bucket}.>" for bucket in buckets.NAMES),
+    *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets.NAMES),
+    *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets.NAMES),
+)
 
 
 @dataclass(frozen=True)
@@ -93,21 +92,21 @@ def from_environ(environ: Mapping[str, str]) -> Signer | None:
         raise auth.HiveError(f"the NATS signer record {path} cannot be used ({exc})") from None
 
 
-def user_claims(permissions: Mapping[str, dict] = OPEN) -> dict:
-    return {"type": "user", "version": 2, **permissions, **UNLIMITED}
+def user_claims() -> dict:
+    return {"type": "user", "version": 2, "pub": {}, "sub": {}, **UNLIMITED}
+
+
+def member_claims(user: str) -> dict:
+    return {**user_claims(), "pub": {"allow": list(MEMBER_PUBLISH)}, "sub": {"allow": [f"{subjects.inbox(user)}.>"]}}
 
 
 def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
     return nkey.derive(signer.account, nkey.USER, member_id)
 
 
-def member_permissions(user: str) -> dict:
-    return {"pub": {"allow": MEMBER_PUBLISH}, "sub": {"allow": [SWARM_SUBJECTS, f"{subjects.inbox(user)}.>"]}}
-
-
 def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
-    claims = user_claims(member_permissions(user.public))
+    claims = member_claims(user.public)
     return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 
 

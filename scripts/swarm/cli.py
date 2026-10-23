@@ -629,7 +629,7 @@ def cmd_spoke(store, args):
 
     if workstation.runs_engine(os.environ):
         raise SwarmError(workstation.ENGINE_RUNS)
-    bus = factory.open_bus(BusConfig.from_environ(os.environ))
+    bus = factory.open_bus(replace(BusConfig.from_environ(os.environ), provision=False))
     try:
         workstation.run(store, bus, LocalHerdrRuntime(HerdrRuntime()), commands.hive_id())
     finally:

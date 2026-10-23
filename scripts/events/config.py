@@ -8,6 +8,7 @@ from .envelope import _count
 BACKEND_ENV = "AGENTIHOOKS_BUS"
 URL_ENV = "AGENTIHOOKS_BUS_URL"
 CREDENTIALS_ENV = "AGENTIHOOKS_BUS_CREDENTIALS"
+BIND_ENV = "AGENTIHOOKS_BUS_BIND"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
 DEFAULT_BACKEND = "memory"
@@ -59,6 +60,7 @@ class BusConfig:
             backend=environ.get(BACKEND_ENV) or DEFAULT_BACKEND,
             url=environ.get(URL_ENV) or None,
             credentials=credentials_from(environ),
+            provision=environ.get(BIND_ENV) != "1",
         )
 
 
