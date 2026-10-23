@@ -1,5 +1,4 @@
 import re
-import socket
 import sqlite3
 import threading
 from collections.abc import Iterable, Iterator, Mapping
@@ -15,8 +14,7 @@ KEPT = 8
 LOCK_WAIT = 10
 LOCK_TRIES = 3
 LOCK_REFUSED = f"the ledger writer lock was not granted in {LOCK_TRIES} waits of {LOCK_WAIT} seconds"
-# version 1 records the changed rows that replicas refresh from; a writer without them makes every replica rebuild.
-# Code older than this check sends no version, so the database refuses it only when a bump leaves no changed rows.
+# version 1 records the changed rows that replicas refresh from; a writer without them makes every replica rebuild
 VERSION = 1
 REQUIRED = 1
 VERSION_SETTING = "agentihooks.ledger_writer_version"
@@ -52,15 +50,23 @@ REWRITES = (
 IGNORE = "INSERT OR IGNORE INTO "
 UNFENCEABLE = "PRAGMA table_info"
 NAMED = re.compile(r"(?<![:\w]):(\w+)")
-FLOOR_SCHEMA = (
-    "CREATE TABLE IF NOT EXISTS writer_floor (name TEXT PRIMARY KEY, version INTEGER NOT NULL);\n"
-    "CREATE TABLE IF NOT EXISTS writer_refusals (slug TEXT, text TEXT, at INTEGER, PRIMARY KEY(slug,text));\n"
-)
+REFUSAL_REASON = ", the oldest the shared database allows; update its code and restart it"
+REFUSED_LOCK = 0x4C574652
+REFUSED_SHIFT = 65536
+FLOOR_SCHEMA = "CREATE TABLE IF NOT EXISTS writer_floor (name TEXT PRIMARY KEY, version INTEGER NOT NULL);\n"
 RAISE_FLOOR = (
     "INSERT INTO writer_floor VALUES ('ledger', ?) ON CONFLICT (name)"
     " DO UPDATE SET version = GREATEST(writer_floor.version, EXCLUDED.version)"
 )
 FLOOR = "SELECT version FROM writer_floor WHERE name = 'ledger'"
+# a session advisory lock outlives the refused transaction, so allowed writers can see who was refused
+MARK_REFUSED = "SELECT pg_try_advisory_lock(?, ?)"
+REFUSED_WRITERS = (
+    "SELECT DISTINCT COALESCE(host(a.client_addr), 'a local socket'),"
+    f" l.objid::BIGINT / {REFUSED_SHIFT}, l.objid::BIGINT % {REFUSED_SHIFT} FROM pg_locks l"
+    " JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.locktype = 'advisory' AND l.classid = ? AND l.objsubid = 2"
+    " ORDER BY 1, 2, 3"
+)
 GUARD = f"""CREATE OR REPLACE FUNCTION ledger_writer_floor() RETURNS trigger LANGUAGE plpgsql AS $guard$
 DECLARE
   writer BIGINT := COALESCE(NULLIF(current_setting('{VERSION_SETTING}', true), ''), '0')::BIGINT;
@@ -68,8 +74,9 @@ DECLARE
 BEGIN
   IF writer < required
     AND NOT EXISTS (SELECT 1 FROM row_changes WHERE slug = NEW.slug AND generation = NEW.generation) THEN
+    PERFORM pg_try_advisory_lock({REFUSED_LOCK}, (writer * {REFUSED_SHIFT} + required)::INTEGER);
     RAISE EXCEPTION USING ERRCODE = '{REFUSED_CODE}', MESSAGE = 'ledger writer version ' || writer
-      || ' is below version ' || required || ', the oldest the shared database allows; update its code and restart it';
+      || ' is below version ' || required || '{REFUSAL_REASON}';
   END IF;
   RETURN NEW;
 END
@@ -78,8 +85,6 @@ GUARD_TRIGGER = (
     "CREATE OR REPLACE TRIGGER ledger_writer_floor BEFORE UPDATE ON ledgers FOR EACH ROW"
     " WHEN (NEW.generation IS DISTINCT FROM OLD.generation) EXECUTE FUNCTION ledger_writer_floor()"
 )
-RECORD_REFUSAL = "INSERT INTO writer_refusals VALUES (?, ?, ?) ON CONFLICT (slug, text) DO UPDATE SET at = EXCLUDED.at"
-TAKE_REFUSALS = "DELETE FROM writer_refusals WHERE slug = ? RETURNING text"
 
 
 class Refused(sqlite3.DatabaseError):
@@ -87,10 +92,7 @@ class Refused(sqlite3.DatabaseError):
 
 
 def refusal(version: int, required: int) -> str:
-    return (
-        f"ledger writer version {version} is below version {required}, the oldest the shared database allows;"
-        " update its code and restart it"
-    )
+    return f"ledger writer version {version} is below version {required}{REFUSAL_REASON}"
 
 
 def url(env: Mapping[str, str]) -> str | None:
@@ -308,27 +310,21 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
                 connection.execute(GUARD_TRIGGER)
             self._ready.add(address)
 
-    def apply_ops(self, slug: str, *args, **kwargs) -> tuple[dict, list]:
-        try:
-            return super().apply_ops(slug, *args, **kwargs)
-        except Refused as refused:
-            text = f"The ledger writer on {socket.gethostname()} was refused: {refused}"
-            with self.connect() as connection, connection:
-                connection.execute(RECORD_REFUSAL, (slug, text, self.domain.now_ms()))
-            raise
-
     def _write(self, connection, slug: str, entry, state: dict, events: list):
-        required = connection.execute(FLOOR).fetchone()
-        if required is not None and required[0] > VERSION:
-            raise Refused(refusal(VERSION, required[0]))
-        refusals = connection.execute(TAKE_REFUSALS, (slug,)).fetchall()
-        if refusals:
+        stored = connection.execute(FLOOR).fetchone()
+        required = REQUIRED if stored is None else stored[0]
+        if required > VERSION:
+            connection.execute(MARK_REFUSED, (REFUSED_LOCK, VERSION * REFUSED_SHIFT + required))
+            raise Refused(refusal(VERSION, required))
+        refused = connection.execute(REFUSED_WRITERS, (REFUSED_LOCK,)).fetchall()
+        if refused:
             from scripts.swarm_ledger import ledger_alerts
 
-            state.setdefault("alerts", [])
+            before = [alert["text"] for alert in state.setdefault("alerts", [])]
             raised = SimpleNamespace(rev=state["_meta"]["rev"], at=self.domain.now_ms(), dirty=False)
-            for (text,) in refusals:
-                ledger_alerts.raise_warning(state, raised, (ledger_alerts.WRITER, text), [])
+            for address, version, floor in refused:
+                text = f"The ledger writer at {address} was refused: {refusal(version, floor)}"
+                ledger_alerts.raise_warning(state, raised, (ledger_alerts.WRITER, text), before)
         return super()._write(connection, slug, entry, state, events)
 
     @contextmanager

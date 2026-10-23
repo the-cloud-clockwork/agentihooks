@@ -81,16 +81,21 @@ def test_a_writer_on_code_without_the_check_is_refused_and_no_replica_rebuilds_i
     replica = postgres.PostgresLedgerRepository(URL)
     cached = replica.get_document(slug)
     before = generation(slug)
-    with pytest.raises(psycopg2.Error) as refused:
-        run("UPDATE ledgers SET generation = generation + 1 WHERE slug = %s", (slug,))
-    assert refused.value.diag.message_primary == refusal(0, postgres.REQUIRED)
-    assert generation(slug) == before
+    with closing(psycopg2.connect(URL)) as old:
+        with pytest.raises(psycopg2.Error) as refused, old, old.cursor() as cursor:
+            cursor.execute("UPDATE ledgers SET generation = generation + 1 WHERE slug = %s", (slug,))
+        assert refused.value.diag.message_primary == refusal(0, postgres.REQUIRED)
+        assert generation(slug) == before
 
-    def whole(*args):
-        raise AssertionError("the replica rebuilt the whole ledger")
+        def whole(*args):
+            raise AssertionError("the replica rebuilt the whole ledger")
 
-    monkeypatch.setattr(sqlite, "read_rows", whole)
-    assert replica.get_document(slug) == cached
+        monkeypatch.setattr(sqlite, "read_rows", whole)
+        assert replica.get_document(slug) == cached
+        monkeypatch.undo()
+        repository.apply_ops(slug, changes=[DONE])
+    texts = [a["text"] for a in repository.get_document(slug)["alerts"] if a["source"] == "writer"]
+    assert f"The ledger writer at 127.0.0.1 was refused: {refusal(0, postgres.REQUIRED)}" in texts
 
 
 def test_a_writer_on_code_without_the_check_passes_when_it_records_its_changed_rows(ledger):
