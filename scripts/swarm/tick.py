@@ -1259,7 +1259,10 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
 
 
 def _room_wait(runtime, lane, task):
-    refused = seat_spawn.placed_elsewhere(runtime, lane, task)
+    try:
+        refused = seat_spawn.placed_elsewhere(runtime, lane, task)
+    except ProfileUnresolved:
+        return ""
     return f"task {task['id']} waits: {refused}" if refused else ""
 
 
