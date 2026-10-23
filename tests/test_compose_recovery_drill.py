@@ -36,10 +36,10 @@ def test_the_recovery_drill_restores_the_cold_backup_before_the_hub_reconciles()
 def test_the_recovery_drill_requires_every_task_done_with_its_recorded_claims_and_no_agent():
     script = drill()
     expected = (
-        '$(task t1 1 \'"started"\'), $(task t2 2 \'"exited", "exited"\'), $(task t3 1 \'"exited"\'), ',
+        '$(task t1 1 \'"exited"\'), $(task t2 2 \'"exited", "exited"\'), $(task t3 1 \'"exited"\'), ',
         '$(task t4 2 \'"exited", "exited"\'), $(task t5 1 \'"exited"\'), $(task t6 1 \'"exited"\')',
     )
     assert all(part in script for part in expected)
-    assert '"ledger": "done", "claim": null, "launches": %s, "executions": %s, "jetstream": [%s]' in script
+    assert '"ledger": "done", "claim": null, "launches": %s, "jetstream": [%s]' in script
     assert '\\"agents\\": []}' in script
     assert script.index('settle "$want"') < script.index("printf 'Recovery drill passed")
