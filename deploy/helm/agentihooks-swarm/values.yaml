@@ -201,6 +201,10 @@ hub:
   bus:
     backend: nats
     url: ""
+    # A Secret key holding the hub's bus address, for an address that carries credentials; wins over url.
+    urlSecret:
+      name: ""
+      key: AGENTIHOOKS_BUS_URL
   affinity:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:

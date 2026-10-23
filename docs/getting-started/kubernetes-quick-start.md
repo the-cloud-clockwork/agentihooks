@@ -62,7 +62,7 @@ nats:
   enabled: false
 ```
 
-The server needs JetStream enabled for the hub's durable consumers.
+The server needs JetStream enabled for the hub's durable consumers. When the address carries a user and password, keep it in a Secret and name it with `hub.bus.urlSecret.name` (key `AGENTIHOOKS_BUS_URL` unless `hub.bus.urlSecret.key` says otherwise); it replaces `hub.bus.url`.
 
 ### Use your own Redis
 
