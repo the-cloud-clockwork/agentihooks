@@ -79,9 +79,11 @@ fi
         assert "runtime images ready for startup" in result.stdout, result.stderr
         assert len(starts) == 1
         pulls = [call for call in calls if " pull " in f" {call} "]
-        assert len(pulls) == 2
+        assert len(pulls) == (3 if script == "compose-hive-smoke" else 2)
         assert all("@sha256:runtime" in call for call in pulls)
         assert any("redis:7@sha256:runtime" in call for call in pulls)
+        if script == "compose-hive-smoke":
+            assert any("nats:2.15.1-alpine@sha256:runtime" in call for call in pulls)
         if script != "hive-launch-smoke":
             assert any("agentihooks-swarm:dev@sha256:runtime" in call for call in pulls)
         for pull in pulls:
