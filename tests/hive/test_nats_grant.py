@@ -111,7 +111,7 @@ def test_a_member_credential_runs_the_hive_bus_operations(signer):
         event = Envelope(
             "ready-a", "task.ready", "rig", "task", "task-a", 0, 12, "readiness", {"lane": "eng", "generation": 0}
         )
-        hub.queue("swarm.rig.ready.eng", QueuePolicy()).offer(event)
+        assert hub.queue("swarm.rig.ready.eng", QueuePolicy()).offer(event)
         delivery = member.queue("swarm.rig.ready.eng", QueuePolicy()).take(5000)
         assert delivery.event == event
         delivery.ack()
@@ -122,6 +122,8 @@ def test_a_member_credential_runs_the_hive_bus_operations(signer):
         assert [entry.value for entry in work.watch("task-a")] == [b"claimed", b"done"]
         assert member.events.publish("swarm.rig.execution.started", event)
         assert member.dead.publish("dead.rig", event)
+        for _ in range(2):
+            member._loop.run(nats._publish_dead(member._js, event, "queue.m1", 1))
     finally:
         member.close()
         hub.close()
