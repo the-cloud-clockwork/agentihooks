@@ -58,3 +58,4 @@ profiles/*/.claude/settings.json
 !.impeccable/live/config.json
 docs/swarm-v2/.*.lock
 collected.json
+deploy/helm/agentihooks-swarm/charts/
