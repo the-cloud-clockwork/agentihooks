@@ -62,9 +62,10 @@ FLOOR = "SELECT version FROM writer_floor WHERE name = 'ledger'"
 # a session advisory lock outlives the refused transaction, so allowed writers can see who was refused
 MARK_REFUSED = "SELECT pg_try_advisory_lock(?, ?)"
 REFUSED_WRITERS = (
-    "SELECT DISTINCT COALESCE(host(a.client_addr), 'a local socket'),"
+    "SELECT DISTINCT COALESCE(host(a.client_addr), 'an unseen client'),"
     f" l.objid::BIGINT / {REFUSED_SHIFT}, l.objid::BIGINT % {REFUSED_SHIFT} FROM pg_locks l"
     " JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.locktype = 'advisory' AND l.classid = ? AND l.objsubid = 2"
+    " AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())"
     " ORDER BY 1, 2, 3"
 )
 GUARD = f"""CREATE OR REPLACE FUNCTION ledger_writer_floor() RETURNS trigger LANGUAGE plpgsql AS $guard$

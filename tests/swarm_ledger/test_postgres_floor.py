@@ -73,6 +73,8 @@ def test_the_stored_version_only_rises_and_the_guard_refuses_unrecorded_bumps_be
     assert "WHEN (NEW.generation IS DISTINCT FROM OLD.generation)" in postgres.GUARD_TRIGGER
     assert "l.locktype = 'advisory' AND l.classid = ? AND l.objsubid = 2" in postgres.REFUSED_WRITERS
     assert "l.objid::BIGINT / 65536, l.objid::BIGINT % 65536" in postgres.REFUSED_WRITERS
+    assert "COALESCE(host(a.client_addr), 'an unseen client')" in postgres.REFUSED_WRITERS
+    assert "l.database = (SELECT oid FROM pg_database WHERE datname = current_database())" in postgres.REFUSED_WRITERS
 
 
 def test_a_database_refusal_surfaces_as_refused_and_other_failures_stay_database_errors():
@@ -114,14 +116,14 @@ def test_a_writer_at_or_above_the_stored_version_writes(monkeypatch, floor):
 
 def test_each_refused_writer_becomes_one_open_master_alert_on_the_next_allowed_write(monkeypatch):
     calls = written(monkeypatch)
-    refused = [("10.0.0.5", 0, 1), ("a local socket", 1, 2)]
+    refused = [("10.0.0.5", 0, 1), ("an unseen client", 1, 2)]
     connection = Statements({postgres.REFUSED_WRITERS: refused})
     state = {"_meta": {"rev": 7}, "alerts": [{"id": "al-1-0", "text": "kept", "state": "done"}]}
     repository()._write(connection, "s", "old", state, [])
     alerts = calls[0][3]["alerts"]
     texts = [
         f"The ledger writer at 10.0.0.5 was refused: {postgres.refusal(0, 1)}",
-        f"The ledger writer at a local socket was refused: {postgres.refusal(1, 2)}",
+        f"The ledger writer at an unseen client was refused: {postgres.refusal(1, 2)}",
     ]
     assert alerts[1:] == [
         {"id": f"al-7-{n}", "text": text, "source": "writer", "target": "master", "state": "open", "at": 1234, "rev": 7}
