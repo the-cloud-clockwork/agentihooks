@@ -64,7 +64,7 @@ def _opens(signer: nats_grant.Signer, credentials: str | None) -> bool:
     from scripts.events import nats
 
     try:
-        bus = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credentials))
+        bus = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credentials, bind=True))
     except Exception as exc:
         assert "authorization" in str(exc).lower()
         return False
@@ -98,6 +98,71 @@ def test_hive_serve_mints_a_member_credential_the_bus_opens_with(admin, signer):
     jwt, user = nkey.parse_creds(grant["nats_credentials"])
     assert user == nats_grant.member_user(signer, member["id"])
     assert _opens(signer, grant["nats_credentials"])
+
+
+def _refused(signer: nats_grant.Signer, credentials: str) -> list[str]:
+    import asyncio
+
+    import nats as nats_client
+
+    from scripts.events import nats
+
+    errors = []
+
+    async def attempt() -> None:
+        async def collect(exc):
+            errors.append(str(exc).lower())
+
+        nc = await nats_client.connect(
+            signer.url, allow_reconnect=False, error_cb=collect, **nats.auth_options(credentials)
+        )
+        js = nc.jetstream(timeout=1)
+        try:
+            for create in (
+                js.add_stream(name="ROGUE", subjects=["rogue.>"]),
+                js.add_consumer(nats.EVENT_STREAM, durable_name="rogue"),
+            ):
+                with pytest.raises(nats_client.errors.TimeoutError):
+                    await create
+            await nc.flush()
+        finally:
+            await nc.close()
+
+    asyncio.run(attempt())
+    return errors
+
+
+def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_durable(admin, signer):
+    from scripts.events import nats
+    from scripts.events.config import QueuePolicy
+    from scripts.events.envelope import Envelope
+    from scripts.hive import buckets
+
+    hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
+    member = nats.open_bus(
+        BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, "m1"), bind=True)
+    )
+    try:
+        policy = QueuePolicy()
+        with pytest.raises(nats.NotFoundError):
+            member.queue("swarm.rig.ready.eng", policy)
+        buckets.provision(hub)
+        event = Envelope("offer-1", "task.ready", "rig", "task", "t1", 0, 1, "readiness", {"lane": "eng"})
+        hub.queue("swarm.rig.ready.eng", policy).offer(event)
+        delivery = member.queue("swarm.rig.ready.eng", policy).take(1_000)
+        assert delivery.event.id == "offer-1"
+        delivery.ack()
+        for bucket in buckets.NAMES:
+            assert member.state(bucket).create("k", b"v") == 1
+        assert member.events.publish("swarm.rig.execution.started", event)
+        assert member.dead.publish("dead.rig", event)
+    finally:
+        member.close()
+        hub.close()
+    refused = " ".join(_refused(signer, nats_grant.mint(signer, "m1")))
+    assert 'permissions violation for publish to "$js.api.stream.create.rogue"' in refused
+    durable = f'"$js.api.consumer.durable.create.{nats.EVENT_STREAM}.rogue"'.lower()
+    assert f"permissions violation for publish to {durable}" in refused
 
 
 def test_a_hive_endpoint_without_a_signer_mints_no_bus_credential(admin):
@@ -181,9 +246,10 @@ def test_refresh_writes_the_bus_credential_beside_the_member_env(tmp_path):
     creds = tmp_path / auth.NATS_CREDS_FILE
     assert creds.read_text() == "creds text"
     assert oct(creds.stat().st_mode & 0o777) == "0o600"
-    assert env.endswith(f"AGENTIHOOKS_BUS_CREDENTIALS={creds}\n")
+    assert env.endswith(f"AGENTIHOOKS_BUS_CREDENTIALS={creds}\nAGENTIHOOKS_BUS_BIND=1\n")
     env = auth.write_env(tmp_path, "https://hive", {**grant, "nats_credentials": None}).read_text()
     assert "AGENTIHOOKS_BUS_CREDENTIALS" not in env
+    assert "AGENTIHOOKS_BUS_BIND" not in env
     assert not creds.exists()
 
 
@@ -251,12 +317,47 @@ def _offline_signer() -> nats_grant.Signer:
     return nats_grant.Signer(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT), "creds", "nats://hub:4222")
 
 
-def test_a_member_credential_carries_exactly_the_user_claims():
+def test_a_member_credential_carries_exactly_the_hive_member_claims():
     signed = _offline_signer()
     jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
     claims = _claims(jwt)
     assert (claims["iss"], claims["sub"], claims["name"]) == (signed.account.public, user.public, "hive-m1")
-    assert claims["nats"] == {"type": "user", "version": 2, "pub": {}, "sub": {}, "subs": -1, "data": -1, "payload": -1}
+    buckets = ("spoke-work", "spoke-pending", "hive-presence", "hive-executions", "execution-starts")
+    publish = [
+        "swarm.*.execution.>",
+        "dead.*",
+        "dead.*.*",
+        "$JS.API.INFO",
+        "$JS.API.STREAM.MSG.GET.AGENTIHOOKS_DEAD",
+        "$JS.API.CONSUMER.INFO.>",
+        "$JS.API.CONSUMER.MSG.NEXT.>",
+        "$JS.ACK.>",
+        *(f"$KV.{bucket}.>" for bucket in buckets),
+        *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets),
+        *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets),
+    ]
+    assert claims["nats"] == {
+        "type": "user",
+        "version": 2,
+        "pub": {"allow": publish},
+        "sub": {"allow": ["_INBOX.>"]},
+        "subs": -1,
+        "data": -1,
+        "payload": -1,
+    }
+    assert not [subject for subject in publish if ".CREATE" in subject]
+
+
+def test_a_role_credential_keeps_the_unrestricted_user_claims():
+    assert nats_grant.user_claims() == {
+        "type": "user",
+        "version": 2,
+        "pub": {},
+        "sub": {},
+        "subs": -1,
+        "data": -1,
+        "payload": -1,
+    }
 
 
 @pytest.mark.parametrize("revocations", [{}, {"UA": 7}])

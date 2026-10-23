@@ -287,9 +287,14 @@ def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatc
         return passes[-1]
 
     monkeypatch.setattr(runner.HubRunner, "run_once", once)
+    from scripts.hive import buckets
+
+    provisioned = []
+    monkeypatch.setattr(buckets, "provision", provisioned.append)
     previous = signal.getsignal(signal.SIGTERM)
     leases = opened.state(lease.BUCKET)
     assert runner.main(["run", "--once"]) == 0
+    assert provisioned == [opened]
     assert handler.seen == [("e1", 1)]
     assert capsys.readouterr().out == "lifecycle: handled\n"
     assert lease.read(leases, "reactor.lifecycle") == lease.LeaseState("hub-0", 0)

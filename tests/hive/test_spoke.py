@@ -296,12 +296,15 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
     from scripts.events import nats
     from scripts.events.config import BusConfig
     from scripts.events.envelope import Envelope
+    from scripts.hive import buckets
     from scripts.hive.spoke import Spoke, SpokeConfig
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
     from tests.events import nats_server
 
     with nats_server.running(tmp_path / "nats") as url:
         bus = nats.open_bus(BusConfig(backend="nats", url=url))
+        buckets.provision(bus)
+        spoke_bus = nats.open_bus(BusConfig(backend="nats", url=url, bind=True))
         try:
             config = SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a")
             tasks, runtime = Mock(), Mock()
@@ -328,7 +331,7 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
                     {"lane": "eng", "generation": 0},
                 )
             )
-            spoke = Spoke(config, bus, runtime, tasks, reading)
+            spoke = Spoke(config, spoke_bus, runtime, tasks, reading)
             assert spoke.poll(500) == "started"
             runtime.spawn.assert_called_once_with(
                 replace(tasks.request.return_value, task={**tasks.request.return_value.task, "claim_fence": ANY})
@@ -339,6 +342,7 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
             assert found[0].event.version == 7
             assert queue.take(10) is None
         finally:
+            spoke_bus.close()
             bus.close()
 
 

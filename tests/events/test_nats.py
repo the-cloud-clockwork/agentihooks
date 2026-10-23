@@ -137,6 +137,35 @@ def test_a_work_queue_refuses_another_policy(bus):
         bus.queue("work", QueuePolicy())
 
 
+def test_a_bind_bus_creates_nothing_and_binds_what_another_bus_created(url):
+    binder = nats.open_bus(BusConfig(backend="nats", url=url, queue=LOG_POLICY, bind=True))
+    try:
+        assert binder._loop.run(binder._js.streams_info()) == []
+        with pytest.raises(nats.NotFoundError):
+            binder.queue("work", POLICY)
+        with pytest.raises(nats.BucketNotFoundError):
+            binder.state("tasks")
+        with pytest.raises(nats.NotFoundError):
+            binder.events.consumer("watcher", "swarm.>")
+        assert binder._loop.run(binder._js.streams_info()) == []
+        owner = nats.open_bus(BusConfig(backend="nats", url=url, queue=LOG_POLICY))
+        try:
+            owner.queue("work", POLICY).offer(event("w1"))
+            owner.state("tasks").create("k", b"v")
+            owner.events.consumer("watcher", "swarm.>")
+            owner.events.publish("swarm.s.task.claimed", event("l1"))
+            with pytest.raises(ValueError, match=r"^durable consumer 'watcher' filters 'swarm.>', not 'swarm.s.>'$"):
+                binder.events.consumer("watcher", "swarm.s.>")
+            assert [d.event.id for d in binder.events.consumer("watcher", "swarm.>").fetch(1, 500)] == ["l1"]
+            assert binder.queue("work", POLICY).take(500).event.id == "w1"
+            assert binder.state("tasks").get("k").value == b"v"
+            assert _consumer_config(binder, nats.queue_stream("work"), "work").backoff == [0.2, 0.4]
+        finally:
+            owner.close()
+    finally:
+        binder.close()
+
+
 def test_a_delivery_reports_its_event_and_attempt(bus):
     queue = bus.queue("work", POLICY)
     queue.offer(event("e7"))

@@ -167,7 +167,7 @@ def test_the_spoke_command_serves_master_work_as_this_hive_and_closes_the_bus(mo
     [(seen_store, seen_bus, runtime, hive)] = served
     assert (seen_store, seen_bus, hive, type(runtime).__name__) == (store, bus, "workstation-1", "LocalHerdrRuntime")
     assert isinstance(runtime.herdr, cli.HerdrRuntime)
-    assert [(c.backend, c.url) for c in configs] == [("nats", "nats://bus:4222")]
+    assert [(c.backend, c.url, c.bind) for c in configs] == [("nats", "nats://bus:4222", True)]
     assert bus.closed
 
 
