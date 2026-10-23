@@ -92,8 +92,17 @@ def test_an_unrestricted_member_credential_differs_from_a_restricted_hive_user(t
     _, antoncore = _matching(tmp_path)
     status, lines = _run(capsys, _agentihooks(tmp_path / "open", {}, {}), antoncore)
     assert status == 1
-    assert "::error::publish allow > is granted only by the agentihooks member credential" in lines[0]
-    assert len(lines) == 5
+    ours = "is granted only by the agentihooks member credential (scripts/hive/nats_permissions.py)."
+    theirs = (
+        "is granted only by the antoncore swarm-hive user (k8s/values-overlays/agentihooks-swarm-nats/values.yaml)."
+    )
+    assert lines == [
+        f"::error::publish allow > {ours}",
+        f"::error::publish allow $JS.ACK.> {theirs}",
+        f"::error::publish allow swarm.*.execution.> {theirs}",
+        f"::error::subscribe allow > {ours}",
+        f"::error::subscribe allow _INBOX.> {theirs}",
+    ]
 
 
 def test_string_and_list_shorthand_read_as_allow_lists(tmp_path, capsys):
@@ -118,7 +127,10 @@ def test_a_member_source_without_member_grants_is_red(tmp_path, capsys):
     source.write_text("OTHER = {}\nOTHER.MEMBER = {}\n")
     status, lines = _run(capsys, tmp_path / "bare", antoncore)
     assert status == 1
-    assert lines == ["::error::The hive member NATS grants cannot be read (StopIteration: )."]
+    assert lines == [
+        "::error::The hive member NATS grants cannot be read"
+        " (ValueError: scripts/hive/nats_permissions.py assigns no MEMBER grants)."
+    ]
 
 
 def test_a_missing_antoncore_checkout_is_red(tmp_path, capsys):

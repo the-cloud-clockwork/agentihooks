@@ -30,11 +30,16 @@ def _direction(rules) -> dict[str, frozenset[str]]:
 def member_grants(agentihooks: Path) -> dict[str, dict[str, frozenset[str]]]:
     tree = ast.parse((agentihooks / MEMBER_SOURCE).read_text())
     member = next(
-        node.value
-        for node in tree.body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "MEMBER" for target in node.targets)
+        (
+            node.value
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "MEMBER" for target in node.targets)
+        ),
+        None,
     )
+    if member is None:
+        raise ValueError(f"{MEMBER_SOURCE} assigns no MEMBER grants")
     claims = ast.literal_eval(member)
     return {"publish": _direction(claims.get("pub")), "subscribe": _direction(claims.get("sub"))}
 
@@ -80,7 +85,6 @@ def main(argv: list[str] | None = None) -> int:
     except (
         OSError,
         KeyError,
-        StopIteration,
         AttributeError,
         TypeError,
         ValueError,
