@@ -175,7 +175,7 @@ def unresolved_u(lane, task):
 )
 def test_placeable_marks_an_unresolved_task_without_spending_a_slot(store, asked, room, taken):
     runtime = SimpleNamespace(router=SimpleNamespace(placement=object()), placement_refusal=unresolved_u)
-    ready = [{"id": "u1"}, {"id": "e1"}, {"id": "u2"}, {"id": "e2"}]
+    ready = [{"id": "u1"}, {"id": "e1"}, {"id": "u2"}, {"id": "e2"}, {"id": "e3"}]
     found, waited = profile_first.placeable("sw", store.config("sw"), store, runtime, "eng", ready, room)
     assert [task["id"] for task in found] == taken
     assert {task["id"]: task.get(profile_first.UNRESOLVED) for task in found} == {

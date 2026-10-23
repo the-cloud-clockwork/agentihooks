@@ -1029,6 +1029,12 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
     order, actions = _spawn_order(slug, config, store, agents, rows, doc, runtime)
+    actions += [
+        _unresolved(slug, ledger, rows, task["id"], task[profile_first.UNRESOLVED])
+        for _, task in order
+        if profile_first.UNRESOLVED in task
+    ]
+    order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
     begun, tried = time.monotonic(), 0
     for lane, task in order:
         expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
