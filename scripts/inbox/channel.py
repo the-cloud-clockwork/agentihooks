@@ -130,12 +130,12 @@ async def _recheck(store, me, pubsub):
         raise error
 
 
-async def _deliver(store, me, write, pushed=None):
+async def _deliver(store, me, write, pushed):
     import mcp.types as types
     from mcp.shared.message import SessionMessage
 
-    pushed = set() if pushed is None else pushed
-    room = UNCONFIRMED_MAX - _held(store, pushed)
+    pushed.intersection_update([item_id for item_id in pushed if _held(store, item_id)])
+    room = UNCONFIRMED_MAX - len(pushed)
     items = [item for item in claim(store, me, min(room, CLAIM_BATCH)) if item.id not in pushed]
     for index, item in enumerate(items):
         note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
@@ -148,15 +148,11 @@ async def _deliver(store, me, write, pushed=None):
         pushed.add(item.id)
 
 
-def _held(store, pushed):
-    for item_id in list(pushed):
-        try:
-            held = store.get(item_id).state in HELD
-        except InboxError:
-            held = False
-        if not held:
-            pushed.discard(item_id)
-    return len(pushed)
+def _held(store, item_id):
+    try:
+        return store.get(item_id).state in HELD
+    except InboxError:
+        return False
 
 
 async def _push(store, me, write, ready, feed=None):

@@ -20,7 +20,7 @@ def _pass(inbox, session, pushed):
     anyio.run(channel._deliver, inbox, "bob", session, pushed)
 
 
-def test_an_item_pushed_into_the_session_is_never_pushed_again(channel_backend):
+def test_a_running_channel_never_pushes_an_item_into_its_session_again(channel_backend):
     _, inbox = channel_backend
     session, pushed = Session(), set()
     item = inbox.send("alice", "bob", "the stalled session holds this one")

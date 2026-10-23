@@ -5688,9 +5688,10 @@ master seat for the next one, and the tick tells the page chat that the master i
 A stopped swarm whose master seat holds a pending item is paused, so the tick starts its master and no engineer.
 The ledger hook, the ledger watch and the inbox share one seen mark per agent and write. Stable item ids keep
 relay retries from creating a second item; an unconfirmed delivery may still be shown again through another
-transport. The inbox channel pushes an item into its session once, however often redelivery returns it, and holds
-at most ten pushed items the session has not confirmed or closed; further items wait pending until the session
-confirms one, so a stalled session never collects a growing queue of copies.
+transport. While it runs, the inbox channel pushes an item into its session once, however often redelivery returns
+it, and holds at most ten pushed items the session has not confirmed or closed; further items wait pending until
+the session confirms one, so a stalled session never collects a growing queue of copies. A restarted channel
+starts with no record of earlier pushes.
 
 ### Inbox escalation sender exclusion
 
