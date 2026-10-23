@@ -133,3 +133,109 @@ def test_closed_item_and_unrelated_deadline_never_advance_ladder(rig):
     assert rig.herdr.prompts == []
     assert rig.ledger.followups == []
     assert steps(rig, item) == []
+
+
+def test_hive_mail_is_resolved_from_its_own_world(rig, monkeypatch):
+    from scripts.hive import scope
+    from scripts.inbox.store import InboxStore
+
+    monkeypatch.setattr(scope, "member", lambda: True)
+    member = InboxStore(rig.inbox.redis, world="hive")
+    item = member.send("sender", "worker", "hive request")
+    monkeypatch.setattr(scope, "member", lambda: False)
+    monkeypatch.setattr(scope, "members", lambda redis: ["hive"])
+    SeatInbox(rig.bus, "sw").send(item.address, Message(item.id, item.sender, item.text))
+    pump(rig)
+    advance(rig, 1000)
+    assert [row.get("event") for row in member.history(item.id) if "event" in row] == ["woken"]
+    assert rig.herdr.prompts == [
+        (
+            "p1",
+            "Run agentihooks msg inbox and answer through agentihooks msg reply or the swarm commands, never as text in the terminal.",
+        )
+    ]
+
+
+def test_unconfirmed_delivery_requeues_and_keeps_timer_retries_without_tick(rig):
+    item, _ = send(rig)
+    rig.inbox.deliver(item.id, "worker")
+    advance(rig, 1000)
+    assert rig.herdr.prompts == []
+    advance(rig, 1000 + W)
+    assert rig.inbox.get(item.id).state == "pending"
+    assert steps(rig, item) == ["woken"]
+
+
+def test_persisted_next_deadline_is_republished_after_publish_failure(rig, monkeypatch):
+    from scripts.events import deadlines
+    from scripts.events.envelope import Envelope
+
+    item, _ = send(rig)
+    requests = rig.bus.events.consumer("requests-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
+    expired = deadlines.expired(requests[0].event)
+    publish = rig.bus.events.publish
+
+    def fail(subject, event):
+        raise ConnectionError("bus disconnected")
+
+    monkeypatch.setattr(rig.bus.events, "publish", fail)
+    with pytest.raises(ConnectionError, match="bus disconnected"):
+        rig.reactor.handle(expired)
+    monkeypatch.setattr(rig.bus.events, "publish", publish)
+    rig.reactor.handle(expired)
+    saved = Envelope.decode(rig.reactor.state.get(rig.reactor._key("sw", item.id)).value)
+    assert saved.version == 2
+    assert saved.data["deadline_ms"] == 1000 + W
+    pump(rig)
+    advance(rig, 1000 + W)
+    assert steps(rig, item) == ["woken", "woken"]
+
+
+def test_failed_arrival_publication_stays_in_the_durable_outbox(rig, monkeypatch):
+    from scripts.swarm.naming import NameRegistry
+
+    monkeypatch.setattr(NameRegistry, "slug_of", lambda self, name: "sw")
+    item = rig.inbox.send("sender", "worker", "request during bus outage")
+    publish = rig.bus.events.publish
+    monkeypatch.setattr(rig.bus.events, "publish", lambda *args: (_ for _ in ()).throw(ConnectionError("disconnected")))
+    with pytest.raises(ConnectionError, match="disconnected"):
+        rig.reactor.flush()
+    assert rig.inbox.redis.smembers(rig.inbox.key("wake-outbox")) == {item.id}
+    monkeypatch.setattr(rig.bus.events, "publish", publish)
+    rig.reactor.flush()
+    assert rig.inbox.redis.smembers(rig.inbox.key("wake-outbox")) == set()
+    pump(rig)
+    advance(rig, 1000)
+    assert steps(rig, item) == ["woken"]
+
+
+def test_suppressed_escalation_reference_has_no_millisecond_timer_loop(rig):
+    rig.herdr.status["p1"] = "working"
+    item = rig.inbox.send("sender", "worker", "request", ref="inbox-escalation:original")
+    SeatInbox(rig.bus, "sw").send(item.address, Message(item.id, item.sender, item.text, item.ref))
+    pump(rig)
+    advance(rig, 1000 + W)
+    advance(rig, 1000 + W + 1)
+    assert steps(rig, item) == []
+    requests = rig.bus.events.consumer("bounded-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
+    assert [row.event.data["deadline_ms"] for row in requests] == [1000, 1000 + 2 * W]
+
+
+def test_production_reactors_drive_wakes_through_hub_delivery(rig):
+    from scripts.hub.registry import Registry
+    from scripts.hub.runner import HubRunner
+
+    item, _ = send(rig)
+    hub = HubRunner(
+        rig.bus,
+        Registry([rig.reactor.reactor(), rig.reactor.expiry_reactor(), rig.timers.reactor()]),
+        "hub-proof",
+        clock=lambda: rig.clock.now,
+    )
+    for _ in range(6):
+        hub.run_once(timeout_ms=0)
+    assert steps(rig, item) == ["woken"]
+    rig.clock.now += W
+    for _ in range(6):
+        hub.run_once(timeout_ms=0)
+    assert steps(rig, item) == ["woken", "woken"]

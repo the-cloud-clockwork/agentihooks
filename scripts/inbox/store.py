@@ -219,6 +219,7 @@ class InboxStore:
                 pipe.zadd(self.key("pending", address), {item.id: at})
                 pipe.sadd(self.key("waiting"), address)
             pipe.rpush(self.key("history", item.id), _entry("pending", sender, "", at))
+            pipe.sadd(self.key("wake-outbox"), item.id)
             if self.persist is not None:
                 self.persist(pipe)
             pipe.publish(NOTIFY, address)

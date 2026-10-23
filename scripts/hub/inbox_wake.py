@@ -5,10 +5,13 @@ from dataclasses import replace
 from scripts.events import deadlines
 from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
+from scripts.hub import lease
 from scripts.hub.registry import Reactor
 from scripts.inbox import wake
-from scripts.inbox.store import InboxStore
-from scripts.swarm import lease, outage
+from scripts.inbox.bus import Message, SeatInbox
+from scripts.inbox.pool import slug_of
+from scripts.inbox.store import REDELIVERED, REDELIVERER, InboxStore, redelivery_ms
+from scripts.swarm import outage
 from scripts.swarm.delivery import HerdrMessenger
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import connect
@@ -25,7 +28,7 @@ class InboxWake:
         self.state = bus.state("inbox-wake")
 
     def reactor(self) -> Reactor:
-        return Reactor("inbox-wake", "swarm.*.inbox-wake.requested", self.handle, singleton=True)
+        return Reactor("inbox-wake", "swarm.*.inbox-wake.requested", self.handle, singleton=True, poll=self.flush)
 
     def expiry_reactor(self) -> Reactor:
         return Reactor("inbox-wake-expiry", "swarm.*.deadline.expired", self.handle, singleton=True)
@@ -46,23 +49,50 @@ class InboxWake:
     def _key(self, swarm: str, item: str) -> str:
         return hashlib.sha256(f"{swarm}\0{item}".encode()).hexdigest()
 
+    def flush(self, guard=lambda: True) -> None:
+        self.store = self.store or connect()
+        for inbox in InboxStore(self.store.redis).worlds():
+            key = inbox.key("wake-outbox")
+            for item_id in inbox.redis.srandmember(key, number=32):
+                if not guard():
+                    return
+                item = inbox.get(item_id)
+                swarm = slug_of(item.address) or inbox.names.slug_of(item.address)
+                if swarm:
+                    SeatInbox(self.bus, swarm).send(
+                        item.address, Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
+                    )
+                inbox.redis.srem(key, item_id)
+
+    def _mail(self, item_id):
+        inbox = InboxStore(self.store.redis)
+        for world in inbox.worlds():
+            if world.redis.exists(world.key("item", item_id)):
+                return world, world.get(item_id)
+        return inbox, None
+
     def _expire(self, event: Envelope) -> None:
         key = self._key(event.swarm, event.data["key"])
         entry = self.state.get(key)
         if entry is None:
             return
         request = Envelope.decode(entry.value)
+        if request.cause == event.id:
+            self.bus.events.publish(deadlines.subject(request), request)
+            return
         if request.type != "deadline.scheduled" or (event.cause, event.version) != (request.id, request.version):
             return
         self.store = self.store or connect()
-        inbox = InboxStore(self.store.redis)
-        item = inbox.get(event.data["key"])
+        inbox, item = self._mail(event.data["key"])
         now, window = self.clock(), wake.window_ms(self.environ)
+        if item is not None and item.state == "delivered":
+            inbox.requeue(item.id, REDELIVERER, REDELIVERED, now - redelivery_ms(self.environ))
+            item = inbox.get(item.id)
         agents = [agent for agent in self.store.agents(event.swarm) if agent.state != "finished"]
         if item is not None and item.state == "pending" and not item.fyi:
             clock = wake._Clock(now, window, wake.quiet_ms(self.environ))
             wake.wake_item(inbox, event.swarm, agents, self.herdr, self.ledger, item, clock)
-        item = inbox.get(event.data["key"])
+        inbox, item = self._mail(event.data["key"])
         due = self._due(inbox, event.swarm, agents, item, now, window)
         source = replace(
             request,
@@ -76,6 +106,8 @@ class InboxWake:
         self.bus.events.publish(deadlines.subject(next_request), next_request)
 
     def _due(self, inbox, slug, agents, item, now, window):
+        if item is not None and item.state == "delivered":
+            return max(now + window, item.updated_at + redelivery_ms(self.environ))
         if item is None or item.state != "pending" or item.fyi:
             return None
         history = inbox.history(item.id)
@@ -88,4 +120,5 @@ class InboxWake:
         if since is None or outage.open_records(slug):
             return now + window
         last = max(since, *(row["at"] for row in history))
-        return max(now + 1, last + window + outage.paused_ms(slug, last, now))
+        due = last + window + outage.paused_ms(slug, last, now)
+        return due if due > now else now + window
