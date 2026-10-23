@@ -443,9 +443,7 @@ class SQLiteLedgerRepository:
             connection.executescript(hierarchy.SCHEMA)
             connection.executescript(ROWS_SCHEMA)
             connection.executescript(refresh.SCHEMA)
-            with connection:
-                connection.execute(BEGIN_IMMEDIATE)
-                outbox.migrate(connection)
+            outbox.migrate(connection)
             self._ready.add(path)
 
     def _key(self, slug):

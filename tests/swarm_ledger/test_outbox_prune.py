@@ -119,3 +119,40 @@ def test_a_mark_table_without_the_sent_time_gains_it_and_its_old_marks_count_as_
     outbox.relay(repository, bus.events, clock=lambda: SENT_AT)
     assert outbox.prune(repository, WINDOW, clock=lambda: WINDOW + 1) == 0
     assert marks(repository) == sorted((row_id, SENT_AT) for row_id in created)
+
+
+class RacedMarks:
+    def __init__(self, error):
+        self.error = error
+        self.statements = []
+
+    def execute(self, sql):
+        self.statements.append(sql)
+        if sql == outbox.ADD_SENT_AT:
+            raise sqlite3.OperationalError(self.error)
+        return sqlite3.connect(":memory:").execute("SELECT 1 AS id")
+
+
+def test_a_sent_time_another_process_added_first_is_kept():
+    raced = RacedMarks("duplicate column name: sent_at")
+    outbox.migrate(raced)
+    assert raced.statements == [outbox.SENT_COLUMNS, outbox.ADD_SENT_AT]
+
+
+def test_any_other_migration_failure_is_raised():
+    with pytest.raises(sqlite3.OperationalError) as caught:
+        outbox.migrate(RacedMarks("database is locked"))
+    assert str(caught.value) == "database is locked"
+
+
+def test_set_up_inside_another_repository_write_does_not_wait_for_its_lock(tmp_path):
+    path = tmp_path / "ledgers" / sqlite.DATABASE
+    SQLiteLedgerRepository(path).create("ledger", CONTENT)
+    writer = sqlite3.connect(path, timeout=0)
+    writer.execute("BEGIN IMMEDIATE")
+    try:
+        with SQLiteLedgerRepository(path).connect() as connection:
+            assert "sent_at" in {column[0] for column in connection.execute(outbox.SENT_COLUMNS).description}
+    finally:
+        writer.rollback()
+        writer.close()
