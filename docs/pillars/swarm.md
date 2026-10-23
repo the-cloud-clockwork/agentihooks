@@ -1436,12 +1436,12 @@ The rest of the task record follows the same name match:
 |---|---|
 | `repository_branches` | The key for this host's checkout path wins. Without one, the first key from another host with the same repository name supplies the continuation branch. With neither, the task's `branch` is used, unless `branch_repo` names another repository, or the task declares several repositories and has no `branch_repo`; then a new branch is cut. |
 | `prepare` | Creates or reuses one worktree per resolved checkout. Worktrees go under the worktree root, default `~/dev/worktrees/<repo>/<name>`, never inside the checkout folder. A continuation branch is cut from `origin/<branch>`, so the predecessor must have pushed it. |
-| `publish` from a task worktree | The worktree's repository is accepted when its name matches any declared entry, so a declared repository not cloned here does not block another that is. Otherwise it is refused with `current worktree <path> is not in the task repositories`. The worktree's branch must be the agent's own or the task's scoped branch, else `current worktree <path> does not belong to this task`. |
+| `publish` from a task worktree | The worktree's repository is accepted when its name matches any declared entry, so a declared repository not cloned here does not block another that is. Otherwise it is refused with `current worktree repository <path> is not in the task repositories`. The worktree's branch must be the agent's own or the task's scoped branch, else `current worktree <path> does not belong to this task`. |
 | `publish` from a primary checkout | With one declared repository (or none, meaning the swarm repository), resolves it by the steps above and uses its prepared worktree; without one it fails with `task worktree missing` and names `prepare`. With several it refuses: `publish from the task worktree to select one of its repositories`. |
 | `block` | Records the pushed branch of each declared repository that resolves here and skips the ones that do not. Only when none resolves does it fall back to the launch checkout. |
 
-A successful `prepare`, `publish` or `block` adds a `repository_branches` key
-for this host's path; the other host's key stays.
+A successful `prepare` or `publish`, and a `block` that finds a pushed branch,
+adds a `repository_branches` key for this host's path; the other host's key stays.
 
 Example: the task was prepared on the workstation, its branch `engineer-a` is
 pushed, and a hive with clones under `/srv/repos` continues it.
