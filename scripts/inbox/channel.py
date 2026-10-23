@@ -169,7 +169,30 @@ async def _push(store, me, write, ready):
             pubsub.close()
 
 
-async def run(store, me, read, write, active=True):
+async def _pull(store, me, write, ready, feed):
+    import anyio
+    from redis.exceptions import RedisError
+
+    from scripts.inbox.bus import FeedError
+
+    delay = 1.0
+    try:
+        await ready.wait()
+        await anyio.sleep(SETTLE_S)
+        while True:
+            try:
+                await _deliver(store, me, write)
+                feed.settle()
+                await anyio.to_thread.run_sync(feed.wait, int(RECHECK_S * 1000))
+                delay = 1.0
+            except (RedisError, FeedError):
+                await anyio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+    finally:
+        feed.close()
+
+
+async def run(store, me, read, write, active=True, feed=None):
     import anyio
     import mcp.types as types
     from mcp.server.lowlevel import Server
@@ -198,7 +221,13 @@ async def run(store, me, read, write, active=True):
             except InboxError:
                 await anyio.sleep(delay)
                 delay = min(delay * 2, 30.0)
-        await _push(store, me, write, ready)
+        from scripts.inbox.bus import feed_for
+
+        pulled = feed if feed is not None else feed_for(store, me)
+        if pulled is None:
+            await _push(store, me, write, ready)
+        else:
+            await _pull(store, me, write, ready, pulled)
 
     options = server.create_initialization_options(experimental_capabilities={"claude/channel": {}})
     async with anyio.create_task_group() as group:
