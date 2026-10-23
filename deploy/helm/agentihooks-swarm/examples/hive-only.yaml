@@ -7,12 +7,11 @@ nats:
 workers:
   replicas: 1
   maxAgents: 4
+  image:
+    tag: release
   credentialSecret:
-    name: hive-member
-    key: credential
-  caSecret:
-    name: hive-member
-    key: ca_pem
+    name: hive-invite
+    key: invite
   githubAuth:
     mode: token
     secretName: hive-github

@@ -132,6 +132,7 @@ kept = [line for line in saved.read_text().splitlines() if not line.startswith('
 saved.write_text('\n'.join([f"AGENTIHOOKS_HIVE_URL={os.environ['AGENTIHOOKS_HIVE_URL']}", *kept]) + '\n')
 PY
 fi
+agentihooks hive join "$AGENTIHOOKS_HOME/hive.env"
 bundle=()
 [[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
 python3 -m scripts.hive.linked_profiles

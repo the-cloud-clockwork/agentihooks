@@ -99,6 +99,7 @@ def test_like_copies_the_addresses_and_ca_of_another_hive_and_mints_a_new_member
         "AGENTIHOOKS_HIVE_URL",
         "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL",
         "AGENTIHOOKS_HIVE_REDIS_URL",
+        "AGENTIHOOKS_SWARM_URL",
     ]
     assert env["AGENTIHOOKS_HIVE_ID"] == member
     assert env["AGENTIHOOKS_HIVE_URL"] == URL
@@ -140,6 +141,30 @@ def test_without_like_the_flags_and_this_hosts_redis_and_ca_fill_the_record(admi
     assert _redis(admin, env) == ("redis", f"hive-{env['AGENTIHOOKS_HIVE_ID']}", "127.0.0.1", 6379, "/0")
 
 
+def test_one_invite_carries_the_member_event_bus_address(admin):
+    fake = Bao()
+    request = invite.Request("lab", RECORD, url=URL, swarm_url=SWARM, bus_url="nats://bus.example.test:4222")
+    invite.invite(admin, _bao(fake), request, LOCAL)
+    env = _env(fake.records[RECORD]["credential"])
+    assert env["AGENTIHOOKS_BUS"] == "nats"
+    assert env["AGENTIHOOKS_BUS_URL"] == "nats://bus.example.test:4222"
+    assert env["AGENTIHOOKS_SWARM_URL"] == SWARM
+
+
+def test_like_copies_the_member_event_bus_address_and_an_explicit_address_wins(admin):
+    sample = _sample()
+    sample["credential"] += "AGENTIHOOKS_BUS=nats\nAGENTIHOOKS_BUS_URL=nats://copied.example.test:4222\n"
+    fake = Bao({LIKE: sample})
+    invite.invite(admin, _bao(fake), invite.Request("lab", RECORD, like=LIKE), LOCAL)
+    assert _env(fake.records[RECORD]["credential"])["AGENTIHOOKS_BUS_URL"] == "nats://copied.example.test:4222"
+    invite.invite(
+        admin, _bao(fake), invite.Request("lab", RECORD, like=LIKE, bus_url="nats://override.example.test:4222"), LOCAL
+    )
+    env = _env(fake.records[RECORD]["credential"])
+    assert env["AGENTIHOOKS_BUS"] == "nats"
+    assert env["AGENTIHOOKS_BUS_URL"] == "nats://override.example.test:4222"
+
+
 def test_a_like_record_without_a_credential_still_lends_its_ledger_address(admin):
     fake = Bao({LIKE: {"swarm_url": SWARM, "ca_pem": CA}})
 
@@ -174,6 +199,7 @@ def test_the_invite_parser_names_its_record_and_addresses():
         (["--url"], "url", "this hive's endpoint as the new hive reaches it, for hive refresh"),
         (["--redis-url"], "redis_url", "Redis URL the new hive connects to"),
         (["--swarm-url"], "swarm_url", "ledger address the new hive reaches"),
+        (["--bus-url"], "bus_url", "NATS address the new hive reaches; copied from --like when omitted"),
     ]
 
 
@@ -274,14 +300,34 @@ def test_the_cli_passes_its_flags_and_prints_the_outcome(monkeypatch, capsys):
     monkeypatch.setattr("scripts.swarm.store.redis_url", lambda environ: LOCAL if environ is os.environ else None)
     monkeypatch.setattr(invite, "invite", lambda *args: seen.append(args) or "invited")
 
-    assert cli.main(["invite", "lab", "--like", LIKE, "--url", URL, "--redis-url", PUBLIC, "--swarm-url", SWARM]) == 0
+    assert (
+        cli.main(
+            [
+                "invite",
+                "lab",
+                "--like",
+                LIKE,
+                "--url",
+                URL,
+                "--redis-url",
+                PUBLIC,
+                "--swarm-url",
+                SWARM,
+                "--bus-url",
+                "nats://bus.example.test:4222",
+            ]
+        )
+        == 0
+    )
     assert cli.main(["invite", "lab2", "--path", "k8s/elsewhere"]) == 0
 
     assert capsys.readouterr().out == "invited\ninvited\n"
     [(redis, bao, first, local), (_, _, second, _)] = seen
     assert (redis, local) == ("redis", LOCAL)
     assert (bao.url, bao.token) == (BAO_URL, BAO_TOKEN)
-    assert first == invite.Request("lab", "k8s/agentihooks-hive-lab", LIKE, URL, PUBLIC, SWARM, "served-ca")
+    assert first == invite.Request(
+        "lab", "k8s/agentihooks-hive-lab", LIKE, URL, PUBLIC, SWARM, "served-ca", bus_url="nats://bus.example.test:4222"
+    )
     assert second == invite.Request("lab2", "k8s/elsewhere", None, None, None, None, "served-ca")
 
 
