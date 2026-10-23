@@ -4915,8 +4915,9 @@ comment. The swarm ledger skill states the same rule for agents.
 ## Ledger artifacts
 
 An artifact is a file published on the ledger for the operator to review: markdown, JSON, SVG, or a PNG, JPEG,
-WebP or GIF image, at most 8 MB, with a title of at most 200 characters. The ledger stores it by content hash beside
-the ledger media and lists it in `artifacts`. An artifact is only a file the operator asked for. Test runs, logs,
+WebP or GIF image, at most 8 MB, with a title of at most 200 characters. The ledger stores it by content hash in the
+shared ledger database and beside the ledger media, and lists it in `artifacts`; see
+[Where artifact bytes live](#where-artifact-bytes-live). An artifact is only a file the operator asked for. Test runs, logs,
 review notes and proofs go on the task proof and the pull request.
 
 Two commands publish one:
@@ -4962,6 +4963,35 @@ an artifact is only a file the operator asked for: mark its task as artifact req
 ```
 
 A master's artifact is stored with an empty task, so it lists under the ledger's artifacts rather than under a task.
+
+### Where artifact bytes live
+
+Every ledger server reads and writes one ledger database, SQLite or Postgres, chosen by its environment settings,
+but each server has its own disk. Artifact bytes therefore live in the database, in the `artifact_files` table: one
+row per ledger and artifact id (the content hash and extension), the bytes held as base64 text. The same schema
+creates the table on SQLite and on Postgres.
+
+| Step | What happens |
+|---|---|
+| Upload | The server that takes the upload writes the row and a copy in `<slug>.media` beside the ledger file. Uploading the same bytes again keeps the existing row. |
+| Read | Task add (the phase's slice anchors and the task's plan lines) and the `artifact_add` op, which measures the listed file, read the database row first and fall back to the server's disk copy. |
+| Serve | `GET /artifacts/<slug>/<id>` reads the same way. A file found only on this server's disk is copied into the database as it is served. |
+| Server start | The server copies every artifact and image found only in its own `*.media` folders into the database, in a background thread. A ledger it cannot read is logged as `disk adoption <slug>: <error>` and the rest continue. |
+| Purge | `artifact_purge` and bin expiry remove the rows after the ledger write commits, unless another artifact or attachment still uses the file. Purging a ledger from the bin removes all its rows. |
+
+A phase whose plan is a ledger artifact (`plan_ref` or a `plan_url` under `/artifacts/`) reads its plan text from this
+store whenever a task is added to it, so a task add succeeds on every server that shares the database, including a
+hosted ledger whose data volume holds only the database.
+
+Before pull request #5819 artifact bytes lived only on the disk of the server that took the upload. A task add on
+another server, such as the hosted ledger, was refused:
+
+```text
+phase p98 plan cannot be read: no stored artifact <id>
+```
+
+An artifact published before that change reaches the database when its server starts or serves it once, or when its
+bytes are uploaded again; the content hash gives the same id, so the phase link stays valid.
 
 ### A master's plan publish
 
@@ -5015,6 +5045,10 @@ agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 artifact audit
   hold. Leave `--task` off to use the session's swarm task, or name an existing task.
 - **`--request` is refused.** The entry id must belong to an entry the operator wrote and has not deleted. An agent's
   own chat line does not count.
+- **A task add exits with `phase <id> plan cannot be read: no stored artifact <file>`.** No database row and no disk
+  copy on this server hold the plan. Start or restart the ledger server that still holds the file in its `.media`
+  folder so it copies the file into the database, or upload the same plan bytes again under the acceptance rule
+  above, then add the task again.
 - **The ledger write of `publish-plan` was refused after the issue step.** Unless a plan or phase on the ledger
   already links that issue, the command comments that the ledger refused the publish and closes the issue. Publishing
   the same plan again reopens it with a comment.
