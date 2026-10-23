@@ -5,6 +5,7 @@ import json
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from redis import Redis
 
 SIGNER_ENV = "AGENTIHOOKS_NATS_SIGNER"
+FILE_SCHEME = "file:"
 HUB_PATH = "agentihooks/hub/"
 TRUSTED_OPERATOR_ENV = "AGENTIHOOKS_NATS_TRUSTED_OPERATOR"
 ACCOUNT_NAME = "SWARM"
@@ -100,17 +102,15 @@ def from_environ(environ: Mapping[str, str]) -> Signer | None:
     path = environ.get(SIGNER_ENV)
     if not path:
         return None
+    if path.startswith(FILE_SCHEME):
+        return _from_file(path.removeprefix(FILE_SCHEME), environ)
     hub, _, name = path.partition(HUB_PATH)
     if hub or "%" in name or any(part in ("", ".", "..") for part in name.split("/")):
         raise auth.HiveError(
             f"the NATS signer record {path} holds the system account credential, "
             f"so it must live under the OpenBao path {HUB_PATH} that only the hub role reads"
         )
-    trusted = environ.get(TRUSTED_OPERATOR_ENV)
-    if not trusted:
-        raise auth.HiveError(
-            f"{SIGNER_ENV} is set, so {TRUSTED_OPERATOR_ENV} must name the operator public key the NATS server trusts"
-        )
+    trusted = _trusted(environ)
     bao = openbao_kv.from_env(environ)
     if bao is None:
         raise auth.HiveError(
@@ -118,16 +118,40 @@ def from_environ(environ: Mapping[str, str]) -> Signer | None:
         )
     try:
         record, _ = openbao_kv.read(bao, path)
-        return Signer(
-            nkey.from_seed(record["operator_seed"]),
-            nkey.from_seed(record["account_seed"]),
-            record["system_credentials"],
-            record["url"],
-            trusted,
-            _member_swarms(record["member_swarms"]) if "member_swarms" in record else None,
-        )
+        return _signer(record, trusted)
     except (openbao_kv.OpenBaoError, KeyError, nkey.NkeyError) as exc:
         raise auth.HiveError(f"the NATS signer record {path} cannot be used ({exc})") from None
+
+
+def _trusted(environ: Mapping[str, str]) -> str:
+    trusted = environ.get(TRUSTED_OPERATOR_ENV)
+    if not trusted:
+        raise auth.HiveError(
+            f"{SIGNER_ENV} is set, so {TRUSTED_OPERATOR_ENV} must name the operator public key the NATS server trusts"
+        )
+    return trusted
+
+
+def _signer(record: Mapping, trusted: str) -> Signer:
+    return Signer(
+        nkey.from_seed(record["operator_seed"]),
+        nkey.from_seed(record["account_seed"]),
+        record["system_credentials"],
+        record["url"],
+        trusted,
+        _member_swarms(record["member_swarms"]) if "member_swarms" in record else None,
+    )
+
+
+def _from_file(path: str, environ: Mapping[str, str]) -> Signer:
+    trusted = _trusted(environ)
+    try:
+        record = {found.name: found.read_text() for found in Path(path).iterdir() if found.is_file()}
+        if "member_swarms" in record:
+            record["member_swarms"] = json.loads(record["member_swarms"])
+        return _signer(record, trusted)
+    except (OSError, ValueError, KeyError, TypeError, nkey.NkeyError) as exc:
+        raise auth.HiveError(f"the NATS signer file {path} cannot be used ({exc})") from None
 
 
 def user_claims() -> dict:
@@ -160,11 +184,11 @@ def mint(signer: Signer, member_id: str) -> str:
     return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 
 
-def account_jwt(signer: Signer, revocations: Mapping[str, int]) -> str:
+def account_jwt(operator: nkey.KeyPair, account: nkey.KeyPair, revocations: Mapping[str, int]) -> str:
     claims = {"type": "account", "version": 2, "limits": ACCOUNT_LIMITS, "default_permissions": {"pub": {}, "sub": {}}}
     if revocations:
         claims["revocations"] = dict(revocations)
-    return nkey.encode_jwt(signer.operator, signer.account.public, ACCOUNT_NAME, claims)
+    return nkey.encode_jwt(operator, account.public, ACCOUNT_NAME, claims)
 
 
 def push(signer: Signer, jwt: str) -> None:
@@ -192,7 +216,9 @@ def push(signer: Signer, jwt: str) -> None:
 
 def revoke(redis: "Redis", signer: Signer, member_id: str) -> str:
     redis.hset(REVOKED, member_user(signer, member_id).public, int(time.time()))
-    jwt = account_jwt(signer, {key: int(value) for key, value in redis.hgetall(REVOKED).items()})
+    jwt = account_jwt(
+        signer.operator, signer.account, {key: int(value) for key, value in redis.hgetall(REVOKED).items()}
+    )
     issuer = nkey.claims(jwt)["iss"]
     if issuer != signer.trusted_operator:
         raise auth.HiveError(

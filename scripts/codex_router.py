@@ -669,6 +669,8 @@ def main(
         if route == "interactive"
         else child_environment(account, active)
     )
-    execvpe(codex_bin, command(account, codex_bin, args), child)
+    from scripts.hive.account_slots import execute
+
+    execute("codex", account.name, child, lambda env: execvpe(codex_bin, command(account, codex_bin, args), env))
     lock.close()
     return 0

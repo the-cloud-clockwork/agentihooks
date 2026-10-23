@@ -19,6 +19,7 @@ POD_SECURITY = {
 }
 CONTAINER_SECURITY = {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}}
 PROBE = {"tcpSocket": {"port": "join"}}
+SIGNER_MOUNT = "/nats-signer"
 
 
 def redis_env(values: dict, fullname: str) -> dict | None:
@@ -74,10 +75,17 @@ def container_problems(container: dict, values: dict, fullname: str) -> list[str
         expected_env.append(
             {"name": "LEDGER_CA_PEM", "valueFrom": {"secretKeyRef": {"name": ledger_tls, "key": "ca.crt"}}}
         )
+    mounts = [{"name": "tls", "mountPath": "/tls", "readOnly": True}]
+    if join["natsSigner"]["secretName"]:
+        expected_env += [
+            {"name": "AGENTIHOOKS_NATS_SIGNER", "value": f"file:{SIGNER_MOUNT}"},
+            {"name": "AGENTIHOOKS_NATS_TRUSTED_OPERATOR", "value": join["natsSigner"]["trustedOperator"]},
+        ]
+        mounts.append({"name": "nats-signer", "mountPath": SIGNER_MOUNT, "readOnly": True})
     if container.get("env") != expected_env:
         problems.append(f"the hive join env is {json.dumps(container.get('env'), sort_keys=True)}")
-    if container.get("volumeMounts") != [{"name": "tls", "mountPath": "/tls", "readOnly": True}]:
-        problems.append("the hive join container does not mount only the TLS secret read only at /tls")
+    if container.get("volumeMounts") != mounts:
+        problems.append(f"the hive join container mounts are not {json.dumps(mounts)}")
     if container.get("securityContext") != CONTAINER_SECURITY:
         problems.append(f"the hive join container security is {json.dumps(container.get('securityContext'))}")
     if container.get("readinessProbe", {}).get("tcpSocket") != PROBE["tcpSocket"]:
@@ -96,7 +104,10 @@ def pod_problems(pod: dict, values: dict, fullname: str) -> list[str]:
         problems += container_problems(pod["containers"][0], values, fullname)
     if pod.get("initContainers"):
         problems.append("the hive join pod runs init containers")
-    if pod.get("volumes") != [{"name": "tls", "secret": {"secretName": join["tlsSecretName"]}}]:
+    volumes = [{"name": "tls", "secret": {"secretName": join["tlsSecretName"]}}]
+    if join["natsSigner"]["secretName"]:
+        volumes.append({"name": "nats-signer", "secret": {"secretName": join["natsSigner"]["secretName"]}})
+    if pod.get("volumes") != volumes:
         problems.append(f"the hive join volumes are {json.dumps(pod.get('volumes'), sort_keys=True)}")
     if pod.get("automountServiceAccountToken") is not False:
         problems.append("the hive join pod mounts a service account token")
@@ -121,7 +132,11 @@ def deployment_problems(deployment: dict, values: dict, fullname: str, labels: d
         problems.append("the hive join pods lack the hive join labels")
     reload = set(deployment["metadata"].get("annotations", {}).get(RELOAD, "").split(",")) - {""}
     env = redis_env(values, fullname) or {}
-    secrets = {join["tlsSecretName"], env.get("valueFrom", {}).get("secretKeyRef", {}).get("name", "")} - {""}
+    secrets = {
+        join["tlsSecretName"],
+        env.get("valueFrom", {}).get("secretKeyRef", {}).get("name", ""),
+        join["natsSigner"]["secretName"],
+    } - {""}
     if reload != secrets:
         problems.append(f"the hive join Deployment reloads on {sorted(reload)}, not {sorted(secrets)}")
     return problems
@@ -196,7 +211,11 @@ def _container(docs: dict) -> dict:
 
 PLANTS = (
     ("image", lambda d: _container(d).update(image="other/image:dev"), "not the chart image"),
-    ("mount", lambda d: _container(d)["volumeMounts"][0].update(readOnly=False), "does not mount only"),
+    (
+        "mount",
+        lambda d: _container(d)["volumeMounts"][0].update(readOnly=False),
+        "the hive join container mounts are not",
+    ),
     ("token", lambda d: _pod(d).update(automountServiceAccountToken=True), "service account token"),
     ("seccomp", lambda d: _pod(d)["securityContext"].pop("seccompProfile"), "the hive join pod security is"),
     ("host", lambda d: _pod(d).update(hostNetwork=True), "shares host namespace"),

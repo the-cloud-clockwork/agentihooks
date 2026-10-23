@@ -49,7 +49,7 @@ def signer(tmp_path, request):
         f'jetstream: {{store_dir: "{tmp_path / "js"}"}}\n'
         f'resolver: {{type: full, dir: "{tmp_path / "jwt"}"}}\n'
         f"resolver_preload: {{\n  {system.public}: {system_jwt}\n"
-        f"  {account.public}: {nats_grant.account_jwt(signed, {})}\n}}\n"
+        f"  {account.public}: {nats_grant.account_jwt(operator, account, {})}\n}}\n"
     )
     process = subprocess.Popen(
         [nats_server.binary(), "-c", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -241,6 +241,32 @@ def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_dur
     assert 'permissions violation for publish to "$js.api.stream.create.rogue"' in refused
     durable = f'"$js.api.consumer.durable.create.{nats.EVENT_STREAM}.rogue"'.lower()
     assert f"permissions violation for publish to {durable}" in refused
+
+
+def test_hive_members_bind_hub_provisioned_account_slots_and_share_capacity(admin, signer):
+    from scripts.events import nats
+    from scripts.hive import account_slots, buckets
+
+    hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
+    members = [
+        nats.open_bus(
+            BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, name), provision=False)
+        )
+        for name in ("m1", "m2")
+    ]
+    try:
+        buckets.provision(hub)
+        report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+        first = account_slots.Slots(members[0], "m1", lambda: report, lambda: 1000)
+        second = account_slots.Slots(members[1], "m2", lambda: report, lambda: 1000)
+        assert first.take("one", "claude") == "a"
+        assert second.take("two", "claude") is None
+        first.release("one", "claude", "a")
+        assert second.take("two", "claude") == "a"
+    finally:
+        for member in members:
+            member.close()
+        hub.close()
 
 
 def test_a_hive_endpoint_without_a_signer_mints_no_bus_credential(admin):
@@ -454,6 +480,72 @@ def test_a_signer_reference_needs_openbao_settings():
         nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH, nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED})
 
 
+def _signer_dir(tmp_path, record: dict):
+    folder = tmp_path / "nats-signer"
+    folder.mkdir()
+    for name, value in record.items():
+        (folder / name).write_text(value)
+    (folder / "..data").mkdir()
+    return folder
+
+
+def test_the_signer_comes_from_the_synced_record_folder_named_by_file(tmp_path, monkeypatch):
+    operator, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)
+    reads = []
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, found: reads.append(found))
+    folder = _signer_dir(tmp_path, _signer_record(operator, account))
+    environ = {nats_grant.SIGNER_ENV: f"file:{folder}", nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED}
+    assert nats_grant.FILE_SCHEME == "file:"
+    assert nats_grant.from_environ(environ) == nats_grant.Signer(operator, account, "c", "u", TRUSTED)
+    assert reads == []
+
+
+def test_a_synced_signer_record_reads_its_member_swarms_as_json(tmp_path):
+    record = {
+        **_signer_record(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)),
+        "member_swarms": '{"h1": ["s1"]}',
+    }
+    folder = _signer_dir(tmp_path, record)
+    environ = {nats_grant.SIGNER_ENV: f"file:{folder}", nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED}
+    assert nats_grant.from_environ(environ).member_swarms == {"h1": ("s1",)}
+
+
+def test_a_synced_signer_needs_the_trusted_operator(tmp_path):
+    folder = _signer_dir(tmp_path, _signer_record(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)))
+    with pytest.raises(auth.HiveError) as refused:
+        nats_grant.from_environ({nats_grant.SIGNER_ENV: f"file:{folder}"})
+    assert str(refused.value) == (
+        "AGENTIHOOKS_NATS_SIGNER is set, so AGENTIHOOKS_NATS_TRUSTED_OPERATOR must name "
+        "the operator public key the NATS server trusts"
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda record: record.pop("system_credentials"),
+        lambda record: record.update(operator_seed="nope"),
+        lambda record: record.update(member_swarms="{"),
+        lambda record: record.update(member_swarms="[]"),
+    ],
+)
+def test_an_unusable_synced_signer_record_is_refused(tmp_path, change):
+    record = _signer_record(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT))
+    change(record)
+    folder = _signer_dir(tmp_path, record)
+    environ = {nats_grant.SIGNER_ENV: f"file:{folder}", nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED}
+    with pytest.raises(
+        auth.HiveError, match=f"^(the NATS signer file {folder} cannot be used \\(|member_swarms must map)"
+    ):
+        nats_grant.from_environ(environ)
+
+
+def test_a_missing_synced_signer_folder_is_refused(tmp_path):
+    environ = {nats_grant.SIGNER_ENV: f"file:{tmp_path / 'gone'}", nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED}
+    with pytest.raises(auth.HiveError, match=f"^the NATS signer file {tmp_path / 'gone'} cannot be used \\("):
+        nats_grant.from_environ(environ)
+
+
 def test_refresh_writes_the_bus_credential_beside_the_member_env(tmp_path):
     grant = {"id": "m1", "ledger_credential": "l", "redis_url": "r", "nats_credentials": "creds text"}
     env = auth.write_env(tmp_path, "https://hive", grant).read_text()
@@ -537,7 +629,15 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
     jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
     claims = _claims(jwt)
     assert (claims["iss"], claims["sub"], claims["name"]) == (signed.account.public, user.public, "hive-m1")
-    buckets = ("spoke-work", "spoke-pending", "hive-presence", "hive-executions", "execution-starts")
+    buckets = (
+        "spoke-work",
+        "spoke-pending",
+        "hive-presence",
+        "hive-executions",
+        "execution-starts",
+        "account-slots",
+        "hive-slot-accounts",
+    )
     publish = [
         "swarm.*.execution.>",
         "dead.*",
@@ -578,7 +678,7 @@ def test_a_role_credential_keeps_the_unrestricted_user_claims():
 @pytest.mark.parametrize("revocations", [{}, {"UA": 7}])
 def test_the_account_jwt_carries_exactly_the_account_claims(revocations):
     signed = _offline_signer()
-    claims = _claims(nats_grant.account_jwt(signed, revocations))
+    claims = _claims(nats_grant.account_jwt(signed.operator, signed.account, revocations))
     assert (claims["iss"], claims["sub"], claims["name"]) == (signed.operator.public, signed.account.public, "SWARM")
     assert claims["nats"] == {
         "type": "account",

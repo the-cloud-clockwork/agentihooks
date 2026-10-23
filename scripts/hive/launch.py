@@ -408,12 +408,26 @@ class HiveLaunch:
     def collect(self, request: SpawnRequest) -> Outcome:
         order = self.orders_for(request.task["id"])
         previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
+        if previous and previous.state == "finished" and request.task.get("state") == "blocked":
+            return self.finished(request, order, previous)
         if not previous or previous.state in ("ended", "finished"):
             return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
         if self.unacknowledged(order):
             self.retire(order, previous)
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
         return self.spawn(request)
+
+    def finished(self, request: SpawnRequest, order: LaunchOrder, agent: AgentRecord) -> Outcome:
+        lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
+        lease.require_epoch(self.store, self.slug, order.epoch)
+        _match("claimant", agent.name, request.name)
+        _match("seat", agent.seat, request.task["seat"])
+        _match("generation", order.generation, agent.generation)
+        ack = self.orders.ack(order)
+        if not ack or ack.status != "live":
+            return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
+        _match("ack host", order.hive, ack.target.get("host_id"))
+        return Outcome("spawn", Status.OK, HIVE)
 
     def expire(self, request: SpawnRequest) -> bool | None:
         """False when the hive acknowledged the order, which leaves its launch running for a later collect."""

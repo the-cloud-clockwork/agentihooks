@@ -110,6 +110,18 @@ def test_hive_list_shows_max_agents_and_excluded(redis, monkeypatch, capsys):
     )
 
 
+def test_hive_list_shows_a_readable_name_beside_its_id(redis, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "redis_client", lambda: redis)
+    monkeypatch.setattr(cli, "now_ms", lambda: 0)
+    registry.update(redis, "ff0f11b025271d0c", ["ui=no", "name=anton-2"])
+    registry.update(redis, "root", ["ui=yes"])
+    assert cli.main(["list"]) == 0
+    assert capsys.readouterr().out == (
+        "ff0f11b025271d0c\tname=anton-2\tstale\tui=no\tmax-agents=20\texcluded=master\theadroom=missing\n"
+        "root\tstale\tui=yes\tmax-agents=10\texcluded=none\theadroom=missing\n"
+    )
+
+
 @pytest.mark.parametrize("role", ["ci", "plan"])
 def test_a_ci_and_a_plan_agent_land_on_a_headless_hive(role):
     hives = [headless(heartbeat_at=NOW)]
