@@ -308,7 +308,8 @@ def test_master_followup_during_dispatcher_exit_reaches_successor(mailbox, monke
     [departing] = seats(store)
     inbox.seats.occupy(departing.seat, departing.name, NOW)
     assert inbox.read(first.id, departing.name).state == "read"
-    assert inbox.reply(first.id, departing.name, "The launch blocker ranks first").state == "done"
+    inbox.reply(first.id, departing.name, "The launch blocker ranks first")
+    assert inbox.get(first.id).state == "done"
     monkeypatch.setattr(swarm_cli, "LedgerClient", lambda: type("Ledger", (), {"state": lambda self, slug: doc()})())
     monkeypatch.setattr(swarm_cli, "now_ms", lambda: NOW)
     settle = exits.settle
@@ -338,7 +339,8 @@ def test_master_followup_during_dispatcher_exit_reaches_successor(mailbox, monke
     inbox.seats.occupy(successor.seat, successor.name, NOW + 60_000)
     assert inbox.read(followup.id, successor.name).text == followup.text
     assert followup.id in dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(), NOW + 60_000)
-    assert inbox.reply(followup.id, successor.name, "Remaining launch blockers grouped").state == "done"
+    inbox.reply(followup.id, successor.name, "Remaining launch blockers grouped")
+    assert inbox.get(followup.id).state == "done"
     assert inbox.open_items("master")[-1].text == "Remaining launch blockers grouped"
     run(store, runtime, doc(), NOW + 120_000)
     assert all(agent.state == "finished" for agent in seats(store))
