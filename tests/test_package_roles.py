@@ -100,7 +100,7 @@ def _guard(tmp_path, role, condition, tool, tool_input, cwd):
     )
 
 
-@pytest.mark.parametrize("role", GUARDED - {"master"})
+@pytest.mark.parametrize("role", tuple(role for role in GUARDED if role != "master"))
 def test_no_code_edits_guard_allows_only_the_scratchpad(tmp_path, role):
     edit = "pre-edit+write+notebookedit-no_code_edits.py"
     repo = tmp_path / "repo"
