@@ -106,3 +106,28 @@ JWT_BLOCK = "-----BEGIN NATS USER JWT-----\na.b.c\n------END NATS USER JWT------
 def test_creds_text_without_exactly_one_jwt_and_seed_is_refused(text):
     with pytest.raises(nkey.NkeyError, match="^a NATS creds file holds one user JWT and one seed$"):
         nkey.parse_creds(text)
+
+
+def test_b64_is_url_safe_and_strips_only_padding():
+    assert (nkey.b64(b"\x00\x00\x17"), nkey.b64(b"\xff"), nkey.b64(b"\xfb\xff")) == ("AAAX", "_w", "-_8")
+
+
+def test_a_jwt_segment_is_compact_json():
+    assert _unsegment(nkey._segment({"a": 1, "b": [2]})) == b'{"a":1,"b":[2]}'
+
+
+def test_a_derived_key_seeds_from_the_hmac_of_its_parent_seed():
+    import hashlib
+    import hmac
+
+    parent = nkey.from_raw(nkey.ACCOUNT, SEED)
+    expected = nkey.from_raw(nkey.USER, hmac.new(SEED, b"m1", hashlib.sha256).digest())
+    assert nkey.derive(parent, nkey.USER, "m1") == expected
+
+
+@pytest.mark.parametrize(
+    "raw", [bytes([nkey.SEED, nkey.USER << 3 & 0xFF]) + bytes(33), bytes([0x90])], ids=["long-seed", "one-byte"]
+)
+def test_a_checksummed_key_of_the_wrong_shape_is_not_a_seed(raw):
+    with pytest.raises(nkey.NkeyError, match="^not an nkey seed$"):
+        nkey.from_seed(nkey._encode(raw))
