@@ -56,7 +56,9 @@ class HubRunner:
     ):
         self._reactors = list(reactors)
         self._versions = bus.state(VERSIONS)
-        self._consumers = {r.name: bus.events.consumer(registry.durable(r), r.subject, r.policy) for r in self._reactors}
+        self._consumers = {
+            r.name: bus.events.consumer(registry.durable(r), r.subject, r.policy) for r in self._reactors
+        }
         leases = bus.state(lease.BUCKET)
         self._leases = {
             r.name: lease.Lease(leases, f"reactor.{r.name}", holder, lease_ttl_ms, clock)
