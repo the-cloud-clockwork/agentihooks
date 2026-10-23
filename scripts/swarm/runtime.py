@@ -40,6 +40,7 @@ from scripts.swarm.pane import (
     provider_error,
     provider_error_id,
     refusal_input,
+    selection_options,
     selection_prompt,
     typed_input,
 )
@@ -1179,7 +1180,12 @@ class HerdrRuntime:
             return PaneObservation("idle", provider_checked=True, content_refusal=refusal)
         if title or state == "blocked":
             return PaneObservation(
-                "waiting", title, provider_error=error, provider_checked=True, provider_error_id=error_id
+                "waiting",
+                title,
+                selection_options(text),
+                provider_error=error,
+                provider_checked=True,
+                provider_error_id=error_id,
             )
         return PaneObservation(
             state, typed=typed_input(text), provider_error=error, provider_checked=True, provider_error_id=error_id
@@ -1252,5 +1258,13 @@ class HerdrRuntime:
                 InboxStore(connect().redis).send(BY, agent.name, text, fyi=True)
                 return
             self.herdr(["agent", "prompt", pane_target(agent), marked(text)])
+        except Exception as exc:
+            return str(exc) or type(exc).__name__
+
+    def dismiss_prompt(self, agent):
+        if self.remote(agent) or live_binding.managed(agent) or agent.runtime_backend != "local" or not agent.pane_id:
+            return "its pane is not a local herdr pane"
+        try:
+            self.herdr(["pane", "send-keys", agent.pane_id, "esc"])
         except Exception as exc:
             return str(exc) or type(exc).__name__

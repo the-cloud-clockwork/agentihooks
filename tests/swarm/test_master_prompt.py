@@ -52,12 +52,9 @@ class QuestionLedger:
     def __init__(self):
         self.questions = {}
 
-    def question_once(self, slug, text, by, op_id):
+    def question(self, slug, text, by, op_id):
         assert slug == "sw"
-        if op_id in self.questions:
-            return False
         self.questions[op_id] = (text, by)
-        return True
 
 
 @pytest.fixture
@@ -170,4 +167,61 @@ def test_the_master_role_rule_keeps_approved_decisions_off_the_question_tool():
     assert (
         "The question tool is only for a decision you cannot make yourself, never for focus, freeze, rank, scope "
         "or caps the operator already approved." in rule
+    )
+
+
+def test_the_runtime_reads_the_prompt_options_from_the_master_pane(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    def herdr(args):
+        if args[:2] == ["pane", "read"]:
+            return {"text": PANE}
+        return {"agent": {"name": NAME, "pane_id": "w1:m1", "agent_status": "blocked"}}
+
+    observed = HerdrRuntime(home=tmp_path, herdr=herdr).observe(AgentRecord(NAME, MASTER, "", pane_id="w1:m1"))
+    assert (observed.state, observed.prompt_title, observed.prompt_options) == ("waiting", TITLE, OPTIONS)
+
+
+def test_the_runtime_dismisses_a_prompt_with_escape_on_the_local_pane(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    calls = []
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: calls.append(args) or {})
+    assert runtime.dismiss_prompt(AgentRecord(NAME, MASTER, "", pane_id="w1:m1")) is None
+    assert calls == [["pane", "send-keys", "w1:m1", "esc"]]
+
+
+def test_the_runtime_refuses_to_dismiss_a_pane_it_cannot_reach(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    calls = []
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: calls.append(args) or {})
+    assert runtime.dismiss_prompt(AgentRecord(NAME, MASTER, "")) == "its pane is not a local herdr pane"
+    assert calls == []
+
+
+def test_the_runtime_reports_a_failed_dismissal(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    def herdr(args):
+        raise RuntimeError("pane gone")
+
+    runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
+    assert runtime.dismiss_prompt(AgentRecord(NAME, MASTER, "", pane_id="w1:m1")) == "pane gone"
+
+
+def test_the_ledger_client_adds_a_question_under_a_stable_operation_id(monkeypatch):
+    from scripts.swarm import ledger_client
+
+    sent = []
+    monkeypatch.setattr(ledger_client.LedgerClient, "_call", lambda self, slug, ops: sent.append((slug, ops)))
+    ledger_client.LedgerClient().question("sw", f"{TITLE} Options: Yes; No.", "swarm", "prompt-1")
+    [(slug, [op])] = sent
+    assert (slug, op["op"], op["id"], op["by"], op["list"], op["text"]) == (
+        "sw",
+        "add_item",
+        "prompt-1",
+        "swarm",
+        "questions",
+        f"{TITLE} Options: Yes; No.",
     )

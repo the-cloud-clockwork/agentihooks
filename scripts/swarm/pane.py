@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 class PaneObservation:
     state: str
     prompt_title: str = ""
+    prompt_options: tuple[str, ...] = ()
     typed: str = ""
     provider_error: str = ""
     provider_checked: bool = field(default=False, compare=False)
@@ -92,6 +93,19 @@ def _heading(raw):
         above.pop()
     start = max((i + 1 for i, line in enumerate(above) if not line), default=0)
     return above[start] if above else ""
+
+
+OPTION = re.compile(r"(?:[❯›→>]\s*)?\d+\.\s+(\S.*)")
+
+
+def selection_options(text: str) -> tuple[str, ...]:
+    """The numbered choices listed under the prompt's question."""
+    title = selection_prompt(text)
+    if not title:
+        return ()
+    lines = [line.strip() for line in ESCAPE.sub("", text).splitlines()]
+    start = max(i for i, line in enumerate(lines) if title in line)
+    return tuple(match.group(1) for line in lines[start + 1 :] if (match := OPTION.fullmatch(line)))
 
 
 INPUT_MARK = re.compile(r"\s*[❯›]\s?")

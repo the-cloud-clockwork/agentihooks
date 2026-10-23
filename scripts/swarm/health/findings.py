@@ -100,6 +100,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
         *failed_launches(events, tasks),
         *idle_with_claim(agents, tasks, limits, waiting),
         *waiting_on_input(agents, tasks),
+        *master_blocked_on_prompt(agents),
         *stalled(agents, limits),
         *master_rc(agents),
         *master_fallback_auth(agents),
@@ -320,6 +321,25 @@ def waiting_on_input(agents: list[dict], tasks: dict[str, dict]) -> list[Finding
                 f"waiting on input for {ticks} ticks while holding a task",
                 (f"prompt: {agent['input_prompt']}", f"task {_title(tasks, held['id'])} ({held['state']})"),
                 "more than 3 consecutive ticks waiting on input",
+                ticks,
+            )
+        )
+    return found
+
+
+def master_blocked_on_prompt(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        ticks = agent.get("input_ticks", 0)
+        if agent.get("lane") != "master" or ticks <= 3 or not agent.get("input_prompt"):
+            continue
+        found.append(
+            Finding(
+                "master blocked on prompt",
+                agent.get("seat") or agent["name"],
+                f"the master pane has waited on a question prompt for {ticks} ticks",
+                (f"prompt: {agent['input_prompt']}", f"agent {agent['name']}"),
+                "more than 3 consecutive ticks on a question prompt",
                 ticks,
             )
         )
