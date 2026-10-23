@@ -23,7 +23,8 @@ def test_the_chart_pins_the_official_nats_chart_behind_its_enabled_switch():
 
 
 def test_the_pinned_nats_archive_is_committed_and_matches_its_recorded_digest():
-    version = next(d["version"] for d in yaml.safe_load((CHART / "Chart.yaml").read_text())["dependencies"])
+    dependencies = yaml.safe_load((CHART / "Chart.yaml").read_text())["dependencies"]
+    version = next(d["version"] for d in dependencies if d["name"] == "nats")
     archive = CHART / "charts" / f"nats-{version}.tgz"
     digest, path = (ROOT / "deploy/helm/agentihooks-swarm-deps.sha256").read_text().split()
 

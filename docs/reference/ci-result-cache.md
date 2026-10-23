@@ -266,7 +266,7 @@ The required gate accepts a skipped `helm-kind` when `due=false`. It still check
 
 The `helm-kind` entry in `.github/input-keys.json` is the declaration to maintain when the chart proof gains an input. It covers:
 
-- The whole `deploy/helm/agentihooks-swarm` chart, including its CI fixtures, and `.github/workflows/helm-kind.yml`.
+- The whole `deploy/helm/agentihooks-swarm` chart, including its CI fixtures and the pinned NATS archive, its digest file `deploy/helm/agentihooks-swarm-deps.sha256`, and `.github/workflows/helm-kind.yml`.
 - Swarm image inputs: `Dockerfile`, `.dockerignore`, `pyproject.toml`, `README.md`, `docker/swarm/requirements.lock`, `docker/swarm-node`, `hooks`, `scripts`, `profiles` and `media`.
 - Proof schemas and fixtures: `docs/swarm-v2/schemas`, `tests/fixtures/swarm_v2`, `tests/kind_request.py` and the five `tests/chart_*.py` helpers named in the declaration (`chart_hive_join`, `chart_network`, `chart_redis`, `chart_secrets`, `chart_workers`).
 - Tool labels `kind v0.33.0` and `kindest/node v1.37.0`. Keep these aligned with `KIND_VERSION` and `KIND_NODE_IMAGE` in the Helm workflow; the workflow itself is also a declared input, including the pinned node image digest.
