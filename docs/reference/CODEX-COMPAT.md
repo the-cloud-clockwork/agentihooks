@@ -119,6 +119,87 @@ session id — rollouts live at
 for the transcript-driven events (`SessionEnd`, `Stop`, `SubagentStop`,
 `PreCompact`), so a filesystem lookup is not charged to every tool call.
 
+#### Shell working folder
+
+Codex 0.162.1 sends a shell `PreToolUse` with only `tool_input.command` and the
+session's `cwd`, the folder the session started in, as captured live with a
+stdin dump hook for pull request 4804. The `workdir` the model gave
+`exec_command` is not in the payload. It is in the rollout, inside the code mode
+`exec` program, which Codex has written to disk when the hook fires.
+
+`normalize_payload` copies that `workdir` into `tool_input` so the hooks that
+read `tool_input.workdir` see the folder the command really runs in: the
+`one-push` gate, the prepush guard and the lifecycle guard that blocks calls
+on a worktree or scratch folder while it is being removed. For
+a `Bash` call with no `workdir` of its own it:
+
+1. Opens the rollout from `transcript_path`, or from `codex_rollout_path()` with
+   the session id when the payload has none.
+2. Reads the last 1 MiB of the file and takes the newest line whose payload is
+   `{"type": "custom_tool_call", "name": "exec"}`.
+3. Parses every `exec_command({...})` call in that program's `input`. Keys may
+   be bare (`cmd:`) or JSON quoted (`"cmd":`); string values are JavaScript
+   string literals.
+4. Keeps the calls whose decoded `cmd` equals the hook's `command`
+   exactly. When they all name the same non-empty `workdir`, that value
+   becomes `tool_input.workdir`.
+
+A rollout line and the payload it produces:
+
+```text
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"text(await tools.exec_command({cmd:\"git status -sb && gh pr ready 4746\",workdir:\"/home/me/dev/worktrees/agentihooks/ci-1\"}));"}}
+```
+
+```json
+{
+  "hook_event_name": "PreToolUse",
+  "cwd": "/home/me/dev/agentihooks",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git status -sb && gh pr ready 4746",
+    "workdir": "/home/me/dev/worktrees/agentihooks/ci-1"
+  }
+}
+```
+
+The `one-push` gate and the prepush guard then join `cwd` with `workdir` (a
+relative `workdir` resolves against `cwd`, `~` expands) and apply any `cd` or
+`git -C` in the command on top. The lifecycle guard compares `workdir` after `~`
+expansion with the worktree and scratch roots, so a relative `workdir` never
+matches there.
+
+No `workdir` is added, and the hooks fall back to the session's `cwd`, when:
+
+- the payload already carries a `workdir`, which is kept as sent;
+- the rollout cannot be found or read, or holds no `exec` program in its last
+  1 MiB;
+- no `exec_command` call in the newest program runs exactly the hook's command,
+  or the matching calls name different folders, or one of them has none;
+- any string value in the newest program cannot be decoded, even in a call
+  that runs another command.
+
+To see what the hook will read for a session, print the newest `exec` program
+from its rollout:
+
+```bash
+SID='<session id>'
+R=$(ls "${CODEX_HOME:-$HOME/.codex}"/sessions/*/*/*/rollout-*"$SID".jsonl)
+tail -c 1048576 "$R" | jq -rR 'fromjson? | .payload
+  | select(type == "object" and .type == "custom_tool_call" and .name == "exec")
+  | .input' | tail -n 1
+```
+
+Set `SID` to the session id. Swarm Codex sessions run with their own
+`CODEX_HOME`; use the session's value. When `CODEX_HOME` lists several folders
+separated by commas, the hooks read only the first; put that one in the
+command. The `cmd` and `workdir` strings printed there are JavaScript literals
+with `\"` escapes; the normalizer compares and copies their decoded values.
+
+Delivered in
+[pull request 4804](https://github.com/the-cloud-clockwork/agentihooks/pull/4804);
+[pull request 5676](https://github.com/the-cloud-clockwork/agentihooks/pull/5676)
+added JSON quoted keys.
+
 ## §3 Feature-kind mapping
 
 | row | Bundle kind | Codex behaviour |
