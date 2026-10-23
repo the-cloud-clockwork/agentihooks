@@ -657,11 +657,10 @@ class HerdrRuntime:
                 agent, saved.get("account") or self.planned_account(task["id"], agent), None, lane
             )
             route = ["--route", account.name]
-        placed = timing.call(
-            self._launch,
+        placed = self._account_launch(
             config,
             lane,
-            task["id"],
+            task,
             name,
             [
                 *argv,
@@ -677,8 +676,6 @@ class HerdrRuntime:
                 ),
                 *mode,
             ],
-            predecessor=_predecessor(task),
-            controller_epoch=task.get("controller_epoch"),
         )
         self._reserve_account(account, lane, agent)
         placed = codex.complete(config, name, placed, self._terminate)
@@ -771,6 +768,27 @@ class HerdrRuntime:
             effort_range.of(config),
         )
         return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
+
+    def _account_launch(self, config, lane, task, name, argv):
+        if task.get("account_slot_hive"):
+            from scripts.hive.account_slots import EXECUTION_ENV, HIVE_ENV
+
+            argv = [
+                "env",
+                f"{HIVE_ENV}={task['account_slot_hive']}",
+                f"{EXECUTION_ENV}={task['execution_id']}",
+                *argv,
+            ]
+        return timing.call(
+            self._launch,
+            config,
+            lane,
+            task["id"],
+            name,
+            argv,
+            predecessor=_predecessor(task),
+            controller_epoch=task.get("controller_epoch"),
+        )
 
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):
