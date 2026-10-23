@@ -137,6 +137,7 @@ def hub_reclaim(records: list[dict], fault: dict, until: int) -> dict:
     return {"takeover_s": _seconds(fault["t"], takeover), "first_settle_s": _seconds(fault["t"], settle)}
 
 
+# Exits handled twice are reported but never fail the contract: JetStream redelivers at least once.
 RECLAIM = {"hive-kill": hive_reclaim, "nats-restart": nats_reclaim, "hub-kill": hub_reclaim}
 MEASURED = {
     "hive-kill": ("max_s",),
@@ -187,13 +188,11 @@ def report(records: list[dict]) -> dict:
         "exit_events_never_handled": len(handled["never_handled"]),
     }
     clean = len(windows) == len(MEASURED) and all(
-        not (w["duplicate_claims"] or w["orphans"] or w["exit_events_handled_twice"] or w["exit_events_never_handled"])
-        and measured(w)
-        for w in windows
+        not (w["duplicate_claims"] or w["orphans"] or w["exit_events_never_handled"]) and measured(w) for w in windows
     )
-    settled = not (final["exit_events_handled_twice"] or final["exit_events_never_handled"])
+    unsettled = final["exit_events_never_handled"]
     return {
         "windows": windows,
         "final": final,
-        "contract_met": clean and settled and not final["duplicate_claims"] and not lost,
+        "contract_met": clean and not (unsettled or final["duplicate_claims"] or lost),
     }

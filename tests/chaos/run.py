@@ -190,7 +190,8 @@ def summary(found: dict) -> str:
     for window in found["windows"]:
         lines.append(
             f"{window['fault']} ({window['target']}): duplicate claims {window['duplicate_claims']}, "
-            f"orphans at window end among work offered before the fault {window['orphans']}, exit events handled twice {window['exit_events_handled_twice']}, "
+            f"orphans at window end among work offered before the fault {window['orphans']}, "
+            f"exit events handled twice {window['exit_events_handled_twice']}, "
             f"never handled {window['exit_events_never_handled']}, reclaim {json.dumps(window['reclaim'])}"
         )
     final = found["final"]
