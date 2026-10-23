@@ -240,6 +240,28 @@ def test_a_bus_failure_answers_503_so_github_redelivers(capsys):
     assert deliver(ingress, "ping", {}) == 200
 
 
+def test_the_receiver_binds_its_bucket_on_a_delivery_until_the_hub_creates_it(capsys):
+    inner = open_bus(BusConfig())
+    bound = []
+
+    class Bus:
+        events = inner.events
+
+        def state(self, bucket):
+            bound.append(bucket)
+            if len(bound) == 1:
+                raise LookupError("bucket not found")
+            return inner.state(bucket)
+
+    ingress = Ingress(github_webhooks.LazyPulls(Bus()), SECRET)
+    assert bound == []
+    assert deliver(ingress, "pull_request", pull_request()) == 503
+    assert capsys.readouterr().err.endswith("LookupError: bucket not found\n")
+    assert deliver(ingress, "pull_request", pull_request()) == 200
+    assert deliver(ingress, "pull_request", pull_request()) == 200
+    assert bound == [pulls.BUCKET, pulls.BUCKET]
+
+
 def test_http_handler_logs_one_line_per_delivery(capsys):
     request(Recorder(), headers={"X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "d-1"})
     request(Recorder(401), headers={"X-GitHub-Event": "check_suite", "X-GitHub-Delivery": "d-2"})
