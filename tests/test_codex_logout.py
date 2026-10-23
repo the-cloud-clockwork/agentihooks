@@ -173,6 +173,13 @@ def test_a_raw_name_with_shell_characters_is_never_echoed(capsys):
     assert out[-1] == f"no export of AH_CX_TOKEN_ghost_x in the token block of {aicode_tokens.rc_file()}"
 
 
+def test_an_upper_case_raw_name_is_removed_beside_its_slug(capsys):
+    _registered()
+    assert _logout(["Ghost-X", "--no-openbao"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[-1] == f"no export of AH_CX_TOKEN_ghost_x, AH_CX_TOKEN_Ghost-X in the token block of {aicode_tokens.rc_file()}"
+
+
 def test_refusals_go_to_stderr_with_the_command_name_and_the_reason(capsys):
     assert _logout(["default"]) == 2
     err = capsys.readouterr()
