@@ -431,7 +431,7 @@ backfill, which keep their own budget.
 | Trace listing pages | 20 pages | the trace listing, 100 traces per page |
 | Backfill pages | 20 pages | each trace's observation backfill, 50 observations per page |
 | Active freshness rows | 10 observations | the first page of each binding's observations since its watermark |
-| Step deadline | 55 seconds | the trace reads and the wait history together |
+| Step deadline | 55 seconds | the wait history reads, counted from the start of the trace step; the trace reads keep their own budgets |
 
 The request timeout stays under half the active budget, so one stalled request
 leaves room for its retry. When the budget ends, no new attempt starts and every
@@ -601,6 +601,128 @@ Two things have changed since that bear on reading this symptom:
   swarm Redis with it. Check placement with
   `kubectl -n agentihooks-swarm get pod -o wide` before assuming both paths share
   a host.
+
+### Wait history
+
+A turn gap finding counts only the minutes between two turns that fall outside
+the agent's declared waits (`agentihooks swarm <slug> wait`). After the trace
+reads, the detector reads those waits from Redis with `idle.wait_history`, one
+hash per agent name and per alias of that name. `traces_read.waits` reads them
+inside their own budget, and `traces.gap_agents` picks the agents that need
+them.
+
+**Which agents are read.** Only agents whose traces hold a gap between two
+turns longer than `AGENTIHOOKS_DOCTOR_TURN_GAP_MINUTES` (30), counted in whole
+minutes. An agent with no long gap cannot raise a turn gap finding, so its wait
+history is never read. The agents are read in this order:
+
+1. agents with an active binding in this scan, the live agents
+2. then the agent whose newest long gap ends latest
+3. then by name
+
+**When the reads stop.** The step clock starts when the trace step starts,
+before the Langfuse reads. The wait reads stop at whichever comes first:
+
+| Limit | Value | Counted from |
+|---|---|---|
+| Wait history budget | 15 seconds | the first wait read |
+| Step deadline | 55 seconds | the start of the trace step |
+
+The clock is checked before each agent. A read that has started finishes, and
+no new read starts once the deadline has passed. The trace reads keep their own
+budgets ([Read budget](#read-budget)) and are not cut by the step deadline. The
+deadline only limits how long the wait reads may run after them. If the trace
+reads end 20 seconds into the step, the wait reads stop at 35 seconds, when
+their 15 second budget ends. If the trace reads end at 50 seconds, the wait
+reads stop at 55 seconds. If the trace reads end at 55 seconds or later, no wait
+history is read. Both values are `Budget.wait_seconds` and
+`Budget.step_seconds` in `scripts/doctor/traces_read.py`, and no environment
+variable changes them. Raising `AGENTIHOOKS_DOCTOR_TURN_GAP_MINUTES` leaves
+fewer agents to read.
+
+**Agents left unread.** An agent whose wait history was not read gets no turn
+gap judgement in that scan, so no turn gap finding is raised for it. The scan
+raises one `wait history partial` finding for the swarm instead.
+The finding's subject is the swarm slug and its number is the count of unread
+agents:
+
+```text
+wait history of 6 agents with turn gaps over 30 minutes not read in budget
+unread: eng-3, eng-7, ci-1, eng-12, eng-4
+live agents unread: 2
+turn gap findings skip agents whose wait history was not read
+each Doctor scan reads the wait history again within its budget
+```
+
+The first line is the title. The `unread` line names the first five unread
+agents in read order. The threshold reads `every agent with a turn gap over the
+limit has its wait history read`. The finding is absent when every agent that
+needs its wait history was read. Each scan picks the agents again, so the next
+scan retries the unread ones.
+
+#### Why the wait reads are bounded
+
+Before this change, the step read the wait history of every traced agent,
+whatever its gaps. On rig-grade-swarm on 20 October 2026, `doctor.trace` took
+51 to 73 seconds per pass until 04:42 UTC, then 200 to 300 seconds. The last
+three passes before 06:54 UTC took 125 seconds, 238 seconds and over 450
+seconds. The over 450 second pass was still running when the 450 second tick
+deadline stopped the tick. No Doctor code had changed in that window. A probe
+of one pass, using the real code and a copy of the trace cache, timed each
+part:
+
+| Part | Seconds |
+|---|---|
+| Langfuse trace listing and backfill | 15.6 |
+| Active binding reads, 13 of 13 | 5.4 |
+| Wait history of all 1998 traced agents, one after another | 118.4 |
+| Wait history of the 119 agents with a gap over 30 minutes | 6.0 |
+
+Pull request #5176 (issue #5175) limited the wait reads to the agents with a
+long gap and gave them the budget above. The new tests failed on the old code
+in Proofs run
+[39389821466](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39389821466)
+and passed on the fix in Tests run
+[39391541421](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39391541421).
+Pull request #5229 later moved live agents to the front of the read order. The
+command under [Reading the trace step time](#reading-the-trace-step-time), run
+at 15:07 UTC on 23 October 2026 over the six hours before it, showed 43
+`doctor.trace` passes with a median of 24.7 seconds, a maximum of 42.9
+seconds and none over 60 seconds.
+
+The tests that pin this behaviour are the `waits` tests in
+`tests/doctor/test_traces_read.py`, which cover the budget, the step deadline
+and the unread list. The gap agent order, skipped judgement and finding text are
+tested in `tests/doctor/test_turn_gap_waits.py`. The test in
+`tests/swarm/test_wait_history.py` checks that only agents with a long gap are
+read.
+
+#### Reading the trace step time
+
+```bash
+D=rig-grade-swarm-doctor
+journalctl --user -t agentihooks-swarm --since "-6h" \
+  | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
+  | grep "\"slug\": \"$D\"" | grep '"step": "doctor.trace"' \
+  | sed 's/^[^{]*//' \
+  | python3 -c 'import sys, json
+w = sorted(json.loads(l)["wall_s"] for l in sys.stdin)
+print(len(w), "passes; median", round(w[len(w) // 2], 1), "max", round(w[-1], 1), "over 60 s", sum(x > 60 for x in w))'
+agentihooks doctor <watched slug> measure wait-history-partial/<watched slug>
+```
+
+The first command prints the `doctor.trace` wall seconds per pass, as in
+[Measure the timer step](../pillars/swarm.md#measure-the-timer-step). The
+second prints the number of agents left unread in the current scan. When the
+scan raises no such finding it prints 0 only if the finding was seen before;
+otherwise it fails with `no finding wait-history-partial/<slug> has been seen`.
+
+| Symptom | Read |
+|---|---|
+| `wait history partial` on every scan, with `doctor.trace` near 55 seconds | the Langfuse reads used up the step before the wait reads began; check `trace reader unavailable` and the Langfuse response time |
+| `wait history partial` with `doctor.trace` well under 55 seconds | the wait reads themselves used the 15 seconds; many agents have long gaps, or Redis answers slowly |
+| `doctor.trace` above 60 seconds | a Langfuse request or a wait read in flight finished past its budget; read the `trace reader unavailable` failure lines for timeouts |
+| a turn gap finding disappears while `wait history partial` is present | its agent was left unread in that scan; it is judged again once its wait history is read |
 
 ### Historical findings
 
