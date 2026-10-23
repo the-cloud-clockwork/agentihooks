@@ -2,7 +2,6 @@ import copy
 import json
 from unittest.mock import patch
 
-import fakeredis
 import pytest
 
 from scripts.events import memory
@@ -11,11 +10,13 @@ from scripts.inbox import migration
 from scripts.inbox.bus import Message, SeatInbox
 from scripts.inbox.store import CLOSED, STATES, InboxStore
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
 def source(monkeypatch):
+    import fakeredis
+
     monkeypatch.delenv("AGENTIHOOKS_HIVE_MEMBER", raising=False)
     client = fakeredis.FakeRedis(decode_responses=True)
     for index, state in enumerate(STATES):
@@ -162,3 +163,63 @@ def test_cli_refuses_live_import_before_connecting_without_enable_flag(tmp_path)
             migration.main(["apply", str(tmp_path / "proof.json")])
     assert error.value.code == 2
     opener.assert_not_called()
+
+
+@pytest.mark.parametrize("backend,url", [("memory", None), ("nats", None)])
+def test_cli_requires_an_explicit_nats_destination(backend, url, tmp_path):
+    with patch.object(migration.BusConfig, "from_environ", return_value=BusConfig(backend=backend, url=url)):
+        with pytest.raises(SystemExit) as error:
+            migration.main(["rehearse", str(tmp_path / "snapshot.json"), "--receipt", str(tmp_path / "proof.json")])
+    assert error.value.code == 2
+
+
+def test_cli_snapshots_rehearses_and_imports_a_copy_into_a_separate_nats_destination(source, tmp_path, capsys):
+    from scripts.events.nats import open_bus
+    from tests.events.nats_server import running
+
+    exported, receipt = tmp_path / "snapshot.json", tmp_path / "proof.json"
+    with patch.object(migration, "_source", return_value=source):
+        assert migration.main(["snapshot", str(exported)]) == 0
+        assert exported.stat().st_mode & 0o777 == 0o600
+        assert json.loads(capsys.readouterr().out)["items"] == 4
+        records = json.loads(exported.read_text())
+        assert records == migration.snapshot(source)
+        with pytest.raises(FileExistsError):
+            migration.main(["snapshot", str(exported)])
+        with running(tmp_path / "copy") as url:
+            with patch.object(migration.BusConfig, "from_environ", return_value=BusConfig(backend="nats", url=url)):
+                assert migration.main(["rehearse", str(exported), "--receipt", str(receipt)]) == 0
+            proof = json.loads(capsys.readouterr().out)
+            assert proof == json.loads(receipt.read_text())
+            assert proof["version"] == 1
+            assert proof["copy"] == migration.digest(url)
+            assert receipt.stat().st_mode & 0o777 == 0o600
+        with running(tmp_path / "live") as url:
+            with patch.object(migration.BusConfig, "from_environ", return_value=BusConfig(backend="nats", url=url)):
+                assert migration.main(["apply", str(receipt), "--enable-live"]) == 0
+            assert json.loads(capsys.readouterr().out)["history_entries"] == 8
+            bus = open_bus(BusConfig(backend="nats", url=url))
+            try:
+                assert migration.read_records(records, bus) == records
+            finally:
+                bus.close()
+
+
+def test_apply_refuses_unknown_proof_versions_and_changes_during_the_move(source, bus):
+    records = migration.snapshot(source)
+    proof = migration.rehearse(records, bus, "copy")
+    with pytest.raises(ValueError, match="unsupported migration proof version"):
+        migration.apply(source, bus, dict(proof, version=2), "live", enabled=True)
+    with patch.object(migration, "snapshot", side_effect=[records, []]):
+        with pytest.raises(ValueError, match="source changed during migration"):
+            migration.apply(source, bus, proof, "live", enabled=True)
+
+
+@pytest.mark.parametrize("state", ["done", "unknown"])
+def test_import_refuses_closed_or_unknown_states_before_publishing(source, bus, state):
+    records = migration.snapshot(source)
+    records[0]["item"]["state"] = state
+    with patch.object(bus.events, "publish") as publisher:
+        with pytest.raises(ValueError, match="open inbox item"):
+            migration.import_snapshot(records, bus)
+    publisher.assert_not_called()
