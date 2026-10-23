@@ -47,7 +47,11 @@ def member(signer, swarm="rig"):
 
 
 def test_member_scoped_bus_logs_queues_and_keeps_state(hub, signer):
+    from scripts.events.nats_scope import NatsScopedBus
+    from scripts.events.nats_state import ScopedStateStore
+
     own = hub.for_swarm("rig")
+    assert isinstance(own, NatsScopedBus)
     assert hub.for_swarm("rig") is own
     own.queue("eng", POLICY)
     own.state("spoke-work")
@@ -67,6 +71,7 @@ def test_member_scoped_bus_logs_queues_and_keeps_state(hub, signer):
         assert logged.event == work
         logged.ack()
         state = scoped.state("spoke-work")
+        assert isinstance(state, ScopedStateStore)
         revision = state.create("key", b"first")
         updated = state.update("key", b"second", revision)
         assert state.get("key").value == b"second"
