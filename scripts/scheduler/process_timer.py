@@ -22,7 +22,7 @@ def blocking_client() -> "Redis":
 
     source = redis_client()
     pool = source.connection_pool
-    options = {**pool.connection_kwargs, "socket_timeout": None}
+    options = {**pool.connection_kwargs, "socket_timeout": RECHECK_S + 5}
     client = Redis(connection_pool=ConnectionPool(connection_class=pool.connection_class, **options))
     source.close()
     return client
