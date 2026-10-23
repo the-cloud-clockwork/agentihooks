@@ -377,11 +377,14 @@ def test_reconcile_schedules_a_linked_guard_missing_from_the_current_scheduler(t
     assert sync.drift(tmp_path) == []
 
 
-@pytest.mark.parametrize("present", [(), ("guard-daemon.sh",), ("guard-config.json",)])
-def test_reconcile_leaves_a_home_without_both_links_unscheduled(tmp_path, scheduler, calls, present):
-    _link(tmp_path, *present)
-    if "guard-config.json" not in present:
-        (tmp_path / "guard-config.json").write_text("{}")
+@pytest.mark.parametrize(
+    ("linked", "copied"),
+    [((), ("guard-config.json",)), (("guard-daemon.sh",), ("guard-config.json",)), (("guard-config.json",), ())],
+)
+def test_reconcile_leaves_a_home_without_both_links_unscheduled(tmp_path, scheduler, calls, linked, copied):
+    _link(tmp_path, *linked)
+    for name in copied:
+        (tmp_path / name).write_text("{}")
     sync.reconcile(tmp_path)
     assert _records(scheduler) == []
 
@@ -412,8 +415,18 @@ def test_an_unreachable_stranded_scheduler_still_schedules_the_guard(tmp_path, s
         raise ConnectionError("refused")
 
     monkeypatch.setattr(sync, "_stranded_scheduler", refuse)
-    assert sync.install(tmp_path, enable=True) == _installed(tmp_path)
+    assert sync.install(tmp_path, enable=True) == (
+        f"{_installed(tmp_path)}; a guard entry on the local Redis could not be checked or retired"
+    )
     assert len(_records(scheduler)) == 1
+
+
+def test_a_swarm_url_naming_the_local_redis_keeps_the_new_entry(tmp_path, scheduler, monkeypatch, calls):
+    monkeypatch.setattr(sync, "_stranded_scheduler", lambda: scheduler)
+    sync.install(tmp_path, enable=True)
+    assert sync.install(tmp_path, enable=True) == _installed(tmp_path)
+    [record] = _records(scheduler)
+    assert json.loads(record["payload"]) == {"script": str(tmp_path / "guard-daemon.sh")}
 
 
 def test_the_stranded_scheduler_is_the_local_redis_only_when_the_swarm_moved(monkeypatch):
@@ -423,16 +436,10 @@ def test_the_stranded_scheduler_is_the_local_redis_only_when_the_swarm_moved(mon
     monkeypatch.setattr(store, "redis_url", lambda environ: environ is os.environ and current[0])
     assert sync._stranded_scheduler() is None
     current[0] = "redis://remote:6379/0"
-    client = sync._stranded_scheduler().redis
-    assert client.connection_pool.connection_kwargs == {
-        **client.connection_pool.connection_kwargs,
-        "host": "127.0.0.1",
-        "port": 6379,
-        "db": 0,
-        "decode_responses": True,
-        "socket_connect_timeout": 3,
-        "socket_timeout": 10,
-    }
+    options = sync._stranded_scheduler().redis.connection_pool.connection_kwargs
+    assert (options["host"], options["port"], options["db"]) == ("127.0.0.1", 6379, 0)
+    assert options["decode_responses"] is True
+    assert (options["socket_connect_timeout"], options["socket_timeout"]) == (3, 10)
 
 
 def test_check_exits_one_and_names_the_drift_then_zero_after_install(tmp_path, scheduler, capsys, calls):

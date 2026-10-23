@@ -119,7 +119,7 @@ def _stranded_scheduler():
     return Scheduler(client)
 
 
-def _retire(payload: str) -> None:
+def _retire(payload: str) -> bool:
     from redis.exceptions import RedisError
 
     try:
@@ -128,7 +128,8 @@ def _retire(payload: str) -> None:
             if entry.record["payload"] == payload:
                 entry.cancel()
     except RedisError:
-        return
+        return False
+    return True
 
 
 def _schedule(home: Path) -> str:
@@ -137,6 +138,7 @@ def _schedule(home: Path) -> str:
     try:
         scheduler = _scheduler()
         payload = json.dumps({"script": str(home / LINKS[0])})
+        retired = _retire(payload)
         stale = [entry for entry in _entries(scheduler) if entry.record["payload"] == payload]
         entry = scheduler.interval(owner=OWNER, payload=payload, every=EVERY)
         entry.timeout.connect(tick)
@@ -145,9 +147,9 @@ def _schedule(home: Path) -> str:
             old.cancel()
     except RedisError:
         return f"[!!] Host guard linked in {home}; Redis is unreachable, so the guard is not scheduled"
-    _retire(payload)
     _start()
-    return f"[OK] Host guard installed in {home} from {REPO}, every {EVERY}s on the agentihooks scheduler"
+    message = f"[OK] Host guard installed in {home} from {REPO}, every {EVERY}s on the agentihooks scheduler"
+    return message if retired else f"{message}; a guard entry on the local Redis could not be checked or retired"
 
 
 def install(home: Path, enable: bool) -> str:
