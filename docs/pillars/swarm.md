@@ -4917,8 +4917,8 @@ comment. The swarm ledger skill states the same rule for agents.
 An artifact is a file published on the ledger for the operator to review: markdown, JSON, SVG, or a PNG, JPEG,
 WebP or GIF image, at most 8 MB, with a title of at most 200 characters. The ledger stores it by content hash in the
 shared ledger database and beside the ledger media, and lists it in `artifacts`; see
-[Where artifact bytes live](#where-artifact-bytes-live). An artifact is only a file the operator asked for. Test runs, logs,
-review notes and proofs go on the task proof and the pull request.
+[Where artifact bytes live](#where-artifact-bytes-live). An artifact is only a file the operator asked for. Test
+runs, logs, review notes and proofs go on the task proof and the pull request.
 
 Two commands publish one:
 
@@ -4979,9 +4979,9 @@ creates the table on SQLite and on Postgres.
 | Server start | The server copies every artifact and image found only in its own `*.media` folders into the database, in a background thread. A ledger it cannot read is logged as `disk adoption <slug>: <error>` and the rest continue. |
 | Purge | `artifact_purge` and bin expiry remove the rows after the ledger write commits, unless another artifact or attachment still uses the file. Purging a ledger from the bin removes all its rows. |
 
-A phase whose plan is a ledger artifact (`plan_ref` or a `plan_url` under `/artifacts/`) reads its plan text from this
-store whenever a task is added to it, so a task add succeeds on every server that shares the database, including a
-hosted ledger whose data volume holds only the database.
+A phase whose plan is a ledger artifact marked as a plan (`plan_ref` or a `plan_url` under `/artifacts/`) reads its
+plan text from this store when a task add checks the phase's slice anchors or resolves `--plan-slice`, so the task add
+no longer depends on the server that took the upload.
 
 Before pull request #5819 artifact bytes lived only on the disk of the server that took the upload. A task add on
 another server, such as the hosted ledger, was refused:
@@ -5045,7 +5045,8 @@ agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 artifact audit
   hold. Leave `--task` off to use the session's swarm task, or name an existing task.
 - **`--request` is refused.** The entry id must belong to an entry the operator wrote and has not deleted. An agent's
   own chat line does not count.
-- **A task add exits with `phase <id> plan cannot be read: no stored artifact <file>`.** No database row and no disk
+- **A task add exits with `phase <id> plan cannot be read: no stored artifact <file>`**, or with the bare
+  `no stored artifact <file>` when it names `--plan-slice`. No database row and no disk
   copy on this server hold the plan. Start or restart the ledger server that still holds the file in its `.media`
   folder so it copies the file into the database, or upload the same plan bytes again under the acceptance rule
   above, then add the task again.
