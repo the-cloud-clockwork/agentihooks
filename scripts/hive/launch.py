@@ -539,11 +539,11 @@ class HiveLaunch:
         decision = ack.execution.get("profile_decision", {})
         _match("ack host", order.hive, ack.target.get("host_id"))
         _match("profile decision type", "dict", type(decision).__name__)
-        kept = (
-            {"master_placement": agent.profile_decision["master_placement"]}
-            if "master_placement" in agent.profile_decision
-            else {}
-        )
+        kept = {
+            key: agent.profile_decision[key]
+            for key in ("master_placement", "placement_fallback")
+            if key in agent.profile_decision
+        }
         live = replace(
             agent,
             runtime_target=ack.target,
