@@ -31,6 +31,23 @@ Use a separate invite and release for every hive. Provider and GitHub credential
 remain separate Secret references. For a private hub CA, set `workers.caSecret`;
 on a machine, set `SSL_CERT_FILE` to a trusted CA bundle before joining.
 
+# Bundled NATS chart
+
+The pinned NATS chart archive is committed under `charts/` and checked against `deploy/helm/agentihooks-swarm-deps.sha256`, so releases and proofs never fetch the upstream chart index. To move the pin, update the version in `Chart.yaml`, then from the repository root:
+
+```bash
+git rm deploy/helm/agentihooks-swarm/charts/nats-*.tgz
+helm pull nats --repo https://nats-io.github.io/k8s/helm/charts/ --version <version> --destination deploy/helm/agentihooks-swarm/charts
+sha256sum deploy/helm/agentihooks-swarm/charts/nats-<version>.tgz
+```
+
+Write the digest file only after the printed digest equals the `digest` of that version in the upstream `index.yaml`:
+
+```bash
+sha256sum deploy/helm/agentihooks-swarm/charts/nats-<version>.tgz > deploy/helm/agentihooks-swarm-deps.sha256
+git add deploy/helm/agentihooks-swarm/charts deploy/helm/agentihooks-swarm-deps.sha256
+```
+
 # Worker GitHub authentication
 
 Choose `workers.githubAuth.mode` and an existing Secret. GitHub credentials are selected by key reference; never put their values in Helm values.

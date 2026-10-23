@@ -12,6 +12,8 @@ GATE_FILES = [
     "tests/test_ci_gate_workflow.py",
     "tests/test_count_floor.py",
     "tests/test_shard_check.py",
+    "deploy/helm/agentihooks-swarm/charts/nats-2.15.1.tgz",
+    "deploy/helm/agentihooks-swarm-deps.sha256",
 ]
 PLANNED_GATE_FILES = [
     "delivery.yaml",

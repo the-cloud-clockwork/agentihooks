@@ -266,7 +266,7 @@ The required gate accepts a skipped `helm-kind` when `due=false`. It still check
 
 The `helm-kind` entry in `.github/input-keys.json` is the declaration to maintain when the chart proof gains an input. It covers:
 
-- The whole `deploy/helm/agentihooks-swarm` chart, including its CI fixtures, and `.github/workflows/helm-kind.yml`.
+- The whole `deploy/helm/agentihooks-swarm` chart, including its CI fixtures and the pinned NATS archive, its digest file `deploy/helm/agentihooks-swarm-deps.sha256`, and `.github/workflows/helm-kind.yml`.
 - Swarm image inputs: `Dockerfile`, `.dockerignore`, `pyproject.toml`, `README.md`, `docker/swarm/requirements.lock`, `docker/swarm-node`, `hooks`, `scripts`, `profiles` and `media`.
 - Proof schemas and fixtures: `docs/swarm-v2/schemas`, `tests/fixtures/swarm_v2`, `tests/kind_request.py` and the five `tests/chart_*.py` helpers named in the declaration (`chart_hive_join`, `chart_network`, `chart_redis`, `chart_secrets`, `chart_workers`).
 - Tool labels `kind v0.33.0` and `kindest/node v1.37.0`. Keep these aligned with `KIND_VERSION` and `KIND_NODE_IMAGE` in the Helm workflow; the workflow itself is also a declared input, including the pinned node image digest.
@@ -479,6 +479,62 @@ gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused"
 ```
 
 `shard-check`'s step summary prints `Python 3.12: ran <n>, reused <m> from <dev run>, flaky <k>`.
+
+### Shard summary
+
+`shard-check`'s step `Summarize reused, ran and flaky tests` runs `python -m tests.shard_summary` from the base checkout on every `shard-check` leg except pull requests into `main`, and appends its lines to the job log and the step summary. It runs unless the run is cancelled, so it also prints when an earlier `shard-check` step failed.
+
+```bash
+python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \
+  --collected collected-data/collected.json --plan reused-plan/reused-tests.json --flakes shard-flakes/*/flakes.jsonl
+```
+
+| Option | Input |
+|---|---|
+| `--version` | The Python version named on the first line. |
+| `--durations` | Each unit shard's `durations.json`, downloaded from the `durations-<python>-<shard>` artifacts. A test's keys count once per shard, with a trailing `@<worker>` suffix removed. |
+| `--collected` | The head's collected test identifiers. |
+| `--plan` | The test plan from `split`. The workflow downloads `reused-tests-<python>` only when `unit` reports at least one reused test; a missing file means no plan. |
+| `--flakes` | Each shard's `flakes.jsonl`. Missing files are skipped. |
+
+The first line always prints:
+
+```text
+Python 3.12: ran <n>, reused <m> from dev run <run id>, flaky <k>
+```
+
+| Field | Counted as |
+|---|---|
+| `ran` | Distinct test identifiers across every shard's durations. |
+| `reused` | Planned tests that the head also collected, minus every planned test that ran in any shard. |
+| `from` | `dev run <run id>` from the plan's `run` field, or `no plan` with `reused 0`. |
+| `flaky` | Records whose `outcome` is `flaky` across every flake report. |
+
+A shard **fell back** when its durations include at least one planned test, that is, it ran tests the plan told it to reuse. Each such shard adds one line, named by its artifact folder, with every test it ran and no reuse:
+
+```text
+Python 3.12: ran 4, reused 2 from dev run 77, flaky 0
+durations-3.12-2 fell back: ran 3, reused 0
+```
+
+In this example six tests were collected and the plan reused four of them. Shard 1 ran one unplanned test. Shard 2 ran one unplanned test and two planned ones, so those two leave the reused count and shard 2 is named with its three tests. Shards that ran only unplanned tests print no line and report as before. When every shard falls back, `reused` is 0 and every shard is named.
+
+Before [pull request 4987](https://github.com/the-cloud-clockwork/agentihooks/pull/4987) ([#4986](https://github.com/the-cloud-clockwork/agentihooks/issues/4986)) the step was inline `jq`. It counted every planned test the head collected as reused, so a shard that fell back still reported its planned tests as reused, and the summary named no shard. Red: Tests run [39345863084](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39345863084) on the tests alone failed `test_a_shard_that_fell_back_reports_zero_reused_and_its_full_run` in unit (3.11, 11) and `test_every_shard_falling_back_reuses_nothing` in unit (3.11, 7), while the reuse cases passed. Green: Tests run [39346800053](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39346800053) passed.
+
+A shard that runs a planned test also fails `Check every collected test ran in exactly one shard`, which lists each such test as `<test> ran 1 times though reused`. The summary names the shards behind that failure. Since [pull request 5245](https://github.com/the-cloud-clockwork/agentihooks/pull/5245) an unusable dev coverage database fails the shard instead of running its reused tests (see [Unusable coverage databases](#unusable-coverage-databases)), so a fell back line now comes from a shard that ran without its plan, such as a dispatch whose grader predates that change.
+
+Read the lines on a run:
+
+```bash
+RUN="<tests run id>"
+gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused|fell back: ran"
+```
+
+| Symptom | Read | Action |
+|---|---|---|
+| A `fell back` line names a shard | That shard's `Keep the reused tests' dev coverage` and `Run tests` steps | Find why the shard ran without `reused.json`; with a dispatch, merge `origin/dev` into the branch and dispatch again |
+| `reused 0 from no plan` on a run that should reuse | The `split` plan step and the `unit` job's `reused` output | The planner found no record or the run was narrowed; see [When a pull request run reuses tests](#when-a-pull-request-run-reuses-tests) |
+| The step prints `No module named tests.shard_summary` | The base checkout `shard-check` runs from | The base predates pull request 4987. The runner starts the step with `bash -e`, without `pipefail`, so the pipe into `tee` keeps it green; Tests run [39346800053](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39346800053) printed this line on both legs and passed. The summary appears once the base has the module |
 
 ### Proof and evidence gap
 
