@@ -431,7 +431,7 @@ backfill, which keep their own budget.
 | Trace listing pages | 20 pages | the trace listing, 100 traces per page |
 | Backfill pages | 20 pages | each trace's observation backfill, 50 observations per page |
 | Active freshness rows | 10 observations | the first page of each binding's observations since its watermark |
-| Step deadline | 55 seconds | the trace reads and the wait history together |
+| Step deadline | 55 seconds | the wait history reads, counted from the start of the trace step; the trace reads keep their own budgets |
 
 The request timeout stays under half the active budget, so one stalled request
 leaves room for its retry. When the budget ends, no new attempt starts and every
@@ -563,9 +563,10 @@ in Proofs run
 [39389821466](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39389821466)
 and passed on the fix in Tests run
 [39391541421](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39391541421).
-Pull request #5229 later moved live agents to the front of the read order. In
-the six hours to 15:07 UTC on 23 October 2026, the Doctor swarm journal showed
-43 `doctor.trace` passes with a median of 24.7 seconds, a maximum of 42.9
+Pull request #5229 later moved live agents to the front of the read order. The
+command under [Reading the trace step time](#reading-the-trace-step-time), run
+at 15:07 UTC on 23 October 2026 over the six hours before it, showed 43
+`doctor.trace` passes with a median of 24.7 seconds, a maximum of 42.9
 seconds and none over 60 seconds.
 
 The tests that pin this behaviour are the `waits` tests in
@@ -591,7 +592,9 @@ agentihooks doctor <watched slug> measure wait-history-partial/<watched slug>
 
 The first command prints the `doctor.trace` wall seconds per pass, as in
 [Measure the timer step](../pillars/swarm.md#measure-the-timer-step). The
-second prints the number of agents left unread in the current scan.
+second prints the number of agents left unread in the current scan. When the
+scan raises no such finding it prints 0 only if the finding was seen before;
+otherwise it fails with `no finding wait-history-partial/<slug> has been seen`.
 
 | Symptom | Read |
 |---|---|
