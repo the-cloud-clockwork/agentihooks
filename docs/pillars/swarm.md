@@ -111,7 +111,7 @@ is a candidate, else the first candidate by name.
 
 The live pane's placement (pane, harness, account, model, profile) is copied onto that record and it is marked
 working. Lead master records whose process is gone are dropped, the seat is occupied by the adopted name when it held
-another name or none, and the tick logs `<id>: adopted live master <name>`.
+another name or none, and the tick returns the action `adopted live master <name>`, which the tick journal prints as `<id>: adopted live master <name>`.
 
 Before pull request [5335](https://github.com/the-cloud-clockwork/agentihooks/pull/5335), recovery always wrote a fresh
 record with the tick time. When the registry already held an execution for that name, it compared the start time and
