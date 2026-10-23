@@ -124,6 +124,46 @@ def test_a_missing_hive_user_is_red(tmp_path, capsys):
     ]
 
 
+def _operator_antoncore(tmp_path: Path, permissions: dict, user: str = grants.HIVE_USER) -> Path:
+    root = tmp_path / "antoncore"
+    values = root / grants.HIVE_VALUES
+    values.parent.mkdir(parents=True)
+    values.write_text(yaml.safe_dump({"config": {"merge": {"operator": "eyJ", "resolver": {"type": "full"}}}}))
+    users = [
+        {"user": "swarm-controller", "openbao": "k8s/c"},
+        {"user": user, "openbao": "k8s/h", "permissions": permissions},
+    ]
+    (root / grants.SERVICE_USERS).write_text(yaml.safe_dump({"users": users}))
+    return root
+
+
+def test_in_operator_mode_the_hive_user_is_read_from_the_service_users_file(tmp_path, capsys):
+    agentihooks, _ = _matching(tmp_path)
+    antoncore = _operator_antoncore(tmp_path, {"publish": {"allow": PUBLISH}, "subscribe": {"allow": SUBSCRIBE}})
+    assert grants.SERVICE_USERS == "k8s/values-overlays/agentihooks-swarm-nats/users.yaml"
+    assert _run(capsys, agentihooks, antoncore)[0] == 0
+
+
+def test_in_operator_mode_a_differing_hive_user_is_red(tmp_path, capsys):
+    agentihooks, _ = _matching(tmp_path)
+    antoncore = _operator_antoncore(tmp_path, {"publish": {"allow": [*PUBLISH, "x.>"]}, "subscribe": SUBSCRIBE})
+    status, lines = _run(capsys, agentihooks, antoncore)
+    assert status == 1
+    assert lines == [
+        f"::error::publish allow x.> is granted only by the antoncore swarm-hive user ({grants.HIVE_VALUES})."
+    ]
+
+
+def test_in_operator_mode_a_missing_hive_user_is_red(tmp_path, capsys):
+    agentihooks, _ = _matching(tmp_path)
+    antoncore = _operator_antoncore(tmp_path, {}, user="swarm-ledger")
+    status, lines = _run(capsys, agentihooks, antoncore)
+    assert status == 1
+    assert lines == [
+        "::error::The hive member NATS grants cannot be read (ValueError: the SWARM account has no swarm-hive user)."
+    ]
+
+
 def test_a_member_source_that_cannot_render_its_claims_is_red(tmp_path, capsys):
     _, antoncore = _matching(tmp_path)
     agentihooks = _agentihooks(tmp_path / "bare", {}, {}, body="def user_claims():\n    return {}\n")
