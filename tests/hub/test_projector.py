@@ -10,6 +10,8 @@ from scripts.swarm_ledger.events.hub import Hub
 from scripts.swarm_ledger.events.publishing import Publishing
 from scripts.swarm_ledger.repository import outbox, sqlite
 
+NATS = BusConfig(backend="nats")
+
 
 def event(slug, kind="task.changed", key="t1"):
     entity = kind.split(".")[0]
@@ -23,22 +25,26 @@ def watching(*slugs):
     return hub
 
 
+def make(repository=None, hub=None, name="pod", clock=lambda: 0.0):
+    return projector.Projector(repository or Mock(), hub or Hub(), name, NATS, clock)
+
+
 @pytest.mark.parametrize(
     ("host", "name"), [("Ledger_Pod.0", "ledger-pod-0-8765"), ("_pod.", "pod-8765"), ("..", "8765")]
 )
 def test_identity_is_a_valid_reactor_name(host, name):
     assert projector.identity(host, 8765) == name
-    assert projector.Projector(Mock(), Hub(), name).reactor().name == f"projector-{name}"
+    assert make(name=name).reactor.name == f"projector-{name}"
 
 
 def test_reactor_follows_every_swarm_subject_under_a_durable_per_process():
-    reactor = projector.Projector(Mock(), Hub(), "pod-8765").reactor()
+    reactor = make(name="pod-8765").reactor
     assert (reactor.name, reactor.subject, reactor.singleton) == ("projector-pod-8765", "swarm.>", False)
 
 
 def test_a_ledger_event_refreshes_only_a_watched_ledger():
     repository = Mock()
-    project = projector.Projector(repository, watching("seen"), "pod")
+    project = make(repository, watching("seen"))
     project.handle(event("seen"))
     project.handle(event("seen", "phase.removed", "p1"))
     project.handle(event("other"))
@@ -52,7 +58,7 @@ def test_a_failed_refresh_naks_with_the_reactor_retry_delay_and_a_success_acks()
     failed, handled = Mock(event=event("seen"), attempt=2), Mock(event=event("seen"), attempt=1)
     consumer = Mock()
     consumer.fetch.return_value = [failed, handled]
-    project = projector.Projector(repository, watching("seen"), "pod")
+    project = make(repository, watching("seen"))
     assert project.pass_once(consumer, (1_000, 5_000)) == ["failed", "handled"]
     consumer.fetch.assert_called_once_with(projector.BATCH, projector.FETCH_TIMEOUT_MS)
     failed.nak.assert_called_once_with(5_000)
@@ -86,8 +92,7 @@ def test_a_bus_delivery_of_another_hosts_write_reaches_the_watched_page_only(tmp
     inner.apply_ops("seen", changes=[{"path": "phases/p1/done", "value": True, "base": False}])
     inner.apply_ops("other", changes=[{"path": "phases/p1/done", "value": True, "base": False}])
     outbox.relay(inner, bus.events)
-    project = projector.Projector(repository, hub, "pod")
-    assert project.pass_once(consumer, ()) == ["handled", "handled"]
+    assert make(repository, hub).pass_once(consumer, ()) == ["handled", "handled"]
     repository.drain(5)
     after = hub.resource("seen", "ledger")
     assert after["_meta"]["rev"] > before
@@ -117,47 +122,13 @@ def test_running_projector_refreshes_on_a_published_event_and_closes_its_bus_on_
         assert running.name == "pod-a-18472"
         bus.events.publish("swarm.seen.task.t1", event("seen"))
         assert refreshed.wait(5), "the projector did not refresh the watched ledger"
-        worker = running.worker
-    assert not worker.is_alive()
-    opening.assert_called_once_with(BusConfig(backend="nats"))
+    assert running.bus is None
+    opening.assert_called_once_with(NATS)
     close.assert_called_once_with()
     repository.current.assert_called_once_with("seen")
 
 
-def test_a_failed_bus_open_is_logged_and_retried_until_stopped(monkeypatch, capsys, tmp_path):
-    opened = threading.Event()
-    attempts = []
-
-    def refused(config):
-        attempts.append(config)
-        if len(attempts) == 2:
-            opened.set()
-        raise OSError("bus unreachable")
-
-    monkeypatch.setattr(factory, "open_bus", refused)
-    monkeypatch.setattr(projector, "REOPEN_S", 0.01)
-    environ = {"AGENTIHOOKS_BUS": "nats", "HOSTNAME": "pod", "LEDGER_DIR": str(tmp_path), "LEDGER_PORT": "18472"}
-    with projector.running(Mock(), Hub(), environ=environ) as running:
-        assert running.name == "pod-18472"
-        assert opened.wait(5), "the projector did not retry the bus"
-    assert attempts[0] == BusConfig(backend="nats")
-    assert "ledger projector: bus unreachable" in capsys.readouterr().err
-
-
-class Stopped:
-    def __init__(self, passes):
-        self.passes = passes
-        self.waits = []
-
-    def is_set(self):
-        self.passes -= 1
-        return self.passes < 0
-
-    def wait(self, timeout):
-        self.waits.append(timeout)
-
-
-def test_follow_consumes_under_its_durable_with_the_reactor_policy_and_retry_delays(monkeypatch):
+def test_pull_opens_its_durable_once_and_naks_a_failed_refresh_with_the_reactor_delays(monkeypatch):
     bus = Mock()
     failed = Mock(event=event("seen"), attempt=1)
     bus.events.consumer.return_value.fetch.return_value = [failed]
@@ -165,20 +136,39 @@ def test_follow_consumes_under_its_durable_with_the_reactor_policy_and_retry_del
     monkeypatch.setattr(factory, "open_bus", opening)
     repository = Mock()
     repository.current.side_effect = OSError("database down")
-    project = projector.Projector(repository, watching("seen"), "pod")
-    stopped = Stopped(2)
-    config = BusConfig(backend="nats")
-    project.follow(config, stopped)
-    opening.assert_called_once_with(config)
+    project = make(repository, watching("seen"))
+    project.pull()
+    project.pull()
+    opening.assert_called_once_with(NATS)
     bus.events.consumer.assert_called_once_with("hub-projector-pod", "swarm.>", registry.REACTOR_POLICY)
-    failed.nak.assert_called_once_with(registry.RETRY_MS[0])
-    bus.close.assert_called_once_with()
-    assert stopped.waits == [projector.REOPEN_S]
+    assert failed.nak.call_args_list == [((registry.RETRY_MS[0],),)] * 2
+    bus.close.assert_not_called()
 
 
-def test_follow_logs_a_refused_bus_and_waits_before_reopening(monkeypatch, capsys):
-    monkeypatch.setattr(factory, "open_bus", Mock(side_effect=OSError("bus unreachable")))
-    stopped = Stopped(1)
-    projector.Projector(Mock(), Hub(), "pod").follow(BusConfig(backend="nats"), stopped)
+def test_a_refused_bus_is_logged_and_reopened_only_after_the_reopen_delay(monkeypatch, capsys):
+    opening = Mock(side_effect=OSError("bus unreachable"))
+    monkeypatch.setattr(factory, "open_bus", opening)
+    now = [100.0]
+    project = make(clock=lambda: now[0])
+    project.pull()
     assert capsys.readouterr().err == "ledger projector: bus unreachable\n"
-    assert stopped.waits == [projector.REOPEN_S]
+    assert project.reopen_at == 100.0 + projector.REOPEN_S
+    now[0] = 100.0 + projector.REOPEN_S - 0.01
+    project.pull()
+    assert opening.call_count == 1
+    now[0] = 100.0 + projector.REOPEN_S
+    project.pull()
+    assert opening.call_count == 2
+
+
+def test_a_failed_fetch_closes_the_bus_so_the_next_pull_reopens_it(monkeypatch, capsys):
+    bus = Mock()
+    bus.events.consumer.return_value.fetch.side_effect = OSError("connection lost")
+    monkeypatch.setattr(factory, "open_bus", Mock(return_value=bus))
+    project = make()
+    project.pull()
+    assert capsys.readouterr().err == "ledger projector: connection lost\n"
+    bus.close.assert_called_once_with()
+    assert (project.bus, project.consumer) == (None, None)
+    project.close()
+    bus.close.assert_called_once_with()

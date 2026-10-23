@@ -2,7 +2,7 @@ import os
 import re
 import socket
 import sys
-import threading
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 
@@ -13,13 +13,14 @@ from scripts.events.envelope import Envelope
 from scripts.hub import registry
 from scripts.hub.registry import Reactor
 from scripts.hub.runner import retry_delay
+from scripts.scheduler.process_interval import Interval
 from scripts.swarm_ledger import ledger_link
 
 SUBJECT = "swarm.>"
 BATCH = 32
 FETCH_TIMEOUT_MS = 500
 REOPEN_S = 5.0
-STOP_S = 5.0
+PULL_S = 0.05
 _SAFE = re.compile(r"[a-z0-9]+")
 
 
@@ -28,13 +29,16 @@ def identity(host: str, port: int) -> str:
 
 
 class Projector:
-    def __init__(self, repository, hub, name: str):
+    def __init__(self, repository, hub, name: str, config: BusConfig, clock=time.monotonic):
         self.repository = repository
         self.hub = hub
         self.name = name
-
-    def reactor(self) -> Reactor:
-        return Reactor(f"projector-{self.name}", SUBJECT, self.handle)
+        self.config = config
+        self.clock = clock
+        self.reactor = Reactor(f"projector-{name}", SUBJECT, self.handle)
+        self.bus = None
+        self.consumer = None
+        self.reopen_at = 0.0
 
     def handle(self, event: Envelope) -> None:
         if event.type in catalogue.LEDGER and event.swarm in self.hub.watched():
@@ -54,21 +58,25 @@ class Projector:
                 outcomes.append("handled")
         return outcomes
 
-    def follow(self, config: BusConfig, stopped: threading.Event) -> None:
-        reactor = self.reactor()
-        while not stopped.is_set():
-            bus = None
-            try:
-                bus = factory.open_bus(config)
-                consumer = bus.events.consumer(registry.durable(reactor), reactor.subject, reactor.policy)
-                while not stopped.is_set():
-                    self.pass_once(consumer, reactor.retry_ms)
-            except Exception as exc:
-                sys.stderr.write(f"ledger projector: {exc}\n")
-            finally:
-                if bus is not None:
-                    bus.close()
-            stopped.wait(REOPEN_S)
+    def pull(self) -> None:
+        if self.consumer is None and self.clock() < self.reopen_at:
+            return
+        try:
+            if self.consumer is None:
+                self.bus = factory.open_bus(self.config)
+                reactor = self.reactor
+                self.consumer = self.bus.events.consumer(registry.durable(reactor), reactor.subject, reactor.policy)
+            self.pass_once(self.consumer, self.reactor.retry_ms)
+        except Exception as exc:
+            sys.stderr.write(f"ledger projector: {exc}\n")
+            self.close()
+            self.reopen_at = self.clock() + REOPEN_S
+
+    def close(self) -> None:
+        if self.bus is not None:
+            self.bus.close()
+        self.bus = None
+        self.consumer = None
 
 
 @contextmanager
@@ -77,15 +85,14 @@ def running(repository, hub, environ: Mapping[str, str] = os.environ) -> Iterato
     if config.backend == "memory":
         yield None
         return
-    port = ledger_link.address(environ)[1]
-    projector = Projector(repository, hub, identity(environ.get("HOSTNAME") or socket.gethostname(), port))
-    stopped = threading.Event()
-    projector.worker = threading.Thread(
-        target=projector.follow, args=(config, stopped), name="ledger-projector", daemon=True
-    )
-    projector.worker.start()
+    host = environ.get("HOSTNAME") or socket.gethostname()
+    projector = Projector(repository, hub, identity(host, ledger_link.address(environ)[1]), config)
+    scheduled = Interval(projector.pull, every=PULL_S)
+    scheduled.start()
     try:
         yield projector
     finally:
-        stopped.set()
-        projector.worker.join(STOP_S)
+        try:
+            scheduled.close()
+        finally:
+            projector.close()
