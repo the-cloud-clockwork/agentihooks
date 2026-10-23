@@ -1,7 +1,7 @@
 ---
 title: Process environment reads
 parent: Reference
-nav_order: 31
+nav_order: 46
 ---
 
 # Process environment reads under /proc
