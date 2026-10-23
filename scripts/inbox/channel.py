@@ -184,7 +184,9 @@ async def _pull(store, me, write, ready, feed):
                 await anyio.to_thread.run_sync(feed.settle)
                 await anyio.to_thread.run_sync(feed.wait, int(RECHECK_S * 1000))
                 delay = 1.0
-            except (RedisError, FeedError):
+            except FeedError:
+                continue
+            except RedisError:
                 await anyio.sleep(delay)
                 delay = min(delay * 2, 30.0)
     finally:

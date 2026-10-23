@@ -106,3 +106,71 @@ def test_a_bus_failure_becomes_a_feed_error_and_the_next_wait_reopens_the_bus(mo
     monkeypatch.setattr(bus.time, "monotonic", lambda: later)
     assert not feed.wait(0)
     assert len(buses) == 2
+
+
+@pytest.mark.parametrize(("backend", "fed"), [("nats", True), ("memory", False), ("", False)])
+def test_only_the_nats_bus_setting_gives_a_receiver_a_seat_feed(monkeypatch, backend, fed, mcp_sdk):
+    from scripts.inbox.bus import SeatFeed, feed_for
+
+    monkeypatch.setenv("AGENTIHOOKS_BUS", backend)
+    store = FakeStore()
+    store.session_id = "session-1"
+    assert isinstance(feed_for(store, "bob"), SeatFeed) is fed
+
+
+def test_the_channel_takes_its_feed_from_the_bus_setting(monkeypatch, mcp_sdk):
+    import anyio
+
+    from scripts.inbox.bus import Message, SeatFeed, SeatInbox
+
+    bus = memory.open_bus(BusConfig())
+    store = FakeStore()
+    feed = SeatFeed(lambda: bus, store, "bob", "session-1", seat=lambda: SEAT)
+    entered = threading.Event()
+    real_wait = feed.wait
+
+    def wait(timeout_ms):
+        entered.set()
+        return real_wait(timeout_ms)
+
+    monkeypatch.setattr(feed, "wait", wait)
+    monkeypatch.setattr(channel, "feed_for", lambda store, me: feed)
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 3600)
+
+    async def scenario(send, receive):
+        assert await anyio.to_thread.run_sync(lambda: entered.wait(30)), "session never waited on the bus"
+        item = store.send("alice", "bob", "hello", notify=False)
+        SeatInbox(bus, "swarm").send(SEAT, Message(item.id, "alice", "hello"))
+        with anyio.fail_after(10):
+            pushed = await receive()
+        bus.close()
+        return item, pushed
+
+    _, _, (item, pushed) = session(store, scenario)
+    assert pushed["params"]["meta"]["item_id"] == item.id
+    assert store.subs == []
+
+
+def test_a_bus_outage_keeps_redis_items_on_the_recheck_cadence(monkeypatch, mcp_sdk):
+    import anyio
+
+    from scripts.inbox.bus import SeatConsumer, SeatFeed
+
+    def lost(consumer, batch, timeout_ms):
+        raise RuntimeError("bus connection lost")
+
+    monkeypatch.setattr(SeatConsumer, "fetch", lost)
+    store = FakeStore()
+    feed = SeatFeed(lambda: memory.open_bus(BusConfig()), store, "bob", "session-1", seat=lambda: SEAT)
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 0.2)
+
+    async def scenario(send, receive):
+        await anyio.sleep(1.2)
+        item = store.send("alice", "bob", "quiet", notify=False)
+        with anyio.fail_after(0.6):
+            return item, await receive()
+
+    _, _, (item, pushed) = session(store, scenario, feed=feed)
+    assert pushed["params"]["meta"]["item_id"] == item.id
