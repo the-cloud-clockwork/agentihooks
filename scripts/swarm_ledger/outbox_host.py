@@ -20,6 +20,7 @@ def relay(repository, stopped: threading.Event, config: BusConfig, interval: flo
                 if bus is None:
                     bus = factory.open_bus(config)
                 outbox.relay(repository, bus.events)
+                outbox.prune(repository, config.dedupe_window_ms)
             except Exception as exc:
                 sys.stderr.write(f"ledger bus relay: {exc}\n")
                 if bus is not None:
