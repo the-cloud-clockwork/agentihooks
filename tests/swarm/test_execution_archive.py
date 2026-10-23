@@ -76,6 +76,33 @@ def test_set_pane_on_a_replaced_run_keeps_its_dropped_agent_out_of_the_live_list
     assert [agent.name for agent in store.agents("fixture")] == [third.name]
 
 
+def test_set_pane_retries_when_its_agent_is_dropped_during_the_write(store, monkeypatch):
+    current = started(store, "eng-1@fixture")
+    original = store.redis.pipeline
+    drops = []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        hexists = pipe.hexists
+
+        def racing(name, key):
+            if not drops:
+                drops.append(key)
+                store.drop_agent("fixture", key)
+            return hexists(name, key)
+
+        monkeypatch.setattr(pipe, "hexists", racing)
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+
+    store.execution_registry.set_pane("fixture", current.execution_id, "pane-9")
+
+    assert drops == [current.name]
+    assert store.execution("fixture", current.execution_id).pane_id == "pane-9"
+    assert not store.redis.hexists(store.key("fixture", "agents"), current.name)
+
+
 def test_archive_keeps_every_row_of_a_live_name_and_seat_head_ties(store):
     agent = AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-3@fixture")
     one = store.start_execution("fixture", agent)
