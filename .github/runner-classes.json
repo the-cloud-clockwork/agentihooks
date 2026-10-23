@@ -37,6 +37,7 @@
   "pages.yml/build": "hosted",
   "pages.yml/deploy": "hosted",
   "promote.yml/promote": "hosted",
+  "proofs.yml/chaos": "standard",
   "proofs.yml/operations-cpu": "batch",
   "proofs.yml/operations-receipts": "batch",
   "proofs.yml/tests": "standard",

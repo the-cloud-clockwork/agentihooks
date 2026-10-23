@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: tests
-        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
+        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts, chaos]
       base:
         description: Base revision for mutation or Semgrep scope
         required: true
@@ -250,6 +250,43 @@ jobs:
   helm-kind:
     if: inputs.proof == 'helm-kind'
     uses: ./.github/workflows/helm-kind.yml
+
+  chaos:
+    if: inputs.proof == 'chaos'
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+
+      - name: Install the pinned nats server
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
+
+      - name: Kill a hive, restart NATS and kill a hub replica under load
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: python -m tests.chaos.run --folder "$RUNNER_TEMP/chaos"
+
+      - name: Retain every journal and the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos
+          path: ${{ runner.temp }}/chaos
+          if-no-files-found: error
 
   tests:
     if: inputs.proof == 'tests'
