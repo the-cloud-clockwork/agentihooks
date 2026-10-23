@@ -23,10 +23,9 @@ _UNSAFE = re.compile(r"[^a-z0-9-]+")
 
 
 def identity(host: str, port: int) -> str:
-    return _UNSAFE.sub("-", f"{host}-{port}".lower())
+    return _UNSAFE.sub("-", f"{host}-{port}".lower()).strip("-")
 
 
-# Each ledger server follows under its own durable, so every serving process sees every event for its pages.
 class Projector:
     def __init__(self, repository, hub, name: str):
         self.repository = repository

@@ -23,8 +23,12 @@ def watching(*slugs):
     return hub
 
 
-def test_identity_is_lowercase_letters_digits_and_dashes():
-    assert projector.identity("Ledger_Pod.0", 8765) == "ledger-pod-0-8765"
+@pytest.mark.parametrize(
+    ("host", "name"), [("Ledger_Pod.0", "ledger-pod-0-8765"), ("_pod.", "pod-8765"), ("..", "8765")]
+)
+def test_identity_is_a_valid_reactor_name(host, name):
+    assert projector.identity(host, 8765) == name
+    assert projector.Projector(Mock(), Hub(), name).reactor().name == f"projector-{name}"
 
 
 def test_reactor_follows_every_swarm_subject_under_a_durable_per_process():
