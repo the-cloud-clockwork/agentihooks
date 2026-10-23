@@ -20,6 +20,7 @@ CODE_DIRS = (
             "codex_session",
             "scheduler",
             "events",
+            "hub",
         )
     ),
     ROOT / "hooks",
