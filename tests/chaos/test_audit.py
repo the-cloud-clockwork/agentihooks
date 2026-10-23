@@ -57,9 +57,9 @@ def test_a_task_running_on_two_live_hives_fails_the_contract():
 
 
 def test_a_reaped_leftover_ends_its_run_before_the_relaunch():
-    leftover = _run(5_000, "hive-2", "t2", 0)[:2]
-    leftover += [{"t": 5_500, "proc": "hive-2", "kind": "reaped", "task": "t2", "claim": CLAIM.format("t2")}]
-    found = _report(_clean() + leftover + _run(6_000, "hive-2", "t2", 9_000))
+    leftover = _run(70_000, "hive-2", "t9", 0)[:2]
+    leftover += [{"t": 70_500, "proc": "hive-2", "kind": "reaped", "task": "t9", "claim": CLAIM.format("t9")}]
+    found = _report(_clean() + leftover + _run(71_000, "hive-2", "t9", 75_000))
     assert found["final"]["duplicate_claims"] == 0
     assert found["contract_met"], found
 
