@@ -1604,9 +1604,9 @@ command runs `git` or `gh`, and acts only on calls that run `git push`,
 `gh pr create` or `gh pr ready`, including inside a chain such as
 `cd <checkout> && git push`. The directory it checks is the session's working
 folder joined with the call's `workdir` and any `cd` or `git -C` in the command.
-Codex 0.162.1 sends no `workdir` in its shell hook payload; the hook reads the folder
-the model gave `exec_command` from the session's rollout, as described in
-[Shell working folder](../reference/CODEX-COMPAT.md#shell-working-folder).
+Codex 0.162.1 sends no `workdir` in its shell hook payload; the hook reads
+the folder the model gave `exec_command` from the session's rollout, as
+described in [Shell working folder](../reference/CODEX-COMPAT.md#shell-working-folder).
 
 ### Who it applies to
 

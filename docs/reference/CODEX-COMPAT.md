@@ -140,9 +140,9 @@ a `Bash` call with no `workdir` of its own it:
 3. Parses every `exec_command({...})` call in that program's `input`. Keys may
    be bare (`cmd:`) or JSON quoted (`"cmd":`); string values are JavaScript
    string literals.
-4. Keeps the calls whose decoded `cmd` equals the hook's `command` exactly. When they
-   all name the same non-empty `workdir`, that value becomes
-   `tool_input.workdir`.
+4. Keeps the calls whose decoded `cmd` equals the hook's `command`
+   exactly. When they all name the same non-empty `workdir`, that value
+   becomes `tool_input.workdir`.
 
 A rollout line and the payload it produces:
 
@@ -164,9 +164,9 @@ A rollout line and the payload it produces:
 
 The `one-push` gate and the prepush guard then join `cwd` with `workdir` (a
 relative `workdir` resolves against `cwd`, `~` expands) and apply any `cd` or
-`git -C` in the command on top. The lifecycle guard compares `workdir` as given
-with the worktree and scratch roots, so only an absolute `workdir` matches
-there.
+`git -C` in the command on top. The lifecycle guard compares `workdir` after `~`
+expansion with the worktree and scratch roots, so a relative `workdir` never
+matches there.
 
 No `workdir` is added, and the hooks fall back to the session's `cwd`, when:
 
@@ -193,7 +193,10 @@ Set `SID` to the session id. Swarm Codex sessions run with their own
 `CODEX_HOME`; use the session's value. When `CODEX_HOME` lists several folders
 separated by commas, the hooks read only the first; put that one in the
 command. The `cmd` and `workdir` strings printed there are JavaScript literals
-with `\"` escapes; the normalizer compares and copies their decoded values. Delivered in [pull request 4804](https://github.com/the-cloud-clockwork/agentihooks/pull/4804);
+with `\"` escapes; the normalizer compares and copies their decoded values.
+
+Delivered in
+[pull request 4804](https://github.com/the-cloud-clockwork/agentihooks/pull/4804);
 [pull request 5676](https://github.com/the-cloud-clockwork/agentihooks/pull/5676)
 added JSON quoted keys.
 
