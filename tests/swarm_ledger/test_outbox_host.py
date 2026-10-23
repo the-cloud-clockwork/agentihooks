@@ -140,7 +140,7 @@ def test_ledger_server_alone_drives_the_outbox_until_shutdown(tmp_path, monkeypa
     monkeypatch.setattr(ledger_server, "stored", repository)
     monkeypatch.setattr(ledger_server, "PIDFILE", tmp_path / "server.pid")
     monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
-    monkeypatch.setattr(ledger_server.storage, "shared", lambda: True)
+    monkeypatch.setattr(ledger_server.storage, "shared", lambda: None)
     monkeypatch.setattr(ledger_server.ports, "swarm", Mock(return_value=Mock()))
     monkeypatch.setattr(ledger_server.legacy, "adopt", Mock())
     for name in ("adopt_unrelayed", "metrics_journal", "watch_ledgers", "follow_shared"):
