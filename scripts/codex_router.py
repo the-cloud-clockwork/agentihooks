@@ -11,8 +11,8 @@ import fcntl
 import hashlib
 import json
 import os
-import re
 import shutil
+import string
 import subprocess
 import sys
 import time
@@ -60,7 +60,7 @@ BEARER_PROVIDER = "agentihooks-chatgpt"
 CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex"
 OPENAI_AUTH_CLAIM = "https://api.openai.com/auth"
 OPENAI_PROFILE_CLAIM = "https://api.openai.com/profile"
-EMAIL_SLUG = re.compile(r"[a-z0-9_]+at[a-z0-9_]+_[a-z]{2,}")
+SLUG_CHARS = frozenset(string.ascii_lowercase + string.digits + "_")
 AGENT_IDENTITY_CLAIM = "agent_runtime_id"
 API_KEY_PREFIX = "sk-"
 PERSONAL_TOKEN_PREFIX = "at-"
@@ -337,7 +337,17 @@ def _routed_rank(account: CodexAccount, environ: Mapping[str, str]) -> tuple[boo
     profile = claims.get(OPENAI_PROFILE_CLAIM)
     email = profile.get("email") if isinstance(profile, dict) else None
     named = isinstance(email, str) and account.name == account_names.secret_key(email).replace("-", "_")
-    return not named, not EMAIL_SLUG.fullmatch(account.name), account.name
+    return not named, not email_shaped(account.name), account.name
+
+
+def email_shaped(name: str) -> bool:
+    head, _, domain_end = name.rpartition("_")
+    return (
+        "at" in head[1:-1]
+        and set(head) <= SLUG_CHARS
+        and len(domain_end) >= 2
+        and set(domain_end) <= set(string.ascii_lowercase)
+    )
 
 
 def routed(pool: list[CodexAccount], environ: Mapping[str, str]) -> list[CodexAccount]:

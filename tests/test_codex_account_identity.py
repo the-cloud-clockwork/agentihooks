@@ -357,3 +357,24 @@ def test_the_email_claim_decides_between_two_email_shaped_slugs(tmp_path):
     }
     tokens = codex_router.token_accounts(environ)
     assert codex_router.duplicates(tokens, environ) == {"devatexample_com": "opsatexample_com"}
+
+
+@pytest.mark.parametrize(
+    ("name", "shaped"),
+    [
+        ("aatb_cc", True),
+        ("nestor_coltatgmail_com", True),
+        ("aat__cc", True),
+        ("atb_cc", False),
+        ("aat_cc", False),
+        ("aatb_c", False),
+        ("aatb_c1", False),
+        ("aatb_cC", False),
+        ("a-atb_cc", False),
+        ("aAtb_cc", False),
+        ("aatbcc", False),
+        ("aatb_", False),
+    ],
+)
+def test_an_email_shaped_slug_is_user_at_domain_and_a_letter_suffix(name, shaped):
+    assert codex_router.email_shaped(name) is shaped
