@@ -69,3 +69,13 @@ def test_dead_letter_migration_keeps_retained_letters(buses):
     target = hub.for_swarm("rig").dead.consumer("migrated", "dead.>")
     deliveries = target.fetch(10, 1000)
     assert [delivery.event for delivery in deliveries] == [letter]
+
+
+def test_scoped_state_requires_explicit_legacy_key_ownership(buses):
+    legacy, hub = buses
+    legacy.state("spoke-work").create("unknown-owner", b"retained")
+    with pytest.raises(RuntimeError, match="ownership"):
+        hub.for_swarm("rig").state("spoke-work")
+    hub.migrate_state("rig", "spoke-work", [])
+    assert hub.for_swarm("rig").state("spoke-work").get("unknown-owner") is None
+    assert legacy.state("spoke-work").get("unknown-owner").value == b"retained"
