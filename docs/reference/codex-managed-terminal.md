@@ -340,6 +340,97 @@ covered by `test_rehomed_request_validates_against_the_execution_copy`,
 run against fixture homes; no live `app_server` launch passing its profile
 check is cited here.
 
+## Launch waits and the spawn timeout
+
+The swarm runs `init-agent` with a 300 second spawn timeout
+(`SPAWN_TIMEOUT_S` in the swarm runtime). A spawn that passes it is killed and
+fails with `init-agent timed out for <name>`, which names no wait. To return
+inside that timeout, every launch gets one 270 second launch deadline
+(`LAUNCH_DEADLINE_S`), counted from the start of `init-agent`. Each of the
+waits below is granted its own limit or what remains of the deadline,
+whichever is less:
+
+| Wait name | Runs for | Own limit | Result when it runs out |
+|---|---|---|---|
+| `Codex ready` | A Codex agent in a herdr pane, not `app_server` | 120 seconds | The session rename is skipped (`session_name_error=not-ready`) and the opening prompt is held (`opening_prompt=held:not-ready`); the launch goes on |
+| `Codex ready for the opening prompt` | The same agent, after its session rename, when it has an opening prompt and read ready the first time | 120 seconds | `opening_prompt=held:not-ready`; the launch goes on |
+| `profile canary` | Every profiled launch, both harnesses and both transports | 90 seconds for Codex, 120 for Claude, or `--canary-timeout` | The launch fails: `profile_validation=failed`, exit 3 |
+
+A ready wait passes once the pane reads idle or done on two polls in a row,
+1.5 seconds apart. An `app_server` launch has no ready waits, because its
+server names its thread before the first turn; only its canary wait takes from
+the deadline.
+
+Time spent outside these waits still runs the deadline down: rendering the
+profile home, starting the pane and waiting for the route report
+(`--route-timeout`). The Codex session rename between the two ready waits
+confirms within 15 seconds (`RENAME_CONFIRM_S`) and is kept outside the
+deadline, so 270 plus 15 seconds stays below the spawn timeout.
+
+### Worked budget
+
+A legacy Codex launch whose two ready waits each run their full 120 seconds
+has spent 240 seconds of the deadline, plus whatever the route wait and pane
+start took. Its canary wait is granted the remaining 30 seconds or less instead
+of 90. Before the shared deadline, the same launch could spend 120 + 120 + 90 =
+330 seconds in waits alone and outlast the spawn timeout with no named reason.
+
+### When the deadline cuts a wait
+
+A ready wait that is cut short returns not ready; the launch does not fail
+there. A canary wait that is cut short and then runs out fails the launch, and
+the reason on stderr first names the deadline, the first wait that was granted
+less than its own limit and the seconds each wait spent so far:
+
+```text
+agentihooks init-agent: the 270s launch deadline ran out in the profile canary wait after Codex ready 120s, Codex ready for the opening prompt 120s, profile canary 30s: the codex agent reported no canary within 30s
+```
+
+A canary wait that runs out inside its own full limit keeps its plain reason,
+`mounted profile canary did not validate before timeout: the codex agent
+reported no canary within 90s`; see [Profile launch home](profile-launch-home.md).
+In a swarm both reasons reopen the task and are written to the swarm timer
+journal as `spawn failed for <task>, task <task> reopened: <reason>`.
+
+### Count launch deadline and spawn timeout failures
+
+Count both failures for one UTC day from the swarm timer journal:
+
+```bash
+day=2026-10-23
+TZ=UTC journalctl --user -u 'agentihooks-swarm*' \
+  --since "$day 00:00" --until "$day 23:59:59" --no-pager -o cat \
+  | grep -cE "launch deadline ran out|init-agent timed out for"
+```
+
+On this workstation the journal held no line of either kind on any day from
+16 to 23 October 2026, the whole span it kept when this section was written.
+The journal keeps only a few days; older launches are in the swarm store
+history.
+
+### Troubleshooting
+
+| Symptom | Meaning and next check |
+|---|---|
+| `opening_prompt=held:not-ready` | A ready wait ran out, on its own limit or the deadline. Open the herdr pane: a Codex agent still starting, stuck on a prompt or busy with a startup turn never read idle twice. |
+| `the 270s launch deadline ran out in the <wait> wait after ...` | Earlier waits used most of the deadline. Read the listed seconds; the longest wait is the first to investigate. A cut `Codex ready` wait points at a slow Codex start, a cut canary at everything before it. |
+| `init-agent timed out for <name>` | The spawn passed 300 seconds outside the named waits, for example in the session rename or after the canary. Read the launch's pane and the swarm journal lines around the spawn. |
+
+### Tests
+
+`tests/test_launch_deadline.py` pins the behaviour: a Codex launch with both
+ready waits at 120 seconds grants the canary 30 seconds, ends inside the spawn
+timeout and prints the message above; a wait after the deadline is spent gets
+no time and the first cut wait stays named; a wait that fails inside its own
+limit keeps its own error; a wait repeated by name adds up its time; and
+`LAUNCH_DEADLINE_S` plus `RENAME_CONFIRM_S` stays below `SPAWN_TIMEOUT_S`.
+Delivered in
+[pull request 5288](https://github.com/the-cloud-clockwork/agentihooks/pull/5288):
+[red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39431053228/job/118655912523),
+where the canary got 90 seconds after two 120 second ready waits, 330 seconds
+in all, and
+[green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39431405875/job/118657120243).
+
 ## Lifecycle and failures
 
 Reopening a viewer and retiring an execution are separate operations. Managed
