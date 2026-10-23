@@ -20,13 +20,9 @@ PREFIX = "langfuse_account_"
 
 
 def breaches(row: dict, limits: Limits) -> list[tuple[str, float, float, str]]:
-    result = []
     if row["observations"] >= limits.min_observations and row["error_rate"] > limits.error_rate:
-        result.append(("error rate", row["error_rate"], limits.error_rate, "fraction"))
-    latency = row["turn_latency_ms"]["p95"]
-    if row["turns"] >= limits.min_turns and latency is not None and latency > limits.turn_latency_ms:
-        result.append(("turn latency p95", latency, limits.turn_latency_ms, "ms"))
-    return result
+        return [("error rate", row["error_rate"], limits.error_rate, "fraction")]
+    return []
 
 
 def apply(redis: Redis, slug: str, summary: dict, bindings: list[AgentRecord], now_ms: int, limits: Limits) -> int:
@@ -34,15 +30,11 @@ def apply(redis: Redis, slug: str, summary: dict, bindings: list[AgentRecord], n
         raise ValueError("Langfuse summary belongs to another swarm")
     identities = {agent.name: agent for agent in bindings}
     grouped = defaultdict(list)
-    unavailable = set()
     for row in summary["agents"]:
         agent = identities.get(row["agent"])
         stages = breaches(row, limits)
-        if agent and agent.account:
-            if row["turns"] >= limits.min_turns and row["turn_latency_ms"]["p95"] is None:
-                unavailable.add(agent.account)
-            if stages:
-                grouped[agent.account].extend((agent, stage) for stage in stages)
+        if agent and agent.account and stages:
+            grouped[agent.account].extend((agent, stage) for stage in stages)
     window = summary["window"]
     episode = window["toTimestamp"]
     for account, stages in grouped.items():
@@ -58,11 +50,7 @@ def apply(redis: Redis, slug: str, summary: dict, bindings: list[AgentRecord], n
             now_ms,
         )
     for stage in standing.read(redis, slug):
-        if (
-            stage.startswith(PREFIX)
-            and stage.removeprefix(PREFIX) not in grouped
-            and stage.removeprefix(PREFIX) not in unavailable
-        ):
+        if stage.startswith(PREFIX) and stage.removeprefix(PREFIX) not in grouped:
             standing.clear(redis, slug, stage)
     return len(grouped)
 
