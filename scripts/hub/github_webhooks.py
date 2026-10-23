@@ -65,7 +65,7 @@ class Ingress:
             print("hub: GitHub webhook could not record the event", file=sys.stderr)
             traceback.print_exc()
             return 503
-        return 202
+        return 200
 
 
 def handler(ingress: Ingress) -> type[BaseHTTPRequestHandler]:
@@ -85,6 +85,8 @@ def handler(ingress: Ingress) -> type[BaseHTTPRequestHandler]:
             self.send_response(status)
             self.send_header("Content-Length", "0")
             self.end_headers()
+            delivery, name = self.headers.get("X-GitHub-Delivery"), self.headers.get("X-GitHub-Event")
+            print(f"github-webhook: delivery {delivery} event {name} answered {status}", file=sys.stderr)
 
         def log_message(self, format, *args):
             pass
