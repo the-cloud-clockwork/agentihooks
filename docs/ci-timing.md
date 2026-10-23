@@ -250,7 +250,7 @@ start.
 
 API failures keep their existing text and behavior: the read reports
 `incomplete`, raises the `CI speed API read is incomplete` finding unless a
-GitHub incident holds findings, and retries the same slice. A `catching up`
+[GitHub incident holds findings](#github-incident-holds-and-grouped-findings), and retries the same slice. A `catching up`
 line is a successful read and raises no read failure finding. The record
 reports `complete` as true only on a complete read that reaches the present.
 
@@ -489,6 +489,181 @@ after application, eight runner wait findings remained and zero were in that
 false class: 0 per hour. The eight retained findings had confirmed waits of
 306 to 696 seconds. This measures removal of false findings, not increased
 runner capacity.
+
+### GitHub incident holds and grouped findings
+
+Two rules keep CI speed findings to judgments a master can act on. While GitHub
+itself reports an unresolved incident affecting Actions, the CI speed pass
+reads runs but raises no findings. Outside an incident, crossings of the same
+class on the same label set or tier within one Doctor pass window arrive as one
+finding that names every run, instead of one finding per run.
+
+#### Which incidents hold findings
+
+Every pass reads GitHub's status page,
+`https://www.githubstatus.com/api/v2/incidents/unresolved.json`, with a ten
+second timeout. An unresolved incident holds findings when one of its
+components is named exactly `Actions`, or when its name contains the word
+`Actions`; some Actions incidents list no component and name Actions only in
+their title. An incident that affects only Pages, Webhooks or another component
+holds nothing. The incident's start is its `started_at`, or its `created_at`
+when GitHub gives no start.
+
+The timer records each incident in the `incidents` field of the Doctor's
+`ci-speed` Redis record. An incident is open while every successful read lists
+it, and closes, with an end time of that pass, on the first successful read
+that no longer lists it. Closed incidents are kept for 24 hours (`KEEP_MS`) so
+later runs can still be labelled against their window. An incident that GitHub
+lists again after it closed reopens under the same id and holds again.
+
+A status page read that fails, for a network error, a timeout or a body that is
+not the expected JSON, never holds findings and changes no recorded incident:
+open incidents stay open and none is closed. The pass then raises findings as
+if no incident were open.
+
+#### What a hold does
+
+While at least one open incident is listed by the current read:
+
+| Part of the pass | During the hold |
+|---|---|
+| Actions run and jobs read | Unchanged: runs, jobs and API calls are read and counted, and the window advances |
+| `ci runner wait`, `ci queue age unconfirmed`, `ci tier wall time` | Not raised; this pass's crossings are not added to any group |
+| `ci skipped record lag` | Not raised |
+| `CI speed API read is incomplete` | Not raised, even when the read fails |
+| Retractions of earlier findings | Unchanged: a corrected read still retracts a superseded finding |
+| Notice to the masters | One FYI notice per incident, to both masters |
+
+The notice reaches the watched swarm's master and the Doctor master once per
+incident, as an FYI notice that needs no reply. On the 19 October incident it
+read:
+
+```text
+Doctor CI speed findings on the swarm rig-grade-swarm are held: GitHub reports an unresolved incident affecting Actions, Degraded availability for GitHub Actions, GitHub Pages and Webhooks, since 19 October 15:49 UTC. https://stspg.io/nrv2k8s68bwn Runs are still read and counted; findings resume when it resolves, and runs with jobs created during it are labelled.
+```
+
+An incident that reopens is not announced again. Each held pass ends its
+action line with one suffix per open incident, and reports 0 crossings:
+
+```text
+doctor CI speed: complete; 20 runs read of 20 discovered, ... 0 crossings, ... queued jobs not reread; findings held during GitHub incident Degraded availability for GitHub Actions, GitHub Pages and Webhooks
+```
+
+Crossings of runs that finished during the hold are dropped, not stored for
+later. A run still unfinished when its slice completes stays pending and is
+read again, so a run queued during the incident and judged after it resolves
+can still raise a finding.
+
+#### After an incident resolves
+
+The first pass whose successful read no longer lists the incident raises
+findings again. A grouped finding with members whose jobs were created between
+an incident's start and its end, or the present while it is open, carries an
+extra evidence line naming how many runs and which incidents:
+
+```text
+5 of these runs had jobs created during the GitHub incident Degraded availability for GitHub Actions, GitHub Pages and Webhooks
+```
+
+Weigh such runs against the incident before reading them as a runner or tier
+problem.
+
+#### One finding per class and label set or tier per pass
+
+Runner wait and queue age crossings are grouped by their runner label set, tier
+wall time crossings by their tier, pull request or queue. Each group is one
+finding per Doctor pass window. The window is `AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES`
+wide (default 10, see
+[Doctor timer pass](pillars/swarm.md#doctor-timer-pass)) and aligned to
+multiples of that width in UTC. Finding ids name the class and the scope only:
+
+| Class | Grouped by | Example id |
+|---|---|---|
+| `ci runner wait` | Runner label set | `ci-runner-wait/["anton-oss", "self-hosted"]` |
+| `ci queue age unconfirmed` | Runner label set | `ci-queue-age-unconfirmed/["anton-oss", "self-hosted"]` |
+| `ci tier wall time` | Tier | `ci-tier-wall-time/pull_request`, `ci-tier-wall-time/merge_group` |
+
+The summary names the scope, the worst measure in minutes and the run count.
+The first evidence line names the run count, the scope, the worst and median
+measure in seconds and every run id, ordered by run id and attempt. One line per
+run follows, after the incident line when there is one. Ten queued runs on one
+label set in one pass give, for example:
+
+```text
+- ci-queue-age-unconfirmed/["anton-oss", "self-hosted"]: anton-oss, self-hosted jobs read as queued up to 8.00 minutes in 10 runs. Evidence: 10 runs, anton-oss, self-hosted, worst 480 seconds, median 330.0 seconds, runs 1, 2, 3, 4, 5, 6, 7, 8, 9, 10; ...
+```
+
+A rerun appears as `<run id> attempt <n>`. The finding's measure is the worst
+member's measure. A later run that crosses in the same window joins the group
+and grows its evidence without another notice. A new window starts the group
+afresh under the same id, so one wait that spans a window boundary stays one
+finding with one notice. Once a master gives the finding a verdict, the growth
+margin described in [Long gaps read in bounded slices](#long-gaps-read-in-bounded-slices)
+decides whether it is sent again. A corrected read removes a superseded run
+from its group, and the group is retracted once no run is left; see
+[Retractions, configuration and troubleshooting](#retractions-configuration-and-troubleshooting).
+
+#### Configuration
+
+The hold and the grouping are automatic. No flag or environment variable turns
+either off. The status page address, the `Actions` component name and the 24
+hour retention of closed incidents are module constants in the Doctor GitHub
+status reader; the summary wording is a module constant in the Doctor CI speed
+detector. A change goes through a pull request and CI. Only the window width
+follows `AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES`, which also sets the time between
+detection passes.
+
+#### Inspect a hold
+
+Read what the status page lists now and which incidents would hold:
+
+```bash
+curl -s https://www.githubstatus.com/api/v2/incidents/unresolved.json \
+  | jq '.incidents[] | {id, name, status, started_at, created_at, components: [.components[].name]}'
+```
+
+Find the passes that held findings:
+
+```bash
+journalctl --user -t agentihooks-swarm --since '-6 hours' --no-pager -o cat \
+  | grep --line-buffered 'rig-grade-swarm-doctor' \
+  | grep --line-buffered 'findings held during GitHub incident'
+```
+
+| Symptom | Check and action |
+|---|---|
+| No CI speed findings during visibly slow CI | Look for the held suffix in the action line. If present, read the incident on the status page; findings resume on the first pass after GitHub resolves it. |
+| A hold continues after GitHub shows the incident resolved | The unresolved list still names it, or the last reads failed. A failed read neither holds nor closes, so the next successful read that omits it ends the hold. |
+| A slow CI hour raised findings although GitHub had an incident | The incident names neither an `Actions` component nor Actions in its title, or the status page could not be read. Both hold nothing by design. |
+| A finding carries the incident evidence line | Some of its runs had jobs created inside the incident window. Compare those runs with the rest before acting. |
+| Ten slow runs raised one finding | Expected: one finding per class and label set or tier per pass. Read the run ids in the first evidence line. |
+| A second notice for the same group | A verdict was given and a later run passed the judged worst by more than the growth margin, or the verdict cooldown ended. |
+
+#### Delivery evidence
+
+[Pull request 5080](https://github.com/the-cloud-clockwork/agentihooks/pull/5080)
+merged on 20 October 2026 for
+[issue 5078](https://github.com/the-cloud-clockwork/agentihooks/issues/5078).
+Its source was the 19 October GitHub incident that degraded Actions, Pages and
+Webhooks from 15:49 UTC: the runner wait and tier wall time detectors raised
+one finding per run and label, over twenty per ten minute pass, to both
+masters, about one hundred twenty CI speed findings in the incident hour. The
+watched master judged thirty five of them and the Doctor master about fifty.
+
+The [red Proofs run 39366548682](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39366548682)
+ran the new tests on dev code: a recorded fixture of that incident raised
+twenty per run findings, and ten runs on one label raised ten findings. The
+[green Proofs run 39366593106](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39366593106)
+passed with no findings during the incident and one grouped finding after it,
+and [Tests run 39369093533](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39369093533)
+passed every check and mutation shard. No live hour under a later Actions
+incident has been measured since the merge.
+
+Later pull requests changed the grouping:
+[5715](https://github.com/the-cloud-clockwork/agentihooks/pull/5715) took the
+window out of the finding id, so a group keeps its id from one window to the
+next, and [5707](https://github.com/the-cloud-clockwork/agentihooks/pull/5707)
+sent the hold notice as an FYI notice.
 
 ### Inspect and diagnose a read
 
