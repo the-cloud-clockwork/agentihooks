@@ -36,12 +36,15 @@ def swarm_problems(docs: list[dict]) -> list[str]:
 def hub(docs: list[dict], values: dict) -> list[str]:
     found = swarm_problems(docs)
     nats = bundled(docs)
+    service = f"{RELEASE}-nats"
     if not any(d["kind"] == "StatefulSet" for d in nats):
         found.append("renders no bundled NATS StatefulSet")
-    if not any(d["kind"] == "ConfigMap" and "jetstream" in str(d.get("data")) for d in nats):
-        found.append("renders the bundled NATS without JetStream")
-    if bus_url(docs) != f"nats://{RELEASE}-nats:4222":
-        found.append(f"points the hub at {bus_url(docs)}, expected nats://{RELEASE}-nats:4222")
+    if not any(d["kind"] == "Service" and d["metadata"]["name"] == service for d in nats):
+        found.append(f"renders no bundled NATS Service {service}")
+    if not any(d["kind"] == "ConfigMap" and '"jetstream": {' in d["data"].get("nats.conf", "") for d in nats):
+        found.append("renders the bundled NATS without a JetStream block in nats.conf")
+    if bus_url(docs) != f"nats://{service}:4222":
+        found.append(f"points the hub at {bus_url(docs)}, expected nats://{service}:4222")
     return found
 
 

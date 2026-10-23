@@ -1,4 +1,4 @@
-# A hub install on a NATS that runs outside this release, with JetStream enabled; the bundled NATS stays out.
+# A hub install on a NATS that runs outside this release; the bundled NATS stays out.
 hub:
   enabled: true
   bus:

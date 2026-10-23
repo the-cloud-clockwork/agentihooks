@@ -6,7 +6,7 @@
 |---|---|
 | `hub.yaml` | the ledger, Redis and controller with the event hub on the bundled NATS |
 | `hive-only.yaml` | one worker hive that joins a swarm installed elsewhere, without NATS |
-| `external-nats.yaml` | the hub on a NATS outside the release, with JetStream enabled |
+| `external-nats.yaml` | the hub on a NATS outside the release |
 
 # Worker GitHub authentication
 
