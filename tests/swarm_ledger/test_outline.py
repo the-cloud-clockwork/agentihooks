@@ -127,8 +127,7 @@ class Outline(unittest.TestCase):
             f"const SECS = {json.dumps(sections)};\n"
             "const document = { querySelectorAll: () => SECS.map((s) => ({ id: s.id, hidden: false,"
             " dataset: { outline: s.list }, querySelector: () => ({ firstChild: { textContent: s.title } }) })) };\n"
-            "function closedLeft() { return 0; }\n"
-            + VIEW_STUBS
+            "function closedLeft() { return 0; }\n" + VIEW_STUBS
         )
         script = (
             shim
