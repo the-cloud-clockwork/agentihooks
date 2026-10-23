@@ -15,8 +15,8 @@ W = 300_000
 @pytest.fixture
 def rig(monkeypatch):
     import fakeredis
-
     from scripts.hub.inbox_wake import InboxWake
+
     from scripts.hub.timers import Timers
     from scripts.inbox.store import InboxStore
     from scripts.swarm.store import AgentRecord
@@ -109,6 +109,7 @@ def test_master_mail_uses_timer_to_escalate_straight_to_operator(rig):
 
 def test_timer_restart_and_duplicate_arrival_do_not_repeat_wakes(rig):
     from scripts.hub.inbox_wake import InboxWake
+
     from scripts.hub.timers import Timers
 
     item, event = send(rig)
