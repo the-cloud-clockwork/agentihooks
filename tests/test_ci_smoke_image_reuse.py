@@ -31,9 +31,13 @@ status=0
 bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &&
   docker tag public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 &
 redis=$!
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nats:2.15.1-alpine &&
+  docker tag public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine &
+nats=$!
 bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
   docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
 wait "$redis" || status=$?
+wait "$nats" || status=$?
 wait "$build" || status=$?
 exit "$status"
 """,
