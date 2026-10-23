@@ -2,9 +2,11 @@ import json
 import subprocess
 import sys
 import tomllib
+import types
 
 import install
 import pytest
+import tomlkit
 
 from scripts import herdr_setup
 
@@ -183,6 +185,10 @@ def _configured(monkeypatch, runner, tmp_path, existing: str | None) -> str:
 RESUME_OFF = "\n[session]\nresume_agents_on_restore = false\n"
 
 
+def _no_rewrite(doc):
+    raise AssertionError("rewrote a compliant config")
+
+
 def test_configure_adds_a_ui_section_that_turns_copy_on_select_off(monkeypatch, runner, tmp_path, capsys):
     text = _configured(monkeypatch, runner, tmp_path, 'onboarding = false\n\n[theme]\nname = "one-dark"\n')
     assert text == 'onboarding = false\n\n[theme]\nname = "one-dark"\n\n[ui]\ncopy_on_select = false\n' + RESUME_OFF
@@ -219,6 +225,7 @@ def test_configure_turns_off_agent_resume_the_operator_turned_on(monkeypatch, ru
 
 def test_configure_leaves_a_compliant_config_alone(monkeypatch, runner, tmp_path, capsys):
     existing = "[ui]\ncopy_on_select = true\n" + RESUME_OFF
+    monkeypatch.setattr(herdr_setup, "tomlkit", types.SimpleNamespace(parse=tomlkit.parse, dumps=_no_rewrite))
     assert _configured(monkeypatch, runner, tmp_path, existing) == existing
     assert ["/bin/herdr", "server", "reload-config"] not in runner.calls
     assert "[herdr] config:" not in capsys.readouterr().out
