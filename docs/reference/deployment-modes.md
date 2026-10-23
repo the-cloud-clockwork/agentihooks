@@ -299,7 +299,7 @@ SWARM_MEMBER_REDIS_URL=rediss://swarm.example.internal:6379/0
 ```bash
 docker compose --profile join up -d
 # on the UI hive, once each worker is reachable over ssh
-agentihooks hive add ssh://worker@worker-1:22 --label worker-1 \
+agentihooks hive add ssh://worker@worker-1:22 \
   --url https://swarm.example.internal:8770/hive/refresh
 # on each worker, once hive add has delivered its hive.env
 agentihooks hive install

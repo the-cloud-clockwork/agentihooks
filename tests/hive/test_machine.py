@@ -198,22 +198,32 @@ def test_cli_add_passes_its_settings_and_names_the_member(admin, monkeypatch, ca
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://own:6379/0")
     monkeypatch.setattr(cli.ledger_ca, "served", lambda: "PEM")
+    monkeypatch.setattr(cli.time, "time", lambda: 1792604000.7)
 
-    assert cli.main(["add", TARGET, "--label", "anton-hive", "--url", URL]) == 0
-    assert cli.main(["add", TARGET, "--label", "anton-hive", "--url", URL, "--redis-url", PUBLIC]) == 0
+    assert cli.main(["add", TARGET, "--url", URL]) == 0
+    assert cli.main(["add", TARGET, "--url", URL, "--redis-url", PUBLIC]) == 0
 
+    named = "swarm-hive-1792604000"
     assert calls == [
-        ((admin, "root", TARGET, "anton-hive", machine.Delivery(URL, "redis://own:6379/0", "PEM")), {}),
-        ((admin, "root", TARGET, "anton-hive", machine.Delivery(URL, PUBLIC, "PEM")), {}),
+        ((admin, "root", TARGET, named, machine.Delivery(URL, "redis://own:6379/0", "PEM")), {}),
+        ((admin, "root", TARGET, named, machine.Delivery(URL, PUBLIC, "PEM")), {}),
     ]
-    assert capsys.readouterr().out == f"added {TARGET} to herdr as anton-hive; its hive member is ab12\n" * 2
+    assert capsys.readouterr().out == f"added {TARGET} to herdr as {named}; its hive member is ab12\n" * 2
+
+
+def test_cli_add_refuses_a_typed_label(capsys):
+    with pytest.raises(SystemExit) as refused:
+        cli.main(["add", TARGET, "--label", "anton-hive", "--url", URL])
+
+    assert refused.value.code == 2
+    assert "unrecognized arguments: --label anton-hive" in capsys.readouterr().err
 
 
 def test_cli_add_reports_a_refusal(admin, monkeypatch, capsys):
     monkeypatch.setattr(cli, "redis_client", lambda: admin)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
 
-    assert cli.main(["add", TARGET, "--label", "anton-hive", "--url", URL]) == 1
+    assert cli.main(["add", TARGET, "--url", URL]) == 1
 
     assert capsys.readouterr().err == "hive add refused: hive root is headless; only a UI hive adds machines\n"
 
@@ -221,12 +231,11 @@ def test_cli_add_reports_a_refusal(admin, monkeypatch, capsys):
 @pytest.mark.parametrize(
     ("argv", "missing"),
     [
-        (["add", TARGET, "--url", URL], "--label"),
-        (["add", TARGET, "--label", "anton-hive"], "--url"),
-        (["add", "--label", "anton-hive", "--url", URL], "target"),
+        (["add", TARGET], "--url"),
+        (["add", "--url", URL], "target"),
     ],
 )
-def test_cli_add_needs_its_target_label_and_url(argv, missing, capsys):
+def test_cli_add_needs_its_target_and_url(argv, missing, capsys):
     with pytest.raises(SystemExit) as refused:
         cli.main(argv)
 
@@ -243,7 +252,6 @@ def test_cli_add_help_names_every_option(monkeypatch, capsys):
     out = capsys.readouterr().out
     for text in (
         "SSH target herdr machine add dials, such as ssh://worker@host:2222",
-        "herdr sidebar label and hive member name",
         "this hive's endpoint as the machine reaches it, for hive refresh",
         "Redis URL the machine connects to; defaults to this host's",
     ):
