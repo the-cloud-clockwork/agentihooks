@@ -644,8 +644,8 @@ class HiveAcks(FakeRuntime):
         self.live, self.asked = set(), []
 
     def launched(self, config, lane, name, task):
-        assert (config.slug, task["seat"].split("-")[0], len(task)) == ("sw", lane, 3)
-        self.asked.append(name)
+        assert (config.slug, task["seat"].split("-")[0]) == ("sw", lane)
+        self.asked.append((name, task))
         return name in self.live
 
     def expire(self, config, lane, name, task):

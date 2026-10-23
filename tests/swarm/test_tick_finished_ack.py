@@ -5,7 +5,7 @@ import pytest
 from scripts.swarm import failed_panes
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import SwarmError
-from scripts.swarm.tick import _acknowledging, _collect_acks, tick
+from scripts.swarm.tick import ACK_LATER, _acknowledging, _collect_acks, tick
 from tests.swarm.test_tick import HiveAcks, tasks
 from tests.swarm.test_tick import store as store
 
@@ -21,6 +21,11 @@ def _finished_before_ack(store, monkeypatch, *ids):
         tick_module, "_release_hive_launch", lambda s, st, record: released.append((s, st is store, record.name))
     )
     return ledger, runtime, runtime.ordered[0], released
+
+
+def _receipt_request(store, name):
+    agent = next(a for a in store.agents("sw") if a.name == name)
+    return {"id": agent.task, "seat": agent.seat, ACK_LATER: True}
 
 
 def test_an_agent_that_finished_before_its_acknowledgement_was_collected_is_no_spawn_failure(store, monkeypatch):
@@ -84,7 +89,7 @@ def test_an_agent_that_blocked_before_its_live_receipt_was_collected_counts_as_l
     doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "blocked"}]}
     actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
     assert actions == [f"{name} finished t1 before the tick collected its hive acknowledgement"]
-    assert runtime.asked == [name]
+    assert runtime.asked == [(name, _receipt_request(store, name))]
     assert runtime.collected == []
     assert released == [("sw", True, name)]
     assert [(r["agent"], r["state"], r["error"], r["after"]) for r in store.launches("sw")] == [
@@ -103,7 +108,7 @@ def test_a_finished_agent_without_a_live_receipt_on_a_blocked_task_is_still_a_sp
     ledger, runtime, name, _ = _finished_before_ack(store, monkeypatch)
     doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "blocked"}]}
     actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
-    assert runtime.asked == [name]
+    assert runtime.asked == [(name, _receipt_request(store, name))]
     assert len(actions) == 1 and actions[0].startswith("spawn failed for t1")
     assert [(r["state"], r["error"]) for r in store.launches("sw") if r["agent"] == name] == [
         ("failed", "hive launch failed: prompt")
@@ -163,6 +168,24 @@ def test_a_receipt_read_that_still_raises_after_the_lease_takes_the_guarded_coll
     actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, now)
     assert runtime.collected == [name]
     assert len(actions) == 1 and actions[0].startswith("spawn failed for t1")
+
+
+def test_a_receipt_read_that_raises_for_one_agent_still_collects_the_next(store, monkeypatch):
+    ledger, runtime, _, _ = _finished_before_ack(store, monkeypatch, "t1", "t2")
+    first, second = [a.name for a in store.agents("sw") if a.name in runtime.ordered]
+    runtime.live.add(second)
+    live = runtime.launched
+
+    def flaky(config, lane, name, task):
+        if name == first:
+            raise ConnectionError("redis went away")
+        return live(config, lane, name, task)
+
+    runtime.launched = flaky
+    doc = {"tasks": [{"id": t, "lane": "eng", "state": "blocked"} for t in ("t1", "t2")]}
+    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
+    task = _receipt_request(store, second)["id"]
+    assert actions == [f"{second} finished {task} before the tick collected its hive acknowledgement"]
 
 
 def test_an_early_finished_launch_clears_its_saved_assignment(store, monkeypatch):
