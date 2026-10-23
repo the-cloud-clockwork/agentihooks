@@ -34,6 +34,8 @@ def notify(
     after = master(store, args.slug)
     if any(a and by == a.name for a in (before, after)):
         return
+    if action == "verdict" and any(a.name == by for a in store.agents(args.slug)):
+        return
     boss = after or before
     address = (boss.seat or boss.name) if boss else seat_address(args.slug, MASTER)
     actor = "The operator" if by == "operator" else by.replace("-", " ").replace("@", " ")
@@ -41,6 +43,8 @@ def notify(
     verb = CONTROLS[action]
     if action == "stop" and args.now:
         verb = "stopped the swarm immediately"
+    if action == "verdict":
+        verb = f"gave the health finding {args.finding} a verdict"
     config = store.config(args.slug)
     result = f"The swarm is {config.state}."
     if action == "set":
