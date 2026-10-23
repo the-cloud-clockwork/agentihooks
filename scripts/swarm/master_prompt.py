@@ -2,6 +2,7 @@
 ledger question, the prompt is dismissed and the master is told through its inbox."""
 
 import hashlib
+import re
 
 from scripts.inbox import wake
 from scripts.inbox.seats import seat_address
@@ -10,6 +11,7 @@ from scripts.swarm.store import MASTER
 
 WINDOW_MS = 10 * 60 * 1000
 KEY = "master-prompt"
+PERMISSION = re.compile(r"do you want to\b", re.I)
 NOTICE = (
     "Your question prompt sat unanswered for ten minutes, so the swarm moved it to the operator's Priorities as a "
     "ledger question and dismissed it: {question} Do not ask it again. Work your inbox and Priorities, and act on "
@@ -25,7 +27,7 @@ def run(slug, store, ledger, runtime, now_ms) -> list[str]:
         key = store.key(slug, f"{KEY}:{agent.name}")
         absent = agent.name not in live or agent.state in {"finished", "starting"} or not agent.pane_id
         observed = None if absent else runtime.observe(agent)
-        if observed is None or observed.state != "waiting" or not observed.prompt_title:
+        if observed is None or observed.state != "waiting" or not _question_prompt(observed.prompt_title):
             store.redis.delete(key)
             continue
         asked = _asked(observed)
@@ -36,12 +38,13 @@ def run(slug, store, ledger, runtime, now_ms) -> list[str]:
         state = store.redis.hgetall(key)
         if now_ms - int(state["since"]) < WINDOW_MS:
             continue
+        if refused := runtime.dismiss_prompt(agent):
+            actions.append(f"could not dismiss the question prompt on {agent.name}: {refused}, retrying next tick")
+            continue
         if "moved" in state:
-            runtime.dismiss_prompt(agent)
             continue
         op_id = hashlib.sha256(f"{slug}:{agent.name}:{state['since']}:{asked}".encode()).hexdigest()[:32]
         ledger.question(slug, _question(observed, agent.name), "swarm", op_id)
-        runtime.dismiss_prompt(agent)
         InboxStore(store.redis).send(
             wake.BY,
             agent.seat or seat_address(slug, MASTER),
@@ -51,6 +54,10 @@ def run(slug, store, ledger, runtime, now_ms) -> list[str]:
         store.redis.hset(key, "moved", now_ms)
         actions.append(f"moved the question prompt open ten minutes on {agent.name} to Priorities and freed its pane")
     return actions
+
+
+def _question_prompt(title: str) -> bool:
+    return bool(title) and not PERMISSION.match(title)
 
 
 def _asked(observed) -> str:

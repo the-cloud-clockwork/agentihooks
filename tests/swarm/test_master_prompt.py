@@ -144,6 +144,39 @@ def test_engineers_on_a_prompt_are_left_to_the_waiting_on_input_finding(swarm):
     assert runtime.dismissed == [NAME]
 
 
+def test_a_failed_dismissal_copies_nothing_and_retries_next_tick(swarm):
+    store, runtime, ledger = swarm
+    runtime.dismiss_prompt = lambda agent: "pane gone"
+    run(swarm, START)
+    assert run(swarm, START + 10 * MINUTE) == [
+        f"could not dismiss the question prompt on {NAME}: pane gone, retrying next tick"
+    ]
+    assert ledger.questions == {} and mail(store) == []
+    runtime.dismiss_prompt = lambda agent: None
+    assert len(run(swarm, START + 11 * MINUTE)) == 1
+    assert len(ledger.questions) == 1 and len(mail(store)) == 1
+
+
+def test_a_permission_dialog_is_left_alone(swarm):
+    store, runtime, ledger = swarm
+    runtime.pane = PaneObservation("waiting", "Do you want to proceed?", prompt_options=("Yes", "No"))
+    run(swarm, START)
+    assert run(swarm, START + 30 * MINUTE) == []
+    assert ledger.questions == {} and runtime.dismissed == []
+
+
+def test_the_moved_question_shows_in_the_operator_priorities(swarm):
+    from scripts.swarm_ledger.ledger_priorities import wanted
+
+    store, runtime, ledger = swarm
+    run(swarm, START)
+    run(swarm, START + 10 * MINUTE)
+    [(text, _)] = ledger.questions.values()
+    rows = wanted({"phases": [], "questions": [{"id": "q1", "text": text}]})
+    assert list(rows) == ["questions/q1"]
+    assert rows["questions/q1"].startswith(f"Answer: {TITLE} Options: Proof and cleanup; Hive placement.")
+
+
 def test_a_master_blocked_on_a_prompt_raises_a_finding():
     agents = [
         {"name": NAME, "lane": "master", "seat": SEAT, "input_prompt": TITLE, "input_ticks": 4},
