@@ -188,6 +188,7 @@ SCALING_KEYS = {
     "swap-floor": "swap_floor_mb",
 }
 ADDRESS_KEYS = {"api-url": "api_url", "api-url-pending": "pending_api_url"}
+TOP_LEVEL = ("list", "tick", "templates", "rename", "waker", "prober", "waits", "tick-watch", "spoke")
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
 HIVE_PLACEMENT = "hive-placement"
@@ -544,8 +545,12 @@ def _tickable(slug):
 
 @outage.guard_command
 def cmd_tick(store, args):
+    from scripts.hive import workstation
     from scripts.swarm import scheduled_tick, tick_reaper
 
+    if not workstation.runs_engine(os.environ):
+        print(workstation.NO_ENGINE, file=sys.stderr)
+        return
     started = time.monotonic()
     if why := timer.installed_refusal():
         raise SwarmError(f"the tick refused to run: {why}")
@@ -616,6 +621,22 @@ def cmd_prober(store, args):
     from scripts.swarm import command_runner, quota_refresh
 
     quota_refresh.run(store, lambda slug, row: command_runner.execute(store, slug, row), quota_refresh.WAIT_S)
+
+
+def cmd_spoke(store, args):
+    from scripts.events import factory
+    from scripts.events.config import BusConfig
+    from scripts.hive import workstation
+    from scripts.swarm import commands
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+    if workstation.runs_engine(os.environ):
+        raise SwarmError(workstation.ENGINE_RUNS)
+    bus = factory.open_bus(BusConfig.from_environ(os.environ))
+    try:
+        workstation.run(store, bus, LocalHerdrRuntime(HerdrRuntime()), commands.hive_id())
+    finally:
+        bus.close()
 
 
 def cmd_tick_watch(store, args):
@@ -2263,7 +2284,7 @@ def typed(argv):
 
 
 def dispatch(argv):
-    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "prober", "waits", "tick-watch"):
+    if argv and argv[0] in TOP_LEVEL:
         handler, args = globals()[f"cmd_{argv[0].replace('-', '_')}"], argparse.Namespace()
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (

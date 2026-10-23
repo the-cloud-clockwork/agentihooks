@@ -227,6 +227,10 @@ class InboxStore:
             from scripts.inbox.pool import slug_of
 
             self.pool.distribute(slug_of(address))
+        else:
+            from scripts.inbox import bus
+
+            bus.publish(item)
         return item
 
     def get(self, item_id):

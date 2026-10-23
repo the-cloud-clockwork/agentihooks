@@ -21,10 +21,12 @@ if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
   rm -f "$KIND_LAYER_CACHE/complete"
 fi
 python3 tests/kind_request.py
+helm dependency build "$chart"
 python3 tests/chart_github_auth.py "$chart"
 python3 tests/chart_hive_home.py "$chart"
 python3 tests/chart_hive_only.py "$chart"
 python3 tests/chart_hub.py "$chart"
+python3 tests/chart_nats.py "$chart"
 
 finish() {
   status=$?

@@ -394,7 +394,7 @@ def _recover_process(store, slug, agent, task, context, text):
                         model=placed.model or agent.model,
                         effort=placed.effort or agent.effort,
                         model_source=placed.model_source or agent.model_source,
-                        profile_decision=placed.profile_decision or agent.profile_decision,
+                        profile_decision={**agent.profile_decision, **placed.profile_decision},
                     ),
                 )
                 return ""

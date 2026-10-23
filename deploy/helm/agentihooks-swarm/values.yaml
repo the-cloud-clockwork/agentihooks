@@ -220,6 +220,15 @@ hub:
       memory: 512Mi
       ephemeral-storage: 256Mi
 
+# Set enabled false and hub.bus.url to use an external NATS.
+nats:
+  enabled: true
+  config:
+    jetstream:
+      enabled: true
+  natsBox:
+    enabled: false
+
 workers:
   replicas: 0
   maxAgents: 20

@@ -25,7 +25,11 @@ def matches(found: list[tuple[str, str]], kind: str, suffix: str) -> bool:
 
 
 def problems(chart: str) -> list[str]:
-    alone = render(chart, "--set", "hiveOnly=true", "--set", "hive.join.enabled=true", "--set", "ingress.enabled=true")
+    alone = render(
+        chart,
+        *("--set", "hiveOnly=true", "--set", "nats.enabled=false"),
+        *("--set", "hive.join.enabled=true", "--set", "ingress.enabled=true"),
+    )
     found = [
         f"a hive only release renders no {kind} {suffix}" for kind, suffix in HIVE if not matches(alone, kind, suffix)
     ]

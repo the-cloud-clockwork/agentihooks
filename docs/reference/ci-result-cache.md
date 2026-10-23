@@ -351,6 +351,113 @@ On every 3.12 unit shard of a full scope run that reuses at least one test, outs
 
 The step prints `Kept the dev coverage of <n> reused tests and <m> page captures from <commit>; <k> changed files remapped`. Each shard uploads `reused-coverage/` inside its `coverage-3.12-<shard>` artifact.
 
+### Old file fetch in the remap
+
+The remap runs against the unit job's own checkout (`--repo "$GITHUB_WORKSPACE"`), a partial clone with `filter: blob:none` (see [Unit checkout](../ci-timing.md#unit-checkout)). That checkout holds the file contents of the graded commit only. The old text of every changed file, at the record commit, is missing until git fetches it from the remote.
+
+`tests.reused_coverage.moved_lines` lists the changed files with:
+
+```bash
+git -C "$GITHUB_WORKSPACE" diff --no-renames --numstat "<record commit>" HEAD -- '*.py'
+```
+
+`--numstat` counts added and deleted lines, so git needs both texts of every listed file and fetches all the missing old blobs in one `git fetch` before it prints. The remap then reads each file's old and new text with `git show <commit>:<path>`, which finds every blob locally. The path is the third tab separated field of each `--numstat` line. The file list and the line maps are the same as before the change.
+
+Before [pull request 4828](https://github.com/the-cloud-clockwork/agentihooks/pull/4828) ([#4825](https://github.com/the-cloud-clockwork/agentihooks/issues/4825)) the list came from `git diff --name-only`, which reads no file contents. Each `git show` of an old file then started its own lazy fetch, one network round trip per changed file. The step's time grew with the number of files changed since the record commit:
+
+| Run | Changed files remapped | `Keep the reused tests' dev coverage` | Tier wall time |
+|---|---|---|---|
+| Pull request run [39251854559](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39251854559), attempt 1, before | 408 on unit (3.12, 1) | 230 to 256 s on every 3.12 shard, 256 s on unit (3.12, 1) | 1205 s, over the 900 s Doctor threshold |
+| Pull request run [39304815170](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39304815170), attempt 1, after | 9 | at most 9 s | 717 s |
+
+The fix lives in the grader's copy of `tests/reused_coverage.py`: `origin/dev` for a pull request, the head for a dispatch. Every pull request run created after the merge, 2026-10-19 18:06 UTC, uses it, whatever its branch holds. A dispatch from a head older than the merge still fetches one file at a time.
+
+#### Proof
+
+- Red: CI run [39276467640](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39276467640) on the tests alone failed `test_a_partial_clone_fetches_every_changed_file_old_text_in_one_batch` with `assert 3 == 1`: three changed files, three fetches.
+- Green: CI run [39276717099](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39276717099) on the fix passed.
+- Controlled timing: CI run [39310021504](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39310021504) timed both listings of the same 376 changed files, each on a fresh `blob:none` clone from GitHub, and printed `REMAP_TIMING files=376 same=True name_only_seconds=245.7 numstat_seconds=3.5`. Both listings produced identical line maps.
+
+The test builds an origin repository with three changed files, each with its own old text, clones it with `--filter=blob:none`, sets `GIT_TRACE2_EVENT` and counts the `git fetch` child processes that `moved_lines` starts. Identical old texts share one blob and would need one fetch even without the fix, so every file gets distinct text.
+
+#### Reading the remap time on a run
+
+The Doctor measure prints the run attempt's tier wall time in seconds; the threshold is 15 minutes, 900 s:
+
+```bash
+agentihooks doctor rig-grade-swarm measure "ci-tier-wall-time/<run id>-<attempt>"
+```
+
+The wall time of a finished run never changes, so measuring the same run before and after the fix prints the same figure. Compare the remap step on runs created before and after the change instead:
+
+```bash
+RUN="<tests run id>"
+gh api --paginate "repos/the-cloud-clockwork/agentihooks/actions/runs/$RUN/attempts/1/jobs?per_page=30" \
+  --jq '.jobs[] | select(.name | startswith("unit (3.12")) | .name as $job | .steps[]
+        | select(.name | startswith("Keep the reused tests"))
+        | "\($job) \((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601)) s"'
+gh run view "$RUN" --log | grep "changed files remapped"
+```
+
+The first command prints each 3.12 shard's remap step time; the second prints how many files each shard remapped. For the same 376 changed files, the controlled run under Proof took 3.5 s with `--numstat` and 245.7 s with `--name-only`.
+
+| Symptom | Read | Action |
+|---|---|---|
+| The remap step takes minutes and its time grows with `<k> changed files remapped` | The run's event and the grader: `origin/dev` for a pull request, the head for a dispatch | A dispatch from a head older than pull request 4828 lists files with `--name-only`; merge `origin/dev` into the branch and dispatch again |
+| The remap step takes minutes with few changed files | The step log for a stalled fetch | The batch fetch itself is slow or stalled; see [Unit checkout](../ci-timing.md#unit-checkout) for the checkout's fetch behavior |
+
+### Unusable coverage databases
+
+`tests/coverage_check.py` decides whether a coverage data file can be read. Two steps use it: the reuse step above, before it reads the downloaded dev database, and `Check the coverage database`, before each 3.12 unit shard uploads its own.
+
+`coverage_check.problem` opens the file read only and returns the first problem it finds, or nothing for a usable database:
+
+| Problem text | Cause |
+|---|---|
+| `missing` | No file at the path. |
+| The SQLite error, such as `file is not a database` or `database disk image is malformed` | SQLite cannot open or read the file. A truncated or overwritten download lands here. |
+| The `pragma integrity_check` result | SQLite opens the file but the integrity check does not answer `ok`. |
+| `missing tables <names>` | One of `arc`, `context`, `file` or `line_bits` is absent. Reuse and `.github/coverage/combine.sh` read all four. |
+
+**Reuse step.** When the downloaded dev database has a problem, `python -m tests.reused_coverage` prints one error annotation and exits 1 before reading `reused.json` or the database:
+
+```text
+::error::The dev coverage coverage-3.12-9 from <commit> is unusable (database disk image is malformed)
+```
+
+The artifact name comes from the step's `ARTIFACT` variable, `coverage-<python>-<shard>`; without it the message names the file path. The commit is the record commit from `split`. The step fails, so the shard fails before its tests run. `reused.json` is left as `split` planned it, so the other shards are graded against the same plan.
+
+**Upload step.** `Check the coverage database` runs on every 3.12 unit shard, on every event, after the tests and before `Upload coverage`. It checks `.coverage` and, when the shard wrote one, `reused-coverage/.coverage`, and prints one line per bad file:
+
+```text
+::error::The coverage database reused-coverage/.coverage is unusable: missing tables line_bits
+```
+
+Any bad file fails the step, so nothing is uploaded and the unit job fails. A dev push whose unit shard fails this way is never chosen as a record, because the planner takes only a run whose unit shards all passed. A database that is already bad on the runner therefore stops at the dev push that wrote it instead of reaching a later pull request. The check cannot see damage that happens after upload, so the reuse step keeps its own check.
+
+Run the check by hand on a downloaded artifact:
+
+```bash
+gh run download "<dev run id>" --name coverage-3.12-9 --dir "<scratch dir>"
+python -m tests.coverage_check "<scratch dir>/.coverage" "<scratch dir>/reused-coverage/.coverage"
+echo "exit $?"
+```
+
+It prints nothing and exits 0 when every file is usable. A file that is not given on the command line is not checked; the workflow adds `reused-coverage/.coverage` only when it exists.
+
+**History.** [Pull request 4845](https://github.com/the-cloud-clockwork/agentihooks/pull/4845) ([#4842](https://github.com/the-cloud-clockwork/agentihooks/issues/4842)) added the check after pull request 4755 failed unit (3.12, 9) in run [39235643311](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39235643311). The reuse step there raised `sqlite3.DatabaseError: database disk image is malformed` on artifact `coverage-3.12-9` from dev push run [39232564179](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39232564179), whose own unit (3.12, 9) job had passed. As delivered, a bad dev database made the reuse step print a warning, delete `reused.json` and exit 0, so the shard ran its reused tests. Red: Proofs run [39291713004](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39291713004) on the tests alone failed both new tests, one with `sqlite3.DatabaseError: database disk image is malformed` and one with `KeyError: 'Check the coverage database'`. Green: Proofs run [39291717982](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39291717982) passed.
+
+[Pull request 5245](https://github.com/the-cloud-clockwork/agentihooks/pull/5245) ([#5145](https://github.com/the-cloud-clockwork/agentihooks/issues/5145)) replaced that fallback with the failure above. A shard that dropped its reuse plan split the full collection while the other shards split the collection without reused tests, so `shard-check` turned red on a correct change: plant run [39378597454](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39378597454) reported 4730 of 38995 tests that ran zero times or more than once. The upload check from pull request 4845 is unchanged.
+
+**Troubleshooting.**
+
+| Symptom | Read | Action |
+|---|---|---|
+| `Keep the reused tests' dev coverage` fails with `The dev coverage ... is unusable` | The named artifact in the record run from `split` | Rerun the whole Tests run after the next dev push records a new run, or download the artifact and run the check by hand to confirm the problem |
+| `Check the coverage database` fails on a dev push | The problem text for `.coverage` or `reused-coverage/.coverage` | Rerun the job; the run is not used as a record while that shard is red |
+| `Check the coverage database` reports `missing` for `.coverage` | The `Run tests` step of the same shard | The shard wrote no coverage data; fix the earlier failure first |
+| `shard-check` reports tests that ran zero times or twice after a coverage warning, not an error | The grader of the run: `origin/dev` for a pull request, the head for a dispatch | A dispatch from a head older than pull request 5245 still deletes `reused.json`; merge `origin/dev` into the branch and dispatch again |
+
 ### Combine and grade
 
 - `.github/coverage/combine.sh`, which builds the report `sonar` reads, adds each shard's `reused-coverage/.coverage` when the file exists and is not empty.
@@ -365,6 +472,8 @@ RUN=<tests run id>
 gh run view "$RUN" --log | grep -E "Dev run [0-9]+ on|No dev push run with passed|cannot carry reused"
 # Reused coverage kept on each 3.12 unit shard
 gh run view "$RUN" --log | grep "Kept the dev coverage of"
+# Unusable dev or shard coverage databases
+gh run view "$RUN" --log | grep -E "The (dev coverage|coverage database) .* is unusable"
 # Ran, reused and flaky counts from both shard-check legs
 gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused"
 ```
@@ -383,7 +492,7 @@ gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused"
 - Reused coverage is the dev record's measurement moved by a line diff. A changed line that the diff matches to an unchanged one elsewhere can carry an arc onto it; the next dev push measures the real figure.
 - Only `*.py` files are remapped, and the diff runs with `--no-renames`: a renamed file counts as deleted, so the reused tests' arcs on it are dropped and that coverage is missing until the next dev push.
 - A page capture with no test is kept whenever any test is reused, so it can carry coverage from tests that ran on the dev record but run again here.
-- The download of the dev shard's coverage has no fallback: if the artifact cannot be downloaded, the shard fails instead of running every test.
+- The download of the dev shard's coverage has no fallback: if the artifact cannot be downloaded, the shard fails instead of running every test. An unusable downloaded database also fails the shard; see [Unusable coverage databases](#unusable-coverage-databases).
 - A dev record whose coverage artifacts expired, after 7 days, is never chosen, so a quiet dev plans no reuse until its next push.
 
 ## Retried duration uploads

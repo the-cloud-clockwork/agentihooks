@@ -84,3 +84,43 @@ def test_swarm_init_ships_the_repository_stack_byte_for_byte():
     assert 'REDISCLI_AUTH="$SWARM_REDIS_PASSWORD" redis-cli' in check and "--pass" not in check
     for service in ("swarm", "controller", "hive"):
         assert SERVICES[service]["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}"
+
+
+def test_nats_service_runs_the_pinned_server_with_jetstream_on_a_volume():
+    nats = SERVICES["nats"]
+    pinned = (ROOT / ".github/actions/nats-server/action.yml").read_text()
+    assert "NATS_SERVER_RELEASE: v2.15.1" in pinned
+    assert nats["image"] == "mirror.gcr.io/library/nats:2.15.1-alpine"
+    assert nats["command"] == ["--jetstream", "--store_dir=/data", "--http_port=8222"]
+    assert nats["volumes"] == ["nats-data:/data"]
+    assert "nats-data" in COMPOSE["volumes"]
+    assert "ports" not in nats
+    assert nats["healthcheck"]["test"] == [
+        "CMD",
+        "wget",
+        "-q",
+        "-O-",
+        "http://127.0.0.1:8222/healthz?js-enabled-only=true",
+    ]
+    assert nats["restart"] == "unless-stopped"
+    smoke = (ROOT / "scripts/packaging/compose-hive-smoke.sh").read_text()
+    assert "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/nats:2.15.1-alpine\n" in smoke
+
+
+def test_swarm_services_reach_nats_through_the_bus_setting():
+    shared = COMPOSE["x-swarm-env"]
+    assert shared["AGENTIHOOKS_BUS"] == "${AGENTIHOOKS_BUS:-nats}"
+    assert shared["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}"
+    for name in ("swarm", "controller", "hive"):
+        service = SERVICES[name]
+        assert service["environment"]["AGENTIHOOKS_BUS"] == "${AGENTIHOOKS_BUS:-nats}", name
+        assert service["environment"]["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}", name
+        assert service["depends_on"]["nats"]["condition"] == "service_healthy", name
+
+
+def test_swarm_init_smoke_pulls_nats_and_reads_the_four_service_ready_line():
+    smoke = (ROOT / "scripts/packaging/swarm-init-smoke.sh").read_text()
+    pull = "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/nats:2.15.1-alpine\n"
+    assert pull in smoke
+    assert smoke.index(pull) < smoke.index('"$work/venv/bin/agentihooks" swarm init')
+    assert "grep -qx 'Swarm stack ready: redis, nats, swarm and controller are healthy.'" in smoke

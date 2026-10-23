@@ -709,6 +709,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm init --no-start` | Check Docker and the Compose plugin, write the stack files, `.env` (adoption included with `--adopt`) and `client.env`, then stop: no service, swarm or ledger is started or created. |
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
 | `agentihooks swarm tick-watch` | The stale tick watcher, run by its own user service: one inbox alert per stale tick episode to the front door master seat and every live agent seat, a resolved notice when a fresh pass lands, on a workstation a scheduler tick restart and a respawn of an empty front door master while the tick is stale, and in a cluster a placement of an empty front door master (see [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher)). |
+| `agentihooks swarm spoke` | The workstation spoke, run by the `agentihooks-spoke` user service when `AGENTIHOOKS_DEPLOYMENT=distributed`: a master lane spoke per swarm takes master work from the bus as this hive and launches it in a herdr pane. Refused in any other mode. |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the scheduler runs it every minute). |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
 | `agentihooks swarm <id> controller release` | Release this hive's lease so another controller can take over at a higher epoch. |
@@ -842,7 +843,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> branch` | Record the published branch and its repository (`branch_repo`, the origin remote without credentials). When the local branch tracks `origin/<task branch>`, retain that recorded task branch even when the local name differs; otherwise use the local branch. The selected branch must exist on origin. See [recording a published upstream branch](#recording-a-published-upstream-branch). |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. Rounds spent before the task records a pull request, on its first pull request and on each later one, count on separate counters ([Review round counters](#review-round-counters)). |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. A code or ci task needs its pull request merged. A task of any other kind with a recorded pull request is refused until that pull request merges, unless its proof gives `--filed` for a fix proposed instead of made; its prompt tells it to release the seat with `ready` instead, or at manual or assist autonomy to wait for the operator's merge. A `plan` task records no pull request. |
-| `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; their swarm owners receive an inbox message. Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. Each reorder, deferral, replay and restore is recorded in the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
+| `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; each owner still working its task receives an inbox notice sent as information only (see [Merge priority owner notices](#merge-priority-owner-notices)). Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. Each reorder, deferral, replay and restore is recorded in the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
 | `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue ([Ready on a task of any kind](#ready-on-a-task-of-any-kind)). Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff and leave the worktree in place; a green ejection with no failed merge group run of its own is queued again instead ([Ready merge pass queue exits](#ready-merge-pass-queue-exits)). Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. A dependency that is not `done` turns the block into a checked wait on that task instead, keeping the claim. Before blocking, refuses while a task worktree holds commits its remote branch lacks, naming the push to run, and records a pushed branch on the task; see [Blocking with unpushed commits](#blocking-with-unpushed-commits). |
 | `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
@@ -1604,6 +1605,9 @@ command runs `git` or `gh`, and acts only on calls that run `git push`,
 `gh pr create` or `gh pr ready`, including inside a chain such as
 `cd <checkout> && git push`. The directory it checks is the session's working
 folder joined with the call's `workdir` and any `cd` or `git -C` in the command.
+Codex 0.162.1 sends no `workdir` in its shell hook payload; the hook reads
+the folder the model gave `exec_command` from the session's rollout, as
+described in [Shell working folder](../reference/CODEX-COMPAT.md#shell-working-folder).
 
 ### Who it applies to
 
@@ -1778,13 +1782,18 @@ A gate that raises lets the call through and records a `fail-open` row.
 | `gh pr create` refused although both readers reviewed | The readers were launched under another name. Launch them with `name` or `subagent_type` set to `standards-reader` and `spec-reader`. A launch is counted only while the `subagents` gate runs: with `subagents-gate=skip` no reader is counted and every non draft open is refused, so set `one-push-gate` to `log only` or `skip` too. |
 | Refused for `uncommitted changes` with nothing to commit | A tracked file changed in the checkout the command runs in. Check `git status` in the folder named by `workdir`, `cd` or `git -C`, not the session's starting folder. |
 | Refused for `commits not on origin` | `HEAD` holds a commit no `origin` branch has. Publish it with `swarm publish`, then open the pull request. |
+| A Codex agent is refused for `commits not on origin` or `uncommitted changes` while its worktree is clean and on origin | The refusal ends with `Checked worktree: <folder>`. When that is the session's starting folder while the command was meant for a worktree, the hook may have found no `workdir` for the command in the rollout's newest `exec` program. Print that program as shown in [Shell working folder](../reference/CODEX-COMPAT.md#shell-working-folder): the decoded `cmd` must equal the shell command exactly, every matching call must name the same `workdir`, and every string in the program must decode. Otherwise put `cd <worktree> &&` at the start of the command. |
 | A push is refused although the checks look finished | The gate counts as running a required check that has not reported yet, a check result still pending, and a current workflow suite that has not completed, including one still queued. Wait with `--on checks`. |
 | A push to another branch is refused | The task records no branch, so every push to the pull request's repository is checked. Once the task records its branch (`swarm publish` records it; the `push-stop` gate only names it in a ledger comment), a push whose destination is another branch passes. A push to another GitHub repository always passes. |
 | The gate never refuses | The session is not pinned to an `eng` or `ci` task, the mode is `skip` or `log only`, or a lift holds. Check `swarm status --json` for `gate_modes` and the agent's `gates`. |
 
 The gate was delivered in [pull request 2116](https://github.com/the-cloud-clockwork/agentihooks/pull/2116);
 [pull request 4736](https://github.com/the-cloud-clockwork/agentihooks/pull/4736)
-made it count commits in the folder the command runs in.
+made it count commits in the folder the command runs in, and
+[pull request 4804](https://github.com/the-cloud-clockwork/agentihooks/pull/4804)
+gave Codex shell calls their `exec_command` folder, and
+[pull request 5676](https://github.com/the-cloud-clockwork/agentihooks/pull/5676)
+read JSON quoted keys and added the checked worktree to readiness refusals.
 
 ## Promotion fixer intake
 
@@ -1849,7 +1858,111 @@ no live task carries it. The next pass by the owner, or by a new owner after a h
 
 A run whose failed jobs all failed only at the `Check dev still points at this commit` step, with the annotation that
 `dev` advanced before Sonar analysis, is still reported as superseded and files nothing. Failed jobs that lost their
-runner still share one runner outage task.
+runner share one [runner outage task](#runner-outage-runs).
+
+### Runner outage runs
+
+A job that lost its runner has no code cause, so a fixer per job only adds work the master has to hold by hand. The
+watch files one runner outage task for all such jobs of a run and keeps a fixer for every job that failed on its own.
+
+On 19 October cluster node `k8s-worker-1` went `NotReady` during dev push run 39226179257. Its unit jobs failed with
+the annotation `Failed to resolve action download info` and `Resource temporarily unavailable
+(launch.actions.githubusercontent.com:443)`. Twenty jobs failed besides `Gate — Required`, and intake filed seventeen
+urgent fixer tasks, `promo-39226179257-<n>` in the Doctor ledger, for one outage.
+
+#### How a job is judged lost
+
+The watch reads the failed jobs of the run, leaving out `Gate — Required` unless it is the only failed job. For each
+job it builds a cause from the names of its failed steps and its failure annotations, without `Process completed with
+exit code 1.` and empty messages. The job lost its runner when any of these holds:
+
+| Sign | Example annotation or step state |
+|---|---|
+| The cause contains `Failed to resolve action download info` | The runner could not reach the actions download service |
+| The cause contains `Failed to download action` or `Failed to download archive` | `Failed to download archive after 3 attempts.` |
+| The cause contains `lost communication with the server` | `The self-hosted runner: anton-x lost communication with the server.` |
+| The cause contains `The operation was canceled` | A spot drain or node loss stopped the job |
+| The `Set up job` step failed or timed out | The runner died before any workflow step ran |
+| The job has a `Run tests` step that neither passed nor failed, and no step of the job failed | `Run tests` ends `skipped`, `cancelled` or with no conclusion |
+
+A job whose `Run tests` step was skipped because an earlier step such as `Install dependencies` failed is not lost: the
+failed step is a real cause and gets its own fixer. A job whose tests passed and that failed on a later check, such as a
+coverage floor, carrying no sign above, also gets its own fixer.
+
+The signs are fixed in `scripts.swarm.promotion_watch` (`OUTAGE_SIGNS`, `SETUP_STEP`, `TEST_STEP`). No setting
+changes them.
+
+#### What the watch files
+
+When at least one failed job lost its runner, the lost jobs become one cause, `runner outage`. Every other failed job
+keeps its own cause. `refresh-durations` is folded into the outage cause when it kept no samples
+from a durations artifact. When a lost job is a unit shard, a shard consumer job (`sonar`, `shard-check`,
+`coverage-ratchet`, `coverage-baseline`, `flake-budget`) whose failure names the missing shard output is folded too. The watch then
+files as for any red run:
+
+- One urgent `ci` task titled `Promotion red: runner outage`, in the `ci` lane, or `eng` while the `ci` lane has no
+  effective seats. Its id is `promo-<run id>-<n>` like any promotion task; it is `promo-<run id>-0` unless the run also
+  has failing unit tests, whose grouped fixers are numbered first.
+- Its description names the run, the commit, the run link, every lost job and every sign found. With no annotation
+  sign it reads `Set up job failed or Run tests never ran`. It ends `No code change is due` instead of `Fix it on dev`.
+- One fixer task per cause that failed on its own. Failing unit tests are grouped into one fixer per test.
+- One promotion alert for the run, replacing a live one, and one inbox item for the master naming the new tasks.
+
+For a run whose two unit jobs both failed on download resolution and cancellation, the task reads:
+
+```text
+The dev push run 900 of Tests lost its runner infrastructure at commit <sha>:
+https://github.com/<owner>/<repo>/actions/runs/900. Its cause: the jobs unit (3.11, 1), unit (3.11, 2) lost their
+runner infrastructure (Failed to resolve action download info; The operation was canceled). No code change is due;
+the swarm closes this task when a later dev push run passes.
+```
+
+#### Later outages and the green run
+
+The outage task holds the cause `runner outage` in `promotion:jobs`, without the run, job names or signs. While that
+task is not done in the owner's ledger or a former owner's ledger, a later red run that also lost runners files no
+second outage task, whichever jobs it lost. Its real failures are still filed. The next green dev push run closes an
+open or blocked outage task with the other promotion tasks and the alert, and releases its held cause, so the next
+outage files a new task. An outage task that is claimed or in `pr` stays open on green and keeps holding the cause
+until its holder finishes it.
+
+#### Checking a run
+
+Read the failed jobs, their step states and their failure annotations the same way the watch does:
+
+```bash
+RUN="<run id>"
+gh api "repos/{owner}/{repo}/actions/runs/$RUN/jobs?per_page=100" \
+  --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out")
+        | [.name, ([.steps[] | "\(.name)=\(.conclusion)"] | join(", ")), .check_run_url] | @tsv'
+gh api "<check run url>/annotations" --jq '.[] | select(.annotation_level == "failure") | .message'
+```
+
+Run the commands from the swarm's `repo` checkout so `gh` resolves the repository. Then check what the swarm holds:
+
+```bash
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli HGETALL "$P:swarm:<id>:promotion:jobs"   # an outage task maps to the value runner outage
+agentihooks ledger --slug "<id>" show | jq -r --arg run "promo-$RUN-" \
+  '.tasks[] | select(.id | startswith($run)) | [.id, .state, .title] | @tsv'
+```
+
+| Symptom | Cause | Action |
+|---|---|---|
+| An outage run filed one fixer per job | No failed job carried a sign above, for example a new runner error text | Read the job annotations. A new runner error needs a code change to `OUTAGE_SIGNS` with a test |
+| A real failure was folded into the outage task | Its annotations contain a sign, for example a test that prints `The operation was canceled` | Read the cause in the task description. Fix the test output, or file the fixer by hand |
+| A red run with lost runners filed no outage task | An outage task that is not done already holds `runner outage` | Expected. A green dev push run closes it and the next outage files a new one |
+| A skipped `Run tests` step still got a fixer | Another step of the job failed first | Expected. The failed step is the cause |
+
+Delivered in [pull request 4829](https://github.com/the-cloud-clockwork/agentihooks/pull/4829), with
+[issue 4827](https://github.com/the-cloud-clockwork/agentihooks/issues/4827) as the spec. Its tests cover each sign,
+the skipped test step after a real failure, a real failure beside an outage, the exact description, and an open
+outage task holding a later outage until a green run closes it. In the test of seventeen unit jobs all lost to
+download resolution, the code before the change filed seventeen tasks and the change files one. Red: Tests run
+[39276851003](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39276851003) on the tests only commit
+failed all seven new tests. Green: Tests run
+[39287821375](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39287821375) passed on the final head.
+No live dev outage run has been counted since the change.
 
 ### Checking the owner
 
@@ -3061,7 +3174,7 @@ it checks any wait:
 1. **Recycle a stale supervisor.** When the supervisor's record (`supervisor.json` in the scheduler runtime folder)
    names no code, another checkout than the installed one, or another git revision than the installed one, the pass
    prints `recycling the scheduler supervisor: <why>` and sends it SIGTERM, then waits up to 30 seconds for its lock
-   to free.
+   to free. See [Supervisor recycle](#supervisor-recycle).
 2. **Start a missing supervisor.** With no supervisor holding the machine lock, it starts one from the installed
    code. A supervisor that died is back within 15 seconds.
 3. **Restore the timer while delivery is unproven.** When the tick units on disk are current and the timer is
@@ -3080,6 +3193,75 @@ The `agentihooks-tick-watch` service is a second, independent restart path: whil
 the supervisor and registers the tick again from the installed code (see
 [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher)). The wait pass acts within 15 seconds of a
 dead supervisor; the watcher acts once the tick has been stale for 10 minutes.
+
+#### Supervisor recycle
+
+A supervisor keeps the root and code it loaded at start. Before this guard, a supervisor started from the main
+checkout, a worktree or an older revision kept running after an install until someone restarted it by hand. On
+19 October a supervisor started at 05:27 UTC was still running twelve hours later, after the tick delivery record
+had merged and been installed; its old code never wrote the record, so the systemd timer and the Doctor finding
+stayed up.
+
+**The supervisor record.** When a supervisor takes its machine lock it writes `supervisor.json` in the scheduler
+runtime folder:
+
+```json
+{"pid": 41237, "root": "/home/me/.local/share/agentihooks", "revision": "6a3cc6a66...", "started": 1792736201.5}
+```
+
+`root` is the checkout the supervisor's code was loaded from, `revision` is `git rev-parse HEAD` of that checkout read
+once before the lock is taken (empty when git fails or the root is not a git checkout), and `started` is the time the
+lock was taken. The guard trusts the record only while its `pid` matches the pid in `supervisor.lock`; a missing,
+unreadable or mismatched record counts as no record.
+
+**When it recycles.** Each wait pass compares the lock holder with the installed agentihooks and recycles it on the
+first reason that applies:
+
+| Reason printed after `recycling the scheduler supervisor:` | Meaning |
+|---|---|
+| `the scheduler supervisor <pid> left no record of the code it loaded` | No usable record: a supervisor from code older than this guard, or a record from another process. |
+| `the scheduler supervisor <pid> runs <root>, not the installed <installed>` | The supervisor runs another checkout. Both paths are resolved, so a symlink to the installed root counts as installed. |
+| `the scheduler supervisor <pid> loaded revision <loaded>, not the installed revision <current>` | Same root, but the installed checkout moved on since the supervisor started. |
+
+No lock holder, or a holder that matches root and revision, is left alone.
+
+**Drain without dropping a tick.** The pass sends SIGTERM to the supervisor. The supervisor stops its runner, and the
+runner finishes the dispatch pass it is in before it exits; it starts no new pass. The wait pass then polls the
+supervisor lock once a second for up to 30 seconds. When the lock frees, the same pass starts a supervisor from the
+installed code (step 2 above). Scheduled entries live in Redis, not in the supervisor, so a minute that falls due
+while no runner is up stays due and fires once on the restarted runner's first pass. A supervisor that still holds
+its lock after 30 seconds is left running and the pass prints
+`the scheduler supervisor <pid> still holds its lock; the next wait pass tries again`; the recycle repeats every
+15 seconds until it succeeds. A runner in the middle of a long dispatch can outlast the first 30 seconds, so one
+such line before the next recycle is normal.
+
+**Retiring the timer again.** While a stale supervisor ran, the timer was restored (step 3). The guard retires it
+only when the latest scheduled delivery happened at or after the running supervisor's `started` time, so the
+delivery has to come from the restarted supervisor, not from the one that was recycled. The tick service group must
+also be idle. The Doctor `scheduled-tick/<hostname>` finding clears on that same delivery.
+
+**Number.** Time a foreign or stale supervisor stays up after detection: unbounded before this guard (the twelve
+hour case above), one wait pass after it, drained within 30 seconds or on a following pass. Then one scheduled minute later the new
+supervisor proves delivery, and the next wait pass retires the timer.
+
+Check a recycle on a live machine, read only:
+
+```bash
+# The running supervisor's record against the installed checkout. A Redis endpoint other than the
+# local default keeps its record in a hashed subfolder; the newest record is the live one.
+ls -t ~/.cache/agentihooks/scheduler/supervisor.json ~/.cache/agentihooks/scheduler/*/supervisor.json \
+  2>/dev/null | head -1 | xargs cat
+PY="$(dirname "$(readlink -f "$(command -v agentihooks)")")/python"
+INSTALLED="$("$PY" -c 'from scripts.install import install_root; print(install_root())')"
+echo "$INSTALLED"; git -C "$INSTALLED" rev-parse HEAD
+
+# Recycles and drain timeouts on recent wait passes
+journalctl --user -u agentihooks-swarm-waits.service --since "-1h" \
+  | grep -E "recycling the scheduler supervisor|still holds its lock"
+```
+
+After a recycle, `supervisor.json` names a new `pid`, the installed root, the installed revision and a `started`
+time inside the window of that log line.
 
 #### The Doctor finding
 
@@ -3128,6 +3310,8 @@ no `agentihooks-swarm.timer`, and `is-enabled` reports that the unit file is mis
 |---|---|---|
 | `the agentihooks-swarm timer stays` on every pass after an install | The scheduler has not delivered a tick since the install. | Wait one scheduled minute. When it persists, read `scheduler.log` and `swarm-tick.log` in the scheduler runtime folder for the failed delivery. |
 | Evidence names a foreign root | The supervisor started from a worktree or an older checkout. | The next wait pass recycles it. When it stays, check `systemctl --user status agentihooks-swarm-waits.timer`. |
+| `still holds its lock` on many passes in a row | The supervisor or its runner does not exit on SIGTERM. | Read `scheduler.log` in the scheduler runtime folder for the runner's last pass. The timer stays, so ticks continue meanwhile. |
+| `recycling the scheduler supervisor` on every pass with a new pid each time | The installed checkout moves between passes, or git cannot read its revision. | Run `git -C <installed root> rev-parse HEAD`; an empty or failing result makes every recorded revision differ. |
 | Evidence says the last tick was delivered hundreds of seconds ago | The cron stopped firing, every tick failed, or the supervisor died. | The wait pass starts a supervisor and restores the timer, so ticks continue. Read `swarm-tick.log` for the failing tick. |
 | `could not be read` evidence | Redis is down for the scheduler. | The timer stays until Redis answers and the record proves delivery. |
 | `the scheduled swarm tick guard failed: OSError: …` | `systemctl` is missing or the user bus is down. | The waits keep running but nothing guards the tick. Restore the user systemd session. |
@@ -4783,6 +4967,81 @@ at least ten exist, against the retained 31 of 72 baseline; the target is zero.
 That comparison uses different cohorts, rather than equal daily windows. The
 source code task records no completed after count; the CI proofs above establish
 the routing change without claiming a measured production decrease.
+
+### Merge priority owner notices
+
+`agentihooks swarm <slug> merge priority <url>` tells the owner of every displaced
+pull request that still has an owner working its task. The critical pull request's
+owner gets no notice. Each of these notices reports what already happened and asks
+for nothing, so the swarm sends every one as information only, the same as
+`msg send --fyi`. It closes as `done: information received` on read or confirmed
+receipt, and it never enters the inbox wake and escalation ladder: no wake
+retries, no master or operator escalation, and no Doctor seat wait finding
+while the receiving seat is empty.
+
+| When | Sender | Notice text |
+|---|---|---|
+| A waiting entry was removed and requeued in its original order after the critical request | the agent or operator who ran `merge priority` | `Your pull request <url> was requeued in its original order after priority request <priority url>.` |
+| An interrupted priority left an entry out and the entry no longer qualifies, for example it became a draft, its head moved or it conflicts with dev | `swarm` | `Your pull request <url> left the merge queue in an interrupted priority and stays out because <reason>. Queue it again once its checks pass.` |
+| An interrupted priority left an entry out and the swarm could not queue it again yet | `swarm` | `Your pull request <url> left the merge queue in a priority and could not be queued again: <reason>. The swarm retries it at the end of the queue on every refresh until it is back or stays out for a reason.` |
+
+The swarm retries the last case on every refresh but sends that notice once per
+displacement: a pull request displaced again by a later priority gets a new one.
+
+#### Who receives a notice
+
+A notice goes to the `claimed_by` agent of each task whose `pr_url` names the
+moved pull request, and only while that task is still owned. The swarm sends no
+notice when:
+
+- the task has no claimant;
+- the task state is `done`;
+- the task was released with `agentihooks swarm <slug> ready <doc>`, that is,
+  it sits in state `pr` with `awaiting` set to `merge`. The engineer has left,
+  its seat may be empty or already serve other work, and the merge watcher owns
+  the pull request from then on.
+
+The requeue itself does not depend on the notice: every displaced entry is
+requeued, and every reorder and restore is written to the
+[queue journal](../reference/delivery-tiers.md#the-queue-journal), whether or not
+an owner was told.
+
+#### Example
+
+The master moves a critical fix ahead of two waiting entries. Pull request 4707
+belongs to a task still being worked on seat `eng-6`; pull request 4710 belongs
+to a task its engineer released with `swarm ready`:
+
+```bash
+agentihooks swarm <slug> merge priority https://github.com/<owner>/<repo>/pull/4704
+```
+
+The result lists both URLs under `displaced`, and both entries return to the
+queue in their original order. Only the owner of 4707 receives a notice, and it
+closes once that agent reads it or the hook confirms receipt. The released task
+behind 4710 receives none, so no item waits on an emptied seat.
+
+Read the notice and its closure from the receiving seat:
+
+```bash
+agentihooks msg inbox --of eng-6@<slug>
+```
+
+#### Troubleshooting
+
+| Symptom | Check and response |
+|---|---|
+| A requeue notice is still open as work, wakes a pane or escalates | It was sent before [pull request 4798](https://github.com/the-cloud-clockwork/agentihooks/pull/4798) reached the code the swarm runs. Pull dev into the checkout the tick and the master run from, then close the old item with `agentihooks msg close <id> done` |
+| The Doctor reports an inbox past window seat wait on a requeue notice | Same cause as above; a current notice is information only and never qualifies |
+| An owner expected a notice and got none | Check the task: no claimant, state `done`, or released to the merge watcher (`pr` awaiting `merge`) all send none by design. Check the queue journal for the entry's requeue |
+| A displaced pull request is missing from the queue | The notice does not drive the requeue. Read the `merge-priority-requeue:<url>` ledger alert and the queue journal for the reason |
+
+[Pull request 4798](https://github.com/the-cloud-clockwork/agentihooks/pull/4798)
+made the requeue notice information only and skipped released and done tasks;
+its regression cases in `tests/swarm/test_merge_queue_priority.py` and
+`tests/swarm/test_queue_priority.py` assert the `fyi` flag on every notice and
+that no notice reaches a released or done task. Later queue priority changes
+send the left out and retry notices the same way, through the same owner filter.
 
 ### Transport capabilities
 

@@ -27,3 +27,5 @@ controller:
       optional: true
   env:
     AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"
+nats:
+  enabled: false

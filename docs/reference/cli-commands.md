@@ -578,10 +578,16 @@ records the answer in `state.json` (`herdr.enabled`); agents pass
 `agentihooks init --herdr yes|no`. Later inits with herdr enabled install the
 binary when missing and (re)install the herdr integrations for Claude and Codex.
 
+Configure also writes `[session] resume_agents_on_restore = false` into the
+herdr config, overwriting `true`. A herdr server restart then brings agent panes
+back as plain shells; agents return only through the agentihooks boot recovery
+and launcher, which give each one its routed account. herdr's own resume runs
+`codex resume <id>` or `claude --resume <id>` without that account.
+
 ```bash
 agentihooks herdr              # status; offers to install when herdr is missing
 agentihooks herdr install      # official installer, then configure
-agentihooks herdr configure    # herdr integration install claude|codex
+agentihooks herdr configure    # herdr integration install claude|codex; agent resume off
 agentihooks herdr disable      # init-agent stops choosing herdr
 ```
 

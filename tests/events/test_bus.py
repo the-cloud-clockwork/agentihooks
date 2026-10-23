@@ -36,7 +36,7 @@ class _EventLog:
     def publish(self, subject: str, event: Envelope) -> bool:
         return True
 
-    def consumer(self, durable: str, subject: str) -> Consumer:
+    def consumer(self, durable: str, subject: str, policy: QueuePolicy | None = None) -> Consumer:
         return _Consumer()
 
 

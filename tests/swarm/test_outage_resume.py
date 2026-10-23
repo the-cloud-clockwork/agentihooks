@@ -632,6 +632,21 @@ def test_a_reopened_conversation_records_the_placement_it_reports(store, tmp_pat
     )
 
 
+def test_a_reopened_conversation_keeps_the_saved_placement_fallback(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    saved = {"profile": "engineer", "placement_fallback": "no hive places the saved codex harness"}
+    store.put_agent("sw", replace(dead, profile_decision=saved))
+    runtime.placement = {"profile_decision": {"profile": "reviewer"}}
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    reopened = next(agent for agent in owners(store) if agent.name == dead.name)
+    assert reopened.profile_decision == {
+        "profile": "reviewer",
+        "placement_fallback": "no hive places the saved codex harness",
+    }
+
+
 def test_a_pending_owner_missing_its_pane_does_not_stop_other_conversation_updates(store):
     ledger, runtime, _ = three_owners(store)
     first, second, third = owners(store)

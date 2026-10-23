@@ -25,6 +25,7 @@ REQUIRED = (
 OPTIONAL = ("brain",)
 HEARTBEAT_MS = 180_000
 GONE = "agent gone from the swarm"
+ENDED = ("finished", "ended")
 
 
 def key(hive: str) -> str:
@@ -125,7 +126,14 @@ def running_executions(redis: "Redis", reports: list[dict]) -> set[tuple[str, st
         (slug, agent.execution_id, agent.generation)
         for slug in {report["slug"] for report in reports}
         for agent in store.agents(slug)
+        if agent.state not in ENDED
     }
+
+
+def live(redis: "Redis", hive: str) -> list[dict]:
+    reports = [report for report in listing(redis, hive) if "ended_at" not in report]
+    running = running_executions(redis, reports)
+    return [report for report in reports if (report["slug"], report["execution_id"], report["generation"]) in running]
 
 
 def end_gone(redis: "Redis", hive: str, reports: list[dict], at: int) -> list[dict]:
