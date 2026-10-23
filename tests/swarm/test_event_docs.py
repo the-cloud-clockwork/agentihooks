@@ -46,7 +46,7 @@ def _reactors():
 
 
 def _row(text: str, first: str) -> list[str]:
-    row = re.search(rf"^\| `{first}` \|(.*)\|$", text, re.M)
+    row = re.search(rf"^\| `{re.escape(first)}` \|(.*)\|$", text, re.M)
     assert row, first
     return row.group(1).split(" | ")
 
@@ -54,8 +54,8 @@ def _row(text: str, first: str) -> list[str]:
 def test_swarm_page_names_the_engine_setting_and_its_values():
     text = _swarm()
     assert f"agentihooks swarm <slug> set engine={EVENTS_ENGINE}" in text
-    assert "`legacy`" in text
-    assert f"`{EVENTS_ENGINE}`" in text
+    assert "| `legacy` (default) |" in text
+    assert f"| `{EVENTS_ENGINE}` |" in text
 
 
 def test_swarm_page_walks_a_task_through_offer_claim_and_exit():

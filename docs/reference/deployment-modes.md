@@ -49,7 +49,7 @@ Each swarm picks its engine with its `engine` setting, `legacy` or `events`; see
 
 | Mode | Engine | Bus | Hub |
 |---|---|---|---|
-| `local` | `legacy`; `events` only with a hub on the same bus | `memory` unless the bus settings name NATS | None runs by default. Only the hub's `readiness` reactor offers the work of an `events` swarm. |
+| `local` | `legacy`; `events` only with a hub on the same bus | `memory` unless the bus settings name NATS | None runs by default. The hub's `readiness` reactor offers nothing on the `memory` bus, so an `events` swarm needs a hub on a NATS bus. |
 | `compose` | `legacy`; `events` only with a hub on the same bus | The stack's `nats` service: `AGENTIHOOKS_BUS=nats` at `nats://nats:4222` | No hub service. The Compose task smoke runs `agentihooks hub run --once` in the `swarm` service to settle a task end to end. |
 | `distributed` | `events` through the hub; a `legacy` swarm is ticked by the chart's controller, never by the workstation | NATS with JetStream from the `agentihooks-swarm` chart (`nats.enabled`, JetStream on) | The chart's `<release>-hub` Deployment, with `hub.enabled: true` and 2 replicas by default. It runs `agentihooks hub run`, scheduled only on nodes without the `anton.io/capacity-type` label. |
 
@@ -57,7 +57,7 @@ Each swarm picks its engine with its `engine` setting, `legacy` or `events`; see
 
 `agentihooks hub run` creates the hive buckets, then runs every reactor. Each reactor has a durable consumer named
 `hub-<name>`. Singleton reactors hold a lease in `hub-leases`, so with two replicas only one replica runs each of
-them. Every reactor retries up to 50 times, waiting 1, 5, 15, 60 and then 300 seconds between attempts.
+them. Every reactor takes up to 50 deliveries of an event, waiting 1, 5, 15, 60 and then 300 seconds between attempts.
 
 | Reactor | Reacts to | Does |
 |---|---|---|
