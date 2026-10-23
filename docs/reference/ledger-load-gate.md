@@ -290,7 +290,7 @@ The current workflow grades as follows:
 | Load measures | Write p50 and the busiest CPU window. Write p95 stays an absolute budget inside each gate run |
 | Load ratio | Per pair head over base ratios, combined as the geometric mean of the base first median and the head first median, so launch order cancels out |
 | Load margin | `SAME_CODE_MARGIN: '1.25'` in the grade job |
-| Hierarchy pairs | A four job matrix of hierarchy probes graded by `tests.ledger_load.hierarchy_paired` at `HIERARCHY_SAME_CODE_MARGIN: '1.3'` |
+| Hierarchy pairs | A four job matrix of hierarchy probes graded by `tests.ledger_load.hierarchy_paired` at `HIERARCHY_SAME_CODE_MARGIN: '1.3'`, described under [Hierarchy CPU grading](#hierarchy-cpu-grading) |
 | Margin floor | Each grader reads its recorded same code runs and refuses a margin below their noise: the load grader below the widest single pair ratio in `tests/ledger_load/same_code_pairs.json`, the hierarchy grader below the widest per run geometric mean in `tests/ledger_load/hierarchy_same_code.json` |
 | Load base | Still `726353637` unless the dispatch names a `base` |
 
@@ -427,6 +427,195 @@ bound as JSON before its error lines.
 | The same red on a head that changes server code | Compare dev against an older base in CI to bracket the merge that introduced it, then bisect the merges between |
 | One pair far from the rest | Read that pair's runner and start time with the jobs command above. Each pair runs on its own runner, so one busy runner skews one pair |
 | `head had N failed requests, base M` | Read the head server log in the pair artifact. Failed requests are graded apart from latency |
+
+## Hierarchy CPU grading
+
+The `hierarchy` jobs of the `Hierarchy CPU proof` measure the server CPU spent
+per hierarchy read on base and head, and require the head to return the same
+response bytes. Swarm task t520 and
+[pull request 5129](https://github.com/the-cloud-clockwork/agentihooks/pull/5129)
+replaced the halving assertion that went red on identical code with a paired
+grade against the merge base.
+
+### The halving check it replaced
+
+Until pull request 5129 one `hierarchy` job ran the base probe and then the
+head probe on one runner, base always first, against the pinned base
+`726353637`. A final step asserted `head <= base / 2` per read and failed with
+`Hierarchy CPU did not halve`.
+
+On identical code, with the `base` input set to the head commit, seven runs
+measured head over base from 0.425 to 0.513:
+
+| Run | Head over base | Result |
+|---|---|---|
+| [39339788390](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339788390) | 0.500 | Red |
+| [39339766728](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339766728) | 0.508 | Red |
+| [39336620008](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39336620008) | 0.513 | Red |
+| [39339781067](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339781067) | 0.459 | Green |
+| [39339759775](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39339759775) | 0.461 | Green |
+| [39336616389](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39336616389) | 0.477 | Green |
+| [39341525086](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39341525086) | 0.425 | Green |
+
+The cause was launch order. The first probe in a job cost about 2.1 times the
+second whichever side it was, so identical code read close to 0.5 and the
+verdict depended on runner noise around that line.
+
+### Option taken
+
+The task allowed either retiring the check or grading against the merge base on
+the same runner with a margin from recorded same code spread. Pull request 5129
+took the second. Retiring was rejected because no other check reads the
+hierarchy routes: the [paired load grade](#grading-after-the-fix) compares write
+p50 and the busiest CPU window only, so a doubled hierarchy cost would pass
+unseen.
+
+### Current behavior
+
+| Part | Behavior |
+|---|---|
+| When it runs | The `hierarchy-cpu` job of the Tests workflow calls the proof on each push to `dev`, in the [promotion tier](delivery-tiers.md). A manual dispatch runs it on any branch |
+| Base | The `base` input when given. Otherwise, on a push, the previous `dev` head, `github.event.before`. Otherwise `git -C head merge-base HEAD origin/dev`, read from a full history checkout with no API token. The load jobs keep their own fallback, `726353637` |
+| Same probe on both sides | Before measuring, the job copies the head's `hierarchy_probe.py`, operations corpus, `gate.py` and `memory.py` into the base checkout, so only the server code differs |
+| Pairs | A four job matrix, `pair: [1, 2, 3, 4]`, each job one base and one head probe on its own runner. Odd pairs launch base first, even pairs head first |
+| Start | Both probes of a pair run side by side. Each touches a file in a shared barrier folder, `HIERARCHY_START_BARRIER`, and waits until both are there before profiling, failing after 300 seconds with `the paired hierarchy probe never became ready` |
+| Evidence | Each pair uploads `hierarchy-pair-N` holding `base.json` and `head.json`: CPU per read, request count, source and the exact response bodies |
+| Ratio | Per pair head over base `mean_cpu_seconds`, combined as their geometric mean |
+| Margin | `HIERARCHY_SAME_CODE_MARGIN: '1.3'` in the `grade` job, also the grader's default |
+| Margin floor | The grader refuses a margin below the widest geometric mean of the runs in `tests/ledger_load/hierarchy_same_code.json` |
+
+The side by side start came after pull request 5129, in
+[pull request 5667](https://github.com/the-cloud-clockwork/agentihooks/pull/5667);
+5129 ran the two probes of a pair one after the other.
+
+### Why the geometric mean
+
+A launch order bias multiplies the cost of whichever probe runs first by a
+factor. With base first the pair ratio reads the true ratio divided by that
+factor; with head first it reads the true ratio times it. Across alternating
+pairs the factors cancel in a product, so the geometric mean returns the true
+ratio. Two cases from `tests/ledger_load/test_hierarchy_paired.py`, each pair
+listed as base then head CPU seconds per read:
+
+| Pairs | Pair ratios | Geometric mean | Verdict at 1.3 |
+|---|---|---|---|
+| (0.08, 0.04), (0.04, 0.08), twice | 0.5, 2.0, 0.5, 2.0 | 1.00 | Green: identical code with the first run costing twice |
+| (0.08, 0.08), (0.04, 0.16), twice | 1.0, 4.0, 1.0, 4.0 | 2.00 | Red: head doubled under the same order bias |
+
+### Running the grade
+
+The `grade` job runs:
+
+```bash
+python -m tests.ledger_load.hierarchy_paired \
+  --pairs hierarchy-evidence/hierarchy-pair-{1,2,3,4} \
+  --margin "$HIERARCHY_SAME_CODE_MARGIN" --same-code tests/ledger_load/hierarchy_same_code.json
+```
+
+It prints one JSON line, then one `::error::` line per problem:
+
+```json
+{"base_head_cpu_seconds_per_read": [[0.0843, 0.038558], [0.043382, 0.086141], [0.080866, 0.038575], [0.041242, 0.081868]], "margin": 1.3, "same_code_bound": 1.1308210507775234}
+```
+
+The CPU values above are pairs of recorded run 39373482851; the bound is the
+record's current value. To regrade a finished run from its artifacts:
+
+```bash
+gh run download "<run-id>" --pattern 'hierarchy-pair-*' --dir hierarchy-evidence
+python -m tests.ledger_load.hierarchy_paired \
+  --pairs hierarchy-evidence/hierarchy-pair-{1,2,3,4} \
+  --margin 1.3 --same-code tests/ledger_load/hierarchy_same_code.json
+```
+
+Dispatch the proof with no `base` to grade a branch against its merge base with
+`dev`, or with the branch head as `base` for a same code control:
+
+```bash
+gh workflow run hierarchy-cpu.yml --ref "<branch>"
+gh workflow run hierarchy-cpu.yml --ref "<branch>" -f base="$(git rev-parse "origin/<branch>")"
+```
+
+### What the hierarchy grade turns red
+
+| Message | Cause |
+|---|---|
+| `the margin Mx is below Bx, the widest geometric mean of the same code runs` | `HIERARCHY_SAME_CODE_MARGIN` is under the bound of the record |
+| `the <side> run of pair N wrote no hierarchy report` | That pair's `base.json` or `head.json` is missing; no ratio is graded while any is missing |
+| `no paired runs were given` | The grader received no pairs |
+| `hierarchy CPU was not measured on the <side> run of pair N` | That report has zero or null `mean_cpu_seconds` |
+| `hierarchy responses of pair N differ between base and head` | Source, request count or any response body differs. Response identity is still required byte for byte |
+| `head hierarchy CPU geometric mean pair ratio R exceeds the Mx margin` | The geometric mean is over the margin |
+
+### The same code record
+
+`tests/ledger_load/hierarchy_same_code.json` maps each recorded run id to its
+pairs in matrix order, each pair `[base, head]` CPU seconds per read:
+
+```json
+{
+  "runs": {
+    "39373482851": [[0.0843, 0.038558], [0.043382, 0.086141], [0.080866, 0.038575], [0.041242, 0.081868]]
+  }
+}
+```
+
+`same_code_bound` takes each run's geometric mean, folds one below 1 to its
+inverse and returns the widest:
+
+| Run | Pair ratios | Geometric mean |
+|---|---|---|
+| [39373482851](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373482851) | 0.457, 1.986, 0.477, 1.985 | 0.963 |
+| [39373489014](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373489014) | 0.486, 2.186, 0.427, 2.102 | 0.988 |
+| [39373495286](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373495286) | 0.579, 2.359, 0.486, 2.063 | 1.082 |
+| [39374114031](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39374114031) | 0.396, 2.143, 0.658, 2.928 | 1.131 |
+
+The bound is 1.13, under the 1.3 margin. These runs predate the side by side
+start, so their odd and even pairs still show the launch order bias that the
+geometric mean cancels.
+
+`test_the_recorded_same_code_runs_fit_inside_the_margin_the_workflow_states`
+reads the margin from the `grade` job and fails when the record holds fewer than
+three runs, its bound exceeds the margin, the margin reaches 2, or any recorded
+run fails the grade. It also asserts that the old halving rule would have failed
+on the recorded base first pairs, so restoring it fails CI.
+`test_the_workflow_runs_an_even_number_of_hierarchy_pairs_against_the_merge_base`
+pins the four pairs, the alternating order, the base resolution, the full
+history checkout and the absence of the halving assertion.
+
+To add a run, dispatch a same code control, then print each pair's values in
+matrix order and append them under the run id:
+
+```bash
+gh run download "<run-id>" --pattern 'hierarchy-pair-*' --dir hierarchy-evidence
+for n in 1 2 3 4; do
+  python3 -c 'import json, sys; print([json.load(open(f"{sys.argv[1]}/{s}.json"))["mean_cpu_seconds"] for s in ("base", "head")])' \
+    "hierarchy-evidence/hierarchy-pair-$n"
+done
+```
+
+### Delivery evidence
+
+| Run | What it shows |
+|---|---|
+| [39373368060](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373368060) | Red: Proofs on the tests only head, with no `tests.ledger_load.hierarchy_paired` module |
+| [39373482851](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373482851), [39373489014](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373489014), [39373495286](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373495286) | Same code calibration with an empty base resolved to the merge base: geometric means 0.963, 0.988 and 1.082 |
+| [39374114031](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39374114031) | Green: the grade passed at a same code geometric mean of 1.13 |
+| [39374111671](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39374111671) | A plant that ran the hierarchy resolver twice passed at about 1.18; the resolver is a small share of request CPU |
+| [39374699302](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39374699302) | Red: a plant that spent each hierarchy request's CPU twice failed with `head hierarchy CPU geometric mean pair ratio 2.10 exceeds the 1.3x margin` |
+| [39458970824](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39458970824) | Green on the workflow restacked onto dev: pair ratios 0.700, 1.027, 0.817 and 0.973, geometric mean 0.869 |
+| [39468935037](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39468935037) | Green with the base resolved by `git merge-base`: pair ratios 0.863, 1.413, 0.648 and 1.590, geometric mean 1.059 |
+
+### Troubleshooting a hierarchy red
+
+| Observation | Meaning and next step |
+|---|---|
+| `geometric mean pair ratio R exceeds the 1.3x margin` on a head that does not touch hierarchy code | Dispatch a same code control. If identical code also crosses the margin, record the control and judge the margin before looking for a regression |
+| The same red on a head that changes the server's hierarchy path | Read the `profile` in each `head.json` against its `base.json` for the function whose cost grew |
+| One pair ratio far from the rest | Read that pair's runner with the jobs command under [Reproducing a same code control](#reproducing-a-same-code-control); each pair runs on its own runner |
+| `hierarchy responses of pair N differ between base and head` | The head changed hierarchy output. Compare the `outputs` of each observation in the two reports |
+| `the paired hierarchy probe never became ready` | One probe failed before reaching the barrier. Read that side's log in the pair job |
+| A push run graded against an unexpected base | Read the `ref` of the base checkout step in a pair job log. On a push it is the previous `dev` head, not a merge base |
 
 ## Workload
 
