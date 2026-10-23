@@ -51,6 +51,11 @@ RESTACK = (
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
 CARRIED = "hive_opening"
+WORKSTATION_LINE = (
+    "A task that reads or changes the workstation's primary checkout or its local task folders, such as a "
+    "checkout landing or a final reconciliation, gets --workstation on task add or workstation=yes on task set, "
+    "so no remote hive runs it."
+)
 INBOX_LINE = (
     "Operator writes on the ledger reach you as inbox messages at your next tool call, and the swarm wakes you with a "
     "prompt when you sit idle."
@@ -130,6 +135,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f"- {waiting_line(led)}",
         f"- {artifact_line(led)} When the operator asks for a file to review, add or set its task with --artifact "
         "or artifact=yes so its agent may publish it.",
+        f"- {WORKSTATION_LINE}",
         *peer_lines(task.get("peer", "")),
         *priming.master_lines(slug, task.get("peer", "")),
         f'- Turn each operator request into a task with a full spec: {led} task add <id> "<title>" --lane eng|ci '
