@@ -529,6 +529,7 @@ def test_a_tick_drop_refunds_the_life_of_a_claim_it_still_holds(store):
 def test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone(store):
     ledger, runtime, agent = prepared_recovery(store)
     rows = {"t1": dict(ledger.rows["t1"])}
+    store.count_claim("sw", "t1")
     lives = store.claims("sw", "t1")
     ledger.update_task("sw", "t1", {"state": "open", "claimed_by": ""})
     store.refund_claim("sw", "t1")
