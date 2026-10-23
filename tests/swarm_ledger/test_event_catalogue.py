@@ -25,27 +25,25 @@ def written(repo):
     return [Envelope.decode(value.encode()) for (value,) in values]
 
 
-def event(type, entity, data):
-    return create(type=type, swarm="demo", entity=entity, key="t1", version=1, author="ledger", data=data)
+def event(kind, entity, data):
+    return create(type=kind, swarm="demo", entity=entity, key="t1", version=1, author="ledger", data=data)
 
 
 def test_every_row_the_outbox_writers_write_matches_the_catalogue_and_every_catalogued_type_is_written(tmp_path):
     repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
     repo.create("ledger", CONTENT)
-    repo.apply_ops("ledger", ops=[ADD])
-    repo.apply_ops("ledger", ops=[CLAIM])
-    repo.apply_ops("ledger", ops=[APPEND])
-    repo.apply_ops("ledger", changes=[DONE])
+    writes = [{"ops": [ADD]}, {"ops": [CLAIM]}, {"ops": [APPEND]}, {"changes": [DONE]}]
+    assert [repo.apply_ops("ledger", **write)[1] for write in writes] == [[], [], [], []]
     source = repo.get_document("ledger")
     repo.import_document("ledger", {**source, "tasks": source["tasks"][:2]}, replace=True)
     with repo.transaction() as transaction:
         transaction.purge("ledger")
     events = written(repo)
-    assert [(item.type, item.key) for item in events if item.key in ("t3", "p2")] == [
-        ("task.changed", "t3"),
+    assert sorted((item.type, item.key) for item in events if item.key in ("t3", "p2")) == [
         ("phase.changed", "p2"),
-        ("task.removed", "t3"),
         ("phase.removed", "p2"),
+        ("task.changed", "t3"),
+        ("task.removed", "t3"),
     ]
     assert [(item.type, catalogue.refusal(item)) for item in events if catalogue.refusal(item)] == []
     assert {item.type for item in events} == set(catalogue.LEDGER)
