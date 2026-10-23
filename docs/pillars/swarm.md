@@ -3734,7 +3734,8 @@ task names and judges the task's own pull request together with them. The named 
 
 Each text is searched for full `github.com/<owner>/<repo>/pull/<n>` links and for short `<owner>/<repo>#<n>`
 references whose owner is the owner of the task's own pull request. Links to the task's own repository are skipped,
-and each pull request counts once in the order it first appears. The Parent intent section is skipped because it
+and each pull request counts once. Texts are read in the order above; within one text, its full links come before
+its short references. The Parent intent section is skipped because it
 carries the project overview, and a Doctor overview lists every fix it merged: one antoncore pull request body named
 about 140 agentihooks pull requests that way, none of them part of the task.
 
@@ -3759,8 +3760,10 @@ https://github.com/acme/api/pull/14, https://github.com/acme/api/pull/15, https:
 https://github.com/acme/api/pull/17 and 133 more
 ```
 
-That reason comes from a body naming 140 pull requests in another repository: three read, 137 unread, ten listed in
-`unread_pull_requests`, `unread_overflow` 127, four named in the reason and the other 133 counted.
+That reason comes from a body naming 140 pull requests in another repository whose first three were read: 137
+unread, ten listed in `unread_pull_requests`, `unread_overflow` 127, four named in the reason and the other 133
+counted. When none of the 140 can be read, as in the regression test below, `judged_pull_requests` holds only the
+task's own pull request, `unread_overflow` is 130 and the reason ends `and 136 more`.
 
 Read the lists the classifier saw from the intent history of the swarm:
 
@@ -3788,7 +3791,8 @@ jq -c 'select(.gate == "intent" and .kind == "fail-open")' ~/.agentihooks/swarm/
 
 Before [pull request 5148](https://github.com/the-cloud-clockwork/agentihooks/pull/5148), the unread list of that
 140 link body passed the 8192 character bound and became a truncated record, the reason text sliced it as a list, and
-the `KeyError: slice(None, -1, None)` ended every Doctor tick run from 06:06 UTC on 20 October until the fix merged.
+the `KeyError: slice(None, -1, None)` ended every Doctor tick run; the swarm journal of 20 October shows it from
+06:06 UTC until the fix merged.
 The red run on dev code with the new tests,
 [39380494294](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39380494294), failed six of them; the
 green runs, [39380496940](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39380496940) and
