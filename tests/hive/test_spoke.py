@@ -124,7 +124,9 @@ def test_only_one_spoke_can_claim_duplicate_offers_of_the_same_task_generation(r
     assert raced == ["busy"]
     rig.tasks.request.assert_called_once_with(rig.event)
     other_tasks.request.assert_not_called()
-    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+    rig.runtime.spawn.assert_called_once_with(
+        replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
+    )
 
 
 def test_a_withdrawn_task_is_terminated_without_launching(rig):
@@ -161,7 +163,9 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
     rig.runtime.spawn.side_effect = lambda request: (observed.append("spawn"), rig.runtime.spawn.return_value)[1]
 
     assert rig.spoke.poll() == "started"
-    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+    rig.runtime.spawn.assert_called_once_with(
+        replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
+    )
     assert observed[0] == "spawn"
     subject, event = observed[1]
     assert subject == "swarm.rig.execution.started"
@@ -232,7 +236,9 @@ def test_a_publication_retry_reuses_the_started_execution_after_a_spoke_restart(
     rig.clock.now = 10
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, reading)
     assert restarted.poll() == "started"
-    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+    rig.runtime.spawn.assert_called_once_with(
+        replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
+    )
     rig.tasks.request.assert_called_once_with(rig.event)
     rig.tasks.reopen.assert_not_called()
     assert published[0] == published[1]
@@ -331,7 +337,10 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
             spoke = Spoke(config, bus, runtime, tasks, reading)
             assert spoke.poll(500) == "started"
             runtime.spawn.assert_called_once_with(
-                replace(tasks.request.return_value, task={**tasks.request.return_value.task, "claim_fence": ANY})
+                replace(
+                    tasks.request.return_value,
+                    task={**tasks.request.return_value.task, "claim_fence": ANY, "account_slot_hive": "hive-a"},
+                )
             )
             found = bus.events.consumer("audit", "swarm.rig.execution.started").fetch(1, 500)
             assert len(found) == 1
@@ -369,7 +378,9 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, lambda: None)
     assert restarted.poll() == ("started" if boundary == "started" else "dead")
     if boundary == "started":
-        rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+        rig.runtime.spawn.assert_called_once_with(
+            replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
+        )
         rig.tasks.reopen.assert_not_called()
     else:
         assert rig.runtime.spawn.call_count == 3
@@ -393,7 +404,9 @@ def test_an_ambiguous_spawn_keeps_its_identity_and_never_launches_again(rig):
     rig.clock.now = 10
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, reading)
     assert restarted.poll() == "uncertain"
-    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+    rig.runtime.spawn.assert_called_once_with(
+        replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
+    )
     rig.tasks.reopen.assert_not_called()
 
 
@@ -407,7 +420,9 @@ def test_pending_publication_is_recovered_before_taking_new_work_from_a_busy_lan
         rig.queue.offer(replace(rig.event, id=f"offer-{index}", key=f"new-{index}"))
         rig.clock.now += 10
         assert rig.spoke.poll() == "retry"
-    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+    rig.runtime.spawn.assert_called_once_with(
+        replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
+    )
     rig.tasks.reopen.assert_not_called()
     rig.bus.events.publish = real_publish
     assert rig.spoke.poll() == "started"

@@ -26,7 +26,12 @@ def test_hive_runtime_reserves_and_pins_account_before_start(tmp_path, monkeypat
     config = SimpleNamespace(
         slug="rig", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
     )
-    runtime.spawn(config, "eng", "agent-a", {"id": "one", "account_slot_hive": "hive-a", "execution_id": "execution-a"})
+    runtime.spawn(
+        config,
+        "eng",
+        "agent-a",
+        {"id": "one", "title": "work", "account_slot_hive": "hive-a", "execution_id": "execution-a"},
+    )
 
 
 def test_hive_runtime_account_refusal_does_not_launch(tmp_path, monkeypatch):
@@ -44,6 +49,9 @@ def test_hive_runtime_account_refusal_does_not_launch(tmp_path, monkeypatch):
     )
     with pytest.raises(SpawnError, match="^No account slot available$"):
         runtime.spawn(
-            config, "eng", "agent-a", {"id": "one", "account_slot_hive": "hive-a", "execution_id": "execution-a"}
+            config,
+            "eng",
+            "agent-a",
+            {"id": "one", "title": "work", "account_slot_hive": "hive-a", "execution_id": "execution-a"},
         )
     assert calls == []

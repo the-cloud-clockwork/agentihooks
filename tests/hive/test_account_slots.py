@@ -286,3 +286,29 @@ def test_distributed_heartbeat_publishes_even_without_any_executions(rig, monkey
     monkeypatch.setattr(bus, "close", lambda: None)
     account_slots.publish("one", reading(sessions=1), {"executions": {}})
     assert second.take("two", "claude") is None
+
+
+def test_pending_launch_renewal_does_not_hide_a_manual_session(rig, monkeypatch):
+    from scripts.hive import account_slots
+
+    first, second, _, report, _ = rig
+    report[0] = reading(cap=2, sessions=1)
+    second.read = lambda: reading(cap=2)
+
+    class Interval:
+        def __init__(self, callback, **kwargs):
+            self.callback = callback
+
+        def start(self):
+            self.callback()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(account_slots, "Interval", Interval)
+
+    def launch(account):
+        assert second.take("second", "claude") is None
+        return account
+
+    assert first.launch("first", "claude", "", launch) == "a"
