@@ -227,6 +227,20 @@ def test_missing_turn_latency_no_longer_holds_a_finding_open():
     assert set(standing.read(redis, "rig-grade-swarm")) == {"langfuse_account_nestor_coltatthecloudclockwork_com"}
 
 
+def test_long_turns_without_errors_clear_an_earlier_error_finding():
+    from scripts.swarm import langfuse
+    from scripts.swarm.health import standing
+
+    redis, summary, bindings, limits = recorded_case()
+    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 1, limits)
+    assert "langfuse_account_nestorcoltathotmail_com" in standing.read(redis, "rig-grade-swarm")
+    summary["agents"][0].update(
+        observations=331, error_rate=0, errors=0, turns=8, turn_latency_ms={"p50": 3000000, "p95": 3000000}
+    )
+    assert langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2, limits) == 1
+    assert set(standing.read(redis, "rig-grade-swarm")) == {"langfuse_account_nestor_coltatthecloudclockwork_com"}
+
+
 def test_account_evidence_retains_units_window_and_stage_numbers():
     from scripts.swarm import langfuse
     from scripts.swarm.health import standing
