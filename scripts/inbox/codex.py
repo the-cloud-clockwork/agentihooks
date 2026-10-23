@@ -467,7 +467,8 @@ def main(argv: list[str] | None = None) -> int:
     for signum in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(signum, lambda number, frame: stopped.set())
     store = inbox_connect()
-    feed = feed_for(store, record.agent_name, record.execution_id)
+    store.session_id = record.thread_id
+    feed = feed_for(store, record.agent_name, record.thread_id)
     return 0 if Pump(store, binding, feed=feed).run(stopped.is_set) == STOPPED else 1
 
 
