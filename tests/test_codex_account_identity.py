@@ -374,6 +374,7 @@ def test_the_email_claim_decides_between_two_email_shaped_slugs(tmp_path):
         ("aAtb_cc", False),
         ("aatbcc", False),
         ("aatb_", False),
+        ("aatabcdefghijklmnopqrstuvwxyz0123456789_x_abcdefghijklmnopqrstuvwxyz", True),
     ],
 )
 def test_an_email_shaped_slug_is_user_at_domain_and_a_letter_suffix(name, shaped):
