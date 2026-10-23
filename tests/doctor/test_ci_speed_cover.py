@@ -52,7 +52,7 @@ def test_the_cooldown_ending_returns_a_finding_inside_the_judged_range(store):  
     assert ci_speed.unjudged([current], records, AFTER + COOLDOWN_MS, COOLDOWN_MS) == [current]
 
 
-def test_new_runs_in_range_send_the_masters_no_new_notice(store, monkeypatch):  # noqa: F811
+def test_in_range_runs_stay_silent_and_an_out_of_range_run_notifies(store, monkeypatch):  # noqa: F811
     status(monkeypatch)
 
     def finished(identity, created):
