@@ -212,7 +212,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
     timing.call(resume.track_outages, slug, store, runtime, rows, now_ms)
     actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
-    actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms, config.engine == EVENTS_ENGINE)
+    actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(resume.recover_outages, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_strays, slug, config, store, runtime)
     actions += skip_refused(failed_panes.sweep, slug, store, runtime, now_ms)
@@ -596,14 +596,13 @@ def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
     return [f"retired {agent.name}"]
 
 
-def _reap(slug, store, ledger, runtime, rows, now_ms, events=False):
+def _reap(slug, store, ledger, runtime, rows, now_ms):
     from scripts.hub.reconciler import legacy_agents
 
     live, actions = runtime.live_names(), []
     for agent in legacy_agents(store, slug):
         if (
-            (events and agent.lane != MASTER)
-            or agent.state == "awaiting-decision"
+            agent.state == "awaiting-decision"
             or (agent.lane == MASTER and agent.state == "starting")
             or _acknowledging(slug, store, agent)
         ):
@@ -1202,10 +1201,10 @@ def _expire_launch(config, runtime, agent, error):
 
 
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
-    from scripts.swarm_v2.runtime import codex
-
     if config.engine == EVENTS_ENGINE:
         return []
+    from scripts.swarm_v2.runtime import codex
+
     rows, actions = {t["id"]: t for t in doc["tasks"]}, []
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}

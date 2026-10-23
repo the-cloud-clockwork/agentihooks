@@ -24,7 +24,7 @@ def test_an_events_engine_swarm_leaves_claimed_tasks_without_an_agent_to_the_hub
     assert "task t1 had no agent, reopened" in tick("sw", store, ledger, runtime, now_ms=2_000)
 
 
-def test_an_events_engine_swarm_reaps_no_worker_agent(store):  # noqa: F811
+def test_an_events_engine_swarm_still_reaps_a_worker_the_legacy_path_launched(store):  # noqa: F811
     from scripts.swarm.store import AgentRecord
 
     store.update("sw", engine="events", state="paused")
@@ -32,11 +32,8 @@ def test_an_events_engine_swarm_reaps_no_worker_agent(store):  # noqa: F811
     ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0009", "eng", "t1", started_at=1_000))
     actions = tick("sw", store, ledger, runtime, now_ms=10_000_000)
-    assert [a.name for a in store.agents("sw") if a.lane == "eng"] == ["engineer@a1b2c3-0009"]
-    assert not [action for action in actions if action.startswith("lost engineer@a1b2c3-0009")]
-    store.update("sw", engine="legacy")
-    actions = tick("sw", store, ledger, runtime, now_ms=10_000_001)
     assert [action for action in actions if action.startswith("lost engineer@a1b2c3-0009")]
+    assert [a.name for a in store.agents("sw") if a.lane == "eng"] == []
 
 
 def test_an_events_engine_swarm_collects_no_worker_hive_acknowledgement(store):  # noqa: F811
