@@ -2725,6 +2725,63 @@ The command prints 0 once the finding is gone.
 [Pull request #4024](https://github.com/the-cloud-clockwork/agentihooks/pull/4024) delivered the pin and the
 detector; its red Proofs run reproduced a stripped identity master whose directive returned nothing.
 
+### Doctor handoff detectors
+
+The Doctor's handoff detectors (`scripts.doctor.handoffs`) run with the other detectors on every Doctor detection
+pass, timed as the `doctor.handoff` step. They read two kinds of handoff record from the watched swarm:
+
+- **A started successor.** A prompt the tick wrote for a successor carries the handoff document, its seat and its
+  task. The sender is the seat's previous occupant in the seat history, and the successor is the prompt's agent.
+- **A waiting handoff.** A handoff document stored for a task whose successor has not started yet. The seat is the
+  one stored with the handoff, and the sender is the `agent` field of its envelope.
+
+Each record is checked by `missing_recap`, then by `reasked`:
+
+| Record | Finding id | Raised when |
+|---|---|---|
+| A seat or a sender, or both | `missing-recap/<sender, else seat>` | No recap on the seat comes from the sender |
+| No seat and no sender | `unattributed-handoff/<task>` | Always: there is no seat or sender to name |
+| A started successor | `reasked-handoff/<successor>` | The successor sent a message with a question mark and at least four distinct words of four or more characters, at least 60% of them in the handoff document or the sender's recaps |
+
+A record with an empty seat and an empty sender is reported apart, as an `unattributed handoff` naming its task.
+Before [pull request #5126](https://github.com/the-cloud-clockwork/agentihooks/pull/5126) the same record raised
+`missing-recap/` with an empty subject: the finding named nothing to judge, and every such record shared that one
+id. A record with only a seat or only a sender stays a missing recap, named by what it has.
+
+An unattributed handoff finding has this summary, evidence and threshold, and its number is 1:
+
+```text
+unattributed-handoff/doc-79030d0c5613b0f2
+  handoff record names no seat and no sender
+  task doc-79030d0c5613b0f2 with no seat on record
+  no sender on record
+  successor not started yet
+  threshold: every handoff names its seat or its sender
+```
+
+The successor line reads `successor <agent>` once a successor has been recorded. Measure one finding, or every
+current finding of the class, the same way before and after a fix:
+
+```bash
+agentihooks doctor rig-grade-swarm measure unattributed-handoff/doc-79030d0c5613b0f2
+agentihooks doctor rig-grade-swarm measure unattributed-handoff
+```
+
+The first command prints the finding id and 1 while the finding stands and 0 once it is gone. The second prints
+`unattributed-handoff count <n> unknown <failed detectors> max <largest number>`; it refuses with `no finding of the
+class unattributed-handoff has been seen` until the Doctor has seen one.
+
+| Symptom | Check | Cause and action |
+|---|---|---|
+| An `unattributed-handoff` finding names a task | `agentihooks ledger --slug <watched slug> show`, the task's claim history | The task's waiting handoff was stored without a seat, and its envelope names no agent. Judge the finding against the task's last claimant; the handoff itself still reaches the successor. |
+| A `missing-recap` finding names a seat, not an agent | The evidence line `handed off by an occupant the seat history predates` | The seat history has no previous occupant for that generation, so the seat is the only name on record. |
+| A finding id ends in `/` with nothing after it | `git -C <agentihooks checkout> merge-base --is-ancestor 8cdc1475c1 HEAD` | The Doctor runs code from before pull request #5126; apply it with `agentihooks doctor <watched slug> intervene pull-dev`. |
+
+The red [Tests run 39373109267](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373109267) on the
+test only head failed on the empty subject; the green
+[Tests run 39373777928](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373777928) passed with
+the fix.
+
 ## One task per agent life
 
 An agent is spawned for one task, told that task in its opening prompt, and ends when the task is done or
