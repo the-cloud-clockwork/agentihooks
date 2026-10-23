@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 
 SHUTDOWN_WAIT_SECONDS = 12
+EVIDENCE_SECONDS = 10
 
 
 def docker(*args, timeout=30):
@@ -109,6 +110,35 @@ def terminal_disconnect(container, root):
         os.close(master)
 
 
+def stalled(container, output, root):
+    target = output / ("stalled-" + uuid.uuid4().hex)
+    attempt = Path(root).parents[2]
+    captured = target / "attempts" / attempt.name
+    (captured / "run").mkdir(parents=True)
+    evidence = {
+        "state.json": ("inspect", "--format", "{{json .State}}", container),
+        "processes.txt": ("top", container, "-eo", "pid,ppid,stat,etime,args"),
+        "logs.txt": ("logs", "--timestamps", "--tail", "500", container),
+    }
+    for name, args in evidence.items():
+        try:
+            (target / name).write_text(docker(*args, timeout=EVIDENCE_SECONDS) + "\n")
+        except (subprocess.SubprocessError, OSError) as exc:
+            (target / name).write_text(f"unavailable: {exc}\n")
+    unavailable = []
+    for source, destination in (
+        (attempt / "launch.json", captured / "launch.json"),
+        (attempt / "run" / "supervision", captured / "run"),
+    ):
+        try:
+            docker("cp", f"{container}:{source}", str(destination), timeout=EVIDENCE_SECONDS)
+        except (subprocess.SubprocessError, OSError) as exc:
+            unavailable.append(f"{source}: {exc}")
+    if unavailable:
+        (target / "unavailable.txt").write_text("\n".join(unavailable) + "\n")
+    print(f"container {container} did not stop within {SHUTDOWN_WAIT_SECONDS}s; evidence in {target}", flush=True)
+
+
 def run_case(image, mode, output, kill=False, supervised=False, viewer=True):
     container = docker(
         "run",
@@ -158,7 +188,11 @@ def run_case(image, mode, output, kill=False, supervised=False, viewer=True):
             assert len(initial) == 5 and all(final[k] > v for k, v in initial.items())
             start = time.monotonic()
             docker("kill", "--signal", "TERM", container)
-        code = int(docker("wait", container, timeout=SHUTDOWN_WAIT_SECONDS))
+        try:
+            code = int(docker("wait", container, timeout=SHUTDOWN_WAIT_SECONDS))
+        except subprocess.TimeoutExpired:
+            stalled(container, output, root)
+            raise
         elapsed = time.monotonic() - start
         stopped = state(container)
         assert not stopped["Running"] and stopped["Pid"] == 0
