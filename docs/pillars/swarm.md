@@ -2209,6 +2209,38 @@ Limits:
   its own fixer.
 - `stage-budget` reads no shard output and always files its own fixer.
 
+#### Independent consumer failures beside a lost shard
+
+Judge each failed consumer from its own cause. A lost unit shard in the run is only one prerequisite for folding;
+the consumer must also have a recognized name and print one of the missing shard signs above. For example, assume
+`unit (3.12, 1)` lost its runner with `Failed to resolve action download info`. The following are alternative
+consumer failures in that same run:
+
+| Failed consumer | Its own failure | Tasks filed for this pair of jobs |
+|---|---|---|
+| `sonar (3.12)` | `Missing coverage for shard 1` | `Promotion red: runner outage`, naming Sonar among the jobs missing shard output |
+| `sonar` | `Quality gate failed: 1 new bug on new code` | `Promotion red: runner outage` and `Promotion red: sonar` |
+| `shard-check (3.11)` | `No shard durations at shard-durations/1/durations.json, so those shards cannot be graded.` | `Promotion red: runner outage`, naming the shard check among the jobs missing shard output |
+| `shard-check (3.12)` | `Shards split on different stored durations, so their test sets overlap or leave gaps: a: x, b: y` | `Promotion red: runner outage` and `Promotion red: shard check (3.12)` |
+| `stage-budget` | Failed `Grade` step with no failure annotation | `Promotion red: runner outage` and `Promotion red: stage budget` |
+
+These task counts assume no earlier task holds either cause. An unrelated Sonar or shard check failure is absent
+from the outage task's consumer list; its separate fixer carries its own failed step and annotation evidence. If
+Sonar reports missing coverage but no job named exactly `unit` before ` (` lost its runner, Sonar keeps its own
+fixer too. A lost `unit-selected` job does not meet that prerequisite.
+
+To inspect the mixed failure case, use [Checking a run](#checking-a-run) to read both the lost unit job and each
+consumer's annotations, then compare the task titles with the table. A failed step with no useful annotation does
+not establish missing shard output. Fix a quality gate or shard split error through its own fixer even while the
+outage task remains open.
+
+This behavior is automatic in promotion intake. There is no environment variable or swarm setting to enable
+folding, broaden it to every consumer, or add signatures. The configurable `AGENTIHOOKS_SWARM_KEY_PREFIX` in the
+inspection commands selects the Redis key namespace only; it does not change the decision. For example, with the
+default namespace, `P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}` reads the same held causes the watch uses.
+Changes to consumer names or failure wording require a matching code change and CI proof. See the existing
+[limits](#jobs-that-failed-for-want-of-shard-output) for errors that themselves print a missing shard sign.
+
 #### Later outages and the green run
 
 The outage task holds the cause `runner outage` in `promotion:jobs`, without the run, job names or signs. While that
