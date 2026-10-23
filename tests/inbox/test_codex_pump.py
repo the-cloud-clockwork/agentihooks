@@ -1402,3 +1402,48 @@ def test_owner_loss_while_retrying_contention_still_ends_the_pump(rig, monkeypat
     assert sleeps == []
     assert rig.logged[-1] == f"codex pump for {ME} degraded: DispatchError: {OWNER} no longer delivers for {ME}"
     assert rig.server.methods().count("turn/start") == 0
+
+
+def test_contention_late_in_start_retries_start_and_closes_the_earlier_subscription(rig, monkeypatch):
+    subscriptions, marks = [], []
+    original_pubsub, original_mark = rig.store.redis.pubsub, codex.Transport.mark
+
+    def pubsub():
+        subscriptions.append(original_pubsub())
+        return subscriptions[-1]
+
+    def mark(transport, **changes):
+        marks.append(changes)
+        if len(marks) == 1:
+            raise InboxContention("the inbox changed meanwhile; run it again")
+        original_mark(transport, **changes)
+
+    monkeypatch.setattr(rig.store.redis, "pubsub", pubsub)
+    monkeypatch.setattr(codex.Transport, "mark", mark)
+    sleeps = recorded_sleeps(rig)
+    assert rig.run(1) == codex.STOPPED
+    assert sleeps == [codex.BACKOFF_S]
+    assert len(subscriptions) == 2
+    assert all(not subscription.subscribed for subscription in subscriptions)
+    assert rig.record().state == CONNECTED
+
+
+def test_contention_recording_an_acceptance_leaves_the_delivery_unknown_and_the_pump_running(rig, monkeypatch):
+    item = rig.store.send("alice", ME, "accepted under contention")
+    advance, accepting = rig.pump.receipts._advance, []
+
+    def contended_accept(pipe, delivery_id, owner, states, target):
+        if target == "accepted":
+            accepting.append(delivery_id)
+            if len(accepting) <= MOVE_ATTEMPTS:
+                from redis.exceptions import WatchError
+
+                raise WatchError("a watched key changed")
+        return advance(pipe, delivery_id, owner, states, target)
+
+    monkeypatch.setattr(rig.pump.receipts, "_advance", contended_accept)
+    recorded_sleeps(rig)
+    assert rig.run(4) == codex.STOPPED
+    assert rig.server.methods().count("turn/start") == 1
+    assert [d.state for d in deliveries(rig, item.id)] == ["unknown"]
+    assert rig.record().state == CONNECTED

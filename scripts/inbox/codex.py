@@ -305,6 +305,8 @@ class Pump:
         self.leased = True
         self.receipts.recover(binding.recipient, binding.owner)
         if self.feed is None:
+            if self.subscription is not None:
+                self.subscription.close()
             self.subscription = self.store.redis.pubsub()
             self.subscription.subscribe(NOTIFY)
         protocol.resume_thread(binding.connection, binding.thread_id)
