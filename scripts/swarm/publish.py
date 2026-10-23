@@ -81,6 +81,13 @@ def repository_root(repo: Path) -> Path:
     return Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")).parent
 
 
+def local_repository(recorded: str, repo: str) -> Path:
+    for candidate in (Path(recorded), Path(repo).parent / Path(recorded).name):
+        if (candidate / ".git").exists():
+            return repository_root(candidate)
+    raise SwarmError(f"no checkout of {Path(recorded).name} on this host beside {repo}")
+
+
 def repository_task(repo: Path, task: dict) -> dict:
     branch = task.get("repository_branches", {}).get(str(repo))
     if branch is None:
@@ -99,7 +106,7 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         root = Path(current.stdout.strip())
         primary = repository_root(root)
         declared = task.get("repositories")
-        if declared and primary not in {repository_root(Path(value)) for value in declared}:
+        if declared and primary not in {local_repository(value, repo) for value in declared}:
             raise SwarmError(f"current worktree repository {primary} is not in the task repositories")
         scoped = repository_task(primary, task)
         branch = require_branch(git(root, "branch", "--show-current"))
@@ -112,7 +119,7 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
     repositories = task.get("repositories") or [repo]
     if len(repositories) != 1:
         raise SwarmError("publish from the task worktree to select one of its repositories")
-    primary = repository_root(Path(repositories[0]))
+    primary = local_repository(repositories[0], repo)
     scoped = repository_task(primary, task)
     return existing(primary, scoped, agent), primary, scoped
 
@@ -132,7 +139,7 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
     fields = []
-    repositories = dict.fromkeys(repository_root(Path(value)) for value in task.get("repositories") or [repo])
+    repositories = dict.fromkeys(local_repository(value, repo) for value in task.get("repositories") or [repo])
     for repository in repositories:
         scoped = repository_task(repository, task)
         root = existing(repository, scoped, agent)

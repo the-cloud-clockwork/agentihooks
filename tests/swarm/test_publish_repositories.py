@@ -90,6 +90,41 @@ def test_prepare_names_the_default_repository_without_inferring_prose(repositori
     assert fields["repository"] == str(p.swarm)
 
 
+def test_prepare_and_publish_resolve_repositories_recorded_on_another_host(repositories, monkeypatch):
+    from pathlib import Path
+
+    p = repositories
+    elsewhere = p.swarm.parent / "another-host"
+    p.task["repositories"] = [str(elsewhere / "agentihooks"), str(elsewhere / "agentihooks-bundle")]
+    fields = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    roots = [entry["worktree"] for entry in fields["worktrees"]]
+    assert roots == [f"{p.swarm}-worktree", f"{p.bundle}-worktree"]
+    assert [entry["repository"] for entry in fields["worktrees"]] == [str(p.swarm), str(p.bundle)]
+    install_gate(Path(roots[1]))
+    Path(roots[1], "chosen.txt").write_text("after")
+    monkeypatch.chdir(roots[1])
+    first = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change bundle", ["chosen.txt"])
+    assert first["worktree"] == roots[1]
+    assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == first["head"]
+    p.task["repositories"] = [str(elsewhere / "agentihooks-bundle")]
+    Path(roots[1], "chosen.txt").write_text("again")
+    monkeypatch.chdir(p.swarm)
+    second = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Continue bundle", ["chosen.txt"])
+    assert second["worktree"] == roots[1]
+    assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == second["head"]
+
+
+def test_prepare_names_a_repository_without_a_checkout_on_this_host(repositories):
+    import re
+
+    from scripts.swarm.store import SwarmError
+
+    p = repositories
+    p.task["repositories"] = [str(p.swarm.parent / "another-host" / "antoncore")]
+    with pytest.raises(SwarmError, match=f"^no checkout of antoncore on this host beside {re.escape(str(p.swarm))}$"):
+        publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+
+
 def install_gate(root):
     package = root / "scripts" / "ci_prepush"
     package.mkdir(parents=True)
