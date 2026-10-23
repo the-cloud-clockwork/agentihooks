@@ -19,6 +19,16 @@ def live_readiness(monkeypatch):
     return document
 
 
+def test_default_readiness_loads_the_spokes_own_swarm(rig, live_readiness, monkeypatch):
+    from scripts.swarm import readiness
+    from tests.swarm.test_readiness import snapshot
+
+    load = Mock(return_value=snapshot(live_readiness))
+    monkeypatch.setattr(readiness.Source, "snapshot", load)
+    assert rig.spoke.poll(1) == "started"
+    load.assert_called_once_with("rig")
+
+
 @pytest.mark.parametrize(
     "measured",
     [None, reading(pod_cpus=1, pod_load=1), reading(pod_available_mb=0, pod_total_mb=4096)],

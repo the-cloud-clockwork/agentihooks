@@ -224,3 +224,38 @@ def test_unconfigured_memory_hub_does_not_open_shared_services(monkeypatch):
     with backend("memory", None) as bus:
         Readiness(bus).poll()
     factory.assert_not_called()
+
+
+def test_snapshot_preserves_swarm_scope_and_admission_arguments(monkeypatch):
+    row, store, ledger = source()
+    released, applied = Mock(return_value=True), Mock(return_value=True)
+    release_factory, apply_factory = Mock(return_value=released), Mock(return_value=applied)
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", release_factory)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", apply_factory)
+    view = readiness.Source(store, ledger).snapshot("rig")
+    store.config.assert_called_once_with("rig")
+    store.agents.assert_called_once_with("rig")
+    release_factory.assert_called_once_with(store.config.return_value.repo)
+    apply_factory.assert_called_once_with(store.config.return_value, {"task-a": row})
+    assert view.fix == ""
+    assert view.claimed("task-a") is False
+    store.claimant.assert_called_once_with("rig", "task-a")
+    assert view.admits(row)
+    released.assert_called_once_with(row)
+    applied.assert_called_once_with(row)
+
+
+def test_configured_readiness_publishes_through_its_bus_and_clock(monkeypatch):
+    _, store, ledger = source()
+    provider = readiness.Source(store, ledger)
+    monkeypatch.setattr(readiness, "Source", lambda: provider)
+    monkeypatch.setattr("scripts.hub.readiness.BusConfig.from_environ", lambda: BusConfig(backend="nats"))
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
+    with backend("memory", None) as bus:
+        reactor = next(r for r in registry.configured(bus, clock=lambda: 73) if r.name == "readiness")
+        assert reactor.subject == "swarm.*.readiness.requested"
+        reactor.poll()
+        delivery = bus.queue(readiness.queue_name("rig", "eng"), QueuePolicy()).take(1)
+        assert delivery.event.time == 73
+        delivery.ack()
