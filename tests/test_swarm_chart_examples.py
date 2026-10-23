@@ -62,9 +62,9 @@ def test_the_external_nats_example_points_the_hub_at_its_own_nats():
     assert values.get("hiveOnly", False) is False
 
 
-def test_the_kind_proof_renders_every_example_after_building_the_dependency():
+def test_the_kind_proof_renders_every_example_after_verifying_the_dependency():
     script = (CHART / "ci" / "kind-smoke.sh").read_text()
     render = script.index('python3 tests/chart_examples.py "$chart"')
 
-    assert script.index('helm dependency build "$chart"') < render
+    assert script.index("sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256") < render
     assert render < script.index("finish() {")

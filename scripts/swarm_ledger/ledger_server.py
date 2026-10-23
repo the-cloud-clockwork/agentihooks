@@ -1311,6 +1311,15 @@ def follow_shared(interval=FOLLOW_S):
         scheduled_wait(interval)
 
 
+def adopt_disk_files():
+    for folder in sorted(core.LEDGER_DIR.glob("*.media")):
+        slug = folder.name.removesuffix(".media")
+        try:
+            ledger_artifacts.adopt_disk(slug)
+        except Exception as exc:  # one unreadable ledger must not stop the others adopting
+            sys.stderr.write(f"disk adoption {slug}: {exc}\n")
+
+
 def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     ledger_writer = ports.swarm().ledger_writer
@@ -1322,6 +1331,7 @@ def serve():
             sys.exit(str(conflict))
     legacy.adopt(stored)
     adopt_unrelayed()
+    threading.Thread(target=adopt_disk_files, daemon=True).start()
     metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
     threading.Thread(target=watch_ledgers, daemon=True).start()
     if storage.shared():

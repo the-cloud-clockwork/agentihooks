@@ -21,7 +21,7 @@ if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
   rm -f "$KIND_LAYER_CACHE/complete"
 fi
 python3 tests/kind_request.py
-helm dependency build "$chart"
+sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
 python3 tests/chart_examples.py "$chart"
 python3 tests/chart_github_auth.py "$chart"
 python3 tests/chart_hive_home.py "$chart"
