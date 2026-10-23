@@ -213,6 +213,25 @@ def test_a_pending_entry_without_pending_details_is_logged_as_stale_and_the_pass
     assert caplog.records == []
 
 
+def test_a_stale_pending_entry_stays_indexed_when_the_dispatch_lease_is_lost(monkeypatch, scheduler):
+    import json
+
+    from scripts.scheduler import core
+
+    stale = scheduler.timer(owner="operator", payload="stale", delay=1, now=100)
+    scheduler.redis.hset(scheduler.key("entries"), stale.id, json.dumps({**stale.record, "state": "pending"}))
+    scheduler.redis.sadd(scheduler.key("pending"), stale.id)
+    lock_key = scheduler.key("dispatch-lock")
+
+    def lose_ownership(*args):
+        scheduler.redis.set(lock_key, "successor")
+
+    monkeypatch.setattr(core._log, "warning", lose_ownership)
+    with pytest.raises(RuntimeError, match="^scheduler lost its dispatch lock$"):
+        scheduler.run_due(now=101)
+    assert scheduler.redis.smembers(scheduler.key("pending")) == {stale.id}
+
+
 def test_dispatch_lock_refuses_a_competing_drain_without_losing_work(scheduler):
     timer = scheduler.timer(owner="operator", payload="notice", delay=1, now=100)
     timer.start(now=100)
