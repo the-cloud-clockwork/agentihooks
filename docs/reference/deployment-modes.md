@@ -381,3 +381,4 @@ and hives with their hive tokens.
 - [Hives](../pillars/hives.md)
 - [Swarm](../pillars/swarm.md)
 - [Hosted ledger auth](hosted-ledger-auth.md)
+- [Shared ledger database sessions](shared-ledger-database.md)
