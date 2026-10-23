@@ -840,7 +840,9 @@ global installs and uv tools land in `~/.local` under the worker home.
 file. It reads the file without executing it, refreshes the member through the
 hive endpoint and saves its Redis and NATS credentials privately. The hub operator
 issues that file with `agentihooks hive invite`, using `--bus-url` for the NATS
-address reachable by the member. A `--like` invite copies that address. Bus and
+address reachable by the member. A `--like` invite copies that address. When the NATS signer record lists the member's swarms,
+the credential reaches only those swarms' subjects and streams; see
+[Swarm scoped bus credentials](../reference/swarm-bus-scope.md). Bus and
 ledger addresses survive later credential refreshes. A private hub CA must be
 trusted before joining, for example through `SSL_CERT_FILE`.
 
