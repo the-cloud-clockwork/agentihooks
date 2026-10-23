@@ -989,3 +989,10 @@ def test_failed_renewal_during_request_loading_prevents_spawn_and_releases_claim
     assert rig.spoke.poll() == "retry"
     rig.runtime.spawn.assert_not_called()
     assert json.loads(rig.bus.state("spoke-work").get(spoke.claim_key(rig.event)).value) == {"state": "ready"}
+
+
+def test_spoke_passes_hive_slot_ownership_to_the_launch_boundary(rig):
+    assert rig.spoke.poll() == "started"
+    request = rig.runtime.spawn.call_args.args[0]
+    assert request.task["account_slot_hive"] == "hive-a"
+    assert request.task["execution_id"] == "execution-a"
