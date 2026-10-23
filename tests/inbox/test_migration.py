@@ -21,6 +21,7 @@ def source(monkeypatch):
     for index, state in enumerate(STATES):
         world = "hive" if index % 2 else ""
         store = InboxStore(client, world=world)
+        monkeypatch.setattr(store, "home", lambda address: world)
         item = store.send("sender", "eng-1@swarm", f"work {state}", item_id=state, ref="ref", task="task")
         client.hset(store.key("item", item.id), mapping={"state": state, "extra": "preserved", "fyi": "True"})
         client.rpush(store.key("history", item.id), json.dumps({"event": "wake", "at": 1, "detail": state}))
