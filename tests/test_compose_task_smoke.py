@@ -25,6 +25,7 @@ def test_the_compose_task_smoke_starts_the_stack_with_nats_and_removes_it_with_i
         script.index("docker compose up")
     )
     assert 'left="$(docker ps --all --quiet --filter "$owned")$(docker volume ls --quiet --filter "$owned")"' in script
+    assert 'left+="$(docker network ls --quiet --filter "$owned")"' in script
 
 
 def test_the_compose_task_smoke_settles_one_task_to_done_through_the_hub_on_nats():
@@ -34,3 +35,9 @@ def test_the_compose_task_smoke_settles_one_task_to_done_through_the_hub_on_nats
     assert "execution_events.publish(bus" in script
     assert '["agentihooks", "swarm", slug, "done"' in script
     assert script.index("agentihooks hub run --once") < script.index("printf 'Compose task smoke passed")
+    gate = (
+        """if [[ $settled != '{"task": "done", "claim": null, "execution": "finished", "agent": false, """
+        """"spoke": "exited"}' ]]; then\n"""
+    )
+    assert gate in script
+    assert script.index(gate) < script.index("printf 'Compose task smoke passed")
