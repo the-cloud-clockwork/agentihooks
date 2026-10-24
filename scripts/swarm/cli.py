@@ -58,6 +58,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -279,6 +280,23 @@ def _stopped_tick(store, slug, ledger, runtime, held):
     return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
 
 
+def _intent_pass(inbox, store, slug, doc, ledger, config):
+    view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
+    check = intent.Check(
+        slug,
+        intent.mode_of(config),
+        now_ms(),
+        ledger,
+        ledger_events.Mail(inbox, store, slug),
+        intent.pr_view,
+        intent.judged,
+        head=lambda url: getattr(view(url), "head", None),
+        named=intent.named_view,
+        text=intent.pr_text,
+    )
+    return view, skip_refused(check.run, doc)
+
+
 @timing.instrument_tick
 @outage.guard_tick
 @ledger_route.service
@@ -347,25 +365,12 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = _phase_steps(inbox, store, slug, doc, ledger)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
-            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
-            mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
-            actions += skip_refused(
-                intent.Check(
-                    slug,
-                    mode,
-                    now_ms(),
-                    ledger,
-                    mail,
-                    intent.pr_view,
-                    intent.judged,
-                    head=lambda url: getattr(view(url), "head", None),
-                    named=intent.named_view,
-                    text=intent.pr_text,
-                ).run,
-                doc,
-            )
-            actions += skip_refused(reboot.boot_pass, slug, store, ledger, runtime, now_ms())
-            actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
+            with ThreadPoolExecutor(max_workers=1) as worker:
+                judged = worker.submit(copy_context().run, _intent_pass, inbox, store, slug, doc, ledger, config)
+                actions += skip_refused(reboot.boot_pass, slug, store, ledger, runtime, now_ms())
+                actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
+                view, checked = judged.result()
+            actions += checked
             if store.config(slug).template == "doctor":
                 from scripts.doctor import cli as doctor
 
@@ -375,7 +380,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
             skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
-            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
+            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc, view)
             actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
