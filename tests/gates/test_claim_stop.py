@@ -257,17 +257,19 @@ def test_future_verification_stop_passes_and_releases_its_claim(rig, offset):
     rig.pulls[URL] = MERGED
     assert rig.stop().allowed
     assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG)[0].state == "finished"
     assert rig.task["awaiting"] == "verify"
     assert rig.task["state"] == "pr"
     assert rig.rows() == []
 
 
+@pytest.mark.parametrize("kind", ["ops", "code"])
 @pytest.mark.parametrize("after_at", ["", "999999", "1000000"])
-def test_due_or_unscheduled_verification_stop_still_owes_contract(rig, after_at):
+def test_due_or_unscheduled_verification_stop_still_owes_contract(rig, after_at, kind):
     rig.task.update(
         state="pr",
         pr_url=URL,
-        kind="ops",
+        kind=kind,
         awaiting="verify",
         contract={"after": "yes", "after_at": after_at},
     )
