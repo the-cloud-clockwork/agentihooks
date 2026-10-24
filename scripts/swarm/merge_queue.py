@@ -190,20 +190,27 @@ def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=N
     steps = []
     try:
         removed = []
+        for pull in waiting:
+            displaced.add(pull)
         try:
             for pull in reversed(waiting):
                 current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
                 if current["mergeQueueEntry"] is not None and current["mergeQueueEntry"]["state"] == "QUEUED":
                     removed.append(pull)
                     steps.append(["dequeue", pull["url"]])
-                    displaced.add(pull)
                     graphql(DEQUEUE, {"id": pull["id"]}, run)
-            current = graphql(STATE, {"url": url}, run)["resource"]
-            if current["mergeQueueEntry"] is None:
-                steps.append(["queue", url])
-                graphql(QUEUE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
+                else:
+                    displaced.discard(pull["url"])
         except SwarmError as exc:
             errors.append(str(exc))
+        if not errors or raw["mergeQueueEntry"] is not None:
+            try:
+                current = graphql(STATE, {"url": url}, run)["resource"]
+                if current["mergeQueueEntry"] is None:
+                    steps.append(["queue", url])
+                    graphql(QUEUE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
+            except SwarmError as exc:
+                errors.append(str(exc))
         restored = []
         for pull in reversed(removed):
             try:
@@ -216,6 +223,7 @@ def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=N
                 displaced.discard(pull["url"])
             except SwarmError as exc:
                 errors.append(f"could not restore {pull['url']}: {exc}")
+                break
         return {"url": url, "displaced": restored, "errors": errors}
     finally:
         if journal is not None:

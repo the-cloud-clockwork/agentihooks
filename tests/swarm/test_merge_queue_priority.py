@@ -276,7 +276,7 @@ def test_priority_reenqueues_a_critical_entry_ejected_during_reorder():
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9", "P2", "P3", "P4"]
 
 
-def test_priority_attempts_every_restoration_after_one_is_refused():
+def test_priority_stops_restoring_at_the_first_refusal_so_the_rest_keep_their_order():
     queue = FakeQueue()
 
     def run(command, **kwargs):
@@ -285,9 +285,24 @@ def test_priority_attempts_every_restoration_after_one_is_refused():
         return queue.run(command, **kwargs)
 
     result = merge_queue.prioritize(URL, run=run)
-    assert result["displaced"] == [URL[:-1] + "3"]
-    assert "could not restore" in result["errors"][0]
-    assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9", "P3"]
+    assert result == {"url": URL, "displaced": [], "errors": [f"could not restore {URL[:-1]}2: restore refused"]}
+    assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9"]
+
+
+def test_priority_requeues_a_queued_target_ejected_before_a_dequeue_fails():
+    queue = FakeQueue(queued=True)
+
+    def run(command, **kwargs):
+        if "dequeuePullRequest" in " ".join(command) and "id=P3" in command:
+            return subprocess.CompletedProcess(command, 1, "", "dequeue refused")
+        done = queue.run(command, **kwargs)
+        if "dequeuePullRequest" in " ".join(command) and "id=P4" in command:
+            queue.entries = [e for e in queue.entries if e["pullRequest"]["id"] != "P9"]
+        return done
+
+    result = merge_queue.prioritize(URL, run=run)
+    assert result == {"url": URL, "displaced": [URL[:-1] + "4"], "errors": ["dequeue refused"]}
+    assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P2", "P3", "P9", "P4"]
 
 
 @pytest.mark.parametrize("queued, split", [(False, 2), (True, 4)])
@@ -406,7 +421,7 @@ def test_priority_records_each_entry_before_it_leaves_the_queue():
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1"]
 
 
-@pytest.mark.parametrize("refused, kept", [("", []), ("P2", [URL[:-1] + "2"])])
+@pytest.mark.parametrize("refused, kept", [("", []), ("P2", [URL[:-1] + "2", URL[:-1] + "3"])])
 def test_priority_clears_each_entry_once_it_is_back(refused, kept):
     queue = FakeQueue()
     displaced = Displaced(queue)
