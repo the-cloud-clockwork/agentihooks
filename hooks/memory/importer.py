@@ -44,6 +44,7 @@ SESSIONS = (
 UNKNOWN_EVENTS = "SELECT TOTAL(unknown_events) FROM session_import WHERE access_domain = ?"
 RETIRE = "DELETE FROM session_import WHERE access_domain = ?"
 ALL_ROWS = "SELECT * FROM session_import"
+BEGIN, COMMIT, ROLLBACK = "BEGIN IMMEDIATE", "COMMIT", "ROLLBACK"
 MISMATCH = "the written export does not match the current import projections; nothing was retired"
 EXISTS = "the export destination already exists; nothing was retired"
 
@@ -111,12 +112,12 @@ def _observe(provider: str, entry: dict, metadata: dict) -> str | None:
     return cwd
 
 
-def _entry(piece: bytes) -> dict | None:
+def _entry(piece: bytes) -> tuple[dict | None, bool]:
     try:
         entry = json.loads(piece.decode())
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    return entry if isinstance(entry, dict) else None
+        return None, False
+    return (entry if isinstance(entry, dict) else None), True
 
 
 def _events(provider: str, entry: dict, turn: TurnState, first: int, base: dict) -> list[dict]:
@@ -141,9 +142,9 @@ def read_source(provider: str, data: bytes, aliases: Mapping[str, str]) -> Sourc
         offset += len(piece) + 1
         if not piece.strip():
             continue
-        entry = _entry(piece)
+        entry, parsed = _entry(piece)
         if entry is None:
-            reason = "truncated final line" if index == len(pieces) - 1 else "unparseable line"
+            reason = "unparseable line" if parsed or index < len(pieces) - 1 else "truncated final line"
             losses.append({**span, "reason": reason})
             continue
         cwd = _observe(provider, entry, metadata) or cwd
@@ -253,10 +254,21 @@ class ImportLedger:
         }
 
     def retire(self, catalog: Catalog, domain: str, destination: Path) -> dict:
-        if destination.exists():
-            return {"state": "rejected", "error": {"class": "export_exists", "detail": EXISTS}}
+        self.db.execute(BEGIN)
+        try:
+            result = self._retire(catalog, domain, destination)
+        except BaseException:
+            self.db.execute(ROLLBACK)
+            raise
+        self.db.execute(COMMIT)
+        return result
+
+    def _retire(self, catalog: Catalog, domain: str, destination: Path) -> dict:
         current = self.export(catalog, domain)
-        _write_durably(destination, json.dumps(current, ensure_ascii=False, sort_keys=True))
+        try:
+            _write_durably(destination, json.dumps(current, ensure_ascii=False, sort_keys=True))
+        except FileExistsError:
+            return {"state": "rejected", "error": {"class": "export_exists", "detail": EXISTS}}
         if digest(json.loads(destination.read_text(encoding="utf-8"))["records"]) != current["digest"]:
             return {"state": "rejected", "error": {"class": "export_mismatch", "detail": MISMATCH}}
         self.db.execute(RETIRE, (domain,))
@@ -270,6 +282,11 @@ def _write_durably(destination: Path, text: str) -> None:
         handle.write(text)
         handle.flush()
         os.fsync(handle.fileno())
+    folder = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(folder)
+    finally:
+        os.close(folder)
 
 
 def _plan_error(grant: Grant, plan: ImportPlan) -> tuple[str, str] | None:

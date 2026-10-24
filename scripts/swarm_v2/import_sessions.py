@@ -76,6 +76,8 @@ def _plan(parser: argparse.ArgumentParser, args: argparse.Namespace) -> ImportPl
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.retire and (args.dry_run or args.root):
+        parser.error("--retire takes no --dry-run or --root")
     plan = _plan(parser, args)
     catalog = Catalog(args.catalog)
     try:

@@ -129,6 +129,12 @@ def test_truncated_unparseable_and_non_object_lines_are_reported_as_losses_with_
     ]
 
 
+def test_a_final_line_that_parses_but_is_not_an_object_is_unparseable_rather_than_truncated():
+    assert read_source("claude", claude("x") + b"[1]", ALIASES).losses == [
+        {"byte_start": len(claude("x")), "byte_end": len(claude("x")) + 3, "reason": "unparseable line"}
+    ]
+
+
 def test_a_complete_final_line_without_a_newline_is_an_event_and_not_a_loss():
     first, last = claude("one"), claude("two").rstrip(b"\n")
     read = read_source("claude", first + last, ALIASES)
@@ -496,6 +502,25 @@ def test_retire_writes_a_full_export_first_and_removes_only_import_projections(s
     assert imports.unknown_attribution("corpus-a") == 0
 
 
+def test_retire_holds_the_import_ledger_write_lock_from_export_to_delete(stores, tmp_path, monkeypatch):
+    only(run(stores, root(tmp_path, files={"p/s-1.jsonl": claude("one")})))
+    catalog, imports = stores
+    seen = []
+    write = importer_module._write_durably
+
+    def observed(destination, text):
+        seen.append(imports.db.in_transaction)
+        write(destination, text)
+
+    monkeypatch.setattr(importer_module, "_write_durably", observed)
+    assert imports.retire(catalog, "corpus-a", tmp_path / "export.json")["state"] == "retired"
+    assert seen == [True] and not imports.db.in_transaction
+    monkeypatch.setattr(importer_module, "_write_durably", lambda destination, text: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        imports.retire(catalog, "corpus-a", tmp_path / "other.json")
+    assert not imports.db.in_transaction
+
+
 def test_retire_refuses_an_existing_destination_and_a_mismatched_written_export(stores, tmp_path, monkeypatch):
     only(run(stores, root(tmp_path, files={"p/s-1.jsonl": claude("one")})))
     catalog, imports = stores
@@ -569,7 +594,16 @@ def test_the_cli_exits_two_when_a_source_is_refused(tmp_path, capsys, monkeypatc
     assert only(json.loads(capsys.readouterr().out))["outcome"] == "refused"
 
 
-@pytest.mark.parametrize("bad", [["--root", "claude:host-a"], ["--alias", "noequals"], ["--expected", "claude:x"]])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        ["--root", "claude:host-a"],
+        ["--alias", "noequals"],
+        ["--expected", "claude:x"],
+        ["--retire", "export.json"],
+        ["--retire", "export.json", "--dry-run"],
+    ],
+)
 def test_the_cli_refuses_malformed_arguments(tmp_path, bad):
     base = ["--catalog", "c", "--imports", "i", "--corpus", "c", "--principal", "p", "--root", f"claude:h:{tmp_path}"]
     with pytest.raises(SystemExit) as raised:
