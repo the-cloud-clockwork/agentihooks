@@ -69,18 +69,13 @@ def first_registration(home: Path, session: str) -> float | None:
     return before / 1e9 if registered and before == after else None
 
 
-def awaited_registration(
-    home: Path,
-    session: str,
-    clock: Callable[[], float] = time.monotonic,
-    sleep: Callable[[float], None] = time.sleep,
-) -> float:
+def awaited_registration(home: Path, session: str) -> float:
     budget = REGISTRATION_BUDGET_SECONDS
-    deadline = clock() + budget
+    deadline = time.monotonic() + budget
     while (registered_at := first_registration(home, session)) is None:
-        if clock() >= deadline:
+        if time.monotonic() >= deadline:
             raise AssertionError(f"Codex session {session} never registered within {budget} seconds")
-        sleep(POLL_SECONDS)
+        time.sleep(POLL_SECONDS)
     return registered_at
 
 
