@@ -11,7 +11,14 @@ REPLAYS = ("tests/swarm_ledger/repository_replay.py", "tests/swarm_ledger/page_r
 # The replays put the ledger folder ahead of the checkout root on sys.path.
 SEARCH = ("scripts/swarm_ledger", ".")
 # The replays read these without importing them: the served page, their recorded fixtures and this workflow.
-READ = ("scripts/swarm_ledger/", "tests/swarm_ledger/", ".github/workflows/equivalence.yml")
+# A change to this trigger or its graph helper runs the check, so a pull request cannot skip it by editing them.
+READ = (
+    "scripts/swarm_ledger/",
+    "tests/swarm_ledger/",
+    ".github/workflows/equivalence.yml",
+    "scripts/ci_equivalence_trigger.py",
+    "scripts/ci_mutation/scope.py",
+)
 DOTTED = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+")
 
 

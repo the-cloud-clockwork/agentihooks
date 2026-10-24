@@ -114,6 +114,8 @@ def test_the_trigger_follows_relative_nested_and_patched_imports(replays):
         (["scripts/swarm/plan.py", "scripts/unrelated.py"], ["scripts/swarm/plan.py"]),
         (["scripts/swarm_ledger/static/app.js"], ["scripts/swarm_ledger/static/app.js"]),
         ([".github/workflows/equivalence.yml"], [".github/workflows/equivalence.yml"]),
+        (["scripts/ci_equivalence_trigger.py"], ["scripts/ci_equivalence_trigger.py"]),
+        (["scripts/ci_mutation/scope.py"], ["scripts/ci_mutation/scope.py"]),
         (["scripts/unrelated.py", "docs/page.md"], []),
     ],
 )
