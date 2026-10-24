@@ -229,3 +229,27 @@ def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_relea
 def test_the_proven_image_skips_the_artifact_round_trip():
     assert "docker save" not in PROOF.read_text()
     assert all("image.tar" not in str(step) for job in hive_jobs().values() for step in job["steps"])
+
+
+def test_kind_proof_pulls_the_base_and_redis_into_the_node_while_the_hive_builds():
+    lines = PROOF.read_text().splitlines()
+    pulls = [
+        f'  docker exec "$cluster-control-plane" crictl pull {image}'
+        for image in (BASE, "mirror.gcr.io/library/redis:7-alpine")
+    ]
+    start = lines.index("{")
+    assert lines[start + 1].startswith('  kind create cluster --name "$cluster"')
+    assert lines[start + 2 : start + 4] == pulls
+    assert lines[start + 4] == '} > "$out/cluster.log" 2>&1 &'
+    load = lines.index('kind load docker-image "$image" --name "$cluster" &')
+    assert lines.index('wait "$cluster_pid"') < load < lines.index('wait "$load_pid"')
+    assert lines.index('wait "$load_pid"') < lines.index("kubectl apply -f - <<EOF")
+
+
+def test_kind_proof_ends_the_drain_hold_once_the_hive_reads_draining():
+    text = PROOF.read_text()
+    assert "sleep 45" not in text
+    lines = text.splitlines()
+    restart = lines.index('kubectl rollout restart "deployment/$deployment"')
+    assert lines[restart + 1 : restart + 3] == ["hold_agent draining", "sleep 5"]
+    assert "        if registry.show(store.redis, os.environ['HIVE'])['draining'] == 'yes':" in lines
