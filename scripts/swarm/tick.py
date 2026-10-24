@@ -43,6 +43,7 @@ from scripts.swarm import (
     failed_panes,
     freeze,
     grouping,
+    input_wait,
     lane_split,
     launch_check,
     ledger_events,
@@ -724,9 +725,13 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         observed = replace(observed, state=idle_state.IDLE)
     if observed.state == idle_state.WAITING:
         title = observed.prompt_title or "Waiting on input"
-        ticks = agent.input_ticks + 1 if agent.input_prompt == title else 1
+        same = agent.input_prompt == title
+        ticks = agent.input_ticks + 1 if same else 1
+        input_wait.mark(store, slug, agent.name, now_ms, same)
         store.put_agent(slug, replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0))
         return []
+    if agent.input_prompt:
+        input_wait.clear(store, slug, agent.name)
     agent = replace(agent, input_prompt="", input_ticks=0)
     held = outage.held(store, slug, agent.name)
     exhausted = resume.recovery_exhausted(store, slug, agent)
