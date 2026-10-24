@@ -41,6 +41,9 @@ def load_retired(path: Path | str) -> list[dict]:
         not isinstance(entry, dict) or not entry.get("user") or not entry.get("openbao") for entry in listed
     ):
         raise auth.HiveError(f"every retired user in {path} needs a user name and the openbao record to delete")
+    signed = {entry["user"] for entry in load_users(path)} & {entry["user"] for entry in listed}
+    if signed:
+        raise auth.HiveError(f"{path} lists {', '.join(sorted(signed))} under both users and retired")
     return listed
 
 
@@ -92,11 +95,20 @@ def _keys(bao: openbao_kv.OpenBao, url: str) -> dict[str, nkey.KeyPair]:
         raise auth.HiveError(f"the NATS signer record {SIGNER_PATH} cannot be used ({exc})") from None
 
 
-def revocations(redis: "Redis", account: nkey.KeyPair, retired: Sequence[Mapping]) -> dict[str, int]:
+def retire(
+    bao: openbao_kv.OpenBao, redis: "Redis", account: nkey.KeyPair, retired: Sequence[Mapping]
+) -> tuple[dict[str, int], list[str]]:
     now = int(time.time())
+    lines = []
     for entry in retired:
-        redis.hsetnx(nats_grant.REVOKED, service_user(account, entry["user"]).public, now)
-    return nats_grant.revoked(redis)
+        user = service_user(account, entry["user"]).public
+        redis.hsetnx(nats_grant.REVOKED, user, now)
+        openbao_kv.delete(bao, entry["openbao"])
+        lines.append(
+            f"{entry['user']}: revoked {user} in the preloaded swarm account, "
+            f"deleted OpenBao {openbao_kv.MOUNT}/{entry['openbao']}"
+        )
+    return nats_grant.revoked(redis), lines
 
 
 def trust_values(keys: Mapping[str, nkey.KeyPair], revoked: Mapping[str, int]) -> dict:
@@ -125,9 +137,5 @@ def bootstrap(
     for entry in users:
         total = openbao_kv.merge(bao, entry["openbao"], {CREDENTIALS_FIELD: service_creds(keys["account"], entry)})
         lines.append(f"{entry['user']}: {openbao_kv.summary(entry['openbao'], [CREDENTIALS_FIELD], total)}")
-    revoked = revocations(redis, keys["account"], retired)
-    for entry in retired:
-        openbao_kv.delete(bao, entry["openbao"])
-        user = service_user(keys["account"], entry["user"]).public
-        lines.append(f"{entry['user']}: revoked {user}, deleted OpenBao {openbao_kv.MOUNT}/{entry['openbao']}")
-    return trust_values(keys, revoked), lines
+    revoked, retired_lines = retire(bao, redis, keys["account"], retired)
+    return trust_values(keys, revoked), [*lines, *retired_lines]

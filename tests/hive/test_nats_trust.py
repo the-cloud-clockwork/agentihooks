@@ -198,7 +198,9 @@ def test_a_retired_user_is_revoked_in_the_preloaded_account_and_its_record_delet
     preload = values["config"]["merge"]["resolver_preload"]
 
     assert RETIRED[0]["openbao"] not in records
-    assert lines[2:] == [f"swarm-hive: revoked {retired}, deleted OpenBao secret/k8s/agentihooks-swarm-nats-hive"]
+    assert lines[2:] == [
+        f"swarm-hive: revoked {retired} in the preloaded swarm account, deleted OpenBao secret/k8s/agentihooks-swarm-nats-hive"
+    ]
     assert nkey.claims(preload[account.public])["nats"]["revocations"] == {"UMEMBER": 5, retired: 100}
     assert admin.hgetall(nats_grant.REVOKED) == {"UMEMBER": "5", retired: "100"}
 
@@ -294,6 +296,14 @@ def test_a_retired_user_without_a_name_or_record_is_refused(tmp_path, retired):
     assert str(refused.value) == f"every retired user in {path} needs a user name and the openbao record to delete"
 
 
+def test_a_user_listed_as_both_signed_and_retired_is_refused(tmp_path):
+    path = tmp_path / "users.yaml"
+    path.write_text(yaml.safe_dump({"users": [*USERS, *RETIRED], "retired": [*RETIRED, USERS[0]]}))
+    with pytest.raises(auth.HiveError) as refused:
+        nats_trust.load_retired(path)
+    assert str(refused.value) == f"{path} lists swarm-controller, swarm-hive under both users and retired"
+
+
 @pytest.mark.parametrize("body", ["", "users: []\n", "users: {}\n", "other: 1\n"])
 def test_a_users_file_without_users_is_refused(tmp_path, body):
     path = tmp_path / "users.yaml"
@@ -336,7 +346,7 @@ def test_cli_writes_the_trust_values_and_reports_each_user(bao, admin, tmp_path,
     assert out[0].endswith(f"swarm account {account.public}")
     assert out[1:] == [
         "swarm-controller: OpenBao secret/k8s/agentihooks-swarm-nats-controller: wrote credentials (2 keys total)",
-        f"swarm-hive: revoked {retired}, deleted OpenBao secret/k8s/agentihooks-swarm-nats-hive",
+        f"swarm-hive: revoked {retired} in the preloaded swarm account, deleted OpenBao secret/k8s/agentihooks-swarm-nats-hive",
         f"wrote the public operator trust to {values}",
     ]
     assert RETIRED[0]["openbao"] not in records
