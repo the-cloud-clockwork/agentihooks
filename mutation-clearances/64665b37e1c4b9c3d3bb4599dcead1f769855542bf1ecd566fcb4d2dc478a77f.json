@@ -1,6 +1,0 @@
-{
-  "scripts/swarm/code_reach.py:scripts.swarm.code_reach.x\u01c1Program\u01c1_typed__mutmut_35:0247928e7c08428ee898fea89ee7a0036c3dc79e6c9c550555435145665f7af2": {
-    "reader": "Standards",
-    "reason": "Detected by non-termination: for the same non-call binding the value flips False, True, False and never settles, so _typed hangs."
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "scripts/swarm/code_reach.py:scripts.swarm.code_reach.x\u01c1Program\u01c1_typed__mutmut_34:deb9439b2d956f8398800bda939fe2a624f43e9b2f2285082dad940c6ef20fd9": {
-    "reader": "Standards",
-    "reason": "Detected by non-termination: a name bound only to a non-call value such as items = [] flips True, False, True on successive passes and never settles, so _typed hangs."
-  }
-}

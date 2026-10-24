@@ -366,18 +366,18 @@ class Program:
         return chained and expr.func.attr in methods(redis.Redis) and self._receiver(expr.func.value, unit, local)
 
     def _typed(self, unit: Unit) -> dict[str, bool]:
-        """The names a unit binds, each true when a binding holds a Redis client or pipeline."""
+        """The names a unit binds, each true when a binding holds a Redis client or pipeline, read in source order."""
         local = {name: held for node in unit.nodes for name, held in _annotated(node).items()}
-        pairs = [pair for targets, value in map(_bindings, unit.nodes) for t in targets for pair in _pairs(t, value)]
-        while True:
-            before = dict(local)
-            for target, value in pairs:
-                if value is not None and self._held(value, unit, local):
-                    local[target] = True
-                elif not isinstance(value, ast.Call) or self._callees(value.func, unit) is not None:
-                    local[target] = local.get(target) is True
-            if local == before:
-                return local
+        bindings = sorted(
+            (found for found in map(_bindings, unit.nodes) if found[0]),
+            key=lambda found: (found[0][0].lineno, found[0][0].col_offset),
+        )
+        for target, value in (pair for targets, value in bindings for t in targets for pair in _pairs(t, value)):
+            if value is not None and self._held(value, unit, local):
+                local[target] = True
+            elif not isinstance(value, ast.Call) or self._callees(value.func, unit) is not None:
+                local[target] = local.get(target) is True
+        return local
 
     def _spread(self, key: str, unit: Unit) -> None:
         local = self._typed(unit)
@@ -393,8 +393,8 @@ class Program:
 
     def _receivers(self) -> None:
         """Grow the names holding a Redis client and the functions returning one, typed from the client and
-        pipeline constructors and annotations, until neither changes."""
-        while True:
+        pipeline constructors and annotations, until neither changes, with at most one pass per unit."""
+        for _ in self.units:
             size = len(self.clients), len(self.factories)
             for key, unit in self.units.items():
                 self._spread(key, unit)
