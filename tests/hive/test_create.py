@@ -177,7 +177,9 @@ def test_create_brings_a_named_hive_from_nothing_to_an_engineer_in_herdr(world):
     assert herdr == [["herdr", "machine", "add", "--label", NAME, "--remote-session", "default", TARGET]]
     state = _state(world)
     assert state["finished"] is True and state["pr"] == PR and state["ssh_port"] == 2225
-    assert state["added"] != member
+    assert state["added"] == member
+    assert world.run.named("ssh") == []
+    assert world.tools.redis.keys(f"{auth.PREFIX}:member:*") == [f"{auth.PREFIX}:member:{member}"]
     titles = [line.split(": ")[1] for line in world.lines]
     assert titles == [title for title, _ in create.STEPS]
     assert world.lines[-1] == f"hive create {NAME}: engineer: engineer@{member} in demo works on the hive"
