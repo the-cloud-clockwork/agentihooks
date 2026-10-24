@@ -34,10 +34,10 @@ def test_a_missing_start_uses_the_observed_hive_launch():
 
 @pytest.mark.parametrize("start", [0, None, -1])
 def test_an_old_hive_launch_reports_its_observed_age(start):
-    [found] = _findings(_agent(started_at=start, launched_at=NOW - 600_000))
+    [found] = _findings(_agent(started_at=start, launched_at=NOW - 3_700_000))
     assert found.kind == "telemetry never exported"
-    assert found.measure == 600
-    assert "after 600 seconds" in found.summary
+    assert found.measure == 3700
+    assert "after 3700 seconds" in found.summary
 
 
 @pytest.mark.parametrize("start", [0, None, -1])
