@@ -68,7 +68,7 @@ def test_retry_of_an_ended_agent_without_process_or_pane_releases_its_seat(store
     herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={})
     monkeypatch.setattr(herdr, "live_names", lambda: set())
     local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {})
-    runtime = RoutedRuntime(RuntimeRouter([local]), herdr)
+    runtime = RoutedRuntime(herdr, RuntimeRouter([local]))
     ledger = FakeLedger([{"id": "t1", "state": "done", "done": True}])
 
     assert _retire_ended("sw", store, ledger, runtime, ledger.rows, agent, 2) == [f"retired {agent.name}"]
