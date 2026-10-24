@@ -120,6 +120,10 @@ def _load(owners: dict[str, str], seat_id: str) -> int:
     return sum(owner == seat_id for owner in owners.values())
 
 
+def _added(held: list[str], address: str) -> list[str]:
+    return held if address in held else [*held, address]
+
+
 def count_of(text: str) -> int:
     if not text.isdecimal():
         raise MasterError(f"masters takes a whole number of master seats, not {text!r}")
@@ -199,13 +203,23 @@ class MasterSeats:
 
     def retire(self, slug: str, address: str) -> None:
         """Every phase the seat owns moves to the front door in the same write."""
-        front = seat_address(slug, MASTER)
-        saved = json.loads(self.redis.hget(self.key(slug), "owners") or "{}")
-        mapping = {"owners": json.dumps({p: front if owner == address else owner for p, owner in saved.items()})}
-        held = self.retired(slug)
-        if address not in held:
-            mapping[RETIRED] = json.dumps([*held, address])
-        self.redis.hset(self.key(slug), mapping=mapping)
+        from redis.exceptions import WatchError
+
+        front, key = seat_address(slug, MASTER), self.key(slug)
+        for _ in range(SAVE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key)
+                    saved = json.loads(pipe.hget(key, "owners") or "{}")
+                    held = json.loads(pipe.hget(key, RETIRED) or "[]")
+                    moved = {p: front if owner == address else owner for p, owner in saved.items()}
+                    pipe.multi()
+                    pipe.hset(key, mapping={"owners": json.dumps(moved), RETIRED: json.dumps(_added(held, address))})
+                    pipe.execute()
+                    return
+                except WatchError:
+                    continue
+        raise MasterError(f"master seats of {slug} kept changing; seat {address} was not retired")
 
     def retired(self, slug: str) -> list[str]:
         return json.loads(self.redis.hget(self.key(slug), RETIRED) or "[]")

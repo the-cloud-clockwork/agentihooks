@@ -239,8 +239,55 @@ def test_after_a_backend_master_retires_the_front_door_messages_a_claimant_in_it
 
     assert table.owners(SLUG, world.doc())[phase] == LEAD
     assert table.retired(SLUG) == [SECOND]
+    table.retire(SLUG, SECOND)
+    assert table.retired(SLUG) == [SECOND]
     master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
     assert world.refusals() == 0
+
+
+def racing_pipelines(world, monkeypatch, times):
+    real, raced = world.redis.pipeline, []
+
+    def pipeline():
+        pipe = real()
+        read = pipe.hget
+
+        def hget(key, field):
+            if field == "owners" and len(raced) < times:
+                raced.append(field)
+                world.redis.hset(key, "seats", json.dumps([LEAD]))
+            return read(key, field)
+
+        pipe.hget = hget
+        return pipe
+
+    monkeypatch.setattr(world.redis, "pipeline", pipeline)
+    return raced
+
+
+def test_a_retire_racing_another_masters_write_retries_and_still_hands_the_phases_to_the_front_door(world, monkeypatch):
+    table = masters.MasterSeats(world.redis)
+    [phase] = [p for p, owner in table.owners(SLUG, world.doc()).items() if owner == SECOND]
+    raced = racing_pipelines(world, monkeypatch, 1)
+
+    table.retire(SLUG, SECOND)
+
+    assert raced == ["owners"]
+    assert json.loads(world.redis.hget(table.key(SLUG), "owners"))[phase] == LEAD
+    assert table.retired(SLUG) == [SECOND]
+
+
+def test_a_retire_that_keeps_losing_the_race_is_refused_naming_the_seat(world, monkeypatch):
+    table = masters.MasterSeats(world.redis)
+    table.owners(SLUG, world.doc())
+    raced = racing_pipelines(world, monkeypatch, masters.SAVE_ATTEMPTS)
+
+    with pytest.raises(masters.MasterError) as refused:
+        table.retire(SLUG, SECOND)
+
+    assert str(refused.value) == f"master seats of {SLUG} kept changing; seat {SECOND} was not retired"
+    assert len(raced) == masters.SAVE_ATTEMPTS
+    assert table.retired(SLUG) == []
 
 
 def test_a_single_live_master_messages_without_reading_the_ledger(world, monkeypatch):
