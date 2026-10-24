@@ -598,7 +598,9 @@ def test_launch_execs_native_claude_in_the_private_home_with_the_session_setting
     ah, rendered, tmp_path, monkeypatch, capsys
 ):
     from scripts import install
+    from scripts.routing import native_login
 
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
     _seed(rendered)
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     monkeypatch.chdir(tmp_path)

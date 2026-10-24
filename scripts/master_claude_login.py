@@ -509,15 +509,70 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
     return chain.run(current, browser, token)
 
 
+def token_home(environ: Mapping[str, str]) -> Path:
+    name = aicode_tokens.slug(environ["AGENTIHOOKS_AGENT_NAME"])
+    folder = Path(hooks_config.AGENTIHOOKS_HOME) / "master-token" / name
+    with _locked(folder):
+        target = _rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
+        (target / CREDENTIALS).unlink(missing_ok=True)
+        path = target / "settings.json"
+        settings = _read(path)
+        settings.pop("forceLoginMethod", None)
+        path.unlink(missing_ok=True)
+        _write(path, settings)
+    if environ.get(binding.REPORT):
+        binding.rehome(Path(environ[binding.REPORT]), target)
+    return target
+
+
+def _token_args(args: list[str]) -> list[str]:
+    result = []
+    index = 0
+    flags = ("--remote-control", "--remote-control-session-name-prefix")
+    while index < len(args):
+        argument = args[index]
+        index += 1
+        if argument.split("=", 1)[0] in flags:
+            if "=" not in argument and index < len(args) and not args[index].startswith("--"):
+                index += 1
+        else:
+            result.append(argument)
+    return result
+
+
+def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
+    from hooks.context.account_sessions import sessions_by_account
+    from scripts import master_login_chain as chain
+    from scripts.claude_quota_balancer import API_ACCOUNT, launch_environment, select_credential
+    from scripts.hive.account_slots import execute
+    from scripts.install import _claude_command, _write_route_report
+
+    decision = select_credential(environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,))
+    target = token_home(environ)
+    child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}
+    chain.notification(target, "token", "routed")
+    _write_route_report(report, status="routed", account=decision.account, placement="fallback", remote_control="off")
+    print(f"[agenti] account={decision.account} route=token-fallback remote-control=off", flush=True)
+    execute(
+        "claude",
+        decision.account,
+        child_env,
+        lambda env: os.execvpe(binary, _claude_command(binary, _token_args(args)), env),
+    )
+
+
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from scripts.claude_quota_balancer import RoutingError
     from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
     try:
-        target, found = prepare(environ, Path.cwd())
+        prepared = prepare_launch(environ, Path.cwd())
     except LoginRefused as exc:
         raise RoutingError(str(exc)) from exc
+    if prepared is None:
+        return launch_token(binary, args, environ, report)
+    target, found = prepared
     _write_route_report(report, status="routed", account=found, placement="forced")
     print(f"[agenti] account={found} route={ROUTE}", flush=True)
     execute(
