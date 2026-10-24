@@ -195,7 +195,7 @@ def test_a_local_restore_is_path_only_and_never_offers_context(store):
     assert card["material"] == [rv.NO_CHECKPOINT, rv.NO_WATERMARK]
     assert card["diagnosis"] == ["native resume: worktree gone", *model.PATH_ONLY_LIMITS]
     assert [(c["send"], c["unavailable"]) for c in card["choices"]] == [
-        ("resume", "worktree gone"),
+        ("native", "worktree gone"),
         ("", resume.LOCAL_CONTEXT),
         ("fresh", ""),
     ]
@@ -214,6 +214,14 @@ def test_a_retryable_local_failure_keeps_native_resume_open(store):
     assert card["seat"] == "eng-local"
     assert card["choices"][0]["unavailable"] == ""
     assert card["diagnosis"][0] == f"native resume: {rv.LOCAL_NATIVE}"
+
+
+@pytest.mark.parametrize("reason", ["no conversation id", "no worktree", "worktree gone"])
+def test_each_lost_local_conversation_or_worktree_disables_native(store, reason):
+    _local(store)
+    _restored(store, reason=reason)
+    [card] = rv.view(store, SLUG, NOW)["cards"]
+    assert card["choices"][0] == {"choice": "native", "label": "native resume", "send": "native", "unavailable": reason}
 
 
 def test_a_decided_local_restore_keeps_its_accepted_choice(store):

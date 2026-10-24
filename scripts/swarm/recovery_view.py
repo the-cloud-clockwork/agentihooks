@@ -16,7 +16,7 @@ CHOICES = ("native", "context", "fresh")
 PENDING = "recovery_pending"
 ACCEPTED = "a recovery decision was already accepted"
 REQUESTED = "a request is waiting for the controller's next pass"
-LOCAL_BLOCKERS = ("no conversation id", "worktree gone")
+LOCAL_BLOCKERS = ("no conversation id", "no worktree", "worktree gone")
 NO_CHECKPOINT = "no complete compatible checkpoint"
 NO_WATERMARK = "a local snapshot records no transcript archive watermark"
 LOCAL_NATIVE = "reopening the saved conversation is retried, not verified from a checkpoint"
@@ -123,7 +123,7 @@ def local_card(row: dict, agent: AgentRecord, now_ms: int) -> dict:
         "material": [NO_CHECKPOINT, NO_WATERMARK],
         "diagnosis": [f"native resume: {blocker or LOCAL_NATIVE}", *model.PATH_ONLY_LIMITS],
         "choices": _choices(
-            unavailable, ACCEPTED if decided else "", {"native": "resume", "context": "", "fresh": "fresh"}
+            unavailable, ACCEPTED if decided else "", {"native": "native", "context": "", "fresh": "fresh"}
         ),
         "requested": "",
         "requested_text": "",
