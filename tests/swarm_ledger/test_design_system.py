@@ -35,7 +35,7 @@ def home_style():
     return css.replace("\n", "")
 
 
-def home_page_source(view):
+def home_page_source():
     page = server.index_page()
     version = server.served_version()
     for name, path in core.static_assets().items():
@@ -81,9 +81,8 @@ class PaletteReachesEveryPage(unittest.TestCase):
         self.assertIn(palette().strip(), css_of(page))
         self.assertNotIn("__LEDGER_PALETTE__", page)
 
-    def test_home_and_bin_carry_the_palette(self):
-        for view in ("home", "bin"):
-            self.assertIn(palette().strip(), css_of(home_page_source(view)))
+    def test_the_home_and_bin_shell_carries_the_palette(self):
+        self.assertIn(palette().strip(), css_of(home_page_source()))
 
     def test_a_palette_edit_changes_the_page_version(self):
         before = core.page_version()
