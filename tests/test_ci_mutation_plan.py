@@ -625,20 +625,6 @@ def test_stats_parts_read_the_stored_durations_once(tmp_path, monkeypatch):
     assert len(reads) == 1
 
 
-def test_stats_parts_by_default_give_each_worker_a_minute_of_tests(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    tests = _timed_tests(tmp_path, {name: 20 for name in "abcdefghijklmnop"})
-    output = tmp_path / "github-output"
-    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    monkeypatch.setattr("sys.argv", ["plan"])
-    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
-    monkeypatch.setattr(plan, "discover_changes", lambda *args: {})
-    monkeypatch.setattr(plan, "estimate", lambda *args: (0.0, 0, tests))
-    monkeypatch.setattr(plan, "validate_tests", lambda *args: None)
-    assert plan.main() == 0
-    assert "stats_parts=[0, 1]\n" in output.read_text()
-
-
 def _project(tmp_path, durations):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
@@ -819,13 +805,13 @@ def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
     ("seconds", "timed", "shards", "parts"),
     [
         (0, {}, "[0]", "[0]"),
-        (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0, 1]"),
+        (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0]"),
         (480, {"a": 1}, "[0]", "[0]"),
         (481, {"a": 1}, "[0, 1]", "[0]"),
         (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(10))), json.dumps(list(range(10)))),
     ],
 )
-def test_main_defaults_to_origin_dev_a_two_minute_target_a_half_minute_stats_bucket_and_ten_shards(
+def test_main_defaults_to_origin_dev_a_two_minute_target_a_one_minute_stats_bucket_and_ten_shards(
     tmp_path, monkeypatch, seconds, timed, shards, parts
 ):
     monkeypatch.chdir(tmp_path)
