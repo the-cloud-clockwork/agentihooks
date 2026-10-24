@@ -48,16 +48,7 @@ def add(
     delivery: Delivery,
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> dict:
-    local = registry.show(redis, local_id)
-    if local is None or local["ui"] != YES:
-        raise auth.HiveError(f"hive {local_id} is headless; only a UI hive adds machines")
-    if not _saved(run, target):
-        run_checked(
-            run,
-            ["herdr", "machine", "add", "--label", label, "--remote-session", REMOTE_SESSION, target],
-            None,
-            HERDR_TIMEOUT_S,
-        )
+    save(redis, local_id, target, label, run)
     grant = auth.mint(redis, label, delivery.redis_url)
     try:
         run_checked(
@@ -69,6 +60,21 @@ def add(
         auth.revoke(redis, grant["id"])
         raise
     return grant
+
+
+def save(
+    redis: "Redis", local_id: str, target: str, label: str, run: Callable[..., subprocess.CompletedProcess]
+) -> None:
+    local = registry.show(redis, local_id)
+    if local is None or local["ui"] != YES:
+        raise auth.HiveError(f"hive {local_id} is headless; only a UI hive adds machines")
+    if not _saved(run, target):
+        run_checked(
+            run,
+            ["herdr", "machine", "add", "--label", label, "--remote-session", REMOTE_SESSION, target],
+            None,
+            HERDR_TIMEOUT_S,
+        )
 
 
 def _saved(run: Callable[..., subprocess.CompletedProcess], target: str) -> bool:
