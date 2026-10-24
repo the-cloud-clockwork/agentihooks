@@ -22,6 +22,7 @@ def store():
 
 def finding(store, doctor=DOCTOR):
     judgments = loop.verdicts(store, doctor)
+    assert isinstance(judgments, verdicts.VerdictStore)
     found = Finding("test", "repeat", "Repeated finding", ("evidence",), "above zero", 3)
     judgments.visible([found], START, DAY)
     return judgments, found
