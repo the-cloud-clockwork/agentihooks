@@ -277,11 +277,14 @@ def test_a_scoped_member_reaches_the_hub_slot_service_only_through_its_own_swarm
     report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
     client = member(signer)
     try:
-        own = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig"), "m1", lambda: report)
+        own = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig", "m1"), "m1", lambda: report)
         assert own.take("one", "claude") == "a"
-        foreign = account_slots.Remote(account_slots.asker(client, "other", 500), "m1", lambda: report)
-        with pytest.raises(TimeoutError, match="^no responders for 'swarm.other.slots'$"):
+        foreign = account_slots.Remote(account_slots.asker(client, "other", "m1", 500), "m1", lambda: report)
+        with pytest.raises(TimeoutError, match="^no responders for 'slots.other.m1'$"):
             foreign.take("two", "claude")
+        posing = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig", "m2", 500), "m2")
+        with pytest.raises(TimeoutError, match="^no responders for 'slots.rig.m2'$"):
+            posing.release("one", "claude", "a")
         own.release("one", "claude", "a")
         assert own.take("two", "claude") == "a"
     finally:
@@ -366,7 +369,7 @@ def test_hive_heartbeat_keeps_beating_on_a_fresh_bus_until_the_hub_serves_accoun
     client, beats = member(signer), []
 
     def publish(hive, beat_report, beat_hosted):
-        ask = account_slots.asker(client.for_swarm("rig"), "rig", 500)
+        ask = account_slots.asker(client.for_swarm("rig"), "rig", hive, 500)
         account_slots.Remote(ask, hive, lambda: beat_report).heartbeat(beat_report, beat_hosted["executions"])
         beats.append(hive)
 
