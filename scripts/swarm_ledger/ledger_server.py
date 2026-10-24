@@ -1580,7 +1580,6 @@ def serve():
                 HUB.drain()
                 drained = server.drained(DRAIN_S)
     finally:
-        stopped.set()
         server.server_close()
         with WATCH_PASS:
             watching.set()
