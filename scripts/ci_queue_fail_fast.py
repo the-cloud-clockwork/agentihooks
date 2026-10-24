@@ -28,7 +28,12 @@ def failed(jobs: list[dict], lost: Callable[[dict], bool] = lambda job: False) -
 
 
 def settled(jobs: list[dict]) -> bool:
-    return any(job["name"] == LAST and job["status"] == "completed" for job in jobs)
+    shards = [job for job in jobs if base_name(job["name"]) == SHARD]
+    return (
+        bool(shards)
+        and all(job.get("conclusion") == "success" for job in shards)
+        or any(job["name"] == LAST and job["status"] == "completed" for job in jobs)
+    )
 
 
 def logged_loss(repo: str, job: dict, seen: dict[str, bool]) -> bool:
