@@ -23,7 +23,7 @@ class GitHub:
         self.queue = queue
         self.conclusions = list(conclusions)
         self.heads = list(heads)
-        self.commit = None
+        self.commit = {"oid": "m1"}
         self.check_error = None
         self.states = list(states)
         self.rollup = rollup
@@ -91,7 +91,7 @@ class GitHub:
                 {
                     "data": {
                         "mergePullRequest": {
-                            "pullRequest": {"state": "MERGED", "mergeCommit": self.commit or {"oid": "m1"}}
+                            "pullRequest": {"state": "MERGED", "mergeCommit": self.commit}
                         }
                     }
                 },
@@ -231,4 +231,13 @@ def test_a_check_read_failing_for_another_reason_is_not_taken_for_an_unreadable_
     with pytest.raises(SwarmError) as caught:
         merge_queue.operate("queue", URL, github)
     assert str(caught.value) == "gh: HTTP 502"
+    assert github.merged == []
+
+
+def test_a_conflicting_pull_request_is_refused_without_waiting(no_sleep):
+    github = GitHub(states=("DIRTY",))
+    with pytest.raises(SwarmError) as caught:
+        merge_queue.operate("queue", URL, github, attempts=3)
+    assert str(caught.value) == "the pull request conflicts with dev; merge dev into it before merging"
+    assert no_sleep == []
     assert github.merged == []

@@ -128,6 +128,8 @@ def settle(url: str, head: str, run, attempts: int) -> None:
         status = raw["mergeStateStatus"]
         if status in MERGEABLE:
             return
+        if status == "DIRTY":
+            raise SwarmError("the pull request conflicts with dev; merge dev into it before merging")
     raise SwarmError(f"required checks on the current pull request head must pass before merging; merge state {status}")
 
 
