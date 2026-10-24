@@ -2234,7 +2234,7 @@ def build_parser():
     confirm.add_argument("--next", required=True)
     decision = sub.add_parser("restore-decision")
     decision.add_argument("agent")
-    decision.add_argument("choice", choices=("resume", "fresh"))
+    decision.add_argument("choice", choices=("resume", "native", "context", "fresh"))
     learned = sub.add_parser("learned")
     learned.add_argument("text", nargs="?", default="")
     learned.add_argument("--maturity", choices=MATURITIES, default=DEFAULT_MATURITY)

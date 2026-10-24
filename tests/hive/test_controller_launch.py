@@ -703,7 +703,7 @@ def test_a_finished_worker_receipt_is_collected_once_without_reviving_it(setup, 
     from scripts.swarm import controller
     from scripts.swarm.tick import ACKNOWLEDGING, _collect_acks
 
-    request, order, _ = live_order(setup)
+    request, order, ack = live_order(setup)
     store, slug = setup.store, setup.config.slug
     worker = store.execution_registry.get(slug, order.execution_id)
     worker = replace(worker, state="finished")
@@ -724,7 +724,13 @@ def test_a_finished_worker_receipt_is_collected_once_without_reviving_it(setup, 
 
     assert actions == [f"{worker.name} finished task before the tick collected its hive acknowledgement"]
     assert task == {"id": "task", "lane": "eng", "state": task_state, "claimed_by": worker.name}
-    assert store.execution_registry.get(slug, order.execution_id) == worker
+    assert store.execution_registry.get(slug, order.execution_id) == replace(
+        worker,
+        runtime_target=ack.target,
+        pane_id=ack.execution["pane_id"],
+        launched_at=ack.execution["launched_at"],
+        launch_timings=ack.execution["launch_timings"],
+    )
     assert [(row["agent"], row["state"], row["error"], row["after"]) for row in store.launches(slug)] == [
         (worker.name, "started", "", restart)
     ]
