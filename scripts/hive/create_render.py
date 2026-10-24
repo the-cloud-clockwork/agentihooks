@@ -1,19 +1,16 @@
 """agentihooks hive create: one hive's antoncore files from the antoncore hive template."""
 
-import re
 from dataclasses import dataclass
 from string import Template
 
 from scripts.hive import auth
 
 TEMPLATE_PATH = "k8s/templates/agentihooks-hive.yaml"
-NFS_HOMES_PATH = "k8s/manifests/agentihooks-swarm/hive-home-nfs.yaml"
 FILE_MARK = "#@ file: "
 LAN_IP_ANNOTATION = "metallb.universe.tf/loadBalancerIPs"
 SHARED_IP_ANNOTATION = "metallb.universe.tf/allow-shared-ip"
 SHARED_IP_KEY = "agentihooks-swarm"
 SSH_PORT_FIRST = 2222
-HIVES_LINE = re.compile(r"(- name: HIVES\n\s+value: )(.*)")
 
 
 @dataclass(frozen=True)
@@ -44,16 +41,6 @@ def render(template: str, hive: Hive) -> dict[str, str]:
     if not files:
         raise auth.HiveError(f"the hive template names no file with a {FILE_MARK.strip()} line")
     return {path: "".join(body) for path, body in files.items()}
-
-
-def with_home(manifest: str, name: str) -> str:
-    found = HIVES_LINE.search(manifest)
-    if found is None:
-        raise auth.HiveError(f"{NFS_HOMES_PATH} has no HIVES list to add the hive home to")
-    hives = found.group(2).split()
-    if name in hives:
-        return manifest
-    return manifest[: found.start(2)] + " ".join([*hives, name]) + manifest[found.end(2) :]
 
 
 def lan_address(services: list[dict]) -> str:
