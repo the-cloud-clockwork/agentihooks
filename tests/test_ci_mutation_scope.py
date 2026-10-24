@@ -719,3 +719,37 @@ def test_inherited_lines_are_regraded_once_the_branch_changes_a_source_helper_th
         "dev.py": {"hooks/dev.py": {11, 12, 13, 14}},
     }
     assert discover_changes(tmp_path, pinned, "HEAD") == expected[helper]
+
+
+def test_repeated_selection_normalizes_each_test_text_once(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_first.py").write_text("from hooks.context import first_sample\n")
+    (tests / "test_second.py").write_text("from hooks.context import second_sample\n")
+    normalized = []
+    normalize = scope.unicodedata.normalize
+    monkeypatch.setattr(
+        scope.unicodedata, "normalize", lambda form, text: normalized.append(text) or normalize(form, text)
+    )
+    scope.mentions.cache_clear()
+    assert select_tests(tmp_path, Path("hooks/context/first_sample.py")) == ["tests/test_first.py"]
+    assert select_tests(tmp_path, Path("hooks/context/second_sample.py")) == ["tests/test_second.py"]
+    assert len(normalized) == 2
+
+
+def test_a_word_inside_a_longer_identifier_does_not_mark_a_file_for_parsing(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_direct.py").write_text("from hooks.context import word_sample\n")
+    (tests / "test_longer.py").write_text("word_sample_extra = 1\n")
+    parsed = []
+    parse = scope.ast.parse
+    monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
+    scope.imported_names.cache_clear()
+    scope.mentions.cache_clear()
+    assert select_tests(tmp_path, Path("hooks/context/word_sample.py")) == ["tests/test_direct.py"]
+    assert parsed == ["from hooks.context import word_sample\n"]

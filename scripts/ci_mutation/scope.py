@@ -187,6 +187,12 @@ def imported_names(text: str, package: tuple[str, ...]) -> frozenset[str]:
     return frozenset(names)
 
 
+@cache
+def mentions(text: str) -> tuple[bool, frozenset[str]]:
+    normalized = unicodedata.normalize("NFKC", text)
+    return re.search(r"\bfrom\W*\.", normalized) is not None, frozenset(re.findall(r"\w+", normalized))
+
+
 def select_tests(root: Path, source: Path) -> list[str]:
     module = module_name(source)
     named = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
@@ -194,17 +200,18 @@ def select_tests(root: Path, source: Path) -> list[str]:
 
     def importing(modules: set[str]) -> set[Path]:
         # Every import of a module names its last part or is relative, so other files are never parsed.
-        words = "|".join(re.escape(name.rpartition(".")[2]) for name in modules)
-        mention = re.compile(rf"\b(?:{words})\b|\bfrom\W*\.")
+        words = {name.rpartition(".")[2] for name in modules}
         return {
             path
             for path, text in texts.items()
-            if mention.search(unicodedata.normalize("NFKC", text))
+            if ((relative := mentions(text))[0] or not words.isdisjoint(relative[1]))
             and imported_names(text, path.relative_to(root).parent.parts) & modules
         }
 
     reaching = {
-        path for path, text in texts.items() if named.search(text) or path.name == f"test_{source.stem}.py"
+        path
+        for path, text in texts.items()
+        if module in text and named.search(text) or path.name == f"test_{source.stem}.py"
     } | importing({module})
     added = reaching
     while added:
