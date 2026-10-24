@@ -7,7 +7,8 @@ import pytest
 
 from hooks.classifier import Answer, ClassifierError, DecisionResult
 from hooks.context import conditions, profile_chain
-from hooks.filters import check, extract, runner, schema
+from hooks.filters import extract, runner, schema
+from hooks.filters.check import check
 from hooks.filters.finders import scripts
 
 pytestmark = pytest.mark.unit
