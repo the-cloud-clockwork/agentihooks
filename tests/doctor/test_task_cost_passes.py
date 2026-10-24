@@ -1,9 +1,10 @@
+import json
 from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 
-from scripts.doctor import detect
+from scripts.doctor import detect, traces
 from scripts.swarm.store import RedisStore
 
 
@@ -22,10 +23,14 @@ def _trace(task, tokens, end):
 
 
 @pytest.fixture
-def scan(monkeypatch):
+def redis():
     import fakeredis
 
-    redis = fakeredis.FakeRedis(decode_responses=True)
+    return fakeredis.FakeRedis(decode_responses=True)
+
+
+@pytest.fixture
+def scan(monkeypatch, redis):
     tasks = [{"id": task, "state": "done", "pr_url": f"https://example.com/{task}"} for task in ("a", "b", "old")]
     record = {
         "slug": "watched",
@@ -120,4 +125,50 @@ def test_a_new_merge_waits_for_its_exported_cost_before_it_is_consumed(scan, mis
     else:
         record["traces"][-1] = exported
     assert [f.subject for f in run()] == ["new"]
+    assert run() == []
+
+
+def test_cost_candidates_require_a_readable_merged_task_export(scan):
+    _, tasks, record = scan
+    _merge(tasks, record, "missing")
+    record["traces"].pop()
+    _merge(tasks, record, "partial")
+    record["traces"][-1]["complete"] = False
+    _merge(tasks, record, "turnless")
+    record["traces"][-1]["observations"] = []
+    record["traces"].append(_trace("unmerged", 3000, 50))
+    assert traces.task_cost_candidates(record) == {"a", "b", "old"}
+
+
+@pytest.mark.parametrize("gap", ["failure", "listing", "observations", "capped", "missing_listing", "missing_complete"])
+def test_cost_candidates_require_a_complete_reader(scan, gap):
+    _, _, record = scan
+    if gap == "failure":
+        record["reader"]["failures"] = ["timeout"]
+    elif gap == "listing":
+        record["reader"]["historical"]["listed"] = False
+    elif gap == "observations":
+        record["reader"]["historical"]["complete"] = False
+    elif gap == "capped":
+        record["reader"]["historical"]["capped"] = 1
+    elif gap == "missing_listing":
+        del record["reader"]["historical"]["listed"]
+    else:
+        del record["reader"]["historical"]["complete"]
+    assert traces.task_cost_candidates(record) == set()
+
+
+@pytest.mark.parametrize("candidates,expected", [(set(), []), ({"new"}, ["new"])])
+def test_cost_judgment_keeps_the_median_cohort_and_skips_only_unselected_tasks(scan, candidates, expected):
+    _, tasks, record = scan
+    _merge(tasks, record)
+    record["task_cost_candidates"] = candidates
+    assert [f.subject for f in traces.task_cost(record, traces.Limits())] == expected
+
+
+def test_an_existing_complete_pass_checkpoint_is_resumed_after_restart(scan, redis):
+    run, _, _ = scan
+    store = RedisStore(redis)
+    redis.set(store.key("watched", "doctor-task-cost"), json.dumps(["a", "b"]))
+    assert [f.subject for f in run()] == ["old"]
     assert run() == []
