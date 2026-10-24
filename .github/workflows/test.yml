@@ -974,16 +974,12 @@ jobs:
         run: |
           [[ ! -f plan-outputs.txt ]] || cat plan-outputs.txt >> "$GITHUB_OUTPUT"
 
-      - name: Size queue shards from conservative durations
+      - name: Size queue shards from median durations
         id: queue-size
         if: github.event_name == 'merge_group'
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: |
-          for suffix in '' "-$PYTHON_VERSION"; do
-            measured="$HOME/dev-durations/.test_durations-slowest$suffix"
-            [[ ! -f "$measured" ]] || cp "$measured" "$HOME/dev-durations/.test_durations$suffix"
-          done
           : > queue-plan.txt
           destination="queue-input/$PYTHON_VERSION"
           mkdir -p "$destination"
@@ -1366,6 +1362,7 @@ jobs:
       contents: read
     env:
       CODEX_RELEASE: rust-v0.160.0
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       UNIT_SOURCE: ""
       LEG: ${{ matrix.leg }}
     strategy:

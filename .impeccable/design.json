@@ -321,7 +321,7 @@
       "Do take every colour from a role token in palette.css.",
       "Do carry status with role colour and an optional status dot.",
       "Do keep controls frameless at rest and show the hover lift on hover and focus.",
-      "Do keep every section foldable, remembering its state per viewer.",
+      "Do fold only Ledger sections, Swarm panels below Capacity, outline categories and comments, remembering each choice per viewer.",
       "Do keep a visible focus-visible ring on every control."
     ],
     "donts": [

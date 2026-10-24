@@ -246,11 +246,15 @@ class El {
 }
 const document = { createElement: (tag) => new El(tag), querySelector: () => ({ className: "home" }), getElementById: () => new El("ul"), addEventListener: () => {} };
 const fetch = () => new Promise(() => {});
+const location = { search: "" };
+const loadTips = () => null, readCollection = fetch, readLayout = fetch, readLedgerPage = fetch, writeBin = fetch;
+const writeLayout = fetch, writeLedgerSwarm = fetch;
 """
 
 
 def node_home_rows(rows):
-    source = HOME_JS.read_text(encoding="utf-8").removesuffix("start();\n")
+    lines = HOME_JS.read_text(encoding="utf-8").removesuffix("start();\n").splitlines()
+    source = "\n".join(line for line in lines if not line.startswith("import "))
     shown = "rows.map((s) => homeRow(s, NOW)).map((r) => ({ attrs: r.attrs, tip: r.kids[0].attrs['data-tip'], title: r.kids[0].textContent }))"
     script = f"{NODE_DOM}{source}\nconst NOW = {NOW}; const rows = {json.dumps(rows)};\nconsole.log(JSON.stringify({shown}));"
     return json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True).stdout)

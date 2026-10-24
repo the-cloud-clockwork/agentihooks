@@ -18,7 +18,7 @@ from tests.shards import (
 WORKERS = 4
 STEP_SECONDS = step_seconds("unit")
 STARTUP_SECONDS = 30
-SLOWDOWN = 1.15
+SLOWDOWN = 1.85
 MAX_SHARDS = 30
 
 

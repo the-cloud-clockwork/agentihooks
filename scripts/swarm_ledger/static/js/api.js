@@ -1,4 +1,4 @@
-import { API_V1, EVENTS_API, HIVES_API, LAYOUT_API, ROUTING_API, SLUG, TOKEN } from "./config.js";
+import { API_V1, EVENTS_API, HIVES_API, LAYOUT_API, ROOT_API, ROUTING_API, SLUG, TIPS_API, TOKEN } from "./config.js";
 
 export function openEvents(cursor) {
   const headers = { Accept: "text/event-stream", "X-Ledger-Token": TOKEN };
@@ -69,6 +69,35 @@ export function readLayout() {
 
 export function writeLayout(layout) {
   return fetch(LAYOUT_API, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(layout) });
+}
+
+export function readTips() {
+  return fetch(TIPS_API, { cache: "no-store" });
+}
+
+export async function loadTips() {
+  try {
+    const resp = await readTips();
+    const values = resp.ok ? (await resp.json()).data : null;
+    if (values && window.ledgerTipValues) window.ledgerTipValues(values);
+    return values;
+  } catch (e) { return null; }
+}
+
+export function readCollection(name, cursor) {
+  return fetch(`${ROOT_API}/${name}?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { cache: "no-store" });
+}
+
+export function writeBin(action, slug) {
+  return fetch(`${ROOT_API}/bin/actions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, slug }) });
+}
+
+export function readLedgerPage(slug) {
+  return fetch(`/${encodeURIComponent(slug)}`);
+}
+
+export function writeLedgerSwarm(slug, token, body) {
+  return fetch(`${ROOT_API}/ledgers/${encodeURIComponent(slug)}/swarm/controls`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": token }, body: JSON.stringify(body) });
 }
 
 export function mediaUrl(id) {

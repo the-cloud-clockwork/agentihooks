@@ -77,3 +77,4 @@ jobs:
         with:
           name: worker-resources
           path: ${{ env.EVIDENCE }}
+          retention-days: 7

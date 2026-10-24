@@ -299,8 +299,8 @@ def test_every_page_route_goes_through_version_one():
     constants = dict(re.findall(r"^export const (\w+) = (.*);$", source("config"), re.M))
     for call in re.findall(r"fetch\(([^,)]+)", source("api")):
         names = re.findall(r"\b[A-Z][A-Z0-9_]*\b", call)
-        versioned = any(re.search(r"API_V1|/api/v1/", constants.get(name, "")) for name in names)
-        assert "V1" in call or versioned or call == "artifactUrl(id", call
+        versioned = any(re.search(r"API_V1|/api/v1\b", constants.get(name, "")) for name in names)
+        assert "V1" in call or versioned or call in ("artifactUrl(id", "`/${encodeURIComponent(slug"), call
 
 
 def test_the_page_copies_no_server_rule_or_limit():

@@ -123,6 +123,7 @@ jobs:
         with:
           name: ledger-stream-cpu
           path: ${{ runner.temp }}/ledger-streams
+          retention-days: 7
 
   compare:
     if: inputs.compare
@@ -217,6 +218,7 @@ jobs:
             load-evidence/*.log
             load-evidence/*/server.log
           if-no-files-found: error
+          retention-days: 7
 
   compare-grade:
     needs: compare
