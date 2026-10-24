@@ -129,6 +129,14 @@ def test_truncated_unparseable_and_non_object_lines_are_reported_as_losses_with_
     ]
 
 
+def test_a_complete_final_line_without_a_newline_is_an_event_and_not_a_loss():
+    first, last = claude("one"), claude("two").rstrip(b"\n")
+    read = read_source("claude", first + last, ALIASES)
+    assert [event["record"]["text"] for event in read.events] == ["one", "two"]
+    assert read.events[1]["byte_start"] == len(first) and read.events[1]["byte_end"] == len(first + last)
+    assert read.losses == []
+
+
 def test_codex_metadata_and_working_folder_come_from_session_meta_and_turn_context():
     data = (
         line(type="session_meta", timestamp="t0", payload={"id": "cx-1", "cwd": "/work/app", "cli_version": "0.1"})
@@ -259,6 +267,11 @@ def test_a_rerun_skips_imported_sources_by_hash_and_a_changed_source_is_a_new_ge
     assert [s["source_generation"] for s in stores[1].sessions("corpus-a")] == sorted(
         f"import:{h}" for h in (first["source_sha256"], grown["source_sha256"])
     )
+    current = stores[1].sessions("corpus-a", current=True)
+    assert [s["source_generation"] for s in current] == [f"import:{grown['source_sha256']}"]
+    hits = stores[1].search(stores[0], "corpus-a", "one")
+    assert [(hit["source_generation"], hit["sequence"]) for hit in hits] == [(current[0]["source_generation"], 1)]
+    assert stores[1].export(stores[0], "corpus-a")["events"] == 3
 
 
 def test_a_source_committed_before_its_mark_is_replayed_without_duplicates(stores, tmp_path):
@@ -352,6 +365,18 @@ def test_discovery_walks_nested_transcripts_in_order_and_skips_other_files(tmp_p
     (tmp_path / "d.jsonl").mkdir()
     found = importer_module._discover(tmp_path)
     assert [path.relative_to(tmp_path).as_posix() for path in found] == ["a/sub/1.jsonl", "b/2.jsonl", "c.jsonl"]
+
+
+def test_discovery_skips_symlinks_and_anything_that_resolves_outside_the_root(tmp_path):
+    folder, outside = tmp_path / "root", tmp_path / "personal"
+    (folder / "p").mkdir(parents=True)
+    outside.mkdir()
+    (outside / "notes.jsonl").write_bytes(claude("private"))
+    (folder / "p/own.jsonl").write_bytes(claude("own"))
+    (folder / "p/linked.jsonl").symlink_to(outside / "notes.jsonl")
+    (folder / "inner.jsonl").symlink_to(folder / "p/own.jsonl")
+    (folder / "away").symlink_to(outside, target_is_directory=True)
+    assert importer_module._discover(folder) == [folder / "p/own.jsonl"]
 
 
 def test_the_report_counts_unknown_attribution_and_names_codex_sources(stores, tmp_path):

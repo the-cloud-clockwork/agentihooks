@@ -28,8 +28,13 @@ PRAGMAS = ("PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", "PRAGMA busy_ti
 SCHEMA = """CREATE TABLE IF NOT EXISTS session_import (
     access_domain TEXT NOT NULL, source_hash TEXT NOT NULL, session_uid TEXT NOT NULL,
     source_generation TEXT NOT NULL, provenance TEXT NOT NULL, unknown_events INTEGER NOT NULL,
-    PRIMARY KEY (access_domain, source_hash))"""
-MARK = "INSERT INTO session_import VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (access_domain, source_hash) DO NOTHING"
+    source_key TEXT NOT NULL, PRIMARY KEY (access_domain, source_hash))"""
+MARK = "INSERT INTO session_import VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (access_domain, source_hash) DO NOTHING"
+CURRENT = (
+    "SELECT session_uid, source_generation, provenance FROM session_import AS row WHERE access_domain = ? "
+    "AND rowid = (SELECT MAX(rowid) FROM session_import WHERE access_domain = row.access_domain "
+    "AND source_key = row.source_key) ORDER BY session_uid, source_generation"
+)
 KNOWN = "SELECT session_uid FROM session_import WHERE access_domain = ? AND source_hash = ?"
 SESSIONS = (
     "SELECT session_uid, source_generation, provenance FROM session_import WHERE access_domain = ? "
@@ -132,14 +137,12 @@ def read_source(provider: str, data: bytes, aliases: Mapping[str, str]) -> Sourc
     for index, piece in enumerate(pieces):
         span = {"byte_start": offset, "byte_end": offset + len(piece)}
         offset += len(piece) + 1
-        if index == len(pieces) - 1:
-            losses += [{**span, "reason": "truncated final line"}] if piece else []
-            continue
         if not piece.strip():
             continue
         entry = _entry(piece)
         if entry is None:
-            losses.append({**span, "reason": "unparseable line"})
+            reason = "truncated final line" if index == len(pieces) - 1 else "unparseable line"
+            losses.append({**span, "reason": reason})
             continue
         cwd = _observe(provider, entry, metadata) or cwd
         events += _events(provider, entry, turn, len(events) + 1, {**span, "project_id": resolve_project(cwd, aliases)})
@@ -206,10 +209,11 @@ class ImportLedger:
     def mark(self, domain: str, session_uid: str, provenance: dict) -> None:
         source_hash = provenance["source_sha256"]
         row = (domain, source_hash, session_uid, f"import:{source_hash}", json.dumps(provenance))
-        self.db.execute(MARK, (*row, provenance["unknown_attribution_events"]))
+        key = json.dumps([provenance[name] for name in ("provider", "installation", "relative_path")])
+        self.db.execute(MARK, (*row, provenance["unknown_attribution_events"], key))
 
-    def sessions(self, domain: str) -> list[dict]:
-        rows = self.db.execute(SESSIONS, (domain,)).fetchall()
+    def sessions(self, domain: str, current: bool = False) -> list[dict]:
+        rows = self.db.execute(CURRENT if current else SESSIONS, (domain,)).fetchall()
         return [{"session_uid": row[0], "source_generation": row[1], "provenance": json.loads(row[2])} for row in rows]
 
     def unknown_attribution(self, domain: str) -> int:
@@ -227,7 +231,7 @@ class ImportLedger:
                 **{key: event[key] for key in HIT_FIELDS},
                 "source": {key: session["provenance"][key] for key in SOURCE_FIELDS},
             }
-            for session in self.sessions(domain)
+            for session in self.sessions(domain, current=True)
             for event in catalog.events(domain, session["session_uid"], session["source_generation"])
             if needle in " ".join(str(event["record"][key]) for key in SEARCHED if key in event["record"]).casefold()
         ]
@@ -247,7 +251,7 @@ class ImportLedger:
 
     def retire(self, catalog: Catalog, domain: str, export: dict) -> dict:
         current = self.export(catalog, domain)
-        if not export["digest"] == digest(export["records"]) == current["digest"]:
+        if export["digest"] != current["digest"] or digest(export["records"]) != current["digest"]:
             return {"state": "rejected", "error": {"class": "export_mismatch", "detail": MISMATCH}}
         self.db.execute(RETIRE, (domain,))
         return {"state": "retired", "sessions": current["sessions"], "catalog_events_kept": current["events"]}
@@ -270,7 +274,12 @@ def _plan_error(grant: Grant, plan: ImportPlan) -> tuple[str, str] | None:
 
 
 def _discover(folder: Path) -> list[Path]:
-    return sorted(path for path in folder.rglob("*.jsonl") if path.is_file())
+    inside = folder.resolve()
+    return sorted(
+        path
+        for path in folder.rglob("*.jsonl")
+        if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(inside)
+    )
 
 
 @dataclass(frozen=True)

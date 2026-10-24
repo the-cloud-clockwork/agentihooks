@@ -65,12 +65,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     plan = _plan(parser, args)
     grant = Grant(args.principal, args.corpus, frozenset(args.project))
-    catalog, imports = Catalog(args.catalog), ImportLedger(args.imports)
+    catalog = Catalog(args.catalog)
     try:
-        report = import_sessions(catalog, imports, grant, plan, dry_run=args.dry_run)
+        imports = ImportLedger(args.imports)
+        try:
+            report = import_sessions(catalog, imports, grant, plan, dry_run=args.dry_run)
+        finally:
+            imports.close()
     finally:
         catalog.close()
-        imports.close()
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0 if report["state"] == "completed" else 2
 
