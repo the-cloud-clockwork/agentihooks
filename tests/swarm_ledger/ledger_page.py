@@ -94,7 +94,11 @@ def served_ledger(ledger):
     from scripts.swarm_ledger import ledger_server
 
     meta = {"limits": ledger_server.PAGE_LIMITS, **ledger.get("_meta", {})}
-    status = phase_state.status({"tasks": [], **ledger})
+    closed = ledger.get("_meta", {}).get("closed", {})
+    hidden = [{"id": pid, "done": True} for pid in closed.get("phases", {}).get("ids", [])]
+    plans = [{"phase": pid, "kind": "plan", "state": "done"} for pid in closed.get("tasks", {}).get("plan_phases", [])]
+    full = {**ledger, "phases": [*ledger.get("phases", []), *hidden], "tasks": [*ledger.get("tasks", []), *plans]}
+    status = {key: item for key, item in phase_state.status(full).items() if key not in {p["id"] for p in hidden}}
     return {"marks": {"frozen": [], "held": []}, "phase_status": status, **ledger, "_meta": meta}
 
 

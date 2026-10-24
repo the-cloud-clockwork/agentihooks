@@ -56,7 +56,9 @@ def test_the_page_renders_the_served_phase_status_and_keeps_no_lifecycle_of_its_
     state, render = ((MODULES / name).read_text(encoding="utf-8") for name in ("state.js", "render.js"))
     assert "phaseLifecycle" not in state + render
     assert "PHASE_LABELS" not in (MODULES / "config.js").read_text(encoding="utf-8") + render
-    assert "phase_status" in render
+    review = (MODULES / "phase_review.js").read_text(encoding="utf-8")
+    assert "phaseLifecycle" not in review
+    assert "phase_status" in review and "phaseStatus(item).label" in render
 
 
 def apply_ops(doc, ops):

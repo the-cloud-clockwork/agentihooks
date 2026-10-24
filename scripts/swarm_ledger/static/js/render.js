@@ -293,7 +293,8 @@ function groupedWork(name, items, row) {
   done.reverse();
   const key = `${name}-done`;
   $(name).append(h("li", { class: "done-group", id: key }, h("div", { class: "done-head", text: `${done.length + closedLeft(name)} done` }),
-    h("ol", {}, ...done.map(row), closedMore(name, `done ${NOUNS[name]}`, render) || "")));
+    h("ol", {}, ...firstPage(key, done, idOf).map(row), moreButton(key, done.length, `more done ${NOUNS[name]}`, render) || "",
+      closedMore(name, `done ${NOUNS[name]}`, render) || "")));
 }
 
 function lastSeen() {
