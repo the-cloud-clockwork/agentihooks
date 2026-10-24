@@ -69,13 +69,12 @@ def test_offline_codex_profile_rejects_a_hook_that_does_not_register(tmp_path, m
 
 def test_offline_codex_profile_waits_for_a_registry_written_after_the_hook_exits(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(profile_probe, "surviving_hook_children", lambda existing: [])
     writer = tmp_path / "writer.py"
     writer.write_text(
         "import json, sys, time\n"
         "from pathlib import Path\n"
         "home, session, cwd = Path(sys.argv[1]), sys.argv[2], sys.argv[3]\n"
-        "time.sleep(0.5)\n"
+        "time.sleep(1.5)\n"
         "registry = home / '.agentihooks/active-sessions.json'\n"
         "registry.parent.mkdir()\n"
         "registry.write_text(json.dumps({session: {'cwd': cwd}}))\n"

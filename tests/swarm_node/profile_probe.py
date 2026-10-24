@@ -156,6 +156,7 @@ def codex_session_start(home: Path, tmp: Path | None = None) -> dict:
                     (tmp / "codex-run.exit").write_text(str(process.returncode))
                     if process.returncode:
                         raise subprocess.CalledProcessError(process.returncode, command)
+            registered_at = registered_at or awaited_registration(home, session)
         except BaseException as error:
             failure = error
         survivors = surviving_hook_children(existing)
@@ -165,7 +166,6 @@ def codex_session_start(home: Path, tmp: Path | None = None) -> dict:
         raise AssertionError(f"Codex hook children outlived registration: {survivors}") from failure
     if failure is not None:
         raise failure
-    registered_at = registered_at or awaited_registration(home, session)
     assert sessions(home) == {session: str(Path.cwd())}
     return {
         "registered_at": registered_at,
