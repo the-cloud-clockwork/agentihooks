@@ -433,10 +433,11 @@ def test_the_controller_grant_keeps_legacy_event_routing_and_swarm_discovery():
 
 
 def test_the_controller_grant_serves_hub_slot_requests():
-    from scripts.events.subjects import SLOTS
+    from scripts.events.subjects import slot_request
 
     claims = nats_grant.controller_claims()
-    assert f"{SLOTS}.*.*" in claims["sub"]["allow"]
+    root, _, _ = slot_request("rig", "m1").split(".")
+    assert f"{root}.*.*" in claims["sub"]["allow"]
     assert "_INBOX.>" in claims["pub"]["allow"]
 
 
