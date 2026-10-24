@@ -250,6 +250,8 @@ def env_text(url: str, grant: dict) -> str:
     )
     if grant.get("bus_scoped"):
         bus += "AGENTIHOOKS_BUS_SCOPED=1\n"
+    if grant.get("bus_swarms"):
+        bus += f"AGENTIHOOKS_BUS_SWARMS={','.join(grant['bus_swarms'])}\n"
     return (
         f"AGENTIHOOKS_HIVE_ID={grant['id']}\n"
         f"AGENTIHOOKS_HIVE_URL={url}\n"

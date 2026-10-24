@@ -88,5 +88,10 @@ class NatsScopedBus:
                 store = self._buckets[bucket] = ScopedStateStore(self._root, self._swarm, bucket)
             return store
 
+    def request(self, subject: str, data: bytes, timeout_ms: int) -> bytes:
+        if not subject.startswith(f"{PREFIX}.{self._swarm}."):
+            raise ValueError(f"a scoped bus cannot request outside swarm {self._swarm!r}")
+        return self._root.request(subject, data, timeout_ms)
+
     def close(self) -> None:
         pass

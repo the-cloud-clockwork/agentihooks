@@ -269,26 +269,80 @@ def test_scoped_event_consumers_dead_letter_within_their_own_swarm(hub, signer):
         client.close()
 
 
-def test_scoped_members_share_only_the_two_approved_account_slot_buckets(hub, signer):
+def test_a_scoped_member_reaches_the_hub_slot_service_only_through_its_own_swarm(hub, signer):
     from scripts.hive import account_slots
+    from scripts.hub import slots
 
-    for bucket in ("account-slots", "hive-slot-accounts"):
-        hub.state(bucket)
-    first, second = member(signer, "rig"), member(signer, "other")
+    slots.serve(hub, clock=lambda: 1000)
     report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+    client = member(signer)
     try:
-        own = account_slots.Slots(first, "first", lambda: report, lambda: 1000)
-        peer = account_slots.Slots(second, "second", lambda: report, lambda: 1000)
+        own = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig"), "m1", lambda: report)
         assert own.take("one", "claude") == "a"
-        assert peer.take("two", "claude") is None
+        foreign = account_slots.Remote(account_slots.asker(client, "other", 500), "m1", lambda: report)
+        with pytest.raises(TimeoutError, match="^no responders for 'swarm.other.slots'$"):
+            foreign.take("two", "claude")
         own.release("one", "claude", "a")
-        assert peer.take("two", "claude") == "a"
+        assert own.take("two", "claude") == "a"
+    finally:
+        client.close()
+
+
+def test_a_scoped_member_view_refuses_a_request_outside_its_swarm(hub, signer):
+    client = member(signer)
+    try:
+        with pytest.raises(ValueError) as caught:
+            client.for_swarm("rig").request("swarm.other.slots", b"{}", 500)
+        assert str(caught.value) == "a scoped bus cannot request outside swarm 'rig'"
+    finally:
+        client.close()
+
+
+def test_nats_requests_wait_their_timeout_and_reach_one_replica_of_a_queue_group(hub):
+    import time
+
+    calls = []
+
+    def slow(subject, data):
+        calls.append(subject)
+        time.sleep(1)
+        return data
+
+    hub.serve("swarm.rig.slow", "replicas", slow)
+    hub.serve("swarm.rig.slow", "replicas", slow)
+    assert hub.request("swarm.rig.slow", b"echo", 5000) == b"echo"
+    assert hub.request("swarm.rig.slow", b"again", 5000) == b"again"
+    assert calls == ["swarm.rig.slow", "swarm.rig.slow"]
+
+
+def test_a_nats_request_passes_its_timeout_and_maps_a_nats_timeout():
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from nats.errors import TimeoutError as NatsTimeout
+
+    bus = object.__new__(nats.NatsBus)
+    silent = AsyncMock(side_effect=NatsTimeout)
+    bus._loop = SimpleNamespace(run=asyncio.run)
+    bus._nc = SimpleNamespace(request=silent)
+    with pytest.raises(TimeoutError, match="^no responders for 'swarm.rig.silent'$"):
+        bus.request("swarm.rig.silent", b"", 300)
+    silent.assert_awaited_once_with("swarm.rig.silent", b"", timeout=0.3)
+
+
+def test_scoped_members_open_no_root_state_including_the_hub_owned_account_buckets(hub, signer):
+    from scripts.hub import slots
+
+    first = member(signer, "rig")
+    try:
         for bucket in (
             "spoke-work",
             "spoke-pending",
             "hive-presence",
             "hive-executions",
             "execution-starts",
+            *slots.BUCKETS,
             "unlisted",
         ):
             with pytest.raises(PermissionError) as caught:
@@ -296,4 +350,36 @@ def test_scoped_members_share_only_the_two_approved_account_slot_buckets(hub, si
             assert str(caught.value) == "select a swarm before opening scoped state"
     finally:
         first.close()
-        second.close()
+
+
+def test_hive_heartbeat_keeps_beating_on_a_fresh_bus_until_the_hub_serves_account_slots(
+    hub, signer, monkeypatch, capsys
+):
+    import fakeredis
+
+    from scripts.hive import account_slots, daemon
+    from scripts.hub import slots
+
+    redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    report = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    hosted = {"executions": {}, "names": []}
+    client, beats = member(signer), []
+
+    def publish(hive, beat_report, beat_hosted):
+        ask = account_slots.asker(client.for_swarm("rig"), "rig", 500)
+        account_slots.Remote(ask, hive, lambda: beat_report).heartbeat(beat_report, beat_hosted["executions"])
+        beats.append(hive)
+
+    monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
+    monkeypatch.setattr(daemon, "execution_report", lambda *args: hosted)
+    monkeypatch.setattr(account_slots, "publish", publish)
+    try:
+        daemon.beat(redis, "m1")
+        assert "account slot heartbeat failed (TimeoutError" in capsys.readouterr().err
+        assert beats == []
+        slots.serve(hub, clock=lambda: 1000)
+        daemon.beat(redis, "m1")
+        assert beats == ["m1"]
+        assert "account slot heartbeat failed" not in capsys.readouterr().err
+    finally:
+        client.close()

@@ -53,7 +53,7 @@ def test_the_cooldown_ending_returns_a_finding_inside_the_judged_range(store):  
     assert ci_speed.unjudged([current], records, AFTER + COOLDOWN_MS, COOLDOWN_MS) == [current]
 
 
-def test_in_range_runs_stay_silent_and_an_out_of_range_run_notifies(store, monkeypatch):  # noqa: F811
+def test_new_finished_runs_notify_once_inside_and_outside_the_judged_range(store, monkeypatch):  # noqa: F811
     status(monkeypatch)
 
     def finished(identity, created):
@@ -80,16 +80,18 @@ def test_in_range_runs_stay_silent_and_an_out_of_range_run_notifies(store, monke
     for minutes in (1, 6, 11):
         loop.speed(store, DOCTOR, WATCHED, AFTER + minutes * 60000)
     for texts in items(store).values():
-        assert len(texts) == 1
+        assert len(texts) == 2
+        assert "run 2," in texts[1] and "run 1," not in texts[1]
     records.append(finished(3, "2026-10-19T16:26:40Z"))
     loop.speed(store, DOCTOR, WATCHED, AFTER + 16 * 60000)
     for texts in items(store).values():
-        assert len(texts) == 2
-        assert "ci-runner-wait/" in texts[1] and "worst 2000 seconds" in texts[1]
+        assert len(texts) == 3
+        assert "ci-runner-wait/" in texts[2] and "worst 2000 seconds" in texts[2]
     records.append(finished(4, "2026-10-19T16:20:00Z"))
     loop.speed(store, DOCTOR, WATCHED, AFTER + 21 * 60000)
     for texts in items(store).values():
-        assert len(texts) == 2
+        assert len(texts) == 4
+        assert "run 4," in texts[3] and "run 3," not in texts[3]
 
 
 def test_a_returned_finding_is_keyed_by_its_verdict(store):  # noqa: F811
