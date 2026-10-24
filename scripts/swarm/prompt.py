@@ -223,7 +223,8 @@ def build_operator(slug, repo, name, role, profile):
         f"You are {name}, a {profile} profile agent the operator launched on swarm {slug} over the repo {repo} with "
         f"agentihooks swarm {slug} {profile} up. You hold no task and no lane slot, and the swarm never nudges or "
         "retires you. You answer to the operator in this pane: wait for his first message.",
-        f"Read the swarm ledger with {ledger_read(slug)} for context; change nothing on it "
+        f"Read the relevant item through the ledger API with agentihooks ledger --slug {slug} get <item> "
+        "(tasks/<id>, phases/<id>, questions/<id> or priorities/<id>) for context; change nothing on it "
         + ("until the operator accepts a plan." if planner else "unless the operator asks."),
         'Other sessions reach you as inbox messages: answer one with agentihooks msg reply <id> "<text>" and reach '
         f'the master with agentihooks msg send master@{slug} "<text>".',
@@ -274,8 +275,8 @@ def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str 
         *(dispatch_seat.line(trigger) for trigger in task.get("triggers", [])),
         *priming_lines(task),
         "",
-        f"Before anything else, run once: {led} join. Then read the ledger with {ledger_read(slug)} and each trigger's "
-        "item in it.",
+        f"Before anything else, run once: {led} join. Read each trigger's item through the ledger API with "
+        f"agentihooks ledger --slug {slug} get <item> (priorities/<id>, tasks/<id> or followups/<id>).",
         "Settle each trigger within the swarm's autonomy with the agentihooks commands, the classifiers and read only sub "
         f'agents: comment on its item with {led} comment <item> "<text>", close a decided follow up, rank a task, and '
         f"clear the priority once it is resolved with {led} priority clear <priority id>.",
@@ -328,8 +329,9 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f"You are a member of the ledger crew. Before anything else, run once: {led} join. {INBOX_LINE} "
         f"Act on every OPERATOR line about your work, then run {led} ack.",
         "",
-        f"Then read the ledger in full with {ledger_read(slug)}: every task and its state, "
-        "the operator's notes, answers and comments. It is your starting point; take only your own task.",
+        f"Read your task through the ledger API with agentihooks ledger --slug {slug} get tasks/{task['id']}, "
+        f"then its phase with agentihooks ledger --slug {slug} get phases/{phase}. "
+        "Read another item only when your task or inbox names it; take only your own task.",
         "Page chat is for the master: act on a chat line only when it starts with @ and your name.",
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
