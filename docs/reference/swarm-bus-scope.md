@@ -14,14 +14,16 @@ queue, dead letter, state and stream subjects, even when those resources exist.
 
 ## When a credential is scoped
 
-`agentihooks hive serve` mints each member's NATS credential at `hive join` and at every refresh. The OpenBao
-signer record named by `AGENTIHOOKS_NATS_SIGNER` decides its shape:
+`agentihooks hive serve` mints each member's NATS credential at `hive join` and at every refresh. The signer record
+named by `AGENTIHOOKS_NATS_SIGNER` decides its shape, and the hive endpoint rereads that record on every refresh, so a
+changed list applies without restarting `hive serve`:
 
 | Signer record | Credential | `hive.env` |
 |---|---|---|
 | No `member_swarms` field | The unscoped member grant: legacy execution subjects, the shared dead letter stream and every hive state bucket of every swarm | No `AGENTIHOOKS_BUS_SCOPED` line |
 | `member_swarms` maps the member id to a list of swarms | Publish and subscribe only under each listed swarm's prefix, plus the two shared slot buckets | `AGENTIHOOKS_BUS_SCOPED=1` |
-| `member_swarms` present, member id absent | Publish denied on `>`; subscribe only on the member's own `_INBOX.<user>.>` | `AGENTIHOOKS_BUS_SCOPED=1` |
+| `member_swarms` maps the member id to an empty list | Publish denied on `>`; subscribe only on the member's own `_INBOX.<user>.>` | `AGENTIHOOKS_BUS_SCOPED=1` |
+| `member_swarms` present, member id absent | None. The endpoint answers 403 `the hub record lists no member swarms for hive member <id>; it mints no unscoped bus credential`, checked before it rotates the member's Redis password | Unchanged |
 
 The signer record field is one JSON object:
 
@@ -34,9 +36,24 @@ The signer record field is one JSON object:
 }
 ```
 
-`hive serve` refuses a record whose `member_swarms` is not an object of lists, or that names a swarm that is not a
-valid subject token, with `member_swarms contains an invalid swarm name`. A member picks up a changed list at its
-next `agentihooks hive refresh` or `hive join`, which mints a new credential.
+A `file:` signer reads the same object from a `member_swarms` file in its folder. `hive serve` refuses a record whose
+`member_swarms` is not an object of lists with `member_swarms must map member ids to lists of swarm names`, and one
+that names a swarm that is not a valid subject token with `member_swarms contains an invalid swarm name`. A member
+picks up a changed list at its next `agentihooks hive refresh` or `hive join`, which mints a new credential.
+
+The field is written by two commands, both with `AGENTIHOOKS_NATS_SIGNER` naming an OpenBao record under
+`agentihooks/hub/`:
+
+- `agentihooks hive scope [--swarm <swarm> ...]` creates the field and lists every existing member with the given
+  swarms, or with every swarm in the store when none is given. Members already listed keep their swarms.
+- `agentihooks hive invite` lists each new member the same way once the field exists, and marks its invite
+  `AGENTIHOOKS_BUS_SCOPED=1`. It never creates the field, so invites issued before `hive scope` stay unscoped. A
+  `file:` signer is never written.
+
+`hive join` with an invite marked `AGENTIHOOKS_BUS_SCOPED=1` refuses an unscoped credential with `the hive offered an
+unscoped bus credential; ask its hub to list this member's swarms` and keeps its current membership. That refusal
+guards a scoped member against a downgrade; the hub's 403 is the enforcement, since anyone holding the invite file can
+edit its marker.
 
 ## Settings
 
@@ -45,7 +62,7 @@ next `agentihooks hive refresh` or `hive join`, which mints a new credential.
 | `AGENTIHOOKS_BUS=nats` | operator or `hive.env` | Selects the NATS backend |
 | `AGENTIHOOKS_BUS_URL` | invite (`hive invite --bus-url`) | NATS address the member reaches |
 | `AGENTIHOOKS_BUS_CREDENTIALS` | `hive join` | The minted credential, or an `openbao:` reference to it |
-| `AGENTIHOOKS_BUS_SCOPED=1` | `hive join`, when the grant is scoped | Routes every queue, dead letter, state and event call to the swarm's own streams |
+| `AGENTIHOOKS_BUS_SCOPED=1` | `hive invite` and `hive join`, when the grant is scoped | Routes every queue, dead letter, state and event call to the swarm's own streams |
 | `AGENTIHOOKS_BUS_BIND=1` | hive members | Binds existing streams and consumers instead of creating them; members hold no stream create grant |
 
 The hub reads the same variables. Set `AGENTIHOOKS_BUS_SCOPED=1` on the hub, without `AGENTIHOOKS_BUS_BIND`, once
@@ -159,5 +176,7 @@ legacy bus working beside a scoped one.
 | `queue '<name>' does not belong to swarm '<swarm>'` | The lane is not `eng`, `ci` or `plan`, or the name names another swarm | Use one of the three lanes of the bus swarm |
 | `a scoped bus cannot change its swarm` | `for_swarm` was called on a view of a different swarm | Call `for_swarm` on the root bus |
 | `permissions violation for publish to "swarm.<swarm>...."` on the member's own swarm | The signer record does not list that swarm for this member | Add it under `member_swarms`, then `agentihooks hive refresh` on the member |
-| Member gets `permissions violation` on every subject | `member_swarms` exists but omits this member id | Add the member id with its swarms |
+| Member gets `permissions violation` on every subject | `member_swarms` lists this member with no swarms | Add its swarms, then `agentihooks hive refresh` on the member |
+| `hive refresh` or `hive join` answers 403 `the hub record lists no member swarms for hive member <id>` | `member_swarms` exists but omits this member id | `agentihooks hive scope` on the hub, or add the member id with its swarms |
+| `the hive offered an unscoped bus credential; ask its hub to list this member's swarms` | The invite is marked scoped but the hub record has no `member_swarms` field | Run `agentihooks hive scope` on the hub, then join again |
 | `scoped queue migration is incomplete` | The hub has not finished `migrate_queue` for that lane | Finish the migration on the hub, then restart the member |
