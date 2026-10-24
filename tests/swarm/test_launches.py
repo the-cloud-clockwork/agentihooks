@@ -20,6 +20,7 @@ NAME = "engineer@a1b2c3-0001"
 
 def test_record_writes_this_process_and_its_start_under_the_agent_name(tmp_path):
     launches.record({"AGENTIHOOKS_SWARM": "crew", "AGENTIHOOKS_AGENT_NAME": NAME}, tmp_path)
+    launches.record({"AGENTIHOOKS_SWARM": "crew", "AGENTIHOOKS_AGENT_NAME": NAME}, tmp_path)
     data = json.loads((tmp_path / "launches" / f"{NAME}.json").read_text())
     assert data == {"pid": os.getpid(), "start_time": processes()[os.getpid()].start_time}
     assert launches.find(NAME, tmp_path).pid == os.getpid()

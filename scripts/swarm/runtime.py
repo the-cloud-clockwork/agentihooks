@@ -24,6 +24,7 @@ from scripts.swarm import (
     default_models,
     effort_range,
     host_budget,
+    launches,
     live_binding,
     model_pick,
     naming,
@@ -1104,7 +1105,7 @@ class HerdrRuntime:
         if found is None and agent.name not in self.live_names():
             return self.retire_process(replace(agent, pane_id=""), None, homes)
         if found is None:
-            named = _named_process(agent)
+            named = launches.find(agent.name, self.home) or _named_process(agent)
             if named is not None:
                 return self.retire_process(replace(agent, pane_id=""), named.pid, homes, named.start_time)
         self.refusals[agent.name] = {"process": 0, "refusal": "no owned pane for unrecorded process"}
