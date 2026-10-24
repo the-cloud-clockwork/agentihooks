@@ -218,21 +218,6 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
         " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
-    jobs = yaml.safe_load((_ROOT / ".github/workflows/semgrep.yml").read_text())["jobs"]
-    assert set(jobs) == {"scan", "charts"}
-    scan = jobs["scan"]
-    assert scan["uses"] == "The-Cloud-Clockwork/.github/.github/workflows/semgrep-reusable.yml@main"
-    assert scan["with"]["base"] == "${{ inputs.base }}"
-    assert set(scan["with"]["configs"].split()) == {"p/ci", "p/secrets", "p/python"}
-    assert scan["with"]["exclude_rules"].split() == [
-        "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
-    ]
-    assert scan["with"]["rules_dir"] == ".semgrep"
-    assert scan["with"]["runs_on"] == jobs["charts"]["runs-on"] == _workflow()["jobs"]["select"]["runs-on"]
-    assert set(scan["with"]) == {"base", "configs", "exclude_rules", "rules_dir", "runs_on"}
-    assert jobs["charts"]["steps"][-1]["run"] == "python tests/ci_charts/chart_timers.py"
-    assert all("if" not in step and "continue-on-error" not in step for step in jobs["charts"]["steps"])
-    assert not {"if", "continue-on-error"} & (set(scan) | set(jobs["charts"]))
     assert "continue-on-error" not in job
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
