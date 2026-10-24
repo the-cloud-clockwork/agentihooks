@@ -1049,7 +1049,7 @@ def build_parser():
         "--kind", choices=ledger_kinds.KINDS, help="code (default), ci, ops, troubleshoot, tune, research, workflow"
     )
     task.add_argument("--workflow", default="", help="workflow kind: the workflow name")
-    task.add_argument("--case", default="", help="workflow kind: the case file")
+    task.add_argument("--case", help="workflow kind: the case file")
     task.add_argument("--must", default="", help="contract: what must be true when the task is done")
     task.add_argument("--check", default="", help="contract: how it is checked")
     task.add_argument("--judge", default="", help="contract: who judges it")

@@ -10,6 +10,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 
+from scripts.swarm import cli as swarm_cli  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_kinds, workflow_task  # noqa: E402
 from tests.swarm.test_cli import env, run  # noqa: E402, F401
 from tests.swarm_ledger import test_task_kinds as kinds  # noqa: E402
@@ -54,6 +55,38 @@ def test_the_ledger_stores_a_workflow_task_with_its_name_and_case():
 def test_task_add_refuses_an_unknown_missing_or_misplaced_workflow(extra):
     with pytest.raises(SystemExit):
         add(*extra)
+
+
+@pytest.mark.parametrize(
+    ("extra", "reason"),
+    [
+        (("--workflow", "no-such-workflow"), "unknown workflow no-such-workflow"),
+        ((), "unknown workflow "),
+        (("--workflow", "simple-workflow", "--lane", "ci"), "workflow tasks use the eng lane"),
+    ],
+)
+def test_task_add_names_why_a_workflow_task_was_not_added(extra, reason):
+    with pytest.raises(SystemExit) as refused:
+        add(*extra)
+    assert refused.value.code == f"task t5 was not added: {reason}"
+
+
+def test_task_add_refuses_a_kind_it_does_not_know():
+    argv = ["--slug", kinds.SLUG, "--as", "liaison", "task", "add", "t5", "loop", "--kind", "bogus"]
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(argv)
+
+
+def test_task_add_keeps_a_named_profile_and_resolves_a_project_workflow_from_the_cwd(tmp_path, monkeypatch):
+    workflows = tmp_path / ".agentihooks" / "workflows"
+    workflows.mkdir(parents=True)
+    (tmp_path / ".git").mkdir()
+    package = Path(__file__).resolve().parents[2] / "profiles" / "package" / "workflows" / "simple-workflow.yaml"
+    text = package.read_text().replace("name: simple-workflow", "name: project-workflow")
+    (workflows / "project-workflow.yaml").write_text(text)
+    monkeypatch.chdir(tmp_path)
+    fields = add("--workflow", "project-workflow", "--profile", "reviewer")[0][1]
+    assert (fields["workflow"], fields["profile"]) == ("project-workflow", "reviewer")
 
 
 def test_the_ledger_refuses_a_workflow_field_on_another_kind_or_a_workflow_task_without_one():
@@ -152,13 +185,27 @@ def test_an_exhausted_workflow_blocks_its_task_with_the_last_judge_notes(env, mo
     notes = "the build never handles the retry path"
     rows = _workflow_task(env, monkeypatch, tmp_path, {"status": "exhausted", "last_notes": notes})
     assert run("sw", "done") == 0
-    assert json.loads(capsys.readouterr().out.splitlines()[-1])["state"] == "blocked"
+    assert json.loads(capsys.readouterr().out.splitlines()[-1]) == {
+        "task": "t1",
+        "state": "blocked",
+        "next": "stop now; the swarm closes this session",
+    }
     assert rows.rows["t1"]["state"] == "blocked"
     assert rows.comments[-1] == ("t1", notes, NAME)
 
 
 def test_the_workspace_files_are_workflow_json_and_verdict_json():
     assert (workflow_task.STATE, workflow_task.VERDICT) == ("workflow.json", "verdict.json")
+
+
+def test_done_names_the_proof_each_kind_lacks():
+    assert swarm_cli._unproven("troubleshoot", ["root_cause", "fix or filed"]) == (
+        "a troubleshoot task is done only with its proof: give --root-cause, --fix or --filed"
+    )
+    assert swarm_cli._unproven("workflow", ["verdict"]) == (
+        "a workflow task is done only when workflow.json in its workspace says passed "
+        "and the judge verdict record verdict.json says pass"
+    )
 
 
 def test_add_fields_keeps_a_named_profile_and_omits_an_absent_case():

@@ -75,5 +75,5 @@ def unmet(task):
     if kind(task) == "research" and "finding" not in missing and not LINK_RE.match(proof["finding"].strip()):
         missing.append("finding")
     if kind(task) == "workflow":
-        missing = [key for key, value in WORKFLOW_PROOF.items() if str(proof.get(key, "")).strip() != value]
+        missing = [key for key, value in WORKFLOW_PROOF.items() if str(proof.get(key)).strip() != value]
     return missing

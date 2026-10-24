@@ -1743,7 +1743,7 @@ def _unproven(kind, missing):
 
 
 def _workflow_proof(store, slug, agent, ledger, row):
-    workspace = row.get("workspace", "")
+    workspace = row.get("workspace")
     notes = workflow_task.exhausted_notes(workspace)
     if notes is None:
         return workflow_task.proof(workspace)

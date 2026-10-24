@@ -12,7 +12,7 @@ VERDICT = "verdict.json"
 EXHAUSTED = "workflow exhausted"
 
 
-def add_fields(name: str, case: str, lane: str, profile: str | None, cwd: Path) -> dict:
+def add_fields(name: str, case: str | None, lane: str, profile: str | None, cwd: Path) -> dict:
     found, _ = loader.resolve(cwd)
     if name not in found:
         raise ValueError(f"unknown workflow {name}")
@@ -28,7 +28,7 @@ def add_fields(name: str, case: str, lane: str, profile: str | None, cwd: Path) 
     return fields
 
 
-def read(workspace: str, name: str) -> dict:
+def read(workspace: str | None, name: str) -> dict:
     if not workspace:
         return {}
     try:
@@ -38,14 +38,14 @@ def read(workspace: str, name: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def proof(workspace: str) -> dict:
+def proof(workspace: str | None) -> dict:
     return {
         "workflow": str(read(workspace, STATE).get("status", "")),
         "verdict": str(read(workspace, VERDICT).get("verdict", "")),
     }
 
 
-def exhausted_notes(workspace: str) -> str | None:
+def exhausted_notes(workspace: str | None) -> str | None:
     state = read(workspace, STATE)
     if state.get("status") != "exhausted":
         return None
