@@ -6,9 +6,19 @@ on:
       version:
         type: string
         required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published chart version to install
+        type: string
+        required: true
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow == 'Published Helm chart in kind' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('helm-kind-published-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Published Helm chart in kind' && 'max' || 'single' }}
 
 jobs:
   kind:

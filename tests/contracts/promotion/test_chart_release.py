@@ -49,10 +49,14 @@ def test_the_chart_just_published_installs_on_kind_after_publication():
     assert job["with"] == {"version": "${{ github.event.release.tag_name }}"}
     assert not job.get("if") and not job.get("continue-on-error")
     called = yaml.safe_load((ROOT / ".github/workflows/helm-kind-published.yml").read_text())
-    assert called[True] == {"workflow_call": {"inputs": {"version": {"type": "string", "required": True}}}}
+    assert called[True]["workflow_call"] == {"inputs": {"version": {"type": "string", "required": True}}}
     step = called["jobs"]["kind"]["steps"][-1]
     assert step["env"] == {"VERSION": "${{ inputs.version }}"}
     assert step["run"] == 'bash deploy/helm/agentihooks-swarm/ci/kind-published.sh "$VERSION"'
+    chart = ROOT / "deploy/helm/agentihooks-swarm"
+    assert (chart / "ci/kind-values.yaml").is_file()
+    ignored = (chart / ".helmignore").read_text().split() if (chart / ".helmignore").exists() else []
+    assert not [pattern for pattern in ignored if pattern.strip("/*") in ("ci", "ci/kind-values.yaml")]
 
 
 def _install_published(tmp_path, mode):
@@ -76,7 +80,6 @@ def _install_published(tmp_path, mode):
         "if tool == 'helm' and args[0] == 'show':\n"
         "    print('version: ' + ('9.9.8' if os.environ['MODE'] == 'mismatch' else '9.9.9'))\n"
         "if tool == 'helm' and args[0] == 'install':\n"
-        "    assert args[args.index('-f') + 1].endswith('/agentihooks-swarm/ci/kind-values.yaml')\n"
         "    sys.exit(1)\n"
     )
     stub.chmod(0o755)
@@ -120,6 +123,7 @@ def test_a_failed_install_of_the_published_chart_fails_and_deletes_the_cluster(t
     assert result.returncode == 1
     install = next(call for call in calls if call[:2] == ["helm", "install"])
     assert install[3].endswith("agentihooks-swarm-9.9.9.tgz")
+    assert install[install.index("-f") + 1] == f"{install[3].rsplit('/', 1)[0]}/agentihooks-swarm/ci/kind-values.yaml"
     assert "image.tag=9.9.9" in install
     assert ["docker", "pull", "-q", "ghcr.io/the-cloud-clockwork/agentihooks-swarm:9.9.9"] in calls
     assert not [call for call in calls if call[:2] == ["helm", "test"]]
