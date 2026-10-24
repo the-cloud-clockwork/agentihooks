@@ -14,8 +14,7 @@ def _finished_before_ack(store, monkeypatch, *ids, receipt=True):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     for agent in [a for a in store.agents("sw") if a.name in runtime.ordered]:
         store.put_agent("sw", replace(agent, state="finished", harness="claude"))
-        if not receipt:
-            runtime.failing.add(agent.name)
+        (runtime.acked if receipt else runtime.failing).add(agent.name)
     released = []
     monkeypatch.setattr(
         tick_module, "_release_hive_launch", lambda s, st, record: released.append((s, st is store, record.name))
