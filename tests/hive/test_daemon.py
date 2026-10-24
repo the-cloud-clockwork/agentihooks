@@ -1419,7 +1419,9 @@ def test_beat_counts_a_named_live_execution_once_without_fleet_registration(redi
     assert not slots.reserve(slot, "full", 3, 1000)
 
 
-@pytest.mark.parametrize("mismatch", ["none", "hive", "harness", "account", "pid", "name"])
+@pytest.mark.parametrize(
+    "mismatch", ["none", "hive", "harness", "account", "pid", "name", "host_id", "missing_harness", "duplicate"]
+)
 def test_named_execution_discovery_requires_a_local_matching_process(redis, monkeypatch, mismatch):
     from dataclasses import replace
 
@@ -1429,32 +1431,47 @@ def test_named_execution_discovery_requires_a_local_matching_process(redis, monk
 
     store = RedisStore(redis)
     store.create(SwarmConfig("swarm", "repo", 8, 0))
-    agent = AgentRecord(
-        store.next_name("swarm", "eng"),
-        "eng",
-        "task",
-        hive="hive",
-        harness="claude",
-        account="one",
-        seat="eng-1@swarm",
-    )
-    if mismatch in {"hive", "harness", "account"}:
-        agent = replace(agent, **{mismatch: "other"})
-    agent = store.start_execution("swarm", agent)
-    store.put_agent("swarm", agent)
-    pid = 20 if mismatch == "pid" else 10
-    session = terminate_agent.Session(
-        "",
-        "claude",
-        "stray" if mismatch == "name" else agent.name,
-        Process(pid, 1, pid, pid, 7, "S", "claude", ("claude",)),
-        "",
-        "unregistered",
-    )
-    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
-    assert daemon._executions(redis, "hive", {"claude": {10: "one"}}) == (
-        {"claude:one": [agent.execution_id]} if mismatch == "none" else {}
-    )
+    agents, sessions = [], []
+    for index in range(2):
+        agent = AgentRecord(
+            store.next_name("swarm", "eng"),
+            "eng",
+            "task",
+            hive="hive",
+            harness="claude",
+            account="one",
+            seat=f"eng-{index + 1}@swarm",
+        )
+        if index == 0 and mismatch in {"hive", "harness", "account"}:
+            agent = replace(agent, **{mismatch: "other"})
+        if index == 0 and mismatch == "host_id":
+            agent = replace(agent, hive="", runtime_target={"host_id": "hive"})
+        agent = store.start_execution("swarm", agent)
+        store.put_agent("swarm", agent)
+        agents.append(agent)
+        pid = 10 if mismatch == "duplicate" else 10 + index
+        if index == 0 and mismatch == "pid":
+            pid = 20
+        sessions.append(
+            terminate_agent.Session(
+                "",
+                "claude",
+                "stray" if index == 0 and mismatch == "name" else agent.name,
+                Process(pid, 1, pid, pid, 7, "S", "claude", ("claude",)),
+                "",
+                "unregistered",
+            )
+        )
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: sessions)
+    processes = {} if mismatch == "missing_harness" else {"claude": {10: "one", 11: "one"}}
+    expected = [agents[1].execution_id]
+    if mismatch in {"none", "host_id"}:
+        expected.insert(0, agents[0].execution_id)
+    elif mismatch == "duplicate":
+        expected = [agents[0].execution_id]
+    elif mismatch == "missing_harness":
+        expected = []
+    assert daemon._executions(redis, "hive", processes) == ({"claude:one": expected} if expected else {})
 
 
 def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeypatch):
