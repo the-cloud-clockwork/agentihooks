@@ -16,7 +16,7 @@ pytestmark = pytest.mark.unit
 def finished(identity, kind, conclusion="success"):
     work = job(400 if kind == "ci runner wait" else 0, created=-1200)
     work.update(status="completed", completed_at=stamp(-1))
-    return record([work], identity=identity, status="completed", conclusion=conclusion)
+    return record([work], event="merge_group", identity=identity, status="completed", conclusion=conclusion)
 
 
 def mentions(database, slug, kind):
@@ -29,13 +29,20 @@ def mentions(database, slug, kind):
 
 
 @pytest.mark.parametrize("kind", ["ci runner wait", "ci tier wall time"])
-def test_finished_runs_are_mentioned_once_when_group_members_join_leave_or_return(store, monkeypatch, kind):  # noqa: F811
+@pytest.mark.parametrize("judged", [False, True])
+def test_finished_runs_are_mentioned_once_when_group_members_join_leave_or_return(store, monkeypatch, kind, judged):  # noqa: F811
     monkeypatch.setattr(loop.github_status, "unresolved", lambda: [])
     batch = []
     monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot(batch))
     first, second = finished(101, kind), finished(102, kind)
     batch[:] = [first]
     loop.speed(store, DOCTOR, WATCHED, NOW)
+    if judged:
+        monkeypatch.setenv("AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES", "0")
+        details = store.redis.hgetall(store.key(DOCTOR, "doctor-findings"))
+        for identity, raw in details.items():
+            if json.loads(raw)["kind"] == kind:
+                loop.verdicts(store, DOCTOR).judge(identity, "established", "investigated", "reader", NOW)
     batch[:] = [second, finished(103, kind, "cancelled"), finished(104, kind, "superseded")]
     loop.speed(RedisStore(store.redis), DOCTOR, WATCHED, NOW + 60000)
     for slug in (DOCTOR, WATCHED):
