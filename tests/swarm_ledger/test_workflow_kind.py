@@ -1,3 +1,4 @@
+import argparse
 import json
 import sys
 import unittest.mock
@@ -7,11 +8,9 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
-import ledger  # noqa: E402
 import ledger_core as core  # noqa: E402
-import ledger_kinds  # noqa: E402
 
-from scripts.swarm_ledger import workflow_task  # noqa: E402
+from scripts.swarm_ledger import ledger, ledger_kinds, workflow_task  # noqa: E402
 from tests.swarm.test_cli import env, run  # noqa: E402, F401
 from tests.swarm_ledger import test_task_kinds as kinds  # noqa: E402
 
@@ -65,6 +64,45 @@ def test_the_ledger_refuses_a_workflow_field_on_another_kind_or_a_workflow_task_
     ):
         with pytest.raises(ValueError):
             core.check_op(bad)
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        ({"kind": "workflow", "workflow": 3}, "workflow and case must be strings"),
+        (
+            {"kind": "workflow", "workflow": " "},
+            "a workflow task names its workflow, and only a workflow task takes one",
+        ),
+        (
+            {"kind": "ops", "workflow": "simple-workflow"},
+            "a workflow task names its workflow, and only a workflow task takes one",
+        ),
+        ({**WORKFLOW, "lane": "ci"}, "workflow tasks use the eng lane"),
+    ],
+)
+def test_check_workflow_names_what_it_refuses(fields, message):
+    with pytest.raises(ValueError) as refused:
+        ledger_kinds.check_workflow(fields)
+    assert str(refused.value) == message
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [WORKFLOW, {"kind": "workflow", "workflow": "simple-workflow"}, {"kind": "ops", "lane": "ci"}, {}],
+)
+def test_check_workflow_takes_a_named_workflow_in_the_eng_lane_or_by_default_and_other_kinds_without_one(fields):
+    assert ledger_kinds.check_workflow(fields) is None
+
+
+def test_task_add_documents_the_workflow_kind_and_its_options():
+    parser = ledger.build_parser()
+    for name in ("task", "add"):
+        parser = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices[name]
+    helps = {action.dest: action.help for action in parser._actions}
+    assert helps["kind"] == "code (default), ci, ops, troubleshoot, tune, research, workflow"
+    assert helps["workflow"] == "workflow kind: the workflow name"
+    assert helps["case"] == "workflow kind: the case file"
 
 
 def test_the_ledger_refuses_done_without_a_passed_workflow_and_a_pass_verdict():
