@@ -45,6 +45,10 @@ REQUEUED = (
     "The swarm queued {url} again: it left the merge queue while green and no merge group run of its own failed, "
     "so the task keeps its claim."
 )
+HEAD_RED = "left the merge queue red"
+OWN_RED = "left the merge queue red in its own merge group run"
+UNREAD_EXIT = "left the merge queue green and its merge group runs could not all be read"
+DROPPED_GREEN = "left the merge queue green and was dropped again after {tries} requeues"
 BACKOFF_MS = 60_000
 RECOVER = "recover"
 ALERT_SOURCE = "requeue"
@@ -245,7 +249,8 @@ def _advance(run, rows, row, found):
         return _finish(run, rows, row, found)
     if outcome.startswith(f"pull request {url}, now green"):
         return _requeue(run, row, found)
-    return _reopen(run, row, found, "left the merge queue without merging")
+    red = outcome.startswith(f"pull request {url}, now red")
+    return _reopen(run, row, found, HEAD_RED if red else "left the merge queue without merging")
 
 
 def _requeue(run, row, found):
@@ -255,8 +260,12 @@ def _requeue(run, row, found):
     except SwarmError as exc:
         save(run.store, run.slug, task_id, found)
         return [f"could not read the merge group runs of {url} for task {task_id}: {exc}"]
-    if failures is None or failures or found.get("requeues", 0) >= QUEUE_TRIES:
-        return _reopen(run, row, found, "left the merge queue without merging")
+    if failures is None:
+        return _reopen(run, row, found, UNREAD_EXIT)
+    if failures:
+        return _reopen(run, row, found, OWN_RED)
+    if found.get("requeues", 0) >= QUEUE_TRIES:
+        return _reopen(run, row, found, DROPPED_GREEN.format(tries=QUEUE_TRIES))
     actions = _queue(run, row, found)
     if actions == [f"queued {url} for task {task_id}"]:
         found["requeues"] = found.get("requeues", 0) + 1
