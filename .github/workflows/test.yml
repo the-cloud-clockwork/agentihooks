@@ -2431,6 +2431,11 @@ jobs:
           REUSED: ${{ needs.reuse.outputs.reused }}
           INLINE: ${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}
         run: |
+          selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
+          if [[ "$selection" == failure || "$selection" == cancelled ]]; then
+            echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
+            exit 1
+          fi
           if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
             if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" '
               (.select.outputs.scope // "") as $scope
