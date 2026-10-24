@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.xǁSQLiteRecallStoreǁ_mark__mutmut_7:eb86dc4e249cf62a5a85d5b5efeeda464b6feabcbb5d5b4f8f5fda6c03c44330": {
+    "reader": "standards_reader",
+    "reason": "Uppercasing the upsert keywords, the INDEXED/SOURCE/AT identifiers and EXCLUDED.AT is a no-op because SQLite identifiers and keywords are case-insensitive."
+  }
+}

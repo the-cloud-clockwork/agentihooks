@@ -161,7 +161,7 @@ class NatsConsumer:
     async def _fetch(self, batch: int, timeout_ms: int) -> list:
         try:
             messages = await self._subscription.fetch(batch, timeout=_seconds(max(timeout_ms, MIN_FETCH_MS)))
-        except TimeoutError:
+        except asyncio.TimeoutError:
             return []
         deliveries = []
         for msg in messages:

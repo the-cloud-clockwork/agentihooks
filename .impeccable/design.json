@@ -191,8 +191,16 @@
         "value": "600px"
       },
       {
+        "name": "phone",
+        "value": "767px"
+      },
+      {
         "name": "tablet",
         "value": "1023px"
+      },
+      {
+        "name": "tablet-wide",
+        "value": "1100px"
       },
       {
         "name": "laptop",
