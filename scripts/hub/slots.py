@@ -1,10 +1,11 @@
 """Account slot admission the hub answers for hive members, so one account total spans every swarm."""
 
 import json
+import sys
 from collections.abc import Callable
 
 from scripts.events.bus import Bus
-from scripts.events.subjects import PREFIX
+from scripts.events.subjects import SLOTS
 from scripts.hive import account_slots, presence
 
 BUCKETS = ("account-slots", "hive-slot-accounts")
@@ -18,12 +19,18 @@ OPERATIONS = {
 
 def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int]):
     parts = subject.split(".")
-    if len(parts) != 3 or parts[0] != PREFIX or parts[2] != account_slots.SLOTS:
+    if len(parts) != 3 or parts[0] != SLOTS:
         raise ValueError(f"not a slot request subject: {subject!r}")
     request = json.loads(data)
     operation = OPERATIONS.get(request.get("op"))
     if operation is None:
         raise ValueError(f"unknown slot operation {request.get('op')!r}")
+    if request["hive"] != parts[2]:
+        refusal = (
+            f"slot request names hive {request['hive']!r} but the sending credential is bound to hive {parts[2]!r}"
+        )
+        print(f"hub: refused a {request['op']} in swarm {parts[1]}: {refusal}", file=sys.stderr)
+        raise PermissionError(refusal)
     return operation(account_slots.Slots(bus, request["hive"], lambda: request["report"], clock), request)
 
 
@@ -40,4 +47,4 @@ def handle(bus: Bus, subject: str, data: bytes, clock: Callable[[], int] = prese
 def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms) -> None:
     for bucket in BUCKETS:
         bus.state(bucket)
-    bus.serve(f"{PREFIX}.*.{account_slots.SLOTS}", QUEUE, lambda subject, data: handle(bus, subject, data, clock))
+    bus.serve(f"{SLOTS}.*.*", QUEUE, lambda subject, data: handle(bus, subject, data, clock))
