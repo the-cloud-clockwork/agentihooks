@@ -2,6 +2,7 @@
 
 import argparse
 import ast
+import collections
 import inspect
 import itertools
 import json
@@ -16,7 +17,7 @@ import time
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import TextIO
+from typing import BinaryIO, TextIO
 
 from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
@@ -46,6 +47,8 @@ THREAD_GROWTH = 8
 RSS_GROWTH_KIB = 65_536
 MIN_WRITES = 0.9
 SERVER_WAIT_S = 60.0
+STDERR_TAIL_LINES = 200
+RELAY_JOIN_S = 5.0
 ALERT_QUIET_MS = 3_600_000
 WRITE_BREACH = "write p95"
 BUDGETS = {
@@ -64,6 +67,7 @@ BUDGETS = {
     "READS_PER_SECOND": max,
     "SWEEPS": max,
 }
+RELAYS: dict[int, threading.Thread] = {}
 WORDS = "the swarm keeps every task with its comments proof and the work that landed for the operator".split()
 
 
@@ -241,17 +245,16 @@ def start_server(folder: Path, port: int, log: TextIO) -> subprocess.Popen:
         stdout=log,
         stderr=subprocess.PIPE,
         stdin=subprocess.DEVNULL,
-        text=True,
     )
-    stderr: list[str] = []
-    relay = threading.Thread(target=relay_stderr, args=(server.stderr, log, stderr), daemon=True)
+    startup_stderr: collections.deque[bytes] = collections.deque(maxlen=STDERR_TAIL_LINES)
+    relay = threading.Thread(target=relay_stderr, args=(server.stderr, log.fileno(), startup_stderr), daemon=True)
     relay.start()
+    RELAYS[server.pid] = relay
     deadline = time.monotonic() + SERVER_WAIT_S
     while time.monotonic() < deadline:
         if server.poll() is not None:
-            relay.join(timeout=5)
             raise SystemExit(
-                f"ledger server exited with {server.returncode} before listening; its stderr:\n" + "".join(stderr)
+                startup_failure(server, startup_stderr, f"exited with {server.returncode} before listening")
             )
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=1):
@@ -259,14 +262,22 @@ def start_server(folder: Path, port: int, log: TextIO) -> subprocess.Popen:
         except OSError:
             time.sleep(0.2)
     server.kill()
-    raise SystemExit(f"ledger server did not listen on port {port} within {SERVER_WAIT_S}s")
+    server.wait()
+    raise SystemExit(startup_failure(server, startup_stderr, f"did not listen on port {port} within {SERVER_WAIT_S}s"))
 
 
-def relay_stderr(pipe: TextIO, log: TextIO, lines: list[str]) -> None:
+def startup_failure(server: subprocess.Popen, startup_stderr: collections.deque[bytes], outcome: str) -> str:
+    RELAYS.pop(server.pid).join(timeout=RELAY_JOIN_S)
+    return f"ledger server {outcome}; its stderr:\n" + b"".join(startup_stderr).decode(errors="replace")
+
+
+def relay_stderr(pipe: BinaryIO, fd: int, tail: collections.deque[bytes]) -> None:
     for line in pipe:
-        lines.append(line)
+        tail.append(line)
+        view = memoryview(line)
         try:
-            os.write(log.fileno(), line.encode())
+            while view:
+                view = view[os.write(fd, view) :]
         except OSError:
             pass
 
@@ -278,6 +289,8 @@ def stop_server(server: subprocess.Popen) -> None:
     except subprocess.TimeoutExpired:
         server.kill()
         server.wait()
+    if relay := RELAYS.pop(server.pid, None):
+        relay.join(timeout=RELAY_JOIN_S)
 
 
 def client(api: ResourceClient, name: str, item: str, start: float, deadline: float, results: dict) -> None:

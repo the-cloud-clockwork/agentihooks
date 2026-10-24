@@ -257,6 +257,20 @@ def test_a_server_that_fails_at_startup_names_its_exit_status_and_stderr(monkeyp
         assert log_path.read_text() == "ledger database is locked\n"
 
 
+def test_a_server_that_never_listens_names_its_stderr(monkeypatch, tmp_path):
+    script = tmp_path / "silent_server.py"
+    script.write_text(
+        "import sys, time\nsys.stderr.write('waiting on the ledger lock\\n')\nsys.stderr.flush()\ntime.sleep(60)\n"
+    )
+    monkeypatch.setattr(ledger_load, "ledger_server", SimpleNamespace(__file__=str(script)))
+    monkeypatch.setattr(ledger_load, "SERVER_WAIT_S", 2.0)
+    with (tmp_path / "server.log").open("w") as log, pytest.raises(SystemExit) as exited:
+        ledger_load.start_server(tmp_path, ledger_load.free_port(), log)
+    assert "did not listen on port" in str(exited.value)
+    assert "waiting on the ledger lock" in str(exited.value)
+    assert not ledger_load.RELAYS
+
+
 def resource_samples(threads=0, memory=0):
     return [(float(n), 12 + threads * n, 100_000 + memory * n) for n in range(91)]
 
