@@ -86,7 +86,7 @@ def test_hive_sessions_count_launch_reservations_no_hive_reports_yet(monkeypatch
     )
     redis.set(
         f"{registry.key('remote')}:sessions",
-        json.dumps({"claude:room_left": 1, "_executions": {"claude:room_left": ["exe-remote"]}}),
+        json.dumps({"claude:room_left": 2, "_executions": {"claude:room_left": ["exe-remote", "exe-gone"]}}),
     )
     rows = {
         "exe-local": {"slot": "claude:room_left", "state": "live"},
@@ -94,6 +94,8 @@ def test_hive_sessions_count_launch_reservations_no_hive_reports_yet(monkeypatch
         "exe-pending": {"slot": "claude:room_left", "state": "reserved"},
         "exe-second": {"slot": "claude:full_on_hives", "state": "reserved"},
         "exe-codex": {"slot": "codex:other", "state": "reserved"},
+        "exe-gone": {"slot": "claude:room_left", "state": "exited"},
+        "exe-ended": {"slot": "claude:full_on_hives", "state": "exited"},
     }
     for execution, row in rows.items():
         redis.set(f"{ROOT}:launch-slot:{execution}", json.dumps(row))
