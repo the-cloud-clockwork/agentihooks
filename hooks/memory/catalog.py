@@ -42,6 +42,12 @@ SETTLED = (
 INSERT_EVENT = "INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 INSERT_QUARANTINE = "INSERT INTO session_quarantine VALUES (?, ?, ?, ?, ?, ?)"
 WATERMARK = f"SELECT durable_through FROM session_watermark WHERE {SCOPE}"
+CONTIGUOUS = (
+    f"WITH settled(sequence) AS (SELECT sequence FROM session_event WHERE {SCOPE} "
+    f"UNION SELECT sequence FROM session_quarantine WHERE {SCOPE}) "
+    "SELECT MIN(sequence) FROM (SELECT ? AS sequence UNION SELECT sequence FROM settled WHERE sequence > ?) "
+    "WHERE sequence + 1 NOT IN (SELECT sequence FROM settled)"
+)
 ADVANCE = (
     "INSERT INTO session_watermark VALUES (?, ?, ?, ?, ?) "
     "ON CONFLICT (access_domain, session_uid, source_generation) "
@@ -164,13 +170,9 @@ class Catalog:
 
     def _advance(self, batch: BatchCommit) -> int:
         scope = self._scope(batch)
-        through = self.watermark(*scope)
-        while self._settled(scope, through + 1):
-            through += 1
-        self.db.execute(
-            ADVANCE,
-            (*scope, through, batch.schema_version),
-        )
+        current = self.watermark(*scope)
+        through = self.db.execute(CONTIGUOUS, (*scope, *scope, current, current)).fetchone()[0]
+        self.db.execute(ADVANCE, (*scope, through, batch.schema_version))
         return through
 
     def _replay(self, batch: BatchCommit, stored: tuple[str, str]) -> dict:
