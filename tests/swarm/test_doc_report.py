@@ -119,7 +119,7 @@ def test_a_recorded_report_missing_from_the_inbox_is_sent_again(world):
     ledger.update_task(SLUG, "t1", {"watchdog": record})
     assert sweep(world, AT + 60_000) == [f"resent the doc item report of t1 to {WATCHDOG}"]
     [item] = inbox.inbox(WATCHDOG)
-    assert item.id == record["item"] and doc_report.utc(AT) in item.text
+    assert item.id == record["item"] and item.text == doc_report.text(SLUG, task("t1"), AT)
     assert sweep(world, AT + 120_000) == []
 
 
@@ -139,15 +139,72 @@ def test_the_watchdog_address_and_window_come_from_the_environment(monkeypatch):
     assert doc_report.address() == "watch@elsewhere" and doc_report.ack_ms() == 300_000
 
 
+def test_the_default_window_is_thirty_minutes_in_utc(monkeypatch):
+    import time
+
+    monkeypatch.delenv(doc_report.ACK_MINUTES_ENV, raising=False)
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    time.tzset()
+    try:
+        assert doc_report.ack_ms() == 1_800_000
+        assert doc_report.utc(0) == "1970-01-01T00:00:00Z"
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+def test_the_report_text_names_every_field():
+    task = {
+        "id": "t9",
+        "title": "Ship",
+        "doc_items": ["10 a", "13 b"],
+        "pr_url": PR,
+        "proof": {"evidence": "r", "fix": "f"},
+    }
+    assert doc_report.text("sw", task, 0) == "\n".join(
+        [
+            "Doc item report from swarm sw, task t9: Ship",
+            "Status: done",
+            "Doc items: 10 a; 13 b",
+            f"Merged pull request: {PR}",
+            "Proof run: evidence: r; fix: f",
+            "Done at: 1970-01-01T00:00:00Z",
+            "Reply to this message to acknowledge it; the ledger records your reply on the task.",
+        ]
+    )
+    bare = doc_report.text("sw", {"id": "t9", "doc_items": ["10 a"]}, 0).splitlines()
+    assert bare[0] == "Doc item report from swarm sw, task t9: "
+    assert bare[3:5] == ["Merged pull request: none recorded", "Proof run: none recorded"]
+
+
+def test_a_done_task_without_a_pull_request_is_reported_once(world):
+    _, ledger = world
+    ledger.add_task(SLUG, {"task": "t3", "title": "No pull request", "lane": "eng"}, "init-swarm")
+    ledger.update_task(SLUG, "t3", {"state": "done", "doc_items": ["18 Watchdog feedback stays internal"]})
+    assert sweep(world) == [f"reported doc items of t1 to {WATCHDOG}", f"reported doc items of t3 to {WATCHDOG}"]
+    assert task("t3")["watchdog"]["pr"] == ""
+    assert sweep(world) == []
+
+
+def test_task_set_parses_doc_items_as_a_list():
+    import ledger
+
+    assert ledger._task_set_fields(["doc_items=10 a,13 b"]) == {"doc_items": ["10 a", "13 b"]}
+
+
 def test_swarm_done_sends_the_report_as_the_engineer(env, monkeypatch, capsys):  # noqa: F811
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     ledger.rows["t1"]["doc_items"] = ["13 Every completion triggers a watchdog update"]
+    authors = []
+    report = doc_report.report
+    monkeypatch.setattr(doc_report, "report", lambda *a, by: authors.append(by) or report(*a, by=by))
     capsys.readouterr()
     assert run("sw", "done", "--pr", PR) == 0
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["state"] == "done"
     [item] = InboxStore(store.redis).inbox(WATCHDOG)
     assert "13 Every completion triggers a watchdog update" in item.text and PR in item.text
     assert ledger.rows["t1"]["watchdog"]["item"] == item.id
+    assert authors == ["engineer@a1b2c3-0001"]

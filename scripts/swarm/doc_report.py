@@ -20,8 +20,7 @@ def address() -> str:
 
 
 def ack_ms() -> int:
-    raw = os.environ.get(ACK_MINUTES_ENV, "")
-    return (int(raw) if raw.isdigit() else DEFAULT_ACK_MINUTES) * 60_000
+    return int(os.environ.get(ACK_MINUTES_ENV) or DEFAULT_ACK_MINUTES) * 60_000
 
 
 def utc(at_ms: int) -> str:
