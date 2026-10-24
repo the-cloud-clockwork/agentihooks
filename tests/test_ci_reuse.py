@@ -1174,6 +1174,35 @@ def test_documentation_gate_requires_a_successful_build_on_pull_requests(status)
     assert (result.returncode == 0) == (status == "success"), result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+@pytest.mark.parametrize("status", ["success", "failure", "skipped", "cancelled", None])
+def test_postgres_gate_requires_the_writer_lock_scenario_only_on_pull_requests(event, status):
+    from scripts import ci_reuse
+
+    required = (
+        {"select", "test-count", "lint", "docs", "semgrep", "sonar"}
+        if event == "pull_request"
+        else {"select", "split", "unit", "shard-check", "test-count", "queue-fail-fast"}
+    )
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": "none"}
+    if status is not None:
+        needs["writer-lock"] = {"result": status}
+    canonical = ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True, summary=True)
+    steps = ci_reuse.postgres_required(canonical)
+    assert steps[0]["run"] == canonical[0]["run"].replace('"sonar"]', '"sonar", "writer-lock"]')
+    assert steps[0]["run"].count('"writer-lock"') == 1
+    assert steps[1:] == canonical[1:] and len(steps) > 1
+    assert {**steps[0], "run": canonical[0]["run"]} == canonical[0]
+    result = _gate(
+        ci_reuse.postgres_required(ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True)),
+        needs,
+        event=event,
+    )
+    green = status == "success" if event == "pull_request" else status in ("skipped", None)
+    assert (result.returncode == 0) == green, result.stdout + result.stderr
+
+
 def test_the_canonical_gate_still_needs_the_standalone_ratchet_in_the_queue():
     from scripts import ci_reuse
 
