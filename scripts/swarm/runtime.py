@@ -1038,6 +1038,8 @@ class HerdrRuntime:
                     return False
         if found is not None and _owns(found, agent):
             return self.retire_process(agent, None, homes)
+        if found is None and agent.name not in self.live_names():
+            return self.retire_process(replace(agent, pane_id=""), None, homes)
         self.refusals[agent.name] = {"process": 0, "refusal": "no owned pane for unrecorded process"}
         return False
 

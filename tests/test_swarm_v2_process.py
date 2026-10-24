@@ -330,7 +330,7 @@ def test_local_retirement_refuses_an_incomplete_process_identity(tmp_path, monke
 def test_retirement_without_a_recorded_pid_ends_only_its_owned_pane(tmp_path, monkeypatch):
     pane = {"pane_id": "w1:p1", "name": NAME, "agent_session": None}
     herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
-    monkeypatch.setattr(herdr, "reported", lambda agent: True)
+    monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
     local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {PID: proc()})
     agent = replace(record(pid=None, start=None), state="finished")
     assert RuntimeRouter([local]).terminate(agent).ok
@@ -342,7 +342,7 @@ def test_retirement_without_a_recorded_pid_ends_only_its_owned_pane(tmp_path, mo
 def test_a_live_agent_without_a_pid_or_owned_pane_is_refused(tmp_path, monkeypatch, owner):
     panes = {} if owner is None else {"w1:p1": {"pane_id": "w1:p1", "name": owner}}
     herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes=panes)
-    monkeypatch.setattr(herdr, "reported", lambda agent: True)
+    monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
     local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {PID: proc()})
     assert not RuntimeRouter([local]).terminate(record(pid=None, start=None)).ok
     assert ["pane", "close", "w1:p1"] not in calls
