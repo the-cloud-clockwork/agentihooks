@@ -911,7 +911,7 @@ jobs:
           permission-actions: read
 
       - name: Require successful early collection
-        if: github.event_name != 'push' && needs.select.outputs.source == '' && steps.app-token.outputs.token != ''
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           COLLECTION_JOB: test-count (${{ matrix.python-version }})
@@ -927,7 +927,7 @@ jobs:
           done
 
       - name: Download the early collection
-        if: github.event_name != 'push' && needs.select.outputs.source == '' && steps.app-token.outputs.token != ''
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: ./.github/actions/retry-download
         with:
           name: early-collected-${{ matrix.python-version }}
@@ -935,7 +935,7 @@ jobs:
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
       - name: Wait for the early collection on a fork
-        if: github.event_name != 'push' && needs.select.outputs.source == '' && steps.app-token.outputs.token == ''
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
         uses: ./.github/actions/await-download
         with:
           name: early-collected-${{ matrix.python-version }}
