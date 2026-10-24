@@ -880,3 +880,39 @@ def test_the_hive_controller_reads_hive_reports_from_its_store(remote):
     remote.runtime.hive = None
     hive_controller(routed(environ={}, herdr=remote.runtime), remote.store, "fixture", held)
     assert remote.runtime.hive.redis is remote.redis
+
+
+@pytest.mark.parametrize("handoff", [False, True])
+def test_finished_removed_hive_workers_settle_after_an_absence_lease(remote, handoff):
+    from scripts.hive import registry
+    from scripts.hive.orders import Orders
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import retire_watch, tick
+
+    remote.agent = replace(remote.agent, state="finished")
+    remote.store.put_agent("fixture", remote.agent)
+    remote.redis.srem(registry.INDEX, HIVE)
+    if handoff:
+        remote.store.put_handoff("fixture", "task", "continue the task")
+    rows = {"task": {"state": "claimed" if handoff else "done", "claimed_by": remote.agent.name}}
+    ledger = Mock()
+    ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
+
+    for now in (NOW, NOW + registry.LIVE_MS - 1):
+        assert tick._reap("fixture", remote.store, ledger, remote.runtime, rows, now) == [
+            f"could not retire {remote.agent.name}, retrying next tick"
+        ]
+        assert len(remote.store.agents("fixture")) == 1
+    assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
+
+    actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW + registry.LIVE_MS)
+
+    assert actions == [f"retired {remote.agent.name}"]
+    assert remote.store.agents("fixture") == []
+    assert retire_watch.rows(remote.store, "fixture") == []
+    assert remote.store.claimant("fixture", "task") is None
+    assert remote.store.execution_registry.occupants("fixture")[remote.agent.seat].state == "ended"
+    exit_record = InboxStore(remote.redis).seats.exit_of(remote.agent.name)
+    assert exit_record["reason"] == "exited"
+    assert exit_record["seat"] == (remote.agent.seat if handoff else "")
+    assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
