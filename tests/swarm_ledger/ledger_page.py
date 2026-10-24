@@ -33,6 +33,7 @@ ORDER = (
 )
 ORDER += (
     "outline",
+    "walk",
     "folds",
     "layout",
     "chat",

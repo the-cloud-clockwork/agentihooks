@@ -43,6 +43,8 @@ class Outline(unittest.TestCase):
             "function viewCount() { return ''; }\n"
             + function_source("itemState")
             + "\n"
+            + function_source("outlineEntry")
+            + "\n"
             + function_source("outlineOf")
             + f"\nprocess.stdout.write(JSON.stringify(outlineOf({json.dumps(doc)}, {json.dumps(HEADS)})));"
         )
@@ -62,7 +64,15 @@ class Outline(unittest.TestCase):
                 {
                     "id": "sec-tasks",
                     "title": "Swarm tasks · 1 open",
-                    "items": [{"id": "item-tasks-t1", "title": "t1 Write the test", "state": "open"}],
+                    "items": [
+                        {
+                            "id": "item-tasks-t1",
+                            "title": "t1 Write the test",
+                            "state": "open",
+                            "status": "open",
+                            "phase": "p1",
+                        }
+                    ],
                 },
                 {
                     "id": "sec-questions",
@@ -133,6 +143,8 @@ class Outline(unittest.TestCase):
         script = (
             shim
             + function_source("itemState")
+            + "\n"
+            + function_source("outlineEntry")
             + "\n"
             + function_source("outlineOf")
             + "\n"
