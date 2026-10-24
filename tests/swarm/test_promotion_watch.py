@@ -69,7 +69,10 @@ class Ledger:
         next(a for a in self.alerts if a["id"] == alert_id)["state"] = "done"
 
 
-def gh(runs, jobs=(), calls=None):
+PROMOTED = [{"name": "promote / promote", "conclusion": "success"}]
+
+
+def gh(runs, jobs=PROMOTED, calls=None):
     def run(argv, **kwargs):
         if calls is not None:
             calls.append((argv, kwargs))
@@ -386,9 +389,9 @@ def test_the_watch_reads_at_most_once_per_refresh_window(store):
     calls = []
     refresh(store, Ledger(), gh([GREEN], calls=calls))
     refresh(store, Ledger(), gh([GREEN], calls=calls), NOW + promotion_watch.REFRESH_MS - 1)
-    assert len(calls) == 1
+    assert len([argv for argv, _ in calls if "/jobs" not in argv[2]]) == 1
     refresh(store, Ledger(), gh([GREEN], calls=calls), NOW + promotion_watch.REFRESH_MS)
-    assert len(calls) == 2
+    assert len([argv for argv, _ in calls if "/jobs" not in argv[2]]) == 2
 
 
 def test_a_green_run_closes_open_and_blocked_promotion_tasks_and_the_alert(store):
@@ -421,6 +424,30 @@ def test_a_green_run_closes_open_and_blocked_promotion_tasks_and_the_alert(store
         "cleared the promotion alert, dev push run 901 passed",
     ]
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "901"
+
+
+@pytest.mark.parametrize(
+    "promote",
+    [
+        [{"name": "promote", "conclusion": "skipped"}],
+        [{"name": "promote / promote", "conclusion": "cancelled"}],
+        [],
+    ],
+)
+def test_a_green_run_whose_promote_did_not_succeed_keeps_the_promotion_red_open(store, promote):
+    tasks = [{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"}]
+    alerts = [{"id": "al-1", "source": "promotion", "text": "red", "state": "open"}]
+    store.redis.set(promotion_watch.key(SLUG, "seen"), 900)
+    store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-900-0", "helm-kind")
+    ledger = Ledger(tasks, alerts)
+    actions = refresh(store, ledger, gh([GREEN], [{"name": "lint", "conclusion": "success"}, *promote]))
+    assert ledger.updates == [] and ledger.comments == [] and ledger.closed == []
+    assert actions == ["dev push run 901 passed but its promote job did not succeed, so the promotion red stays open"]
+    assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "901"
+    assert filed(store) == {"promo-900-0": "helm-kind"}
+    refresh(store, ledger, gh([{**GREEN, "id": 902}]), NOW * 2)
+    assert ledger.tasks[0]["state"] == "done" and ledger.alerts[0]["state"] == "done"
+    assert filed(store) == {}
 
 
 def test_a_task_claimed_before_the_close_lands_is_not_reported_closed(store):
