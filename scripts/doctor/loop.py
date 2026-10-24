@@ -191,12 +191,21 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
     report["unverified"] = snapshot.get("unverified", 0)
     mail = InboxStore(store.redis)
     _hold(mail, watched, doctor, held)
-    notices = {ci_speed.notice_key(finding, judgments): finding for finding in found}
+    notices = {
+        ci_speed.notice_key(finding, judgments): finding
+        for finding in found
+        if finding.kind not in ("ci runner wait", "ci tier wall time")
+    }
     for slug in (watched, doctor):
         notified = store.key(doctor, "ci-speed-notified", slug)
         fresh = {
             identity: finding for identity, finding in notices.items() if not store.redis.sismember(notified, identity)
         }
+        run_notified = store.key(doctor, "ci-speed-runs-notified", slug)
+        groups, run_ids = ci_speed.fresh_groups(
+            state["groups"], {finding.id for finding in found}, store.redis.smembers(run_notified)
+        )
+        fresh.update({finding.id: finding for finding in ci_speed.grouped(groups)})
         if fresh:
             mail.send(
                 SENDER,
@@ -204,6 +213,8 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
                 news(watched, [{"id": finding.id, **finding.as_dict(), "verdict": None} for finding in fresh.values()]),
             )
             store.redis.sadd(notified, *fresh)
+            if run_ids:
+                store.redis.sadd(run_notified, *run_ids)
             store.redis.hset(_timer_key(store, doctor), "last_new", now_ms)
     if snapshot["complete"]:
         state.update(last=end, pending=[run["id"] for run in snapshot["runs"] if run["status"] != "completed"])
