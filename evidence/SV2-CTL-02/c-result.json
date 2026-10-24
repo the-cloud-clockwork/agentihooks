@@ -1,0 +1,62 @@
+{
+  "case": "T-SV2-CTL-02-C",
+  "tested_commit": "6980bcabd85bec9181a7fb8250e38717770b033b",
+  "runs": [
+    {
+      "case": "T-SV2-CTL-02-C",
+      "state": "passed",
+      "evidence_class": "mocked Redis and server clock; signed fixture grants; no external runtime",
+      "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
+      "observed": {
+        "task_id": "task",
+        "holder": "engineer@5b4e98-0002",
+        "generation": 2,
+        "execution_id": "exe-7178086c0e8d40a093b1edbaa71660ee",
+        "execution_generation": 1,
+        "lease_deadline_ms": 1200,
+        "state": "completed",
+        "result": {
+          "outcome": "done"
+        }
+      },
+      "rejection": "",
+      "stale_generation_rejections_total": 0,
+      "journal_events": [
+        "admitted",
+        "fenced",
+        "admitted",
+        "completed"
+      ],
+      "rollback": "new admission disabled; generations and journal retained; local compatibility works",
+      "tested_commit": "6980bcabd85bec9181a7fb8250e38717770b033b"
+    },
+    {
+      "case": "T-SV2-CTL-02-C",
+      "state": "passed",
+      "evidence_class": "mocked Redis and server clock; signed fixture grants; no external runtime",
+      "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
+      "observed": {
+        "task_id": "task",
+        "holder": "engineer@bf2b97-0002",
+        "generation": 2,
+        "execution_id": "exe-390e1a9deff64e5e8f758d1505a3c1a1",
+        "execution_generation": 1,
+        "lease_deadline_ms": 1200,
+        "state": "completed",
+        "result": {
+          "outcome": "done"
+        }
+      },
+      "rejection": "",
+      "stale_generation_rejections_total": 0,
+      "journal_events": [
+        "admitted",
+        "fenced",
+        "admitted",
+        "completed"
+      ],
+      "rollback": "new admission disabled; generations and journal retained; local compatibility works",
+      "tested_commit": "6980bcabd85bec9181a7fb8250e38717770b033b"
+    }
+  ]
+}

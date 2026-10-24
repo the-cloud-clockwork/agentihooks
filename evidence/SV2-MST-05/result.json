@@ -1,0 +1,65 @@
+{
+  "package": "SV2-MST-05",
+  "dependency": [
+    "SV2-MST-04",
+    "SV2-GIT-05"
+  ],
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2809",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "tested_commit": "af0045fb6c2a763192e7ced826750104194ca1fb",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38244642965",
+  "evidence_class": "Mocked Redis, production ledger file operations and master fence, event relay and inbox store; no running hive, agent session, deployed controller or cloud worker.",
+  "interfaces": [
+    "ledger question add TEXT --hive ID",
+    "ledger followup add TEXT --hive ID",
+    "Stored question and followup hive field; owning master routing in masters.owner_of and route",
+    "ledger_events event and priority delivery, followup escalation, operator_mail comment routing",
+    "master_fence decision ownership and durable seat stamp",
+    "InboxStore delivery claim and master seat successor mailbox",
+    "MastersChannel private seat access and durable unread cursor"
+  ],
+  "states": {
+    "observed": "Two admitted master records carry distinct hive identities and own separate phases in independent fixtures.",
+    "committed": "Questions and followups retain hive; owner decisions are written inside the locked ledger operation with their decision stamp.",
+    "externally_verified": "None. Live two hive G10 proof waits for SV2-GIT-05."
+  },
+  "authoritative_objects": [
+    "Ledger question, followup and task records, decision stamps and event revisions",
+    "Redis admitted execution records and master seats",
+    "Redis master phase and hive ownership mappings",
+    "Inbox item histories and private masters channel posts and cursors"
+  ],
+  "validation": {
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38243869310 at 330f8659af05e8acb5e4f6315fceffa2c0d307fa: sixteen failures with successful fixture setup",
+    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38244642965 at af0045fb6c2a763192e7ced826750104194ca1fb: 314 passed",
+    "cheap_gates": "scripts.ci_prepush at af0045fb6c2a: lint and format passed; 83 allowlisted units, zero size errors",
+    "review": "Standards finding about contradictory routing docstrings closed at 888ae8f31; Spec no findings on the precursor",
+    "mutation": "Pending current head branch preflight"
+  },
+  "cases": {
+    "a": "evidence/SV2-MST-05/a-result.json",
+    "b": "evidence/SV2-MST-05/b-result.json",
+    "c": "evidence/SV2-MST-05/c-result.json",
+    "manifest": "evidence/SV2-MST-05/manifest.json"
+  },
+  "obligations": {
+    "input_preparation": "Scratch ledger from master-race fixture; two generated and admitted master names, local and Anton hive identity, two owner mappings and two phases.",
+    "output_contract": "Own phase writes accepted; private coordination and lead operator chat observed; targeted items reach owner mailbox.",
+    "rejection_contract": "Malformed hive refused; other owner and former master refused; concurrent delivery admits one handler.",
+    "recovery_contract": "Seat successor receives pending hive item and retains channel cursor; identical operation replay leaves one answer.",
+    "compatibility": "Untargeted and missing items keep lead routing; absent hive owner falls back to live lead."
+  },
+  "rollback_rehearsal": {
+    "action": "Omit hive option on subsequent writes; code rollback goes through Git and CI.",
+    "evidence": "Untargeted CLI and item compatibility cases passed in the green focused proof. No deployed rollback claimed.",
+    "data_safety": "Retain ledger records, inbox histories, decision stamps and channel cursors."
+  },
+  "remaining_limitations": [
+    "SV2-GIT-05 remains open, so no live Anton two hive proof is recorded and the package is incomplete.",
+    "The fixture uses fakeredis; runtime, network and process behavior require live qualification.",
+    "Added event and priority notices are distinct inbox items about one question; each delivery is claimed once.",
+    "Existing decision fence can fail open on Redis outage; this change preserves that policy."
+  ]
+}

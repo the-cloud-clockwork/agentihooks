@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__migrate__mutmut_37:bd3fffbbbcd8bdeec4335720e631bb12f4cf781e35196645b786f1a99ae3bb3c": {
+    "reader": "Standards",
+    "reason": "Only ASCII LEGACY table identifier casing changes; SQLite inserts or ignores the same bound filename in the same deduplication table."
+  }
+}

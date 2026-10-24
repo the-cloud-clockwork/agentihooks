@@ -1,0 +1,189 @@
+import json
+import os
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+
+from scripts.hive import admission, placement_waits
+from scripts.hive.placement import LOCAL_FULL
+from scripts.inbox.seats import seat_address
+from scripts.inbox.store import CLOSED, InboxStore
+from scripts.swarm import capacity, freeze, timing
+from scripts.swarm.health.findings import Finding
+from scripts.swarm.ledger_client import LedgerGone
+
+STALL_MS = 600_000
+REF = "spawn-stall:"
+LOCAL_CAP = "local cap"
+LOCAL_REFUSAL = "spawn-stall-local"
+
+
+def read(store, slug: str) -> dict:
+    raw = store.redis.get(store.key(slug, "spawn-stall"))
+    return json.loads(raw) if raw else {}
+
+
+def save(store, slug: str, state: dict) -> None:
+    timing.keep()
+    store.redis.set(store.key(slug, "spawn-stall"), json.dumps(state))
+
+
+def eligible(store, slug: str, ledger, at: int, runtime, since: int | None = None) -> bool:
+    from scripts.swarm.tick import _ended
+
+    config = store.config(slug)
+    if config.state != "running":
+        return False
+    try:
+        rows, ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
+    except LedgerGone:
+        return False
+    ready = placeable(store, slug, ready, at if since is None else since)
+    demand = {lane: len(tasks) for lane, tasks in ready.items()}
+    agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
+    requirements = None
+    if hasattr(runtime, "quota_requirements"):
+        prepared = {lane: [capacity._prepared(store, slug, task) for task in tasks] for lane, tasks in ready.items()}
+        requirements = runtime.quota_requirements(config, prepared)
+    if reader := getattr(runtime, "quota_capacity", None):
+        runtime.quota_previous(capacity.read(store, slug))
+        capacity.feed_spent(runtime, store, at)
+        decision = reader(config, agents, at / 1000, demand, requirements, refresh=False)
+    else:
+        inputs = capacity.live_inputs(slug, store, ledger, dict(os.environ), at)
+        host = capacity.granted(capacity.host_room(config, inputs), inputs.previous, inputs.now_ms)
+        config, _ = capacity.autoscaled(config, inputs, host)
+        decision = capacity.calculate(
+            config, inputs.observations, inputs.agents, demand, requirements, warned=inputs.warned
+        )
+        decision["host"] = host
+    if (decision.get("host") or {}).get("room") == 0:
+        return False
+    return any(decision["placements"].values())
+
+
+def placeable(store, slug: str, ready: dict, since: int) -> dict:
+    held = {
+        (row["lane"], task)
+        for task, row in placement_waits.read(store, slug).items()
+        if row.get("seen_at", row["started_at"]) >= since
+    }
+    return {lane: [task for task in tasks if (lane, task["id"]) not in held] for lane, tasks in ready.items()}
+
+
+def launched(store, slug: str) -> int:
+    return max(
+        [0]
+        + [row["at"] for row in store.launches(slug) if row["state"] == "started"]
+        + [agent.started_at for agent in store.agents(slug) if agent.state in ("starting", "working")]
+    )
+
+
+def observe(store, slug: str, ledger, at: int, runtime) -> dict:
+    state = read(store, slug)
+    last = launched(store, slug)
+    if capped(store, slug, state.get("at", 0)) or not eligible(store, slug, ledger, at, runtime, state.get("at")):
+        state = {}
+    elif "since" not in state or last > state["launch"]:
+        state = {"since": at, "launch": last}
+    state["at"] = at
+    save(store, slug, state)
+    return state
+
+
+def capped(store, slug: str, since: int) -> bool:
+    local = json.loads(store.redis.get(store.key(slug, LOCAL_REFUSAL)) or "{}")
+    if not local or local["at"] < since:
+        return False
+    from scripts.swarm import local_slots
+
+    return local_slots.occupancy(store, local["machine"])[1] >= local["maximum"]
+
+
+def refuse_local(store, slug: str, machine: str, taken: int, maximum: int, at: int) -> None:
+    row = {"machine": machine, "taken": taken, "maximum": maximum, "at": at}
+    store.redis.set(store.key(slug, LOCAL_REFUSAL), json.dumps(row))
+
+
+def _refused(reason: str) -> list[tuple[str, str]]:
+    head = reason.partition(LOCAL_FULL)[0]
+    _, has_room, held = head.partition(" has room: ")
+    found = [(admission.category(part), part.partition(" ")[0]) for part in held.split("; ")] if has_room else []
+    return found or ([(admission.category(head), "")] if head else [])
+
+
+def _label(reason: str, host: str, count: str) -> str:
+    return f"{reason} on {host} ({count})" if host else f"{reason} ({count})"
+
+
+def refusals(waits: dict, local: dict, since: int) -> str:
+    latest, counts = {}, {}
+    for row in waits.values():
+        seen = row.get("seen_at", row["started_at"])
+        if seen < since:
+            continue
+        for found in set(_refused(row["reason"])):
+            latest[found] = max(latest.get(found, 0), seen)
+            counts[found] = counts.get(found, 0) + 1
+    shown = {found: _label(*found, f"{count} task{'s' if count > 1 else ''}") for found, count in counts.items()}
+    if local and local["at"] >= since:
+        found = (LOCAL_CAP, local["machine"])
+        latest[found] = local["at"]
+        shown[found] = _label(*found, f"{local['taken']} of {local['maximum']} agents")
+    ordered = sorted(shown, key=lambda found: (-latest[found], found))
+    return f"Admission refusals, latest first: {', '.join(shown[found] for found in ordered)}" if ordered else ""
+
+
+def findings(store, slug: str) -> list[Finding]:
+    state = read(store, slug)
+    if "since" not in state or state["at"] - state["since"] < STALL_MS:
+        return []
+    failure = json.loads(store.redis.get(store.key(slug, "tick-failure")) or "{}")
+    evidence = ("A lane has a free seat, quota and claimable work",)
+    local = json.loads(store.redis.get(store.key(slug, LOCAL_REFUSAL)) or "{}")
+    if refused := refusals(placement_waits.read(store, slug), local, state["since"]):
+        evidence += (refused,)
+    if "at" in failure and failure["at"] >= state["since"]:
+        evidence += (f"Last failed step {failure['step']}: {failure['error']}",)
+    return [Finding("spawn stall", slug, "No agent has launched for ten minutes", evidence, "ten minutes", 1)]
+
+
+def deliver(store, slug: str, ledger, at: int) -> None:
+    found = findings(store, slug)
+    if not found:
+        return
+    state = read(store, slug)
+    inbox = InboxStore(store.redis)
+    finding = found[0]
+    text = f"Spawn stall on {slug}: {finding.summary}. " + "; ".join(finding.evidence)
+    if "message" not in state:
+        timing.keep()
+        item = inbox.send("swarm", seat_address(slug, "master"), text, ref=f"{REF}{slug}:{state['since']}")
+        state.update(message=item.id, sent_at=at)
+        save(store, slug, state)
+    item = inbox.get(state["message"])
+    if item.state not in CLOSED and at - state["sent_at"] >= STALL_MS and not state.get("notified"):
+        ledger.notify(slug, text)
+        state["notified"] = True
+        save(store, slug, state)
+
+
+@contextmanager
+def watch(store, slug: str, ledger, clock: Callable[[], int], runtime) -> Iterator[None]:
+    previous = None
+
+    def failed(step, error):
+        nonlocal previous
+        if error is previous:
+            return
+        previous = error
+        failure = {"step": step, "error": f"{type(error).__name__}: {error}", "at": clock()}
+        timing.keep()
+        store.redis.set(store.key(slug, "tick-failure"), json.dumps(failure))
+
+    token = timing.ON_FAILURE.set(failed)
+    try:
+        yield
+    finally:
+        timing.ON_FAILURE.reset(token)
+        observe(store, slug, ledger, clock(), runtime)
+        deliver(store, slug, ledger, clock())

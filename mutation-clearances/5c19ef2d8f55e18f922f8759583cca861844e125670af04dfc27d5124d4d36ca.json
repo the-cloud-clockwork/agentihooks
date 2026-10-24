@@ -1,0 +1,6 @@
+{
+  "hooks/context/local_test_guard.py:hooks.context.local_test_guard.x__python_script__mutmut_1:a24f8b74a213f378621e4fc45d53f39b08db39ae2c876cf5abdbf4e107125004": {
+    "reader": "standards_reader",
+    "reason": "Initialising value to None instead of False before the loop is equivalent: value is only read by if value:, so None and False take the same branch, and it is never compared, returned or stored."
+  }
+}

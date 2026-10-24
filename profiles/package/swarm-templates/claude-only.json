@@ -1,0 +1,39 @@
+{
+  "name": "claude-only",
+  "lanes": {
+    "eng": {
+      "role": "",
+      "cap": 2,
+      "agent": "claude",
+      "model": "auto",
+      "effort": "auto",
+      "kind": "auto",
+      "profile": "engineer"
+    },
+    "ci": {
+      "role": "",
+      "cap": 1,
+      "agent": "claude",
+      "model": "auto",
+      "effort": "auto",
+      "kind": "auto",
+      "profile": "cicd"
+    },
+    "plan": {
+      "role": "",
+      "cap": 1,
+      "agent": "claude",
+      "model": "auto",
+      "effort": "auto",
+      "kind": "auto",
+      "profile": "planner"
+    },
+    "master": {
+      "agent": "claude",
+      "profile": "master"
+    }
+  },
+  "compact_limit": 0,
+  "links": [],
+  "autonomy": ""
+}

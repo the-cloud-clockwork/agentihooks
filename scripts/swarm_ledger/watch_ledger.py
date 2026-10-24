@@ -37,6 +37,7 @@ import ledger_gate as gate  # noqa: E402
 import ledger_link  # noqa: E402
 
 from scripts.inbox import seen  # noqa: E402
+from scripts.swarm_ledger import ledger_closed  # noqa: E402
 from scripts.swarm_ledger.events import Expired, patch  # noqa: E402
 from scripts.swarm_ledger.events import stream as events_stream  # noqa: E402
 
@@ -53,7 +54,7 @@ def stream(slug, cursor=None, headers=None):
     """Yield (event, data, cursor) from the ledger server's event stream; Expired when the cursor is gone."""
     url, headers = request(slug, cursor, credentials(slug) if headers is None else headers)
     try:
-        response = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=STREAM_TIMEOUT_S)
+        response = ledger_link.urlopen(urllib.request.Request(url, headers=headers), STREAM_TIMEOUT_S)
     except urllib.error.HTTPError as exc:
         if exc.code == 410:
             raise Expired from None
@@ -77,19 +78,24 @@ def say(text):
 class Watch:
     """What one watcher has printed so far, so a reconnect or reset never prints an event twice."""
 
-    def __init__(self, args, json_path, marks):
-        self.args, self.json_path, self.marks = args, json_path, marks
+    def __init__(self, args, source, marks):
+        self.args, self.source, self.marks = args, source, marks
         self.state, self.since = None, args.since_rev
         self.seed_error, self.warned = None, []
 
     def show(self, state):
         if self.state is None:
-            say(f"WATCHING {self.json_path} rev {state['_meta']['rev']}")
+            say(f"WATCHING {self.source} rev {state['_meta']['rev']}")
             if self.since is None:
                 self.since = state["_meta"]["rev"]
         self.state = state
         meta, args = state["_meta"], self.args
-        members, tasks = meta.get("members", {}), state.get("tasks", [])
+        members, tasks = meta.get("members", {}), state.get("tasks", []) + ledger_closed.hidden_claims(state)
+        if meta.get("events_trimmed", self.since) > self.since:
+            say(
+                f"WARNING ledger history trimmed events after revision {self.since}"
+                f" through revision {meta['events_trimmed']} before this watcher read them"
+            )
         fresh = [
             e
             for e in meta.get("events", [])
@@ -153,11 +159,14 @@ def main():
     parser.add_argument("--as", dest="name")
     parser.add_argument("--since-rev", type=int)
     args = parser.parse_args()
-    json_path = core.paths(args.slug)[1]
-    if not json_path.exists():
-        sys.exit(f"no ledger JSON at {json_path}")
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
+
+    if not repository.exists(args.slug):
+        sys.exit(f"no ledger {args.slug} in {core.LEDGER_DIR}")
     beat = core.watch_path(args.slug, args.name) if args.name else None
-    watch = Watch(args, json_path, seen.marks_for(args.slug) if args.name else None)
+    watch = Watch(args, f"ledger {args.slug}", seen.marks_for(args.slug) if args.name else None)
     if beat:
         atexit.register(beat.unlink, missing_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))

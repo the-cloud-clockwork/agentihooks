@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import json
 import time
+import traceback
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event
 
 ACTIVE = "working"
 TRACES_LIMIT = 5
 ATTEMPTS = 2
 WINDOW_BYTES = 1 << 20
 CORRELATION = "agentihooks.correlation."
+wall = time.time
 REMOTE_FIELDS = {
     "life": "agent.life",
     "seat": "seat",
@@ -20,6 +24,19 @@ REMOTE_FIELDS = {
     "harness": "harness",
     "profile": "profile.resolved",
 }
+
+
+def failure(exc: BaseException) -> str:
+    frame = traceback.extract_tb(exc.__traceback__)[-1]
+    return f"{type(exc).__name__}: {exc} at {frame.filename}:{frame.lineno}"
+
+
+def read_at() -> str:
+    return _iso(int(wall() * 1000))
+
+
+def failed_read(target: str, exc: BaseException) -> str:
+    return f"{target} failed at {read_at()}: {failure(exc)}"
 
 
 def _json(path: Path) -> dict:
@@ -50,6 +67,10 @@ def save(path: Path, state: dict) -> None:
     path.write_text(json.dumps(state))
 
 
+def _started_at(agent):
+    return next((agent[key] for key in ("started_at", "launched_at") if (agent.get(key) or 0) > 0), 0)
+
+
 def bindings(agents: list[dict]) -> list[dict]:
     return [
         {
@@ -59,7 +80,7 @@ def bindings(agents: list[dict]) -> list[dict]:
             "task": agent.get("task") or "",
             "harness": agent.get("harness") or "",
             "profile": agent.get("profile") or "",
-            "started_at": agent.get("started_at") or 0,
+            "started_at": _started_at(agent),
             "session_id": agent.get("conversation_id") or "",
         }
         for agent in agents
@@ -126,6 +147,9 @@ def progress(session_id: str, harness: str) -> dict | None:
         "accepted_at": _ms(cursor["accepted_at"]) if cursor.get("accepted_at") else 0,
         "exporter_alive": trace_flush.alive(owner),
         "requested_at": int(request["at"]) // 1_000_000 if request.get("at") else 0,
+        "stopped": bool(request.get("stopped"))
+        or request.get("reason") in trace_flush.STOP_REASONS
+        or int(cursor.get("buffered_turns", 0)) > 1,
     }
 
 
@@ -175,6 +199,37 @@ def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: 
     }
 
 
+def _unread() -> dict:
+    return {"read": False, "traces": [], "remote": None}
+
+
+def _attempts(get, slug: str, binding: dict, marks: dict, page: int, ended: Event, slot: dict) -> tuple[dict, dict]:
+    tries = 0
+    while tries < ATTEMPTS and not ended.is_set():
+        tries += 1
+        kept: dict = {}
+        try:
+            remote = _read_binding(get, slug, binding, marks, kept, page)
+            slot.clear()
+            return remote, kept
+        except Exception as exc:  # noqa: BLE001
+            slot["error"] = failed_read(f"active read of {binding['agent']}", exc)
+    return _unread(), {}
+
+
+def _read_all(get, slug: str, active: list[dict], marks: dict, page: int, remaining: float) -> list[tuple]:
+    if remaining <= 0:
+        return [(_unread(), {}, None) for _ in active]
+    slots: list[dict] = [{} for _ in active]
+    ended, pool = Event(), ThreadPoolExecutor(max_workers=max(len(active), 1))
+    futures = [pool.submit(_attempts, get, slug, b, marks, page, ended, slot) for b, slot in zip(active, slots)]
+    wait(futures, timeout=remaining)
+    ended.set()
+    pool.shutdown(wait=False)
+    done = [f.result() if f.done() else (_unread(), {}) for f in futures]
+    return [(remote, kept, slot.get("error")) for (remote, kept), slot in zip(done, slots)]
+
+
 def read(
     slug: str,
     agents: list[dict],
@@ -187,22 +242,17 @@ def read(
     """Every active binding with its local progress and, inside the read budget, its Langfuse traces and freshness."""
     deadline = clock() + seconds
     marks, kept, failures, found = state.get("marks", {}), {}, [], []
-    for binding in bindings(agents):
-        remote, error = {"read": False, "traces": [], "remote": None}, None
-        for _ in range(ATTEMPTS):
-            if clock() >= deadline:
-                error = error or f"active read budget of {seconds:g} seconds spent before {binding['agent']}"
-                break
-            try:
-                remote, error = _read_binding(get, slug, binding, marks, kept, page), None
-                break
-            except Exception as exc:  # noqa: BLE001
-                error = f"active read of {binding['agent']} failed: {type(exc).__name__}: {exc}"
+    active = bindings(agents)
+    results = _read_all(get, slug, active, marks, page, deadline - clock())
+    for binding, (remote, marked, error) in zip(active, results):
+        kept.update(marked)
+        if not remote["read"]:
+            error = error or f"active read budget of {seconds:g} seconds spent before {binding['agent']} at {read_at()}"
         merged = {**binding, **remote, "local": None}
         try:
             merged["local"] = progress(merged["session_id"], merged["harness"]) if merged["session_id"] else None
         except (OSError, ValueError, TypeError) as exc:
-            error = error or f"exporter progress of {binding['agent']} unreadable: {type(exc).__name__}: {exc}"
+            error = error or failed_read(f"exporter progress read of {binding['agent']}", exc)
         failures += [error] if error else []
         found.append(merged)
     state["marks"] = {**marks, **kept} if failures else kept

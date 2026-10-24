@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Local ledger server: serves ~/development-ledger/<slug>.html and reads/writes <slug>.json.
+"""Local ledger server: serves the ledger pages and reads/writes the ledger records in ~/development-ledger.
 
 Usage:
   ledger_server.py --ensure   start it detached if it is not answering, print the base URL
   ledger_server.py --serve    run in the foreground
   ledger_server.py --stop     stop the detached server
+  ledger_server.py --reload   hand the running server's socket to a fresh process on the current code
 
 Env: LEDGER_DIR (default ~/development-ledger), LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765),
-SWARM_PUBLIC_URL and SWARM_ALLOWED_HOSTS (comma list) beside loopback, SWARM_RELOAD=1 for code reload
+SWARM_PUBLIC_URL and SWARM_ALLOWED_HOSTS (comma list) beside loopback, LEDGER_TLS_CERT and LEDGER_TLS_KEY to serve
+https (clients trust LEDGER_CA_PEM), SWARM_RELOAD=1 for code reload
 (--ensure sets it unless given), LEDGER_IMPECCABLE_LIVE=1 for the Impeccable live origin on a scratch server.
 Idempotent: --ensure on a running server only prints the URL.
 """
@@ -16,17 +18,21 @@ import argparse
 import errno
 import functools
 import html
+import http.server
+import importlib
 import itertools
 import json
 import os
 import re
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections.abc import Callable
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -42,16 +48,50 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
-from scripts.swarm_ledger import ledger_task_duplicates, page_policy, server_lifetime  # noqa: E402
+from scripts.swarm_ledger import (  # noqa: E402
+    composition,
+    ledger_closed,
+    ledger_task_duplicates,
+    page_policy,
+    ports,
+    request_metrics,
+    server_code,
+    server_compose,
+    server_handoff,
+    server_lifetime,
+    storage,
+)
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
-from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
+from scripts.swarm_ledger.repository import (
+    hierarchy,  # noqa: E402
+    legacy,  # noqa: E402
+)
+from scripts.swarm_ledger.server_code import CODE_DIRS, code_digest, code_stamp  # noqa: E402
 
 HOST, PORT = ledger_link.address()
-BASE = f"http://{HOST}:{PORT}"
+BASE = f"{ledger_link.scheme()}://{HOST}:{PORT}"
 PIDFILE = core.LEDGER_DIR / ".server.pid"
 LOGFILE = core.LEDGER_DIR / ".server.log"
 SERVER_WAIT = 5.0
+COMPOSE_WAIT = 180.0
+POLL_S = 0.05
+DRAIN_S = 5.0
+LEASE_WAIT_S = 20.0
+RELOAD_WAIT_S = 100.0
+WARM_PASSES = 5
+CARRY = ".server.carry.json"
+WATCHED = "LEDGER_WATCHED"
+MODULES = "LEDGER_MODULES"
+RELOAD = threading.Event()
+HANDING = threading.Lock()
+HANDED = threading.Event()
+NEVER = threading.Event()
+WATCH_PASS = threading.Lock()
+HANDOFF = {}
+THREADS_EXHAUSTED = 75
+TLS_HANDSHAKE_S = 10
+PROBE_FILE = ".healthz"
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
 ALLOWED_HOSTS = ledger_link.allowed_hosts()
@@ -59,15 +99,14 @@ ALLOWED_ORIGINS = ledger_link.allowed_origins()
 CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
 LOGO = ROOT / "media" / "agentihooks-logo.png"
-CODE_DIRS = (
-    CODE_DIR,
-    *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates", "hive")),
-    ROOT / "hooks",
-)
 
 
 HUB = Hub()
 BIN_SWEEP_EVERY = 15
+FOLLOW_S = 0.25
+SCHEDULER_UNAVAILABLE = threading.Event()
+LOADED_STAMP = code_stamp()
+LOADED_DIGEST = code_digest()
 
 
 @functools.cache
@@ -81,18 +120,50 @@ def served_version():
     return served_page()[0]
 
 
-def ledger_view(state):
+NO_DOCTOR = ("", False)
+
+
+def page_view(state, fix_phase, watched):
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
-    meta.update(page_version=served_version(), crew=ledger_gate.crew(state["_meta"]))
-    return json.loads(json.dumps({**state, "_meta": meta}))
+    marks = ports.swarm().freeze.marks(state, hierarchy.project(state)[0], fix_phase, watched)
+    rows, closed = ledger_closed.trimmed(state)
+    if closed:
+        meta["closed"] = closed
+    return {**state, **rows, "marks": marks, "_meta": {**meta, "limits": PAGE_LIMITS}}
+
+
+def doctor_holds(slug):
+    from redis import RedisError
+
+    SwarmError = ports.swarm().store.SwarmError
+    try:
+        store = swarm_store()
+        fix = ports.swarm().freeze.fix_phase(store.config(slug))
+        peer = fix and store.peer(slug)
+        records = repository.get_document(peer).get("freezes") or [] if peer and repository.exists(peer) else []
+    except (SwarmError, RedisError, ValueError, OSError):
+        return NO_DOCTOR
+    return fix, any(r.get("verb") == "focus" for r in records)
+
+
+def ledger_view(state, slug=None):
+    view = page_view(state, *(doctor_holds(slug) if slug else NO_DOCTOR))
+    view["_meta"].update(page_version=served_version(), crew=ledger_gate.crew(state["_meta"]))
+    return view
 
 
 def publish_ledger(slug, state):
     if HUB.has(slug):
-        HUB.publish(slug, "ledger", ledger_view(state))
+        HUB.publish(slug, "ledger", ledger_view(state, slug))
 
 
-repository = publishing(stored, publish_ledger)
+def publish_snapshot(slug: str, state: dict) -> None:
+    if HUB.has(slug):
+        HUB.publish_snapshot(slug, "ledger", ledger_view(state, slug))
+
+
+stored = storage.default()
+repository = publishing(stored, publish_snapshot)
 
 
 def all_summaries():
@@ -124,7 +195,7 @@ TRASH = ICON.format(
 )
 HOME_ICON = ICON.format('<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>')
 HEADS = {
-    "home": ("", "Ledger", "Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at", ""),
+    "home": ("Ledger", "Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at", ""),
     "bin": ("Ledger", "Kind", "Overview", ">Deleted", ">Left", ""),
 }
 PAGE_POLICY = page_policy.policy(os.environ, core.LEDGER_DIR, PORT)
@@ -136,9 +207,6 @@ PAGE_HEADERS = {"Content-Security-Policy": PAGE_POLICY, "X-Content-Type-Options"
 
 def home_summaries():
     return [{**s, "swarm": swarm_state(s["slug"])} for s in ledger_summaries()]
-
-
-FOLD_ALL = '<button class="act toggle-all" id="fold-all" type="button">Expand all</button>'
 
 
 def head_cell(label):
@@ -157,7 +225,7 @@ def index_page(view="home"):
         heading, total, watermark = "BIN", '<span class="total" id="total"></span>', ""
         fab = f'<a class="fab" id="home-fab" href="/" aria-label="HOME">{HOME_ICON}</a>'
     else:
-        heading, total, watermark = "HOME", FOLD_ALL, '<div class="watermark" aria-hidden="true"></div>'
+        heading, total, watermark = "HOME", "", '<div class="watermark" aria-hidden="true"></div>'
         fab = f'<a class="fab" id="bin-fab" href="/?view=bin" aria-label="Bin">{TRASH}</a>'
     values = {
         "HEADING": heading,
@@ -177,13 +245,9 @@ def index_page(view="home"):
 
 def page_for(slug):
     """The ledger shell: the page's metadata and asset links, read without writing; the records load over the API."""
-    page = repository.read_page(slug)
-    try:
-        title = repository.read_snapshot(slug).get("title") or slug
-    except (ValueError, OSError):
-        title = slug
+    title = repository.read(slug, "title").get("title") or slug
     values = {
-        "TOKEN": html.escape(core.read_token(page) or ""),
+        "TOKEN": html.escape(repository.token(slug) or ""),
         "PAGE": served_version(),
         "SLUG": html.escape(slug),
         "PORT": str(PORT),
@@ -196,14 +260,14 @@ def page_for(slug):
 
 @functools.cache
 def swarm_store():
-    from scripts.swarm.store import connect
+    connect = ports.swarm().store.connect
 
     return connect()
 
 
 def swarm_status(slug, state=None):
-    from scripts.swarm import commands
-    from scripts.swarm.store import SwarmError
+    commands = ports.swarm().commands
+    SwarmError = ports.swarm().store.SwarmError
 
     try:
         return commands.view(swarm_store(), slug)
@@ -214,8 +278,28 @@ def swarm_status(slug, state=None):
         return None
 
 
+STREAM_UNREAD = ("history", "transfers", "launch_checks")
+
+
+def stream_swarm(slug, ledger):
+    """Swarm status for the page stream, without the records the page never reads."""
+    status = swarm_status(slug, ledger)
+    return status and {key: item for key, item in status.items() if key not in STREAM_UNREAD}
+
+
+def swarm_models():
+    model_catalog = ports.swarm().model_catalog
+    SwarmError = ports.swarm().store.SwarmError
+
+    try:
+        redis = swarm_store().redis
+    except SwarmError:
+        redis = None
+    return model_catalog.catalog(dict(os.environ), redis, time.time())
+
+
 def swarm_state(slug):
-    from scripts.swarm.store import SwarmError
+    SwarmError = ports.swarm().store.SwarmError
 
     try:
         return swarm_store().config(slug).state
@@ -227,7 +311,7 @@ def swarm_state(slug):
 
 
 def bin_closed_without_swarm(now=None):
-    from scripts.swarm.store import SwarmError
+    SwarmError = ports.swarm().store.SwarmError
 
     try:
         store = swarm_store()
@@ -256,12 +340,36 @@ MAX_CAP = 50
 MIN_COMPACT, MAX_COMPACT = 100, 1000
 QUOTA_PROBE_TIMEOUT_S = 120
 AUTONOMY = ("manual", "assist", "delegate", "full")
-EFFORTS = ("low", "medium", "high", "max")
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 SCALING = ("auto", "manual")
 MAX_LOAD = 10.0
 MASTER_AGENTS = ("claude", "codex")
 MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
+CAPS = {
+    "max_eng": ("max-eng-agents", 0, MAX_CAP),
+    "max_ci": ("max-ci-agents", 0, MAX_CAP),
+    "max_plan": ("max-plan-agents", 0, MAX_CAP),
+    "masters_step": ("masters-step", 0, MAX_CAP),
+    "compact_limit": ("compact-limit", MIN_COMPACT, MAX_COMPACT),
+}
+PAGE_LIMITS = {
+    "capacity": {key: [low, high] for key, (_, low, high) in CAPS.items()},
+    "efforts": list(EFFORTS),
+    "sync_cooldown_ms": core.SYNC_COOLDOWN_MS,
+    "bin_days": ledger_artifacts.KEEP_DAYS,
+}
+
+
+def model_pairs(body):
+    default_models = ports.swarm().default_models
+
+    changes = {key: body[key] for key in default_models.FIELDS.values() if key in body}
+    if not changes:
+        return []
+    if refused := default_models.refusal(changes, swarm_models()):
+        raise ValueError(refused)
+    return [f"{key}={changes[field]}" for key, field in default_models.KEYS.items() if field in changes]
 
 
 def control_argv(body):
@@ -273,25 +381,21 @@ def control_argv(body):
         if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9@._-]{1,200}", name) or name.startswith("-"):
             raise ValueError("terminate needs an exact agent name")
         return ["terminate", name]
-    if action == "verdict":
-        return verdict_argv(body)
-    if action == "restore-decision":
-        return restore_decision_argv(body)
-    if action == "lift":
-        return lift_argv(body)
+    builders = {
+        "verdict": verdict_argv,
+        "restore-decision": restore_decision_argv,
+        "lift": lift_argv,
+        "master_move": master_move_argv,
+    }
+    if action in builders:
+        return builders[action](body)
     if action != "set":
         raise ValueError("action must be start, pause, stop, stop_now, close, reopen, set or verdict")
     pairs = []
-    for key, flag, limit in (
-        ("max_eng", "max-eng-agents", MAX_CAP),
-        ("max_ci", "max-ci-agents", MAX_CAP),
-        ("max_plan", "max-plan-agents", MAX_CAP),
-        ("compact_limit", "compact-limit", MAX_COMPACT),
-    ):
+    for key, (flag, low, limit) in CAPS.items():
         value = body.get(key)
         if value is None:
             continue
-        low = MIN_COMPACT if key == "compact_limit" else 0
         if type(value) is not int or not low <= value <= limit:
             raise ValueError(f"{key} must be a whole number from {low} to {limit}")
         pairs.append(f"{flag}={value}")
@@ -305,6 +409,7 @@ def control_argv(body):
             raise ValueError(f"autonomy must be one of {', '.join(AUTONOMY)}")
         pairs.append(f"autonomy={body['autonomy']}")
     pairs += scaling_pairs(body)
+    pairs += model_pairs(body)
     if "gates" in body:
         pairs += gate_pairs(body["gates"])
     if "master_agent" in body:
@@ -315,10 +420,24 @@ def control_argv(body):
         pairs += overlay_pairs(body["overlays"])
     if not pairs:
         raise ValueError(
-            "set needs max_eng, max_ci, max_plan, compact_limit, effort_min, effort_max, autonomy, "
-            "scaling, load_high, load_low, memory_per_agent_mb, master_agent, overlays or gates"
+            "set needs max_eng, max_ci, max_plan, masters_step, compact_limit, effort_min, effort_max, autonomy, "
+            "scaling, load_high, load_low, memory_per_agent_mb, claude_model, codex_model, master_agent, overlays or gates"
         )
     return ["set", *pairs]
+
+
+def effort_refusal(slug, body):
+    if body.get("action") != "set" or not {"effort_min", "effort_max"} & set(body):
+        return None
+    from redis import RedisError
+
+    effort_range, SwarmError = ports.swarm().effort_range, ports.swarm().store.SwarmError
+    try:
+        config = swarm_store().config(slug)
+    except (SwarmError, RedisError):
+        return None
+    bounds = (body.get("effort_min", config.effort_min), body.get("effort_max", config.effort_max))
+    return effort_range.refusal(bounds, config.lanes)
 
 
 def scaling_pairs(body):
@@ -344,8 +463,8 @@ def scaling_pairs(body):
 
 
 def overlay_pairs(overlays):
-    from hooks.context.profile_chain import OVERLAY_CAP
-    from scripts.swarm.overlays import KEY, ROLES
+    OVERLAY_CAP = ports.hooks().profile_chain.OVERLAY_CAP
+    KEY, ROLES = ports.swarm().overlays.KEY, ports.swarm().overlays.ROLES
 
     name = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
     if (
@@ -387,8 +506,8 @@ def restore_decision_argv(body):
     agent, choice = body.get("agent"), body.get("choice")
     if not isinstance(agent, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9@_.-]{0,127}", agent):
         raise ValueError("A restore decision needs an agent name")
-    if choice not in {"resume", "fresh"}:
-        raise ValueError("Choose resume or fresh")
+    if choice not in {"resume", "native", "context", "fresh"}:
+        raise ValueError("Choose native, context, fresh or resume")
     return ["restore-decision", agent, choice]
 
 
@@ -401,8 +520,17 @@ def lift_argv(body):
     return ["lift", agent, gate]
 
 
+def master_move_argv(body):
+    HIVE_ID = ports.hive().registry.HIVE_ID
+
+    hive = body.get("hive")
+    if not isinstance(hive, str) or not HIVE_ID.fullmatch(hive):
+        raise ValueError("A master move needs a hive id")
+    return ["master", "move", "--to", hive]
+
+
 def verdict_argv(body):
-    from scripts.swarm.health.verdicts import VERDICTS
+    VERDICTS = ports.swarm().verdicts.VERDICTS
 
     finding, value, note = body.get("id"), body.get("verdict"), body.get("note", "")
     if not (isinstance(finding, str) and FINDING_RE.match(finding)):
@@ -423,7 +551,7 @@ def bin_request(body):
 
 
 def terminate_control(slug, name):
-    from scripts.swarm import commands
+    commands = ports.swarm().commands
 
     store = swarm_store()
     if not any(agent.name == name for agent in store.agents(slug)):
@@ -433,8 +561,8 @@ def terminate_control(slug, name):
 
 
 def swarm_control(slug, argv, command="swarm"):
-    from scripts.swarm import commands
-    from scripts.swarm.store import SwarmError
+    commands = ports.swarm().commands
+    SwarmError = ports.swarm().store.SwarmError
 
     try:
         if command == "swarm" and argv[0] == "terminate":
@@ -445,47 +573,185 @@ def swarm_control(slug, argv, command="swarm"):
         return None, str(exc)
 
 
+def lifecycle_control(slug, body, operator):
+    lifecycle = ports.swarm().lifecycle
+    SwarmError = ports.swarm().store.SwarmError
+
+    try:
+        stamps = repository.read(slug, "_meta.stamps").get("_meta", {}).get("stamps", {})
+    except KeyError:
+        return None, "no such ledger"
+    try:
+        lifecycle.request(swarm_store(), slug, body, operator=operator, task_revisions=lifecycle.revisions(stamps))
+    except SwarmError as exc:
+        return None, str(exc)
+    return swarm_status(slug), ""
+
+
 def refresh_quota(slug: str) -> tuple[dict | None, str]:
-    return swarm_control(slug, [], "quota")
+    quota_refresh = ports.swarm().quota_refresh
+    SwarmError = ports.swarm().store.SwarmError
+
+    try:
+        quota_refresh.request(swarm_store(), slug)
+    except SwarmError as exc:
+        return None, str(exc)
+    return swarm_status(slug), ""
 
 
 def relay_to_inbox(slug, state):
-    """Operator writes from this sync become inbox items for the swarm on this ledger, if it has one."""
+    """Operator writes since the oldest revision not yet relayed become inbox items for the swarm on this ledger."""
     meta = state["_meta"]
-    events = [e for e in meta.get("events", []) if e.get("rev") == meta["rev"] and e.get("by") == "operator"]
+    since = unrelayed_since(RELAY, slug, meta["rev"])
+    if since <= meta.get("events_trimmed", -1):
+        since = record_trimmed(slug, since, meta["events_trimmed"])
+    events = [
+        e for e in meta.get("events", []) if since <= e.get("rev", -1) <= meta["rev"] and e.get("by") == "operator"
+    ]
     if not events:
+        relayed(RELAY, slug, since, meta["rev"])
         return []
     try:
         import watch_ledger
 
         from scripts.inbox.store import connect
-        from scripts.swarm import operator_mail
-        from scripts.swarm.store import RedisStore
+
+        operator_mail = ports.swarm().operator_mail
+        RedisStore = ports.swarm().store.RedisStore
+        from scripts.swarm_ledger import chat_receipts
+
+        masters = ports.swarm().masters
 
         inbox = connect()
-        return operator_mail.relay(inbox, RedisStore(inbox.redis), slug, state, events, watch_ledger.line)
+        store = RedisStore(inbox.redis)
+        sent = operator_mail.relay(inbox, store, slug, state, events, watch_ledger.line)
+        addresses = [masters.lead_of(slug, []), *masters.held(store.redis, slug, store.agents(slug))]
+        chat_receipts.post(repository, inbox, slug, events, addresses)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"inbox relay for {slug}: {exc}\n")
+        unrelayed_on(RELAY, slug, meta["rev"])
         return []
+    relayed(RELAY, slug, since, meta["rev"])
+    return sent
+
+
+TRIMMED = (
+    "Operator writes from revision {since} through {trimmed} left the ledger history before the inbox could take "
+    "them during an outage, so no agent received them. Write them again if they still matter."
+)
+
+
+def record_trimmed(slug, since, trimmed):
+    """Tell the operator which unrelayed writes the event window dropped; the relay resumes after them."""
+    notice = {"op": "notice", "id": f"trimmed-{since}-{trimmed}", "by": "ledger", "text": TRIMMED.format(**locals())}
+    try:
+        _, rejected = repository.apply_ops(slug, ops=[notice])
+    except Exception as exc:  # the ledger write stands; the held revisions wait for the next relay
+        sys.stderr.write(f"trimmed notice for {slug}: {exc}\n")
+        return since
+    if rejected:
+        return since
+    relayed(RELAY, slug, since, trimmed)
+    return trimmed + 1
 
 
 def deliver_alerts(slug, state):
-    """Alerts raised by this sync go to the master's seat or the operator through the inbox."""
     meta = state["_meta"]
-    if not any(a.get("rev") == meta["rev"] for a in state.get("alerts", [])):
+    since = unrelayed_since(ALERTS, slug, meta["rev"])
+    fresh = [
+        a
+        for a in state.get("alerts", [])
+        if since <= a.get("rev", -1) <= meta["rev"] and a["state"] == ledger_alerts.OPEN
+    ]
+    if not fresh:
+        relayed(ALERTS, slug, since, meta["rev"])
         return []
     try:
         from scripts.inbox.store import connect
-        from scripts.swarm import operator_mail
-        from scripts.swarm.store import RedisStore
+
+        operator_mail = ports.swarm().operator_mail
+        RedisStore = ports.swarm().store.RedisStore
 
         inbox = connect()
-        live = [a for a in RedisStore(inbox.redis).agents(slug) if a.state != "finished"]
-        master = operator_mail.master_address(slug, live)
-        return ledger_alerts.deliver(inbox, slug, state["alerts"], meta["rev"], master)
+        agents = RedisStore(inbox.redis).agents(slug)
+        live = [a for a in agents if a.state != "finished"]
+        master = operator_mail.master_address(inbox.redis, slug, agents)
+        addresses = {a.name: a.seat or a.name for a in live}
+        alerts = [{**a, "target": addresses.get(a["target"], "master")} for a in fresh]
+        sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"alert delivery for {slug}: {exc}\n")
+        unrelayed_on(ALERTS, slug, meta["rev"])
         return []
+    relayed(ALERTS, slug, since, meta["rev"])
+    return sent
+
+
+RELAY, ALERTS = "relay", "alerts"
+UNRELAYED = "ledger-unrelayed.json"
+REPLAY_EVERY = 5
+
+
+def unrelayed() -> dict:
+    try:
+        return stored.held_revisions()
+    except (storage.Error, OSError):
+        return {}
+
+
+def unrelayed_since(kind, slug, rev) -> int:
+    return min([rev, *unrelayed().get(kind, {}).get(slug, [])])
+
+
+def unrelayed_on(kind, slug, rev):
+    """Keep the revision for replay whatever stopped the inbox from taking it."""
+    stored.hold_revision(kind, slug, rev)
+
+
+def relayed(kind, slug, since, rev):
+    """Forget the revisions a relay from since through rev covered; one recorded meanwhile outside it stays."""
+    if unrelayed().get(kind, {}).get(slug):
+        stored.release_revisions(kind, slug, since, rev)
+
+
+def adopt_unrelayed() -> None:
+    config = ports.hooks().config
+
+    path = Path(config.AGENTIHOOKS_HOME) / UNRELAYED
+    try:
+        found = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return
+    for kind, slugs in found.items() if isinstance(found, dict) else ():
+        for slug, revisions in slugs.items() if isinstance(slugs, dict) else ():
+            for rev in revisions if isinstance(revisions, list) else ():
+                if isinstance(rev, int):
+                    unrelayed_on(kind, slug, rev)
+    path.unlink()
+
+
+def replay_unrelayed() -> None:
+    """Relay again every revision the inbox could not take, from the stored ledger, once Redis answers."""
+    for kind, slugs in unrelayed().items():
+        for slug in list(slugs):
+            try:
+                state = repository.get_document(slug)
+            except KeyError:
+                stored.drop_revisions(kind, slug)
+                continue
+            REPLAYS[kind](slug, state)
+
+
+REPLAYS = {RELAY: relay_to_inbox, ALERTS: deliver_alerts}
+
+
+def expire_alerts() -> None:
+    at = core.now_ms()
+    for summary in ledger_summaries():
+        slug = summary["slug"]
+        state = repository.read(slug, "alerts")
+        if any(ledger_alerts.expired(alert, at) for alert in state.get("alerts", [])):
+            repository.apply_ops(slug)
 
 
 def doctor_phrase(slug, state):
@@ -500,14 +766,14 @@ def doctor_phrase(slug, state):
 
 
 def stream_resources(slug):
-    ledger = ledger_view(repository.get_document(slug, reconcile=False))
-    return {"ledger": ledger, "swarm": swarm_status(slug, ledger)}
+    ledger = ledger_view(repository.get_document(slug), slug)
+    return {"ledger": ledger, "swarm": stream_swarm(slug, ledger)}
 
 
 def workspace_tails(slug, task_id):
     """The latest work folder lines the hive tick published for one task, read when its proof fold opens."""
-    from scripts.swarm import commands
-    from scripts.swarm.store import SwarmError
+    commands = ports.swarm().commands
+    SwarmError = ports.swarm().store.SwarmError
 
     if not re.fullmatch(r"[A-Za-z0-9_-]+", task_id):
         raise ValueError(f"no work folder for task {task_id!r}")
@@ -515,6 +781,60 @@ def workspace_tails(slug, task_id):
         return commands.workspaces(swarm_store(), slug).get(task_id, {})
     except SwarmError:
         return {}
+
+
+def write_gate(slug):
+    """Every op write: masters fenced to the items they own, page chat to the front door, inside the talk budget."""
+    swarm = ports.swarm()
+    return swarm.master_fence.Fence(slug, swarm.front_door.Door(slug, talk.Budget(slug)))
+
+
+def api_services():
+    from scripts.swarm_ledger import services
+    from scripts.swarm_ledger.api.services import HttpPolicy, LedgerService, MediaService, Services, SwarmService
+
+    ledger: LedgerService = services.Ledger(
+        core=core,
+        authority=authority,
+        hub=HUB,
+        layout_rows=ledger_layout.ROWS,
+        layout_lists=ledger_layout.LISTS,
+        home_summaries=home_summaries,
+        bin_summaries=bin_summaries,
+        bin_entries=ledger_bin.entries,
+        bin_ledger=ledger_bin.delete,
+        workspace_tails=workspace_tails,
+        stream_resources=stream_resources,
+        layout=ledger_layout.read,
+        write_layout=ledger_layout.write,
+        write_gate=write_gate,
+        relay_to_inbox=relay_to_inbox,
+        deliver_alerts=deliver_alerts,
+    )
+    swarm: SwarmService = services.Swarm(
+        doctor=DOCTOR,
+        store=swarm_store,
+        status=swarm_status,
+        models=swarm_models,
+        control=swarm_control,
+        lifecycle=lifecycle_control,
+        refresh_quota=refresh_quota,
+        control_argv=control_argv,
+        doctor_phrase=doctor_phrase,
+    )
+    media: MediaService = services.Media(
+        media_store=ledger_media,
+        artifact_store=ledger_artifacts,
+        resolve_media=ledger_media.resolve,
+        resolve_artifacts=ledger_artifacts.resolve,
+    )
+    return Services(
+        repository=repository,
+        ledger=ledger,
+        swarm=swarm,
+        media=media,
+        policy=HttpPolicy(allowed_hosts=ALLOWED_HOSTS, allowed_origins=ALLOWED_ORIGINS, max_body=MAX_BODY),
+    )
 
 
 def sample_streams():
@@ -525,17 +845,69 @@ def sample_streams():
         if ledger is None:
             continue
         try:
-            HUB.publish(slug, "swarm", swarm_status(slug, ledger))
+            HUB.publish(slug, "swarm", stream_swarm(slug, ledger))
         except Exception as exc:  # the seed watcher that calls this must outlive any one ledger's readers
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
+class Handshake(Exception):
+    pass
+
+
+class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    def __init__(self, *args, **kwargs):
+        self.active = 0
+        self.idle = threading.Condition()
+        super().__init__(*args, **kwargs)
+
+    def handle_error(self, *args):
+        if not isinstance(sys.exc_info()[1], Handshake):
+            super().handle_error(*args)
+
+    def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+        with self.idle:
+            self.active += 1
+        try:
+            super().process_request(request, client_address)
+        except RuntimeError:
+            os._exit(THREADS_EXHAUSTED)
+
+    def process_request_thread(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self.idle:
+                self.active -= 1
+                self.idle.notify_all()
+
+    def drained(self, timeout: float) -> bool:
+        with self.idle:
+            return self.idle.wait_for(lambda: not self.active, timeout)
+
+
 class Handler(BaseHTTPRequestHandler):
+    tls: ssl.SSLContext | None = ledger_link.server_context()
+
+    def setup(self):
+        if self.tls is not None:
+            self.request.settimeout(TLS_HANDSHAKE_S)
+            try:
+                self.request = self.tls.wrap_socket(self.request, server_side=True)
+            except OSError as exc:
+                raise Handshake from exc
+            self.request.settimeout(None)
+        super().setup()
+
     def log_message(self, fmt, *args):
         if self.path.startswith("/api/v1/"):
             sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?', 1)[0]}\n")
             return
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
+
+    @request_metrics.measured
+    def handle_one_request(self) -> None:
+        self.command, self.path, self.raw_requestline = None, "/", b""
+        return super().handle_one_request()
 
     def send(self, code, body, ctype):
         if self.path.startswith("/api/v1/") and code >= 400 and ctype != "application/json":
@@ -569,20 +941,16 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Origin") not in (None, FILE_ORIGIN, *ALLOWED_ORIGINS):
             return self.send(403, "origin not allowed", "text/plain") or True
         if slug is not None:
-            self.principal = authority.principal(
-                core.read_token(repository.read_page(slug)),
-                slug,
-                self.headers.get("X-Ledger-Token"),
-                self.headers.get("X-Ledger-Agent"),
-            )
+            self.principal = authority.caller(self.headers, repository.token(slug), slug)
             if self.principal is None:
                 return self.send(403, "missing or wrong ledger token", "text/plain") or True
         return False
 
     def reply_state(self, slug, changes=None, ops=None, refusals=None, screen=None):
+        """Apply a page save and answer with a bounded acknowledgment; the page takes state from the event stream."""
         refusals = refusals or {}
         screen = screen or ledger_task_duplicates.Screen()
-        gate = talk.Budget(slug) if ops else None
+        gate = write_gate(slug) if ops else None
         try:
             state, rejected = repository.apply_ops(
                 slug,
@@ -592,38 +960,40 @@ class Handler(BaseHTTPRequestHandler):
             )
         except (ValueError, OSError) as exc:
             return self.send(500, f"ledger unreadable: {exc}", "text/plain")
+        if gate:
+            gate.publish(rejected)
         if changes or ops:
             relay_to_inbox(slug, state)
             doctor_phrase(slug, state)
         deliver_alerts(slug, state)
-        state["_meta"] = {
-            **{k: v for k, v in state["_meta"].items() if k != "seeds"},
-            "page_version": core.page_version(),
-            "crew": ledger_gate.crew(state["_meta"]),
+        warnings = [*state["_meta"].get("warnings", []), *refusals.values(), *screen.warnings.values()]
+        reply = {
+            "applied": [op["id"] for op in ops or [] if op["id"] not in rejected],
+            "rejected": [*rejected, *refusals],
+            "_meta": {"rev": state["_meta"]["rev"], "warnings": [warning[:1000] for warning in warnings[:20]]},
         }
-        state["_meta"]["warnings"] = [
-            *state["_meta"].get("warnings", []),
-            *refusals.values(),
-            *screen.warnings.values(),
-        ]
-        reply = {**state, "rejected": [*rejected, *refusals]}
         return self.send(200, json.dumps(reply, ensure_ascii=False), "application/json")
 
+    @request_metrics.measured
     def do_OPTIONS(self):
         self.send_response(204)
         if self.headers.get("Origin") == FILE_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", FILE_ORIGIN)
-            self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent")
+            self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST, PATCH")
+            self.send_header(
+                "Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"
+            )
             if self.headers.get("Access-Control-Request-Private-Network") == "true":
                 self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
 
+    @request_metrics.measured
+    @request_metrics.endpoint
     def do_GET(self):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
 
-            return api.handle(self, sys.modules[__name__])
+            return api.handle(self, api_services())
         route, slug = self.path.split("?", 1)[0], self.slug()
         if self.refused():
             return None
@@ -643,20 +1013,25 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/layout":
             return self.send(200, json.dumps(ledger_layout.read()), "application/json")
         if route.startswith("/api/swarm/"):
-            slug = slug.removeprefix("swarm/")
-            if not self.exists(slug):
-                return self.send(404, "no such ledger", "text/plain")
-            if self.refused(slug):
-                return None
-            status = swarm_status(slug)
-            if status is None:
-                return self.send(404, "no swarm for this ledger", "text/plain")
-            return self.send(200, json.dumps(status), "application/json")
+            name, _, view = slug.removeprefix("swarm/").partition("/")
+            return self.get_swarm(name, view)
         if not self.exists(slug):
             return self.send(404, "no such ledger", "text/plain")
         if route.startswith("/api/"):
-            return None if self.refused(slug) else self.reply_state(slug)
+            return self.send(410, f"read the ledger from /api/v1/ledgers/{slug}", "text/plain")
         return self.send(200, page_for(slug), "text/html; charset=utf-8")
+
+    def get_swarm(self, slug, view):
+        if view not in ("", "models") or not self.exists(slug):
+            return self.send(404, "no such ledger", "text/plain")
+        if self.refused(slug):
+            return None
+        if view:
+            return self.send(200, json.dumps(swarm_models()), "application/json")
+        status = swarm_status(slug)
+        if status is None:
+            return self.send(404, "no swarm for this ledger", "text/plain")
+        return self.send(200, json.dumps(status), "application/json")
 
     def put_swarm(self, slug):
         if not self.exists(slug):
@@ -671,14 +1046,23 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("body size out of range")
             body = core.loads(self.rfile.read(length) or b"{}")
             action = body.get("action") if isinstance(body, dict) else None
-            if action == "quota_refresh":
+            if action == "lifecycle":
+                control = functools.partial(lifecycle_control, slug, body, not self.principal)
+            elif action == "quota_refresh":
                 control = functools.partial(refresh_quota, slug)
             else:
                 command, argv = ("doctor", DOCTOR[action]) if action in DOCTOR else ("swarm", control_argv(body))
+                if refused := effort_refusal(slug, body):
+                    raise ValueError(refused)
                 control = functools.partial(swarm_control, slug, argv, command)
         except ValueError as exc:
             return self.send(400, str(exc), "text/plain")
-        status, error = control()
+        Refused = ports.swarm().lifecycle.Refused
+
+        try:
+            status, error = control()
+        except Refused as refused:
+            return self.send(refused.status, str(refused), "text/plain")
         if error:
             return self.send(502, error, "text/plain")
         return self.send(200, json.dumps(status), "application/json")
@@ -726,7 +1110,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not core.SLUG_RE.match(slug):
                 raise ValueError("not a ledger")
-            data = store.path_of(slug, media_id).read_bytes()
+            data = store.served(slug, media_id)
         except (ValueError, OSError):
             return self.send(404, "no such file", "text/plain")
         ctype = store.TYPES[media_id.rsplit(".", 1)[1]]
@@ -760,7 +1144,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except (ValueError, TypeError) as exc:
                 raise ledger_media.Refused(400, str(exc)) from exc
-            doc = repository.get_document(slug, reconcile=False)
+            doc = repository.get_document(slug)
             reason = authority.refusal(self.principal, op) or ledger_artifacts.refusal(doc, op, doc["_meta"]["members"])
             if reason:
                 raise ledger_media.Refused(403, reason)
@@ -778,7 +1162,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.refused(slug):
             return None
         if agent or agents_only:
-            meta = repository.get_document(slug, reconcile=False)["_meta"]
+            meta = repository.read(slug, "_meta.members")["_meta"]
             if agent not in meta.get("members", {}):
                 return self.send(403, "agent must join this ledger before uploading", "text/plain")
         try:
@@ -796,18 +1180,30 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(exc.status, str(exc), "text/plain")
         return self.send(200, json.dumps(stored), "application/json")
 
+    def post_route(self, route: str) -> Callable[[], None] | None:
+        if route == "/healthz":
+            return self.probe_write
+        for prefix, post in (("/api/media/", self.post_media), ("/api/artifacts/", self.post_artifact)):
+            if route.startswith(prefix):
+                return functools.partial(post, route.removeprefix(prefix))
+        return None
+
+    def probe_write(self) -> None:
+        with core.LOCK:
+            core.atomic_write(core.LEDGER_DIR / PROBE_FILE, str(core.now_ms()))
+        return self.send(200, json.dumps({"dir": str(core.LEDGER_DIR)}), "application/json")
+
+    @request_metrics.measured
     def do_POST(self):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
 
-            return api.handle(self, sys.modules[__name__])
+            return api.handle(self, api_services())
         if self.refused():
             return None
         route = self.path.split("?", 1)[0]
-        if route.startswith("/api/media/"):
-            return self.post_media(route.removeprefix("/api/media/"))
-        if route.startswith("/api/artifacts/"):
-            return self.post_artifact(route.removeprefix("/api/artifacts/"))
+        if post := self.post_route(route):
+            return post()
         if route != "/api/bin":
             return self.send(404, "not found", "text/plain")
         if self.headers.get("Origin") not in ALLOWED_ORIGINS:
@@ -829,15 +1225,24 @@ class Handler(BaseHTTPRequestHandler):
             if swarm_status(slug) is not None:
                 _, error = swarm_control(slug, ["stop", "--now"])
                 reply = {"swarm_error": error} if error else {}
-        elif not ledger_bin.restore(slug):
+        elif not repository.restore(slug):
             return self.send(404, "not in the bin", "text/plain")
         return self.send(200, json.dumps({"binned": sorted(ledger_bin.entries()), **reply}), "application/json")
 
+    @request_metrics.measured
+    def do_PATCH(self):
+        from scripts.swarm_ledger import api
+
+        if not self.path.startswith("/api/v1/"):
+            return self.send(404, "not found", "text/plain")
+        return api.handle(self, api_services())
+
+    @request_metrics.measured
     def do_PUT(self):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
 
-            return api.handle(self, sys.modules[__name__])
+            return api.handle(self, api_services())
         slug = self.slug()
         if self.refused():
             return None
@@ -847,6 +1252,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.put_swarm(slug.removeprefix("swarm/"))
         if not self.path.startswith("/api/") or not self.exists(slug):
             return self.send(404, "no such ledger", "text/plain")
+        return self.put_ledger(slug)
+
+    def put_ledger(self, slug):
         if self.refused(slug):
             return None
         if not (self.headers.get("Content-Type") or "").startswith("application/json"):
@@ -856,7 +1264,7 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 <= length <= MAX_BODY:
                 raise ValueError("body size out of range")
             body = core.loads(self.rfile.read(length) or b"{}")
-            state = repository.get_document(slug, reconcile=not core.paths(slug)[1].exists())
+            state = repository.get_document(slug)
             task_ids = tuple(task["id"] for task in state.get("tasks", []))
             changes, ops = core.check_body(body, task_ids)
             ledger_media.resolve(slug, ops)
@@ -870,61 +1278,320 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply_state(slug, changes, allowed, refusals, ledger_task_duplicates.screen(state, allowed))
 
 
-def code_stamp(code_dirs=CODE_DIRS):
-    return max(
-        (p.stat().st_mtime_ns for d in code_dirs for p in d.rglob("*") if p.suffix in (".py", ".html", ".js", ".css")),
-        default=0,
-    )
+def metrics_journal(action, *args):
+    try:
+        action(*args)
+    except OSError as exc:
+        sys.stderr.write(f"request metrics journal: {exc}\n")
 
 
-def reload_if_changed(started, code_dirs=CODE_DIRS, execv=os.execv):
-    if code_stamp(code_dirs) == started:
+def container_main(proc=Path("/proc")) -> bool:
+    try:
+        return (proc / str(os.getppid()) / "comm").read_text().startswith("containerd-shim")
+    except OSError:
         return False
-    execv(sys.executable, [sys.executable, str(CODE_DIR / "ledger_server.py"), "--serve"])
-    return True
+
+
+def reload_if_changed(started, server, code_dirs=CODE_DIRS, hand_off=server_handoff.hand_off, force=False, loaded=None):
+    """None once a successor took the socket and this server stopped accepting, else the code stamp to compare
+    next; with loaded, code whose content still hashes to it reads as unchanged."""
+    stamp = code_stamp(code_dirs)
+    if stamp == started and not force:
+        return started
+    if loaded is not None and not force and code_digest(code_dirs) == loaded:
+        server_code.record(PIDFILE.parent, os.getpid(), stamp, code_dirs)
+        return stamp
+    argv = [sys.executable, str(CODE_DIR / "ledger_server.py"), "--serve"]
+    if container_main():
+        metrics_journal(request_metrics.stop)
+        try:
+            os.execv(sys.executable, argv)
+        except OSError as exc:
+            sys.stderr.write(f"reload: could not restart in place: {exc}; this server keeps serving\n")
+            metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
+            return stamp
+    try:
+        held = hand_off(server.socket, argv, extra={WATCHED: ",".join(HUB.watched()), MODULES: loaded_modules()})
+    except OSError as exc:
+        sys.stderr.write(f"reload: the successor did not start: {exc}; this server keeps serving\n")
+        return stamp
+    if held is None:
+        sys.stderr.write("reload: the successor never reported ready; this server keeps serving\n")
+        return stamp
+    try:
+        HANDOFF["since"] = json.loads(held)
+    except ValueError:
+        HANDOFF["since"] = {}
+    server.shutdown()
+    return None
+
+
+def write_carry(since: dict) -> None:
+    path = core.LEDGER_DIR / CARRY
+    staged = path.with_name(f"{CARRY}.{os.getpid()}")
+    staged.write_text(json.dumps(stored.carry(since)))
+    staged.replace(path)
+
+
+def take_carry() -> list[str] | None:
+    """The slugs whose committed copies the old server carried over."""
+    path = core.LEDGER_DIR / CARRY
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        return None
+    path.unlink()
+    try:
+        carried = json.loads(text)
+        stored.adopt_carried(carried)
+    except Exception as exc:  # a broken carry leaves its ledgers to load from their rows
+        sys.stderr.write(f"carry: {exc}\n")
+        return None
+    return list(carried)
+
+
+def refresh_streams(slugs: list[str]) -> None:
+    """Bring a warmed stream view up to a ledger the old server wrote after the successor built it."""
+    for slug in slugs:
+        if HUB.has(slug):
+            try:
+                publish_ledger(slug, repository.get_document(slug))
+            except Exception as exc:  # the next write to the ledger publishes its view anyway
+                sys.stderr.write(f"refresh stream {slug}: {exc}\n")
+
+
+def request_reload(signum: int, frame: object) -> None:
+    RELOAD.set()
+
+
+def hand_over(started: int, server: ThreadingHTTPServer, force: bool = False) -> int | None:
+    with HANDING:
+        if HANDED.is_set():
+            return None
+        started = reload_if_changed(started, server, force=force, loaded=LOADED_DIGEST)
+        if started is None:
+            HANDED.set()
+        return started
+
+
+def answer_reloads(server: ThreadingHTTPServer, requested: threading.Event = RELOAD) -> None:
+    while requested.wait():
+        requested.clear()
+        if hand_over(code_stamp(), server, force=True) is None:
+            return
 
 
 def reloading(environ=os.environ) -> bool:
     return environ.get("SWARM_RELOAD") == "1"
 
 
-def watch_seeds(interval=2.0):
-    seen = {}
-    started = code_stamp()
-    reload = reloading()
-    for passes in itertools.count():
-        if reload:
-            reload_if_changed(started)
+def scheduled_wait(interval: float) -> None:
+    from redis.exceptions import NoPermissionError
+
+    from scripts.scheduler.process_timer import wait
+
+    if not SCHEDULER_UNAVAILABLE.is_set():
         try:
-            ledger_bin.tidy()
-        except OSError as exc:
-            sys.stderr.write(f"bin purge: {exc}\n")
-        if passes % BIN_SWEEP_EVERY == 0:
-            bin_closed_without_swarm()
-        for path in repository.pages():
+            wait(interval)
+            return
+        except (OSError, NoPermissionError) as exc:
+            SCHEDULER_UNAVAILABLE.set()
+            sys.stderr.write(f"scheduler wait unavailable, sleeping instead: {exc}\n")
+    time.sleep(interval)
+
+
+def watch_ledgers(server=None, interval=2.0, stopping=NEVER):
+    started = LOADED_STAMP
+    reloads = reloading()
+    for passes in itertools.count():
+        if reloads:
+            started = hand_over(started, server)
+            if started is None:
+                return
+        with WATCH_PASS:
+            if stopping.is_set():
+                return
             try:
-                mtime = path.stat().st_mtime
-                if seen.get(path) != mtime:
-                    seen[path] = mtime
-                    repository.get_document(path.stem)
-            except Exception as exc:  # the loop must outlive any one bad ledger
-                sys.stderr.write(f"skip {path.name}: {exc}\n")
-        sample_streams()
-        time.sleep(interval)
+                ledger_bin.tidy()
+            except OSError as exc:
+                sys.stderr.write(f"bin purge: {exc}\n")
+            if passes % BIN_SWEEP_EVERY == 0:
+                bin_closed_without_swarm()
+            if passes and passes % BIN_SWEEP_EVERY == 0:
+                expire_alerts()
+            if passes % REPLAY_EVERY == 0:
+                try:
+                    if unrelayed():
+                        replay_unrelayed()
+                except Exception as exc:  # the watch loop also tidies the bin, expires alerts and samples streams
+                    sys.stderr.write(f"unrelayed replay: {exc}\n")
+            sample_streams()
+            metrics_journal(request_metrics.persist)
+        scheduled_wait(interval)
+
+
+def listening(listener: socket.socket | None = None) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((HOST, PORT), Handler, bind_and_activate=False)
+    server.request_queue_size = 128
+    if listener is None:
+        server.server_bind()
+        server.server_activate()
+    else:
+        server.socket.close()
+        server.socket = listener
+    return server
+
+
+def warm(passes: int = WARM_PASSES) -> None:
+    """Load every open ledger, again while a pass still finds one written since, at most passes times."""
+    held = {}
+    for _ in range(passes):
+        loaded = {}
+        for summary in ledger_summaries():
+            slug = summary["slug"]
+            try:
+                loaded[slug] = stored.current(slug)
+            except Exception as exc:  # a ledger that fails to load stays cold and the handoff goes on
+                sys.stderr.write(f"warm {slug}: {exc}\n")
+        if all(held.get(slug) is entry for slug, entry in loaded.items()):
+            return
+        held.update(loaded)
+
+
+def loaded_modules(modules=sys.modules) -> str:
+    return ",".join(
+        sorted(
+            name
+            for name, module in modules.items()
+            if module is not None and name != "__main__" and name.rpartition(".")[2] != "ledger_server"
+        )
+    )
+
+
+def warm_modules(environ=os.environ, load=importlib.import_module) -> None:
+    for name in filter(None, environ.pop(MODULES, "").split(",")):
+        try:
+            load(name)
+        except Exception:  # a module the new code no longer has stays unloaded
+            continue
+
+
+def warm_streams(environ=os.environ) -> list[str]:
+    warmed = []
+    for slug in filter(None, environ.pop(WATCHED, "").split(",")):
+        try:
+            HUB.open(slug, lambda slug=slug: stream_resources(slug))
+        except Exception as exc:  # a view that fails to build loads on the page's own reconnect
+            sys.stderr.write(f"warm stream {slug}: {exc}\n")
+            continue
+        HUB.close(slug)
+        warmed.append(slug)
+    return warmed
+
+
+def follow_shared(interval=FOLLOW_S):
+    """Publish each watched ledger's newer stored generation, whichever host wrote it to the shared database."""
+    while True:
+        for slug in HUB.watched():
+            try:
+                repository.current(slug)
+            except Exception as exc:  # one unreadable ledger must not stop the others following
+                sys.stderr.write(f"shared follow {slug}: {exc}\n")
+        scheduled_wait(interval)
+
+
+def retrying(target, sleep=time.sleep, first=1.0, cap=30.0):
+    @functools.wraps(target)
+    def run(*args, **kwargs):
+        delay = first
+        while True:
+            try:
+                return target(*args, **kwargs)
+            except Exception:  # an unresolved Redis name at pod start must not end the thread for good
+                sys.stderr.write(f"{target.__name__} stopped, retrying in {delay:g}s: {sys.exc_info()[1]}\n")
+                sleep(delay)
+                delay = min(delay * 2, cap)
+
+    return run
+
+
+def adopt_disk_files():
+    for folder in sorted(core.LEDGER_DIR.glob("*.media")):
+        slug = folder.name.removesuffix(".media")
+        try:
+            ledger_artifacts.adopt_disk(slug)
+        except Exception as exc:  # one unreadable ledger must not stop the others adopting
+            sys.stderr.write(f"disk adoption {slug}: {exc}\n")
+
+
+def take_lease(writer, ledger_writer, listener, predecessor=os.getppid) -> None:
+    """A successor outwaits the predecessor that handed it the socket, since exiting would leave nothing listening."""
+    while True:
+        try:
+            writer.acquire(ledger_writer.owner(), wait=0.0 if listener is None else LEASE_WAIT_S)
+            return
+        except ledger_writer.WriterConflict as conflict:
+            held = conflict.holder.get("pid")
+            if listener is None or held != predecessor():
+                sys.exit(str(conflict))
+            sys.stderr.write(f"reload: predecessor pid {held} still holds the writer lease; waiting\n")
 
 
 def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    threading.Thread(target=watch_seeds, daemon=True).start()
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    listener = server_handoff.inherited()
+    warmed, carried = [], []
+    if listener is not None:
+        warm_modules()
+        warm()
+        warmed = warm_streams()
+        server_handoff.announce(json.dumps(stored.generations()).encode())
+    ledger_writer = ports.swarm().ledger_writer
+    writer = ledger_writer.WriterLease(core.LEDGER_DIR)
+    if not storage.shared():
+        take_lease(writer, ledger_writer, listener)
+    if listener is not None:
+        carried = take_carry()
+    legacy.adopt(stored)
+    adopt_unrelayed()
+    threading.Thread(target=adopt_disk_files, daemon=True).start()
+    metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
+    server = listening(listener)
+    watching = threading.Event()
+    threading.Thread(target=retrying(watch_ledgers), args=(server,), kwargs={"stopping": watching}, daemon=True).start()
+    threading.Thread(target=answer_reloads, args=(server,), daemon=True).start()
+    threading.Thread(target=refresh_streams, args=(warmed if carried is None else carried,), daemon=True).start()
+    if storage.shared():
+        threading.Thread(target=retrying(follow_shared), daemon=True).start()
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
+    server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST)
     PIDFILE.write_text(str(os.getpid()))
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
+    drained = True
     try:
-        server.serve_forever()
+        from scripts.hub import projector
+        from scripts.swarm_ledger import outbox_host
+
+        with outbox_host.running(stored), projector.running(repository, HUB):
+            try:
+                server.serve_forever(POLL_S)
+            finally:
+                stopped.set()
+                HUB.drain()
+                drained = server.drained(DRAIN_S)
     finally:
-        stopped.set()
         server.server_close()
+        with WATCH_PASS:
+            watching.set()
+        metrics_journal(request_metrics.stop)
+        if drained:
+            try:
+                if "since" in HANDOFF:
+                    write_carry(HANDOFF.pop("since"))
+            finally:
+                writer.release()
+        else:
+            sys.stderr.write("drain: requests still ran at the bound; the lease ends with this process\n")
 
 
 def port_held() -> bool:
@@ -954,30 +1621,45 @@ def server_process_alive() -> bool:
     return not cmdline or b"ledger_server.py" in cmdline
 
 
+def wait_for(folder: Path) -> float:
+    return COMPOSE_WAIT if server_compose.used(folder) else SERVER_WAIT
+
+
+def start_server(compose: bool) -> bool:
+    if compose:
+        if error := server_compose.start(core.LEDGER_DIR):
+            sys.exit(f"could not start the ledger service: {error}")
+        return True
+    if port_held() or server_process_alive():
+        return False
+    core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+    core.rotate_if_full(LOGFILE)
+    with open(LOGFILE, "a") as log:
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "--serve"],
+            stdout=log,
+            stderr=log,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            env={
+                **server_lifetime.environment(core.LEDGER_DIR, PORT),
+                "SWARM_RELOAD": os.environ.get("SWARM_RELOAD", "1"),
+            },
+        )
+    return True
+
+
 def ensure():
-    deadline = time.monotonic() + SERVER_WAIT
+    deadline = time.monotonic() + wait_for(core.LEDGER_DIR)
+    compose = server_compose.used(core.LEDGER_DIR)
     started = False
     running = ledger_link.serving(url=BASE)
     while running is None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            sys.exit(f"ledger server did not answer on {BASE}; see {LOGFILE}")
-        if not started and not port_held() and not server_process_alive():
-            core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-            core.rotate_if_full(LOGFILE)
-            with open(LOGFILE, "a") as log:
-                subprocess.Popen(
-                    [sys.executable, os.path.abspath(__file__), "--serve"],
-                    stdout=log,
-                    stderr=log,
-                    stdin=subprocess.DEVNULL,
-                    start_new_session=True,
-                    env={
-                        **server_lifetime.environment(core.LEDGER_DIR, PORT),
-                        "SWARM_RELOAD": os.environ.get("SWARM_RELOAD", "1"),
-                    },
-                )
-            started = True
+            sys.exit(f"ledger server did not answer on {BASE}; see {LOGFILE} or docker compose logs ledger")
+        if not started:
+            started = start_server(compose)
         time.sleep(min(0.1, remaining))
         running = ledger_link.serving(timeout=min(1, remaining), url=BASE)
     if running != str(core.LEDGER_DIR):
@@ -988,6 +1670,8 @@ def ensure():
 
 
 def stop():
+    if server_compose.used(core.LEDGER_DIR) and (error := server_compose.stop(core.LEDGER_DIR)):
+        sys.exit(f"could not stop the ledger service: {error}")
     if not PIDFILE.exists():
         return print(f"no server pidfile in {core.LEDGER_DIR}")
     pid = int(PIDFILE.read_text())
@@ -1001,17 +1685,47 @@ def stop():
     print("stopped")
 
 
+def recorded_pid() -> str:
+    try:
+        return PIDFILE.read_text()
+    except OSError:
+        return ""
+
+
+def reload(wait: float = RELOAD_WAIT_S) -> str | None:
+    if server_compose.used(core.LEDGER_DIR) and (error := server_compose.start(core.LEDGER_DIR)):
+        sys.exit(f"could not start the ledger service: {error}")
+    if not server_process_alive():
+        return ensure()
+    pid = recorded_pid()
+    try:
+        os.kill(int(pid), signal.SIGHUP)
+    except (ValueError, ProcessLookupError):
+        return ensure()
+    deadline = time.monotonic() + wait
+    while all((recorded_pid() == pid, server_process_alive())):
+        if time.monotonic() >= deadline:
+            sys.exit(f"the ledger server pid {pid} did not hand off within {wait:.0f} s; see {LOGFILE}")
+        time.sleep(0.1)
+    return ensure()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--ensure", action="store_true")
     group.add_argument("--serve", action="store_true")
     group.add_argument("--stop", action="store_true")
+    group.add_argument("--reload", action="store_true")
     args = parser.parse_args()
+    composition.wire()
     if args.serve:
+        signal.signal(signal.SIGHUP, request_reload)
         serve()
     elif args.ensure:
         ensure()
+    elif args.reload:
+        reload()
     else:
         stop()
 

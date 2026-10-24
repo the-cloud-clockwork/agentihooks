@@ -1,0 +1,27 @@
+paths:
+  - '*.html'
+  - '*.htm'
+  - '*.jsx'
+  - '*.tsx'
+  - '*.vue'
+  - '*.svelte'
+  - 'components/*.js'
+  - 'components/*.ts'
+  - '**/components/*.js'
+  - '**/components/*.ts'
+  - 'pages/*.js'
+  - 'pages/*.ts'
+  - '**/pages/*.js'
+  - '**/pages/*.ts'
+  - 'ui/*.js'
+  - 'ui/*.ts'
+  - '**/ui/*.js'
+  - '**/ui/*.ts'
+finders:
+  - script: string_literals
+  - script: explanation_tail
+mode: both
+action: send-back
+intent: >-
+  User-facing text states the value or state its label names. It never explains
+  why, how it was computed, or adds detail nobody asked for.

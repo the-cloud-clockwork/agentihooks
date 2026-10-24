@@ -1,0 +1,45 @@
+{
+  "package": "SV2-UX-02",
+  "preceding_protocol": "SV2-UX-01 as merged into dev (#2595): PUT /api/swarm/<slug> accepts start, pause, stop, stop_now, close, reopen, terminate, set, verdict, restore-decision, lift, doctor_start, doctor_stop and quota_refresh; GET returns the swarm view with commands, terminals and executions; every agent row shows message and terminate",
+  "unchanged": [
+    {
+      "behavior": "every preceding PUT action keeps its body, validation and 200, 400, 403 and 502 answers",
+      "proof": "tests/swarm_ledger/test_swarm_control_env.py, tests/swarm_ledger/test_doctor_controls.py and tests/swarm_ledger/test_swarm_panel.py run unchanged"
+    },
+    {
+      "behavior": "terminate keeps its server path and its button when the view has no lifecycle offers or the rollback switch is off; with lifecycle offers and the switch on, force stop replaces it because terminate is not fenced on generation and terminate-agent acts only on local processes",
+      "proof": "test_a_page_without_lifecycle_offers_keeps_the_terminate_button, test_the_rollback_switch_brings_terminate_back_beside_the_offers, test_terminate_is_offered_only_under_the_rollback_switch"
+    },
+    {
+      "behavior": "commands.submit queues the same pending row; it is now prepare plus enqueue",
+      "proof": "test_submit_still_queues_one_pending_row and tests/swarm/test_commands.py"
+    },
+    {
+      "behavior": "the swarm view still never reads the ledger; swarm_status reads only the published snapshot",
+      "proof": "tests/swarm_ledger/test_events_sampling.py::test_swarm_status_reads_the_snapshot_only_without_a_given_state"
+    },
+    {
+      "behavior": "SV2-UX-01 execution cards are computed the same way",
+      "proof": "tests/e2e/swarm_v2/test_ledger_execution_cards.py against its committed evidence"
+    }
+  ],
+  "added": [
+    {
+      "surface": "PUT /api/swarm/<slug> action lifecycle",
+      "answers": "200 with the swarm view, 400 malformed, 403 destructive without the operator, 409 stale or unresolved or reused operation id, 422 unsupported or turned off, 502 swarm store error, 503 contention"
+    },
+    {
+      "surface": "swarm view key lifecycle",
+      "shape": "controls, destructive, agents (incarnation, generation, task_revision, pending, disabled, terminate), operations, conflicts, ledger_control_conflicts_total"
+    },
+    {
+      "surface": "published status key task_revisions",
+      "shape": "task id to the revision of its state stamp"
+    },
+    {
+      "surface": "command row command lifecycle",
+      "argv": "[control, agent, operation id]"
+    }
+  ],
+  "local_compatibility": "A page served by an older ledger server shows no lifecycle key and keeps its message and terminate buttons; an older page against this server never sends action lifecycle and sees only an extra view key it ignores."
+}

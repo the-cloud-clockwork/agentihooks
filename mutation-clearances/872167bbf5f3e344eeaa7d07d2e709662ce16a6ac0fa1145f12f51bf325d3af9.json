@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_autoscaled__mutmut_47:d15e6c8e791d062c2343de0141c9f38837b45de65954054df08caa56b5028e4a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The mutated fallback has target=None. calculate reads prior ticks only when prior target equals an integer raise target, so TICKS is never consumed. Returned pending state is freshly constructed."
+  }
+}

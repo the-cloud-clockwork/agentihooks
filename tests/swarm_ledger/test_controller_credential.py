@@ -12,8 +12,10 @@ from scripts.swarm_ledger import ledger_authority as authority
 from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 from tests.swarm_ledger.test_remote_ledger_client import REMOTE, server_only
+from tests.swarm_ledger.test_remote_ledger_client import hive as _remote_hive
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
+remote_hive = _remote_hive
+
 
 live = _authority_live
 CONTROLLER = {"AGENTIHOOKS_DEPLOYMENT": "compose", "LEDGER_URL": "https://hub.example"}
@@ -113,9 +115,9 @@ def test_an_agent_client_without_the_controller_credential_still_cannot_make_ser
             LedgerClient().notify(SLUG, "Agent posing as the swarm")
 
 
-def test_an_agent_token_cannot_write_as_the_swarm_beside_a_controller_credential(live, hive):
-    auth.issue_controller(hive)
-    token = authority.agent_token(live["admin"], SLUG, WORKER)
+def test_an_agent_token_cannot_write_as_the_swarm_beside_a_controller_credential(live, remote_hive):
+    auth.issue_controller(remote_hive)
+    token = auth.issue_agent(remote_hive, "member-1", SLUG, WORKER)
     posing = {"op": "add", "id": "a1", "by": "swarm", "thread": "chat", "text": "posing"}
     with patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_LEDGER_AGENT_TOKEN": token}):
         os.environ.pop("AGENTIHOOKS_CONTROLLER_CREDENTIAL", None)

@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -11,8 +12,6 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, store, tasks, workers  # noqa: F401
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 LAUNCH = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "old"}
 
@@ -33,7 +32,13 @@ class QuotaRuntime(FakeRuntime):
 
     def _run(self, argv, **kwargs):
         self.argv.append(argv)
-        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+        return SimpleNamespace(
+            returncode=0,
+            stdout=validated(argv, "status=started\nroute_status=routed\n").replace(
+                '"pid": 123', f'"pid": {os.getpid()}'
+            ),
+            stderr="",
+        )
 
     def has_capacity(self, config):
         return self.herdr.has_capacity(config)
@@ -62,6 +67,9 @@ def _ledger():
 
 
 def _quota_handoff(store, ledger, runtime):  # noqa: F811
+    master = store.next_name("sw", "master")
+    store.put_agent("sw", AgentRecord(master, "master", "master", started_at=1))
+    runtime.live.add(master)
     for task in ledger.rows.values():
         task["title"] = "keep the seat"
     warned = list(runtime.pool)
@@ -78,9 +86,9 @@ def _quota_handoff(store, ledger, runtime):  # noqa: F811
     return done, first, envelope
 
 
-def _capacity(eng, claude, codex):
+def _capacity(eng, claude, codex, idle=""):
     return (
-        f"quota capacity eng {eng} ci 0 plan 0 because accounts have quota; "
+        f"quota capacity eng {eng} ci 0 plan 0 because {idle}accounts have quota; "
         f"Claude has {claude} free seats and Codex has {codex} free seats"
     )
 
@@ -107,6 +115,14 @@ def test_a_quota_handoff_keeps_the_seat_and_launch_settings_on_another_account(s
     pool = [OLD, FRESH, capacity.Account("codex", "roomy", "OPEN", 0, 100, 100, 6)]
     ledger, runtime = _ledger(), QuotaRuntime(tmp_path, pool, monkeypatch)
     done, first, envelope = _quota_handoff(store, ledger, runtime)
+    continuation = {
+        "continue_from": "fresh",
+        "remote_branch": "none",
+        "remote_head": "none",
+        "fresh_reason": "no branch was pushed",
+    }
+    envelope.update(continuation)
+    monkeypatch.setattr("scripts.swarm.tick.reclaim", lambda *args, **kwargs: continuation)
     actions = tick("sw", store, ledger, runtime, 2)
     (argv,) = runtime.argv
     successor = next(a for a in workers(store) if a.name != first.name)
@@ -279,6 +295,74 @@ def test_a_restarted_agent_gets_a_new_warning_for_its_new_life():
     assert latest in {item.id for item in messages}
 
 
+@pytest.mark.parametrize(
+    "window,used,field",
+    [("week", {"week": 91}, "week_resets_at"), ("five hour", {"five": 96, "week": 10}, "five_resets_at")],
+)
+def test_the_warning_names_quota_left_and_reset_and_a_new_reset_rearms_it(window, used, field):
+    import time
+    from datetime import datetime
+
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    harness = "codex" if window == "week" else "claude"
+    storage.put_agent("sw", AgentRecord("cx", "eng", "e", harness=harness, account="spent", started_at=1))
+    key = storage.key("sw", "quota-capacity")
+
+    def observe(reset, **quota):
+        row = replace(account(harness=harness, **quota), **{field: reset})
+        storage.redis.set(key, json.dumps({"accounts": [row.__dict__]}))
+        return quota_handoff.warn("sw", storage, {})
+
+    first, second = int(time.time()) + 3600, int(time.time()) + 7200
+    assert observe(first, **used) == ["early quota handoff warning sent to cx"]
+    assert observe(first, **used) == []
+    assert observe(second, **used) == ["early quota handoff warning sent to cx"]
+    assert observe(second, **used) == []
+    texts = [item.text for item in InboxStore(storage.redis).pending_items("cx")]
+    left = 100 - max(used.values()) if window == "week" else 4
+    assert len(texts) == 2
+    for text, reset in zip(texts, (first, second), strict=True):
+        assert (
+            f"{harness} account spent has used {100 - left}% of its {window} window, {left}% left; it resets " in text
+        )
+        assert datetime.fromtimestamp(reset).astimezone().strftime("%a %H:%M %Z") in text
+
+
+def test_each_window_warns_once_per_reset_while_the_other_stays_crossed():
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    storage.put_agent("sw", AgentRecord("cx", "eng", "e", harness="claude", account="spent", started_at=1))
+    key = storage.key("sw", "quota-capacity")
+
+    def observe(five_reset, five, week):
+        row = replace(account(harness="claude", five=five, week=week), week_resets_at=9_000, five_resets_at=five_reset)
+        storage.redis.set(key, json.dumps({"accounts": [row.__dict__]}))
+        return len(quota_handoff.warn("sw", storage, {}))
+
+    assert [observe(100, 50, 91), observe(100, 96, 91), observe(100, 97, 92)] == [1, 1, 0]
+    assert [observe(200, 20, 92), observe(200, 96, 92), observe(200, 96, 93)] == [0, 1, 0]
+    items = InboxStore(storage.redis).pending_items("cx")
+    assert storage.redis.hget(storage.key("sw", "quota-warnings"), "cx") == items[0].id
+    periods = storage.redis.hgetall(storage.key("sw", "quota-warning-periods"))
+    assert periods == {"cx:week": "1:9000", "cx:five hour": "1:200"}
+    assert [item.text.split(" window,")[0].rsplit(" ", 2)[-2:] for item in items] == [
+        ["its", "week"],
+        ["five", "hour"],
+        ["five", "hour"],
+    ]
+    storage.put_agent("sw", AgentRecord("both", "eng", "f", harness="claude", account="spent", started_at=2))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to both"]
+    assert quota_handoff.warn("sw", storage, {}) == []
+    (both,) = InboxStore(storage.redis).pending_items("both")
+    assert "has used 93% of its week window, 7% left; it resets " in both.text
+    assert ". It has used 96% of its five hour window, 4% left; it resets " in both.text
+    assert both.text.count("Submit it with") == 1
+    assert storage.redis.hget(storage.key("sw", "quota-warning-lives"), "both") == "2"
+
+
 def test_an_old_warning_does_not_suppress_a_new_lifes_quota_notice():
     import fakeredis
 
@@ -323,7 +407,8 @@ def test_tick_warns_once_per_agent_without_retiring_it(monkeypatch):
     messages = InboxStore(storage.redis).pending_items(agent.name)
     assert len(messages) == 1
     assert messages[0].text == (
-        "QUOTA HANDOFF WARNING: claude account spent has used 90% of its week window. "
+        "QUOTA HANDOFF WARNING: claude account spent has used 90% of its week window, 10% left; "
+        "its reset time is unknown. "
         "Finish your current step and write your Handoff v2 with the handoff skill while quota remains. "
         "Submit it with agentihooks swarm sw handoff DOC --reason quota, then stop. "
         "The tick keeps your seat and task and routes the successor to an account with room. "
@@ -383,14 +468,19 @@ def test_warning_ignores_unknown_state_and_handles_empty_observations():
 
 def test_required_claude_successor_uses_an_eligible_account():
     row = account("healthy", five=10, week=20)
-    assert quota_handoff.successor([row], False, quota_handoff.Thresholds()) == row
+    assert quota_handoff.successor([row], ("claude",), quota_handoff.Thresholds()) == row
 
 
 def test_an_eligible_weekly_only_codex_account_can_receive_the_successor():
     row = replace(account("default", "codex", week=20), five_left=None)
-    assert quota_handoff.successor([row], True, quota_handoff.Thresholds()) == row
-    assert quota_handoff.successor([replace(row, week_left=None)], True, quota_handoff.Thresholds()) is None
-    assert quota_handoff.successor([replace(row, state="UNKNOWN")], True, quota_handoff.Thresholds()) is None
+    assert quota_handoff.successor([row], ("claude", "codex"), quota_handoff.Thresholds()) == row
+    assert (
+        quota_handoff.successor([replace(row, week_left=None)], ("claude", "codex"), quota_handoff.Thresholds()) is None
+    )
+    assert (
+        quota_handoff.successor([replace(row, state="UNKNOWN")], ("claude", "codex"), quota_handoff.Thresholds())
+        is None
+    )
 
 
 def test_quota_transfer_obeys_its_allocation_without_a_task_pin(tmp_path, monkeypatch):
@@ -457,14 +547,14 @@ def test_successor_uses_most_routing_left_and_skips_unplaceable_accounts(state):
         account("best", five=10, week=20),
         account("cx", "codex", five=0, week=0),
     ]
-    assert quota_handoff.successor(rows, True, quota_handoff.Thresholds()).name == "best"
+    assert quota_handoff.successor(rows, ("claude", "codex"), quota_handoff.Thresholds()).name == "best"
 
 
 def test_successor_falls_back_to_codex_and_respects_profile_and_floor():
     rows = [account("cc", state="DRAIN"), account("cx", "codex", five=10, week=20)]
-    assert quota_handoff.successor(rows, True, quota_handoff.Thresholds()) == rows[1]
-    assert quota_handoff.successor(rows, False, quota_handoff.Thresholds()) is None
-    assert quota_handoff.successor([replace(rows[1], cap=0)], True, quota_handoff.Thresholds()) is None
+    assert quota_handoff.successor(rows, ("claude", "codex"), quota_handoff.Thresholds()) == rows[1]
+    assert quota_handoff.successor(rows, ("claude",), quota_handoff.Thresholds()) is None
+    assert quota_handoff.successor([replace(rows[1], cap=0)], ("claude", "codex"), quota_handoff.Thresholds()) is None
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -497,6 +587,70 @@ def test_quota_transfer_routes_to_best_account_and_preserves_profile(tmp_path, m
     assert seen[0][seen[0].index("--agent") + 1] == target
     if target == "codex":
         assert "opus" not in seen[0]
+
+
+@pytest.mark.parametrize(
+    "target,flags", [("codex", ["-c", 'model_reasoning_effort="xhigh"']), ("claude", ["--effort", "max"])]
+)
+def test_a_quota_transfer_continues_its_saved_effort_at_the_equal_rank(tmp_path, monkeypatch, target, flags):
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    rt._quota_accounts = [account("old", state="DRAIN"), account("best", target, five=10, week=20)]
+    seen = []
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", target, "best"),
+    )
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3", effort_max="max")
+    task = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {"reason": "quota", "launch": {**LAUNCH, "effort": "max"}},
+    }
+    rt.spawn(config, "eng", "engineer@a1b2c3-0002", task)
+    model = seen[0][seen[0].index("--") + 1 :]
+    assert model[model.index(flags[0]) : model.index(flags[0]) + 2] == flags
+
+
+def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_range(tmp_path, monkeypatch):
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    rt._quota_accounts = [account("old", state="DRAIN"), account("best", "codex", five=10, week=20)]
+    seen = []
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", "codex", "best"),
+    )
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3", effort_max="high")
+    task = {
+        "id": "master",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {"reason": "quota", "launch": {**LAUNCH, "effort": "max"}},
+    }
+    rt.spawn(config, "master", "master@a1b2c3-0002", task)
+    assert 'model_reasoning_effort="high"' in seen[0][seen[0].index("--") + 1 :]
+
+
+def test_a_lane_quota_transfer_to_codex_outside_the_range_is_refused(tmp_path, monkeypatch):
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    rt._quota_accounts = [account("old", state="DRAIN"), account("best", "codex", five=10, week=20)]
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(rt, "_launch", lambda *args, **kw: pytest.fail("launched outside the range"))
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3", effort_max="high")
+    task = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {"reason": "quota", "launch": {**LAUNCH, "effort": "max"}},
+    }
+    with pytest.raises(
+        runtime.SpawnError, match="^unsupported transfer: saved effort is outside the current swarm range$"
+    ):
+        rt.spawn(config, "eng", "engineer@a1b2c3-0002", task)
 
 
 @pytest.mark.parametrize("same_lane,pinned", [(False, False), (False, True), (True, True)])
@@ -553,7 +707,9 @@ def _quota_decision(tmp_path, monkeypatch, rows, launch, tasks, lanes=None):
     envelope = {"reason": "quota", "launch": launch}
     ready = {"eng": [{"id": task, "handoff_envelope": envelope} for task in tasks], "ci": [], "plan": []}
     requirements = rt.quota_requirements(config, ready)
-    return rt.quota_capacity(config, [], 100, {"eng": len(tasks), "ci": 0, "plan": 0}, requirements)
+    return rt.quota_capacity(
+        config, [AgentRecord("master", "master", "master")], 100, {"eng": len(tasks), "ci": 0, "plan": 0}, requirements
+    )
 
 
 @pytest.mark.parametrize("claude_week_used,expected", [(20, {"q": "claude"}), (95, {})])
@@ -643,6 +799,51 @@ def test_a_relaunch_without_a_quota_handoff_keeps_its_own_account(tmp_path, monk
     assert decision["tasks"] == {"r": "codex"}
 
 
+@pytest.mark.parametrize("codex_sessions,expected", [(6, "claude"), (0, "codex")])
+@pytest.mark.parametrize("lane", ["eng", "plan"])
+def test_an_exit_handoff_prefers_codex_but_uses_a_free_claude_seat(
+    tmp_path, monkeypatch, codex_sessions, expected, lane
+):
+    rows = [
+        capacity.Account("codex", "default", "OPEN", codex_sessions, 90, 90, 6),
+        capacity.Account("claude", "cc", "OPEN", 0, 90, 90, 6),
+        capacity.Account("claude", "default", "OPEN", 5, 90, 90, 6),
+    ]
+    monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: list(rows))
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    seen = []
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda requested, environ: (requested, "requested"))
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", expected, "cc"),
+    )
+    config = SwarmConfig(
+        "sw", str(tmp_path), max_eng=int(lane == "eng"), max_ci=0, max_plan=int(lane == "plan"), code="a1b2c3"
+    )
+    task = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {"reason": "exit", "launch": CODEX_HANDING_OFF},
+    }
+    ready = {name: [task] if name == lane else [] for name in ("eng", "ci", "plan")}
+    requirements = rt.quota_requirements(config, ready)
+    demand = {name: int(name == lane) for name in ready}
+    decision = rt.quota_capacity(config, [], 100, demand, requirements)
+    assert decision["tasks"] == {"e": expected}
+    rt.spawn(config, lane, "engineer@a1b2c3-0002", task)
+    argv = seen[0]
+    assert argv[argv.index("--agent") + 1] == expected
+    assert argv[argv.index("--route") + 1] == ("cc" if expected == "claude" else "default")
+    assert argv[argv.index("--profile") + 1] == "engineer"
+    if expected == "claude":
+        assert argv[argv.index("--model") + 1] == "opus"
+        assert argv[argv.index("--effort") + 1] == "high"
+    else:
+        assert argv[argv.index("-m") + 1] == "gpt"
+
+
 def test_a_claude_only_profile_hands_off_to_claude(tmp_path, monkeypatch):
     rt = runtime.HerdrRuntime(home=tmp_path)
     rt._quota_accounts = [account("cc", five=50, week=50), account("cx", "codex", five=90, week=90)]
@@ -681,3 +882,118 @@ def test_a_lane_pinned_to_claude_keeps_a_quota_handoff_off_codex(tmp_path):
         "no claude account can take the quota handoff from claude account old: "
         "claude old is the account handing off; codex cx is not a claude account"
     )
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize("five,week", [(None, None), (0, 0), (5, 10)])
+def test_api_quota_rows_never_trigger_a_subscription_warning(harness, five, week):
+    row = capacity.Account(harness, "api", "OPEN", 1, five, week, 3, kind="api")
+    assert quota_handoff.trigger(row, quota_handoff.Thresholds()) == ""
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_api_agents_receive_no_subscription_warning(harness):
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    agent = AgentRecord("api-worker", "eng", "e", harness=harness, account="api", state="working")
+    storage.put_agent("sw", agent)
+    row = capacity.Account(harness, "api", "OPEN", 1, 0, 0, 3, kind="api")
+    storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [row.__dict__]}))
+    assert quota_handoff.warn("sw", storage, {}) == []
+    assert not InboxStore(storage.redis).pending_items(agent.name)
+    assert storage.redis.hgetall(storage.key("sw", "quota-warning-lives")) == {}
+
+
+@pytest.mark.parametrize(
+    "harness,harnesses", [("claude", ("claude",)), ("claude", ("claude", "codex")), ("codex", ("claude", "codex"))]
+)
+@pytest.mark.parametrize("sessions,cap,eligible", [(0, 1, True), (1, 1, False), (0, 0, False), (999, 1000, True)])
+def test_api_successors_use_capacity_without_subscription_readings(harness, harnesses, sessions, cap, eligible):
+    row = capacity.Account(harness, "api", "OPEN", sessions, None, None, cap, kind="api")
+    assert quota_handoff.successor([row], harnesses, quota_handoff.Thresholds()) == (row if eligible else None)
+    assert quota_handoff.exclusion(row, quota_handoff.Thresholds()) == ("" if eligible else "has no free seats")
+
+
+def test_api_successors_preserve_harness_and_predecessor_restrictions():
+    api = capacity.Account("codex", "api", "OPEN", 0, None, None, 1, kind="api")
+    assert quota_handoff.successor([api], ("claude",), quota_handoff.Thresholds()) is None
+    assert quota_handoff.exclusion(api, quota_handoff.Thresholds(), ("codex", "api")) == "is the account handing off"
+    pool = account("token", harness="codex", five=0, week=0, sessions=0)
+    assert quota_handoff.successor([api, pool], ("claude", "codex"), quota_handoff.Thresholds()) == api
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_swarm_quota_transfer_routes_to_api_with_no_window_readings(tmp_path, monkeypatch, target):
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    rt._quota_accounts = [
+        account("old", state="DRAIN"),
+        capacity.Account(target, "api", "OPEN", 0, None, None, 3, kind="api"),
+    ]
+    rt._quota_cap, rt._quota_floor, rt._quota_share = 3, 5, 0
+    seen = []
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", target, "api"),
+    )
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3")
+    task = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {
+            "reason": "quota",
+            "launch": {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "old"},
+        },
+    }
+    placed = rt.spawn(config, "eng", "engineer@a1b2c3-0002", task)
+    assert (placed.harness, placed.account) == (target, "api")
+    assert _option(seen[0], "--route") == "api"
+    assert _option(seen[0], "--agent") == target
+    assert _option(seen[0], "--profile") == "engineer"
+
+
+def test_api_successor_ties_use_the_existing_account_name_order():
+    api = capacity.Account("claude", "api", "OPEN", 0, None, None, 1, kind="api")
+    token = account("aaa", five=0, week=0, sessions=0)
+    assert quota_handoff.successor([api, token], ("claude",), quota_handoff.Thresholds()) == token
+
+
+CEILING_REASON = "reserved for 1 live master: workers stop at 70% of the week"
+
+
+def test_handoff_trigger_fires_at_the_ceiling():
+    reserved = replace(account("main", five=10, week=70), reserved=CEILING_REASON)
+    thresholds = quota_handoff.Thresholds()
+    assert quota_handoff.trigger(reserved, thresholds) == "week"
+    assert quota_handoff.trigger(account("main", five=10, week=70), thresholds) == ""
+    assert quota_handoff.windows(replace(reserved, week_left=None), thresholds) == []
+
+
+def test_warn_spares_the_master_lane_on_a_reserved_account():
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    storage.put_agent("sw", AgentRecord("master@x", "master", "m", harness="claude", account="main"))
+    storage.put_agent("sw", AgentRecord("worker", "eng", "w", harness="claude", account="main"))
+    reserved = replace(account("main", five=10, week=70), reserved=CEILING_REASON)
+    storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [capacity.record(reserved)]}))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to worker"]
+
+
+@pytest.mark.parametrize("five", [None, 0.0, 100.0])
+@pytest.mark.parametrize("week,expected", [(73.0, []), (10.0, ["week"])])
+def test_codex_handoff_windows_use_only_the_week(five, week, expected):
+    row = capacity.Account("codex", "a", "OPEN", 0, five, week, 6)
+    assert quota_handoff.windows(row, quota_handoff.Thresholds()) == expected
+
+
+def test_codex_successor_prefers_week_remaining_and_requires_a_week():
+    thresholds = quota_handoff.Thresholds()
+    better = capacity.Account("codex", "a", "OPEN", 0, 0.0, 73.0, 6)
+    lesser = capacity.Account("codex", "b", "OPEN", 0, 80.0, 50.0, 6)
+    missing = capacity.Account("codex", "c", "OPEN", 0, 90.0, None, 6)
+    assert quota_handoff.exclusion(missing, thresholds) == "has no quota reading"
+    assert quota_handoff.successor([lesser, better, missing], ("codex",), thresholds) == better

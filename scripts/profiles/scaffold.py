@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from hooks.context.profile_chain import PACKAGE_ROLES
+from hooks.context import profile_chain
 from scripts import install
 from scripts.profiles.render import KEY_SEPARATOR
 
@@ -24,7 +24,7 @@ Your agentihooks profiles, overlays, skills, rules and MCP servers. Layout: the 
 
 
 def base_roles() -> list[str]:
-    return sorted(p.name for p in PACKAGE_ROLES.iterdir() if p.is_dir() and not p.name.startswith("_"))
+    return sorted(p.name for p in profile_chain.PACKAGE_ROLES.iterdir() if p.is_dir() and not p.name.startswith("_"))
 
 
 def _keep(folder: Path) -> None:

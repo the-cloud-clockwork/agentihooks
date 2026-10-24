@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__migrate__mutmut_6:f6e7de26077b3cbd03bd9957ede5e65c801a2130b7bf801749e97e7fda51120e": {
+    "reader": "Standards",
+    "reason": "pending is read only by not pending and otherwise assigned True for unresolved ownership. False and None are both falsey, so completion-marker decisions and every externally visible effect remain identical."
+  }
+}

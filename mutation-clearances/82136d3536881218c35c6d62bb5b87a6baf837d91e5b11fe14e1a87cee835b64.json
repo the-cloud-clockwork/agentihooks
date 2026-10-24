@@ -1,0 +1,6 @@
+{
+  "scripts/hive/server.py:scripts.hive.server.xǁJoinServerǁreap__mutmut_2:c66a294950114455dba7d20c2d335502e2434c01b84bcbc70526362f6c277d0b": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: deadline <= now and deadline < now on time.monotonic() floats differ only at the exact instant of equality, and the next reap pass shuts the socket down, so the only effect is a one pass delay in that instant."
+  }
+}

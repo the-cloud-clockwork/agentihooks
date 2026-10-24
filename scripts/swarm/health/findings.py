@@ -3,15 +3,18 @@
 The calculator only reports; the master diagnoses and the operator decides.
 """
 
+import dataclasses
 import os
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
 
+from scripts import quota_state
 from scripts.swarm import naming
 from scripts.swarm_ledger import ledger_kinds
 
 NOT_TRANSITIONS = ("joined", "left", "task started", "launch failed")
 HELD = ("claimed", "pr")
+SETTLED = ("checked", "priority cleared")
 MINUTE_MS = 60_000
 ENV = {
     "ceremony_min": "AGENTIHOOKS_HEALTH_CEREMONY_MIN",
@@ -21,6 +24,7 @@ ENV = {
     "review_rounds": "AGENTIHOOKS_HEALTH_REVIEW_ROUNDS",
     "idle_ticks": "AGENTIHOOKS_HEALTH_IDLE_TICKS",
     "stale_minutes": "AGENTIHOOKS_HEALTH_STALE_MINUTES",
+    "stalled_minutes": "AGENTIHOOKS_HEALTH_STALLED_MINUTES",
     "watch_min": "AGENTIHOOKS_HEALTH_WATCH_MIN",
     "watch_ratio": "AGENTIHOOKS_HEALTH_WATCH_RATIO",
     "master_watch_min": "AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN",
@@ -40,13 +44,14 @@ class Limits:
     review_rounds: int = 3
     idle_ticks: int = 3
     stale_minutes: int = 30
+    stalled_minutes: int = 10
     watch_min: int = 20
     watch_ratio: int = 5
     master_watch_min: int = 60
     master_watch_ratio: int = 15
     cooldown_minutes: int = 60
     drain_minutes: int = 10
-    drain_left: int = 10
+    drain_left: int = quota_state.DRAIN_LEFT
 
 
 @dataclass(frozen=True)
@@ -57,6 +62,9 @@ class Finding:
     evidence: tuple
     threshold: str
     measure: int = 0
+    basis: str = dataclasses.field(default="", compare=False)
+    links: tuple = ()
+    evidence_identity: tuple | None = None
 
     @property
     def id(self):
@@ -64,7 +72,11 @@ class Finding:
 
     def as_dict(self):
         found = asdict(self)
-        del found["measure"]
+        del found["measure"], found["basis"], found["evidence_identity"]
+        if not self.links:
+            del found["links"]
+        else:
+            found["links"] = list(self.links)
         return {**found, "evidence": list(self.evidence)}
 
 
@@ -84,10 +96,15 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
     return [
         *ceremony(events, tasks, limits, green, talk),
         *scope_inflation(events, tasks, limits),
-        *proof_loops(events, tasks, limits),
+        *proof_loops(events, tasks, limits, ledger.get("review_rounds", {})),
         *failed_launches(events, tasks),
         *idle_with_claim(agents, tasks, limits, waiting),
         *waiting_on_input(agents, tasks),
+        *master_blocked_on_prompt(agents),
+        *stalled(agents, limits),
+        *master_rc(agents),
+        *master_fallback_auth(agents),
+        *master_headless(agents),
         *stale_claims(agents, tasks, limits),
         *over_monitoring(activity, limits),
     ]
@@ -119,16 +136,29 @@ def _outcome(task):
     return bool(task.get("pr_url")) or (ledger_kinds.kind(task) in ledger_kinds.NEEDS and not ledger_kinds.unmet(task))
 
 
+def _is_dispatcher(by):
+    return naming.lane_of(by) == "dispatch"
+
+
+def _decided(events):
+    commented = {(e["by"], e["target"]) for e in events if e.get("kind") == "comment added"}
+    settled = {
+        (e["by"], e["target"]) for e in events if e.get("kind") in SETTLED and (e["by"], e["target"]) in commented
+    }
+    return Counter(by for by, _ in settled if _is_dispatcher(by))
+
+
 def ceremony(events, tasks, limits, green=frozenset(), talk=None):
     finished = {tid for tid, t in tasks.items() if _outcome(t)}
     moves = Counter(e["by"] for e in events if e.get("kind") not in NOT_TRANSITIONS)
     closed = Counter(e["by"] for e in events if e.get("kind") == "task done" and _task_id(e["target"]) in finished)
+    decided = _decided(events)
     delivering = {tasks[tid].get("claimed_by") for tid in (*green, *finished) if tid in tasks}
     found = []
     for by, count in sorted(moves.items()):
         if not naming.lane_of(by) or by in delivering or (talk is not None and _is_worker(by)):
             continue
-        outcomes = len(finished) if _is_master(by) else closed[by]
+        outcomes = len(finished) if _is_master(by) else closed[by] + decided[by]
         if count >= limits.ceremony_min and count / max(outcomes, 1) > limits.ceremony_ratio:
             found.append(
                 Finding(
@@ -195,13 +225,16 @@ def scope_inflation(events, tasks, limits):
     return found
 
 
-def proof_loops(events, tasks, limits):
-    claims = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task started")
-    rounds = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task pr")
+def proof_loops(
+    events: list[dict], tasks: dict[str, dict], limits: Limits, reviews: dict[str, dict[str, int]]
+) -> list[Finding]:
+    claims, reruns = _lives(events)
+    rounds = {tid: max(reviews.get(tid, {}).values(), default=0) for tid in tasks}
     found = []
     for tid in tasks:
-        reruns = max(claims[tid] - 1, 0)
-        if reruns > limits.reruns or rounds[tid] > limits.review_rounds:
+        if tasks[tid].get("state") == "done":
+            continue
+        if reruns[tid] > limits.reruns or rounds[tid] > limits.review_rounds:
             found.append(
                 Finding(
                     "proof loop",
@@ -209,14 +242,27 @@ def proof_loops(events, tasks, limits):
                     "reruns or review rounds over the cap",
                     (
                         f"task {_title(tasks, tid)}",
-                        f"started {_plural(claims[tid], 'time')} ({_plural(reruns, 'rerun')})",
+                        f"started {_plural(claims[tid], 'time')} ({_plural(reruns[tid], 'rerun')})",
                         _plural(rounds[tid], "review round"),
                     ),
                     f"more than {limits.reruns} reruns or {limits.review_rounds} review rounds",
-                    reruns + rounds[tid],
+                    reruns[tid] + rounds[tid],
                 )
             )
     return found
+
+
+def _lives(events: list[dict]) -> tuple[Counter, Counter]:
+    starts, reruns, heads = Counter(), Counter(), {}
+    for e in sorted((e for e in events if e.get("kind") == "task started"), key=lambda e: e["at"]):
+        tid = _task_id(e["target"])
+        head, last = e.get("head"), heads.get(tid)
+        moved = head is not None and last is not None and head != last
+        if starts[tid] and not e.get("after") and not moved:
+            reruns[tid] += 1
+        starts[tid] += 1
+        heads[tid] = head
+    return starts, reruns
 
 
 def failed_launches(events: list[dict], tasks: dict) -> list[Finding]:
@@ -276,6 +322,105 @@ def waiting_on_input(agents: list[dict], tasks: dict[str, dict]) -> list[Finding
                 (f"prompt: {agent['input_prompt']}", f"task {_title(tasks, held['id'])} ({held['state']})"),
                 "more than 3 consecutive ticks waiting on input",
                 ticks,
+            )
+        )
+    return found
+
+
+def master_blocked_on_prompt(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        if agent.get("lane") != "master" or not agent.get("input_prompt") or agent["input_ticks"] <= 3:
+            continue
+        found.append(
+            Finding(
+                "master blocked on prompt",
+                agent.get("seat") or agent["name"],
+                f"the master pane has waited on a question prompt for {agent['input_ticks']} ticks",
+                (f"prompt: {agent['input_prompt']}", f"agent {agent['name']}"),
+                "more than 3 consecutive ticks on a question prompt",
+                agent["input_ticks"],
+            )
+        )
+    return found
+
+
+def stalled(agents: list[dict], limits: Limits) -> list[Finding]:
+    found = []
+    for agent in agents:
+        minutes = agent.get("tool_quiet_minutes")
+        if agent.get("pane_state") != "working" or minutes is None or minutes < limits.stalled_minutes:
+            continue
+        found.append(
+            Finding(
+                "stalled",
+                agent["name"],
+                f"busy with no tool call for {minutes} minutes",
+                (f"pane working; task {agent.get('task', '')}",),
+                f"{limits.stalled_minutes} minutes without a tool call",
+                minutes,
+            )
+        )
+    return found
+
+
+def master_rc(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        failed = agent.get("remote_control_failure")
+        if agent.get("lane") != "master" or not failed or failed["at"] < agent.get("started_at", 0):
+            continue
+        found.append(
+            Finding(
+                "master-rc",
+                agent.get("seat") or agent["name"],
+                "Remote Control failed on the master, phone access lost",
+                (f"notice: {failed['message']}", f"agent {agent['name']}"),
+                "a Remote Control failure notice since the master started",
+                1,
+            )
+        )
+    return found
+
+
+def master_fallback_auth(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        if (
+            agent.get("lane") != "master"
+            or agent.get("seat", "").partition("@")[0] not in ("", "master")
+            or agent.get("desired_route_kind") != "interactive"
+            or agent.get("route_kind") in ("interactive", "master-login")
+            or agent.get("state") in ("finished", "ended")
+        ):
+            continue
+        found.append(
+            Finding(
+                "master-fallback-auth",
+                agent.get("seat") or agent["name"],
+                "master on fallback auth, phone access lost",
+                (f"route: {agent.get('route_kind', 'subscription')}", f"agent {agent['name']}"),
+                "the master desires interactive authentication but runs on fallback authentication",
+                1,
+            )
+        )
+    return found
+
+
+def master_headless(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        placed = agent.get("profile_decision", {}).get("master_placement", {})
+        if agent.get("lane") != "master" or agent.get("state") in ("finished", "ended") or not placed.get("headless"):
+            continue
+        found.append(
+            Finding(
+                "master-headless",
+                agent.get("seat") or agent["name"],
+                "master runs on a headless hive",
+                (f"hive: {placed['hive']}", f"agent {agent['name']}"),
+                "the master has no UI hive",
+                1,
             )
         )
     return found

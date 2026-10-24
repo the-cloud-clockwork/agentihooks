@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import subprocess
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -15,7 +16,10 @@ pytestmark = pytest.mark.unit
 
 
 def _workflow():
+    from scripts.ci_branch_lanes import GROUP
+
     return {
+        "concurrency": {"group": GROUP, "queue": "max", "cancel-in-progress": False},
         True: {"pull_request": {"branches": ["dev"]}, "merge_group": None, "push": {"branches": ["dev"]}},
         "jobs": {
             "unit": {"runs-on": "ubuntu-latest"},
@@ -272,9 +276,12 @@ def test_main_refuses_an_unknown_head(repo):
 
 
 def test_the_repository_grades_itself_green():
+    from scripts import ci_runner_trust
+
     workflows = ci_wiring.load(_ROOT)
     config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
-    assert gate_protected.grade(workflows, config, workflows, config, _TODAY) == []
+    actors = json.loads((_ROOT / ci_runner_trust.ACTORS).read_text())
+    assert gate_protected.grade(workflows, config, workflows, config, _TODAY, actors) == []
 
 
 def _protected_workflow():
@@ -300,6 +307,177 @@ def test_the_protected_grader_never_executes_the_head():
     assert "git checkout" not in runs and "git worktree" not in runs
 
 
+@pytest.mark.parametrize("name", ["test.yml", "branch-lanes.yml"])
+def test_branch_lane_grading_holds_the_required_status_from_the_base(repo, capsys, name):
+    from scripts.ci_branch_lanes import GROUP
+
+    base = _workflow()
+    base["concurrency"] = {"group": GROUP, "queue": "max", "cancel-in-progress": False}
+    _commit(repo, {name: base}, {}, "base lane")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _workflow()
+    head.pop("concurrency")
+    planted = _commit(repo, {name: head}, {}, "drop workflow lane")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    assert "shared hosted lane concurrency group" in capsys.readouterr().out
+
+
+def test_the_required_grader_preserves_existing_dev_concurrency(repo):
+    base = _workflow()
+    base["concurrency"] = {"group": "existing-dev-policy"}
+    _commit(repo, {"test.yml": base}, {}, "base concurrency")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _workflow()
+    head["concurrency"] = base["concurrency"]
+    head["jobs"]["lint"]["steps"] = [{"run": "echo changed"}]
+    changed = _commit(repo, {"test.yml": head}, {}, "change lint steps")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0
+
+
+@pytest.mark.parametrize("fault", ["skip", "command", "proofs", "delete"])
+def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, fault, capsys):
+    from copy import deepcopy
+
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trusted preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    altered = deepcopy(preflight)
+    if fault == "skip":
+        altered["jobs"]["grade"]["if"] = False
+    elif fault == "command":
+        altered["jobs"]["grade"]["steps"][-1]["run"] = "echo accepted"
+    elif fault == "proofs":
+        altered[True]["push"]["branches-ignore"].append("diffcheck/**")
+    files = {"test.yml": _workflow(), "branch-lanes.yml": altered}
+    if fault == "delete":
+        files.pop("branch-lanes.yml")
+    planted = _commit(repo, files, {}, "disable preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    out = capsys.readouterr().out
+    assert "::error::The head changes or removes the trusted branch lane preflight." in out.splitlines()
+    assert ("shared hosted lane concurrency group" in out) is (fault == "proofs")
+
+
+_SPARSE = "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
+_SHALLOW_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
+_FULL_FETCH = 'git fetch --no-tags origin "$GITHUB_SHA"'
+
+
+def _fetch_step(preflight):
+    return next(step for step in preflight["jobs"]["grade"]["steps"] if step.get("run", "").startswith("git fetch"))
+
+
+def _shallow_preflight(preflight):
+    shallow = copy.deepcopy(preflight)
+    checkout = shallow["jobs"]["grade"]["steps"][0]["with"]
+    checkout.update({"fetch-depth": 1, "sparse-checkout": _SPARSE, "sparse-checkout-cone-mode": False})
+    _fetch_step(shallow)["run"] = _SHALLOW_FETCH
+    return shallow
+
+
+def _full_preflight(preflight):
+    full = copy.deepcopy(preflight)
+    checkout = full["jobs"]["grade"]["steps"][0]["with"]
+    checkout.pop("sparse-checkout", None)
+    checkout.pop("sparse-checkout-cone-mode", None)
+    checkout["fetch-depth"] = 0
+    _fetch_step(full)["run"] = _FULL_FETCH
+    return full
+
+
+@pytest.mark.parametrize(
+    "fault", [None, "wider", "cone", "history", "fetch", "proofs", "fetch_full", "no_sparse", "no_depth"]
+)
+def test_the_required_grader_accepts_only_the_exact_shallow_sparse_preflight(repo, fault, capsys):
+    preflight = _full_preflight(yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text()))
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trusted preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    shallow = _shallow_preflight(preflight)
+    checkout = shallow["jobs"]["grade"]["steps"][0]["with"]
+    if fault == "wider":
+        checkout["sparse-checkout"] += "/scripts/\n"
+    elif fault == "cone":
+        checkout["sparse-checkout-cone-mode"] = True
+    elif fault == "history":
+        checkout["fetch-depth"] = 0
+    elif fault == "fetch":
+        _fetch_step(shallow)["run"] = "git fetch --no-tags origin dev"
+    elif fault == "proofs":
+        shallow[True]["push"]["branches-ignore"].append("diffcheck/**")
+    elif fault == "fetch_full":
+        _fetch_step(shallow)["run"] = _FULL_FETCH
+    elif fault == "no_sparse":
+        checkout.pop("sparse-checkout")
+        checkout.pop("sparse-checkout-cone-mode")
+    elif fault == "no_depth":
+        checkout.pop("fetch-depth")
+    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": shallow}, {}, "shallow preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == (0 if fault is None else 1)
+    refused = "::error::The head changes or removes the trusted branch lane preflight." in capsys.readouterr().out
+    assert refused is (fault is not None)
+
+
+@pytest.mark.parametrize("fault", [None, "history", "sparse", "fetch"])
+def test_a_branch_still_carrying_the_full_preflight_passes_a_shallow_base(repo, fault):
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": _shallow_preflight(preflight)}, {}, "shallow base")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    full = _full_preflight(preflight)
+    checkout = full["jobs"]["grade"]["steps"][0]["with"]
+    if fault == "history":
+        checkout["fetch-depth"] = 1
+    elif fault == "sparse":
+        checkout["sparse-checkout"] = _SPARSE
+    elif fault == "fetch":
+        _fetch_step(full)["run"] = _SHALLOW_FETCH
+    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": full}, {}, "full preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == (0 if fault is None else 1)
+
+
+@pytest.mark.parametrize(
+    ("form", "cover_proofs"), [(_full_preflight, True), (_shallow_preflight, True), (_shallow_preflight, False)]
+)
+def test_either_checkout_form_covers_proof_branches_from_a_preflight_that_ignored_them(repo, form, cover_proofs):
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    old = _full_preflight(preflight)
+    if "diffcheck/**" not in old[True]["push"]["branches-ignore"]:
+        old[True]["push"]["branches-ignore"].append("diffcheck/**")
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": old}, {}, "old preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = form(old)
+    if cover_proofs:
+        head[True]["push"]["branches-ignore"].remove("diffcheck/**")
+    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": head}, {}, "covering preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 0
+
+
+@pytest.mark.parametrize("cover_proofs", [False, True])
+@pytest.mark.parametrize("quoted", [False, True])
+def test_the_required_grader_preserves_preflight_and_allows_proof_coverage(repo, cover_proofs, quoted):
+    from copy import deepcopy
+
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    event_key = "on" if quoted else True
+    if quoted:
+        preflight["on"] = preflight.pop(True)
+    old = deepcopy(preflight)
+    old[event_key]["push"]["branches-ignore"].append("diffcheck/**")
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": old}, {}, "old preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = preflight if cover_proofs else old
+    workflow = _workflow()
+    workflow["jobs"]["lint"]["steps"] = [{"run": "echo changed"}]
+    changed = _commit(repo, {"test.yml": workflow, "branch-lanes.yml": head}, {}, "retain preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0
+
+
 def test_the_protected_grader_reports_gate_required_on_the_head():
     steps = _protected_workflow()["jobs"]["grade"]["steps"]
     statuses = [step for step in steps if "statuses/$HEAD_SHA" in step.get("run", "")]
@@ -307,3 +485,674 @@ def test_the_protected_grader_reports_gate_required_on_the_head():
     assert all('context="$CONTEXT"' in step["run"] for step in statuses)
     assert _protected_workflow()["env"]["CONTEXT"] == gate_protected.GATE
     assert statuses[-1]["if"] == "${{ always() }}"
+
+
+@pytest.mark.parametrize("weakened", [False, True])
+def test_only_the_canonical_reuse_protocol_is_an_allowed_transition(weakened):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["gate-required"] = base["jobs"].pop("gate")
+    head = copy.deepcopy(base)
+    head["jobs"]["reuse"] = ci_reuse.reuse_job()
+    head["jobs"]["queue-baseline"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate-required"]["needs"].extend(["reuse", "queue-baseline"])
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps()
+    if weakened:
+        head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert bool(problems) == weakened, problems
+
+
+@pytest.mark.parametrize("weakened", [False, True])
+@pytest.mark.parametrize("anton", [False, True])
+def test_the_protected_grader_admits_only_the_exact_paged_reuse_variant(weakened, anton):
+    from scripts import ci_reuse
+
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = ci_reuse.paged_reuse_job()
+    policy = _POLICY if anton else None
+    if anton:
+        head["jobs"]["reuse"]["runs-on"] = _anton()
+        [install] = [
+            step for step in head["jobs"]["reuse"]["steps"] if step.get("name") == "Install metadata dependencies"
+        ]
+        install["env"] = {"PYTHONNOUSERSITE": "1"}
+    if weakened:
+        [step] = [
+            step
+            for step in head["jobs"]["reuse"]["steps"]
+            if step.get("name") == "Fetch the evidence of recent passed runs"
+        ]
+        step["run"] = step["run"].replace("--page-size 5", "--page-size 100")
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, policy)
+    assert bool(problems) == weakened, problems
+
+
+def test_a_head_cannot_replace_the_protected_reuse_decision():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["gate-required"] = base["jobs"].pop("gate")
+    base["jobs"]["reuse"] = ci_reuse.reuse_job()
+    base["jobs"]["gate-required"]["needs"].append("reuse")
+    head = copy.deepcopy(base)
+    head["jobs"]["reuse"]["steps"] = [{"run": "echo reused=true"}]
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert "The head changes the protected reuse job; the protected branch grades with its own." in problems
+
+
+def test_an_unchanged_protected_reuse_producer_stays_accepted():
+    base = _workflow()
+    base["jobs"]["reuse"] = {"runs-on": "ubuntu-latest", "steps": [{"run": "echo legacy"}]}
+    base["jobs"]["gate"]["needs"].append("reuse")
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": copy.deepcopy(base)}, {}, _TODAY) == []
+
+
+def test_removing_the_protected_reuse_producer_names_the_violation():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = ci_reuse.reuse_job()
+    base["jobs"]["gate"]["needs"].append("reuse")
+    head = copy.deepcopy(base)
+    del head["jobs"]["reuse"]
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert "The head removes the protected reuse job." in problems
+
+
+def test_a_head_moving_the_gate_away_from_the_protected_reuse_job_is_named_not_crashed():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = ci_reuse.reuse_job()
+    base["jobs"]["gate"]["needs"].append("reuse")
+    problems = gate_protected.grade({"test.yml": base}, {}, {"other.yml": copy.deepcopy(base)}, {}, _TODAY)
+    assert "The head removes the protected reuse job." in problems
+
+
+_POLICY = {
+    "actors": ["nestorcolt", "agenticore-app[bot]", "tcc-main-ci[bot]"],
+    "queue_actor": "github-merge-queue[bot]",
+}
+_MEMBERS = '["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'
+
+
+def _anton(pool="anton-oss-light"):
+    return (
+        "${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || "
+        "github.event.pull_request.head.repo.full_name == github.repository) && "
+        f"contains(fromJSON('{_MEMBERS}'), github.actor) && contains(fromJSON('{_MEMBERS}'), github.triggering_actor) || "
+        "(github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && "
+        f"github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && '{pool}' || 'ubuntu-latest' }}}}"
+    )
+
+
+def _anton_reuse(pool="anton-oss-light"):
+    from scripts import ci_reuse
+
+    job = ci_reuse.reuse_job()
+    job["runs-on"] = _anton(pool)
+    [install] = [step for step in job["steps"] if step.get("name") == "Install metadata dependencies"]
+    install["env"] = {"PYTHONNOUSERSITE": "1"}
+    return job
+
+
+def _protected_pair():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["gate-required"] = base["jobs"].pop("gate")
+    base["jobs"]["gate-required"]["runs-on"] = "ubuntu-latest"
+    base["jobs"]["reuse"] = ci_reuse.reuse_job()
+    base["jobs"]["gate-required"]["needs"].append("reuse")
+    return base, copy.deepcopy(base)
+
+
+def test_the_reuse_job_and_the_gate_may_move_behind_the_runner_trust_selector():
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = _anton_reuse()
+    head["jobs"]["gate-required"]["runs-on"] = _anton()
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY) == []
+    assert gate_protected.grade({"test.yml": head}, {}, {"test.yml": base}, {}, _TODAY, _POLICY) == []
+
+
+def test_the_reuse_job_and_gate_accept_trusted_queue_rerun_selectors():
+    base, head = _protected_pair()
+    runner = _anton().replace(
+        "github.triggering_actor == 'github-merge-queue[bot]'",
+        "(github.triggering_actor == 'github-merge-queue[bot]' || "
+        f"contains(fromJSON('{_MEMBERS}'), github.triggering_actor))",
+    )
+    head["jobs"]["reuse"] = _anton_reuse()
+    head["jobs"]["reuse"]["runs-on"] = runner
+    head["jobs"]["gate-required"]["runs-on"] = runner
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY) == []
+    assert gate_protected.grade({"test.yml": head}, {}, {"test.yml": base}, {}, _TODAY, _POLICY) == []
+
+
+@pytest.mark.parametrize(
+    "runner", [_anton("anton-oss"), "anton-oss-light", "ubuntu-22.04", _anton().replace("&&", "||", 1)]
+)
+def test_the_gate_takes_no_other_runner(runner):
+    base, head = _protected_pair()
+    head["jobs"]["gate-required"]["runs-on"] = runner
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY)
+    assert problems == ["The head's Gate — Required changes its runs-on; the protected branch grades with its own."]
+
+
+def _without_install_env(job):
+    [install] = [step for step in job["steps"] if step.get("name") == "Install metadata dependencies"]
+    del install["env"]
+    return job
+
+
+def _changed_step(job):
+    job["steps"][-1]["name"] = "renamed"
+    return job
+
+
+def _other_pool(job):
+    job["runs-on"] = _anton("anton-oss-batch")
+    return job
+
+
+@pytest.mark.parametrize("weaken", [_without_install_env, _changed_step, _other_pool])
+def test_the_reuse_job_moves_only_in_its_canonical_anton_form(weaken):
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = weaken(_anton_reuse())
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY)
+    assert problems == ["The head changes the protected reuse job; the protected branch grades with its own."]
+
+
+def test_without_a_dict_policy_only_the_hosted_runner_is_accepted():
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = _anton_reuse()
+    head["jobs"]["gate-required"]["runs-on"] = _anton()
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, list(_POLICY["actors"]))
+    assert problems == [
+        "The head's Gate — Required changes its runs-on; the protected branch grades with its own.",
+        "The head changes the protected reuse job; the protected branch grades with its own.",
+    ]
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == problems
+
+
+def _trusted_base(repo, actors=None):
+    candidate = _workflow()
+    candidate["jobs"]["gate"]["runs-on"] = "ubuntu-latest"
+    _commit(repo, {"test.yml": candidate}, {}, "base workflows")
+    policy = repo / ".github/workflows/trusted-actors.json"
+    policy.write_text(json.dumps(actors or ["nestorcolt", "agenticore-app[bot]", "tcc-main-ci[bot]"]))
+    _git(repo, "add", ".github/workflows/trusted-actors.json")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "protected approvals")
+    return candidate, _git(repo, "rev-parse", "HEAD")
+
+
+def test_protected_cli_accepts_a_hosted_head_from_an_actor_owned_base(repo):
+    candidate, base = _trusted_base(repo)
+    head = _commit(repo, {"test.yml": candidate}, {}, "hosted head")
+    assert gate_protected.main(["--root", str(repo), "--base", base, "--head", head]) == 0
+
+
+def test_protected_cli_accepts_the_gate_behind_the_selector_of_the_base_policy(repo):
+    candidate, base = _trusted_base(repo, _POLICY)
+    candidate["jobs"]["gate"]["runs-on"] = _anton()
+    head = _commit(repo, {"test.yml": candidate}, {}, "gate on anton")
+    assert gate_protected.main(["--root", str(repo), "--base", base, "--head", head]) == 0
+
+
+def test_protected_cli_refuses_a_policy_without_its_queue_actor_before_building_a_selector(repo):
+    candidate, base = _trusted_base(repo, {"actors": _POLICY["actors"]})
+    candidate["jobs"]["gate"]["runs-on"] = _anton()
+    head = _commit(repo, {"test.yml": candidate}, {}, "gate on anton")
+    with pytest.raises(ValueError, match="trusted actors"):
+        gate_protected.main(["--root", str(repo), "--base", base, "--head", head])
+
+
+def test_protected_cli_rejects_a_private_runner_with_no_actor_check(repo, capsys):
+    candidate, base = _trusted_base(repo)
+    candidate["jobs"]["private"] = {"runs-on": "anton"}
+    candidate["jobs"]["gate"]["needs"].append("private")
+    head = _commit(repo, {"test.yml": candidate}, {}, "unguarded private head")
+    assert gate_protected.main(["--root", str(repo), "--base", base, "--head", head]) == 1
+    assert "test.yml/private: runner trust" in capsys.readouterr().out
+
+
+def test_protected_cli_keeps_wiring_errors_when_runner_admission_is_safe(repo):
+    candidate, base = _trusted_base(repo)
+    candidate["jobs"]["gate"]["needs"].remove("unit")
+    head = _commit(repo, {"test.yml": candidate}, {}, "lost required unit")
+    assert gate_protected.main(["--root", str(repo), "--base", base, "--head", head]) == 1
+
+
+def test_protected_cli_validates_approvals_from_the_base_not_head(repo):
+    candidate, base = _trusted_base(repo, ["nestorcolt", "agenticore-app[bot]", "tcc-main-ci[bot]", "stranger"])
+    head = _commit(repo, {"test.yml": candidate}, {}, "head without policy")
+    with pytest.raises(ValueError, match="trusted actors"):
+        gate_protected.main(["--root", str(repo), "--base", base, "--head", head])
+
+
+def _aggregators():
+    base, head = _workflow(), _workflow()
+    for workflow in (base, head):
+        workflow["jobs"]["gate-required"] = workflow["jobs"].pop("gate")
+    return base, head
+
+
+@pytest.mark.parametrize("selected", [False, True])
+def test_a_head_switching_to_either_canonical_aggregation_is_green(selected):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(selected=selected)
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+@pytest.mark.parametrize("docs", [False, True])
+def test_documentation_aggregation_accepts_only_the_canonical_transition(docs):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=docs)
+    if docs:
+        head["jobs"]["docs"] = {"runs-on": "ubuntu-latest"}
+        head["jobs"]["gate-required"]["needs"].append("docs")
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+    head["jobs"]["gate-required"]["steps"][0]["run"] += "\necho weakened"
+    assert _grade({"test.yml": head}, base={"test.yml": base})
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_a_declared_documentation_check_cannot_switch_to_legacy_aggregation(existing):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    head["jobs"]["docs"] = {"runs-on": "ubuntu-latest", "if": False}
+    head["jobs"]["gate-required"]["needs"].append("docs")
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    if existing:
+        base["jobs"]["docs"] = {"runs-on": "ubuntu-latest"}
+        base["jobs"]["gate-required"]["needs"].append("docs")
+        base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True)
+    problems = _grade({"test.yml": head}, base={"test.yml": base})
+    assert any("changes its steps" in problem for problem in problems), problems
+
+
+def test_unchanged_noncanonical_documentation_gate_preserves_its_protected_steps():
+    base, head = _workflow(), _workflow()
+    for workflow in (base, head):
+        workflow["jobs"]["docs"] = {"runs-on": "ubuntu-latest"}
+        workflow["jobs"]["gate"]["needs"].append("docs")
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+@pytest.mark.parametrize("change", ["outcome", "byte", "extra"])
+@pytest.mark.parametrize("selected", [False, True])
+def test_a_head_altering_the_queue_canonical_aggregation_is_red(change, selected):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.gate_steps(selected=selected)
+    [step] = steps
+    altered = {
+        "outcome": [{**step, "run": step["run"].replace("success", "failure")}],
+        "byte": [{**step, "run": step["run"][:-1]}],
+        "extra": [*steps, {"run": "true"}],
+    }
+    head["jobs"]["gate-required"]["steps"] = altered[change]
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        "The head's Gate — Required changes its steps; the protected branch grades with its own."
+    ]
+
+
+_REVIEWED_SUMMARY = """
+- uses: actions/checkout@v4
+  if: ${{ always() }}
+  with:
+    ref: ${{ github.sha }}
+    sparse-checkout: scripts/ci_gate_summary.py
+    sparse-checkout-cone-mode: false
+    persist-credentials: false
+
+- name: Download this run's test durations
+  if: ${{ always() }}
+  uses: actions/download-artifact@v4
+  with:
+    pattern: durations-3.*
+    path: test-reports
+
+- name: Download this run's test flakes
+  if: ${{ always() }}
+  uses: actions/download-artifact@v4
+  with:
+    pattern: flakes-3.*
+    path: test-reports
+
+- name: Summarize this run's tests
+  if: ${{ always() }}
+  run: python3 "$GITHUB_WORKSPACE/scripts/ci_gate_summary.py" test-reports | tee -a "$GITHUB_STEP_SUMMARY"
+"""
+
+_FORMS = [
+    {},
+    {"selected": True},
+    {"queue_tier": True},
+    {"queue_tier": True, "promotion": True},
+    {"queue_tier": True, "consolidated": True},
+    {"queue_tier": True, "promotion": True, "consolidated": True},
+]
+
+
+@pytest.mark.parametrize("form", _FORMS)
+def test_the_summary_follows_the_unchanged_aggregation(form):
+    from scripts import ci_reuse
+
+    [aggregation, *summary] = ci_reuse.gate_steps(**form, summary=True)
+    assert [aggregation] == ci_reuse.gate_steps(**form)
+    assert summary == yaml.safe_load(_REVIEWED_SUMMARY)
+
+
+@pytest.mark.parametrize("form", _FORMS)
+@pytest.mark.parametrize("summary", [False, True])
+def test_a_head_adding_the_reviewed_summary_is_green(form, summary):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form, summary=summary)
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+@pytest.mark.parametrize("form", _FORMS)
+@pytest.mark.parametrize("summary", [False, True])
+def test_a_head_taking_the_inline_mutation_form_is_green(form, summary):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.inline_mutation(ci_reuse.gate_steps(**form, summary=summary))
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+@pytest.mark.parametrize("form", _FORMS)
+@pytest.mark.parametrize(("shell", "problems"), [("bash", 0), ("sh", 1), ("pwsh", 1)])
+def test_a_head_running_the_summary_under_pipefail_bash_is_green(form, shell, problems):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form, summary=True)
+    steps = ci_reuse.gate_steps(**form, summary=True)
+    steps[-1]["shell"] = shell
+    head["jobs"]["gate-required"]["steps"] = steps
+    assert len(_grade({"test.yml": head}, base={"test.yml": base})) == problems
+    assert ci_reuse.pipefail_summary(ci_reuse.gate_steps(**form, summary=True))[-1]["shell"] == "bash"
+    assert ci_reuse.pipefail_summary(steps)[:-1] == ci_reuse.gate_steps(**form, summary=True)[:-1]
+    assert "shell" not in ci_reuse.gate_steps(**form, summary=True)[-1]
+
+
+@pytest.mark.parametrize("weaken", ["trusted output", "no skip guard"])
+def test_a_head_weakening_the_inline_mutation_form_is_red(weaken):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
+    [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(queue_tier=True, promotion=True))
+    if weaken == "trusted output":
+        step["env"]["INLINE"] = "${{ needs.mutation-plan.outputs.inline }}"
+    else:
+        step["run"] = step["run"].replace(' and $inline == "true")', ")")
+    head["jobs"]["gate-required"]["steps"] = [step]
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        "The head's Gate — Required changes its steps; the protected branch grades with its own."
+    ]
+
+
+@pytest.mark.parametrize("change", ["extra", "before", "reordered", "altered", "partial"])
+def test_a_head_changing_the_summary_steps_is_red(change):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    [aggregation, *summary] = ci_reuse.gate_steps(queue_tier=True, promotion=True, summary=True)
+    altered = {
+        "extra": [aggregation, *summary, {"run": "true"}],
+        "before": [{"run": "true"}, aggregation, *summary],
+        "reordered": [*summary, aggregation],
+        "altered": [aggregation, *summary[:-1], {**summary[-1], "run": "true"}],
+        "partial": [aggregation, *summary[1:]],
+    }
+    head["jobs"]["gate-required"]["steps"] = altered[change]
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        "The head's Gate — Required changes its steps; the protected branch grades with its own."
+    ]
+
+
+@pytest.mark.parametrize("separate", [False, True])
+@pytest.mark.parametrize("declared", [False, True])
+@pytest.mark.parametrize("runner", ["ubuntu-latest", _anton()])
+def test_the_reviewed_summary_may_run_outside_required_grading(separate, declared, runner):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(summary=True)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(summary=not separate)
+    config = {}
+    if separate:
+        head["jobs"]["test-summary"] = {
+            "needs": ["unit", "unit-selected"],
+            "if": "${{ always() }}",
+            "runs-on": runner,
+            "timeout-minutes": 5,
+            "steps": yaml.safe_load(_REVIEWED_SUMMARY),
+        }
+        head["jobs"]["unit-selected"] = {"runs-on": "ubuntu-latest"}
+        head["jobs"]["gate-required"]["needs"].append("unit-selected")
+        if declared:
+            config = {"not_gates": {"test.yml/test-summary": _entry()}}
+    expected = (
+        []
+        if not separate or declared
+        else ["test.yml/test-summary runs on pull requests but is not a need of Gate — Required."]
+    )
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, config, _TODAY, _POLICY) == expected
+
+
+@pytest.mark.parametrize("shell", [None, "bash", "sh", "pwsh"])
+@pytest.mark.parametrize("declared_on_base", [False, True])
+def test_the_separate_summary_accepts_only_the_reviewed_shell(shell, declared_on_base):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.summary_steps()
+    if shell is not None:
+        steps[-1]["shell"] = shell
+    head["jobs"]["test-summary"] = {
+        "needs": ["unit", "unit-selected"],
+        "if": "${{ always() }}",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "steps": steps,
+    }
+    head["jobs"]["unit-selected"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate-required"]["needs"].append("unit-selected")
+    config = {"not_gates": {"test.yml/test-summary": _entry()}}
+    problems = gate_protected.grade(
+        {"test.yml": base},
+        config if declared_on_base else {},
+        {"test.yml": head},
+        config,
+        _TODAY,
+        _POLICY,
+    )
+    if shell in (None, "bash"):
+        assert problems == []
+    else:
+        assert "The test summary must use the reviewed reporting job." in problems
+
+
+@pytest.mark.parametrize("change", ["steps", "needs", "if", "runs-on", "timeout-minutes", "env"])
+@pytest.mark.parametrize("declared_on_base", [False, True])
+def test_a_separate_summary_cannot_change_its_reviewed_job(change, declared_on_base):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    summary = {
+        "needs": ["unit", "unit-selected"],
+        "if": "${{ always() }}",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "steps": ci_reuse.summary_steps(),
+    }
+    summary[change] = {
+        "steps": [{"run": "true"}],
+        "needs": ["unit"],
+        "if": "${{ success() }}",
+        "runs-on": "anton",
+        "timeout-minutes": 30,
+        "env": {"EXTRA": "value"},
+    }[change]
+    head["jobs"]["test-summary"] = summary
+    config = {"not_gates": {"test.yml/test-summary": _entry()}}
+    problems = _grade(
+        {"test.yml": head},
+        base={"test.yml": base},
+        head_config=config,
+        base_config=config if declared_on_base else {},
+    )
+    assert "The test summary must use the reviewed reporting job." in problems
+
+
+def test_the_separate_summary_keeps_the_protected_declaration_expiry():
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    head["jobs"]["test-summary"] = {
+        "needs": ["unit", "unit-selected"],
+        "if": "${{ always() }}",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "steps": ci_reuse.summary_steps(),
+    }
+    key = "test.yml/test-summary"
+    problems = _grade(
+        {"test.yml": head},
+        base={"test.yml": base},
+        base_config={"not_gates": {key: {**_entry(), "expires": "2026-10-01"}}},
+        head_config={"not_gates": {key: _entry()}},
+    )
+    assert "test.yml/test-summary expired on 2026-10-01." in problems
+
+
+@pytest.mark.parametrize("promotion", [False, True])
+@pytest.mark.parametrize("weakened", [False, True])
+@pytest.mark.parametrize("watcher_loss", [False, True])
+@pytest.mark.parametrize("lost_rerun", [False, True])
+def test_the_promotion_gate_form_is_an_allowed_transition(weakened, promotion, watcher_loss, lost_rerun):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["gate-required"] = base["jobs"].pop("gate")
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps()
+    head = copy.deepcopy(base)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(
+        queue_tier=True, promotion=promotion, watcher_loss=watcher_loss
+    )
+    if lost_rerun:
+        head["jobs"]["gate-required"]["steps"] = ci_reuse.lost_rerun(head["jobs"]["gate-required"]["steps"])
+    if weakened:
+        head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert bool(problems) == weakened, problems
+
+
+@pytest.mark.parametrize(
+    ("disabled", "removed", "red"),
+    [(True, True, False), (True, False, True), (False, True, True)],
+)
+def test_only_a_disabled_job_the_head_removes_may_leave_the_gate(disabled, removed, red):
+    base = _workflow()
+    base["jobs"]["queue-baseline"] = {"runs-on": "ubuntu-latest", "if": False if disabled else "${{ always() }}"}
+    base["jobs"]["gate"]["needs"].append("queue-baseline")
+    head = copy.deepcopy(base)
+    head["jobs"]["gate"]["needs"].remove("queue-baseline")
+    if removed:
+        del head["jobs"]["queue-baseline"]
+    problems = _grade({"test.yml": head}, {"test.yml": base})
+    dropped = "The head's Gate — Required drops the base need queue-baseline."
+    assert (dropped in problems) == red, problems
+
+
+@pytest.mark.parametrize(
+    ("event", "skipped", "reused", "green"),
+    [
+        ("push", {"lint", "semgrep", "test-count"}, "false", True),
+        ("push", {"lint", "semgrep", "test-count", "queue-baseline"}, "false", True),
+        ("push", {"lint", "semgrep", "test-count", "sonar"}, "false", False),
+        ("push", {"unit"}, "false", False),
+        ("workflow_dispatch", {"lint"}, "false", False),
+        ("push", set(), "true", False),
+        ("push", set(), "false", True),
+    ],
+)
+def test_the_promotion_gate_skips_only_pull_request_tier_jobs_on_a_push(event, skipped, reused, green):
+    from scripts import ci_reuse
+
+    [step] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
+    jobs = [
+        "durations",
+        "split",
+        "unit",
+        "shard-check",
+        "test-count",
+        "lint",
+        "semgrep",
+        "sonar",
+        "reuse",
+        "queue-baseline",
+    ]
+    needs = {job: {"result": "skipped" if job in skipped else "success"} for job in jobs}
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(os.environ, NEEDS=json.dumps(needs), REUSED=reused, EVENT=event, MUTATION="false", KIND="false"),
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) == green, result.stdout + result.stderr
+
+
+def test_the_required_grader_refuses_widened_events_behind_a_conditional_lane(repo, capsys):
+    block = {"group": "${{ github.event_name == 'push' && github.ref || 'hosted-lane-a' }}", "queue": "max"}
+    base = {
+        "name": "Replay",
+        True: {"push": {"branches": ["dev"]}},
+        "concurrency": block,
+        "jobs": {"replay": {"runs-on": "x"}},
+    }
+    _commit(repo, {"test.yml": _workflow(), "replay.yml": base}, {}, "conditional lane")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    widened = {**base, True: {"push": None}}
+    planted = _commit(repo, {"test.yml": _workflow(), "replay.yml": widened}, {}, "widen push events")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert "::error::replay.yml: job replay has no shared hosted lane concurrency group" in out
+
+
+def test_the_required_grader_skips_lane_grading_of_an_unchanged_workflow(repo, capsys):
+    unchanged = {"name": "Replay", "concurrency": float("nan"), "jobs": {"replay": {"runs-on": "x"}}}
+    head = _commit(repo, {"test.yml": _workflow(), "replay.yml": unchanged}, {}, "unchanged lane")
+    assert gate_protected.main(["--root", str(repo), "--head", head]) == 0
+    assert "replay.yml" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("trusted", [False, True])
+def test_only_the_trusted_preflight_skips_lane_grading(repo, capsys, trusted):
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    _commit(repo, {"test.yml": _workflow()}, {}, "no preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    added = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "add preflight")
+    _git(repo, "checkout", "-q", "dev")
+    if trusted:
+        _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trust preflight")
+    assert gate_protected.main(["--root", str(repo), "--head", added]) == (0 if trusted else 1)
+    assert ("shared hosted lane concurrency group" in capsys.readouterr().out) is not trusted

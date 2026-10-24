@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/store.py:scripts.swarm.store.x\u01c1RedisStore\u01c1claim__mutmut_23:d96eeefba28c6430613fe8f213a2f61cf713e50084ae6c35b46ce8500e8aff28": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: GET requires an absent claim, WATCH rejects an intervening insertion, and atomic EXEC makes SET NX redundant. Independent Standards ruling for SV2-CTL-02 after CI run 37890437465."
+  }
+}

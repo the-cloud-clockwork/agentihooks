@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_outbox.py:scripts.swarm.metrics_outbox.x\u01c1Outbox\u01c1flush__mutmut_40:367a38284db66fa19be52e398d3b5d8cd9a3835fab5ce1fa520fe0e2909166a1": {
+    "reader": "Standards",
+    "reason": "Equivalent cursor upsert: only SQL keyword casing changes. The cursor row identity, conflict target, assigned column and bound table value remain identical."
+  }
+}

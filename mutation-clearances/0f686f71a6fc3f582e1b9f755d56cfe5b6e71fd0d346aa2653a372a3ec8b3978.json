@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_hook.py:scripts.swarm_ledger.ledger_hook.x_wait_seen__mutmut_23:67c50ae1774ce74a8bd90d92c1874ff89a3b077f48901a1e7f99e36263e7829c": {
+    "reader": "Standards reader round two",
+    "reason": "A missing deadline defaults to zero or one epoch millisecond; both are expired under the runtime epoch clock. Existing deadline values and every emitted progress demand remain unchanged."
+  }
+}

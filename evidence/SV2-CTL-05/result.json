@@ -1,0 +1,79 @@
+{
+  "package": "SV2-CTL-05",
+  "dependency": "SV2-CTL-04",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2079",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2093",
+  "tested_commit": "421f9da195884fd0f7210e42e15f7b133681b863",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "Scoped fixture grants, fake Redis server time, fakeredis, real isolated SQLite repository and mocked GitHub provider. Live G3 qualification is separate.",
+  "interfaces": [
+    "Proposal binds task generation, task revision, PR identity, tested head and artifact/run proof",
+    "Outcomes.propose authenticates scope and current ownership before journalling accepted proposals",
+    "Outcomes.integrate reserves one provider dispatch, checks current ownership at the final guard and reconciles queue and merge identifiers",
+    "GitHubIntegration restricts the repository and dev base, rechecks the actual PR and enqueues with expectedHeadOid",
+    "Outcomes.complete commits the authoritative SQLite task through CompletionGate before completing TaskAuthority; immutable effect receipts permit replay after interruption or owner replacement",
+    "Legacy merge and done commands reject distributed tasks before provider or ledger mutations; merge verifies the recorded PR and all duplicate task links",
+    "Committed receipt fields cannot be overwritten by legacy task updates",
+    "Outcomes.outcome_conflicts_total exposes fixture scoped conflict counts"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards passed in the linked CI run",
+    "coordination": "Accepted TaskAuthority scoped grants, generations, Redis journal fencing and controller lease",
+    "ledger": "Existing SQLite LedgerRepository and transaction gate",
+    "provider": "GitHub GraphQL PR node and expectedHeadOid enqueuePullRequest",
+    "compatibility": "Explicitly local legacy done and merge behavior remains covered by passing existing CI tests"
+  },
+  "states": {
+    "observed": "Provider PR, tested head, queue entry and merge commit are read independently of worker success messages",
+    "accepted": "Current owner evidence is bound to generation and task revision in the claim journal",
+    "committed": "Provider queue admission is recorded while task authority remains active; SQLite done mutation stores an immutable effect receipt",
+    "externally_verified": "Observed MERGED state plus merge commit allows ledger completion and then authority completion"
+  },
+  "validation": {
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37921616636",
+    "unit": "All twelve Python unit shards passed; each acceptance case passed twice using independent fixture directories",
+    "lint": "CI lint passed",
+    "size": "CI size passed",
+    "coverage": "CI coverage ratchet passed",
+    "mutation": "The cited run exposed survivors; subsequent test coverage and five Standards equivalent mutant rulings are pending new head CI",
+    "review": "Standards and Spec code reviews closed on e12eb73a; subsequent changes strengthen tests and evidence",
+    "local": "No local tests or mutation ran after the operator prohibition; static prepush passed on aa83d8e3"
+  },
+  "measurements": {
+    "outcome_conflicts_total": {
+      "success": 0,
+      "rejection": 0,
+      "recovery": 0,
+      "changed_revision": 1
+    },
+    "provider_dispatches": {
+      "success": 1,
+      "rejection": 0,
+      "recovery": 1
+    },
+    "dimension": "Each test has its own Redis swarm and authoritative ledger fixture"
+  },
+  "rollback_rehearsal": {
+    "action": "Set Outcomes.integration_enabled false and retain proposals for operator review",
+    "evidence": {
+      "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37921616636",
+      "job": 113791847355,
+      "tests": [
+        "test_pause_retains_proposal_for_review",
+        "test_pause_at_the_final_guard_keeps_the_proposal_retryable"
+      ],
+      "output": "Both PASSED at 2026-10-09T11:14:31 UTC"
+    },
+    "behavior": "Pause before dispatch preserves accepted proposals; resuming dispatches once. Ambiguous unknown operations remain pending and are never blindly replayed.",
+    "authoritative_objects": "TaskClaim and journal, authenticated launch records, SQLite task and immutable outcome receipt, actual provider PR and commit"
+  },
+  "remaining_limitations": [
+    "Live G3 deployment evidence is required at the rollout gate; mocked fixtures do not qualify a deployed system",
+    "Worker outcome HTTP transport is supplied by the remote ledger workstream; this package supplies the authenticated controller outcome and repository boundaries",
+    "Final authority check and provider HTTP write are separate operations; atomic provider generation fencing is not claimed",
+    "Unknown provider effects without observable queue or merge identity require reconciliation rather than automatic redispatch",
+    "Mutation qualification is pending new head CI"
+  ]
+}

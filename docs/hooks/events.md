@@ -7,7 +7,7 @@ parent: Hook System
 # Hook Events
 {: .no_toc }
 
-AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine** is not a hook event -- it is a native Claude Code setting (`"statusLine"` key in `settings.json`) handled by a separate script (`hooks/statusline.py`).
+AgentiHooks registers shared lifecycle handlers for Claude Code and Codex. The examples below use the Claude Code event contract; see the [Codex reference](../reference/CODEX-COMPAT.md) for registration and delivery differences. **StatusLine** is not a hook event -- it is a native Claude Code setting (`"statusLine"` key in `settings.json`) handled by a separate script (`hooks/statusline.py`).
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -349,4 +349,6 @@ Configure via:
 |----------|---------|-------------|
 | `AGENTICORE_TOOL_MEMORY_PATH` | `~/.agenticore_tool_memory.ndjson` | Memory file path |
 | `AGENTICORE_TOOL_MEMORY_MAX` | `100` | Maximum stored entries |
-| `AGENTICORE_TOOL_MEMORY_SHOW` | `15` | Entries injected per PreToolUse |
+| `AGENTICORE_TOOL_MEMORY_SHOW` | `5` | Maximum selected entries per PreToolUse, each limited to 160 characters |
+
+Tool memory is fitted last within the [hook injection budget](injection-budget.md).

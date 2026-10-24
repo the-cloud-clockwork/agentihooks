@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x_matching__mutmut_26:411a1b92372c2b99899fa9a88af7c69de6e5caca4992c7e14832e345f969d62f": {
+    "reader": "Standards",
+    "reason": "Only ASCII AT and ID identifier casing changes; SQLite evaluates the same time column and orders by the same id using unchanged bound values."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1__init____mutmut_6:1a2438a870d1a788c5e4410e175efd2b886d0272f74e1d026d0296bd666ee521": {
+    "reader": "standards-reader round three",
+    "reason": "approved; every path establishing a pending Escape overwrites the initial escape key before reading it."
+  }
+}

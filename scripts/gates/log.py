@@ -1,6 +1,7 @@
 """The swarm's gate log: one JSON row per deny, would-be deny, lift and fail-open, read by doctor rates and swarm status."""
 
 import json
+import math
 import re
 import time
 from dataclasses import asdict, dataclass
@@ -58,15 +59,44 @@ def recent(slug, limit=20, home=None):
             lines = source.read().splitlines()
     except OSError:
         return []
-    rows = []
-    for line in lines[1:] if start else lines:
+    rows = list(_parse(lines[1:] if start else lines))
+    return rows if limit is None else rows[-limit:]
+
+
+def since(slug, since_ms, home=None):
+    chunks = []
+    try:
+        with gate_log_path(slug, home).open("rb") as source:
+            for stop in range(source.seek(0, 2), 0, -TAIL_BYTES):
+                start = max(0, stop - TAIL_BYTES)
+                source.seek(start)
+                chunk = source.read(stop - start)
+                chunks.append(chunk)
+                if _newest(chunk.splitlines()) < since_ms:
+                    break
+    except OSError:
+        return []
+    data = b"".join(reversed(chunks))
+    return [row for row in _parse(data.splitlines()) if (at := _at(row)) is not None and at >= since_ms]
+
+
+def _newest(lines):
+    return max((at for row in _parse(lines) if (at := _at(row)) is not None), default=math.inf)
+
+
+def _at(row):
+    at = row.get("at")
+    return at if isinstance(at, (int, float)) and not isinstance(at, bool) else None
+
+
+def _parse(lines):
+    for line in lines:
         try:
             row = json.loads(line)
         except ValueError:
             continue
         if isinstance(row, dict):
-            rows.append(row)
-    return rows if limit is None else rows[-limit:]
+            yield row
 
 
 def decisions(slug, limit=20, home=None):

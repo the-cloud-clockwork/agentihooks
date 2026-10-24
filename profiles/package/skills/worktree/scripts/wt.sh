@@ -15,9 +15,10 @@
 #                                             # (<name> may be a _tmp path printed by 'tmp'; those are removed even if dirty)
 #   wt.sh root                                # print the worktree root
 #
-# new and tmp refuse when free space (the smaller of the worktree filesystem and, on WSL, /mnt/c) is below
-# WT_MIN_FREE_GB (50) or the repo already has WT_MAX_PER_REPO (60) worktrees. Both record the calling agent
-# session as owner through 'agentihooks lease' when agentihooks is installed.
+# When free space (the smaller of the worktree filesystem and, on WSL, /mnt/c) is below WT_MIN_FREE_GB (50) or
+# the repo already has WT_MAX_PER_REPO (60) worktrees, new and tmp first evict the oldest safe worktrees through
+# 'agentihooks gc --make-room' and refuse only when nothing safe is left. Both record the calling agent session
+# as owner through 'agentihooks lease' when agentihooks is installed.
 #
 # Names come from code: with agentihooks installed, new and tmp take the name 'agentihooks name' builds for the
 # calling session when none is given, and refuse a given name it did not build. Without agentihooks or outside an
@@ -96,16 +97,30 @@ free_gb() {
   return 0
 }
 
-preflight() {
+shortfall() {
   local free count
   free="$(free_gb "${WT_DIR}")"
   if [[ -n "${free}" && "${free}" -lt "${WT_MIN_FREE_GB}" ]]; then
-    die "REFUSED — ${free} GB free, below the ${WT_MIN_FREE_GB} GB floor (WT_MIN_FREE_GB). Finish worktrees with 'wt.sh done <name>' and run 'agentihooks gc'."
+    echo "${free} GB free, below the ${WT_MIN_FREE_GB} GB floor (WT_MIN_FREE_GB)"
+    return 0
   fi
   count="$(git -C "${REPO}" worktree list --porcelain | awk '/^worktree /{n++} END{print n-1}')"
   if [[ "${count}" -ge "${WT_MAX_PER_REPO}" ]]; then
-    die "REFUSED — ${REPO_NAME} already has ${count} worktrees (cap ${WT_MAX_PER_REPO}, WT_MAX_PER_REPO). Finish some with 'wt.sh done <name>' or run 'agentihooks gc'."
+    echo "${REPO_NAME} already has ${count} worktrees (cap ${WT_MAX_PER_REPO}, WT_MAX_PER_REPO)"
   fi
+}
+
+preflight() {
+  local short
+  short="$(shortfall)"
+  [[ -n "${short}" ]] || return 0
+  command -v agentihooks >/dev/null 2>&1 \
+    || die "REFUSED — ${short}. Finish worktrees with 'wt.sh done <name>' and run 'agentihooks gc'."
+  agentihooks gc --make-room "${REPO}" --root "${WORKTREE_ROOT}" \
+    --min-free-gb "${WT_MIN_FREE_GB}" --max-per-repo "${WT_MAX_PER_REPO}" >&2 \
+    || echo "wt: worktree eviction failed (exit $?)" >&2
+  short="$(shortfall)"
+  [[ -z "${short}" ]] || die "REFUSED — ${short} and no safe worktree is left to evict"
 }
 
 lease() {
@@ -207,10 +222,12 @@ case "${cmd}" in
       exit 1
     fi
     if [[ "${PUSHED}" -eq 1 && "${NAME}" != _tmp/* ]]; then
-      REMOTE_HEAD="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${BR}")" \
-        || die "cannot read remote branch '${BR}' — worktree kept"
-      [[ -n "${REMOTE_HEAD}" && "${REMOTE_HEAD%%[[:space:]]*}" == "$(git -C "${TARGET}" rev-parse HEAD)" ]] \
-        || die "branch '${BR}' is not on origin at the worktree head — worktree kept"
+      git -C "${REPO}" fetch --quiet --prune origin '+refs/heads/*:refs/remotes/origin/*' \
+        || die "cannot read origin branches — worktree kept"
+      REMOTE_HEAD="$(git -C "${REPO}" for-each-ref --format='%(refname)' --contains "$(git -C "${TARGET}" rev-parse HEAD)" refs/remotes/origin/)" \
+        || die "cannot check origin containment — worktree kept"
+      [[ -n "${REMOTE_HEAD}" ]] \
+        || die "branch '${BR}' is not contained in an origin branch — worktree kept"
     elif [[ "${NAME}" != _tmp/* ]]; then
       if command -v gh >/dev/null 2>&1; then
         PR_STATE="$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state elif .state == "CLOSED" then "CLOSED " + .url else .url end')" \

@@ -1,0 +1,73 @@
+{
+  "package": "SV2-GIT-01",
+  "integration_gate": "G12",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2456",
+  "repositories": [
+    "agentihooks",
+    "antoncore"
+  ],
+  "tested_commit": "05f2fb2f6235efa1bdb2cafb3dab95477577a0d7",
+  "status": "fixture-qualified; live API enablement on anton-prod waits for gate G12",
+  "evidence_class": "Mocked for cases A to C: a fakeredis store shared by both controller processes, labelled node fixtures taken from the anton-prod node list and the antoncore ec2-arc-runners node labels, and the chart controller placement pinned to the fixture by a chart test. Live in kind: Proofs run 38076980770 at agentihooks 30afd472be87e5659206b5d122d31457f42873b0 deployed the chart with the control API on, registered one worker and heartbeated it through the controller API Service, saw the controller tick observe it working, and saw the kube-scheduler hold the controller Pending on a node labelled as Spot capacity; output in kind-proof.txt.",
+  "interfaces": [
+    "scripts.swarm_v2.control_service.ControlService(store, slug, key, authorize, transports, owner) builds the v2 Controller, LaunchAuthority, TaskAuthority and ExecutionsAPI for one swarm; owner sets the lease owner so the hive tick and the v2 controller share one lease",
+    "ControlService.start acquires the controller, recovering the operation journal and running the account reconcile; tick renews it, acquires it again after a lapsed lease, and sends each kubernetes occupant's latest accepted heartbeat through Controller.observe; stop shuts the API down and releases the lease",
+    "control_service.host(environ, store, owner) is off without AGENTIHOOKS_CONTROL_API_PORT; with it, it needs AGENTIHOOKS_CONTROL_SWARM, a numeric port, the launch signing key named by AGENTIHOOKS_LAUNCH_SIGNING_KEY_ID and AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE, and authorizes with the hive controller credential AGENTIHOOKS_CONTROLLER_CREDENTIAL before it binds the port",
+    "agentihooks controller run hosts the control service when configured, ticks it after each hive tick and stops it on exit",
+    "Chart agentihooks-swarm: controller.affinity requires nodes without anton.io/capacity-type and tolerates no EC2 taint; controller.api adds the controller API Service, container port, NetworkPolicy and the read only signing key mount, and refuses to render without a swarm or a key",
+    "The swarm image ships docs/swarm-v2/schemas beside the installed package, which the executions API and the Pod template load",
+    "antoncore: the agentihooks-swarm overlay pins the same durable affinity, prepares controller.api off, and a Password generator, an IfNotExists PushSecret and an ExternalSecret produce the agentihooks-swarm-launch-signing Secret from OpenBao k8s/agentihooks-swarm launch_signing_key"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "contracts": "heartbeat and launch grant schema 2.1 from docs/swarm-v2/schemas",
+    "kubernetes": "kind v1.37 in the chart proof; anton-prod k3s v1.33 for placement labels",
+    "compatibility": "Without AGENTIHOOKS_CONTROL_API_PORT the controller loop runs exactly as before; the chart default keeps controller.api off",
+    "image": "floating :dev tag; ArgoCD Image Updater pins the deployed digest with its digest strategy, so no digest is written to git (CI Manifesto no hash pins)"
+  },
+  "measurements": {
+    "swarm_control_restart_recovery_seconds": "60.0 in cases A and C with dimensions swarm, tick_seconds 60, attempts 2, ticks 1: one controller tick after restart observes both remote attempts working; ticks times the tick interval, an upper bound, not a wall clock measure; live in kind Proofs run 38076980770: 4.4 seconds from durable capacity returning to the control API ready"
+  },
+  "authority": "The controller acts only while the hive controller credential digest matches Redis; case B shows a forged credential refused with no lease taken and no occupant changed. A rival controller owner cannot take a live lease in case C. Workers authenticate with launch grants signed by the mounted key.",
+  "states": {
+    "observed": "Cases A, B and C each ran twice with identical records in Proofs run 38076627332 and matched the committed records in Proofs run 38076739374 at f763bba1d (34 passed). Kind Proofs run 38076980770 printed register 200, heartbeat 200, observed working, and the controller held Pending on reclaimable capacity for node affinity. It measured swarm_control_restart_recovery_seconds=4.4 from durable capacity returning to the control API ready.",
+    "accepted": "Placement admits the four on premises nodes and refuses all four EC2 pools, including an untainted Spot node with 32 free cores. A graceful restart keeps both task claims and observes both attempts working; a crash restart under the same owner keeps the lease epoch, replays heartbeats identically and refuses older heartbeats as revision conflicts. A forged controller credential is refused with no lease taken, and a new valid request then takes the lease.",
+    "committed": "Code and fixtures at tested_commit; manifest.json hashes them.",
+    "externally_verified": "Not on anton-prod: the control API stays off there until gate G12."
+  },
+  "limitations": [
+    "The anton-prod controller does not hold the rig-grade-swarm lease today; the workstation hive does, so enabling the API on anton-prod serves nothing until the swarm moves there",
+    "The control service serves the executions API only; the tasks API needs a ledger repository the deployed process does not build yet",
+    "Heartbeats are the only runtime observation source sent through the controller; Kubernetes Pod observations join when the deployed process builds the Kubernetes runtime",
+    "Worker namespace egress allows only the ledger, Redis and the brain; the controller API port must be added before the API is turned on (ledger follow-up)"
+  ],
+  "rollback": {
+    "action": "Revert the antoncore overlay commit, or set controller.api.enabled false, with distributed admission paused; the hive tick keeps running unchanged",
+    "rehearsal": "On a throwaway checkout of antoncore engineer-323133-1002: `git revert --no-edit HEAD` printed `delete mode 100644 k8s/manifests/agentihooks-swarm/launch-signing-key.yaml`; `helm template agentihooks-swarm <chart> -f k8s/values-overlays/agentihooks-swarm/values.yaml | grep -c 'controller-api\\|launch-signing'` printed 0; the checkout was removed with wt.sh done",
+    "data_safety": "The OpenBao launch_signing_key property and the task claims in Redis are authoritative and are kept; the PushSecret deletion policy is None"
+  },
+  "antoncore": {
+    "pull_request": "https://github.com/the-cloud-clockwork/antoncore/pull/648",
+    "tested_commit": "7da7542d73a7f856a7ec053a1f42ce6263bc8978"
+  },
+  "dependencies": {
+    "SV2-KUB-02": "accepted: merged in agentihooks pull request 2461",
+    "SV2-SEC-01": "accepted: merged in antoncore pull request 631",
+    "SV2-LDG-05": "accepted: merged in agentihooks pull request 2436"
+  },
+  "plan_obligations": {
+    "owned_paths": "The plan names k8s/charts/swarm-control and k8s/argocd/apps/swarm-control.yaml as candidates. Step 1 says to follow existing long-lived service chart conventions, so the control deployment extends the existing agentihooks-swarm chart (controller and ledger) and its ArgoCD Application k8s/argocd/apps/agentihooks-swarm.yaml through the antoncore overlay k8s/values-overlays/agentihooks-swarm/values.yaml. A second chart would deploy a second controller against the same lease.",
+    "image_digest": "Master ruling for this task: no image digest pin in any deployment config, per the CI manifesto no hash pins rule. Both the chart and the antoncore overlay reference the floating dev tag with pullPolicy Always, and ArgoCD Image Updater tracks the digest. A resolved digest appears only as rollout evidence.",
+    "protocol_versions": "The required protocol versions ship inside the image: docs/swarm-v2/schemas, including compatibility.json, is copied beside the installed package, so the heartbeat and launch grant schema 2.1 travel with the image revision the image updater deploys.",
+    "durable_state_and_credentials": "The ledger keeps its persistent volume; the controller authorizes with the scoped hive controller credential and mounts the launch signing key read only from the agentihooks-swarm-launch-signing Secret.",
+    "placement": "Required node affinity excludes every node labelled anton.io/capacity-type, with no EC2 tolerations, for the controller and the ledger; case B shows an untainted Spot node with 32 free cores refused.",
+    "compatibility": "Compared with the preceding accepted path (the hive controller loop without the v2 API): without AGENTIHOOKS_CONTROL_API_PORT the controller loop runs exactly as before, proven by test_the_controller_loop_runs_as_before_without_an_api_port; the chart default keeps controller.api off; heartbeat and launch grant contracts stay at schema 2.1 with no field changed.",
+    "live_evidence": "Cases A, B and C are mocked and labelled mocked in their records. The worker registration and heartbeat ran live against the controller deployed by the chart in kind (kind-proof.txt). Live evidence on anton-prod is due at rollout gate G12, where controller.api is turned on; until then externally_verified stays false."
+  },
+  "task_scope": {
+    "worker_api": "Task text: wire the worker registration and heartbeat server into the controller process with its scoped controller credential and the launch signing key, and prove one worker registers and heartbeats against the deployed controller. Delivered by control_service.host, the controller run wiring, the chart signing key mount and kind-proof.txt.",
+    "controller_lifecycle": "Task text, folded in by the master: the deployed process acquires the swarm v2 controller, renews it each tick, runs its start and tick account reconcile and sends runtime observations through it. Delivered by ControlService.start, tick and observe.",
+    "image": "Task text, master ruling: no image digest pin; floating dev tag with pullPolicy Always tracked by the image updater.",
+    "schemas_in_image": "Required by the deployed controller, which loads docs/swarm-v2/schemas at start; kind proof 38075338716 crashed without them."
+  }
+}

@@ -17,6 +17,8 @@ from hooks.serena_router.binding import (
 from hooks.serena_router.pool import BackendError, Pool
 
 ACTIVATE = "activate_project"
+# Listed only when the endpoint's `tools` query names them.
+OPT_IN = frozenset({"read_file", "search_for_pattern"})
 
 UNBOUND = (
     "No project is active for this session. The router may have restarted. "
@@ -30,6 +32,11 @@ def _text(message: str, *, error: bool = False) -> CallToolResult:
 
 def edit_tools(tools: list[Tool]) -> frozenset[str]:
     return frozenset(t.name for t in tools if not (t.annotations and t.annotations.readOnlyHint))
+
+
+def listed(tools: list[Tool], values: list[str]) -> list[Tool]:
+    named = {name for value in values for name in value.split(",")}
+    return [t for t in tools if t.name not in OPT_IN - named]
 
 
 async def activate(pool: Pool, binding: Binding, project: str) -> CallToolResult:
@@ -70,6 +77,17 @@ async def dispatch(pool: Pool, binding: Binding, edits: frozenset[str], name: st
     return result
 
 
+def binding_for_call(pool: Pool, binding: Binding, name: str, meta: dict) -> Binding:
+    session_id, thread_id = meta.get("sessionId"), meta.get("threadId")
+    if not isinstance(session_id, str) or not session_id or not isinstance(thread_id, str) or not thread_id:
+        return binding
+    if session_id == thread_id:
+        pool.parents[session_id] = binding
+    elif binding.root is None and name != ACTIVATE:
+        return pool.parents.get(session_id, binding)
+    return binding
+
+
 def build_server(pool: Pool, tools: list[Tool]) -> Server:
     edits = edit_tools(tools)
     # The router answers activation and refusals itself, without structured content a declared schema would demand.
@@ -85,11 +103,15 @@ def build_server(pool: Pool, tools: list[Tool]) -> Server:
 
     @server.list_tools()
     async def _list_tools() -> list[Tool]:
-        return tools
+        request = server.request_context.request
+        return listed(tools, request.query_params.getlist("tools") if request else [])
 
     @server.call_tool(validate_input=False)
     async def _call_tool(name: str, arguments: dict | None) -> CallToolResult:
-        binding = server.request_context.lifespan_context
+        context = server.request_context
+        binding = binding_for_call(
+            pool, context.lifespan_context, name, context.meta.model_dump() if context.meta else {}
+        )
         return await dispatch(pool, binding, edits, name, arguments or {})
 
     return server

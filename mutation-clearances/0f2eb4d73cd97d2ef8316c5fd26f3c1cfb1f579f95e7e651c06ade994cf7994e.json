@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x__supersede_merges__mutmut_6:21bdd9bdb88295561edcbb98f7dfa4b327425553d040c00614703c1af74a57bd": {
+    "reader": "standards_reader",
+    "reason": "Changes only the letter case of the SQL text passed to sqlite3 in _supersede_merges. SQLite keywords and unquoted identifiers (spool, tbl, event_id, row) are case-insensitive, so the statement deletes the same rows; nothing reads the SQL text back. Checked on an in-memory SQLite with identical seed rows: remaining rows identical."
+  }
+}

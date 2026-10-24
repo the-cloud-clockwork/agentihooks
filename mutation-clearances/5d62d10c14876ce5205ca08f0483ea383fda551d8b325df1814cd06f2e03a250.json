@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1_paste_byte__mutmut_11:d47d0cdbdae97b3b3e95859a28c0bed25ae97653fc2ff7c7b3f7ed0544a2e74c": {
+    "reader": "standards-reader round three",
+    "reason": "paste state is consumed only through truth tests; None and False take the same subsequent branches."
+  }
+}

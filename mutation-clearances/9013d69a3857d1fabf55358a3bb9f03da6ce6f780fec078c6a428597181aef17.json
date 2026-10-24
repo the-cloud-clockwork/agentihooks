@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/artifacts/remote.py:scripts.swarm_v2.artifacts.remote.x\u01c1ControllerBackend\u01c1request__mutmut_18:72dd4ac8ee445930f7e2e244969285b5598f76c661937db15afd6028d58d7d0e": {
+    "reader": "standards_reader",
+    "reason": "This mutation changes only HTTP header name case. urllib.request.Request normalizes header names on insertion, and HTTP header names are case insensitive. For every URL, token, operation and encoded body accepted by this transport, semantic header names and values, authentication, serialization and server response are identical. This ruling excludes spelling, removal and value changes."
+  }
+}

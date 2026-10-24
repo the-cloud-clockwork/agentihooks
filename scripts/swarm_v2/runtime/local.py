@@ -2,11 +2,14 @@
 
 import subprocess
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from hooks.proc import Process, processes
+from scripts.hive import reports
+from scripts.swarm import live_binding
 from scripts.swarm.runtime import HerdrRuntime
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2.runtime import process
 from scripts.swarm_v2.runtime.base import (
@@ -21,10 +24,13 @@ from scripts.swarm_v2.runtime.base import (
     legacy,
 )
 
+ENDED_NAMESPACE = "its process ended with a previous boot"
+
 
 def _failed(operation: str, exc: SpawnError) -> Outcome:
     status = Status.AMBIGUOUS if isinstance(exc.__cause__, subprocess.TimeoutExpired) else Status(exc.status)
-    return Outcome(operation, status, LOCAL, detail=str(exc))
+    value = {"pane_id": exc.pane_id} if exc.pane_id else None
+    return Outcome(operation, status, LOCAL, value, detail=str(exc))
 
 
 class LocalHerdrRuntime:
@@ -55,6 +61,11 @@ class LocalHerdrRuntime:
             return _failed("spawn", exc)
         return Outcome("spawn", Status.OK, LOCAL, placed)
 
+    def admit(self, store: RedisStore, slug: str, agent: AgentRecord) -> AgentRecord:
+        pid = agent.profile_decision.get("validation", {}).get("pid")
+        target = process.launch_target(pid, self.namespace(), self.table())
+        return store.start_execution(slug, replace(agent, runtime_target=target))
+
     def observe(self, agent: AgentRecord) -> Outcome:
         refused = foreign(self, "observe", agent)
         if refused:
@@ -67,7 +78,9 @@ class LocalHerdrRuntime:
         refused = foreign(self, "command", agent)
         if refused:
             return refused
-        self.herdr.nudge(agent, text)
+        failed = self.herdr.nudge(agent, text)
+        if failed:
+            return Outcome("command", Status.REFUSED, LOCAL, detail=failed)
         return Outcome("command", Status.OK, LOCAL, "accepted")
 
     def drain(self, agent: AgentRecord) -> Outcome:
@@ -77,17 +90,36 @@ class LocalHerdrRuntime:
         refused = foreign(self, "terminate", agent)
         if refused:
             return refused
-        if legacy(agent):
+        if legacy(agent) or reports.host(agent) or live_binding.managed(agent):
             retired = self.herdr.retire(agent, homes=homes)
+        elif not agent.runtime_target.get("pid") and not agent.runtime_target.get("pid_start"):
+            retired = self.herdr.retire_pane(agent, homes)
         else:
-            pid = process.resolve(agent, self.namespace(), self.table())
-            if isinstance(pid, Unqualified):
-                return Outcome("terminate", Status.REFUSED, LOCAL, pid, pid.value)
-            retired = self.herdr.retire_process(agent, pid, homes, agent.runtime_target["pid_start"])
+            namespace = self.namespace()
+            ended_boot = process.previous_boot(agent.runtime_target.get("process_namespace", ""), namespace)
+            pid = process.resolve(agent, namespace, {} if ended_boot else self.table())
+            if pid is Unqualified.FOREIGN_NAMESPACE and ended_boot:
+                reopened = process.reopened_process(agent)
+                if reopened is None:
+                    return Outcome("terminate", Status.OK, LOCAL, detail=ENDED_NAMESPACE)
+                pid, start = reopened.pid, reopened.start_time
+            else:
+                if isinstance(pid, Unqualified):
+                    return Outcome("terminate", Status.REFUSED, LOCAL, pid, pid.value)
+                start = agent.runtime_target["pid_start"]
+            retired = self.herdr.retire_process(agent, pid, homes, start)
         if retired:
             return Outcome("terminate", Status.OK, LOCAL)
         refusal = self.herdr.refusal(agent)
         return Outcome("terminate", Status.REFUSED, LOCAL, refusal, refusal["refusal"])
+
+    def find(self, name: str) -> Outcome:
+        return Outcome("find", Status.OK, LOCAL, name if name in self.herdr.live_names() else None)
+
+    def reap(self, name: str) -> Outcome:
+        if self.herdr.reap_name(name):
+            return Outcome("reap", Status.OK, LOCAL)
+        return Outcome("reap", Status.REFUSED, LOCAL, detail=f"a process carrying {name} still runs")
 
     def recover(self, agent: AgentRecord, mode: Recovery, config: Any, text: str) -> Outcome:
         refused = foreign(self, "recover", agent)

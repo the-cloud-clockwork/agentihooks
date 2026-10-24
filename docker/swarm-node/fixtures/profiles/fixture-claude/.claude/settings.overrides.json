@@ -1,0 +1,4 @@
+{
+  "enabledPlugins": {"fixture@market": true},
+  "env": {"FIXTURE_PROFILE": "fixture-claude"}
+}

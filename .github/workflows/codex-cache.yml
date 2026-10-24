@@ -1,0 +1,61 @@
+name: Codex cache
+
+# Merge queue refs restore caches only from their own ref and main, so the Codex CLI
+# that unit shard 1 restores and the pinned nats server every unit shard restores are
+# saved here on main. Hosted runners compress with zstd, which saves a cache version
+# the gzip self-hosted unit runners cannot restore.
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+concurrency:
+  group: codex-cache-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    env:
+      CODEX_RELEASE: rust-v0.160.0
+    steps:
+      - name: Skip the seed off the self-hosted unit runner pool
+        if: runner.environment != 'self-hosted'
+        run: echo "::warning::Only the self-hosted pool unit shards restore on may save the Codex cache."
+
+      - name: Restore the Codex CLI
+        id: codex
+        if: runner.environment == 'self-hosted'
+        uses: actions/cache@v4
+        with:
+          path: ~/codex
+          key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}
+
+      - name: Install the Codex CLI
+        if: steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          mkdir -p ~/codex
+          curl -fsSL --retry 3 "https://github.com/openai/codex/releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.tar.gz" | tar -xzO > ~/codex/codex
+          chmod +x ~/codex/codex
+
+      - name: Check the Codex CLI runs
+        if: steps.codex.outcome == 'success'
+        run: ~/codex/codex --version
+
+      - name: Take the nats server action
+        if: runner.environment == 'self-hosted'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions/nats-server
+
+      - name: Seed the pinned nats server
+        if: runner.environment == 'self-hosted'
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server

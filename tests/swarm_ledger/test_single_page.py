@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser
 
 __all__ = ["browser"]
@@ -37,6 +37,7 @@ def page(browser):
     serve_modules(context, ledger_state(DOC))
     tab = context.new_page()
     tab.goto(URL)
+    loaded(tab)
     tab.set_default_timeout(1500)
     yield tab
     context.close()
@@ -120,6 +121,7 @@ def test_chat_bubble_floats_bottom_right_and_opens_chat_with_its_unread_count(br
     serve_modules(context, ledger_state(doc))
     tab = context.new_page()
     tab.goto(URL)
+    loaded(tab)
     tab.set_default_timeout(1500)
     bubble = tab.locator("#chat-fab")
     assert tab.locator("#icon-strip #chat-fab").count() == 0

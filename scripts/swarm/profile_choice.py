@@ -1,35 +1,17 @@
 """The typed profile decision made before every swarm launch: explicit task profile, fixed lane, else the classifier."""
 
-import json
 from dataclasses import asdict, dataclass, replace
 
-from hooks.classifier import Choice, ClassifierUnavailable, decide
+from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
 from scripts.swarm import overlays
-from scripts.swarm.prompt import ledger_path
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm_ledger import ledger_close
 
 CLASSIFIED_LANE = "eng"
-MIN_CONFIDENCE_VAR = "AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE"
-MIN_CONFIDENCE = 0.6
-RESPONSIBILITIES = {
-    "frontend": (
-        "A product interface behavior: what a person sees or does on a page, panel, control or layout, including a "
-        "product interaction such as claim ordering or ranking from a view, even when Python code implements it."
-    ),
-    "engineer": (
-        "Backend or infrastructure behavior: services, APIs, command lines, hooks, runtimes, storage, deployment or "
-        "CI plumbing, with no change to what a person sees or does in a product interface."
-    ),
-    "qa": (
-        "Independent verification: stress testing or proving work that others built, producing evidence rather "
-        "than changing behavior."
-    ),
-}
-NOT_ONE = {
-    "split": "Two or more unrelated public responsibilities bundled in one task that should become separate tasks.",
-    "unresolved": "The task does not say enough about the public behavior it changes to decide.",
-}
+PURPOSE = "profile-pick"
+RESPONSIBILITIES = ("frontend", "engineer", "qa")
+HARNESS_ORDER = {"frontend": ("claude", "codex")}
+FRESH = "fresh_spawn"
 
 
 class ProfileUnresolved(RuntimeError):
@@ -58,16 +40,14 @@ def installed(name: str) -> bool:
     return _install_module()._resolve_profile_dir(name) is not None
 
 
+def preferred(profile: str) -> tuple[str, ...]:
+    return HARNESS_ORDER.get(profile, ())
+
+
 def choose(
     slug: str, lane: str, lane_config: dict, task: dict, environ: dict, role_overlays: dict | None = None
 ) -> ProfileDecision:
-    pinned = lane_config.get("profile") or DEFAULT_PROFILES[lane]
-    if task.get("profile"):
-        decision = ProfileDecision(task["profile"], "task", "explicit task profile")
-    elif lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
-        decision = ProfileDecision(pinned, "lane", f"{lane} lane")
-    else:
-        decision = classify(slug, task, environ)
+    decision = pick(slug, lane, lane_config, task, environ)
     if not installed(decision.profile):
         raise ProfileUnresolved(
             f"task {task.get('id')} needs profile {decision.profile}, which is not installed: install it with "
@@ -79,22 +59,58 @@ def choose(
         raise ProfileUnresolved(f"task {task.get('id')} overlays are refused: {exc}") from exc
 
 
-def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
-    question = Choice(
-        f'Task {task.get("id")} "{task.get("title", "")}": which responsibility owns the public behavior this task '
-        "changes? Judge what a user or caller observes changing, from the description, parent intent and territory, "
-        "never from keywords or file names. Mixed interface and backend work follows the public behavior changed.",
-        {**RESPONSIBILITIES, **NOT_ONE},
+def pick(slug: str, lane: str, lane_config: dict, task: dict, environ: dict | None = None) -> ProfileDecision:
+    pinned = lane_config.get("profile") or DEFAULT_PROFILES[lane]
+    if task.get("profile"):
+        return ProfileDecision(task["profile"], "task", "explicit task profile")
+    if saved := task.get("profile_decision"):
+        return ProfileDecision(**{**saved, "anchors": tuple(saved["anchors"]), "overlays": tuple(saved["overlays"])})
+    if lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
+        return ProfileDecision(pinned, "lane", f"{lane} lane")
+    if needs_ci_push(task):
+        return ProfileDecision(
+            DEFAULT_PROFILES[CLASSIFIED_LANE], "proof contract", "proof needs a pushed CI run", anchors=anchors(task)
+        )
+    return classify(slug, task, environ)
+
+
+def kept(task: dict, saved: dict, relaunch: dict) -> ProfileDecision | None:
+    if not saved.get("profile") or (task.get("profile") and not relaunch):
+        return None
+    return ProfileDecision(
+        saved["profile"], "handoff", "original seat profile", overlays=tuple(saved.get("overlays", ()))
     )
+
+
+def transfer(task: dict) -> dict:
+    from scripts.swarm.tick import SpawnError
+
+    saved = (task.get("handoff_envelope") or {}).get("launch")
+    if task.get(FRESH) or (not task.get("handoff") and not saved):
+        return {}
+    if not saved or not all(saved.get(key) for key in ("profile", "harness", "model", "effort")):
+        raise SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
+    if saved["harness"] not in ("claude", "codex"):
+        raise SpawnError(f"unsupported handoff harness: {saved['harness']}", "unsupported")
+    return saved
+
+
+def needs_ci_push(task: dict) -> bool:
+    return (task.get("contract") or {}).get("push") == "yes"
+
+
+def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
+    params = {"id": task.get("id"), "title": task.get("title", "")}
     try:
-        result = decide(state(slug, task), {"responsibility": question}, purpose="profile-pick")
-    except ClassifierUnavailable as exc:
+        output = runner.run(PURPOSE, state(slug, task), params, decider=decide, environ=environ)
+    except (ClassifierUnavailable, definitions.DefinitionError) as exc:
         raise ProfileUnresolved(
             f"task {task.get('id')} profile classification is unavailable ({exc}): {_remedy(slug, task)}"
         ) from exc
-    answer, floor = result.answers["responsibility"], float(environ.get(MIN_CONFIDENCE_VAR, MIN_CONFIDENCE))
+    result, floor = output.raw, output.thresholds["confidence"]
+    answer = result.answers["responsibility"]
     confidence = answer.confidence if answer.confidence is not None else 0.0
-    if confidence < floor:
+    if output.verdicts["responsibility"] is None:
         return ProfileDecision(
             DEFAULT_PROFILES[CLASSIFIED_LANE],
             "lane default",
@@ -136,11 +152,9 @@ def anchors(task: dict) -> tuple:
 
 
 def _ledger(slug: str) -> dict:
-    path = ledger_path(slug).expanduser()
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return {}
+    from scripts.swarm import ledger_read
+
+    return ledger_read.parts(slug, "overview", "phases")
 
 
 def _remedy(slug: str, task: dict) -> str:

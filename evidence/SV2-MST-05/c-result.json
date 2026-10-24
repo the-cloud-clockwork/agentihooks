@@ -1,0 +1,13 @@
+{
+  "case": "T-SV2-MST-05-C",
+  "independent_runs": 2,
+  "test": "test_hive_master_successor_keeps_items_decisions_and_channel_cursor",
+  "observed": {
+    "successor_retains_cursor": true,
+    "pending_item_reaches_successor": true,
+    "former_delivery_refused": true,
+    "former_decision_refused": true,
+    "answers": 1,
+    "successor_new_channel_posts": 1
+  }
+}

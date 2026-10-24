@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -6,8 +7,6 @@ import hooks.context.swarm_wait_nudge as nudge
 from hooks import hook_manager
 from hooks.targets.emitter import flush
 from scripts.swarm import idle
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 NAME = "engineer@abc123-0001"
 WORKER = {"AGENTIHOOKS_SWARM": "rig", "AGENTIHOOKS_SWARM_TASK": "t7", "AGENTIHOOKS_AGENT_NAME": NAME}
@@ -48,6 +47,23 @@ def _declare(redis, slug="rig", name=NAME):
         _bash("gh run watch 37671144724"),
         _bash("gh pr checks 1367 --watch --interval 30"),
         {"tool_name": "Monitor", "tool_input": {"command": "until gh pr checks 1; do sleep 30; done"}},
+        {"tool_name": "sleep", "tool_input": {"duration_ms": 55000}},
+        {"tool_name": "wait", "tool_input": {"cell_id": "measurement"}},
+        {"tool_name": "write_stdin", "tool_input": {"session_id": 1, "chars": "", "yield_time_ms": 30000}},
+        {"tool_name": "write_stdin", "tool_input": {"session_id": 1, "yield_time_ms": 30000}},
+        _bash('text(await tools.exec_command({cmd:"sleep 55"}));'),
+        _bash('const r = await tools.exec_command({ cmd: "cd ~/x && sleep 300", workdir: "/w" });'),
+        _bash('await tools.exec_command({cmd:"ls"}); await tools.exec_command({cmd:"gh run watch 1"});'),
+        _bash('await tools.exec_command({cmd:"echo \\$HOME"}); sleep 900'),
+        _bash('await tools.exec_command({cmd:"echo \\$HOME"}); await tools.exec_command({cmd:"sleep 900"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900 \\$x"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900", workdir:"/a\\$b"});'),
+        _bash('await tools.exec_command({workdir:"/w", cmd:"sleep 900"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900", workdir:"\\uZZ"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900 \\\\$x"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900 \\v"});'),
+        _bash('await tools.exec_command({cmd:"sleep \\\n900"});'),
+        _bash('await tools.exec_command({cmd:"ls\\nsleep 900"});'),
     ],
 )
 def test_a_worker_with_no_declared_wait_is_told_to_declare_it(redis, payload):
@@ -73,10 +89,26 @@ def test_a_worker_with_no_declared_wait_is_told_to_declare_it(redis, payload):
         {"tool_name": "Bash", "tool_input": {}},
         {"tool_name": "Bash"},
         {"tool_name": "Edit", "tool_input": {"file_path": "a.py"}},
+        {"tool_name": "write_stdin", "tool_input": {"session_id": 1, "chars": "y\n", "yield_time_ms": 1000}},
+        {"tool_name": "sleepy", "tool_input": {}},
+        _bash('text(await tools.exec_command({cmd:"ls -la"}));'),
+        _bash('await tools.exec_command({workdir:"/w"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900 \\uZZ"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900'),
+        {"tool_name": "Read", "tool_input": {"command": "sleep 900"}},
+        {"tool_name": "Edit", "tool_input": {"command": "gh run watch 1"}},
+        _bash('text("sleep 55"); await tools.exec_command({cmd:"git status"});'),
     ],
 )
 def test_a_call_that_is_not_a_wait_is_not_told(redis, payload):
     assert nudge.nudge(payload, environ=WORKER) == ""
+
+
+@pytest.mark.parametrize(
+    "program", ["await tools.exec_command({cmd:'sleep 900'});", "await tools.exec_command({cmd:`sleep 900`});"]
+)
+def test_only_double_quoted_nested_commands_are_read(redis, program):
+    assert nudge.nudge(_bash(program), environ=WORKER) == ""
 
 
 def test_a_worker_with_a_declared_wait_is_not_told(redis):
@@ -143,3 +175,115 @@ def test_the_pre_tool_hook_logs_a_failed_lookup_and_adds_nothing(worker, monkeyp
     monkeypatch.setattr(hook_manager, "log", lambda message, data=None: logged.append((message, data)))
     assert TOLD not in _pre(capsys, _bash("sleep 900"))
     assert ("swarm wait nudge failed", {"error": "redis down"}) in logged
+
+
+def _post(capsys, payload):
+    hook_manager.on_post_tool_use({"session_id": "s1", "cwd": "/", **payload})
+    flush("PostToolUse")
+    out = capsys.readouterr().out
+    return json.loads(out).get("hookSpecificOutput", {}).get("additionalContext", "") if out.strip() else ""
+
+
+def test_the_post_tool_hook_carries_the_nudge_where_the_pre_tool_event_cannot(worker, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    assert TOLD not in _pre(capsys, _bash("sleep 900"))
+    assert TOLD in _post(capsys, _bash("sleep 900"))
+
+
+def test_the_post_tool_hook_leaves_the_nudge_to_a_pre_tool_event_that_carries_it(worker, capsys):
+    assert TOLD in _pre(capsys, _bash("sleep 900"))
+    assert TOLD not in _post(capsys, _bash("sleep 900"))
+
+
+def test_the_post_tool_hook_tells_nothing_once_a_wait_is_declared(worker, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    _declare(worker)
+    assert TOLD not in _post(capsys, _bash("sleep 900"))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh run watch 123",
+        "gh run watch 123 --interval 60",
+        "gh -R owner/repo run watch 123",
+        "gh --repo owner/repo run watch 123",
+        "gh --hostname github.com run watch 123",
+        "gh -Rowner/repo run watch 123",
+        "gh pr checks 456 --watch",
+        "gh pr checks --watch=true 456",
+        "cd repo && gh run watch 123 | tail -n 1",
+        "gh pr checks 456 --watch; echo done",
+        "bash -lc 'gh run watch 123'",
+        "env DEBUG=api /usr/bin/gh run watch 123",
+    ],
+)
+@pytest.mark.parametrize("target", ["claude", "codex", "copilot"])
+def test_the_pre_tool_hook_refuses_independent_github_watches(worker, monkeypatch, capsys, command, target):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
+    with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota") as blocked:
+        _pre(capsys, _bash(command))
+    assert "agentihooks swarm rig wait --on checks <pr url>" in str(blocked.value)
+    assert str(blocked.value) == (
+        "Independent GitHub watches spend the shared GitHub hourly quota. "
+        "Use agentihooks swarm rig wait --on checks <pr url>, "
+        "or wait --on mutation <run url> for Mutation preflight. The swarm tick resolves these waits centrally."
+    )
+
+
+def test_declaring_a_wait_does_not_allow_an_independent_github_watch(worker, capsys):
+    _declare(worker)
+    with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota"):
+        _pre(capsys, _bash("gh run watch 123"))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh run view 123 --json status",
+        "gh pr checks 456",
+        "gh pr checks 456 -w",
+        "gh pr view 456 --json state",
+        "gh api repos/owner/repo/actions/runs/123",
+        "printf '%s' 'gh run watch 123'",
+        "echo 'gh pr checks --watch'",
+        "echo run watch",
+        "gh api repos/owner/repo -f 'body=gh run watch 123'",
+        "gh pr checks 456; echo --watch",
+    ],
+)
+def test_the_pre_tool_hook_keeps_single_github_reads_and_literal_watch_text_allowed(worker, capsys, command):
+    _pre(capsys, _bash(command))
+
+
+@pytest.mark.parametrize("name", ["ci@abc123-0001", "engineer@abc123-0001"])
+def test_each_swarm_worker_lane_is_refused_github_watches(worker, monkeypatch, capsys, name):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota"):
+        _pre(capsys, _bash("gh run watch 123"))
+
+
+@pytest.mark.parametrize("missing", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"])
+def test_sessions_outside_the_swarm_worker_scope_can_watch(worker, monkeypatch, capsys, missing):
+    monkeypatch.delenv(missing)
+    _pre(capsys, _bash("gh run watch 123"))
+
+
+def test_the_master_can_watch(worker, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@abc123-0001")
+    _pre(capsys, _bash("gh run watch 123"))
+
+
+def test_a_monitor_cannot_start_an_independent_github_watch(worker):
+    with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota"):
+        nudge.check_github_watch({"tool_name": "Monitor", "tool_input": {"command": "gh run watch 123"}})
+
+
+def test_a_monitor_command_alias_cannot_start_an_independent_github_watch(worker):
+    with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota"):
+        nudge.check_github_watch({"tool_name": "Monitor", "tool_input": {"cmd": "gh run watch 123"}})
+
+
+@pytest.mark.parametrize("tool_input", [{}, {"command": ""}, {"command": None, "cmd": ""}])
+def test_empty_monitor_commands_are_allowed(worker, tool_input):
+    assert nudge.check_github_watch({"tool_name": "Monitor", "tool_input": tool_input}) is None

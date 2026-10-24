@@ -51,7 +51,8 @@ _STANDARD_PATTERNS: list[_Pattern] = [
     _Pattern(
         "private_key",
         re.compile(
-            r"-----BEGIN\s+(RSA|EC|OPENSSH|PGP)\s+PRIVATE KEY-----(?:.*?-----END\s+\1\s+PRIVATE KEY-----|.*)", re.DOTALL
+            r"-----BEGIN\s+((?:[A-Z0-9]+\s+)?)PRIVATE KEY-----(?:.*?-----END\s+\1PRIVATE KEY-----|.*)",
+            re.DOTALL,
         ),
     ),
     _Pattern(
@@ -60,7 +61,7 @@ _STANDARD_PATTERNS: list[_Pattern] = [
     ),
     _Pattern(
         "db_url_creds",
-        re.compile(r"(postgres|mysql|mongodb)://[^:]+:[^@]{4,}@", re.IGNORECASE),
+        re.compile(r"(postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?)://[^/\s:@]*:[^@\s]+@", re.IGNORECASE),
     ),
     _Pattern(
         "generic_secret",
@@ -76,6 +77,14 @@ _STANDARD_PATTERNS: list[_Pattern] = [
 ]
 
 _STRICT_PATTERNS: list[_Pattern] = [
+    _Pattern(
+        "nested_secret",
+        re.compile(
+            r"""(?:PASSWORD|PASSWD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_TOKEN)["']\s*:\s*\{[^{}]*"""
+            r"""["'](?:VALUE|PASSWORD|PASSWD|TOKEN|SECRET)["']\s*:\s*["'][^\s"'$<{]{8,}""",
+            re.IGNORECASE,
+        ),
+    ),
     _Pattern(
         "slack_token",
         re.compile(r"xox[bpors]-[A-Za-z0-9\-]{10,}"),
@@ -95,10 +104,28 @@ _STRICT_PATTERNS: list[_Pattern] = [
 ]
 
 
+_MEMORY_PATTERNS: list[_Pattern] = [
+    _Pattern(
+        "secret_assignment",
+        re.compile(
+            r"(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|ACCESS_KEY)(?:[^\S\r\n]*(?:=(?!=)|:)[^\S\r\n]*"
+            r"""(?:["']?[^\s"'$<{]+)|["'][^\S\r\n]*:[^\S\r\n]*["'][^\s"'$<{]+)""",
+            re.IGNORECASE,
+        ),
+    ),
+]
+
+
 def _get_patterns(mode: str) -> list[_Pattern]:
     """Return the pattern list for the given secrets mode."""
     if mode == "off":
         return []
+    if mode == "memory":
+        return (
+            [pattern for pattern in _STANDARD_PATTERNS if pattern.name != "generic_secret"]
+            + _STRICT_PATTERNS
+            + _MEMORY_PATTERNS
+        )
     if mode == "strict":
         return _STANDARD_PATTERNS + _STRICT_PATTERNS
     # "warn" and "standard" both use the standard set

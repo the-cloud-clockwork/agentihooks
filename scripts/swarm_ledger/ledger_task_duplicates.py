@@ -18,8 +18,13 @@ REFUSAL = (
     'task {new} repeats task {id} "{title}" ({state}, rank {rank}, phase {phase}): {fate}. '
     'If it is a different change, add it with --not-duplicate "<why it differs>"'
 )
-UNCHECKED_PREFIX = "the duplicate check did not run"
-UNCHECKED_WARNING = UNCHECKED_PREFIX + " for task {new} because {why}, so it was added unchecked"
+UNCHECKED_PREFIX = "the duplicate check did not"
+UNCHECKED_WARNING = UNCHECKED_PREFIX + " run for task {new} because {why}, so it was added unchecked"
+LANDED_REPEAT = (
+    'task {new} repeats task {id} "{title}", added while its duplicate check ran. '
+    'If it is a different change, add it with --not-duplicate "<why it differs>"'
+)
+CONCURRENT = UNCHECKED_PREFIX + " compare task {new} with {ids}, added while it ran, so check them for repeats"
 UNANSWERED = "the classifier did not answer"
 SLOW = "it took longer than {budget:g} seconds"
 FAILED = "it failed with {error}"
@@ -29,6 +34,7 @@ FAILED = "it failed with {error}"
 class Screen:
     refused: dict = field(default_factory=dict)
     warnings: dict = field(default_factory=dict)
+    seen: frozenset = frozenset()
 
 
 @dataclass(frozen=True)
@@ -37,8 +43,25 @@ class Gate:
     inner: object
 
     def apply(self, doc: dict, op: dict, ctx: object, apply_op: object) -> bool:
-        reason = self.screen.refused.get(op["id"])
-        return self.inner.apply(doc, op, ctx, _refuse(reason) if reason else apply_op)
+        reason = self.screen.refused.get(op["id"]) or self.landed_repeat(doc, op)
+        accepted = self.inner.apply(doc, op, ctx, _refuse(reason) if reason else apply_op)
+        if accepted and op["id"] not in self.screen.warnings and checked(op):
+            self.flag_concurrent(doc, op)
+        return accepted
+
+    def landed(self, doc: dict) -> list[dict]:
+        return [t for t in doc.get("tasks", []) if t["id"] not in self.screen.seen]
+
+    def landed_repeat(self, doc: dict, op: dict) -> str:
+        if not checked(op):
+            return ""
+        title = _plain(op["title"])
+        match = next((t for t in self.landed(doc) if _plain(t["title"]) == title), None)
+        return LANDED_REPEAT.format(new=op["task"], id=match["id"], title=match["title"]) if match else ""
+
+    def flag_concurrent(self, doc: dict, op: dict) -> None:
+        if landed := [t["id"] for t in self.landed(doc)]:
+            self.screen.warnings[op["id"]] = CONCURRENT.format(new=op["task"], ids=", ".join(landed))
 
 
 def screen(doc: dict, ops: list[dict]) -> Screen:
@@ -52,7 +75,8 @@ def screen(doc: dict, ops: list[dict]) -> Screen:
             warnings[op["id"]] = UNCHECKED_WARNING.format(new=op["task"], why=why)
         elif match is not None:
             refused[op["id"]] = refusal(op, match)
-    return Screen(refused, warnings)
+    seen = {t["id"] for t in doc.get("tasks", [])} | {op["task"] for op in ops if op["op"] == "task_add"}
+    return Screen(refused, warnings, frozenset(seen))
 
 
 def checked(op: dict) -> bool:
@@ -108,6 +132,10 @@ def _find(doc, adds):
 def _error(stderr):
     lines = stderr.strip().splitlines()
     return lines[-1].partition(":")[0] if lines else "no message"
+
+
+def _plain(title):
+    return title.casefold().split()
 
 
 def _refuse(reason):

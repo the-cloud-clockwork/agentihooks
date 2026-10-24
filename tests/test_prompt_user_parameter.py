@@ -51,7 +51,7 @@ def _run(box, body: str, stdin: str = ""):
     script.write_text(body)
     status = box["inputs"] / "key.status"
     done = subprocess.run(
-        ["bash", str(SKILL / "scripts" / "run.sh"), str(script), str(status), PANE],
+        ["bash", str(SKILL / "scripts" / "run_param_pane.sh"), str(script), str(status), PANE],
         input=stdin,
         capture_output=True,
         text=True,
@@ -131,7 +131,7 @@ def test_the_value_never_reaches_the_status_file_or_any_file_beside_it(box):
 
 def _open(box, script: Path, extra: dict | None = None):
     return subprocess.run(
-        ["bash", str(SKILL / "scripts" / "open.sh"), str(script), "Tailnet key"],
+        ["bash", str(SKILL / "scripts" / "open_param_pane.sh"), str(script), "Tailnet key"],
         capture_output=True,
         text=True,
         env={**box["env"], **(extra or {})},
@@ -151,7 +151,7 @@ def test_open_splits_a_pane_beside_the_caller_and_runs_the_runner_there(box):
     calls = _herdr_calls(box)
     assert calls[0] == f"pane split --pane w1:p1 --direction right --cwd {box['inputs']}"
     assert calls[1] == f"pane rename {PANE} Tailnet key"
-    assert calls[2] == f"pane run {PANE} bash {SKILL / 'scripts' / 'run.sh'} {script} {status} {PANE}"
+    assert calls[2] == f"pane run {PANE} bash {SKILL / 'scripts' / 'run_param_pane.sh'} {script} {status} {PANE}"
     assert len(calls) == 3
 
 
@@ -195,7 +195,7 @@ def test_the_master_rule_says_when_to_use_the_skill():
     rule = (ROLES / "master" / ".claude" / "rules" / "master-role.md").read_text()
     line = next(line for line in rule.splitlines() if "prompt-user-parameter" in line)
 
-    assert "operator on" in line and "Priorities" in line and "Monitor" in line
+    assert "Priorities" in line and "When he asks for it" in line and "open pane" not in line
     for command in _commands(line):
         tool, argv = _argv(command)
         assert PARSERS[tool](argv).values == ["x", "x"]

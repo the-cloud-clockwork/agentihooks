@@ -1,0 +1,6 @@
+{
+  "scripts/gates/lift.py:scripts.gates.lift.x_current__mutmut_13:c1fb0f8d1c58c3ac568e463cda2d14f5d82479363a82dbd6bf83876217506b2f": {
+    "reader": "standards_reader",
+    "reason": "active re-applies the strict at > now_ms - LIFT_SECONDS * 1000 bound to every row, so the extra rows the mutant's wider lower bound admits (all at or below the real bound) are dropped, and every in-window row is returned in the same file order by both versions, so the per-key last-row result is identical."
+  }
+}

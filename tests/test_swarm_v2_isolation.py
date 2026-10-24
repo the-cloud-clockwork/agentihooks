@@ -27,7 +27,6 @@ from tests.swarm_v2_isolation import (
     sweep,
 )
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 Failed = pytest.fail.Exception
 
 

@@ -6,8 +6,6 @@ from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seen import SeenMarks, write_ref
 from scripts.inbox.store import InboxStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 EVENT = {"rev": 3, "by": "operator", "kind": "note added", "id": "n-1", "text": "note 1"}
 
 
@@ -52,10 +50,6 @@ def test_the_claude_channel_pushes_nothing_while_an_owner_holds_the_recipient(st
         async def send(self, message):
             sent.append(message)
 
-    class PubSub:
-        def close(self):
-            pass
-
     async def stop(*_):
         raise Stop
 
@@ -63,7 +57,7 @@ def test_the_claude_channel_pushes_nothing_while_an_owner_holds_the_recipient(st
         ready = anyio.Event()
         ready.set()
         with pytest.raises(Stop):
-            await channel._push(store, "bob", Write(), ready, PubSub())
+            await channel._push(store, "bob", Write(), ready)
 
     monkeypatch.setattr(channel, "SETTLE_S", 0)
     monkeypatch.setattr(channel, "_recheck", stop)

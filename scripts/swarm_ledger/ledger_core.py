@@ -1,22 +1,18 @@
 #!/usr/bin/env python3
-"""Ledger state: the HTML seed block, the JSON store and the merge between them.
+"""Ledger domain: the document shape, its validation and the ops that change it.
 
-The HTML file carries the document in <script id="ledger-data">, stamped with the `_rev`
-the server wrote; agents edit it. The JSON file carries the same document plus `_meta`
-(rev, per-path stamps, an event log and the seeds written at recent revs). Fields an
-agent changed relative to the seed at its `_rev` are agent edits. Threads (comments,
-answers, notes) are lists of entries {id, by, at, text[, edited_at, deleted]}; the
-operator adds, edits and deletes entries through ops, agents append entries in the seed.
+A ledger is a document plus `_meta` (rev, per-path stamps, an event log, members) stored by
+the SQLite repository. Threads (comments, answers, notes) are lists of entries
+{id, by, at, text[, edited_at, deleted]}; the operator and agents add, edit and delete
+entries through ops. The seed parser reads ledger pages left in the ledger folder, once, when
+they are imported.
 """
 
 import difflib
-import hashlib
 import json
 import os
 import re
-import shlex
 import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -26,6 +22,7 @@ import ledger_alerts
 import ledger_answer
 import ledger_close
 import ledger_comments
+import ledger_events_ack
 import ledger_names
 import ledger_notifications
 import ledger_priorities
@@ -38,59 +35,41 @@ import ledger_title
 import ledger_verdict
 import orjson
 
-from scripts.swarm_ledger import ledger_groups, ledger_phases, ledger_rank
+from scripts.swarm_ledger import (
+    ledger_freezes,
+    ledger_groups,
+    ledger_phases,
+    ledger_plans,
+    ledger_rank,
+    ledger_splits,
+    models,
+    ports,
+)
+from scripts.swarm_ledger.ledger_files import LOG_MAX_BYTES, append_capped, atomic_write, rotate_if_full  # noqa: F401
+from scripts.swarm_ledger.page_assets import (  # noqa: F401
+    HOME,
+    MODULES,
+    PAGE_RE,
+    PAGES,
+    PALETTE,
+    SEED_RE,
+    SHELL,
+    TOKEN_RE,
+    TOOLTIPS,
+    page_version,
+    read_token,
+    static_assets,
+)
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
-SEED_RE = re.compile(r'(<script id="ledger-data" type="application/json">)(.*?)(</script>)', re.S)
-PAGE_RE = re.compile(r'<meta name="ledger-page" content="([0-9a-f]+)">')
-TEMPLATE = Path(__file__).resolve().parent / "template.html"
-PALETTE = TEMPLATE.with_name("palette.css")
-TOOLTIPS = TEMPLATE.with_name("tooltips.js")
-MODULES = TEMPLATE.parent / "static" / "js"
-SHELL = TEMPLATE.with_name("shell.html")
-HOME = TEMPLATE.with_name("home.html")
-TOKEN_RE = re.compile(r'<meta name="ledger-token" content="([A-Za-z0-9_-]{16,})">')
 LEGACY_LINE_RE = re.compile(r"^([A-Za-z][\w.-]*)(?: [0-9:]+Z?| \([^)]*\))?: (.+)$")
-LISTS = {
-    "phases": ("title", "description", "done", "out_of_scope", "depends_on", "planning", "release"),
-    "questions": ("text", "out_of_scope"),
-    "followups": ("text", "done", "out_of_scope"),
-    "tasks": (
-        "title",
-        "description",
-        "phase",
-        "lane",
-        "state",
-        "claimed_by",
-        "issue_url",
-        "pr_url",
-        "done",
-        "out_of_scope",
-    ),
-}
-BOOL_FIELDS = ("done", "out_of_scope")
-SEED_ADD_COMMANDS = {
-    "tasks": (
-        "task",
-        "task add <id>",
-        ("phase", "lane", "description", "depends_on", "territory", "gain", "kind", "profile", "rank", "difficulty"),
-    ),
-    "followups": ("follow up", "followup add", ()),
-    "phases": ("phase", "phase add <id>", ("description", "depends_on", "planning", "release")),
-}
+LISTS = models.LISTS
+BOOL_FIELDS = models.CHECKBOXES
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
-THREADS = {
-    "notes": ("comments",),
-    "phases": ("comments",),
-    "questions": ("answers", "comments"),
-    "followups": ("comments",),
-    "tasks": ("comments",),
-}
-SCALARS = ("title", "overview", "sources", "orchestrator", "chat_instructions", "policy", "time_left_minutes")
+THREADS = models.THREADS
 AGENT_OPS = ("join", "leave", "ack", "claim", "set", "add_item", "retext", "gate_bypass", "gate_lift")
 ARTIFACT_OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
-OPERATOR_THREADS = re.compile(r"^(notes|questions/[^/]+/answers)$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 NOUN = {"comments": "comment", "answers": "answer", "notes": "note", "chat": "message"}
 CHAT_KEPT = 500
@@ -100,11 +79,10 @@ DEFAULT_CHAT_INSTRUCTIONS = (
     "Answer with agentihooks ledger say, in plain words for the operator: no times, ids, hashes, paths "
     "or capital labels. Under 100 words unless the operator asks, in a separate message, to expand."
 )
-SEEDS_KEPT = 5
 EVENTS_KEPT = 2000
+EVENTS_CEILING = 10000
+EVENTS_WINDOW_MS = 24 * 60 * 60 * 1000
 MAX_TEXT = 20000
-LOG_MAX_BYTES = 5 << 20
-MISSING = object()
 LOCK = threading.Lock()
 
 EXTENSION_OPS = {
@@ -115,17 +93,21 @@ EXTENSION_OPS = {
         ledger_tasks,
         ledger_rank,
         ledger_groups,
+        ledger_splits,
         ledger_title,
         ledger_names,
         ledger_close,
         ledger_size,
         ledger_sources,
         ledger_phases,
+        ledger_plans,
         ledger_relay,
         ledger_answer,
         ledger_verdict,
         ledger_alerts,
         ledger_time_left,
+        ledger_freezes,
+        ledger_events_ack,
     )
     for name in module.OPS
 }
@@ -133,12 +115,6 @@ EXTENSION_OPS = {
 
 def now_ms():
     return int(time.time() * 1000)
-
-
-def paths(slug):
-    if not isinstance(slug, str) or not SLUG_RE.match(slug):
-        raise ValueError(f"invalid slug: {slug!r}")
-    return LEDGER_DIR / f"{slug}.html", LEDGER_DIR / f"{slug}.json"
 
 
 def _reject_constant(name):
@@ -206,6 +182,9 @@ def normalize(doc):
     doc.setdefault("artifacts", [])
     doc.setdefault("artifact_trash", [])
     doc.setdefault("tasks", [])
+    doc.setdefault("plans", [])
+    doc.setdefault("slices", [])
+    doc.setdefault("freezes", [])
     for name in THREADS:
         for item in doc.get(name, []) if isinstance(doc.get(name), list) else []:
             if not isinstance(item, dict):
@@ -239,7 +218,7 @@ def validate(doc):
         type(doc["time_left_minutes"]) is not int or time_left_value(doc["time_left_minutes"]) is None
     ):
         raise ValueError("time_left_minutes must be a nonnegative integer")
-    for key in ("title", "overview", "orchestrator", "chat_instructions"):
+    for key in models.TEXT_FIELDS:
         if not isinstance(doc.get(key, ""), str):
             raise ValueError(f"{key} must be a string")
     if not isinstance(doc.get("sources", []), list) or not all(isinstance(s, str) for s in doc.get("sources", [])):
@@ -259,7 +238,7 @@ def validate(doc):
             raise ValueError(f"every {name} item needs a unique string id without '/'")
         for item in items:
             for field in fields:
-                expected = list if field == "depends_on" else bool if field in (*BOOL_FIELDS, "release") else str
+                expected = models.field_type(name, field)
                 if field in item and not isinstance(item[field], expected):
                     raise ValueError(f"{name}/{item['id']}/{field} must be {expected.__name__}")
             for thread in THREADS[name]:
@@ -268,20 +247,7 @@ def validate(doc):
                 ledger_tasks.check_task(item)
 
     ledger_phases.validate(doc.get("phases", []))
-
-
-def flatten(doc):
-    """Every non-thread field as path -> value; list paths hold the id order."""
-    flat = {key: doc.get(key, [] if key == "sources" else "") for key in SCALARS}
-    for name, fields in LISTS.items():
-        items = doc.get(name, [])
-        flat[name] = [item["id"] for item in items]
-        for item in items:
-            for field in fields:
-                if field in ("depends_on", "planning", "release") and field not in item:
-                    continue
-                flat[f"{name}/{item['id']}/{field}"] = item.get(field, False if field in BOOL_FIELDS else "")
-    return flat
+    ledger_plans.validate(doc)
 
 
 def thread_paths(doc):
@@ -317,73 +283,15 @@ def parse_seed(html):
 
 
 def watch_path(slug, name):
-    from scripts.swarm.naming import addresses
+    addresses = ports.swarm().naming.addresses
 
     paths = [LEDGER_DIR / ".sessions" / f"{slug}.{candidate}.watch" for candidate in addresses(name)]
     return next((path for path in paths if path.exists()), paths[0])
 
 
-def static_assets():
-    """Every file a page loads, by its path under /static/<page version>/."""
-    static = MODULES.parent
-    return {
-        "palette.css": PALETTE,
-        "tooltips.js": TOOLTIPS,
-        **{f"css/{p.name}": p for p in sorted((static / "css").glob("*.css"))},
-        **{f"js/{p.name}": p for p in sorted(MODULES.glob("*.js"))},
-        **{f"home/{p.name}": p for p in sorted((static / "home").glob("*.js"))},
-    }
-
-
-def page_version(assets=None):
-    if assets is None:
-        assets = {name: path.read_bytes() for name, path in static_assets().items()}
-    digest = hashlib.sha256(TEMPLATE.read_bytes() + SHELL.read_bytes() + HOME.read_bytes())
-    for name, data in assets.items():
-        digest.update(name.encode() + b"\0" + data)
-    return digest.hexdigest()[:12]
-
-
-def read_token(html):
-    match = TOKEN_RE.search(html)
-    return match.group(1) if match else None
-
-
 def seed_text(doc, rev=None):
     body = doc if rev is None else {"_rev": rev, **doc}
     return "\n" + pretty(body).replace("<", "\\u003c") + "\n"
-
-
-def rotate_if_full(path, limit=LOG_MAX_BYTES):
-    try:
-        if path.stat().st_size >= limit:
-            path.replace(path.with_name(path.name + ".1"))
-    except FileNotFoundError:
-        pass
-
-
-def append_capped(path, text, limit=LOG_MAX_BYTES):
-    rotate_if_full(path, limit)
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(text)
-
-
-def atomic_write(path, text):
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(text)
-    written = os.stat(tmp)
-    os.replace(tmp, path)
-    return written
-
-
-def write_if_changed(path, text):
-    try:
-        if path.read_bytes() == text.encode():
-            return
-    except FileNotFoundError:
-        pass
-    atomic_write(path, text)
 
 
 def text_diff(old, new):
@@ -397,7 +305,7 @@ def warnings(doc):
     if words > 200:
         found.append(f"overview has {words} words, limit 200")
     for phase in doc["phases"]:
-        if len(phase["description"].split()) > 100:
+        if "description" in phase and len(phase["description"].split()) > 100:
             found.append(f"phase {phase['id']} description has {len(phase['description'].split())} words, limit 100")
     return found
 
@@ -409,10 +317,22 @@ def size_warning(text):
 class Context:
     """One sync's clock, rev, stamps and event log."""
 
-    def __init__(self, meta, at):
+    def __init__(self, meta, at, slug=""):
         self.at, self.rev = at, meta["rev"] + 1
         self.stamps, self.events = meta["stamps"], []
         self.meta, self.dirty, self.refused, self.dropped = meta, False, [], []
+        self.unstored = set()
+        self.names = {}
+        self.slug = slug
+
+    def author(self, name: str) -> str:
+        if name not in self.names:
+            resolve_name = ports.swarm().naming.resolve_name
+
+            resolved = resolve_name(name)
+            self.names[name] = resolved
+            self.names[resolved] = resolved
+        return self.names[name]
 
     def record(self, by, kind, target, **extra):
         self.events.append({"rev": self.rev, "at": self.at, "by": by, "kind": kind, "target": target, **extra})
@@ -428,146 +348,8 @@ def earliest(meta, at):
     return min([meta.get("created_at") or at, *stamps, *events])
 
 
-def merge_order(current, base, new):
-    """Items are never removed: an id missing from the seed stays, appended at the end."""
-    kept = [i for i in new if i in current or i not in base]
-    return kept + [i for i in current if i not in kept]
-
-
-def agent_entry(entry, ctx):
-    by = entry.get("by") or "agent"
-    return {"id": entry["id"], "by": "agent" if by == "operator" else by, "at": ctx.at, "text": entry.get("text", "")}
-
-
-def new_item(name, seed_item, ctx):
-    item = {k: v for k, v in seed_item.items() if k not in THREADS[name] and not (name == "phases" and k == "review")}
-    for thread in THREADS[name]:
-        operator_only = thread == "answers"
-        item[thread] = [] if operator_only else [agent_entry(e, ctx) for e in seed_item.get(thread, [])]
-    return item
-
-
-def refuse_seed_adds(doc, base_doc, seed, ctx):
-    """New tasks, follow ups and phases come only from the ledger add commands."""
-    kept = {}
-    for name, (noun, command, fields) in SEED_ADD_COMMANDS.items():
-        known = {i["id"] for i in doc[name]} | {i["id"] for i in base_doc[name]}
-        kept[name] = [i for i in seed[name] if i["id"] in known]
-        for item in seed[name]:
-            if item["id"] not in known:
-                label = item.get("text") or item.get("title")
-                ctx.refused.append(
-                    f'The page added the {noun} "{label}", which was not added. Add it with '
-                    f"{seed_add_command(command, label, item, fields)}"
-                )
-    return {**seed, **kept}
-
-
-def seed_add_command(command, label, item, fields):
-    flags = []
-    for field in fields:
-        value, flag = item.get(field), f"--{field.replace('_', '-')}"
-        if value is True:
-            flags.append(flag)
-        elif value is not None and value is not False and value not in ("", []):
-            value = ",".join(value) if isinstance(value, list) else str(value)
-            flags.append(f"{flag} {shlex.quote(value)}")
-    return " ".join(["agentihooks ledger --slug <slug> --as <name>", command, shlex.quote(label), *flags])
-
-
-def reconcile_fields(doc, base_doc, seed, ctx):
-    seed = refuse_seed_adds(doc, base_doc, seed, ctx)
-    if not ledger_phases.seed_graph_valid(doc["phases"], base_doc["phases"], seed["phases"], ctx):
-        seed = {**seed, "phases": base_doc["phases"]}
-    base, new, flat = flatten(base_doc), flatten(seed), flatten(doc)
-    items = {name: {i["id"]: i for i in doc[name]} for name in LISTS}
-    for name in LISTS:
-        if new[name] != base[name]:
-            seed_items = {i["id"]: i for i in seed[name]}
-            for item_id in new[name]:
-                if item_id not in items[name] and item_id not in base[name]:
-                    items[name][item_id] = new_item(name, seed_items[item_id], ctx)
-                    ctx.record(
-                        "agent",
-                        "added",
-                        f"{name}/{item_id}",
-                        text=seed_items[item_id].get("text") or seed_items[item_id].get("title", ""),
-                    )
-            doc[name] = [items[name][i] for i in merge_order(flat[name], base[name], new[name]) if i in items[name]]
-    for path, value in new.items():
-        if path in LISTS or base.get(path, MISSING) == value or flat.get(path, MISSING) == value:
-            continue
-        if not apply_seed_field(doc, items, path, value, ctx):
-            continue
-        parts = path.split("/")
-        ctx.stamp(path, "agent")
-        kind = state_event(parts[-1], value) if parts[-1] in BOOL_FIELDS else f"{parts[-1]} changed"
-        ctx.record("agent", kind, "/".join(parts[:2]) if len(parts) == 3 else path)
-
-
-def apply_seed_field(doc, items, path, value, ctx):
-    parts = path.split("/")
-    if len(parts) == 1:
-        doc[path] = value
-        return True
-    item = items[parts[0]].get(parts[1])
-    if item is None or parts[2] == "text" and ledger_comments.refused(value, "item", f"agent text of {path}", ctx):
-        return False
-    if parts[2] in BOOL_FIELDS:
-        set_state(item, parts[2], value)
-    else:
-        item[parts[2]] = value
-    return True
-
-
-def reconcile_threads(doc, base_doc, seed, ctx):
-    base = {p: {e["id"]: e for e in t} for p, t in thread_paths(base_doc)}
-    for path, seed_thread in thread_paths(seed):
-        current = get_thread(doc, path)
-        if current is None or OPERATOR_THREADS.match(path):
-            continue
-        by_id = {e["id"]: e for e in current}
-        old = base.get(path, {})
-        target, noun = thread_target(path), NOUN[path.rsplit("/", 1)[-1]]
-        for entry in seed_thread:
-            have, was = by_id.get(entry["id"]), old.get(entry["id"])
-            if have is None and was is None and entry.get("text", "").strip():
-                if not seed_entry(current, path, agent_entry(entry, ctx), ctx):
-                    continue
-            elif (
-                have
-                and was
-                and have["by"] != "operator"
-                and not have.get("deleted")
-                and entry.get("text", "") != was.get("text", "")
-                and entry.get("text", "") != have["text"]
-                and not ledger_comments.refused(
-                    entry.get("text", ""), kind_of(path), f"{have['by']} edit on {path}", ctx
-                )
-            ):
-                diff = text_diff(have["text"], entry.get("text", ""))
-                have.update(text=entry.get("text", ""), edited_at=ctx.at)
-                ctx.record(have["by"], f"{noun} edited", target, id=entry["id"], diff=diff)
-            else:
-                continue
-            ctx.stamp(path, "agent")
-
-
 def kind_of(path):
     return "chat" if path == "chat" else "comment"
-
-
-def seed_entry(thread, path, entry, ctx):
-    """A new agent entry written into the HTML seed: filtered, and a comment amends the agent's own."""
-    if ledger_comments.refused(entry["text"], kind_of(path), f"{entry['by']} {kind_of(path)} on {path}", ctx):
-        return False
-    target, noun = thread_target(path), NOUN[path.rsplit("/", 1)[-1]]
-    if noun == "comment":
-        ledger_comments.post_status(thread, entry["by"], entry["id"], entry["text"], ctx, target)
-    else:
-        thread.append(entry)
-        ctx.record(entry["by"], f"{noun} added", target, id=entry["id"], text=entry["text"])
-    return True
 
 
 def state_event(field, value):
@@ -600,7 +382,7 @@ def apply_changes(doc, changes, ctx):
             set_state(item, parts[2], value)
             ctx.stamp(change["path"], "operator")
             ctx.record("operator", state_event(parts[2], value), "/".join(parts[:2]))
-            if parts[2] == "out_of_scope":
+            if parts[2] == "out_of_scope" and parts[0] != "plans":
                 note = "Out of scope." if value else "Back in scope."
                 item["comments"].append(
                     {"id": f"scope-{ctx.rev}-{parts[1]}", "by": "operator", "at": ctx.at, "text": note}
@@ -616,6 +398,15 @@ def clear_chat(thread, op, target, ctx):
         ctx.record("operator", "chat cleared", target, id=op["id"])
         ctx.stamp("chat", "operator")
     return True
+
+
+def new_entry(op, by, at, text):
+    entry = {"id": op["id"], "by": by, "at": at, "text": text}
+    if op["thread"] == "notes":
+        entry["comments"] = []
+    if "reply_to" in op:
+        entry["reply_to"] = op["reply_to"]
+    return entry
 
 
 def record_sync(doc, op, ctx):
@@ -638,9 +429,7 @@ def record_sync(doc, op, ctx):
 
 def apply_op(doc, op, ctx):
     if "by" in op:
-        from scripts.swarm.naming import resolve_name
-
-        op = {**op, "by": resolve_name(op["by"])}
+        op = {**op, "by": ctx.author(op["by"])}
     if op["op"] in AGENT_OPS:
         import ledger_agent_ops
 
@@ -670,7 +459,7 @@ def apply_op(doc, op, ctx):
         if entry is not None or not (text.strip() or op.get("attachments")):
             return entry is not None
         by = op.get("by", "operator")
-        thread.append({"id": op["id"], "by": by, "at": ctx.at, "text": text})
+        thread.append(new_entry(op, by, ctx.at, text))
         if op.get("attachments"):
             thread[-1]["attachments"] = op["attachments"]
         if by != "operator" and by in ctx.meta["members"]:
@@ -696,15 +485,16 @@ def apply_op(doc, op, ctx):
 def _screened(op):
     if not op["thread"].endswith("/comments"):
         return op["text"]
-    from hooks.context.conditions import LEDGER_WRITE
-    from hooks.filters import check as filters
+    LEDGER_WRITE = ports.hooks().conditions.LEDGER_WRITE
+    filters = ports.hooks().filters
 
     return filters.screen(LEDGER_WRITE, op["text"])
 
 
 def _check_chat_address(op, chat_add):
-    if ("to" in op or "reply_to" in op) and not chat_add:
-        raise ValueError("to and reply_to address only an agent chat message")
+    answer = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
+    if ("to" in op and not (chat_add or answer)) or ("reply_to" in op and not chat_add):
+        raise ValueError("to addresses only an agent chat message or comment, reply_to only an agent chat message")
     if op.get("to", "operator") != "operator" or not isinstance(op.get("reply_to", ""), str):
         raise ValueError("an agent chat message goes to the operator or answers his line by its id")
 
@@ -752,6 +542,7 @@ def check_op(op, task_ids=()):
         if op["op"] != "add" or not talks:
             raise ValueError("attachments ride only on an add to chat or a comment thread")
         ledger_media.check(op["attachments"])
+    ledger_comments.check_outcome(op)
     if "by" in op:
         talks = op["op"] != "clear" and (op["thread"] == "chat" or op["thread"].endswith("/comments"))
         if not talks or not AUTHOR_RE.match(str(op["by"])) or op["by"] == "operator":
@@ -777,16 +568,9 @@ def check_body(body, task_ids=()):
 
 
 def load_state(json_path, seed):
-    from scripts.swarm_ledger.repository.file import load_state as read_state
+    from scripts.swarm_ledger.repository.legacy import load_state as read_state
 
     return read_state(json_path, seed, sys.modules[__name__])
-
-
-def rewrite_seed(html_path, html, doc, rev):
-    new = SEED_RE.sub(lambda m: m.group(1) + seed_text(doc, rev) + m.group(3), html, count=1)
-    if new != html and html_path.read_text(encoding="utf-8") == html:
-        return atomic_write(html_path, new)
-    return None
 
 
 def gated(gate, doc, op, ctx):
@@ -794,6 +578,8 @@ def gated(gate, doc, op, ctx):
 
 
 def sync(slug, changes=None, ops=None, gate=None):
-    from scripts.swarm_ledger.repository import FileLedgerRepository
+    from scripts.swarm_ledger import storage
 
-    return FileLedgerRepository(sys.modules[__name__]).apply_ops(slug, changes=changes, ops=ops, gate=gate)
+    repository = storage.default()
+
+    return repository.bound(sys.modules[__name__]).apply_ops(slug, changes=changes, ops=ops, gate=gate)

@@ -41,7 +41,7 @@ def _fake(client):
 
 def _check(client, args):
     command = str(args[0]).upper() if args else ""
-    if command in SCRIPTS or (command in WIPES and not _fake(client)):
+    if command in SCRIPTS | WIPES and not _fake(client):
         written.append(command)
         raise ProductionKey(f"a test sent {command}, which can reach production keys the guard cannot read")
     if not command or command in READS:

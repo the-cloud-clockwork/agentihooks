@@ -6,7 +6,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -102,20 +102,22 @@ def test_code_reload_runs_only_when_swarm_reload_is_one(value, expected):
     assert server.reloading({} if value is None else {"SWARM_RELOAD": value}) is expected
 
 
-@pytest.mark.parametrize(("value", "calls"), [(None, []), ("0", []), ("1", [((42,),)])])
+@pytest.mark.parametrize(
+    ("value", "calls"), [(None, []), ("0", []), ("1", [call(42, None, force=False, loaded=server.LOADED_DIGEST)])]
+)
 def test_the_seed_watcher_reloads_code_only_when_asked(monkeypatch, value, calls):
     if value is None:
         monkeypatch.delenv("SWARM_RELOAD", raising=False)
     else:
         monkeypatch.setenv("SWARM_RELOAD", value)
-    monkeypatch.setattr(server, "code_stamp", lambda: 42)
+    monkeypatch.setattr(server, "LOADED_STAMP", 42)
     monkeypatch.setattr(server, "reload_if_changed", Mock())
     monkeypatch.setattr(server.ledger_bin, "tidy", Mock())
-    monkeypatch.setattr(server.repository, "pages", lambda: [])
+    monkeypatch.setattr(server, "bin_closed_without_swarm", Mock())
     monkeypatch.setattr(server, "sample_streams", Mock())
-    monkeypatch.setattr(server.time, "sleep", Mock(side_effect=Stop))
+    monkeypatch.setattr(server, "scheduled_wait", Mock(side_effect=Stop))
     with pytest.raises(Stop):
-        server.watch_seeds()
+        server.watch_ledgers()
     assert server.reload_if_changed.call_args_list == calls
 
 
@@ -142,7 +144,7 @@ def test_a_folder_other_than_the_shared_one_may_serve_on_8765(monkeypatch, tmp_p
     monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
     monkeypatch.setattr(server.threading, "Thread", Mock())
     server.serve()
-    server.ThreadingHTTPServer.assert_called_once_with((server.HOST, 8765), server.Handler)
+    server.ThreadingHTTPServer.assert_called_once_with((server.HOST, 8765), server.Handler, bind_and_activate=False)
 
 
 def test_files_under_the_agentihooks_home_never_configure_the_server(tmp_path):
@@ -237,25 +239,44 @@ def test_a_server_whose_port_another_server_holds_is_never_taken_for_its_own(tmp
                 pass
 
 
-def request(port, path, host, origin=None):
+def fetch(port, path, host, origin=None):
     headers = {"Host": host, **({"Origin": origin} if origin else {})}
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
         conn.request("GET", path, headers=headers)
         response = conn.getresponse()
         return response.status, response.read()
-    except OSError:
-        return None, b""
     finally:
         conn.close()
+
+
+def request(port, path, host, origin=None):
+    try:
+        return fetch(port, path, host, origin)
+    except OSError:
+        return None, b""
+
+
+def served(port, path, host, origin, log):
+    try:
+        return fetch(port, path, host, origin)
+    except (OSError, http.client.HTTPException) as error:
+        pytest.fail(f"{type(error).__name__}: {error}\nledger server log:\n{log.read_text()}")
+
+
+def test_a_failed_request_names_its_error_and_the_server_log(tmp_path, ledger_port):
+    log = tmp_path / "server.log"
+    log.write_text("ledger server said this\n")
+    with pytest.raises(pytest.fail.Exception, match=r"(?s)ConnectionRefusedError: .*ledger server said this"):
+        served(ledger_port, "/api/v1/ledgers", "swarm.lan", "http://swarm.lan", log)
 
 
 @pytest.mark.parametrize(
     ("host", "origin"),
     [("swarm.example.com", "https://swarm.example.com"), ("swarm.lan", "http://swarm.lan")],
 )
-def test_a_listed_host_and_origin_are_served(hosted, host, origin):
-    status, body = request(hosted, "/api/v1/ledgers", host, origin)
+def test_a_listed_host_and_origin_are_served(hosted, tmp_path, host, origin):
+    status, body = served(hosted, "/api/v1/ledgers", host, origin, tmp_path / "server.log")
     assert status == 200
     assert json.loads(body)["data"] == []
 

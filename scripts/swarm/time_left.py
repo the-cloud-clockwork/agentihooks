@@ -1,9 +1,9 @@
-"""Each tick recomputes time left and sends the ledger its live slots and CI median when the estimate moved."""
+"""Each tick sends the ledger its live slots and CI median, so time left and its refresh age stay current."""
 
-from scripts.swarm import capacity, ci_speed
-from scripts.swarm_ledger import ledger_stats
+from scripts.swarm import capacity, ci_speed, freeze
 
-MOVE_MINUTES = 5
+WATCHED_KEPT = 100
+WATCHED_LENGTH = 2000
 
 
 def slots(decision: dict) -> int | None:
@@ -14,25 +14,20 @@ def slots(decision: dict) -> int | None:
     return min(sum(lanes.values()), running + sum(decision["placeable"].values()))
 
 
-def moved(saved: dict, inputs: dict, result: dict) -> bool:
-    before = saved.get("calculation") or {}
-    if saved.get("inputs") != inputs or before.get("tiers") != result["tiers"]:
-        return True
-    shown, now = before.get("minutes"), result["minutes"]
-    if shown is None or now is None:
-        return shown != now
-    return abs(shown - now) >= MOVE_MINUTES
-
-
-def refresh(slug, store, ledger, runtime, doc, now_ms) -> list[str]:
-    writer = getattr(ledger, "time_left", None)
-    if writer is None:
-        return []
+def inputs_of(store, slug, runtime) -> dict:
     observed = getattr(runtime, "quota_capacity", None) is not None
     cached = ci_speed.get(store.redis, slug) or {}
-    inputs = {"slots": slots(capacity.read(store, slug)) if observed else None, "ci_minutes": cached.get("minutes")}
-    meta = doc.get("_meta", {})
-    result = ledger_stats.calculate(doc, meta.get("events", []), now_ms, inputs)
-    if moved(meta.get("time_left") or {}, inputs, result):
-        writer(slug, inputs["slots"], inputs["ci_minutes"])
+    return {"slots": slots(capacity.read(store, slug)) if observed else None, "ci_minutes": cached.get("minutes")}
+
+
+def focus(config, doc: dict) -> dict:
+    watched = [name[:WATCHED_LENGTH] for name in (doc.get(freeze.WATCHED) or [])[:WATCHED_KEPT]]
+    return {key: value for key, value in (("fix_phase", freeze.fix_phase(config)), ("watched", watched)) if value}
+
+
+def refresh(slug, store, ledger, runtime, config, doc) -> list[str]:
+    writer = getattr(ledger, "time_left", None)
+    if writer is not None:
+        inputs = inputs_of(store, slug, runtime)
+        writer(slug, inputs["slots"], inputs["ci_minutes"], **focus(config, doc))
     return []

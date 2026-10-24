@@ -1,5 +1,6 @@
 import contextlib
 import json
+import re
 import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -15,16 +16,36 @@ ORDER = (
     "pages",
     "api",
     "patch",
+    "freezes",
+    "frozen_view",
     "state",
     "sync",
+    "phase_review",
     "markdown",
     "media",
     "artifacts",
     "threads",
+    "render_cycle",
     "render",
+    "edits",
     "notices",
 )
-ORDER += ("outline", "folds", "layout", "chat", "swarm", "controls", "events", "main")
+ORDER += (
+    "outline",
+    "folds",
+    "layout",
+    "chat",
+    "lifecycle",
+    "roles",
+    "agent_cells",
+    "swarm",
+    "recovery",
+    "hives",
+    "architecture",
+    "controls",
+    "events",
+    "main",
+)
 
 
 def serve_modules(target, ledger=None, swarm=None):
@@ -54,8 +75,17 @@ def ledger_state(doc, rev=1):
 
 
 def snapshot_body(ledger=None, swarm=None):
-    data = {"ledger": ledger, "swarm": swarm}
+    data = {"ledger": served_ledger(ledger), "swarm": swarm}
     return f"id: c0\nevent: snapshot\ndata: {json.dumps(data)}\n\n"
+
+
+def served_ledger(ledger):
+    if not isinstance(ledger, dict):
+        return ledger
+    from scripts.swarm_ledger import ledger_server
+
+    meta = {"limits": ledger_server.PAGE_LIMITS, **ledger.get("_meta", {})}
+    return {"marks": {"frozen": [], "held": []}, **ledger, "_meta": meta}
 
 
 def is_events(url):
@@ -78,7 +108,53 @@ def show(tab, html, url=PAGE_URL, ledger=None, swarm=None):
 
 def loaded(tab):
     """Wait until the page applied the stream's first ledger state."""
-    tab.wait_for_function("() => document.getElementById('status').textContent !== 'loading'")
+    tab.wait_for_function(
+        """() => {
+          if (!window.__ledgerTestLoaded) {
+            window.__ledgerTestLoaded = {ready: false};
+            const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+            import(new URL("sync.js", main)).then(sync => sync.loaded)
+              .then(() => { window.__ledgerTestLoaded.ready = true; });
+          }
+          return window.__ledgerTestLoaded.ready;
+        }"""
+    )
+
+
+def reload_after_folds(tab, selector):
+    state = tab.locator(selector).evaluate_all(
+        """boxes => boxes.map(box => ({
+          id: box.id,
+          key: box.dataset.key || (box.matches(".plan-fold,.phase-fold")
+            ? box.closest("[id^=item-]").id.slice(5).replace("-", "/") + "/row" : null),
+          open: box.open
+        }))"""
+    )
+    assert state
+    keys = tab.evaluate(
+        """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          const {FOLD_KEY, COMMENTS_KEY} = await import(new URL("config.js", main));
+          return {FOLD_KEY, COMMENTS_KEY};
+        }"""
+    )
+    tab.wait_for_function(
+        """({boxes, keys}) => {
+          const folds = JSON.parse(localStorage.getItem(keys.FOLD_KEY) || "{}");
+          const comments = JSON.parse(localStorage.getItem(keys.COMMENTS_KEY) || "{}");
+          return boxes.every(box => box.key
+            ? (comments[box.open ? "opened" : "closed"] || []).includes(box.key)
+            : folds[box.id] === box.open);
+        }""",
+        arg={"boxes": state, "keys": keys},
+    )
+    tab.reload()
+    loaded(tab)
+
+
+def worker_modules(name):
+    source = (MODULES / name).read_text(encoding="utf-8")
+    return re.findall(r"new\s+Worker\(\s*new\s+URL\(\s*[\"'](?:\./)?(\w+\.js)[\"']", source)
 
 
 def page_source():
@@ -100,6 +176,10 @@ def page_source():
             f'<link rel="stylesheet" href="/static/__LEDGER_PAGE__/{name}">', f"<style>\n{text}</style>"
         )
         page = page.replace(f'<script src="/static/__LEDGER_PAGE__/{name}"></script>', f"<script>{text}</script>")
+    workers = {worker for name in ORDER for worker in worker_modules(f"{name}.js")}
+    for worker in sorted(workers):
+        source = (MODULES / worker).read_text(encoding="utf-8")
+        page += f'<script type="text/worker">{source}</script>\n'
     return page
 
 

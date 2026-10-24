@@ -1,0 +1,34 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-ACC-03",
+  "fixture": "Stale full-quota report arriving after a newer exhausted-quota observation",
+  "account": "fixture",
+  "harness": "claude",
+  "handoff_account": "spare",
+  "exhausted": {
+    "observed_ms": 240000,
+    "provider_status": "allowed_warning",
+    "five_used": 100.0,
+    "week_used": 62.0,
+    "five_reset": 18000,
+    "week_reset": 600000
+  },
+  "stale_full": {
+    "observed_ms": 120000,
+    "provider_status": "allowed",
+    "five_used": 0.0,
+    "week_used": 10.0,
+    "five_reset": 18000,
+    "week_reset": 600000
+  },
+  "spare": {
+    "observed_ms": 200000,
+    "provider_status": "allowed",
+    "five_used": 20.0,
+    "week_used": 30.0,
+    "five_reset": 18000,
+    "week_reset": 600000
+  },
+  "clock_ms": 270000,
+  "grant": "Signed fixture launch grant, validated on every request; never a deployed credential"
+}

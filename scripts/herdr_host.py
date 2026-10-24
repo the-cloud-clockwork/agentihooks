@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import json
 import re
@@ -5,8 +6,11 @@ import shlex
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+from scripts.swarm.pane import typed_input
 
 PLACEMENTS = ("tab", "split", "workspace")
 
@@ -56,6 +60,23 @@ def server_socket(environ: dict[str, str]) -> str:
     return environ.get("HERDR_SOCKET_PATH") or str(Path.home() / ".config" / "herdr" / "herdr.sock")
 
 
+SESSION_KEYS = (
+    "AGENTIHOOKS_AGENT_NAME",
+    "AGENTIHOOKS_PROFILE",
+    "AGENTIHOOKS_SWARM",
+    "AGENTIHOOKS_SWARM_TASK",
+    "CLAUDECODE",
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "COPILOT_HOME",
+)
+
+
+def server_environ(environ: dict[str, str]) -> dict[str, str]:
+    """Every pane inherits the server's environment, so one agent's identity must not reach the operator's panes."""
+    return {key: value for key, value in environ.items() if key not in SESSION_KEYS}
+
+
 def ensure_server(environ: dict[str, str], timeout: float = 10.0) -> bool:
     """Start a detached herdr server when none answers; True when one was started."""
     if server_running(environ):
@@ -65,7 +86,7 @@ def ensure_server(environ: dict[str, str], timeout: float = 10.0) -> bool:
         raise HerdrError("herdr is not installed")
     subprocess.Popen(
         [exe, "server"],
-        env=environ,
+        env=server_environ(environ),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -147,6 +168,12 @@ def run(pane_id: str, launcher: Path, environ: dict[str, str]) -> None:
     _cli(["pane", "run", pane_id, f"exec {shlex.quote(str(launcher))}"], environ)
 
 
+def open_command(directory: Path, title: str, argv: list[str], workspace: str, environ: dict[str, str]) -> Placement:
+    placed = open_pane(directory, title, {}, "tab", workspace, environ)
+    _cli(["pane", "run", placed.pane_id, shlex.join(argv)], environ)
+    return placed
+
+
 def agent_name(name: str) -> str:
     cleaned = re.sub(r"[^a-z0-9_-]", "-", name.lower()).strip("-_")
     cleaned = cleaned if cleaned[:1].isalpha() else f"a-{cleaned}"
@@ -176,6 +203,94 @@ def answer(pane_id: str, text: str, environ: dict[str, str], timeout_ms: int) ->
     try:
         _cli(["pane", "wait-output", pane_id, "--match", text, "--timeout", str(timeout_ms)], environ)
         _cli(["pane", "send-keys", pane_id, "Enter"], environ)
+    except (HerdrError, subprocess.TimeoutExpired):
+        return False
+    return True
+
+
+READY = ("idle", "done")
+READY_SETTLE_S = 1.5
+RENAME_CONFIRM_S = 15.0
+RENAME_POLL_S = 0.5
+CLEAR_INPUT = "ctrl+u"
+
+
+def agent_status(pane_id: str, environ: dict[str, str]) -> str:
+    try:
+        found = _cli(["agent", "get", pane_id], environ).get("agent", {})
+    except (HerdrError, subprocess.TimeoutExpired):
+        return "unknown"
+    return found.get("agent_status") or "unknown"
+
+
+def typed(pane_id: str, environ: dict[str, str]) -> str:
+    return typed_input(_read(pane_id, environ))
+
+
+def _read(pane_id: str, environ: dict[str, str]) -> str:
+    """The pane's visible screen with its styles; herdr prints it raw, not as a JSON reply."""
+    exe = binary()
+    if exe is None:
+        raise HerdrError("herdr is not installed")
+    args = [exe, "pane", "read", pane_id, "--source", "visible", "--format", "ansi"]
+    done = subprocess.run(args, capture_output=True, text=True, env=environ, timeout=30)
+    if done.returncode != 0:
+        raise HerdrError(f"herdr pane read: {done.stderr.strip()}")
+    return done.stdout
+
+
+def wait_ready(pane_id: str, environ: dict[str, str], timeout: float) -> bool:
+    """True once the agent reads ready twice in a row: Codex reads idle for a moment before its startup turns busy."""
+    deadline = time.monotonic() + timeout
+    streak = 0
+    while True:
+        streak = streak + 1 if agent_status(pane_id, environ) in READY else 0
+        if streak == 2:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(READY_SETTLE_S)
+
+
+def name_session(
+    pane_id: str, name: str, environ: dict[str, str], confirmed: Callable[[], bool], timeout: float = RENAME_CONFIRM_S
+) -> str:
+    """Codex has no launch option for a session name, so its own rename command is typed at its ready prompt."""
+    try:
+        why = busy(pane_id, environ)
+    except (HerdrError, subprocess.TimeoutExpired):
+        return "error"
+    if why:
+        return f"refused-{why}"
+    try:
+        _cli(["pane", "run", pane_id, f"/rename {name}"], environ)
+        deadline = time.monotonic() + timeout
+        while not confirmed():
+            if time.monotonic() >= deadline:
+                _clear(pane_id, environ)
+                return "unconfirmed"
+            time.sleep(RENAME_POLL_S)
+    except (HerdrError, subprocess.TimeoutExpired):
+        _clear(pane_id, environ)
+        return "error"
+    return "named"
+
+
+def busy(pane_id: str, environ: dict[str, str]) -> str:
+    status = agent_status(pane_id, environ)
+    if status not in READY:
+        return status
+    return "typed" if typed(pane_id, environ) else ""
+
+
+def _clear(pane_id: str, environ: dict[str, str]) -> None:
+    with contextlib.suppress(HerdrError, subprocess.TimeoutExpired):
+        _cli(["pane", "send-keys", pane_id, CLEAR_INPUT], environ)
+
+
+def prompt(pane_id: str, text: str, environ: dict[str, str]) -> bool:
+    try:
+        _cli(["agent", "prompt", pane_id, text], environ)
     except (HerdrError, subprocess.TimeoutExpired):
         return False
     return True

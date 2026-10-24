@@ -8,8 +8,9 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
-from scripts.swarm_ledger.api import schemas  # noqa: E402
+from scripts.swarm_ledger.api import resources, schemas  # noqa: E402
 from scripts.swarm_ledger.api.errors import APIError  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "opchat-2026-01-01"
 
@@ -17,9 +18,9 @@ SLUG = "opchat-2026-01-01"
 @pytest.fixture(autouse=True)
 def ledger():
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
     core.sync(SLUG, ops=[{"op": "join", "id": "j1", "by": "boss", "role": "orchestrator"}])
@@ -54,6 +55,11 @@ def test_an_agent_line_answering_an_operator_line_is_shown():
     core.sync(SLUG, ops=[said(1, "where are we")])
     core.sync(SLUG, ops=[said(2, "Phase one is half done.", by="boss", reply_to="m-1")])
     assert chat() == [("operator", "where are we"), ("boss", "Phase one is half done.")]
+    state, _ = core.sync(SLUG)
+    assert state["chat"][1]["reply_to"] == "m-1"
+    rows = resources.read(state, "chat")["data"]
+    assert rows[1]["reply_to"] == "m-1"
+    assert "reply_to" not in rows[0]
 
 
 @pytest.mark.parametrize("reply_to", ["m-1", "m-9"])

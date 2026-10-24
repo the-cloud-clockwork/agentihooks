@@ -3,17 +3,15 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePath
 
 from hooks import classifier
+from hooks.classifier import definitions, runner
 from hooks.filters import extract, rounds, schema
 from hooks.filters.finders import scripts
 
 PURPOSE = "filter"
-YES_LINE = 0.5
-TRUE = "yes, the finding goes against the intent"
-FALSE = "no, the finding is fine"
 
 
 @dataclass(frozen=True)
@@ -23,6 +21,7 @@ class Finding:
     end: int
     text: str
     reason: str
+    context: str = ""
 
 
 def _passed() -> dict:
@@ -40,7 +39,7 @@ def _applies(spec: schema.FilterSpec, tool_input: dict) -> bool:
 def find(spec: schema.FilterSpec, pieces: list[extract.Piece], payload: dict | None = None) -> list[Finding]:
     payload = payload or {}
     if spec.mode == "classifier":
-        return [Finding(p.where, 0, len(p.text), p.text, "whole text") for p in pieces if p.text]
+        return [Finding(p.where, 0, len(p.text), p.text, "whole text", p.text) for p in pieces if p.text]
     named = scripts.resolve(payload.get("cwd")) if any(f.script for f in spec.finders) else {}
     path = extract.target_path(payload.get("tool_input") or {})
     tool = payload.get("tool_name", "")
@@ -57,7 +56,17 @@ def find(spec: schema.FilterSpec, pieces: list[extract.Piece], payload: dict | N
                     for match in finder.pattern.finditer(piece.text)
                     if match.group(0)
                 )
-    return findings
+    sources = {piece.where: piece.text for piece in pieces}
+    return [
+        replace(finding, context=_enclosing_lines(sources[finding.where], finding.start, finding.end))
+        for finding in findings
+    ]
+
+
+def _enclosing_lines(text: str, start: int, end: int) -> str:
+    first = text[:start].rfind("\n") + 1
+    last = text.find("\n", end - 1)
+    return text[first : len(text) if last < 0 else last]
 
 
 def _intent(spec: schema.FilterSpec, tool_input: dict) -> str:
@@ -65,14 +74,11 @@ def _intent(spec: schema.FilterSpec, tool_input: dict) -> str:
     return value if isinstance(value, str) and value else spec.intent
 
 
-def questions(spec: schema.FilterSpec, intent: str, findings: list[Finding]) -> dict:
+def _params(spec: schema.FilterSpec, intent: str, findings: list[Finding]) -> dict:
     return {
-        f"finding_{i}": classifier.YesNo(
-            f"{spec.question}\nIntent: {intent}\nFinding: {finding.text}\nReason: {finding.reason}",
-            true=TRUE,
-            false=FALSE,
-        )
-        for i, finding in enumerate(findings)
+        "question": spec.question,
+        "intent": intent,
+        "findings": [{"text": f.text, "reason": f.reason, "context": f.context} for f in findings],
     }
 
 
@@ -88,7 +94,7 @@ def confirm(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[
         "intent": intent,
     }
     try:
-        result = classifier.decide(state, questions(spec, intent, findings), purpose=PURPOSE, fallbacks=[])
+        output = runner.run(PURPOSE, state, _params(spec, intent, findings), decider=classifier.decide)
     except classifier.ClassifierInputError:
         raise
     except classifier.ClassifierError as error:
@@ -99,7 +105,7 @@ def confirm(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[
             {"filter": entry["path"], "findings": len(findings), "error": str(error)},
         )
         return []
-    return [f for i, f in enumerate(findings) if result.answers[f"finding_{i}"].noul >= YES_LINE]
+    return [f for i, f in enumerate(findings) if output.verdicts[f"finding_{i}"]]
 
 
 def _listing(findings: list[Finding]) -> str:
@@ -236,3 +242,10 @@ def run(entry: dict, step: str, payload: dict) -> dict:
     if spec.action == "send-back":
         return _limited(entry, spec, payload, confirmed)
     return ACTIONS[spec.action](confirmed)
+
+
+def __getattr__(name):
+    if name in ("TRUE", "FALSE"):
+        question = next(spec.question for spec in definitions.load(PURPOSE).questions if spec.name == "finding")
+        return question.true if name == "TRUE" else question.false
+    raise AttributeError(name)

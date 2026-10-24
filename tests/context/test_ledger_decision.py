@@ -54,49 +54,19 @@ def todos(count, session="s1"):
     }
 
 
-def task_create(n, session="s1"):
-    return {
-        "session_id": session,
-        "hook_event_name": "PostToolUse",
-        "tool_name": "TaskCreate",
-        "tool_input": {"subject": f"task {n}", "description": "work"},
-        "tool_response": {"task": {"id": str(n)}},
-        "cwd": "/",
-    }
+def bind(ledgers, session, slug="rig-grade-swarm", name="master@323133-0001"):
+    (ledgers / ".sessions" / f"{session}.json").write_text(json.dumps({"slug": slug, "name": name}), encoding="utf-8")
 
 
-def bash(command, stdout, session="s1"):
-    return {
-        "session_id": session,
-        "hook_event_name": "PostToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": command},
-        "tool_response": {"stdout": stdout, "stderr": "", "interrupted": False},
-        "cwd": "/",
-    }
+def test_an_unbound_claude_session_accepting_a_plan_gets_nothing(capsys, monkeypatch):
+    assert MARK not in run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
 
 
-# Seam one: an accepted plan starts a swarm.
+def test_an_unbound_codex_session_accepting_a_plan_gets_nothing(capsys, monkeypatch):
+    assert MARK not in run(recorded("codex_plan_accept"), capsys, "codex", monkeypatch)
 
 
-def test_claude_leaving_plan_mode_directs_init_swarm(capsys, monkeypatch):
-    out = run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
-    assert MARK in out
-    assert "init-swarm" in out
-    assert "without asking" in out
-
-
-def test_codex_accepting_its_plan_directs_init_swarm(capsys, monkeypatch):
-    out = run(recorded("codex_plan_accept"), capsys, "codex", monkeypatch)
-    assert MARK in out
-    assert "init-swarm" in out
-
-
-def test_codex_asking_for_a_plan_is_not_accepting_one(capsys, monkeypatch):
-    assert MARK not in run(recorded("codex_plan_prompt"), capsys, "codex", monkeypatch)
-
-
-def test_copilot_leaving_plan_mode_directs_init_swarm(monkeypatch):
+def test_an_unbound_copilot_session_leaving_plan_mode_gets_nothing(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
     payload = {
         "session_id": "c1",
@@ -104,95 +74,64 @@ def test_copilot_leaving_plan_mode_directs_init_swarm(monkeypatch):
         "tool_name": "exit_plan_mode",
         "tool_input": {"summary": "Write, run and delete hello.py"},
     }
-    assert "init-swarm" in decision.directive(payload)
+    assert decision.directive(payload) == ""
 
 
-def test_the_acceptance_signal_follows_the_harness(monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
-    assert decision.directive(recorded("codex_plan_accept", session_id="a")) == ""
-    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
-    assert decision.directive(recorded("claude_plan_accept", session_id="b")) == ""
+@pytest.mark.parametrize("count", [4, 5, 12])
+def test_an_unbound_session_with_a_four_item_task_list_gets_nothing(count, capsys, monkeypatch):
+    assert MARK not in run(todos(count), capsys, "claude", monkeypatch)
 
 
-# Seam two: non trivial work without a plan gets a small ledger.
+@pytest.mark.parametrize("count", [4, 8])
+def test_an_unbound_session_adding_four_tasks_gets_nothing(count, capsys, monkeypatch):
+    for i in range(count):
+        payload = {
+            "session_id": "s1",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "TaskCreate",
+            "tool_input": {"subject": f"step {i}", "description": f"do step {i}"},
+            "tool_response": {"task": {"id": str(i)}},
+            "cwd": "/",
+        }
+        assert MARK not in run(payload, capsys, "claude", monkeypatch)
 
 
-def test_a_task_list_of_four_directs_a_small_ledger(capsys, monkeypatch):
-    assert MARK not in run(todos(3), capsys, "claude", monkeypatch)
-    out = run(todos(4), capsys, "claude", monkeypatch)
-    assert MARK in out
-    assert "small ledger" in out
+TROUBLESHOOT_PROMPTS = [
+    "troubleshoot why the ledger page is blank",
+    "Debug the failing shard",
+    "investigate the slow Redis test",
+    "refactor the inbox module",
+    "we have a bug, start debugging it",
+    "Troubleshooting the deploy rollout",
+    "an investigation into the memory leak",
+    "please help me debug this",
+]
 
 
-def test_the_fourth_created_task_directs_a_small_ledger(capsys, monkeypatch):
-    for n in range(3):
-        assert MARK not in run(task_create(n), capsys, "claude", monkeypatch)
-    assert "small ledger" in run(task_create(3), capsys, "claude", monkeypatch)
+@pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.parametrize("text", TROUBLESHOOT_PROMPTS)
+def test_an_unbound_session_asked_to_troubleshoot_gets_nothing(text, target, capsys, monkeypatch):
+    assert MARK not in run(prompt(text), capsys, target, monkeypatch)
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        "troubleshoot why the ledger page is blank",
-        "Debug the failing shard",
-        "investigate the slow Redis test",
-        "refactor the inbox module",
-        "we have a bug, start debugging it",
-    ],
-)
-def test_a_troubleshooting_prompt_directs_a_small_ledger(text, capsys, monkeypatch):
-    out = run(prompt(text), capsys, "claude", monkeypatch)
-    assert MARK in out
-    assert "small ledger" in out
-
-
-def test_a_codex_troubleshooting_prompt_directs_a_small_ledger(capsys, monkeypatch):
-    payload = recorded("codex_trivial", prompt="Investigate why the hello world script prints twice")
-    assert "small ledger" in run(payload, capsys, "codex", monkeypatch)
-
-
-@pytest.mark.parametrize("name", ["codex_trivial"])
-def test_a_trivial_recorded_prompt_gets_nothing(name, capsys, monkeypatch):
-    assert MARK not in run(recorded(name), capsys, "codex", monkeypatch)
-
-
-def test_a_trivial_prompt_gets_nothing(capsys, monkeypatch):
+def test_an_unbound_trivial_prompt_gets_nothing(capsys, monkeypatch):
     assert MARK not in run(prompt("rename the helper to build_block"), capsys, "claude", monkeypatch)
 
 
-def test_the_small_ledger_directive_leaves_no_size_judgement(capsys, monkeypatch):
-    out = run(prompt("troubleshoot why sum.py prints 5"), capsys, "claude", monkeypatch)
-    assert "before any other tool call" in out
-    assert "even for a one line fix" in out
-    assert "--size small" in out and "--slug" not in out
+def test_a_codex_prompt_naming_a_plan_but_not_accepting_one_gets_nothing(capsys, monkeypatch):
+    assert MARK not in run(recorded("codex_plan_prompt"), capsys, "codex", monkeypatch)
 
 
-# Seam three: once per trigger, never in a swarm or a bound session, silenced by a decline.
-
-
-def test_each_directive_fires_once_per_trigger(capsys, monkeypatch):
-    assert MARK in run(prompt("debug the gate"), capsys, "claude", monkeypatch)
-    assert MARK not in run(prompt("now investigate the server"), capsys, "claude", monkeypatch)
-    assert MARK in run(todos(5), capsys, "claude", monkeypatch)
-    assert MARK not in run(todos(6), capsys, "claude", monkeypatch)
-    assert MARK in run(recorded("claude_plan_accept", session_id="s1"), capsys, "claude", monkeypatch)
-    assert MARK not in run(recorded("claude_plan_accept", session_id="s1"), capsys, "claude", monkeypatch)
-
-
-def test_another_session_gets_its_own_directive(capsys, monkeypatch):
-    assert MARK in run(prompt("debug the gate", "s1"), capsys, "claude", monkeypatch)
-    assert MARK in run(prompt("debug the gate", "s2"), capsys, "claude", monkeypatch)
-
-
-def test_an_accepted_plan_is_not_followed_by_a_small_ledger(capsys, monkeypatch):
-    assert "init-swarm" in run(recorded("claude_plan_accept", session_id="s1"), capsys, "claude", monkeypatch)
-    assert MARK not in run(todos(4), capsys, "claude", monkeypatch)
-
-
-def test_a_swarm_agent_gets_no_small_ledger(capsys, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_SWARM", "swarm-buildout")
-    assert MARK not in run(prompt("debug the gate"), capsys, "claude", monkeypatch)
-    assert MARK not in run(todos(5), capsys, "claude", monkeypatch)
+def test_a_non_plan_tool_call_on_an_unbound_session_gets_nothing(capsys, monkeypatch):
+    payload = {
+        "session_id": "s1",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "ls"},
+        "tool_response": {"stdout": "", "stderr": "", "interrupted": False},
+        "cwd": "/",
+    }
+    assert MARK not in run(payload, capsys, "claude", monkeypatch)
 
 
 def test_a_swarm_agent_appends_its_plan_to_the_swarm_ledger(capsys, monkeypatch):
@@ -204,110 +143,46 @@ def test_a_swarm_agent_appends_its_plan_to_the_swarm_ledger(capsys, monkeypatch)
     assert "init-swarm" not in out
 
 
-def test_a_session_bound_to_a_ledger_gets_no_small_ledger(isolated, capsys, monkeypatch):
-    (isolated / ".sessions" / "s1.json").write_text(json.dumps({"slug": "x", "name": "y"}), encoding="utf-8")
-    assert MARK not in run(prompt("troubleshoot the page"), capsys, "claude", monkeypatch)
-    assert MARK not in run(todos(5), capsys, "claude", monkeypatch)
-
-
-def test_a_bound_master_appends_its_plan_to_its_own_ledger(isolated, capsys, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_SWARM", "other-swarm")
-    session = RECORDED["claude_plan_accept"]["session_id"]
-    binding = {"slug": "rig-grade-swarm", "name": "master@323133-0001", "role": "master"}
-    (isolated / ".sessions" / f"{session}.json").write_text(json.dumps(binding), encoding="utf-8")
+def test_a_session_bound_to_a_ledger_appends_its_plan_there(isolated, capsys, monkeypatch):
+    bind(isolated, RECORDED["claude_plan_accept"]["session_id"], slug="rig-grade-swarm", name="master@323133-0001")
     out = run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
     assert MARK in out
     assert "agentihooks ledger --slug rig-grade-swarm --as master@323133-0001 plan phases <phases.json>" in out
-    assert "init-swarm" not in out
     assert "without asking" in out
-    assert MARK not in run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
 
 
-def test_an_unbound_plan_still_directs_init_swarm(isolated, capsys, monkeypatch):
-    (isolated / ".sessions" / "other.json").write_text(json.dumps({"slug": "x", "name": "y"}), encoding="utf-8")
-    out = run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
-    assert "init-swarm" in out
-    assert "plan phases" not in out
+@pytest.mark.parametrize("count", [4, 12])
+def test_a_bound_session_with_a_four_item_task_list_still_gets_nothing(count, isolated, capsys, monkeypatch):
+    bind(isolated, "s1")
+    assert MARK not in run(todos(count), capsys, "claude", monkeypatch)
 
 
-def ledger(isolated, slug):
-    (isolated / f"{slug}.json").write_text("{}", encoding="utf-8")
+@pytest.mark.parametrize("text", TROUBLESHOOT_PROMPTS)
+def test_a_bound_session_asked_to_troubleshoot_still_gets_nothing(text, isolated, capsys, monkeypatch):
+    bind(isolated, "s1")
+    assert MARK not in run(prompt(text), capsys, "claude", monkeypatch)
 
 
-def plan_accept(text, plan_file=None):
-    payload = recorded("claude_plan_accept")
-    payload["tool_input"]["plan"] = text
-    if plan_file is not None:
-        payload["tool_input"]["planFilePath"] = str(plan_file)
-    return payload
+def test_the_bound_directive_fires_once_per_session(isolated, capsys, monkeypatch):
+    bind(isolated, "s1")
+    assert MARK in run(recorded("claude_plan_accept", session_id="s1"), capsys, "claude", monkeypatch)
+    assert MARK not in run(recorded("claude_plan_accept", session_id="s1"), capsys, "claude", monkeypatch)
 
 
-def test_an_unbound_plan_naming_an_existing_ledger_is_offered_it_first(isolated, capsys, monkeypatch):
-    ledger(isolated, "rig-grade-swarm")
-    ledger(isolated, "other-ledger")
-    out = run(plan_accept("# Plan\n\nContinue rig-grade-swarm, then other-ledger.\n"), capsys, "claude", monkeypatch)
-    assert MARK in out
-    assert "names the existing ledger rig-grade-swarm" in out
-    assert "ask the operator whether the plan continues rig-grade-swarm" in out
-    offer = out.index("agentihooks ledger --slug rig-grade-swarm --as <your name> plan phases <phases.json>")
-    assert offer < out.index("init-swarm")
-    assert "other-ledger" not in out
-    assert MARK not in run(plan_accept("Continue rig-grade-swarm."), capsys, "claude", monkeypatch)
+def test_another_bound_session_gets_its_own_directive(isolated, capsys, monkeypatch):
+    bind(isolated, RECORDED["claude_plan_accept"]["session_id"])
+    bind(isolated, "other-session")
+    assert MARK in run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
+    assert MARK in run(recorded("claude_plan_accept", session_id="other-session"), capsys, "claude", monkeypatch)
 
 
-def test_the_offer_names_the_agent_and_reads_the_plan_file(isolated, tmp_path, monkeypatch):
+def test_the_acceptance_signal_follows_the_harness(isolated, monkeypatch):
+    bind(isolated, "a")
+    bind(isolated, "b")
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@1")
-    ledger(isolated, "swarm-buildout")
-    plan_file = tmp_path / "plan.md"
-    plan_file.write_text("Add two phases to Swarm-Buildout.\n", encoding="utf-8")
-    out = decision.directive(plan_accept("no slug here", plan_file))
-    assert "`agentihooks ledger --slug swarm-buildout --as engineer@1 plan phases <phases.json>`" in out
-
-
-def test_a_copilot_summary_naming_a_ledger_is_offered_it(isolated, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
-    ledger(isolated, "rig-grade-swarm")
-    payload = {
-        "session_id": "c1",
-        "hook_event_name": "PostToolUse",
-        "tool_name": "exit_plan_mode",
-        "tool_input": {"summary": "Two more phases for rig-grade-swarm"},
-    }
-    assert "names the existing ledger rig-grade-swarm" in decision.directive(payload)
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "# Hello world\n\n1. Write hello.py\n",
-        "Start a fresh ledger called brand-new-ledger.",
-        "Build the demo-app on top of the old demo-ledger.",
-        "Revive the binned ledger.",
-    ],
-)
-def test_a_plan_naming_no_existing_ledger_gets_the_swarm_directive(isolated, text, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
-    ledger(isolated, "demo")
-    ledger(isolated, "binned")
-    (isolated / ".bin.json").write_text(json.dumps({"binned": 1}), encoding="utf-8")
-    assert decision.directive(plan_accept(text, isolated / "missing.md")) == decision.SWARM_DIRECTIVE
-
-
-def test_a_plan_without_text_names_no_ledger(isolated, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
-    for slug in ("none", "xxxx"):
-        ledger(isolated, slug)
-    payload = {"session_id": "c1", "hook_event_name": "PostToolUse", "tool_name": "exit_plan_mode", "tool_input": {}}
-    assert decision.directive(payload) == decision.SWARM_DIRECTIVE
-
-
-@pytest.mark.parametrize("content", ["not json", "[1]"])
-def test_an_unreadable_bin_hides_no_ledger(isolated, content, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
-    ledger(isolated, "binned")
-    (isolated / ".bin.json").write_text(content, encoding="utf-8")
-    assert "names the existing ledger binned" in decision.directive(plan_accept("Revive the binned ledger."))
+    assert decision.directive(recorded("codex_plan_accept", session_id="a")) == ""
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    assert decision.directive(recorded("claude_plan_accept", session_id="b")) == ""
 
 
 def test_a_plan_without_a_session_id_gets_nothing(monkeypatch):
@@ -345,32 +220,9 @@ def test_an_unreadable_binding_falls_back_to_the_swarm(isolated, monkeypatch):
     assert "--slug env-swarm --as master@2 plan phases" in out
 
 
-def test_a_recorded_decline_silences_the_session(capsys, monkeypatch):
-    run(bash("agentihooks ledger decline", '{"declined": true}'), capsys, "claude", monkeypatch)
-    assert MARK not in run(prompt("troubleshoot the page"), capsys, "claude", monkeypatch)
-    assert MARK not in run(recorded("claude_plan_accept", session_id="s1"), capsys, "claude", monkeypatch)
-    assert MARK in run(prompt("troubleshoot the page", "s2"), capsys, "claude", monkeypatch)
-
-
-def test_a_failed_decline_does_not_silence(capsys, monkeypatch):
-    run(bash("agentihooks ledger decline", "usage: agentihooks ledger"), capsys, "claude", monkeypatch)
-    assert MARK in run(prompt("troubleshoot the page"), capsys, "claude", monkeypatch)
-
-
-def test_the_decline_command_reports_the_decline(capsys):
-    from scripts.swarm_ledger import run as ledger_run
-
-    assert ledger_run(["decline"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"declined": True}
-
-
-# Seam four: the toolbelt rule states the three outcomes.
-
-
-def test_the_toolbelt_rule_states_the_three_outcomes():
+def test_the_toolbelt_rule_bars_automatic_creation():
     rule = TOOLBELT.read_text(encoding="utf-8")
     section = rule.split("## Swarm, small ledger or nothing", 1)[1].split("\n## ", 1)[0]
-    assert "init-swarm" in section
-    assert "small ledger" in section
-    assert "agentihooks ledger decline" in section
-    assert "trivial" in section
+    assert "No session creates a ledger or starts a swarm on its own" in section
+    assert "gets no directive and" in section
+    assert "keeps its ledger duties" in section

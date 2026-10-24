@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/resume.py:scripts.swarm.resume.x__recover_process__mutmut_11:966498d7e881a4ce80c2239617c18b65169766abc7a5580e80347e4e35bf17ae": {
+    "reader": "standards_reader",
+    "reason": "The default applies only when snapshot.worktrees omits the agent, which production never does because it returns every requested name. With XXXX, blocker returns worktree gone instead of no worktree; both are truthy and the reason is never returned or stored, so the same restart branch runs with the same actions and state. Holds while the process working directory has no directory named XXXX."
+  }
+}

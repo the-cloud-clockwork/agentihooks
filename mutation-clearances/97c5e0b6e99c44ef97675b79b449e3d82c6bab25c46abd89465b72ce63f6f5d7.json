@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__migrate__mutmut_3:583339d5b6af94c771ea5f9f207753c9bd545628088eec6b0c269869679c452e": {
+    "reader": "Standards",
+    "reason": "Only SELECT, FROM and WHERE keyword casing changes; the completion-marker query still tests the same legacy row with the unchanged empty-string sentinel."
+  }
+}

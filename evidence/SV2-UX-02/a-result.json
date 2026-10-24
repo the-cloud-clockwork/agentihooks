@@ -1,0 +1,65 @@
+{
+  "case": "T-SV2-UX-02-A",
+  "checks": {
+    "drained_worker_reports_its_checkpoint": true,
+    "duplicated_click_queued_once": true,
+    "no_command_reached_another_agent": true,
+    "other_agents_stay_active": true,
+    "pending_cleared_after_settling": true,
+    "scopes_differ_per_control": true,
+    "second_fixture_matches_the_first": true
+  },
+  "evidence_class": "mocked: a fake Redis swarm store holds two Kubernetes workers and one local agent; page clicks enter through the ledger server's lifecycle control with the incarnation, generation and task revision a page rendered; the hive command runner consumes the queue with its terminal commands stubbed; a worker's acknowledgement and checkpoint outcome are written through the worker command queue; no ledger HTTP server, browser, worker Pod or cluster runs",
+  "input_sha256": {
+    "ledger-lifecycle-controls.json": "7debe263338f18145353feee5368d88748f513d5110fb23c17885940574ed7f1"
+  },
+  "ledger_control_conflicts_total": 0,
+  "observed": {
+    "agents": {
+      "eng-1": "working",
+      "eng-2": "working",
+      "eng-3": "working"
+    },
+    "answers": [
+      [
+        200,
+        ""
+      ],
+      [
+        200,
+        ""
+      ]
+    ],
+    "commands_queued": 1,
+    "operation": {
+      "control": "drain",
+      "error": "",
+      "state": "issued",
+      "worker": {
+        "outcome": {
+          "checkpoint": "ckpt-sv2-ux-02-eng-1",
+          "status": "checkpointed"
+        },
+        "state": "completed"
+      }
+    },
+    "other_worker_commands": {
+      "eng-2": 0,
+      "eng-3": 0
+    },
+    "pending": {},
+    "runner": [
+      "control lifecycle acknowledged"
+    ],
+    "scopes": {
+      "attach": "terminal view",
+      "cancel": "one agent",
+      "drain": "one agent",
+      "force_stop": "one agent",
+      "pause": "one swarm"
+    },
+    "terminal_commands": []
+  },
+  "package": "SV2-UX-02",
+  "state": "passed"
+}

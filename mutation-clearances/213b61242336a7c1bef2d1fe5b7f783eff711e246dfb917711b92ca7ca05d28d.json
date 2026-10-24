@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_main__mutmut_34:fd2d10eb9b5c5fcd15c83964701ad9c9996305bb88a5211d81914fd1f78c5cc2": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "Same as main_32: the markdown write without encoding uses the UTF-8 locale of CI and the worker image, so bytes are identical; a non-UTF-8 locale is excluded by the precedent."
+  }
+}

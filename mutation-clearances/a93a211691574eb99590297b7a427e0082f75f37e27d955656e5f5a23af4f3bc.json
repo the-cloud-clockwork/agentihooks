@@ -1,0 +1,6 @@
+{
+  "hooks/lifecycle/gitstate.py:hooks.lifecycle.gitstate.x__reflog_time__mutmut_4:911f8c21b040b81e84226f1c600a24f01e64c6c28fec3131d6abbb7f4cc39be8": {
+    "reader": "standards_reader",
+    "reason": "Python UTF-8 codec names are case-insensitive. Both names resolve to the same decoder and produce identical outputs and errors for every input. Independent reader ruled this mutation neutral after observing both codec lookups resolve to utf-8."
+  }
+}

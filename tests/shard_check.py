@@ -37,8 +37,24 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="fail unless every collected test ran in exactly one shard")
     parser.add_argument("durations", type=Path, nargs="+", help="the durations.json each shard stored")
     parser.add_argument("--tests", default="tests/")
+    parser.add_argument("--collected", type=Path, help="JSON test identifiers collected by the head run")
+    parser.add_argument("--reused", type=Path, help="the test plan whose tests reuse their passed dev result")
     args = parser.parse_args(argv)
-    collected = collect(args.tests)
+    if args.collected:
+        try:
+            collected = json.loads(args.collected.read_text())
+        except (OSError, ValueError) as error:
+            print(f"::error::Cannot read collected test data at {args.collected}: {error}")
+            return 1
+        if (
+            not isinstance(collected, list)
+            or not all(isinstance(nodeid, str) and nodeid for nodeid in collected)
+            or len(set(collected)) != len(collected)
+        ):
+            print(f"::error::Invalid collected test data at {args.collected}.")
+            return 1
+    else:
+        collected = collect(args.tests)
     if not collected:
         print(f"::error::Collecting {args.tests} failed or found no tests, so no shard can be graded.")
         return 1
@@ -51,11 +67,18 @@ def main(argv: list[str] | None = None) -> int:
         named = ", ".join(f"{path.parent.name}: {digest or 'none'}" for path, digest in hashes.items())
         print(f"::error::Shards split on different stored durations, so their test sets overlap or leave gaps: {named}")
         return 1
+    reused = set()
+    if args.reused:
+        try:
+            reused = set(json.loads(args.reused.read_text())["tests"]).intersection(collected)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            print(f"::error::Cannot read the test plan at {args.reused}: {error}")
+            return 1
     counts = run_counts(args.durations)
-    wrong = sorted(nodeid for nodeid in collected if counts[nodeid] != 1)
-    print(f"{len(collected)} collected tests, {len(wrong)} ran zero times or more than once")
+    wrong = sorted(nodeid for nodeid in collected if counts[nodeid] != (0 if nodeid in reused else 1))
+    print(f"{len(collected)} collected tests, {len(wrong)} ran zero times or more than once, {len(reused)} reused")
     for nodeid in wrong:
-        print(f"{nodeid} ran {counts[nodeid]} times")
+        print(f"{nodeid} ran {counts[nodeid]} times{' though reused' if nodeid in reused else ''}")
     if wrong:
         print(f"::error::{len(wrong)} collected tests did not run in exactly one of {len(args.durations)} shards.")
         return 1

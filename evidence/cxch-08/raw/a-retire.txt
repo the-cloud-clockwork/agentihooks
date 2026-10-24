@@ -1,0 +1,2 @@
+{"agent": "engineer@ed3ec8-0006", "retired": true, "refusal": null}
+{"agent": "master@ed3ec8-0001", "retired": true, "refusal": null}

@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger, ledger_tasks, new_ledger
 from scripts.swarm_ledger import ledger_core as core
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "taskadd-2026-01-01"
 PLANNER = "planner@abcdef-0003"
@@ -25,8 +26,8 @@ def make_ledger(claims=()):
         "sources": [],
         "phases": [{"title": "one", "description": "d"}, {"title": "two", "description": "d"}],
     }
-    html_path, _ = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path, _ = legacy_page.paths(SLUG, core)
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     for n, (lane, state, by) in enumerate(claims):
         kind = {"kind": "plan"} if lane == "plan" else {}
@@ -56,6 +57,37 @@ def assert_added(by, phase="p1"):
     state, rejected = add(by, phase)
     assert rejected == []
     assert "t9" in [t["id"] for t in state["tasks"]]
+
+
+def add_ranked(by):
+    op = {"op": "task_add", "id": "add-t9", "by": by, "task": "t9", "title": "x", "lane": "eng", "phase": "p1"}
+    return core.sync(SLUG, ops=[{**op, "rank": "high"}])
+
+
+def test_a_planner_holding_its_plan_task_cannot_add_a_ranked_task():
+    make_ledger([plan_task()])
+    state, rejected = add_ranked(PLANNER)
+    assert rejected == ["add-t9"]
+    assert state["_meta"]["warnings"] == [f"{PLANNER} cannot set a task rank: {FOLLOWUP}"]
+    assert "t9" not in [t["id"] for t in state["tasks"]]
+
+
+@pytest.mark.parametrize("by", ["master@abcdef-0001", "dispatcher@abcdef-0005"])
+def test_the_master_and_the_dispatcher_add_a_ranked_task(by):
+    make_ledger()
+    state, rejected = add_ranked(by)
+    assert rejected == []
+    assert next(t for t in state["tasks"] if t["id"] == "t9")["rank"] == "high"
+
+
+def test_the_swarm_adds_a_generated_documentation_task_at_rank_low_under_its_own_name():
+    make_ledger()
+    op = {"op": "task_add", "id": "add-t9", "by": "swarm", "task": "t9", "title": "x", "lane": "eng", "phase": "p1"}
+    generated = {"rank": "low", "profile": "documentation", "follow_up": True, "not_duplicate": "documents it"}
+    state, rejected = core.sync(SLUG, ops=[{**op, **generated}])
+    assert rejected == []
+    assert next(t for t in state["tasks"] if t["id"] == "t9")["rank"] == "low"
+    assert state["_meta"]["stamps"]["tasks/t9/rank"]["by"] == "swarm"
 
 
 def test_an_engineer_cannot_add_a_task():
@@ -147,7 +179,7 @@ def test_task_add_prints_the_server_refusal(monkeypatch):
     )
     with pytest.raises(SystemExit) as raised:
         ledger.send(args, "task_add", task="t9")
-    assert raised.value.code == "refused because"
+    assert raised.value.code == "task t9 was not added: refused because"
 
 
 TAKEN = 'task c0 already exists as "c" (done): pick another id, or pass - as the id to mint one'
@@ -155,7 +187,7 @@ TAKEN = 'task c0 already exists as "c" (done): pick another id, or pass - as the
 
 def served(slug, ops=None):
     state, rejected = core.sync(slug, ops=ops)
-    return {**state, "rejected": rejected}
+    return {**state, "applied": [op["id"] for op in ops or [] if op["id"] not in rejected], "rejected": rejected}
 
 
 def cli(monkeypatch, *argv):
@@ -178,7 +210,7 @@ def test_task_add_cli_exits_with_the_refusal_for_a_taken_id(monkeypatch, capsys)
     make_ledger([("eng", "done", "engineer@abcdef-0001")])
     with pytest.raises(SystemExit) as raised:
         cli(monkeypatch, "add", "c0", "new", "work")
-    assert raised.value.code == TAKEN
+    assert raised.value.code == f"task c0 was not added: {TAKEN}"
     assert capsys.readouterr().out == ""
 
 
@@ -205,7 +237,7 @@ def test_the_refusal_names_a_task_without_a_state_as_open():
 
 def test_task_add_with_a_dash_mints_t1_on_a_ledger_without_tasks(monkeypatch, capsys):
     sent = []
-    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: sent.append(ops) or {})
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: sent.append(ops) or {"applied": [ops[0]["id"]]})
     monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: sent.append(None) or [])
     ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "swarm", "task", "add", "-", "first"]))
     assert [op["task"] for op in sent[1]] == ["t1"]

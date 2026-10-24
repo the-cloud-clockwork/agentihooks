@@ -179,8 +179,9 @@ def _marker_key(marker: dict, session_id: str, scope: dict, content: str) -> str
     from hooks.context.brain_adapter import brain_id
     from scripts.swarm_v2 import keyspace
 
-    if keyspace.MARKER_KEY.fullmatch(str(marker.get("idempotency_key"))):
-        return marker["idempotency_key"]
+    recorded = marker.get("idempotency_key")
+    if isinstance(recorded, str) and keyspace.MARKER_KEY.fullmatch(recorded):
+        return recorded
     record = keyspace.installation(Path(AGENTIHOOKS_HOME))
     if not keyspace.current(marker.get("at"), record):
         return keyspace.legacy_marker_key(session_id, marker["type"], content)
@@ -258,7 +259,7 @@ def _drain_outbox(outbox_dir: str) -> int:
             continue
 
         body, idem = _marker_request(
-            marker, payload.get("session_id", ""), payload.get("cwd") or payload.get("project", "")
+            marker, payload.get("session_id") or "", payload.get("cwd") or payload.get("project", "")
         )
         response = post("/marker", body=body, idempotency_key=idem, surface_http_errors=True)
         status = (response or {}).get("__http_status__")

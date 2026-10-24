@@ -133,7 +133,7 @@ def _codex_quotas() -> dict:
         "default": CodexQuota(NOW - 60, "team", QuotaWindow(20, NOW + 1000), QuotaWindow(30, NOW + 5000)),
         "alpha": CodexQuota(NOW - 30, "team", QuotaWindow(97, NOW + 1000), QuotaWindow(10, NOW + 4000)),
         "beta": CodexQuota(NOW - 10, "team", QuotaWindow(None), QuotaWindow(96, NOW - 1)),
-        "gamma": CodexQuota(NOW - 3600, "team", QuotaWindow(5), QuotaWindow(5)),
+        "gamma": CodexQuota(NOW - 6 * 3600 - 1, "team", QuotaWindow(5), QuotaWindow(5)),
         "delta": CodexQuota(NOW, "team", QuotaWindow(40), QuotaWindow(96, NOW + 100)),
     }
 
@@ -195,14 +195,19 @@ def _capacity_outcome(case: dict, root: Path) -> dict:
     home = root / "home"
     home.mkdir(exist_ok=True)
     _seed(home / "claude-router-cache.json", NOW - 5)
-    env = {"AGENTIHOOKS_HOME": str(home), **_claude_env("ALPHA", "BRAVO", "CHARLIE", "DELTA", "GOLF", "HOTEL")}
+    env = {
+        "AGENTIHOOKS_HOME": str(home),
+        **_claude_env("ALPHA", "BRAVO", "CHARLIE", "DELTA", "ECHO", "FOXTROT", "GOLF", "HOTEL"),
+    }
     if case.get("codex_tokens", True):
         env.update({f"AH_CX_TOKEN_{name}": f"cx-{name}" for name in ("alpha", "beta", "gamma", "delta")})
     quotas = _codex_quotas()
     with ExitStack() as stack:
         patch = stack.enter_context
         patch(
-            mock.patch.object(capacity.account_sessions, "sessions_by_account", lambda: case.get("claude_sessions", {}))
+            mock.patch.object(
+                capacity.account_sessions, "sessions_by_account", lambda **_: case.get("claude_sessions", {})
+            )
         )
         patch(
             mock.patch.object(
@@ -225,7 +230,9 @@ def _capacity_outcome(case: dict, root: Path) -> dict:
     requirements = case.get("requirements")
     if requirements:
         requirements = {lane: [tuple(choice) for choice in choices] for lane, choices in requirements.items()}
-    return capacity.calculate(config, rows, agents, case.get("demand"), requirements)
+    decision = capacity.calculate(config, rows, agents, case.get("demand"), requirements)
+    unaged = [{key: value for key, value in row.items() if key != "observed_at"} for row in decision["accounts"]]
+    return {**decision, "accounts": unaged}
 
 
 def outcomes() -> dict:

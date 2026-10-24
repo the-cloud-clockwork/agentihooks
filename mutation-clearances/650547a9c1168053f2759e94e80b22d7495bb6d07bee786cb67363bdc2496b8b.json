@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routing.py:scripts.swarm_ledger.api.routing.x__principal__mutmut_7:1bba852df40d0883bd132031e187947a8c6a58e7ff3d05ef38da537fabed696d": {
+    "reader": "Standards code-reviewer sub agent on pull request 2057",
+    "reason": "Equivalent mutant: a missing slug header becomes XXXX instead of the empty string, and neither matches the ledger slug pattern, which requires a lowercase first character, so the principal is None and the write is refused with 403 in both cases. The reader checked old and new against the real SLUG_RE for missing, empty, valid and invalid slugs and found identical results."
+  }
+}

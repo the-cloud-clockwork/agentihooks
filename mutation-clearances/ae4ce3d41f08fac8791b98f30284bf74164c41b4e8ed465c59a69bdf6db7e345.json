@@ -1,0 +1,6 @@
+{
+  "scripts/ci_wall_clock.py:scripts.ci_wall_clock.x\u01c1Timing\u01c1value__mutmut_82:e953297747ca145a888da742ad4edb1458ad81671c5416d5d3f76f645a23402b": {
+    "reader": "standards-reader",
+    "reason": "The third tuple element is a private cycle sentinel. Creation and membership checks use the same changed literal; no branch interprets its spelling and it is never emitted."
+  }
+}

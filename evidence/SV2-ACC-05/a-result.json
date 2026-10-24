@@ -1,0 +1,78 @@
+{
+  "package": "SV2-ACC-05",
+  "case": "T-SV2-ACC-05-A",
+  "title": "successful behavior: a completed handoff releases the old slot only after the successor route is confirmed",
+  "tested_commit": "5b2c70a3bd120abda0676c302fe122ca77a5a88b",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064120800",
+  "fixture": "tests/fixtures/swarm_v2/account-reconciliation.json: account fixture with cap 4; seat eng-1 mid handoff (generation 1 occupied, generation 2 reserved), seat eng-2 orphan reservation of a replaced execution, seat eng-3 working with a confirmed terminal loss, and stored runtime observations for supervisor exit, Pod Failed, Pod not found, Pod unreachable and Pod Running",
+  "fixture_clock": "build() from tests/sv2_ctl02_cases.py patches time.time to the fixture clock and issues launch grants; FleetRegistry, AccountCapacity and AccountReconciler read the same list",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_a_handoff_releases_the_old_slot_only_after_the_successor_occupies[first]",
+      "job": 114248338082,
+      "output": "PASSED at 2026-10-10T15:36:32.9374827Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_a_handoff_releases_the_old_slot_only_after_the_successor_occupies[second]",
+      "job": 114248338082,
+      "output": "PASSED at 2026-10-10T15:36:32.9667449Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_a_live_remote_session_without_a_slot_is_reported_and_a_local_one_is_not",
+      "job": 114248338082,
+      "output": "PASSED at 2026-10-10T15:36:33.0067190Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_a_replacement_of_a_closed_occupancy_takes_the_seat_slot",
+      "job": 114248338081,
+      "output": "PASSED at 2026-10-10T15:37:39.8974634Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_a_retiring_row_of_the_current_generation_is_never_a_confirmed_handoff",
+      "job": 114248338034,
+      "output": "PASSED at 2026-10-10T15:38:35.5377427Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_a_successor_that_never_confirms_leaves_the_old_slot_counted",
+      "job": 114248338034,
+      "output": "PASSED at 2026-10-10T15:38:35.4197322Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_a_worker_waiting_on_quota_keeps_its_slot_until_its_session_closes",
+      "job": 114248338034,
+      "output": "PASSED at 2026-10-10T15:38:35.5777512Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_reconstruct_keeps_a_live_predecessor_beside_its_confirmed_successor",
+      "job": 114248338034,
+      "output": "PASSED at 2026-10-10T15:38:35.8035589Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_report_writes_nothing",
+      "job": 114248338081,
+      "output": "PASSED at 2026-10-10T15:37:39.9266036Z"
+    }
+  ],
+  "state_assertions": {
+    "before_confirmation": "the account hash holds the retiring generation 1 row, the generation 2 reservation, the orphan reservation and the lost terminal row; reconcile keeps them all and reports handoff_unconfirmed and orphan_reservation",
+    "after_confirmation": "once the successor occupies with a live registry record, reconcile releases only the retiring row; the successor row is generation 2 occupied",
+    "unconfirmed_successor": "a successor reservation that expires is released and the old slot stays counted as handoff_unconfirmed",
+    "waiting_quota": "a worker waiting on provider quota keeps its occupied slot and is not a discrepancy until its session closes",
+    "report": "report() returns findings and writes neither account rows nor the discrepancy hash"
+  },
+  "repeat_assertion": "the handoff test runs twice on independent fakeredis fixtures (first, second)",
+  "boundary_assertion": "judgement reads only the account hash, the execution registry, fleet session records and stored runtime observations; a local-backend session is not reported as unaccounted",
+  "account_occupancy_discrepancies": {
+    "before_confirmation": {
+      "handoff_unconfirmed": 1,
+      "orphan_reservation": 1
+    },
+    "after_confirmation": {
+      "orphan_reservation": 1
+    },
+    "dimension": "swarm fixture, account fixture, per reconcile pass"
+  },
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "passed": true
+}

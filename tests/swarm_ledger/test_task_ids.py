@@ -83,6 +83,13 @@ def test_the_id_label_is_bare_flat_red_text_in_the_priorities_red(tab):
 
 def test_a_focused_id_label_keeps_a_visible_focus_ring(tab):
     tab.locator("#priorities .prio-link").click()
+    tab.evaluate(
+        """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          const {render} = await import(new URL('render.js', main));
+          await render(null, true);
+        }"""
+    )
     label = tab.locator("#item-tasks-rb3c .task-id")
     label.wait_for(state="visible")
     label.focus()

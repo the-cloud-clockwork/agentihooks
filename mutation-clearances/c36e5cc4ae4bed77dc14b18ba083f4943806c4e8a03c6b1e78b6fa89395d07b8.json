@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x__checkpoint__mutmut_6:127efde0c64475f8047c3a63b3711d854be04aa5ad7eb237363fbc32270d69a9": {
+    "reader": "standards_reader",
+    "reason": "Only SQL keyword and function letter case changes. SQLite executes the same INSERT/UPSERT and MAX expression with unchanged bound values and monotonic cursor updates."
+  }
+}

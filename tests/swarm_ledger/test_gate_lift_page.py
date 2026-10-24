@@ -48,5 +48,8 @@ def test_a_click_sends_the_lift_for_that_agent_and_gate(tab):
     open_swarm(tab, puts)
     tab.locator("#swarm-agents tr", has_text="engineer").hover()
     tab.get_by_role("button", name="Lift the watch gate for engineer").click()
-    tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('Lift the gate: pending')")
+    for _ in range(100):
+        if puts:
+            break
+        tab.wait_for_timeout(100)
     assert puts == [{"action": "lift", "agent": "engineer", "gate": "watch"}]

@@ -17,7 +17,6 @@ from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 ROOT = Path(__file__).resolve().parents[2]
 BOOT = """
 import json, shutil, sys, threading, time
@@ -33,7 +32,7 @@ new_ledger.create('sw', {'title': 'Remote controls', 'overview': 'Control the ow
 server = ThreadingHTTPServer(('127.0.0.1', 0), ledger_server.Handler)
 ledger_server.ALLOWED_HOSTS.add(f'127.0.0.1:{server.server_address[1]}')
 ledger_server.ALLOWED_ORIGINS.add(f'http://127.0.0.1:{server.server_address[1]}')
-token = ledger_core.read_token(ledger_core.paths('sw')[0].read_text())
+token = ledger_server.repository.token('sw')
 Path(sys.argv[3]).write_text(json.dumps({'port': server.server_address[1], 'token': token, 'host': f'127.0.0.1:{ledger_server.PORT}'}))
 def sample():
     while True:
@@ -66,13 +65,13 @@ def test_readiness_wait_returns_only_a_complete_reply(tmp_path):
 @pytest.fixture
 def remote_server(tmp_path, monkeypatch):
     import fakeredis
-    import redis
 
     backend = fakeredis.TcpFakeServer(("127.0.0.1", 0), server_type="redis")
+    monkeypatch.setattr(backend.RequestHandlerClass, "disable_nagle_algorithm", True)
     thread = threading.Thread(target=backend.serve_forever, daemon=True)
     thread.start()
     url = f"redis://127.0.0.1:{backend.server_address[1]}/0"
-    saved = RedisStore(redis.Redis.from_url(url, decode_responses=True, protocol=3))
+    saved = RedisStore(fakeredis.FakeRedis(server=backend.fake_server, decode_responses=True, protocol=3))
     saved.create(SwarmConfig("sw", str(ROOT), 0, 0, state="running"))
     commands.bind(saved, "sw", "home")
     commands.publish(saved, "sw", {"tasks": {}, "agents": []}, {})

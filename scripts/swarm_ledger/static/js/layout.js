@@ -3,7 +3,7 @@ import { $, store, stored } from "./dom.js";
 import { readLayout, writeLayout } from "./api.js";
 import { showArtifacts } from "./artifacts.js";
 import { anchorPanel, showAlerts, showNotifications } from "./notices.js";
-import { revealTarget } from "./outline.js";
+import { pageTo, revealTarget } from "./outline.js";
 import { renderSwarm, swarm } from "./swarm.js";
 
 const tabScroll = {};
@@ -30,7 +30,10 @@ export function openHash() {
   const target = id && revealTarget(id);
   if (target) {
     requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
-  } else selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
+    return;
+  }
+  selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
+  pageTo(id);
 }
 
 export function wireTabs() {
@@ -52,8 +55,13 @@ export function wireTabs() {
 let layout = {};
 let layoutSave = 0;
 
+function knownRows(next) {
+  const rows = new Set([...document.querySelectorAll("#swarm-box [data-grip]")].map((grip) => grip.dataset.row));
+  return Object.fromEntries(Object.entries(next).filter(([key]) => ["columns", "stats"].includes(key) || rows.has(key)));
+}
+
 function applyLayout(next) {
-  layout = next && typeof next === "object" && !Array.isArray(next) ? next : {};
+  layout = next && typeof next === "object" && !Array.isArray(next) ? knownRows(next) : {};
   for (const grip of document.querySelectorAll("#swarm-box [data-grip]")) {
     const row = $(grip.dataset.row), value = (layout[row.id] || {})[grip.dataset.grip];
     const [cls, prop, unit] = grip.dataset.grip === "height" ? ["sized", "--h", "px"] : ["split", "--split", "%"];
@@ -66,6 +74,140 @@ function applyLayout(next) {
     }
   }
   $("layout-reset").disabled = !Object.keys(layout).length;
+  applyColumns();
+  orderStats();
+}
+
+function orderStats() {
+  const box = $("stats"), order = Array.isArray(layout.stats) ? layout.stats : [];
+  if (!box) return;
+  const rows = [...box.children], rank = (row) => {
+    const at = order.indexOf(row.dataset.stat);
+    return at < 0 ? order.length + rows.indexOf(row) : at;
+  };
+  const sorted = [...rows].sort((a, b) => rank(a) - rank(b));
+  if (sorted.some((row, i) => row !== rows[i])) box.append(...sorted);
+}
+
+function saveStats() {
+  setLayout({ ...layout, stats: [...$("stats").children].map((row) => row.dataset.stat).filter(Boolean) }, 0);
+}
+
+function wireStats() {
+  const box = $("stats");
+  box.addEventListener("pointerdown", (ev) => {
+    const grip = ev.target.closest(".stat-grip");
+    if (!grip || ev.button !== 0) return;
+    ev.preventDefault();
+    const row = grip.closest(".stat");
+    row.classList.add("dragging");
+    document.body.classList.add("reordering");
+    const move = (e) => {
+      if (e.pointerId !== ev.pointerId || !row.isConnected) return;
+      const target = [...box.children].find((other) => {
+        const at = other.getBoundingClientRect();
+        return other !== row && e.clientY >= at.top && e.clientY < at.bottom;
+      });
+      if (!target) return;
+      const at = target.getBoundingClientRect();
+      if (e.clientY < at.top + at.height / 2) target.before(row);
+      else target.after(row);
+    };
+    const end = (e) => {
+      if (e.pointerId !== ev.pointerId) return;
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", end);
+      document.removeEventListener("pointercancel", end);
+      row.classList.remove("dragging");
+      document.body.classList.remove("reordering");
+      saveStats();
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", end);
+    document.addEventListener("pointercancel", end);
+  });
+  box.addEventListener("keydown", (ev) => {
+    const grip = ev.target.closest(".stat-grip"), row = grip && grip.closest(".stat");
+    const next = row && { ArrowUp: row.previousElementSibling, ArrowDown: row.nextElementSibling }[ev.key];
+    if (!next) return;
+    ev.preventDefault();
+    if (ev.key === "ArrowUp") next.before(row);
+    else next.after(row);
+    grip.focus();
+    saveStats();
+  });
+  document.addEventListener("stats", orderStats);
+}
+
+const COLUMN_MIN = 40;
+const COLUMN_STEP = 16;
+
+function columnKey(table) {
+  return `${table.id}-${table.tHead.rows[0].cells.length}`;
+}
+
+function columnHeads(table) {
+  return [...table.tHead.rows[0].cells];
+}
+
+export function applyColumns() {
+  const saved = layout.columns || {};
+  for (const table of document.querySelectorAll("table.sw-table[id]")) {
+    const heads = columnHeads(table), widths = saved[columnKey(table)];
+    heads.forEach((th, i) => {
+      if (i < heads.length - 1 && !th.querySelector(":scope > .col-grip")) th.append(columnGrip(th));
+    });
+    const sized = Array.isArray(widths) && widths.length === heads.length;
+    table.classList.toggle("sized-cols", sized);
+    heads.forEach((th, i) => { th.style.width = sized ? `${widths[i]}px` : ""; });
+    table.style.width = sized ? `${widths.reduce((a, b) => a + b, 0)}px` : "";
+  }
+}
+
+function columnGrip(th) {
+  const grip = document.createElement("span");
+  grip.className = "col-grip";
+  grip.tabIndex = 0;
+  grip.setAttribute("role", "separator");
+  grip.setAttribute("aria-orientation", "vertical");
+  grip.setAttribute("aria-label", `Resize the ${th.textContent.trim() || "column"} column`);
+  return grip;
+}
+
+function setColumns(table, widths) {
+  setLayout({ ...layout, columns: { ...(layout.columns || {}), [columnKey(table)]: widths.map((w) => Math.round(w)) } });
+}
+
+function measured(table) {
+  return columnHeads(table).map((th) => th.getBoundingClientRect().width);
+}
+
+function wireColumns() {
+  document.addEventListener("pointerdown", (ev) => {
+    const grip = ev.target.closest(".col-grip");
+    if (!grip || ev.button !== 0) return;
+    ev.preventDefault();
+    const th = grip.parentElement, table = th.closest("table"), index = th.cellIndex, start = measured(table), x0 = ev.clientX;
+    grip.setPointerCapture(ev.pointerId);
+    grip.classList.add("dragging");
+    document.body.classList.add("resizing-x");
+    const move = (e) => setColumns(table, start.map((w, i) => (i === index ? Math.max(COLUMN_MIN, w + e.clientX - x0) : w)));
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("lostpointercapture", () => {
+      grip.removeEventListener("pointermove", move);
+      grip.classList.remove("dragging");
+      document.body.classList.remove("resizing-x");
+    }, { once: true });
+  });
+  document.addEventListener("keydown", (ev) => {
+    const grip = ev.target.closest && ev.target.closest(".col-grip");
+    const step = grip && { ArrowLeft: -COLUMN_STEP, ArrowRight: COLUMN_STEP }[ev.key];
+    if (!step) return;
+    ev.preventDefault();
+    const table = grip.closest("table"), index = grip.parentElement.cellIndex;
+    setColumns(table, measured(table).map((w, i) => (i === index ? Math.max(COLUMN_MIN, w + step * (ev.shiftKey ? 4 : 1)) : w)));
+  });
+  document.addEventListener("columns", applyColumns);
 }
 
 function mirrorLayout() {
@@ -128,9 +270,11 @@ function wireGrip(grip) {
 export function startLayout() {
   applyLayout(stored(LAYOUT_KEY, {}));
   for (const grip of document.querySelectorAll("#swarm-box [data-grip]")) wireGrip(grip);
+  wireColumns();
+  wireStats();
   $("layout-reset").addEventListener("click", () => setLayout({}, 0));
   readLayout()
-    .then((resp) => (resp.ok ? resp.json() : null))
+    .then((resp) => (resp.ok ? resp.json().then((reply) => reply.data) : null))
     .then((saved) => {
       if (saved && !layoutSave) { applyLayout(saved); mirrorLayout(); }
     })

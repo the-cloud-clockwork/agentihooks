@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stack.py:scripts.swarm.stack.x_restack__mutmut_22:5fd3349a8b72221c88ac2c16aeefb866b7482be613823e717767e66b1ec6f3af": {
+    "reader": "Standards",
+    "reason": "Standards reader ruled output equivalent: restack resolves its root from the current Git context and never changes cwd. A None cwd queries the same repository for branch, origin and absolute common directory, including from nested directories. branch_record discards checkout_fields worktree text. Git errors depend on unchanged argv and captured output, not cwd spelling. The root lookup itself remains executed."
+  }
+}

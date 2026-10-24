@@ -6,7 +6,7 @@ from hooks.context import profile_chain
 from scripts.swarm import prompt
 from scripts.swarm.store import MASTER, SwarmError
 
-KINDS = {"planner": "plan", "engineer": "eng", "qa": "eng", "cicd": "ci"}
+KINDS = {"planner": "plan", "engineer": "eng", "qa": "eng", "cicd": "ci", "documentation": "eng"}
 
 
 @dataclass(frozen=True)

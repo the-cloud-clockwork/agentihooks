@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/lifecycle.py:scripts.swarm.lifecycle.x_operations__mutmut_38:e99ac011c8a6fd53b3abb3f3657766b683936af27bf59a1d1207405b27040d1a": {
+    "reader": "standards_reader",
+    "reason": "Every ops record carries a fingerprint: _admit always sets it, _settle spreads the record so the key survives, and the ops hash and order list are written only by request and _settle; the mutant could raise only for a hand-inserted record no module path produces."
+  }
+}

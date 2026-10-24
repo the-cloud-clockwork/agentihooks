@@ -77,6 +77,22 @@ def test_the_pre_tool_hook_records_a_bound_session(monkeypatch, tmp_path):
     assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}
 
 
+def test_native_codex_tool_boundary_refreshes_timestamp_even_when_unclassified(monkeypatch, tmp_path):
+    from hooks import hook_manager
+
+    for key, value in BOUND.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    activity.record("Read", {}, BOUND, tmp_path, now_ms=1)
+    hook_manager.on_pre_tool_use(
+        {"session_id": "s1", "tool_name": "functions.exec", "tool_input": {"code": "text(1)"}, "cwd": "/"}
+    )
+    assert activity.last_events("sw", tmp_path)["sw-eng-1"] > 1
+    assert activity.counts("sw", tmp_path) == {}
+
+
 def test_a_torn_line_is_skipped_and_the_rest_still_counts(tmp_path):
     (tmp_path / "sw").mkdir()
     (tmp_path / "sw" / "sw-eng-1.jsonl").write_text('{"kind": "watch"}\n{"kind": "wa\n{"kind": "act"}\n')
@@ -222,6 +238,22 @@ def test_the_first_hook_event_of_each_agent_is_kept_whatever_the_tool(tmp_path):
     assert activity.first_events("sw", tmp_path) == {"sw-eng-1": 5_000, "sw-eng-2": 7_000}
     assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 0, "act": 1, "since": 0}}
     assert activity.first_events("none", tmp_path / "missing") == {}
+
+
+def test_latest_tool_event_includes_unclassified_calls(tmp_path):
+    activity.record("Edit", {}, BOUND, tmp_path, now_ms=5000)
+    activity.record("Read", {}, BOUND, tmp_path, now_ms=9000)
+    assert activity.last_events("sw", tmp_path) == {"sw-eng-1": 9000}
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 0, "act": 1, "since": 0}}
+    assert activity.last_events("missing", tmp_path) == {}
+
+
+def test_invalid_latest_tool_timestamp_does_not_hide_later_agents(tmp_path):
+    folder = tmp_path / "sw"
+    folder.mkdir()
+    (folder / "a.last").write_text("broken")
+    (folder / "b.last").write_text("9000")
+    assert activity.last_events("sw", tmp_path) == {"b": 9000}
 
 
 def test_since_action_counts_only_the_watches_after_the_last_action():

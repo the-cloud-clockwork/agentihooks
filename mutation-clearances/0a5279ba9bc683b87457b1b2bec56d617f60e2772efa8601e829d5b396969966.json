@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/lifecycle.py:scripts.swarm.lifecycle.x_destructive_on__mutmut_7:5dbdcacc98415193f7c7b1a82f83ebe04f71df1a9d2e4512150b5dcf5f70acaa": {
+    "reader": "standards_reader",
+    "reason": "The default is read only when AGENTIHOOKS_LIFECYCLE_DESTRUCTIVE is unset, and \"ON\".lower() and \"on\".lower() both differ from \"off\", so destructive_on returns True either way."
+  }
+}

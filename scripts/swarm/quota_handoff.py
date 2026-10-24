@@ -1,9 +1,9 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity
-from scripts.swarm.store import RedisStore
+from scripts.swarm import capacity, quota_notice
+from scripts.swarm.store import MASTER, RedisStore
 
 
 @dataclass(frozen=True)
@@ -24,20 +24,42 @@ class Thresholds:
         return thresholds
 
 
+def windows(account: capacity.Account, thresholds: Thresholds) -> list[str]:
+    if account.kind == "api" or account.state == "UNKNOWN":
+        return []
+    return [
+        window
+        for window, left, limit in (
+            ("week", account.week_left, thresholds.week),
+            ("five hour", account.five_left, thresholds.five),
+        )
+        if (account.harness != "codex" or window == "week")
+        and left is not None
+        and (100 - left >= limit or (window == "week" and account.reserved != ""))
+    ]
+
+
 def trigger(account: capacity.Account, thresholds: Thresholds) -> str:
-    if account.state == "UNKNOWN":
-        return ""
-    if account.week_left is not None and 100 - account.week_left >= thresholds.week:
-        return "week"
-    if account.five_left is not None and 100 - account.five_left >= thresholds.five:
-        return "five hour"
-    return ""
+    return next(iter(windows(account, thresholds)), "")
 
 
-def directive(slug: str, account: capacity.Account, window: str) -> str:
-    used = 100 - (account.week_left if window == "week" else account.five_left)
+def _reset(account: capacity.Account, window: str) -> int | None:
+    return account.week_resets_at if window == "week" else account.five_resets_at
+
+
+def _window_text(account: capacity.Account, window: str) -> str:
+    from hooks.context.quota_policy import reset_when
+
+    left = account.week_left if window == "week" else account.five_left
+    reset = _reset(account, window)
+    when = f"it resets {reset_when(reset)}" if reset else "its reset time is unknown"
+    return f"has used {100 - left:g}% of its {window} window, {left:g}% left; {when}"
+
+
+def directive(slug: str, account: capacity.Account, crossed: list[str]) -> str:
     return (
-        f"QUOTA HANDOFF WARNING: {account.harness} account {account.name} has used {used:g}% of its {window} window. "
+        f"{quota_notice.WARNING_OPENING} {account.harness} account {account.name} "
+        f"{'. It '.join(_window_text(account, window) for window in crossed)}. "
         "Finish your current step and write your Handoff v2 with the handoff skill while quota remains. "
         f"Submit it with agentihooks swarm {slug} handoff DOC --reason quota, then stop. "
         "The tick keeps your seat and task and routes the successor to an account with room. "
@@ -51,16 +73,25 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
         (row["harness"], row["name"]): capacity.Account(**row) for row in capacity.read(store, slug).get("accounts", [])
     }
     key, actions = store.key(slug, "quota-warnings"), []
-    lives = store.key(slug, "quota-warning-lives")
+    lives, periods = store.key(slug, "quota-warning-lives"), store.key(slug, "quota-warning-periods")
     for agent in store.agents(slug):
-        if agent.state == "finished" or store.redis.hget(lives, agent.name) == str(agent.started_at):
-            continue
         account = accounts.get((agent.harness, agent.account))
-        if account is None or not (window := trigger(account, thresholds)):
+        if agent.state == "finished" or account is None:
             continue
-        item = InboxStore(store.redis).send("swarm", agent.name, directive(slug, account, window))
-        store.redis.hset(key, agent.name, item.id)
-        store.redis.hset(lives, agent.name, agent.started_at)
+        account = replace(account, reserved="") if agent.lane == MASTER else account
+        life, due = str(agent.started_at), []
+        for window in windows(account, thresholds):
+            field, period = f"{agent.name}:{window}", f"{life}:{_reset(account, window)}"
+            if store.redis.hget(periods, field) != period:
+                due.append((window, field, period))
+        if not due:
+            continue
+        crossed = [window for window, _, _ in due]
+        item = InboxStore(store.redis).send("swarm", agent.name, directive(slug, account, crossed))
+        if store.redis.hget(lives, agent.name) != life:
+            store.redis.hset(key, agent.name, item.id)
+        store.redis.hset(lives, agent.name, life)
+        store.redis.hset(periods, mapping={field: period for _, field, period in due})
         actions.append(f"early quota handoff warning sent to {agent.name}")
     return actions
 
@@ -70,7 +101,11 @@ def exclusion(account: capacity.Account, thresholds: Thresholds, predecessor: tu
         return "is the account handing off"
     if not capacity.free_seats(account):
         return "has no free seats"
-    if account.state == "UNKNOWN" or (account.five_left is None and account.week_left is None):
+    if account.kind == "api":
+        return ""
+    if account.state == "UNKNOWN" or (
+        account.week_left is None and (account.harness == "codex" or account.five_left is None)
+    ):
         return "has no quota reading"
     if window := trigger(account, thresholds):
         return capacity.warning(window)
@@ -87,14 +122,20 @@ def refusal(
     )
 
 
-def successor(accounts: list[capacity.Account], allow_codex: bool, thresholds: Thresholds) -> capacity.Account | None:
-    for harness in ("claude", "codex") if allow_codex else ("claude",):
+def successor(
+    accounts: list[capacity.Account], harnesses: tuple[str, ...], thresholds: Thresholds
+) -> capacity.Account | None:
+    for harness in harnesses:
         eligible = [row for row in accounts if row.harness == harness and not exclusion(row, thresholds)]
         if eligible:
             return min(
                 eligible,
                 key=lambda row: (
-                    -min(value for value in (row.five_left, row.week_left) if value is not None),
+                    -100
+                    if row.kind == "api"
+                    else -row.week_left
+                    if row.harness == "codex"
+                    else -min(value for value in (row.five_left, row.week_left) if value is not None),
                     row.name,
                 ),
             )

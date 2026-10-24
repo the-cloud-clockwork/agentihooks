@@ -1,0 +1,11 @@
+apiVersion: v2
+name: agentihooks-swarm
+description: The agentihooks swarm runtime in distributed mode, a ledger, Redis and the lease holding controller
+type: application
+version: 0.1.0
+appVersion: dev
+dependencies:
+  - name: nats
+    version: 2.15.1
+    repository: https://nats-io.github.io/k8s/helm/charts/
+    condition: nats.enabled

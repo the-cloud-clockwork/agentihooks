@@ -1,0 +1,15 @@
+version: 1
+purpose: filter
+fallbacks: none
+questions:
+  - name: finding
+    type: yesno
+    each: findings
+    instructions: "{question}\nIntent: {intent}\nFinding: {item[text]}\nReason: {item[reason]}\nContext: {item[context]}"
+    "true": yes, the finding goes against the intent
+    "false": no, the finding is fine
+thresholds:
+  confirm: 0.5
+rule:
+  type: "yes"
+  threshold: confirm

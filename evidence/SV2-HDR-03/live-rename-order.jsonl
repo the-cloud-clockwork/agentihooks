@@ -1,0 +1,1 @@
+{"detail": {"exit": 2, "labels": ["swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal", "swarm-exe-cccccccccccccccccccccccccccccccc-terminal"], "output": "usage: herdr machine rename <profile-id> --label <label>\n"}, "held": false, "step": "c_hand_rename_applied"}

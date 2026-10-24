@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/bus.py:scripts.inbox.bus.x\u01c1SeatPublisher\u01c1publish__mutmut_40:6bf2533a4511940cd6e7c4b4cf364c7394bd7e3484de3e5ef85be1c53304ff9c": {
+    "reader": "standards-reader",
+    "reason": "The mutated type or entity belongs only to an unpublished intermediate Envelope. publish_wake unconditionally replaces both fields before publishing the same final request. Standards reader verified identical outgoing behavior."
+  }
+}

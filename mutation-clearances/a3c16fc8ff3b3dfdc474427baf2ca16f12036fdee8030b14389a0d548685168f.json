@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/kubernetes/terminal.py:scripts.swarm_v2.kubernetes.terminal.x\u01c1TerminalTemplate\u01c1render__mutmut_6:48f3f17c3df31a73af88982dabc7c04ccf68f572559efeb1823e24e2120402f9": {
+    "reader": "standards_reader",
+    "reason": "Actor None is never read on this path. TerminalTemplate.render passes this Scope only to Endpoint, and with_terminal reads only endpoint.name, which is pod_name(scope.execution_id) plus -terminal; Scope is a frozen dataclass with no validation and the digest hashes only the pod dict, so the rendered Pod and digest are unchanged."
+  }
+}

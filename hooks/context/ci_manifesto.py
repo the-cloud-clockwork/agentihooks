@@ -1,25 +1,10 @@
-"""CI Manifesto injector — doctrine-as-context primitive.
+"""Inject enabled CI manifestos at session start and on the refresh cadence.
 
-Reads every enabled bundle manifesto and injects them into the
-session context at SessionStart, with counter-gated re-injection on
-UserPromptSubmit to fight attention decay.
+Publication requires release dance. Legacy fenced signal blocks supply hotfix,
+branch creation and non-protected PR vocabulary.
 
-Also exposes signal vocabulary parsed from the manifesto (§9) so enforcement
-hooks (branch_guard, prod_lockdown) can derive their patterns from the same
-source of truth rather than hardcoding.
-
-Config (env vars via hooks.config):
-    CI_MANIFESTO_ENABLED          (bool, default True)
-    AGENTIHOOKS_SKIP_MANIFESTO    (comma-separated manifesto names to exclude)
-    CI_MANIFESTO_REFRESH_EVERY    (int,  default 8 turns)
-
-Public API:
-    inject_on_session_start()             — one-shot injection
-    maybe_refresh(session_id)             — counter-gated re-inject
-    get_release_signals() -> list[str]    — parsed phrases from §9
-    get_hotfix_signals() -> list[str]     — parsed phrases from §9
-    contains_release_signal(text) -> bool
-    contains_hotfix_signal(text) -> bool
+Configuration: CI_MANIFESTO_ENABLED, AGENTIHOOKS_SKIP_MANIFESTO,
+CI_MANIFESTO_REFRESH_EVERY.
 """
 
 from __future__ import annotations
@@ -34,18 +19,7 @@ _manifesto_cache: dict = {"path": "", "mtime": 0.0, "content": "", "release": []
 _session_counter: dict[str, int] = {}
 
 
-# Fallback signals (used if manifesto missing / unparseable). Must match §9.
-_DEFAULT_RELEASE_SIGNALS = [
-    "release to prod",
-    "push to prod",
-    "let's release",
-    "ship it",
-    "release gate",
-    "merge to main",
-    "merge the pr",
-    "merge it",
-    "release dance",
-]
+_DEFAULT_RELEASE_SIGNALS = ["release dance"]
 _DEFAULT_HOTFIX_SIGNALS = [
     "hotfix",
     "prod is broken",
@@ -77,7 +51,6 @@ _DEFAULT_PR_SIGNALS = [
     "create pr",
     "raise a pr",
     "submit a pr",
-    "release dance",
 ]
 
 
@@ -152,8 +125,7 @@ _PR_SECTION_RE = re.compile(
 
 
 def _parse_signals(content: str) -> tuple[list[str], list[str], list[str], list[str]]:
-    """Extract signal phrases from §9 (release/hotfix), §14 (branch), §15 (PR) of the manifesto."""
-    release: list[str] = []
+    """Read legacy signal blocks while keeping publication authorization fixed."""
     hotfix: list[str] = []
     branch: list[str] = []
     pr: list[str] = []
@@ -163,9 +135,7 @@ def _parse_signals(content: str) -> tuple[list[str], list[str], list[str], list[
         phrases = [
             line.strip().lower() for line in block.splitlines() if line.strip() and not line.strip().startswith("#")
         ]
-        if "release" in header:
-            release = phrases
-        elif "hotfix" in header:
+        if "hotfix" in header:
             hotfix = phrases
     bm = _BRANCH_SECTION_RE.search(content)
     if bm:
@@ -181,15 +151,13 @@ def _parse_signals(content: str) -> tuple[list[str], list[str], list[str], list[
             for line in pm.group(1).strip().splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-    if not release:
-        release = _DEFAULT_RELEASE_SIGNALS
     if not hotfix:
         hotfix = _DEFAULT_HOTFIX_SIGNALS
     if not branch:
         branch = _DEFAULT_BRANCH_SIGNALS
     if not pr:
         pr = _DEFAULT_PR_SIGNALS
-    return release, hotfix, branch, pr
+    return _DEFAULT_RELEASE_SIGNALS, hotfix, branch, [phrase for phrase in pr if phrase != "release dance"]
 
 
 def get_release_signals() -> list[str]:
@@ -326,13 +294,11 @@ def inject_on_session_start() -> None:
             log("ci_manifesto: empty payload (file missing?)", {"paths": [str(path) for path in _manifesto_paths()]})
             return
 
-        from hooks.targets import buffers_single_envelope
+        from hooks.targets import buffers_single_envelope, emitter
 
-        if buffers_single_envelope():
+        if buffers_single_envelope() or emitter.forced():
             # Codex and Copilot parse hook stdout as ONE JSON object — queue
             # for the single end-of-process flush instead of printing our own.
-            from hooks.targets import emitter
-
             emitter.buffer_context(payload)
             return
 
@@ -366,13 +332,11 @@ def maybe_refresh(session_id: str) -> None:
         if not payload:
             return
 
-        from hooks.targets import buffers_single_envelope
+        from hooks.targets import buffers_single_envelope, emitter
 
-        if buffers_single_envelope():
+        if buffers_single_envelope() or emitter.forced():
             # Codex and Copilot parse hook stdout as ONE JSON object — queue
             # for the single end-of-process flush instead of printing our own.
-            from hooks.targets import emitter
-
             emitter.buffer_context(payload)
             return
 

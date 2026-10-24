@@ -11,34 +11,47 @@ session count per account. Outcomes:
 - push: the operator said "keep pushing"; continue to 100%.
 """
 
+import fcntl
 import os
 import time
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hooks.config import (
     AGENTIHOOKS_HOME,
     QUOTA_HANDOFF_5H_PCT,
     QUOTA_HANDOFF_MIN_LEFT,
     QUOTA_HANDOFF_WEEK_PCT,
+    QUOTA_POLICY_ENABLED,
     QUOTA_RESERVE_ACCOUNTS,
+    QUOTA_USAGE_STALE_SEC,
     QUOTA_WAIT_MIN_WEEK_LEFT,
+    QUOTA_WARN_5H_PCT,
+    QUOTA_WARN_WEEK_PCT,
 )
+
+if TYPE_CHECKING:
+    from scripts.claude_quota_balancer import ProbeResult
+    from scripts.routing.reservation import Reservation
 
 MIN_ROUTING_LEFT = 5.0
 PUSH_SIGNALS = ["keep pushing", "push to 100", "push until 100", "burn it to 100"]
-WAIT_TOOLS = frozenset({"CronCreate", "CronList", "CronDelete"})
+RESET_TOLERANCE_S = 600
 
 
 @dataclass(frozen=True)
 class Candidate:
     account: str
-    five_used: float
-    week_used: float
+    five_used: float | None
+    week_used: float | None
     sessions: int
     observed_at: float
     cap: int | None = None
+    reserved: bool = False
+    login: bool = False
 
     def full(self) -> bool:
         return self.cap is not None and self.sessions >= self.cap
@@ -59,6 +72,7 @@ class Decision:
     week_reset: float | None
     target: Candidate | None
     others: tuple[Candidate, ...]
+    week_limit: float = QUOTA_HANDOFF_WEEK_PCT
 
 
 def _effective(used: float | None, resets_at: float | None, now: float) -> float | None:
@@ -82,12 +96,19 @@ def decide(
     wait_min_week_left: float = QUOTA_WAIT_MIN_WEEK_LEFT,
     reserve: frozenset[str] = QUOTA_RESERVE_ACCOUNTS,
 ) -> Decision | None:
+    if account == "api":
+        return None
     week_hit = week_used >= week_pct
     five_hit = five_used >= five_pct
     if not (week_hit or five_hit):
         return None
 
-    pool = [c for c in others if c.account != account and c.five_used < five_pct and c.week_used < week_pct]
+    api = next((c for c in others if c.account == "api" and not c.full()), None)
+    pool = [
+        c
+        for c in others
+        if c.account not in (account, "api") and not c.reserved and c.five_used < five_pct and c.week_used < week_pct
+    ]
     open_slots = [c for c in pool if not c.full() and c.routing_left >= MIN_ROUTING_LEFT]
     unreserved = [c for c in open_slots or pool if c.account not in reserve and c.routing_left >= MIN_ROUTING_LEFT]
     pool = unreserved or pool
@@ -119,10 +140,10 @@ def decide(
         if best_good:
             return made("handoff", trigger, best_good)
         if 100.0 - week_used >= wait_min_week_left and five_reset is not None:
-            return made("push" if push else "wait", trigger)
+            return made("handoff", trigger, api) if api and not push else made("push" if push else "wait", trigger)
         if least_bad:
             return made("handoff", trigger, least_bad)
-    return made("push" if push else "stop", trigger)
+    return made("handoff", trigger, api) if api and not push else made("push" if push else "stop", trigger)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +151,20 @@ def decide(
 # ---------------------------------------------------------------------------
 
 
+def _codex_windows(session_id: str) -> tuple[float, float, float | None, float | None] | None:
+    from scripts.codex_quota import session_quota
+
+    quota = session_quota(dict(os.environ), session_id) if session_id else None
+    now = time.time()
+    if quota is None or quota.seven_day.used is None or now - quota.observed_at > QUOTA_USAGE_STALE_SEC:
+        return None
+    week = quota.seven_day
+    return (0.0, _effective(week.used, week.resets_at, now), None, week.resets_at)
+
+
 def _session_windows(session_id: str) -> tuple[float, float, float | None, float | None] | None:
+    if os.environ.get("AGENTIHOOKS_TARGET") == "codex":
+        return _codex_windows(session_id)
     from hooks.context.quota_usage import _load_native
 
     limits = _load_native(session_id) or {}
@@ -150,13 +184,18 @@ def _session_windows(session_id: str) -> tuple[float, float, float | None, float
     )
 
 
-def _other_accounts(sessions: dict[str, int]) -> list[Candidate]:
-    from scripts import session_bands
-    from scripts.claude_quota_balancer import cached_observations
+def _other_accounts(sessions: dict[str, int], fleet: Iterable[tuple[float, "ProbeResult"]] = ()) -> list[Candidate]:
+    from scripts import operator_env, session_bands
+    from scripts.claude_quota_balancer import cached_observations, discover_credentials
 
+    environ = dict(os.environ)
+    operator_env.fill(environ)
+    current = {credential.account for credential in discover_credentials(environ)}
     now = time.time()
     newest = {}
-    for observed_at, result in cached_observations():
+    for observed_at, result in [*cached_observations(), *fleet]:
+        if result.account not in current:
+            continue
         if observed_at >= newest.get(result.account, (observed_at,))[0]:
             newest[result.account] = (observed_at, result)
     candidates = []
@@ -171,25 +210,115 @@ def _other_accounts(sessions: dict[str, int]) -> list[Candidate]:
     return candidates
 
 
+def _codex_accounts() -> list[Candidate]:
+    from hooks.context.account_sessions import codex_sessions_by_account
+    from scripts import codex_router
+
+    environ = dict(os.environ)
+    sessions = codex_sessions_by_account()
+    pool = codex_router.CodexAccountSource().pool(environ)
+    now = time.time()
+    candidates = []
+    for name, quota in codex_router.quotas(pool, environ).items():
+        if quota is None or quota.seven_day.used is None:
+            continue
+        week = _effective(quota.seven_day.used, quota.seven_day.resets_at, now)
+        cap = codex_router.account_cap(quota, now)
+        candidates.append(Candidate(name, 0.0, week, sessions.get(name, 0), quota.observed_at, cap))
+    return candidates
+
+
+def _api_accounts(sessions: dict[str, int]) -> list[Candidate]:
+    from hooks.context.account_sessions import codex_sessions_by_account
+    from scripts.routing import claude_api, codex_api, place
+
+    harness = os.environ.get("AGENTIHOOKS_TARGET", "claude")
+    counts = codex_sessions_by_account() if harness == "codex" else sessions
+    source = codex_api.CodexApiSource(counts) if harness == "codex" else claude_api.ClaudeApiSource(counts)
+    now = time.time()
+    slots, _ = place.api_side(source, harness, os.environ, now)
+    return [Candidate(slot.account, None, None, slot.sessions, now, slot.cap) for slot in slots]
+
+
 def evaluate(session_id: str) -> Decision | None:
     from hooks.context.account_sessions import agent_pid, session_account, sessions_by_account
+    from scripts.routing import reservation
+    from scripts.swarm_v2.quota import fleet_observations
 
+    if os.environ.get("AH_ROUTE_API"):
+        return None
     windows = _session_windows(session_id)
     if windows is None:
         return None
     five_used, week_used, five_reset, week_reset = windows
-    if five_used < QUOTA_HANDOFF_5H_PCT and week_used < QUOTA_HANDOFF_WEEK_PCT:
+    if five_used < QUOTA_HANDOFF_5H_PCT and week_used < min(QUOTA_HANDOFF_WEEK_PCT, reservation.LOWEST):
+        return None
+    harness = "codex" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "claude"
+    held = reservation.current(harness, os.environ)
+    account = session_account(agent_pid())
+    ceiling = _own_ceiling(held, account, reservation.is_master_session(os.environ))
+    week_pct = QUOTA_HANDOFF_WEEK_PCT if ceiling is None else min(QUOTA_HANDOFF_WEEK_PCT, ceiling)
+    if five_used < QUOTA_HANDOFF_5H_PCT and week_used < week_pct:
         return None
     sessions = sessions_by_account()
-    return decide(
-        account=session_account(agent_pid()),
+    subscriptions = (
+        _codex_accounts() if harness == "codex" else _other_accounts(sessions, fleet_observations(os.environ))
+    )
+    return decide_reserved(
+        ceiling,
+        account=account,
         five_used=five_used,
         week_used=week_used,
         five_reset=five_reset,
         week_reset=week_reset,
-        others=_other_accounts(sessions),
+        others=master_targets(
+            reserved(subscriptions, held) + _api_accounts(sessions) + _login_accounts(os.environ), os.environ
+        ),
         push=push_active(session_id),
     )
+
+
+def _master(environ) -> bool:
+    from scripts.routing import reservation
+
+    return str(environ.get(reservation.AGENT_NAME)).startswith(reservation.MASTER_NAME)
+
+
+def master_targets(candidates: list[Candidate], environ) -> list[Candidate]:
+    if not _master(environ):
+        return candidates
+    return [c for c in candidates if c.login]
+
+
+def _login_accounts(environ) -> list[Candidate]:
+    from scripts import master_claude_login, master_logins
+    from scripts.routing import reservation
+
+    if not _master(environ):
+        return []
+    now = time.time()
+    found = []
+    for account in master_claude_login.free(environ[reservation.AGENT_NAME]):
+        five, week, observed = master_logins.usage(account, now)
+        found.append(Candidate(account, five, week, 0, observed, 1, login=True))
+    return found
+
+
+def decide_reserved(ceiling: float | None, *, week_used: float, **inputs) -> Decision | None:
+    if ceiling is None or week_used < ceiling:
+        return decide(week_used=week_used, **inputs)
+    decision = decide(week_used=max(week_used, QUOTA_HANDOFF_WEEK_PCT), **inputs)
+    return decision and replace(decision, week_used=week_used, week_limit=ceiling)
+
+
+def _own_ceiling(held: "Reservation | None", account: str, master: bool) -> float | None:
+    return None if held is None or master or account != held.slug else held.ceiling
+
+
+def reserved(candidates: list[Candidate], held: "Reservation | None") -> list[Candidate]:
+    if held is None:
+        return candidates
+    return [replace(c, reserved=True) if held.closes(c.account, c.week_used) else c for c in candidates]
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +360,7 @@ def _pct(value: float) -> str:
     return f"{value:.0f}%"
 
 
-def _when(epoch: float | None) -> str:
+def reset_when(epoch: float | None) -> str:
     if epoch is None:
         return "unknown"
     local = datetime.fromtimestamp(epoch).astimezone()
@@ -242,7 +371,7 @@ def _when(epoch: float | None) -> str:
 
 def _trigger_text(d: Decision) -> str:
     if d.trigger == "week":
-        return f"7-day quota {d.week_used:.1f}% used (limit {QUOTA_HANDOFF_WEEK_PCT:g}%)"
+        return f"7-day quota {d.week_used:.1f}% used (limit {d.week_limit:g}%)"
     return f"5-hour quota {d.five_used:.1f}% used (limit {QUOTA_HANDOFF_5H_PCT:g}%)"
 
 
@@ -251,7 +380,9 @@ def _others_text(d: Decision) -> str:
     if not rows:
         return "no other account is configured; handoffs need at least 2 accounts"
     return "; ".join(
-        f"{c.account} {_pct(c.routing_left)} left (5h {_pct(c.five_used)}, 7d {_pct(c.week_used)} used, "
+        f"api {c.sessions}/{c.cap} sessions"
+        if c.account == "api"
+        else f"{c.account} {_pct(c.routing_left)} left (5h {_pct(c.five_used)}, 7d {_pct(c.week_used)} used, "
         f"{c.sessions}/{c.cap if c.cap is not None else 'unknown'} sessions)"
         for c in rows
     )
@@ -272,23 +403,41 @@ def _repo_slug(cwd: str) -> str:
 def render(d: Decision, session_id: str, cwd: str) -> str:
     account = d.account or "this login"
     head = f"{_trigger_text(d)} on {account}."
+    swarm = os.environ.get("AGENTIHOOKS_SWARM")
+    if d.action == "handoff" and d.target and swarm:
+        return (
+            f"QUOTA HANDOFF REQUIRED — {head}\n"
+            f"Policy decision (deterministic): hand this seat to a successor on another account now.\n"
+            f"1. Write your Handoff v2 with the handoff skill.\n"
+            f"2. Run: agentihooks swarm {swarm} handoff DOC --reason quota\n"
+            f"3. Stop. The tick keeps your seat and task and routes the successor to an account with room."
+        )
     if d.action == "handoff" and d.target:
         t = d.target
         age = max(0, int(time.time() - t.observed_at)) // 60
+        harness = os.environ.get("AGENTIHOOKS_TARGET", "claude")
+        route = " -- --route api" if t.account == "api" else ""
+        resume = f" --resume {session_id}" if harness == "codex" and not route else ""
+        agent = f" --agent {harness}" if route or resume else ""
+        kept = "The new session resumes this conversation on that account. " if resume else ""
+        status = (
+            f"Api slot: {t.sessions}/{t.cap} sessions; subscription windows do not apply. "
+            if route
+            else f"Router cache: {t.account} has {_pct(t.routing_left)} left (5h {_pct(t.five_used)}, "
+            f"7d {_pct(t.week_used)} used, {t.sessions}/{t.cap if t.cap is not None else 'unknown'} sessions, "
+            f"observed {age}m ago); the new terminal re-probes and picks the final account. "
+        )
         slug = _repo_slug(cwd)
         doc = Path.home() / "scratchpad" / slug / "handoff" / f"{session_id}.md"
         name = f"{slug}-handoff-{time.strftime('%H%M')}"
         return (
             f"QUOTA HANDOFF REQUIRED — {head}\n"
             f"Policy decision (deterministic): move this task to another account now. "
-            f"Router cache: {t.account} has {_pct(t.routing_left)} left (5h {_pct(t.five_used)}, "
-            f"7d {_pct(t.week_used)} used, {t.sessions}/{t.cap if t.cap is not None else 'unknown'} sessions, "
-            f"observed {age}m ago); "
-            f"the new terminal re-probes and picks the final account.\n"
+            f"{status}{kept}\n"
             f"1. Write the handoff document to {doc}: goal, done so far (commits, PRs, evidence), "
             f"in progress, exact next steps, repo/worktree/branch, open risks, the operator's standing "
             f"instructions.\n"
-            f'2. Run: agentihooks init-agent --handoff --dir "{cwd}" --name "{name}" --prompt-file "{doc}"\n'
+            f'2. Run: agentihooks init-agent --handoff{agent} --dir "{cwd}" --name "{name}" --prompt-file "{doc}"{resume}{route}\n'
             f"3. handoff=done: tell the operator which account and terminal took over, then stop; "
             f"this terminal closes when you stop. "
             f"handoff=failed: stop and report the failure to the operator."
@@ -302,22 +451,26 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
             f"account qualifies ({_others_text(d)}).\n"
             f'1. CronCreate a one-shot job, cron "{cron}" (local time {at.strftime("%a %H:%M")}), recurring '
             f'false, prompt: "The 5-hour quota window has reset. Continue the task from where you stopped."\n'
-            f"2. Tell the operator this session waits until the reset at {_when(d.five_reset)}, then stop. "
-            f"Every other tool is blocked until the window resets."
+            f"2. Tell the operator this session waits until the reset at {reset_when(d.five_reset)}, then stop. "
+            f"Tools are not blocked."
         )
     reset = d.week_reset if d.trigger == "week" else d.five_reset
+    prefix = "AH_CX_TOKEN_" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "AH_CC_TOKEN_"
     return (
-        f"QUOTA STOP — {head} Resets {_when(reset)}. No other account has room: {_others_text(d)}.\n"
-        f"Stop working and tell the operator to add another AH_CC_TOKEN_<slug> account, or to say "
-        f'"keep pushing" to continue on this account until 100%. Every tool is blocked.'
+        f"QUOTA STOP — {head} Resets {reset_when(reset)}. No other account has room: {_others_text(d)}.\n"
+        f"Stop working and tell the operator to add another {prefix}<slug> account, or to say "
+        f'"keep pushing" to continue on this account until 100%. Tools are not blocked.'
     )
 
 
 def handed_off_block(session_id: str) -> str | None:
+    from hooks.context.account_sessions import agent_pid
     from hooks.context.broadcast import session_status
+    from hooks.lifecycle import handoff_close
 
     info = session_status(session_id)
-    if info.get("status") != "handed_off":
+    resumed = bool(session_id) and handoff_close.handoff_record(agent_pid(), session_id).exists()
+    if info.get("status") != "handed_off" and not resumed:
         return None
     return (
         f"BLOCKED: this session handed its task off to account {info.get('handed_off_to') or '?'} at "
@@ -333,16 +486,77 @@ def pretool(session_id: str, tool_name: str, cwd: str) -> tuple[str | None, str 
     d = evaluate(session_id)
     if d is None or d.action == "push":
         return None, None
-    text = render(d, session_id, cwd)
-    if d.action == "stop" or (d.action == "wait" and tool_name not in WAIT_TOOLS):
-        return f"BLOCKED: {text}", None
-    return None, text
+    return None, render(d, session_id, cwd)
 
 
 def prompt_context(session_id: str, cwd: str) -> str | None:
+    blocked = handed_off_block(session_id)
+    if blocked:
+        return blocked
     d = evaluate(session_id)
     if d is None:
-        return None
+        return early_warning(session_id)
     if d.action == "push":
         return f"QUOTA PUSH — {_trigger_text(d)}; the operator said to keep pushing on this account until 100%."
     return render(d, session_id, cwd)
+
+
+# ---------------------------------------------------------------------------
+# Early warning: Codex sessions outside a swarm, once per account, window and reset
+# ---------------------------------------------------------------------------
+
+
+def _claim_warning(account: str, window: str, reset: float | None) -> bool:
+    path = AGENTIHOOKS_HOME / "quota_policy" / "warned" / f"codex-{account}-{window}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        handle.seek(0)
+        seen = handle.read().strip()
+        current = reset or 0.0
+        if seen and abs(float(seen) - current) < RESET_TOLERANCE_S:
+            return False
+        handle.truncate(0)
+        handle.write(str(current))
+    return True
+
+
+def _warning_text(account: str, window: str, used: float, reset: float | None, hard: float) -> str:
+    return (
+        f"QUOTA WARNING — Codex account {account} has {_pct(100 - used)} of its {window} quota left "
+        f"({_pct(used)} used); it resets {reset_when(reset)}. Tell the operator now. Nothing is blocked: at {hard:g}% "
+        f"used the quota policy moves this conversation to another account with a handoff that resumes it."
+    )
+
+
+def early_warning(session_id: str) -> str | None:
+    from hooks.context.account_sessions import API_ACCOUNT, agent_pid, session_account
+
+    if os.environ.get("AGENTIHOOKS_TARGET") != "codex" or os.environ.get("AGENTIHOOKS_SWARM"):
+        return None
+    windows = None if os.environ.get("AH_ROUTE_API") else _session_windows(session_id)
+    if windows is None:
+        return None
+    five_used, week_used, five_reset, week_reset = windows
+    crossed = [
+        (window, used, reset, hard)
+        for window, used, reset, warn, hard in (
+            ("7-day", week_used, week_reset, QUOTA_WARN_WEEK_PCT, QUOTA_HANDOFF_WEEK_PCT),
+            ("5-hour", five_used, five_reset, QUOTA_WARN_5H_PCT, QUOTA_HANDOFF_5H_PCT),
+        )
+        if warn <= used < hard
+    ]
+    if not crossed:
+        return None
+    account = session_account(agent_pid())
+    if account == API_ACCOUNT:
+        return None
+    texts = [_warning_text(account, *row) for row in crossed if _claim_warning(account, row[0], row[2])]
+    return "\n".join(texts) or None
+
+
+def posttool_context(session_id: str, tool_name: str | None, cwd: str) -> str | None:
+    if not QUOTA_POLICY_ENABLED:
+        return None
+    _, directive = pretool(session_id, tool_name, cwd)
+    return directive or early_warning(session_id)

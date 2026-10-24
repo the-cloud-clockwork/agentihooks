@@ -4,8 +4,6 @@ from scripts.swarm import commands
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_server as server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store(monkeypatch):
@@ -29,6 +27,30 @@ def test_server_controls_only_queue_work_on_a_tool_free_path(store):
     assert commands.rows(store, "sw")[-1]["command"] == "quota"
     assert server.swarm_control("sw", ["stop"], "doctor")[1] == ""
     assert commands.rows(store, "sw")[-1]["command"] == "doctor"
+
+
+def test_quota_refresh_wakes_the_hive_prober_the_moment_it_is_queued(store):
+    from scripts.swarm import quota_refresh
+
+    pubsub = store.redis.pubsub()
+    pubsub.subscribe(quota_refresh.WAKE)
+    assert pubsub.get_message(timeout=1)["type"] == "subscribe"
+    status, error = server.refresh_quota("sw")
+    assert error == ""
+    assert [(row["command"], row["state"]) for row in status["commands"]] == [("quota", "pending")]
+    assert pubsub.get_message(timeout=1)["data"] == "sw"
+
+
+def test_a_refresh_click_shows_the_new_probe_in_the_next_status_after_one_prober_round(store, monkeypatch):
+    from scripts import agents_quota
+    from scripts.swarm import quota_refresh
+
+    probed = {"probed_at": 50, "rows": ["probed"]}
+    monkeypatch.setattr(agents_quota, "page_quota", lambda: probed)
+    commands.publish(store, "sw", {"agents": [], "tasks": {}, "quota": {"probed_at": 10, "rows": ["tick"]}}, {})
+    assert server.refresh_quota("sw")[0]["quota"]["rows"] == ["tick"]
+    assert quota_refresh.answer_all(store, lambda slug, row: "") == ["sw: control quota acknowledged"]
+    assert server.swarm_status("sw")["quota"] == probed
 
 
 def test_terminate_checks_membership_then_queues_an_exact_name(store):

@@ -1,0 +1,16 @@
+{
+  "tested_commit": "4a1da5638ef34f4d12ff2ea073a81121382c7a8b",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38135830892",
+  "evidence_class": "mocked: fakeredis execution registry, transition audit, latency counters and observability record, a fake lease clock, a fixed step telemetry clock, an in process exporter that can be switched off, an in process API server whose Pods carry fixture statuses and the SV2-KUB-05 recovery world; no Kubernetes API server, node, worker Pod or telemetry backend was used",
+  "cases": [
+    "T-SV2-OBS-01-A",
+    "T-SV2-OBS-01-B",
+    "T-SV2-OBS-01-C"
+  ],
+  "inputs": {
+    "tests/fixtures/swarm_v2/pod-failures.json": "13b5e8d94825f40ea87fada359454c47dee84fd4161945eebcdea4e235fff4b4",
+    "tests/fixtures/swarm_v2/pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+    "tests/fixtures/swarm_v2/pod-policy.json": "fe59695070f986ee8928dcfa9abff5d0a07372f6af03611733a4cdad34772acb",
+    "tests/fixtures/swarm_v2/transition-telemetry.json": "7961b6446f02d25c61cec6cce0308b2d34ffe21d307757cd48cacee7d1f4b822"
+  }
+}

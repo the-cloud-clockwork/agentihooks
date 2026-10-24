@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_guards__mutmut_38:9099ca6df430032c481e559d4612a60a98e64d8388fc27f6ea56efce98ec9822": {
+    "reader": "standards_reader",
+    "reason": "The absent claim_generation default is a local validation value. Both 0 and 1 are nonnegative exact ints and pass identical validation; explicit values bypass the default. check_guards returns None without mutating the original comparison, which _guarded subsequently reads. No matching or task output changes."
+  }
+}

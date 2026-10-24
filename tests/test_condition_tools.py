@@ -12,6 +12,7 @@ import pytest
 import hooks.hook_manager as hm
 from hooks.context import conditions, ledger_request, profile_chain
 from hooks.hook_manager import BlockAction
+from tests.swarm_ledger import legacy_page
 
 pytestmark = pytest.mark.unit
 
@@ -255,8 +256,7 @@ class TestWriteGuard:
         monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t1")
         members = {"master@a1-1": {"role": "orchestrator"}}
         tasks = [{"id": "t1", "comments": comments, **task}, {"id": "t2", "comments": []}]
-        ledger = {"tasks": tasks, "_meta": {"members": members}}
-        (tmp_path / "demo.json").write_text(json.dumps(ledger))
+        legacy_page.store(tmp_path, "demo", {"tasks": tasks, "_meta": {"members": members}})
 
     def test_an_operator_comment_on_the_agents_task_opens_it(self, tmp_path, monkeypatch):
         at = int(time.time() * 1000)
@@ -547,8 +547,9 @@ class TestCreate:
             ({"matcher": "bad*"}, "invalid characters"),
             ({"name": "has-dash"}, "letters, digits"),
             ({"language": "ruby"}, "language"),
-            ({"step": "start"}, "unknown step"),
+            ({"step": "boot"}, "unknown step"),
             ({"step": "stop"}, "expected stop-<name>"),
+            ({"step": "start"}, "expected start-<name>"),
             ({"script": "  "}, "empty"),
             ({"scope": "everywhere"}, "scope must be"),
         ],
@@ -568,6 +569,12 @@ class TestCreate:
         conditions.arm_gate(SID)
         result = _create(step="stop", matcher=matcher, name="idle")
         assert (result["file"], result["step"], result["matcher"]) == ("stop-idle.sh", "stop", "any")
+
+    @pytest.mark.parametrize("matcher", ["", "any"])
+    def test_a_start_condition_takes_no_matcher(self, bundle, matcher):
+        conditions.arm_gate(SID)
+        result = _create(step="start", matcher=matcher, name="greet")
+        assert (result["file"], result["step"], result["matcher"]) == ("start-greet.sh", "start", "any")
 
 
 class TestLayers:

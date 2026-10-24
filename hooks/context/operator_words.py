@@ -1,18 +1,25 @@
-"""The operator's own words in an agent session, typed prompts and AskUserQuestion answers, the latest ROWS_KEPT.
+"""The operator's own words in an append only log, indexed by normalized line hashes.
 
 A relay to the ledger is accepted only when it quotes words recorded here for a master or planner of its swarm.
+Swarm entries are mirrored into the shared swarm Redis, where a hosted ledger server reads them.
 """
 
+import hashlib
 import json
 import os
 import re
+import sqlite3
 import time
+from contextlib import contextmanager
+from fnmatch import fnmatchcase
 
+from hooks.context import master_coding
 from hooks.context.swarm_heartbeat import is_operator_prompt
 
 TTL_SEC = 3600
 KEPT = 50
-ROWS_KEPT = 500
+SHARED_KEPT = 500
+_SHARED = []
 
 
 def _dir():
@@ -29,6 +36,175 @@ def _norm(text):
     return " ".join(str(text).lower().split())
 
 
+@contextmanager
+def _store(migrate=True):
+    path = _dir() / "words.sqlite3"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.executescript(
+            "CREATE TABLE IF NOT EXISTS entries ("
+            "id INTEGER PRIMARY KEY, swarm TEXT NOT NULL, name TEXT NOT NULL, "
+            "at REAL NOT NULL, words TEXT NOT NULL, norm TEXT NOT NULL);"
+            "CREATE INDEX IF NOT EXISTS entry_swarm ON entries(swarm);"
+            "CREATE INDEX IF NOT EXISTS entry_name ON entries(name);"
+            "CREATE TABLE IF NOT EXISTS lines ("
+            "name TEXT NOT NULL, hash TEXT NOT NULL, entry INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE);"
+            "CREATE INDEX IF NOT EXISTS line_hash ON lines(name, hash);"
+            "CREATE TABLE IF NOT EXISTS legacy (name TEXT PRIMARY KEY);"
+        )
+        if migrate:
+            _migrate(connection)
+        with connection:
+            yield connection
+    finally:
+        connection.close()
+
+
+def _hash(line: str) -> str:
+    return hashlib.sha256(line.encode()).hexdigest()
+
+
+def _append(connection, swarm, name, at, words):
+    entry = connection.execute(
+        "INSERT INTO entries (swarm, name, at, words, norm) VALUES (?, ?, ?, ?, ?)",
+        (swarm, name, at, words, _norm(words)),
+    ).lastrowid
+    connection.executemany(
+        "INSERT INTO lines (name, hash, entry) VALUES (?, ?, ?)",
+        [(name, _hash(_norm(line)), entry) for line in words.splitlines()],
+    )
+
+
+def _shared():
+    from redis.exceptions import RedisError
+
+    from scripts.swarm import store
+
+    if not _SHARED:
+        try:
+            _SHARED.append(store.redis_client())
+        except (RedisError, OSError):
+            return None
+    return _SHARED[0]
+
+
+def _shared_key(*parts):
+    from scripts.swarm.store import PREFIX
+
+    return ":".join((PREFIX, "operator-words", *parts))
+
+
+def _shared_call(action, default):
+    from redis.exceptions import RedisError
+
+    redis = _shared()
+    if redis is None:
+        return default
+    try:
+        return action(redis)
+    except RedisError:
+        return default
+
+
+def _mirror(swarm, name, at, words):
+    def push(redis):
+        row = json.dumps({"swarm": swarm, "at": at, "words": words})
+        key = _shared_key(name)
+        with redis.pipeline() as pipe:
+            pipe.sadd(_shared_key(), name).lpush(key, row).ltrim(key, 0, SHARED_KEPT - 1).execute()
+
+    _shared_call(push, None)
+
+
+def _shared_rows(name):
+    return [json.loads(row) for row in _shared_call(lambda redis: redis.lrange(_shared_key(name), 0, -1), [])]
+
+
+def _shared_match(name, needle, since):
+    for row in _shared_rows(name):
+        if (since is None or row["at"] > since) and needle in _norm(row["words"]):
+            return (row["words"],)
+    return None
+
+
+def _shared_forget(swarm):
+    def drop(redis):
+        for name in redis.smembers(_shared_key()):
+            key = _shared_key(name)
+            for row in set(redis.lrange(key, 0, -1)):
+                if json.loads(row)["swarm"] == swarm:
+                    redis.lrem(key, 0, row)
+
+    _shared_call(drop, None)
+
+
+def _offline_swarm(name):
+    from scripts.swarm.naming import legacy_slug, parse
+
+    return None if parse(name) else legacy_slug(name)
+
+
+def _legacy_swarms(paths, redis):
+    from redis.exceptions import RedisError
+
+    from scripts.swarm.naming import NameRegistry
+
+    swarms = dict.fromkeys(paths)
+    registry = NameRegistry(redis)
+    for path in paths:
+        if redis is None:
+            swarms[path] = _offline_swarm(path.stem)
+            continue
+        try:
+            # slug_of swallows a failed alias lookup; this read raises it so the name stays pending.
+            redis.get(registry.key("alias", path.stem))
+            swarms[path] = registry.slug_of(path.stem)
+        except RedisError:
+            break
+    return swarms
+
+
+def _migrate(connection):
+    from hooks._redis import get_redis
+
+    if connection.execute("SELECT 1 FROM legacy WHERE name = ''").fetchone():
+        return
+    swarms = _legacy_swarms([path for path in _dir().glob("*.json") if _load(path.stem)["rows"]], get_redis())
+    clean = {}
+    with connection:
+        connection.execute("BEGIN IMMEDIATE")
+        for path, swarm in swarms.items():
+            if swarm is None:
+                continue
+            data = _load(path.stem)
+            clean[path.stem] = {"sessions": data["sessions"]}
+            if connection.execute("INSERT OR IGNORE INTO legacy VALUES (?)", (path.name,)).rowcount:
+                for row in data["rows"]:
+                    _append(connection, swarm, path.stem, row["at"], row["words"])
+    for name, data in clean.items():
+        _save(name, data)
+    if None not in swarms.values():
+        with connection:
+            connection.execute("INSERT OR IGNORE INTO legacy VALUES ('')")
+
+
+def _line_match(connection: sqlite3.Connection, name: str, needle: str, since: float | None) -> tuple | None:
+    return connection.execute(
+        "SELECT entries.words FROM lines JOIN entries ON entries.id = lines.entry "
+        "WHERE lines.name = ? AND lines.hash = ? AND (? IS NULL OR entries.at > ?) "
+        "ORDER BY entries.at DESC, entries.id DESC LIMIT 1",
+        (name, _hash(needle), since, since),
+    ).fetchone()
+
+
+def forget(swarm: str) -> None:
+    with _store() as connection:
+        connection.execute("DELETE FROM entries WHERE swarm = ?", (swarm,))
+    _shared_forget(swarm)
+
+
 def _load(name):
     try:
         data = json.loads(_path(name).read_text())
@@ -37,9 +213,11 @@ def _load(name):
     return {"sessions": data.get("sessions", []), "rows": data.get("rows", [])}
 
 
-def recorded(pattern):
-    """Names with words recorded under the glob `pattern`."""
-    return sorted(p.stem for p in _dir().glob(f"{pattern}.json"))
+def recorded(pattern: str) -> list[str]:
+    with _store() as connection:
+        names = connection.execute("SELECT DISTINCT name FROM entries").fetchall()
+    shared = _shared_call(lambda redis: redis.smembers(_shared_key()), set())
+    return sorted(name for name in {name for (name,) in names} | shared if fnmatchcase(name, pattern))
 
 
 def _save(name, data):
@@ -50,23 +228,34 @@ def _save(name, data):
     os.replace(tmp, path)
 
 
-def record(name, words, now=None):
+def record(name: str, words: str, now: float | None = None, swarm: str = "") -> bool:
     now = time.time() if now is None else now
     text = str(words or "").strip()
     if not (name and text):
         return False
-    data = _load(name)
-    data["rows"] = (data["rows"] + [{"at": now, "words": text}])[-ROWS_KEPT:]
-    _save(name, data)
+    with _store(migrate=False) as connection:
+        _append(connection, swarm or "", name, now, text)
+    if swarm:
+        _mirror(swarm, name, now, text)
     return True
 
 
-def matching(name, quote, now=None, within=TTL_SEC):
-    """The latest words recorded under `within` seconds ago, or ever when it is None, that hold the quote."""
+def matching(name: str, quote: str, now: float | None = None, within: float | None = TTL_SEC) -> str:
     needle = _norm(quote)
+    if not needle:
+        return ""
     now = time.time() if now is None else now
-    rows = [r for r in _load(name)["rows"] if within is None or now - r["at"] < within] if needle else []
-    return next((r["words"] for r in reversed(rows) if needle in _norm(r["words"])), "")
+    since = None if within is None else now - within
+    with _store() as connection:
+        row = _line_match(connection, name, needle, since)
+        if row is None:
+            row = connection.execute(
+                "SELECT words FROM entries WHERE name = ? AND instr(norm, ?) > 0 "
+                "AND (? IS NULL OR at > ?) ORDER BY at DESC, id DESC LIMIT 1",
+                (name, needle, since, since),
+            ).fetchone()
+    row = row or _shared_match(name, needle, since)
+    return row[0] if row else ""
 
 
 def _opening(name, session):
@@ -79,15 +268,22 @@ def _opening(name, session):
     return True
 
 
+def _speaker(env, session):
+    seat = master_coding.seat(session)
+    if seat:
+        return seat.get("name"), seat.get("slug"), True
+    return env.get("AGENTIHOOKS_AGENT_NAME"), env.get("AGENTIHOOKS_SWARM"), False
+
+
 def heard_prompt(prompt, environ=None, now=None, session=""):
     env = os.environ if environ is None else environ
-    name, slug = env.get("AGENTIHOOKS_AGENT_NAME"), env.get("AGENTIHOOKS_SWARM")
+    name, slug, seated = _speaker(env, session)
     if not name or not is_operator_prompt(prompt, slug):
         return False
     now = time.time() if now is None else now
-    if slug and _opening(name, session):
+    if slug and not seated and _opening(name, session):
         return False
-    return record(name, prompt, now)
+    return record(name, prompt, now, slug)
 
 
 def _answer_words(payload):
@@ -102,7 +298,8 @@ def heard_answer(payload, environ=None, now=None):
     if payload.get("tool_name") != "AskUserQuestion":
         return False
     env = os.environ if environ is None else environ
-    return record(env.get("AGENTIHOOKS_AGENT_NAME"), _answer_words(payload), now)
+    name, slug, _ = _speaker(env, payload.get("session_id"))
+    return record(name, _answer_words(payload), now, slug)
 
 
 def heard(payload, environ=None, now=None):
@@ -114,6 +311,6 @@ def heard(payload, environ=None, now=None):
 def typed(payload, environ=None, now=None):
     """True when the payload holds the operator's own words: a named session records them, an unnamed one has no launch prompt."""
     env = os.environ if environ is None else environ
-    if env.get("AGENTIHOOKS_AGENT_NAME"):
+    if env.get("AGENTIHOOKS_AGENT_NAME") or master_coding.seat(payload.get("session_id")):
         return heard(payload, env, now)
     return is_operator_prompt(payload.get("prompt", ""), env.get("AGENTIHOOKS_SWARM"))

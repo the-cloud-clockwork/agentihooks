@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x_judge__mutmut_35:d3932e883b055217c221542f5149ece0bfe4e0752412cf4f11d246514ddb071a": {
+    "reader": "standards_reader",
+    "reason": "This call occurs only within the preparatory faults branch. remediation immediately returns the preparatory text based on state.task_part and never reads answers there. Passing None instead of answers leaves the message and verdict unchanged on every reachable call of this line."
+  }
+}

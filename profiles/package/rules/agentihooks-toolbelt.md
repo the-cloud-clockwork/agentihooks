@@ -71,43 +71,45 @@ The deterministic CLI primitives behind these skills are respectively
 `agentihooks init-agent`, and `agentihooks run-in-terminal`. Follow each
 `SKILL.md`; do not reconstruct its process manually.
 
+`init-agent`, `run-in-terminal`, `swarm <slug> master up`, `swarm <slug>
+<profile> up` and herdr pane, tab and workspace commands run without any typed
+phrase: there is no pane guard. Run `init-agent --handoff` only as the quota
+handoff directive's own command while that handoff is due, and never in a swarm
+session, which hands off through its seat; no hook checks this.
+
 ## Swarm, small ledger or nothing
 
-A hook decides how each piece of work is tracked and injects a `LEDGER DECISION`
-directive once per session for each trigger. Act on it at once, without asking:
+No session creates a ledger or starts a swarm on its own. That happens only
+when the operator explicitly runs or asks for the command (`agentihooks
+ledger new`, `init-swarm`), or when an operator-authored rule or condition
+triggers it. A session not bound to a ledger or swarm gets no directive and
+makes no ledger: plain requests, a growing task list and troubleshoot/debug/
+investigate/refactor wording are never themselves a reason to create one.
 
-- **Swarm** — the operator accepted a plan (Claude or Copilot leaving plan mode,
-  Codex's "Yes, implement this plan"): start a swarm from it with `init-swarm`.
-  This session does not implement the plan; the swarm's master never edits code.
-- **Small ledger** — work beyond a trivial edit with no accepted plan: the
-  session's task list reaches four items, or the operator asks to troubleshoot,
-  debug, investigate or refactor, however small the fix turns out to be. Create
-  the small ledger before any other tool call (`agentihooks ledger new --size
-  small`), join it as its worker and keep it current.
-- **Nothing** — a trivial request gets no directive and no ledger.
-
-A swarm agent or a session already bound to a ledger gets no small ledger
-directive. When it accepts a plan, the directive names its own ledger: append the
-plan there as new phases with `agentihooks ledger --slug <slug> --as <name> plan
-phases <file>`, never a new swarm. When the operator declines, run `agentihooks ledger decline`; the hook stays silent
-for the rest of that session.
+A session already bound to a ledger or swarm keeps its ledger duties. A hook
+tells a bound session, once per session, when it accepts a plan: the directive
+names its own ledger, so append the plan there as new phases with
+`agentihooks ledger --slug <slug> --as <name> plan phases <file>`, never a new
+swarm, and do not implement the plan in this session.
 
 ## Swarms and ledgers
 
-A swarm runs Claude and Codex agents over the tasks of a swarm ledger
-(`~/development-ledger/<slug>.json`, page http://127.0.0.1:8765/<slug>).
+A swarm runs Claude and Codex agents over the tasks of a swarm ledger, one
+record in `~/development-ledger/ledgers.sqlite3` read and written only through
+`agentihooks ledger` and the ledger server (page http://127.0.0.1:8765/<slug>).
 
 | Trigger | Action |
 |---|---|
-| Start a swarm from an accepted plan | `$init-swarm`; the swarm starts its master, `master@<code>-<n>`, which the operator talks to on the page chat or in its pane |
-| Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full effort-min=E effort-max=E`; the ledger page swarm panel writes the same ops. Codex is one more account in the session rotation, judged on its week alone with the top band. Every lane agent starts inside the effort range (default medium to high) |
+| The operator asks for a swarm from an accepted plan | `$init-swarm`; the swarm starts its master, `master@<code>-<n>`, which the operator talks to on the page chat or in its pane |
+| Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full effort-min=E effort-max=E`; the ledger page swarm panel writes the same ops. Codex is one more account in the session rotation, judged on its week alone with the top band. Every lane agent starts inside the effort range (default medium to xhigh) |
 | Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, act on every OPERATOR line, then `ack`. In a swarm each operator write arrives as an inbox message at the next tool call and the tick wakes an idle pane, so no Monitor is needed; a ledger without a swarm wakes an idle session only through a `Monitor` on `agentihooks ledger watch <slug> --as <name>` |
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
-| A question while the operator is away (the question tool is refused unless he typed `operator on`, or typed a prompt in the pane within thirty minutes with no swarm or inbox prompt since) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
+| A question while the operator is away (in a swarm bound session the question tool and the plan prompt stay refused until he types `operator on` in that pane; a standalone session always has them) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
 | Publish an artifact only when the operator asked for that file: a plan, an image, a logo, an SVG, markdown or JSON he wants to review | `agentihooks ledger --slug <slug> --as <name> artifact <file> "<title in plain words>"` from a task marked artifact requested (`task add --artifact`, `task set <id> artifact=yes`) or with `--request <id of his message>`; anything else is refused. Never publish test runs, logs, review notes or proofs: proofs go on the task proof and the pull request |
 | A planner or the master has an accepted plan | `agentihooks ledger --slug <slug> --as <name> publish-plan <plan file> --phase <phase ids>` before adding its tasks: a GitHub issue where the repo has issues, else a ledger artifact (a plan counts as artifact requested); it links and comments each phase, every task added there carries the link, and a planner's slice is refused while a task lacks it |
-| A swarm agent's task moves | `agentihooks swarm <slug> issue <url>`, `pr <url>`, `block "<why>"`; `ledger leave`, then `swarm <slug> done --pr <url>` |
-| A swarm agent waits at its prompt on checks, a deploy or a reply | `agentihooks swarm <slug> wait --on checks <pr url>\|reply <inbox item>\|task <id>`, which the tick ends when the thing resolves and tells you; else `wait <minutes> --reason "<what>"`, at most 60. The tick neither nudges nor retires it until the wait ends |
+| A swarm agent's task moves | `agentihooks swarm <slug> issue <url>`, `pr <url>`, `block "<why>"`; `ledger leave`, then `swarm <slug> ready <doc>` (the tick merges and closes the task) or `swarm <slug> done --pr <url>` |
+| A swarm agent waits at its prompt on checks, a queued pull request, a deploy or a reply | `agentihooks swarm <slug> wait --on checks <pr or Actions run url>\|merge <pr url>\|reply <inbox item>\|task <id>`. Use `--on merge <pr url>` while the pull request sits in the merge queue; it holds until the pull request merges or leaves the queue without merging, ending red in the latter case. The tick ends a checked wait when the thing resolves and tells you; else `wait <minutes> --reason "<what>"`, at most 60. The tick neither nudges nor retires it until the wait ends |
+| A task reads or changes the workstation's primary checkout or its local task folders, such as a checkout landing or a final reconciliation | `ledger task add --workstation` (or `task set <id> workstation=yes`): no remote hive runs it, so it lands on the workstation |
 | A task needs a specialist, such as interface work | `ledger task add --profile frontend` (or `task set <id> profile=frontend`): the tick spawns its claimant with that profile instead of the lane's |
 | A task is not code | `ledger task add --kind ops\|tune\|troubleshoot\|research`; `done` then carries its proof (`--command --output`, `--root-cause --evidence --fix\|--filed`, `--finding`) or the ledger refuses it |
 | HANDOFF PREPARATION at `AGENTIHOOKS_COMPACT_LIMIT` (thousands of tokens, default 600) | Use the handoff skill to write the Handoff v2 body before its twenty five minute deadline or the hard gate `AGENTIHOOKS_HANDOFF_MARGIN` above the limit (default 50), whichever comes first. Submit only the document: `agentihooks swarm <slug> handoff <doc>`, then stop. The runtime supplies the envelope; the seat recap is derived from Done, Stopped at and Next. A successor reads the envelope and ranked Read first list before older recaps, with the swarm culture, latest derived recap and learned notes. A lesson for every later occupant: `agentihooks swarm <slug> learned "<lesson because reason>"` (`--maturity data|note|insight|canon`, default note; canon only by the master or operator, who raise a note with `swarm <slug> promote`). The swarm culture: `swarm <slug> culture set <file>` / `show`. From the hard gate on, PreToolUse denies every other tool call: only reads (read-only shell commands included), writes under `~/scratchpad`, the handoff and learned commands and `ledger` comment, say, leave and ack pass |
@@ -130,7 +132,8 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 - The tick counts an agent idle only when its pane reads idle, its heartbeat
   does not say working and no declared wait holds, and holds the count while its
   input line holds text or the operator prompted it inside the quiet window;
-  nudge at 3 idle ticks, retire at 10. A leaving agent's open items move to its seat when its task
+  retire at 20. A task holder silent ten minutes with no named wait, or on a provider error, gets one inbox nudge
+  per ten minute window, never a typed prompt. A leaving agent's open items move to its seat when its task
   goes on, else they are withdrawn and each sender told.
 - A session bound to a swarm task (`AGENTIHOOKS_SWARM`, `AGENTIHOOKS_SWARM_TASK`)
   receives a `SWARM REFOCUS` block: ledger overview, its phase and its task. It
@@ -148,10 +151,10 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   Stop with the new turns and tagged with swarm, agent, lane, task and account
   where set. Setup and checks:
   `docs/reference/observability-langfuse.md`.
-- `agentihooks swarm <slug> status` and the ledger page's Swarm health panel
-  list health findings, each naming the agent or task, the evidence and the
-  threshold crossed. The master diagnoses them; the operator decides. Thresholds
-  (`AGENTIHOOKS_HEALTH_*`, defaults in brackets): ceremony, an agent's ledger
+- `agentihooks swarm <slug> status` lists health findings, each naming the
+  agent or task, the evidence and the threshold crossed. The master diagnoses
+  them; the operator decides. Thresholds (`AGENTIHOOKS_HEALTH_*`, defaults in
+  brackets): ceremony, an agent's ledger
   transitions at least `CEREMONY_MIN` (20) and over `CEREMONY_RATIO` (12) per
   outcome, a merged task or one closed with the proof its kind needs; scope inflation, a lane agent queued `SELF_QUEUED` (3) tasks
   itself whose stated `--gain` never rose; proof loop, a task over `RERUNS` (2)
@@ -168,20 +171,28 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   while the task's pull request waits on checks.
 - Each finding has an id, `<kind>/<subject>`. The master gives every new one a
   verdict: `agentihooks swarm <slug> verdict <id> false-positive|early-real|established|insufficient-evidence|resolved --note "<why>"`,
-  or the operator with the page's Give verdict button. It hides for
+  or the operator through the master. It hides for
   `COOLDOWN_MINUTES` (60) and comes back once only if its evidence grew.
 - The ledger page carries a fixed outline on the left, Stats and the swarm
   panel in a sidebar that scrolls on its own, and the agent list and Swarm tasks
   collapsed until clicked. HOME lists every ledger; a deleted ledger sits in the
   bin 30 days, then the server removes it.
-- Every ledger page section, the chat and notification panels included, folds
-  on a click of its header and remembers that per viewer; a section with comment
-  dropdowns has one comments toggle for its own items only, its label flipping
-  between Show all comments and Hide all comments. Every outline category folds
-  the same way, with one toggle on top flipping between Expand all and Collapse
-  all. Each toggle remembers its choice per viewer across reloads. An outline
-  item with a pending notification carries a plus mark. A new section ships
-  foldable or its test fails.
+- Only four things on the ledger page fold, each remembering its choice per
+  viewer across reloads: the Ledger tab's own sections below Overview; the
+  Swarm tab panels below Capacity (Quota, Hives, Overlays, Agents, Handoff
+  outcomes, Recovery, Freezes, Architecture); the outline categories, with
+  one toggle on top flipping between Expand all and Collapse all; and comment
+  dropdowns,
+  each section with one toggle for its own items flipping between Show all
+  comments and Hide all comments. Nothing else folds: the chat, artifacts,
+  alerts and notifications windows, Stats, Overview, the Swarm control bar and
+  Capacity, HOME and BIN. An outline item with a pending notification carries
+  a plus mark. A fold anywhere else fails its test.
+- Every column in the ledger front end resizes by dragging its header edge
+  (arrow keys on the grip too): every table on the ledger page and the HOME and
+  BIN columns. Only columns resize this way. Widths are saved in the shared
+  page layout beside the panel sizes and clear with Reset layout. A table or
+  column the grips cannot reach fails its test.
 - Ledger front end colours live only in `scripts/swarm_ledger/palette.css`, and
   keep the ledger's own red and blue. Layout follows design system 2026-001 and
   the `ui-doctrine` skill.
@@ -195,12 +206,19 @@ a seat: `master@<slug>`, `eng-1@<slug>`, `ci-1@<slug>`, one per swarm lane slot.
 The tick seats every agent it spawns, a handoff successor in its predecessor's seat;
 whoever occupies a seat now gets its items, the ones a predecessor left pending
 included. Every state change is kept in the item's history.
-A pending item is delivered once, into this session's context at its next tool call
-(PostToolUse where the harness's PreToolUse carries no context), and marked delivered.
+A pending item is claimed and marked delivered when shown through the inbox channel
+or a hook (PostToolUse where PreToolUse carries no context). A later hook confirms
+items delivered before that hook began; `msg read` records receipt, and `msg reply`
+or `msg close` settles the work. Confirmation leaves the item open for you to handle.
+An item never confirmed returns to pending after `AGENTIHOOKS_INBOX_REDELIVER_S`
+(default 300 seconds), with the same id, for whichever transport claims next.
+Failed channel writes return unsent items immediately. Before repeating work on
+redelivery, read the item's current state.
 A swarm Claude session also receives each item the moment it lands through its inbox
 channel, answered with the channel's reply tool. The tick types a wake only into the
-idle worker pane of a harness without that channel, Codex today: one prompt to run
-`agentihooks msg inbox` and answer with `msg reply` or the swarm commands, never as text
+idle worker pane of a harness without that channel, Codex today, and only while no
+Codex push pump owns that agent's inbox: one prompt to run `agentihooks msg inbox`
+and answer with `msg reply` or the swarm commands, never as text
 in the terminal (a busy pane, one waiting on input, one holding typed text or one the
 operator prompted inside `AGENTIHOOKS_INBOX_QUIET_S` never), retried every
 `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` (default 300) up to three times. The master pane is
@@ -208,15 +226,47 @@ the operator's and is never typed into. Still unread one window later, the swarm
 gets an item; one more window, the operator gets a follow-up on the ledger page. A
 session with no typed wake is escalated one window after the send. An item for the
 master, or in a swarm without one, goes straight to the operator. Each wake and
-escalation is kept in the item's history.
+escalation is kept in the item's history. The wake window is separate from the
+receiver confirmation window.
+
+Redis unavailable: sends, replies and closes queue in the local checksummed,
+fsynced outbox under the AgentiHooks home. Queued means accepted locally;
+delivery follows replay. New operations wait behind queued ones. Each inbox
+connection and tick replays in order, retaining the failed record and the rest
+on a Redis failure. Stable item ids prevent duplicate sends after a lost response.
+`AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES` defaults to 1048576; the warning threshold,
+`AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES`, to 786432. A full outbox refuses the new
+operation and drops nothing queued: restore Redis, then retry the refused send.
+Corrupt or refused replay records stay in `inbox-outbox.skipped.jsonl`; inspect
+their reported reasons. Local disk survival and available space bound durability.
+Ledger writes not accepted by Redis or the outbox retain their oldest unrelayed
+revision for replay on the next write or the ledger watch; replay reaches only
+the ledger's retained 2000 events. A ledger notice reports the lost revision
+range when history was trimmed before relay; the watcher and tick report gaps.
+
+An open Redis, ledger or provider outage, or your pane's provider error, holds
+idle counts, nudges, retirement and task reclaim. Wake and escalation deadlines
+exclude outage time; idle and stale claim findings carry the outage evidence and
+send no finding notice. Provider recovery needs a successful minimal request
+for every affected account, on a backoff from one to ten minutes; an account
+stops probing on its first success, and pane text alone does not release the
+hold. On recovery the tick sends a marked resume prompt: read your task folder
+and inbox, then continue your task. Busy panes, typed input and permission
+prompts wait. Error panes get at most three resume attempts on separate ticks
+before normal idle rules; dead agents reopen their own
+conversation in the same seat, with a handoff fallback. Recovery requires your
+claim, generation and seat occupant still to match, with a live claim lease,
+so a successor's work cannot be resumed
+by the old agent. Full contract and limits: `docs/pillars/swarm.md`,
+Delivered then confirmed, Local outbox and limits, Outage holds and recovery.
 
 The inbox carries swarm chat and talk across harnesses (Claude, Codex, Copilot) alike.
 `agentihooks swarm <slug> say --to <name|eng|ci>` leaves one item per recipient; a
 ledger page chat line becomes an item from `operator` for its addressee (the master
 when unaddressed) and stays on the page. Every other operator write on the page (comment,
 reply, answer, note, check) becomes an item too: for the agent that claimed its task, else
-for the master, whom a stopped swarm starts for it. Each write reaches you once, through the
-inbox or the ledger hook; an operator sync order reaches every live agent. A reply to `operator` is posted on the
+for the master, whom a stopped swarm starts for it. Stable ids keep relay retries
+to one item; unconfirmed delivery can be shown again. An operator sync order reaches every live agent. A reply to `operator` is posted on the
 ledger page chat and closed done.
 
 | Trigger | Action |
@@ -288,7 +338,7 @@ target, the least-used account (≥ 5% left) still takes a weekly handoff; on a
 5-hour limit it does so only when this account's week has under 10% left,
 otherwise the session waits for the reset. At least 2 accounts are needed for
 any handoff. `QUOTA STOP`
-and `QUOTA WAIT` block tools (WAIT allows `CronCreate`); a session that handed
+and `QUOTA WAIT` are alerts and never block a tool; a session that handed
 off is blocked from further work. Thresholds: `AGENTIHOOKS_HANDOFF_WEEK_PCT`,
 `AGENTIHOOKS_HANDOFF_5H_PCT`, `AGENTIHOOKS_HANDOFF_MIN_LEFT`,
 `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT`; `QUOTA_POLICY_ENABLED=false` turns it off.

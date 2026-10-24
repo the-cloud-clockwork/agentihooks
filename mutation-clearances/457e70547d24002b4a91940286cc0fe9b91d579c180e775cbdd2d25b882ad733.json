@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish.py:scripts.swarm.publish.x_repository_task__mutmut_13:975dd37f4201981d7b8c0f765ff41ee54cd0a4fc6d1606c13c30335bc6fd11ab": {
+    "reader": "Standards",
+    "reason": "The absent legacy branch default None and empty string both normalize to the same final empty branch; intervening conditions do not distinguish them."
+  }
+}

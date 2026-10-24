@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/master_fence.py:scripts.swarm_v2.master_fence.x_decision__mutmut_9:566d29dba6bf12526bcd77bcfc58c17fed380fd3a665ebe557f8ae82ea3605a9": {
+    "reader": "standards_reader",
+    "reason": "Changes only the default for a relay op with no item key. Any default string that does not start with tasks/ (empty, XXXX, the text None) makes decision return the empty string, so the fence lets the op through to relay validation exactly as before."
+  }
+}

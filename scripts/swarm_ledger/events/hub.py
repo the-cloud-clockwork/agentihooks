@@ -1,6 +1,7 @@
 """Per ledger event channels: the latest value of each resource, and a bounded log of the patches between them."""
 
 import collections
+import copy
 import secrets
 import threading
 import time
@@ -13,6 +14,10 @@ IDLE_EVICT_S = 300.0
 
 
 class Expired(Exception):
+    pass
+
+
+class Closed(Exception):
     pass
 
 
@@ -35,6 +40,7 @@ class Hub:
         self.clock = time.monotonic if clock is None else clock
         self.changed = threading.Condition()
         self.channels = {}
+        self.closing = False
 
     @staticmethod
     def cursor(channel, seq):
@@ -83,10 +89,15 @@ class Hub:
                 raise
             with self.changed:
                 for name, value in loaded.items():
-                    channel.resources.setdefault(name, value)
+                    channel.resources.setdefault(name, copy.deepcopy(value))
         with self.changed:
             if cursor is not None:
                 return seq, [entry for entry in channel.log if entry[0] > seq]
+            return self.snapshot(slug)
+
+    def snapshot(self, slug: str) -> tuple[int, list]:
+        with self.changed:
+            channel = self.channels[slug]
             return channel.seq, [(channel.seq, self.cursor(channel, channel.seq), "snapshot", dict(channel.resources))]
 
     def close(self, slug):
@@ -98,20 +109,31 @@ class Hub:
 
     def publish(self, slug, name, value):
         """Record value as the latest copy of a resource and log the patch from the previous copy."""
+        return self._publish(slug, name, value, False)
+
+    def publish_snapshot(self, slug: str, name: str, value: object) -> bool:
+        """The finite JSON generation and all its descendants must remain immutable."""
+        return self._publish(slug, name, value, True)
+
+    def _publish(self, slug, name, value, shared):
         with self.changed:
             channel = self.channels.get(slug)
             if channel is None:
                 return False
             if name not in channel.resources:
-                channel.resources[name] = value
+                channel.resources[name] = value if shared else copy.deepcopy(value)
                 return False
             old = channel.resources[name]
             if name == "ledger" and revision(value) < revision(old):
                 return False
-            change = patch.diff(old, value)
+            change = patch.diff(old, value, shared=True) if shared else patch.diff(old, value)
             if change is None:
                 return False
-            channel.resources[name] = value
+            if shared:
+                channel.resources[name] = value
+            else:
+                change = copy.deepcopy(change)
+                channel.resources[name] = patch.apply(old, change)
             channel.seq += 1
             data = {"patch": change, "rev": revision(value)} if name == "ledger" else {"patch": change}
             channel.log.append((channel.seq, self.cursor(channel, channel.seq), name, data))
@@ -119,13 +141,21 @@ class Hub:
             return True
 
     def wait(self, slug, seq, timeout):
-        """The events after seq, waiting up to timeout for one; Expired once they fell out of retention."""
+        """The events after seq, waiting up to timeout for one; Expired once they fell out of retention, Closed once
+        the hub drains."""
         with self.changed:
             channel = self.channels[slug]
-            self.changed.wait_for(lambda: channel.seq != seq, timeout)
+            self.changed.wait_for(lambda: channel.seq != seq or self.closing, timeout)
+            if self.closing:
+                raise Closed
             if channel.log and channel.log[0][0] > seq + 1:
                 raise Expired
             return [entry for entry in channel.log if entry[0] > seq]
+
+    def drain(self):
+        with self.changed:
+            self.closing = True
+            self.changed.notify_all()
 
     def evict(self, now=None, idle=IDLE_EVICT_S):
         now = self.clock() if now is None else now

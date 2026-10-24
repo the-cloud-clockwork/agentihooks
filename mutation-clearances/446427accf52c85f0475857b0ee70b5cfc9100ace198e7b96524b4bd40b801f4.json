@@ -1,0 +1,6 @@
+{
+  "scripts/gate_protected.py:scripts.gate_protected.x_main__mutmut_15:0d2f3cdedcb5061a26e92e4e1e66d0586f96ad8f8312808497f46c1d486c7302": {
+    "reader": "Standards",
+    "reason": "Equivalent for valid workflows: preceding self-edit checks change neither baseline nor head; unchanged workflows still yield no lane problems."
+  }
+}

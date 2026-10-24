@@ -5,7 +5,7 @@ import pytest
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -58,6 +58,84 @@ def test_legacy_owner_keeps_ownership_until_expiry(store, monkeypatch):
     }
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+def test_seeded_hive_adopts_its_hostname_lease(store, monkeypatch, legacy):
+    import socket
+
+    from scripts.swarm import commands, controller
+
+    monkeypatch.delenv("SWARM_HIVE_ID", raising=False)
+    monkeypatch.setattr(socket, "gethostname", lambda: "this-machine")
+    monkeypatch.setattr(commands.registry, "seeded_id", lambda: None)
+    monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
+    held = lease.acquire(store, "sw", commands.hive_id())
+    assert held == lease.Lease("this-machine", 1, 181000)
+    if legacy:
+        store.redis.set(store.key("sw", "control-owner"), "this-machine")
+    monkeypatch.setattr(commands.registry, "seeded_id", lambda: "seeded-hive")
+    migrated = lease.acquire(store, "sw", commands.hive_id())
+    assert migrated == lease.Lease("seeded-hive", 1 if not legacy else 2, 181000)
+    assert lease.current(store, "sw") == migrated
+    lease.require_epoch(store, "sw", migrated.epoch)
+    assert controller.take_tick_lock(store, "sw", migrated, 1000) is not None
+    with pytest.raises(lease.SwarmError, match="the controller lease is stale"):
+        lease.require(store, "sw", held)
+    assert lease.acquire(store, "sw", "other-hive") is None
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("holder, requested", [("other-machine", "seeded-hive"), ("this-machine", "other-hive")])
+def test_seeded_hive_never_adopts_another_machine_lease(store, monkeypatch, legacy, holder, requested):
+    import socket
+
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(socket, "gethostname", lambda: "this-machine")
+    monkeypatch.setattr(commands.registry, "seeded_id", lambda: "seeded-hive")
+    monkeypatch.delenv("SWARM_HIVE_ID", raising=False)
+    monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
+    held = lease.acquire(store, "sw", holder)
+    if legacy:
+        store.redis.set(store.key("sw", "control-owner"), holder)
+    assert lease.acquire(store, "sw", requested) is None
+    assert lease.current(store, "sw") == lease.Lease(holder, 2 if legacy else held.epoch, 181000)
+
+
+def test_hostname_migration_rechecks_a_competing_owner(store, monkeypatch):
+    import socket
+
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(socket, "gethostname", lambda: "this-machine")
+    monkeypatch.setattr(commands.registry, "seeded_id", lambda: "seeded-hive")
+    monkeypatch.delenv("SWARM_HIVE_ID", raising=False)
+    monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
+    lease.acquire(store, "sw", "this-machine")
+    pipeline = store.redis.pipeline
+    competed = []
+
+    def competing_pipeline():
+        pipe = pipeline()
+        execute = pipe.execute
+
+        def commit():
+            if not competed:
+                competed.append(True)
+                store.redis.set(
+                    store.key("sw", "control-owner"),
+                    json.dumps({"owner": "other-machine", "epoch": 2, "expires_at": 181000}),
+                )
+                store.redis.set(store.key("sw", "control-epoch"), 2)
+            return execute()
+
+        pipe.execute = commit
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", competing_pipeline)
+    assert lease.acquire(store, "sw", commands.hive_id()) is None
+    assert lease.current(store, "sw") == lease.Lease("other-machine", 2, 181000)
+
+
 def test_expired_lease_cannot_write_or_release(store, monkeypatch):
     clock = [1000]
     monkeypatch.setattr(lease, "now_ms", lambda saved: clock[0])
@@ -96,7 +174,8 @@ def test_controller_entrypoint_runs_once_and_reports_actions(store, monkeypatch,
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(controller, "run_once", lambda saved: calls.append(saved) or {"sw": ["worked"]})
     monkeypatch.setattr(operator_env, "fill", lambda env: None)
-    monkeypatch.setattr(controller.time, "sleep", lambda delay: pytest.fail("once must not sleep"))
+    monkeypatch.setattr(operator_env, "classifier", lambda env: [])
+    monkeypatch.setattr(controller, "scheduled_wait", lambda delay: pytest.fail("once must not sleep"))
     monkeypatch.setattr(install.sys, "argv", ["agentihooks", "controller", "run", "--once"])
     with pytest.raises(SystemExit) as result:
         install.main()
@@ -181,6 +260,7 @@ def test_controller_loop_waits_one_tick_between_runs(store, monkeypatch, capsys)
 
     calls, sleeps = [], []
     monkeypatch.setattr(operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(operator_env, "classifier", lambda env: [])
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(controller, "run_once", lambda saved: calls.append(saved) or {"sw": ["worked"]})
 
@@ -188,7 +268,7 @@ def test_controller_loop_waits_one_tick_between_runs(store, monkeypatch, capsys)
         sleeps.append(delay)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(controller.time, "sleep", stop_after_wait)
+    monkeypatch.setattr(controller, "scheduled_wait", stop_after_wait)
     with pytest.raises(KeyboardInterrupt):
         controller.main(["run"])
     assert calls == [store]
@@ -201,6 +281,7 @@ def test_controller_reports_a_lease_error(store, monkeypatch, capsys):
     from scripts.swarm import controller
 
     monkeypatch.setattr(operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(operator_env, "classifier", lambda env: [])
     monkeypatch.setattr(controller, "connect", lambda: store)
 
     def stale(saved):
@@ -292,10 +373,11 @@ def test_controller_rejects_unknown_actions_with_its_own_usage(capsys, monkeypat
     assert error.value.code == 2
     text = capsys.readouterr().err
     assert text in (
-        "usage: agentihooks controller [-h] [--once] {run}\n"
-        "agentihooks controller: error: argument action: invalid choice: 'invalid' (choose from 'run')\n",
-        "usage: agentihooks controller [-h] [--once] {run}\n"
-        "agentihooks controller: error: argument action: invalid choice: 'invalid' (choose from run)\n",
+        "usage: agentihooks controller [-h] [--once] {run,live,ready}\n"
+        "agentihooks controller: error: argument action: invalid choice: 'invalid' "
+        "(choose from 'run', 'live', 'ready')\n",
+        "usage: agentihooks controller [-h] [--once] {run,live,ready}\n"
+        "agentihooks controller: error: argument action: invalid choice: 'invalid' (choose from run, live, ready)\n",
     )
 
 
@@ -305,6 +387,7 @@ def test_controller_loads_the_environment_and_flushes_actions(store, monkeypatch
 
     calls = []
     monkeypatch.setattr(operator_env, "fill", lambda env: calls.append(env))
+    monkeypatch.setattr(operator_env, "classifier", lambda env: [])
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(controller, "run_once", lambda saved: {"sw": ["worked"]})
     printed = []
@@ -312,3 +395,28 @@ def test_controller_loads_the_environment_and_flushes_actions(store, monkeypatch
     assert controller.main(["run", "--once"]) == 0
     assert calls == [controller.os.environ]
     assert printed == [(("sw: worked",), {"flush": True})]
+
+
+def test_the_controller_never_ticks_a_host_ticked_swarm(store, monkeypatch):
+    from scripts.swarm import cli, controller
+    from scripts.swarm.store import SwarmConfig
+
+    for slug in ("hosted", "workstation", "doctor"):
+        store.create(SwarmConfig(slug, "agentihooks", 2, 0))
+    ticks = []
+    monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: ticks.append(slug) or [slug])
+    monkeypatch.setenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", "workstation,doctor")
+
+    assert controller.run_once(store) == {"hosted": ["hosted"]}
+    assert ticks == ["hosted"]
+
+
+def test_the_controller_ticks_every_swarm_while_no_host_ticked_list_is_set(store, monkeypatch):
+    from scripts.swarm import cli, controller
+    from scripts.swarm.store import SwarmConfig
+
+    store.create(SwarmConfig("XXXX", "agentihooks", 2, 0))
+    monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: [slug])
+    monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
+
+    assert controller.run_once(store) == {"XXXX": ["XXXX"]}

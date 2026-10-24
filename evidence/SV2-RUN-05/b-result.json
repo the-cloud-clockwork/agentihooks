@@ -1,0 +1,18 @@
+{
+  "tested_commit": "fc37a9d50a4270286d55262b79a1e51014cdfb36",
+  "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
+  "passed": true,
+  "refusal": "execution generation is stale",
+  "protected_state_unchanged": true,
+  "refused_request_had_no_effect": true,
+  "new_valid_request_targets_replacement": true,
+  "expired_authority_refused": true,
+  "expiry_preserves_protected_state": true,
+  "fake_clock_ms": 100,
+  "lease_scope": "Command service owns no lease; scoped authenticator supplies current authority",
+  "runtime_commands_by_outcome": {
+    "[\"\", \"force-stop\", \"refused\"]": 1,
+    "[\"kubernetes\", \"force-stop\", \"ok\"]": 1,
+    "[\"\", \"cancel\", \"refused\"]": 1
+  }
+}

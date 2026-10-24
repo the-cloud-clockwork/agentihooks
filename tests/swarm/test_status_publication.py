@@ -1,9 +1,6 @@
-import pytest
-
 from scripts.swarm import status
 from tests.swarm.test_commands import store
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 __all__ = ["store"]
 
 
@@ -14,3 +11,15 @@ def test_status_exposes_exact_invalid_plan_diagnostics(store):
 
 def test_empty_status_has_a_valid_plan_shape(store):
     assert "error" not in status.status_report(store, "sw", {})["plan_shape"]
+
+
+def test_status_findings_read_the_pull_request_view_it_is_handed(store, monkeypatch):
+    seen = []
+    monkeypatch.setattr(status, "findings", lambda *args: seen.append(args[-1]) or [])
+
+    def view(url):
+        return None
+
+    status.status_report(store, "sw", {"tasks": []}, None, view)
+    status.status_report(store, "sw", {"tasks": []})
+    assert seen == [view, None]

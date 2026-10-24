@@ -28,7 +28,8 @@ def test_redis_starts_from_an_acl_file_with_optional_tls():
     start = (ROOT / "deploy/compose/redis/start.sh").read_text()
     assert "--aclfile" in start
     assert "--tls-port" in start
-    assert "user default off" in (ROOT / "deploy/compose/redis/users.acl.template").read_text()
+    users = (ROOT / "deploy/compose/redis/users.acl.template").read_text().splitlines()
+    assert users[0] == "user default off ~* &* +@all"
 
 
 def test_published_ports_bind_to_the_swarm_bind_address():
@@ -49,4 +50,81 @@ def test_env_example_selects_compose_deployment():
 
 def test_swarm_smoke_runs_the_compose_hive_proof():
     jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]
-    assert any("compose-hive-smoke.sh" in step.get("run", "") for step in jobs["compose-hive"]["steps"])
+    assert any("compose-hive-smoke.sh" in step.get("run", "") for job in jobs.values() for step in job["steps"])
+
+
+def test_hive_join_retries_the_redis_mirror_pull_before_starting_redis():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]
+    assert any("hive-join-smoke.sh" in step.get("run", "") for job in jobs.values() for step in job["steps"])
+    script = (ROOT / "scripts/packaging/hive-join-smoke.sh").read_text()
+    pull = "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine\n"
+    start = 'docker run --pull never -d --name "$run-redis"'
+    retry = (ROOT / "scripts/packaging/pull-runtime-image.sh").read_text()
+    assert "attempts=3" in retry
+    assert 'for attempt in $(seq "$attempts"); do' in retry
+    assert 'if acquire "$@"; then' in retry
+    assert 'if (( attempt == attempts )); then\n    exit "$status"\n  fi' in retry
+    assert 'delay="${PULL_RETRY_SECONDS:-10}"' in retry
+    assert 'sleep "$delay"' in retry
+    assert script.index(pull) < script.index(start)
+
+
+def test_swarm_init_ships_the_repository_stack_byte_for_byte():
+    bundled = ROOT / "scripts/swarm/stack"
+    shipped = sorted(str(path.relative_to(bundled)) for path in bundled.rglob("*") if path.is_file())
+    assert shipped == [
+        "compose.yaml",
+        "deploy/compose/adopt.yaml",
+        "deploy/compose/ledger-tailnet.conf.template",
+        "deploy/compose/redis/healthcheck.sh",
+        "deploy/compose/redis/start.sh",
+        "deploy/compose/redis/users.acl.template",
+        "deploy/compose/start-tailnet.sh",
+        "deploy/compose/tailnet.yaml",
+    ]
+    for name in shipped:
+        assert (bundled / name).read_bytes() == (ROOT / name).read_bytes(), name
+    check = (ROOT / "deploy/compose/redis/healthcheck.sh").read_text()
+    assert 'REDISCLI_AUTH="$SWARM_REDIS_PASSWORD" redis-cli' in check and "--pass" not in check
+    for service in ("swarm", "controller", "hive"):
+        assert SERVICES[service]["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}"
+
+
+def test_nats_service_runs_the_pinned_server_with_jetstream_on_a_volume():
+    nats = SERVICES["nats"]
+    pinned = (ROOT / ".github/actions/nats-server/action.yml").read_text()
+    assert "NATS_SERVER_RELEASE: v2.15.1" in pinned
+    assert nats["image"] == "mirror.gcr.io/library/nats:2.15.1-alpine"
+    assert nats["command"] == ["--jetstream", "--store_dir=/data", "--http_port=8222"]
+    assert nats["volumes"] == ["nats-data:/data"]
+    assert "nats-data" in COMPOSE["volumes"]
+    assert "ports" not in nats
+    assert nats["healthcheck"]["test"] == [
+        "CMD",
+        "wget",
+        "-q",
+        "-O-",
+        "http://127.0.0.1:8222/healthz?js-enabled-only=true",
+    ]
+    assert nats["restart"] == "unless-stopped"
+    smoke = (ROOT / "scripts/packaging/compose-hive-smoke.sh").read_text()
+    assert "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/nats:2.15.1-alpine\n" in smoke
+
+
+def test_swarm_services_reach_nats_through_the_bus_setting():
+    shared = COMPOSE["x-swarm-env"]
+    assert shared["AGENTIHOOKS_BUS"] == "${AGENTIHOOKS_BUS:-nats}"
+    assert shared["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}"
+    for name in ("swarm", "controller", "hive"):
+        service = SERVICES[name]
+        assert service["environment"]["AGENTIHOOKS_BUS"] == "${AGENTIHOOKS_BUS:-nats}", name
+        assert service["environment"]["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}", name
+        assert service["depends_on"]["nats"]["condition"] == "service_healthy", name
+
+
+def test_swarm_init_smoke_pulls_nats_and_reads_the_four_service_ready_line():
+    smoke = (ROOT / "scripts/packaging/swarm-init-smoke.sh").read_text()
+    pull = "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/nats:2.15.1-alpine\n"
+    assert pull in smoke
+    assert smoke.index(pull) < smoke.index('"$work/venv/bin/agentihooks" swarm init')
+    assert "grep -qx 'Swarm stack ready: redis, nats, swarm and controller are healthy.'" in smoke

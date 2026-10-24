@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -38,7 +38,7 @@ def tab(browser):
     html = shell_html()
 
     def route(request):
-        if "/api/swarm/" in request.request.url:
+        if "/swarm/" in request.request.url:
             request.fulfill(json=SWARM)
         elif request.request.url.startswith(URL):
             request.fulfill(body=html, content_type="text/html")
@@ -49,6 +49,7 @@ def tab(browser):
     serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL + "#ledger")
+    loaded(page)
     yield page
     context.close()
 

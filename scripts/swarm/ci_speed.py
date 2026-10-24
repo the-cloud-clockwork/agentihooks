@@ -23,7 +23,10 @@ WINDOW_S = 24 * 3600
 REFRESH_MS = 3600 * 1000
 OVERLAP_S = 2 * 3600
 FINISHED = {"success", "failure"}
-JQ = ".workflow_runs[] | {id, event, status, conclusion, head_branch, run_started_at, updated_at} | @json"
+JQ = (
+    ".workflow_runs[] | {id, event, status, conclusion, head_branch, head_sha, created_at, run_started_at,"
+    " updated_at, run_attempt} | @json"
+)
 EMPTY = {"minutes": None, "runs": 0, "at": 0, "tried_at": 0}
 
 
@@ -64,13 +67,13 @@ def median_minutes(window: dict[str, list[float]]) -> float | None:
     return round(statistics.median(seconds) / 60, 2) if seconds else None
 
 
-def read_runs(repo_dir: str, since_s: float, run: Callable = subprocess.run) -> list[dict]:
+def read_runs(repo_dir: str, since_s: float, run: Callable = subprocess.run, event: str = "pull_request") -> list[dict]:
     since = datetime.fromtimestamp(since_s, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def read(conclusion):
         endpoint = (
             f"repos/{{owner}}/{{repo}}/actions/workflows/{WORKFLOW}/runs"
-            f"?event=pull_request&status={conclusion}&exclude_pull_requests=true&created=>={since}&per_page=100"
+            f"?event={event}&status={conclusion}&exclude_pull_requests=true&created=>={since}&per_page=100"
         )
         return run(
             ["gh", "api", endpoint, "--paginate", "--jq", JQ],

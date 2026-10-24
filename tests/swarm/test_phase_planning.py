@@ -13,7 +13,6 @@ from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime
 from tests.swarm_ledger.plan_slices import anchored
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "planned"
 MASTER_SEAT = f"master@{SLUG}"
 DONE_WHEN = (
@@ -119,6 +118,41 @@ def test_manual_waiting_and_out_of_scope_phases_get_no_plan_task(env):
     core.sync(SLUG, ops=[{"op": "set", "id": "oos", "by": "engineer", "path": "phases/p1/out_of_scope", "value": True}])
     run(store, ledger)
     assert tasks("p1") == []
+
+
+@pytest.mark.parametrize("close_plan", [False, True])
+def test_manual_phase_admits_build_tasks_without_requeuing_its_old_plan(env, close_plan):
+    store, ledger = env
+    set_phase("p1", planning="auto")
+    run(store, ledger)
+    if close_plan:
+        build_task(ledger, "build", done=False)
+        op = {"op": "set", "id": "close-plan", "by": "engineer", "path": "tasks/plan-p1/out_of_scope", "value": True}
+        assert core.sync(SLUG, ops=[op])[1] == []
+    else:
+        slice_done(ledger, ("build", DONE_WHEN))
+    set_phase("p1", planning="manual")
+    for _ in range(2):
+        run(store, ledger)
+        current = state(SLUG)
+        manual = next(p for p in current["phases"] if p["id"] == "p1")
+        build = next(t for t in current["tasks"] if t["id"] == "build")
+        assert phase_state.lifecycle(manual, current) == "building"
+        assert phase_state.admits(build, current)
+        assert [t["id"] for t in tasks("p1") if t.get("kind") == "plan"] == ["plan-p1"]
+        assert next(t for t in tasks("p1") if t["id"] == "plan-p1").get("out_of_scope", False) is close_plan
+
+
+def test_new_manual_phase_never_queues_a_plan_while_its_build_task_waits(env):
+    store, ledger = env
+    set_phase("p1", planning="manual")
+    build_task(ledger, "build", done=False)
+    for _ in range(2):
+        run(store, ledger)
+        current = state(SLUG)
+        build = next(t for t in current["tasks"] if t["id"] == "build")
+        assert phase_state.admits(build, current)
+        assert [t["id"] for t in tasks("p1")] == ["build"]
 
 
 def unplanned(store):

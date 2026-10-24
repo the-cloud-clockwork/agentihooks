@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x_validate_actors__mutmut_62:e9b4136d03df42c1c3a36decd732e95df99257d90a3fbaa91be70083ce918741": {
+    "reader": "standards_reader",
+    "reason": "Diagnostic only: the invalid core operator/two-app list still raises ValueError before return. Added XX decoration changes neither rejection nor identity validation and retains the trusted actors explanation."
+  }
+}

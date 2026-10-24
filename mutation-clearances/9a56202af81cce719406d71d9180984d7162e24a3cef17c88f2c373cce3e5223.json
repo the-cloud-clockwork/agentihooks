@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/api/recovery.py:scripts.swarm_v2.api.recovery.xǁRecoveryAPIǁroute__mutmut_51:005305ecc1604cfec16e9addbee6bd9acfbdffccb78b362cd843d38f09ce25ef": {
+    "reader": "standards-reader",
+    "reason": "Omitting dict.get's default returns None for an absent caller; None and an empty string yield the same refusal and operator authentication ignores names."
+  }
+}

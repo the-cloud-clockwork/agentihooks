@@ -1,0 +1,10 @@
+status before: "agent_status":"idle"
+  remains pending.
+
+  Worked for 15s • 17:37
+                                                                                    ⚠ weekly limit: 10% left · /status
+
+› /rename master@3ddefe-0001unsent draft cxc8 charlie delta
+
+  GPT-6.1-Sol high · ~/dev/worktrees/agentihooks/engineer-323133-1629 · Context 11% used · 828K window
+  tab to queue message

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_main__mutmut_32:9bde774a58ae338ba6aebf3707608fde08a7f2ab13d8dde223618b769c440f75": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "Per the repo precedent, encoding=None on the markdown write falls back to the locale, which is UTF-8 in CI and the worker image and yields identical bytes; the only non-ASCII input is the free-text --source argument, which would differ only under a non-UTF-8 locale that the precedent excludes."
+  }
+}

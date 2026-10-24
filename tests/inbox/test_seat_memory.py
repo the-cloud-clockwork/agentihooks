@@ -4,8 +4,6 @@ import pytest
 
 from scripts.inbox.seats import SeatError, SeatMemory, SwarmCulture
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def memory():

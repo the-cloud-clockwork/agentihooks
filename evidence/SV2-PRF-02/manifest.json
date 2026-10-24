@@ -1,0 +1,31 @@
+{
+  "package": "SV2-PRF-02",
+  "tested_commit": "71a2e12850be6be0901a53ec1545f0cece6b193a",
+  "measured_commits": {
+    "kind-run-1.json": "ec5276308ced2ea1c182dbce76c6e81a239a9d48",
+    "kind-run-2.json": "f49241dc520bf8eeb84cb0816a2880e43a85e787",
+    "anton-outage-1.json": "1dd43842b6bc51122e6bf19cb539d6fc619dc14a"
+  },
+  "inputs": {
+    "tests/fixtures/swarm_v2/startup/anton-read-1.json": "850d67d30fb7ec52e89277b2e467c6a9785fba87e56dcff3e2dcd94dc4f9695a",
+    "tests/fixtures/swarm_v2/startup/anton-read-2.json": "4ae6cdceb5cfe22509ba51da0efa04b6a57c8770189b0f2c35e2e6825741e7c4",
+    "tests/fixtures/swarm_v2/startup/kind-run-1.json": "9cdad8aecf741089cc741a5424792136f103c038982b54886cc0db5898fecc17",
+    "tests/fixtures/swarm_v2/startup/kind-run-2.json": "a2b14c83b40160e2de8be5c949f78c28e7ec73cc82a2e175ffa2959a091b1b16",
+    "tests/performance/swarm_v2/startup.py": "893b6ae084e804bee947ae73a669e1de9f568da1041dbbe176ab1b2da39eb579",
+    "scripts/swarm_v2/startup_stages.py": "31d5196ac4447b49a75031e313af40db349c405107f9b1c45a290f2b4c974e90",
+    "scripts/swarm_v2/startup_bench.py": "86b416972cb491c8b66a06fddf0cd4e59ea6d20ad15ca0f591c73efca9e5523a",
+    ".github/workflows/startup-stages.yml": "adbc0e9beb24d913c34f5c223a7ce4c07b0daaf41e49ff2d3675e9a4d6bef0c9",
+    "tests/fixtures/swarm_v2/startup/anton-read-3.json": "d55c97ca370de23b73af9e80ecc9db06a3f3742855d8df56a646d4137728a2a8",
+    "tests/fixtures/swarm_v2/startup/logs/agentihooks-swarm-workers_swarm-exe-4a990712d05642e3964f0b0374c7cd43.log": "7d2676e1713d435e2995e9d709572c785c6378312f52ba9cf2cc6d762496a1b2",
+    "tests/fixtures/swarm_v2/startup/anton-outage-1.json": "8d5860d22787254ad0e1cca0bc07817a1dce6425c66fbbda3ebb5ff12ffcf276",
+    "evidence/SV2-PRF-02/anton-outage-1-fixture.json": "22b98c5d6943787fbc83cbfe3438ae3e2b35201786bc4b2e55d518e7a0f60410"
+  },
+  "reductions": {
+    "anton-outage-1.json": {
+      "command": "python -m scripts.swarm_v2.startup_bench reduce --capture <raw capture> --output <read>",
+      "ran_at": "2026-10-16T21:00:10Z",
+      "output_sha256": "8d5860d22787254ad0e1cca0bc07817a1dce6425c66fbbda3ebb5ff12ffcf276",
+      "note": "raw capture held outside the repo; run with the startup_stages.py pinned in inputs, the output matches the committed read byte for byte"
+    }
+  }
+}

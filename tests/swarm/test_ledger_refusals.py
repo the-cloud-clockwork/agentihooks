@@ -53,6 +53,6 @@ def test_a_client_error_from_the_server_is_a_ledger_refusal(monkeypatch, exit_te
 
     monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call, Missing=LookupError))
     with pytest.raises(SwarmError) as caught:
-        ledger_client.LedgerClient().comment("demo", "t1", "text", by="swarm")
+        ledger_client.LedgerClient().comment("demo", "t1", "text", by="engineer@1-2")
     assert isinstance(caught.value, ledger_client.LedgerRefused) is refused
     assert str(caught.value) == f"ledger demo: {exit_text}"

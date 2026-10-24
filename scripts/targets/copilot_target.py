@@ -205,6 +205,12 @@ class CopilotAdapter:
     def home(self) -> Path:
         return copilot_home()
 
+    def summary_counts(self) -> dict[str, int]:
+        from scripts.init_reporter import installed_counts
+
+        config = self._load_json(self.home() / "mcp-config.json")
+        return installed_counts(config.get("mcpServers", {}), agents_skills_home(), {})
+
     @staticmethod
     def _managed_sidecar(home: Path) -> Path:
         return home / ".agentihooks-managed.json"

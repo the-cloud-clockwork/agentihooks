@@ -12,8 +12,6 @@ from tests.swarm_ledger.test_api_v1 import authority_live as _authority_live
 from tests.swarm_ledger.test_api_v1 import live as _live
 from tests.swarm_ledger.test_ledger_authority import SLUG, core, ledger
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 authority_live = _authority_live
 live = _live
 
@@ -58,7 +56,7 @@ def test_trace_plan_files_its_cut_on_a_ledger_that_changed_since_the_read(live, 
     record, block = trace_plan.run(folder, state, client, who, "observe", home=tmp_path / "home")
     assert (record["verdict"], block) == ("pass", False)
     texts = [row["text"] for row in client._resource(SLUG, "followups", collection=True)]
-    assert texts == ["Other", "Cut from the plan of task t1: a diesel generator"]
+    assert texts == ["Other", "Cut from the plan: a diesel generator"]
 
 
 def test_a_write_against_a_stale_collection_revision_is_still_refused(live):

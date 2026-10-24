@@ -8,6 +8,7 @@ from tests.swarm_ledger.ledger_page import (
     fulfill_events,
     is_events,
     ledger_state,
+    loaded,
     page_source,
     serve_modules,
     shell_html,
@@ -16,7 +17,6 @@ from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
 ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/layout"
 NOW_MS = 1_791_300_000_000
 NOW_S = NOW_MS // 1000
@@ -30,10 +30,14 @@ ROWS = [
     "swarm-head",
     "swarm-alert",
     "capacity-box",
-    "swarm-row-work",
-    "swarm-row-accounts",
-    "health-box",
+    "quota-box",
+    "hives-box",
+    "overlays-box",
+    "agents-box",
     "handoff-box",
+    "recovery-box",
+    "freeze-box",
+    "architecture-box",
 ]
 
 
@@ -46,6 +50,7 @@ def status(**changes):
             "max_eng": 3,
             "max_ci": 1,
             "max_plan": 1,
+            "masters_step": 12,
             "autonomy": "delegate",
             "effort_min": "medium",
             "effort_max": "high",
@@ -125,21 +130,24 @@ class Page:
         html = shell_html()
         self.context = browser.new_context(viewport={"width": width, "height": 2400}, **options)
         if clock:
-            self.context.clock.install(time=NOW_MS)
-        self.context.add_init_script(f"Date.now = () => {NOW_MS};")
+            self.context.clock.install(time=NOW_S - 1)
+            self.context.clock.pause_at(NOW_S)
+        else:
+            self.context.add_init_script(f"Date.now = () => {NOW_MS};")
         self.context.route("**/*", lambda route: self.route(route, html))
         serve_modules(self.context)
         self.tab = self.context.new_page()
         self.errors = []
         self.tab.on("pageerror", lambda error: self.errors.append(str(error)))
         self.tab.goto(URL + "#swarm")
+        loaded(self.tab)
         self.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
 
     def route(self, route, html):
         request = route.request
         if is_events(request.url):
             fulfill_events(route, ledger_state(DOC), self.payload)
-        elif "/api/swarm/" in request.url:
+        elif "/swarm/" in request.url:
             if request.method == "PUT":
                 self.puts.append(json.loads(request.post_data))
             route.fulfill(json=self.payload)
@@ -175,29 +183,42 @@ def open_page(browser):
         page.context.close()
 
 
-def test_rows_run_header_alert_capacity_work_accounts_health_handoffs():
+def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_recovery_with_no_health_panel():
     page = page_source()
     box = page.split('<div id="swarm-box">', 1)[1].split('<aside id="stats-column"', 1)[0]
     positions = [box.index(f'id="{row}"') for row in ROWS]
     assert positions == sorted(positions)
-    assert 'class="fold sw-command-log" id="command-log"' in box
+    assert 'id="command-log"' not in box
     assert '<details class="fold sw-fold" id="overlays-fold" open>' in box
-    box = re.sub(r'<details[^>]*id="(command-log|overlays-fold)".*?</details>', "", box, flags=re.S)
-    for gone in ("crew", "needs-you", "swarm-figs", "swarm-work", "restore-box", "<section", "<details"):
+    assert '<details class="fold sw-fold" id="quota-fold" open>' in box
+    assert '<details class="fold sw-fold" id="recovery-fold" open>' in box
+    for gone in (
+        "crew",
+        "needs-you",
+        "swarm-figs",
+        "swarm-work",
+        "restore-box",
+        "swarm-row-work",
+        "swarm-row-accounts",
+        "doctor-box",
+        'id="health',
+        "<section",
+    ):
         assert gone not in box, gone
 
 
-def test_column_pairs_sit_side_by_side_on_desktop_and_stack_on_a_phone(open_page):
-    for width, side_by_side in ((1440, True), (390, False)):
+def test_every_swarm_row_stays_full_width_at_every_viewport(open_page):
+    for width in (1440, 390):
         page = open_page(status(), width)
-        for left, right in (("agents-box", "overlays-box"), ("quota-box", "doctor-box")):
-            a, b = page.box(left), page.box(right)
-            if side_by_side:
-                assert abs(a["y"] - b["y"]) < 1 and a["x"] + a["width"] <= b["x"] + 1, (left, right)
-            else:
-                assert b["y"] >= a["y"] + a["height"] - 1, (left, right)
         full = page.box("swarm-box")["width"]
-        for row in ("capacity-box", "health-box", "handoff-box"):
+        for row in (
+            "capacity-box",
+            "quota-box",
+            "hives-box",
+            "overlays-box",
+            "agents-box",
+            "handoff-box",
+        ):
             assert abs(page.box(row)["width"] - full) < 1, row
 
 
@@ -221,6 +242,20 @@ def test_header_names_the_swarm_state_tick_controls_and_autonomy(open_page):
     page.tab.get_by_role("button", name="manual").click()
     page.tab.wait_for_function("() => !document.querySelector('#swarm-modes button').disabled")
     assert page.puts == [{"action": "set", "autonomy": "manual"}]
+
+
+@pytest.mark.parametrize(
+    "completed,activity,expected",
+    [
+        (NOW_MS - 1_200_000, NOW_MS - 2_000, "tick activity 2s ago · completed 20m ago"),
+        (0, NOW_MS - 2_000, "tick activity 2s ago · no completed tick"),
+        (NOW_MS - 12_000, NOW_MS - 20_000, "tick 12s ago"),
+    ],
+)
+def test_tick_label_distinguishes_recent_activity_from_completion(open_page, completed, activity, expected):
+    page = open_page(status(last_tick=completed, last_tick_activity=activity), width=1920)
+    page.tab.set_viewport_size({"width": 1920, "height": 1080})
+    assert page.text("#swarm-tick") == expected
 
 
 def test_alert_line_shows_only_while_a_finding_is_open_with_the_live_caps(open_page):
@@ -262,9 +297,26 @@ def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
     assert page.puts == []
     assert fields["eng"].input_value() == "5"
     apply.click()
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('pending')")
+    for _ in range(100):
+        if page.puts:
+            break
+        page.tab.wait_for_timeout(100)
     assert page.puts == [{"action": "set", "max_eng": 5, "max_ci": 2, "compact_limit": 750}]
     assert apply.is_disabled()
+
+
+def test_the_masters_step_stepper_drafts_and_apply_sends_it(open_page):
+    page = open_page()
+    field = page.tab.locator("#cap-masters")
+    assert field.input_value() == "12"
+    page.tab.get_by_role("button", name="Lower masters step").click()
+    assert field.input_value() == "11"
+    page.tab.get_by_role("button", name="Apply capacity").click()
+    for _ in range(100):
+        if page.puts:
+            break
+        page.tab.wait_for_timeout(100)
+    assert page.puts == [{"action": "set", "masters_step": 11}]
 
 
 def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
@@ -273,10 +325,15 @@ def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
     assert (floor.input_value(), ceiling.input_value()) == ("medium", "high")
     assert floor.bounding_box()["y"] == page.tab.locator("#cap-eng").bounding_box()["y"]
     page.tab.get_by_role("button", name="Raise effort ceiling").click()
+    assert ceiling.input_value() == "xhigh"
+    page.tab.get_by_role("button", name="Raise effort ceiling").click()
     assert page.tab.get_by_role("button", name="Raise effort ceiling").is_disabled()
     floor.fill("low")
     page.tab.get_by_role("button", name="Apply capacity").click()
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('pending')")
+    for _ in range(100):
+        if page.puts:
+            break
+        page.tab.wait_for_timeout(100)
     assert page.puts == [{"action": "set", "effort_min": "low", "effort_max": "max"}]
 
 
@@ -291,7 +348,10 @@ def test_master_affinity_shows_the_live_harness_and_apply_sends_only_a_change(op
     pick.select_option("codex")
     assert not apply.is_disabled()
     apply.click()
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('pending')")
+    for _ in range(100):
+        if page.puts:
+            break
+        page.tab.wait_for_timeout(100)
     assert page.puts == [{"action": "set", "master_agent": "codex"}]
 
 
@@ -341,13 +401,13 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
         """() => {
           const box = (el) => el.getBoundingClientRect();
           return {
-            row: [...document.querySelectorAll('#capacity-box .sw-caps > *')].map((el) => [box(el).top, box(el).bottom]),
+            row: [...document.querySelectorAll('#capacity-box .sw-caps > :not(.sw-break)')].map((el) => [box(el).top, box(el).bottom]),
             gates: box(document.getElementById('gates-label')).top,
           };
         }"""
     )
-    assert len(boxes["row"]) == 8
-    caps, (affinity, apply) = boxes["row"][:6], boxes["row"][6:]
+    assert len(boxes["row"]) == 11
+    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][9:]
     middle = (caps[0][0] + caps[0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in caps)
     last = (affinity[0] + affinity[1]) / 2
@@ -369,13 +429,14 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     payload["agents"][1]["overlays"] = ["qitp-tuner", "trader", "reviewer"]
     page = open_page(payload)
     assert page.table("swarm-agents") == [
-        ["master-1", "—", "—", "—", "opus high", "—", "LIVE", "2h 0m", "message\nterminate"],
+        ["master-1\nluna", "—", "—", "—", "opus high", "—", "—", "LIVE", "2h 0m", "message\nterminate"],
         [
             "eng-58",
             "eng",
             "—",
             "qitp-tuner · trader · reviewer",
             "opus high",
+            "—",
             "pb10",
             "IDLE",
             "1m",
@@ -386,25 +447,188 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     for gone in ("swarm-tasks-box", "swarm-tasks", "tasks-open"):
         assert page.tab.locator(f"#{gone}").count() == 0, gone
     pairs = page.tab.eval_on_selector_all(
-        "#stats .stat", "rows => rows.map(r => [r.children[0].innerText, r.children[1].innerText])"
+        "#stats .stat:not(.top-bottleneck)", "rows => rows.map(r => [r.children[0].innerText, r.children[1].innerText])"
     )
-    figures = [[label.lower(), value] for label, value in pairs[4:12]]
+    figures = [[label.lower(), value] for label, value in [pairs[4], *pairs[8:15]]]
     assert figures == [
         ["tasks", "0 / 1"],
         ["open", "9"],
         ["claimed", "3"],
-        ["in pr", "1"],
         ["blocked", "1"],
+        ["in pr", "1"],
         ["done today", "4"],
         ["next phase", "p3"],
         ["inbox pending", "1"],
     ]
 
 
-def test_an_agents_table_without_agents_spans_all_nine_columns(open_page):
+def test_agents_table_shows_push_inbox_and_native_terminal_for_each_agent(open_page):
+    payload = status()
+    payload["agents"][0]["capabilities"] = {"push_inbox": True, "native_terminal_attach": False}
+    payload["agents"][1]["capabilities"] = {"push_inbox": False, "native_terminal_attach": True}
+    page = open_page(payload)
+    cells = page.tab.eval_on_selector_all(
+        "#swarm-agents tr",
+        "rows => rows.map(r => [...r.querySelectorAll('.sw-transport .lbl')].map(l => [l.textContent, l.className]))",
+    )
+    assert cells == [
+        [["push", "lbl on"], ["no native terminal", "lbl off"]],
+        [["no push", "lbl off"], ["native terminal", "lbl on"]],
+    ]
+
+
+def test_agents_table_shows_live_terminals_and_never_shows_an_aged_or_failed_view_as_live(open_page):
+    payload = status()
+    fresh = {"state": "live", "checked_at": NOW_MS - 30_000, "live_at": NOW_MS - 30_000, "fresh_ms": 30_000}
+    payload["terminals"] = {
+        "master-1": {**fresh, "checked_at": NOW_MS - 31_000, "live_at": NOW_MS - 31_000, "reason": ""},
+        "eng-58": fresh | {"reason": ""},
+    }
+    page = open_page(payload, clock=True)
+    heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
+    assert heads[7:11] == ["state", "execution", "terminal", "age"]
+    assert [row[9] for row in page.table("swarm-agents")] == ["CACHED live 1m ago · stale", "LIVE"]
+    payload["terminals"] = {
+        "master-1": {
+            "state": "unverified",
+            "checked_at": NOW_MS,
+            "live_at": 0,
+            "fresh_ms": 30_000,
+            "reason": "unreachable",
+        },
+        "eng-58": {**fresh, "state": "cached", "live_at": NOW_MS - 120_000, "reason": "conversation_mismatch"},
+    }
+    page = open_page(payload, clock=True)
+    assert [row[9] for row in page.table("swarm-agents")] == [
+        "UNVERIFIED unreachable",
+        "CACHED live 2m ago · conversation mismatch",
+    ]
+
+
+def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(open_page):
+    remote = {"lane": "eng", "harness": "claude", "status": "working", "inbox": [], "started_at": NOW_MS - 60_000}
+    payload = status()
+    payload["agents"] += [{**remote, "name": "eng-60", "task": "pb10"}, {**remote, "name": "ci-61", "lane": "ci"}]
+    card = {"pool": "standard", "wait": "", "terminal_behind": False}
+    payload["executions"] = {
+        "master-1": {
+            **card,
+            "backend": "local",
+            "generation": 1,
+            "pool": "",
+            "observed": "working",
+            "seen_at": NOW_MS - 60_000,
+        },
+        "eng-58": {
+            **card,
+            "backend": "local",
+            "generation": 3,
+            "pool": "",
+            "observed": "waiting",
+            "wait": "input",
+            "seen_at": 0,
+        },
+        "eng-60": {
+            **card,
+            "backend": "kubernetes",
+            "generation": 2,
+            "observed": "working",
+            "seen_at": NOW_MS - 120_000,
+            "terminal_behind": True,
+        },
+        "ci-61": {
+            **card,
+            "backend": "kubernetes",
+            "generation": 1,
+            "pool": "memory",
+            "observed": "pending",
+            "wait": "scheduling",
+            "seen_at": NOW_MS - 180_000,
+        },
+    }
+    payload["terminals"] = {
+        "eng-60": {
+            "state": "live",
+            "checked_at": NOW_MS - 300_000,
+            "live_at": NOW_MS - 300_000,
+            "fresh_ms": 30_000,
+            "reason": "",
+        }
+    }
+    page = open_page(payload, clock=True)
+    heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
+    assert heads[:11] == [
+        "agent",
+        "lane",
+        "profile",
+        "overlays",
+        "model",
+        "transport",
+        "task",
+        "state",
+        "execution",
+        "terminal",
+        "age",
+    ]
+    rows = page.table("swarm-agents")
+    assert [row[:2] + row[7:10] for row in rows] == [
+        ["master-1\nluna", "—", "LIVE", "WORKING seen 1m ago\nlocal · gen 1", "—"],
+        ["eng-58", "eng", "IDLE", "INPUT WAIT not seen\nlocal · gen 3", "—"],
+        [
+            "eng-60",
+            "eng",
+            "WORKING",
+            "WORKING seen 2m ago\nkubernetes · gen 2 · standard",
+            "CACHED live 5m ago · stale · behind heartbeat",
+        ],
+        ["ci-61", "ci", "WORKING", "SCHEDULING WAIT seen 3m ago\nkubernetes · gen 1 · memory", "—"],
+    ]
+
+
+def test_a_remote_agent_without_a_terminal_view_still_shows_the_execution_column(open_page):
+    payload = status()
+    payload["executions"] = {
+        "eng-58": {
+            "backend": "kubernetes",
+            "generation": 2,
+            "pool": "standard",
+            "observed": "starting",
+            "wait": "",
+            "seen_at": NOW_MS - 60_000,
+            "terminal_behind": False,
+        }
+    }
+    page = open_page(payload, clock=True)
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 12
+    assert [row[8:10] for row in page.table("swarm-agents")] == [
+        ["—", "—"],
+        ["STARTING seen 1m ago\nkubernetes · gen 2 · standard", "—"],
+    ]
+
+
+def test_a_local_only_swarm_keeps_the_familiar_agents_table(open_page):
+    payload = status()
+    payload["executions"] = {
+        a["name"]: {
+            "backend": "local",
+            "generation": 1,
+            "pool": "",
+            "observed": "working",
+            "wait": "",
+            "seen_at": 0,
+            "terminal_behind": False,
+        }
+        for a in payload["agents"]
+    }
+    page = open_page(payload)
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 10
+    assert "execution" not in page.text("#agents-table thead")
+
+
+def test_an_agents_table_without_agents_spans_all_ten_columns(open_page):
     page = open_page(status(agents=[]))
-    assert page.tab.eval_on_selector("#swarm-agents td", "td => td.colSpan") == 9
-    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 9
+    assert page.tab.eval_on_selector("#swarm-agents td", "td => td.colSpan") == 10
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 10
 
 
 def test_agents_table_lists_live_agents_first_and_pages_the_finished_ones_newest_first(open_page):
@@ -425,9 +649,9 @@ def test_agents_table_lists_live_agents_first_and_pages_the_finished_ones_newest
     payload["agents"] = finished[:60] + payload["agents"] + finished[60:]
     page = open_page(payload, width=1920)
     rows = page.table("swarm-agents")
-    assert [row[0] for row in rows[:2]] == ["master-1", "eng-58"]
+    assert [row[0] for row in rows[:2]] == ["master-1\nluna", "eng-58"]
     assert [row[0] for row in rows[2:52]] == [f"done-{i}" for i in range(119, 69, -1)]
-    assert all(row[6] == "FINISHED" and row[8] == "" for row in rows[2:52])
+    assert all(row[7] == "FINISHED" and row[9] == "" for row in rows[2:52])
     assert [cell.lower() for cell in rows[52]] == ["show 50 more finished agents · 70 left"]
     assert page.text("#agents-count").lower() == "2 live · 120 finished"
     page.tab.locator("#swarm-agents .page-more button").click()
@@ -472,10 +696,35 @@ def test_overlays_box_lists_every_base_role_with_the_overlays_that_wear_it(open_
         ["planner", [["reviewer", "false", False]], ""],
         ["qa", [["qitp-tuner", "false", False]], ""],
         ["cicd", [["sre", "false", False]], ""],
+        ["documentation", [], none],
     ]
     assert page.tab.locator("#overlays-apply").is_disabled()
     payload = status(overlays_available=[])
-    assert [row[2] for row in overlay_rows(open_page(payload))] == [none] * 5
+    assert [row[2] for row in overlay_rows(open_page(payload))] == [none] * 6
+
+
+def test_overlay_names_start_at_the_role_text_edge(open_page):
+    page = open_page(status(overlays_available=[{"name": "trader", "wears": ["engineer"]}]), width=1920)
+    edges = page.tab.eval_on_selector_all(
+        "#swarm-overlays .sw-ovl-row",
+        """rows => rows.map(r => { const t = r.children[1].querySelector('button') || r.children[1];
+          const range = document.createRange(); range.selectNodeContents(t);
+          return Math.round(range.getBoundingClientRect().left); })""",
+    )
+    assert len(edges) == 6
+    assert len(set(edges)) == 1
+
+
+def test_queued_commands_are_not_listed_and_a_failed_one_shows_its_error(open_page):
+    payload = status()
+    payload["commands"] = [
+        {"command": "swarm", "argv": ["set", "--max-eng", "4"], "state": "acknowledged"},
+        {"command": "quota", "argv": [], "state": "failed", "error": "quota reader timed out"},
+    ]
+    page = open_page(payload, width=1920)
+    assert page.tab.locator(".sw-command, #command-log, #command-rows").count() == 0
+    assert "max-eng" not in page.text("#swarm-box")
+    assert page.text("#swarm-note") == "Could not refresh quota: quota reader timed out. Try again or ask the master."
 
 
 def test_a_role_takes_at_most_three_overlays_and_apply_sends_only_changed_roles(open_page):
@@ -513,11 +762,9 @@ def test_toggling_an_overlay_back_leaves_nothing_to_apply(open_page):
 def test_the_overlays_box_folds_on_its_header_and_remembers_it(open_page):
     page = open_page(status(overlays_available=OFFERED))
     assert page.tab.locator("#swarm-overlays").is_visible()
-    page.tab.locator("#overlays-fold > summary").click()
-    assert not page.tab.locator("#swarm-overlays").is_visible()
-    page.tab.reload()
-    page.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
+    page.tab.locator("#overlays-fold > summary h3").click()
     assert page.tab.eval_on_selector("#overlays-fold", "d => d.open") is False
+    page.tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"overlays-fold\":false'))")
 
 
 @pytest.mark.parametrize("width", [1440, 390])
@@ -543,7 +790,7 @@ def test_full_length_agent_names_stay_on_one_line_and_fit_the_desktop_column(ope
         })""",
     )
     assert lines and all(count == 1 for _text, count in lines if "\n" not in _text), lines
-    assert [row[0] for row in page.table("swarm-agents")] == ["master@323133-0004", "engineer@323133-0072"]
+    assert [row[0] for row in page.table("swarm-agents")] == ["master@323133-0004\nluna", "engineer@323133-0072"]
     titles = page.tab.eval_on_selector_all("#swarm-agents td:first-child .sw-id", "ids => ids.map(e => e.title)")
     assert titles == ["master@323133-0004", "engineer@323133-0072"]
 
@@ -573,59 +820,36 @@ def test_every_button_is_flat_at_rest(open_page):
 def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(open_page):
     page = open_page()
     assert page.table("swarm-quota") == [
-        ["tccgma", "claude", "—", "92%", "53m", "78%", "4d15h", "—", "2/6", ""],
-        ["luna", "claude", "—", "64%", "2h05m", "51%", "6d00h", "—", "1/4", "MASTER"],
-        ["default", "codex", "—", "—", "—", "61%", "3d10h", "—", "0/—", ""],
+        ["tccgma", "claude", "SUBSCRIPTION", "—", "92%", "53m", "78%", "4d15h", "—", "2", "—", "6", ""],
+        ["luna", "claude", "SUBSCRIPTION", "—", "64%", "2h05m", "51%", "6d00h", "—", "1", "—", "4", "MASTER"],
+        ["default", "codex", "SUBSCRIPTION", "—", "—", "—", "61%", "3d10h", "—", "0", "—", "—", ""],
     ]
     assert page.text("#quota-count").lower() == "3 accounts · probed 2m ago"
 
 
-def test_the_quota_table_with_its_capacity_line_fits_its_box_at_1920(open_page):
+def test_the_quota_table_fits_its_box_at_1920(open_page):
     payload = status()
-    payload["quota_capacity"] = {
-        "configured": {"eng": 4, "ci": 1, "plan": 1},
-        "effective": {"eng": 2, "ci": 1, "plan": 0},
-        "reason": "accounts are closed; Claude has 1 free seats and Codex has 1 free seats",
-        "lanes": ["eng", "ci", "plan"],
-        "accounts": [
-            {
-                "harness": "claude",
-                "name": "tccgma",
-                "state": "CLOSED",
-                "sessions": 2,
-                "five_left": 92,
-                "week_left": 78,
-                "routing": 78,
-            }
-        ],
-        "at": NOW_MS - 7 * 60_000,
-    }
+    payload["quota"]["rows"][0] = {**payload["quota"]["rows"][0], "state": "CLOSED", "routing_left": 78}
     page = open_page(payload, 1920)
     scroll = page.tab.eval_on_selector("#quota-box .sw-scroll", "s => [s.scrollWidth, s.clientWidth]")
     assert scroll[0] == scroll[1]
-    assert page.table("swarm-quota")[0][2] == "CLOSED"
-    assert page.text("#quota-capacity").split("\n") == [
-        "ENG 2 OF 4 · CI 1 OF 1 · PLAN 0 OF 1",
-        "changed 7m ago",
-        "because accounts are closed; Claude has 1 free seats and Codex has 1 free seats",
-    ]
-    table, line = page.box("quota-table"), page.box("quota-capacity")
-    assert abs(table["x"] - line["x"]) < 1
+    assert page.table("swarm-quota")[0][3] == "CLOSED"
+    assert page.tab.locator("#quota-capacity").count() == 0
 
 
-def test_the_sessions_cell_reads_plain_value_over_cap(open_page):
+def test_the_sessions_cell_reads_the_plain_session_count(open_page):
     page = open_page()
     parts = page.tab.eval_on_selector_all(
         "#swarm-quota tr:first-child .sw-sessions-value",
         "els => els.map(e => [e.tagName, e.innerText])",
     )
-    assert parts == [["SPAN", "2/6"]]
+    assert parts == [["SPAN", "2"]]
 
 
 def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_page):
     page = open_page()
     order = page.tab.eval_on_selector_all(
-        "#capacity-box .sw-cap:not(.sw-affinity)",
+        "#capacity-box .sw-cap:not(.sw-affinity):not(.sw-model)",
         """caps => caps.map(c => [c.querySelector('.sw-cap-name').innerText,
           [...c.children].slice(1).map(e => e.matches('.sw-field') ? e.querySelector('input').value + (e.querySelector('.sw-unit')?.innerText || '') : e.innerText)])""",
     )
@@ -633,6 +857,7 @@ def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_
         ["eng", ["−", "3", "+"]],
         ["ci", ["−", "1", "+"]],
         ["plan", ["−", "1", "+"]],
+        ["masters step", ["−", "12", "+"]],
         ["compact limit", ["−", "600k", "+"]],
         ["effort min", ["−", "medium", "+"]],
         ["effort max", ["−", "high", "+"]],
@@ -661,59 +886,40 @@ def test_the_refresh_icon_beside_the_title_probes_every_account_and_redraws(open
 
 def test_an_untouched_page_probes_quota_every_five_minutes(open_page):
     page = open_page(clock=True)
-    page.tab.clock.run_for(299_000)
-    page.tab.wait_for_timeout(200)
-    assert {"action": "quota_refresh"} not in page.puts
-    page.tab.clock.run_for(2_000)
-    for _ in range(50):
-        if {"action": "quota_refresh"} in page.puts:
-            break
-        page.tab.wait_for_timeout(50)
-    assert page.puts.count({"action": "quota_refresh"}) == 1
+    assert page.tab.evaluate("Date.now()") == NOW_MS
+    for count in (1, 2):
+        page.tab.clock.run_for(299_999)
+        assert page.tab.evaluate("Date.now()") == NOW_MS + count * 300_000 - 1
+        assert page.puts.count({"action": "quota_refresh"}) == count - 1
+        with page.tab.expect_response(
+            lambda response: (
+                response.request.method == "PUT" and response.request.post_data_json == {"action": "quota_refresh"}
+            )
+        ):
+            page.tab.clock.run_for(1)
+        assert page.tab.evaluate("Date.now()") == NOW_MS + count * 300_000
+        assert page.puts.count({"action": "quota_refresh"}) == count
 
 
-def test_doctor_block_offers_start_while_off_and_links_its_ledger_while_on(open_page):
+def test_doctor_row_shows_off_or_on_and_toggles_its_own_button(open_page):
     off = open_page()
-    assert off.text("#doctor-state").lower() == "off"
-    assert [r.split("\n") for r in off.tab.locator("#swarm-doctor .kv").all_inner_texts()] == [
-        ["state", "not running"],
-        ["last check", "—"],
-        ["findings", "—"],
-    ]
+    assert off.tab.locator("#doctor-row").is_visible()
+    assert off.text("#doctor-dot").lower() == "off"
+    assert off.text("#doctor-state") == "not running"
+    assert off.text("#doctor-check") == "last check —"
+    assert off.text("#doctor-findings") == "findings —"
     assert off.tab.locator("[data-swarm=doctor_start]").is_visible()
     assert not off.tab.locator("[data-swarm=doctor_stop]").is_visible()
     on = open_page(
         status(doctor={"slug": "rig-doctor", "state": "running", "last_check": NOW_MS - 120_000, "findings": 2})
     )
-    assert on.text("#doctor-state").lower() == "on"
-    assert on.tab.locator("#swarm-doctor a").get_attribute("href") == "/rig-doctor"
-    assert [r.split("\n")[1] for r in on.tab.locator("#swarm-doctor .kv").all_inner_texts()] == [
-        "running",
-        "2m ago",
-        "2",
-    ]
+    assert on.text("#doctor-dot").lower() == "on"
+    assert on.text("#doctor-state") == "running"
+    assert on.tab.locator("#doctor-state a").get_attribute("href") == "/rig-doctor"
+    assert on.text("#doctor-check") == "last check 2m ago"
+    assert on.text("#doctor-findings") == "findings 2"
     assert on.tab.locator("[data-swarm=doctor_stop]").is_visible()
-
-
-def test_health_rows_carry_evidence_threshold_seen_verdict_and_note(open_page):
-    finding = {
-        "id": "ceremony/eng-59",
-        "kind": "ceremony",
-        "subject": "eng-59",
-        "evidence": ["24 moves", "1 outcome"],
-        "threshold": "20 · ratio 12",
-        "seen_at": NOW_MS - 540_000,
-        "verdict": {"value": "false-positive", "note": "pr open"},
-    }
-    page = open_page(status(findings=[finding]))
-    row = page.table("health")[0]
-    assert row[:5] == ["ceremony", "eng-59", "24 moves · 1 outcome", "20 · ratio 12", "9m ago"]
-    assert page.tab.locator("#health .hl-pick").input_value() == "false-positive"
-    assert page.tab.locator("#health .hl-note").input_value() == "pr open"
-    page.tab.locator("#health .hl-note").fill("still open")
-    page.tab.locator("#health .hl-pick").select_option("resolved")
-    page.tab.wait_for_function("() => !document.querySelector('#swarm-modes button').disabled")
-    assert page.puts == [{"action": "verdict", "id": "ceremony/eng-59", "verdict": "resolved", "note": "still open"}]
+    assert not on.tab.locator("[data-swarm=doctor_start]").is_visible()
 
 
 def test_handoff_rows_show_each_seat_and_offer_the_restore_decision(open_page):
@@ -750,7 +956,7 @@ def test_handoff_rows_show_each_seat_and_offer_the_restore_decision(open_page):
 
 def test_swarm_tab_styles_use_only_palette_tokens():
     page = page_source()
-    rules = re.findall(r"^\s*(?:\.sw-|#swarm|\.lbl|#health-table|#agents-table|#quota-table)[^{]*\{[^}]*\}", page, re.M)
+    rules = re.findall(r"^\s*(?:\.sw-|#swarm|\.lbl|#agents-table|#quota-table)[^{]*\{[^}]*\}", page, re.M)
     assert len(rules) > 30
     for rule in rules:
         assert not re.search(

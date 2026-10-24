@@ -19,7 +19,6 @@ Can be invoked as: python -m hooks.hook_manager
 
 from hooks.common import log, log_command, log_transcript, output_json, run_script
 from hooks.config import LOG_ENABLED, LOG_FILE, LOG_HOOKS_COMMANDS, LOG_TRANSCRIPT, LOG_USE_COLORS
-from hooks.hook_manager import main
 from hooks.observability.transcript import log_new_entries
 
 __all__ = [
@@ -39,3 +38,12 @@ __all__ = [
     "LOG_TRANSCRIPT",
     "LOG_USE_COLORS",
 ]
+
+
+def __getattr__(name: str):
+    if name == "main":
+        from hooks.hook_manager import main
+
+        globals()[name] = main
+        return main
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

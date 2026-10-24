@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_ledger_operation__mutmut_2:916897d25c7acf8ac3bdd2de9ec51b6657d29875cfa1c43c5245896e986fbcdf": {
+    "reader": "standards_reader",
+    "reason": "Passes None as the services argument to admin.upload. upload reads only the handler headers, the schema validator and the handler's post_artifact or post_media methods, which take no services, so the argument never affects the output."
+  }
+}

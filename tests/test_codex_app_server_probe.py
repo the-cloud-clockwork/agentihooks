@@ -421,6 +421,94 @@ def test_the_approval_prompt_touches_one_file():
     )
 
 
+STATUS = {"method": "thread/status/changed"}
+
+
+def late_scripts(a_events, reader_events, late_events, read, resumed, reread):
+    return {
+        "probe-owner-a": ({"thread/start": [thread()], "turn/start": [turn("T")]}, a_events),
+        "probe-late-reader": ({"thread/read": [read]}, reader_events),
+        "probe-late-resumer": ({"thread/resume": [resumed], "thread/read": [reread]}, late_events),
+    }
+
+
+def test_a_late_resumer_receives_the_open_approval_a_late_reader_misses(fakes, tmp_path):
+    scripts, made = fakes
+    repo = str(tmp_path)
+    (tmp_path / "approval-probe.txt").write_text("")
+    running = {"thread": {"turns": [{"id": "T0", "status": "completed"}, {"id": "T", "status": "inProgress"}]}}
+    scripts.update(
+        late_scripts(
+            [{"method": "turn/started"}, REQUEST, agent("X"), done("T")],
+            [STATUS, PAUSE, {"method": "thread/goal/cleared"}, done("T"), {"method": "item/started"}],
+            [{**REQUEST, "_at": 5.0}, RESOLVED],
+            ok(running),
+            {**ok(running), "_at": 4.0},
+            {**ok(running), "_at": 5.0},
+        )
+    )
+    record = probe.late_approval("SOCK", repo)
+    assert record == {
+        "late_resume_last_turn_status": "inProgress",
+        "thread": "TH",
+        "request_method": "item/commandExecution/requestApproval",
+        "delivered_to_owner": True,
+        "late_reader_status": "inProgress",
+        "delivered_to_late_reader": False,
+        "late_resume": "ok",
+        "delivered_to_late_resumer": True,
+        "late_same_request_id": True,
+        "late_request_before_resume_reply": False,
+        "late_request_before_read_reply": True,
+        "late_reader_methods": ["thread/goal/cleared", "thread/status/changed", "turn/completed"],
+        "resolved_seen_by_late_resumer": True,
+        "turn_status": "completed",
+        "file_created": True,
+    }
+    a, reader, late = made["probe-owner-a"], made["probe-late-reader"], made["probe-late-resumer"]
+    assert a.calls == [start_call(repo, approvalPolicy="untrusted"), turn_call("TH", probe.APPROVAL_PROMPT)]
+    assert reader.calls == [("thread/read", {"threadId": "TH", "includeTurns": True}, DEFAULT)]
+    assert late.calls == [
+        ("thread/resume", {"threadId": "TH"}, DEFAULT),
+        ("thread/read", {"threadId": "TH", "includeTurns": True}, DEFAULT),
+    ]
+    assert a.answers == [(7, {"decision": "decline"})]
+    assert (reader.answers, late.answers) == ([], [])
+    assert (a.waits, reader.waits, late.waits) == ([120, 180], [10, 5], [10, 20])
+    assert (a.closed, reader.closed, late.closed) == (True, True, True)
+
+
+def test_a_late_approval_without_an_owner_request_keeps_the_record_short(fakes, tmp_path):
+    scripts, made = fakes
+    scripts.update(
+        late_scripts(
+            [PAUSE],
+            [REQUEST],
+            [{**REQUEST, "id": 8, "_at": 4.0}],
+            ok({}),
+            {**err("gone"), "_at": 4.0},
+            {**ok({}), "_at": 3.0},
+        )
+    )
+    record = probe.late_approval("SOCK", str(tmp_path))
+    assert record == {
+        "late_resume_last_turn_status": None,
+        "thread": "TH",
+        "request_method": None,
+        "delivered_to_owner": False,
+        "late_reader_status": None,
+        "delivered_to_late_reader": True,
+        "late_resume": {"code": -32600, "message": "gone"},
+        "delivered_to_late_resumer": True,
+        "late_same_request_id": False,
+        "late_request_before_resume_reply": True,
+        "late_request_before_read_reply": False,
+    }
+    assert made["probe-owner-a"].answers == []
+    assert made["probe-late-resumer"].waits == [10]
+    assert made["probe-owner-a"].closed is True
+
+
 def test_detach_records_a_viewer_leaving_and_another_returning(fakes, tmp_path):
     scripts, made = fakes
     repo = str(tmp_path)
@@ -747,6 +835,7 @@ def test_every_scenario_is_registered():
         "conversation": probe.conversation,
         "steer": probe.steer,
         "approvals": probe.approvals,
+        "late_approval": probe.late_approval,
         "detach": probe.detach,
         "compaction": probe.compaction,
         "sandbox": probe.sandbox,
@@ -820,10 +909,12 @@ def test_client_speaks_json_rpc_over_a_unix_websocket(monkeypatch):
     try:
         client = probe.Client(path, "t")
         assert client.name == "t"
-        assert client.request("echo", {"a": 1}) == {"jsonrpc": "2.0", "id": 2, "result": {"a": 1}}
+        reply = client.request("echo", {"a": 1})
         note, seen = client.until(probe.method_is("note"), 5)
-        assert note == {"jsonrpc": "2.0", "method": "note", "params": {"n": 1}}
         assert seen == [note]
+        assert note.pop("_at") <= reply.pop("_at")
+        assert reply == {"jsonrpc": "2.0", "id": 2, "result": {"a": 1}}
+        assert note == {"jsonrpc": "2.0", "method": "note", "params": {"n": 1}}
         ask, _ = client.until(lambda m: "id" in m, 5)
         assert ask["id"] == 99
         client.answer(99, {"decision": "accept"})

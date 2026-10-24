@@ -95,7 +95,10 @@ class Budget:
             return done
         if self._exempt(doc, by, ctx):
             return apply(doc, op, ctx)
-        count = progress.read(by).talk
+        mark = progress.read(by)
+        if not mark.outcome_at:
+            return apply(doc, op, ctx)
+        count = mark.talk
         if count >= BUDGET:
             reason = refusal(by, count, self.slug)
             kind = "deny" if mode == "enforce" else "observe"

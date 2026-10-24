@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/rows.py:scripts.swarm_ledger.repository.rows.x_diff__mutmut_21:76c7ffcf91a7c2d435d0ede1320e116d70485264defc237e09e08911364d9610": {
+    "reader": "Standards continuation reader",
+    "reason": "The right argument of _child_paths_match is unused. Replacing that argument with None changes neither the direct list path comparison nor the encoded fallback."
+  }
+}

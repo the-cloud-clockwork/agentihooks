@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Claude Code hook that keeps a crew member bound to its ledger.
+"""Hook that keeps a crew member bound to its ledger, run on every harness by hooks.context.swarm_ledger.
 
-One entry for SessionStart, UserPromptSubmit, PostToolUse and Stop. A session is bound by
+Handles SessionStart, UserPromptSubmit, PostToolUse and Stop. A session is bound by
 `agentihooks ledger join` or `ledger.py join` (learned from the Bash command). Unbound sessions exit at once. Every error fails open.
 """
 
@@ -20,6 +20,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parents[1]))
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SESSIONS = LEDGER_DIR / ".sessions"
+GATE_READS = ("_meta.members", "_meta.events", "tasks", "phases", "followups", "policy")
 SHOWN = 5
 CLI = "agentihooks ledger"
 
@@ -76,8 +77,9 @@ def join_from_new(command, response):
     tokens = tokens_of(command)
     if not is_ledger_cli(tokens) or "new" not in tokens:
         return None
-    stdout = response.get("stdout", "") if isinstance(response, dict) else str(response or "")
-    for text in stdout.splitlines():
+    if isinstance(response, dict):
+        response = response.get("stdout") or response.get("textResultForLlm")
+    for text in str(response).splitlines():
         try:
             out = json.loads(text)
         except ValueError:
@@ -157,7 +159,9 @@ def restart(session):
 
 def progress_of(session):
     from scripts.gates.progress import Progress
-    from scripts.swarm.store import redis_client
+    from scripts.swarm_ledger import ports
+
+    redis_client = ports.swarm().store.redis_client
 
     return Progress(redis_client(), session["slug"])
 
@@ -167,6 +171,22 @@ def note_outcome(session, kind):
         progress_of(session).outcome(session["name"], kind)
     except Exception as exc:  # the tool call stands whatever Redis does
         log(f"outcome not recorded: {exc}")
+
+
+def wait_seen(session: dict) -> bool:
+    from scripts.swarm_ledger import ports
+
+    idle = ports.swarm().idle
+
+    try:
+        held = idle.wait(progress_of(session).redis, session["slug"], session["name"])
+    except Exception as exc:
+        log(f"wait unreadable: {exc}")
+        return False
+    if not held or held.get("until", 0) <= int(time.time() * 1000):
+        return False
+    restart(session)
+    return True
 
 
 def outcome_seen(session):
@@ -191,7 +211,7 @@ def on_tool(payload, session, state, sfile):
     kind = outcome_of(command)
     if kind:
         note_outcome(session, kind)
-    if touched(command) or kind:
+    if touched(command) or kind or wait_seen(session):
         restart(session)
     elif not payload.get("agent_id"):
         session["calls"] += 1
@@ -227,7 +247,7 @@ def stop_reasons(session, state):
     reasons = []
     if owed:
         reasons.append(f"{len(owed)} operator event(s) are unhandled")
-    if session["calls"] >= pol["stop_after_calls"] and not outcome_seen(session):
+    if session["calls"] >= pol["stop_after_calls"] and not wait_seen(session) and not outcome_seen(session):
         reasons.append(f"{session['calls']} tool calls since you last recorded progress in the ledger")
     return reasons, len(owed), pol
 
@@ -265,9 +285,15 @@ HANDLERS = {"PostToolUse": on_tool, "UserPromptSubmit": on_prompt, "Stop": on_st
 def serve_ledgers():
     import ledger_link
 
-    from scripts.swarm_ledger import server_lifetime
+    from scripts.swarm_ledger import server_lifetime, storage
 
-    if os.environ.get("LEDGER_AUTOSTART") == "0" or ledger_link.remote() or not any(LEDGER_DIR.glob("*.json")):
+    if (
+        os.environ.get("LEDGER_AUTOSTART") == "0"
+        or ledger_link.remote()
+        or (
+            not storage.shared() and not (LEDGER_DIR / storage.DATABASE).exists() and not any(LEDGER_DIR.glob("*.json"))
+        )
+    ):
         return
     try:
         address = ledger_link.address()
@@ -284,6 +310,9 @@ def serve_ledgers():
 
 
 def dispatch(payload):
+    global LEDGER_DIR, SESSIONS
+    LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
+    SESSIONS = LEDGER_DIR / ".sessions"
     sid = payload.get("session_id")
     if not sid or not SESSIONS.exists() and payload.get("hook_event_name") not in ("SessionStart", "PostToolUse"):
         return
@@ -293,16 +322,19 @@ def dispatch(payload):
     sfile = SESSIONS / f"{sid}.json"
     session = read_json(sfile)
     if session is not None:
-        from scripts.swarm.naming import resolve_name
+        from scripts.swarm_ledger import ports
+
+        resolve_name = ports.swarm().naming.resolve_name
 
         session["name"] = resolve_name(session["name"])
     handler = HANDLERS.get(payload.get("hook_event_name"))
     if session is None or handler is None:
         return
-    import ledger_core as core
     import ledger_gate
 
-    state = read_json(core.paths(session["slug"])[1])
+    from scripts.swarm_ledger.storage import read_ledger
+
+    state = read_ledger(LEDGER_DIR, session["slug"], *GATE_READS)
     if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or ledger_gate.closed(state):
         return
     if session["name"] not in state["_meta"].get("members", {}):
@@ -320,4 +352,7 @@ def main():
 
 
 if __name__ == "__main__":
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     sys.exit(main())

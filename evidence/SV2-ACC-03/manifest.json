@@ -1,0 +1,14 @@
+{
+  "package": "SV2-ACC-03",
+  "tested_commit": "37077bcf8d769d611e63bbdb62df8d284371d6cd",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38054947948",
+  "fixture_clock": "Fixture clock list patched into time.time by build(); fakeredis server clock only in test_the_default_clock_is_the_redis_server_clock",
+  "independent_runs": 2,
+  "cleanup": "pytest fakeredis; no live resource mutations",
+  "mutation_scope": "Fleet quota accounting only; local router cache observations stay supporting evidence",
+  "inputs": {
+    "quota-observations.json": "539879ba09fa2d94edf7b0825a501347f7dc6bee861d4a6933c1f41ec145ec0d",
+    "task-authority.json": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57"
+  }
+}

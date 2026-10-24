@@ -8,6 +8,9 @@ import pytest
 from scripts.recall.cli import main
 from scripts.recall.reindex import binned, deleted_refs, ledger_dir
 from scripts.recall.store import SQLiteRecallStore
+from scripts.swarm_ledger.repository.rows import TABLES
+from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
+from tests.swarm_ledger import legacy_page
 
 
 def document(title, tasks=(), chat=()):
@@ -22,12 +25,18 @@ def home(tmp_path):
     (agentihooks / "swarm" / "alpha").mkdir(parents=True)
     write(ledgers, "alpha", document("Alpha", [{"id": "t1", "title": "alpha-task words"}]))
     write(ledgers, "beta", document("Beta", [{"id": "t1", "title": "beta words"}]))
-    (ledgers / ".bin.json").write_text(json.dumps({"beta": 1}))
+    bin_entries(ledgers, {"beta": 1})
     return {"LEDGER_DIR": str(ledgers), "AGENTIHOOKS_HOME": str(agentihooks)}
 
 
 def write(folder, slug, doc):
-    (folder / f"{slug}.json").write_text(json.dumps(doc))
+    legacy_page.store(folder, slug, doc)
+
+
+def bin_entries(folder, entries):
+    repository = SQLiteLedgerRepository(folder / DATABASE)
+    with repository.connect() as connection, connection:
+        repository.save_registry(connection, "bin", entries)
 
 
 def run(environ, *argv, capsys):
@@ -47,11 +56,7 @@ def test_ledger_dir_follows_the_ledger_server_setting(tmp_path):
 
 def test_the_bin_holds_only_slugs_with_a_binned_time(tmp_path):
     assert binned(tmp_path) == set()
-    (tmp_path / ".bin.json").write_text("{")
-    assert binned(tmp_path) == set()
-    (tmp_path / ".bin.json").write_text("[1]")
-    assert binned(tmp_path) == set()
-    (tmp_path / ".bin.json").write_text(json.dumps({"kept": 5, "odd": "x"}))
+    bin_entries(tmp_path, {"kept": 5, "odd": "x"})
     assert binned(tmp_path) == {"kept"}
 
 
@@ -93,25 +98,20 @@ def test_a_binned_slug_needs_include_binned(home, capsys):
 def test_an_unknown_slug_fails(home, capsys):
     code, out = run(home, "--ledger", "nope", capsys=capsys)
     assert code == 1
-    assert out == {"error": "no ledger file for nope"}
-
-
-def test_an_unreadable_ledger_is_reported_and_the_rest_indexed(home, capsys):
-    (Path(home["LEDGER_DIR"]) / "broken.json").write_text("{")
-    code, out = run(home, "--all", capsys=capsys)
-    assert code == 0
-    assert out["unreadable"] == ["broken"]
-    assert list(out["indexed"]) == ["alpha"]
+    assert out == {"error": "no stored ledger for nope"}
 
 
 def test_a_malformed_ledger_is_unreadable_and_the_rest_indexed(home, capsys):
     folder = Path(home["LEDGER_DIR"])
-    (folder / "listed.json").write_text("[]")
     write(folder, "idless", document("Idless", [{"title": "no id"}]))
     write(folder, "nameless", document("Nameless", [{"id": "t1", "comments": [{"text": "no id"}]}]))
+    write(folder, "absent-root", document("Rootless"))
+    with sqlite3.connect(folder / DATABASE) as connection:
+        for table in TABLES:
+            connection.execute(f"DELETE FROM {table} WHERE slug='absent-root' AND path='[]'")
     code, out = run(home, "--all", capsys=capsys)
     assert code == 0
-    assert out["unreadable"] == ["idless", "listed", "nameless"]
+    assert out["unreadable"] == ["absent-root", "idless", "nameless"]
     assert list(out["indexed"]) == ["alpha"]
     assert store(home).match("Idless") == []
 
@@ -193,7 +193,7 @@ def test_agentihooks_help_lists_recall(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
     with pytest.raises(SystemExit):
         install.main()
-    assert re.search(r"\n +recall +Recall archive of ledgers and swarms: reindex\n", capsys.readouterr().out)
+    assert re.search(r"\n +recall +Recall archive of ledgers and swarms: reindex, eval\n", capsys.readouterr().out)
 
 
 def test_help_names_the_command_and_its_options(monkeypatch, capsys):
@@ -201,15 +201,21 @@ def test_help_names_the_command_and_its_options(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         main(["--help"], {})
     top = capsys.readouterr().out
-    assert top.startswith("usage: agentihooks recall [-h] {reindex} ...\n")
+    assert top.startswith("usage: agentihooks recall [-h] {reindex,eval} ...\n")
     assert "\nRecall archive of ledgers and swarms\n" in top
-    assert re.search(r"\n +reindex +Backfill the recall archive from ledger files\n", top)
+    assert re.search(r"\n +reindex +Backfill the recall archive from the stored ledgers\n", top)
+    assert re.search(r"\n +eval +Print the top five hit rate of a golden question file\n", top)
+    with pytest.raises(SystemExit):
+        main(["eval", "--help"], {})
+    grade = capsys.readouterr().out
+    assert grade.startswith("usage: agentihooks recall eval [-h] golden\n")
+    assert re.search(r"\n  golden +JSON list of question, expect and optional scope and kinds\n", grade)
     with pytest.raises(SystemExit):
         main(["reindex", "--help"], {})
     sub = capsys.readouterr().out
     assert sub.startswith("usage: agentihooks recall reindex [-h] (--ledger SLUG | --all) [--include-binned]\n")
     assert re.search(r"\n  --ledger SLUG +Index one ledger\n", sub)
-    assert re.search(r"\n  --all +Index every ledger file\n", sub)
+    assert re.search(r"\n  --all +Index every stored ledger\n", sub)
     assert re.search(r"\n  --include-binned +Also index ledgers in the bin\n", sub)
 
 

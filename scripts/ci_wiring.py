@@ -13,7 +13,7 @@ FILTERED_EVENTS = ("pull_request", "push")
 FILTERS = ("paths", "paths-ignore", "types")
 CONFIG = ".github/gate-wiring.json"
 FIELDS = ("reason", "owner", "expires")
-EVENT_TERM = re.compile(r"github\.event_name\s*(==|!=)\s*'(\w+)'")
+EVENT_TERM = re.compile(r"""github\.event_name\s*(==|!=)\s*(['"])(\w+)\2""")
 EXPRESSION = re.compile(r"\$\{\{(.*)\}\}", re.DOTALL)
 
 
@@ -32,10 +32,13 @@ def needs_of(job: dict) -> set[str]:
 
 
 def _skips_pull_requests(term: str) -> bool:
+    operands = re.split(r"(==|!=)", term)
+    if len(operands) == 3 and operands[2].strip() == "github.event_name":
+        term = f"github.event_name {operands[1]} {operands[0]}"
     match = EVENT_TERM.fullmatch(term.strip())
     if match is None:
         return False
-    operator, event = match.groups()
+    operator, _, event = match.groups()
     return event not in PULL_REQUEST_EVENTS if operator == "==" else event == "pull_request"
 
 

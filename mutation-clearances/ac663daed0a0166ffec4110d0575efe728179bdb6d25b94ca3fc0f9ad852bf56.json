@@ -1,0 +1,6 @@
+{
+  "scripts/runtime_env.py:scripts.runtime_env.x_seed__mutmut_17:7f4f6db35366481926e8b6bd8f614ce1d10e535f32634b4b229fa9e79aafef1c": {
+    "reader": "/root/standards_reader",
+    "reason": "Absent endpoint becomes None instead of empty string; both are false before the sole insertion and quote path. Block removal, file content, permissions and return value are unchanged."
+  }
+}

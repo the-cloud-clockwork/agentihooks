@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_main__mutmut_40:626fb6812dd1af530a9eb67180e73a758e916d0e9b25c069eb07ae9f4b4b5964": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "Spelling variant of utf-8 (same codec) on the markdown write; output is identical."
+  }
+}

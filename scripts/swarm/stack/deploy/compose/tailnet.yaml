@@ -1,0 +1,38 @@
+services:
+  swarm-tailnet:
+    image: mirror.gcr.io/library/nginx:1.27-alpine
+    network_mode: host
+    environment:
+      SWARM_TAILNET_IP: ${SWARM_TAILNET_IP:?run deploy/compose/start-tailnet.sh}
+      NGINX_ENVSUBST_FILTER: ^SWARM_TAILNET_IP$
+    volumes:
+      - ${SWARM_TAILNET_ASSETS}/ledger-tailnet.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${SWARM_ADOPT_HOME}/.agentihooks/hive-tls/cert.pem:/tls/cert.pem:ro
+      - ${SWARM_ADOPT_HOME}/.agentihooks/hive-tls/key.pem:/tls/key.pem:ro
+    restart: unless-stopped
+  hive-tailnet:
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
+    command:
+      - agentihooks
+      - hive
+      - serve
+      - --host=${SWARM_TAILNET_IP:?run deploy/compose/start-tailnet.sh}
+      - --port=8770
+      - --redis-url=redis://${SWARM_TAILNET_IP}:6379/0
+      - --tls-cert=/tls/cert.pem
+      - --tls-key=/tls/key.pem
+    user: ${SWARM_ADOPT_UID}:${SWARM_ADOPT_GID}
+    network_mode: host
+    environment:
+      HOME: /tmp
+      AGENTIHOOKS_DEPLOYMENT: local
+      AGENTIHOOKS_SWARM_REDIS_URL: ${SWARM_ADOPT_REDIS_URL}
+    volumes:
+      - ${SWARM_ADOPT_HOME}/.agentihooks/hive-tls/cert.pem:/tls/cert.pem:ro
+      - ${SWARM_ADOPT_HOME}/.agentihooks/hive-tls/key.pem:/tls/key.pem:ro
+    restart: unless-stopped
+  redis-tailnet:
+    image: mirror.gcr.io/alpine/socat:1.8.0.1
+    command: ["TCP-LISTEN:6379,bind=${SWARM_TAILNET_IP:?run deploy/compose/start-tailnet.sh},fork,reuseaddr", "TCP:127.0.0.1:6379"]
+    network_mode: host
+    restart: unless-stopped

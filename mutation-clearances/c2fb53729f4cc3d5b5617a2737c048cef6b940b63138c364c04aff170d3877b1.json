@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_mode.py:hooks.context.operator_mode.x_observe__mutmut_7:a23bd4225ebaaaf5c0949e38a99e809e125051ca6a051605900c43f587d4bb93": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: _on(state, now) returns only bool(state.get(\"on\")); now is neither read nor forwarded, so passing None leaves the branch and every saved field unchanged."
+  }
+}

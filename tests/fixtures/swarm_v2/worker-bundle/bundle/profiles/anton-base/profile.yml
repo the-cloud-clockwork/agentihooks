@@ -1,0 +1,4 @@
+name: anton-base
+description: "Fixture base every bundle role extends"
+allowedOverlays:
+  - brain

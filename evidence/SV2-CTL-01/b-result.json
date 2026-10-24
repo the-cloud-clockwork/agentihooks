@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "cached_admission_refused": true,
+  "former_leader_refused": true,
+  "protected_state_unchanged": true,
+  "external_creations": 0,
+  "controller_leader_changes_total": 2
+}

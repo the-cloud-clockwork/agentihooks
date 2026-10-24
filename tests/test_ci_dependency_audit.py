@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -11,7 +12,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
 
 BASE = (
-    "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+    "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
+    " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
     " || github.event.before || inputs.base }}"
 )
 
@@ -181,23 +183,48 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_dependency_audit_is_a_parallel_need_of_gate_required_graded_by_the_base():
+def test_dependency_audit_is_a_lint_step_graded_by_the_base():
     jobs = _workflow()["jobs"]
-    job = jobs["dependency-audit"]
-    assert "dependency-audit" in jobs["gate-required"]["needs"]
-    assert "needs" not in job
-    assert not {"if", "continue-on-error"} & set(job)
-    assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
+    job = jobs["lint"]
+    assert "dependency-audit" not in jobs
+    assert "lint" in jobs["gate-required"]["needs"]
+    assert job["needs"] in (["reuse"], ["reuse", "admission"])
+    assert job["if"] in (
+        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && github.event_name != 'push' }}",
+    )
+    assert "continue-on-error" not in job
+    assert all("continue-on-error" not in step for step in job["steps"])
     assert job["steps"][0]["with"]["fetch-depth"] == 0
-    base, grade = job["steps"][-2:]
+    steps = {step.get("name"): step for step in job["steps"]}
+    base, grade = steps["Check out the base revision"], steps["Fail on known vulnerabilities new against the base"]
     assert base["env"]["BASE"] == BASE
-    assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
+    assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"'
+    assert grade["if"] == "${{ !cancelled() }}"
     assert grade["run"] == (
-        'grader="$RUNNER_TEMP/base"\n'
-        '[[ -f "$grader/scripts/ci_dependency_audit.py" ]] || grader="$GITHUB_WORKSPACE"\n'
-        'cd "$grader"\n'
+        'if [[ ! -f "$RUNNER_TEMP/base/scripts/ci_dependency_audit.py" ]]; then\n'
+        '  echo "::error::The base carries no scripts/ci_dependency_audit.py, so nothing trusted can grade."\n'
+        "  exit 1\n"
+        "fi\n"
+        'cd "$RUNNER_TEMP/base"\n'
         'python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
+
+
+def test_dependency_audit_refuses_a_base_without_its_script(tmp_path):
+    steps = {step.get("name"): step for step in _workflow()["jobs"]["lint"]["steps"]}
+    grade = steps["Fail on known vulnerabilities new against the base"]
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "ci_dependency_audit.py").write_text(
+        "from pathlib import Path\nPath('head-graded').touch()\n"
+    )
+    (tmp_path / "runner" / "base").mkdir(parents=True)
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path / "runner"), GITHUB_WORKSPACE=str(tmp_path))
+    result = subprocess.run(["bash", "-e", "-c", grade["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "::error::The base carries no scripts/ci_dependency_audit.py, so nothing trusted can grade." in result.stdout
+    assert not (tmp_path / "head-graded").exists()
 
 
 def test_dependabot_updates_pip_and_actions_weekly_into_dev_in_one_group_each():

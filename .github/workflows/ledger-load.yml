@@ -1,0 +1,247 @@
+name: Ledger server load
+
+on:
+  workflow_call:
+    inputs:
+      base:
+        description: Revision whose budgets grade the run
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      streams:
+        description: Compare one and three page streams at two writes per second on base and head
+        type: boolean
+        default: false
+      compare:
+        description: Run identical load gates concurrently on base and head on one runner
+        type: boolean
+        default: false
+      base:
+        description: Revision whose budgets grade the run
+        type: string
+        required: true
+        default: origin/dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow == 'Ledger server load' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('ledger-load-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Ledger server load' && 'max' || 'single' }}
+
+jobs:
+  load:
+    if: ${{ !inputs.compare }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    services:
+      redis:
+        image: public.ecr.aws/docker/library/redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-retries 15
+    env:
+      REDIS_URL: redis://127.0.0.1:6379/0
+      AGENTIHOOKS_SWARM_REDIS_URL: redis://127.0.0.1:6379/0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Fetch the base whose budgets grade the run
+        env:
+          BASE: ${{ inputs.base }}
+        run: git fetch --no-tags --depth=1 origin "${BASE#origin/}"
+
+      - name: Read the Redis service image
+        id: redis
+        if: ${{ !inputs.streams && !inputs.compare }}
+        env:
+          SERVICE: ${{ job.services.redis.id }}
+        run: echo "image=$(docker inspect --format '{{.Image}}' "$SERVICE")" >> "$GITHUB_OUTPUT"
+
+      - name: Key the declared inputs
+        id: key
+        if: ${{ !inputs.streams && !inputs.compare }}
+        uses: ./.github/actions/input-key
+        with:
+          job: ledger-load
+          base: FETCH_HEAD
+          environment: redis=${{ steps.redis.outputs.image }}
+
+      - name: Set up Python
+        id: python
+        if: steps.key.outputs.hit != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        if: steps.key.outputs.hit != 'true'
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        if: steps.key.outputs.hit != 'true'
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          uv venv --python "$PYTHON_PATH" "$HOME/venv"
+          uv pip install --python "$HOME/venv/bin/python" -e ".[all]"
+
+      - name: Write and read a full size ledger from ten clients within the server budget
+        if: ${{ !inputs.streams && !inputs.compare && steps.key.outputs.hit != 'true' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ledger-load"
+          "$HOME/venv/bin/python" -m tests.ledger_load.gate --folder "$RUNNER_TEMP/ledger-load" --base FETCH_HEAD
+
+      - name: Save the passed input key
+        if: steps.key.outputs.hit == 'false' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: ./.github/actions/input-key/save
+        with:
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Compare stream publication CPU on identical base and head workloads
+        if: inputs.streams
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/ledger-load-base" FETCH_HEAD
+          "$HOME/venv/bin/python" -m tests.ledger_load.streams \
+            --base "$RUNNER_TEMP/ledger-load-base" \
+            --head "$GITHUB_WORKSPACE" \
+            --folder "$RUNNER_TEMP/ledger-streams"
+
+      - name: Preserve both stream CPU measurements and server logs
+        if: ${{ always() && inputs.streams }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-stream-cpu
+          path: ${{ runner.temp }}/ledger-streams
+
+  compare:
+    if: inputs.compare
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        pair: [1, 2, 3, 4, 5]
+    services:
+      redis:
+        image: public.ecr.aws/docker/library/redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Fetch the base whose budgets grade the run
+        env:
+          BASE: ${{ inputs.base }}
+        run: git fetch --no-tags --depth=1 origin "${BASE#origin/}"
+
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          uv venv --python "$PYTHON_PATH" "$HOME/venv"
+          uv pip install --python "$HOME/venv/bin/python" -e ".[all]"
+
+      - name: Prepare the same load harness for the base implementation
+        run: |
+          mkdir load-base
+          git archive FETCH_HEAD | tar -x -C load-base
+          cp tests/ledger_load/gate.py load-base/tests/ledger_load/gate.py
+          mkdir -p "$GITHUB_WORKSPACE/load-evidence"
+
+      - name: Run the base and head load windows concurrently on this runner
+        env:
+          PAIR: ${{ matrix.pair }}
+        run: |
+          set -o pipefail
+          order=(base head)
+          [[ "$PAIR" == [135] ]] || order=(head base)
+          database=1
+          pids=()
+          for side in "${order[@]}"; do
+            directory="$GITHUB_WORKSPACE"
+            [[ "$side" == head ]] || directory="$GITHUB_WORKSPACE/load-base"
+            (
+              cd "$directory"
+              "$HOME/venv/bin/python" -c 'import pathlib, scripts.swarm_ledger.ledger_server as m; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), m.__file__'
+              REDIS_URL="redis://127.0.0.1:6379/$database" \
+                AGENTIHOOKS_SWARM_REDIS_URL="redis://127.0.0.1:6379/$database" \
+                "$HOME/venv/bin/python" -m tests.ledger_load.gate \
+                --folder "$GITHUB_WORKSPACE/load-evidence/$side" \
+                --base FETCH_HEAD 2>&1 | tee "$GITHUB_WORKSPACE/load-evidence/$side.log"
+            ) &
+            pids+=("$!")
+            database=$((database + 1))
+          done
+          failed=""
+          for index in "${!pids[@]}"; do
+            wait "${pids[$index]}" || failed="$failed ${order[$index]}"
+          done
+          [[ -z "$failed" ]] || { echo "::error::load gate failed on$failed"; exit 1; }
+
+      - name: Preserve the pair's load measurements and server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compare-pair-${{ matrix.pair }}
+          path: |
+            load-evidence/*.log
+            load-evidence/*/server.log
+          if-no-files-found: error
+
+  compare-grade:
+    needs: compare
+    if: ${{ !cancelled() && inputs.compare }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    env:
+      SAME_CODE_MARGIN: '1.4'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: compare-pair-*
+          path: load-evidence
+
+      - name: Fail when the median head over base pair ratio exceeds the margin set from recorded same code pairs
+        run: |
+          python -m tests.ledger_load.paired \
+            --base load-evidence/compare-pair-{1,2,3,4,5}/base.log \
+            --head load-evidence/compare-pair-{1,2,3,4,5}/head.log \
+            --margin "$SAME_CODE_MARGIN" --same-code tests/ledger_load/compare_same_code_pairs.json

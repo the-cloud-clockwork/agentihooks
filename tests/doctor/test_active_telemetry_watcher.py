@@ -9,8 +9,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.doctor.test_active_telemetry import AGENT, LIMITS, NOW, _binding, _local, _record
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():
@@ -41,6 +39,26 @@ def test_the_watcher_sends_one_finding_per_fault_clears_on_recovery_and_rearms_o
     found, new = scan(again, NOW + 1_800_000)
     assert [n["kind"] for n in new] == ["exporter backlog"]
     assert new[0]["id"] != f"exporter-backlog/{AGENT}.{NOW - 90_000}"
+
+
+def test_a_live_exporter_with_no_queued_observations_clears_only_after_source_acceptance(store):
+    def scan(local, at):
+        record = copy.deepcopy(_record(_binding(local=local)))
+        record["now_ms"] = at
+        return loop.record(store, "watch-doctor", traces.findings(record, LIMITS), at, 60 * 60_000)
+
+    stalled = _local(
+        generated_bytes=5000, accepted_bytes=1000, oldest_unaccepted=NOW - 90_000, pending=0, exporter_alive=True
+    )
+    [first] = scan(stalled, NOW)
+    assert first["kind"] == "telemetry stale"
+    assert loop.seen(store, "watch-doctor")[first["id"]]["measure"] == 90
+    assert scan(stalled, NOW + 600_000) == []
+    recovered = {**stalled, "accepted_bytes": 5000, "oldest_unaccepted": None}
+    assert scan(recovered, NOW + 1_200_000) == []
+    [again] = scan({**stalled, "oldest_unaccepted": NOW + 1_500_000}, NOW + 1_800_000)
+    assert again["kind"] == "telemetry stale"
+    assert again["id"] != first["id"]
 
 
 @pytest.mark.parametrize("root_only", [False, True])

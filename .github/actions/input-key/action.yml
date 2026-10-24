@@ -1,0 +1,46 @@
+name: Input key
+description: Key a job by its declared inputs in .github/input-keys.json and look the key up in the Actions cache. A hit means a passed run of the same job on this ref already saved the key, so the caller skips its heavy steps.
+inputs:
+  job:
+    description: Job id in .github/input-keys.json
+    required: true
+  base:
+    description: Revision the declared base paths are read at
+    required: false
+    default: ""
+  environment:
+    description: Resolved external input the key must cover, such as a service image id
+    required: false
+    default: ""
+outputs:
+  key:
+    description: Cache key of the declared inputs
+    value: ${{ steps.key.outputs.key }}
+  hit:
+    description: true when a passed run saved this key, else false
+    value: ${{ steps.lookup.outputs.cache-hit == 'true' }}
+runs:
+  using: composite
+  steps:
+    - name: Key the declared inputs
+      id: key
+      shell: bash
+      env:
+        JOB: ${{ inputs.job }}
+        BASE: ${{ inputs.base }}
+        ENVIRONMENT: ${{ inputs.environment }}
+      run: python3 -I scripts/ci_input_key.py --job "$JOB" --base "$BASE" --environment "$ENVIRONMENT"
+    - name: Look the key up
+      id: lookup
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/input-pass
+        key: ${{ steps.key.outputs.key }}
+        lookup-only: true
+    - name: Report a reused key
+      if: steps.lookup.outputs.cache-hit == 'true'
+      shell: bash
+      env:
+        JOB: ${{ inputs.job }}
+        KEY: ${{ steps.key.outputs.key }}
+      run: echo "::notice title=Input key reused::$JOB inputs match a passed run on this ref; heavy steps skipped ($KEY)"

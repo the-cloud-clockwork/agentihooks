@@ -90,13 +90,13 @@ def test_the_api_argv_names_the_key_variable_and_never_its_value():
     assert argv == [
         "/usr/bin/codex",
         "--no-daemon",
+        "exec",
         "-c",
         'model_provider="agentihooks-api"',
         *_override("name", "agentihooks-api"),
         *_override("base_url", "https://api.openai.com/v1"),
         *_override("env_key", "CODEX_API_KEY"),
         *_override("wire_api", "responses"),
-        "exec",
         "hi",
     ]
     assert SENTINEL not in " ".join(argv)
@@ -174,7 +174,7 @@ def test_the_login_status_check_runs_without_api_credentials():
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     assert router.default_signed_in({**SUBSCRIPTION, **API_NAMES}, run) is True
-    assert seen == {"HOME": "/home/u"}
+    assert seen == {"HOME": "/home/u", router.INTERNAL_RUN: "1"}
 
 
 def _profile_home(tmp_path):
@@ -223,7 +223,9 @@ def test_an_api_launch_routes_forced_and_writes_nothing_to_the_profile_home(monk
     assert _bytes(home) == before and (home / "auth.json").is_symlink()
 
 
-@pytest.mark.skipif(shutil.which("codex") is None, reason="needs the codex CLI")
+@pytest.mark.skipif(
+    shutil.which("codex") is None and not os.environ.get("CODEX_CLI_REQUIRED"), reason="needs the codex CLI"
+)
 def test_an_api_child_runs_codex_exec_against_a_fake_responses_endpoint(monkeypatch, tmp_path):
     home = _profile_home(tmp_path)
     before = _bytes(home)

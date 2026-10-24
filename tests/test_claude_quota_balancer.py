@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 
 from scripts import claude_quota_balancer as balancer
+from scripts import claude_usage
 from scripts.routing import place
-from scripts.routing.slots import API, API_UNBOUNDED, SUBSCRIPTION
+from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION
 
 
 def _stream(account_usage: float, weekly_usage: float, fable_usage: float | None = None) -> str:
@@ -97,6 +98,20 @@ def test_fable_mode_includes_separate_quota_in_margin_and_table():
     assert "15%" in table
 
 
+def test_an_email_named_account_is_discovered_routed_and_shown():
+    from scripts.account_names import token_env
+
+    name = token_env("NESTOR.COLT@GMAIL.COM")
+    credentials = balancer.discover_credentials({name: "tok-a", "AH_CC_TOKEN_other": "tok-b"})
+
+    assert [credential.account for credential in credentials] == ["nestor_coltatgmail_com", "other"]
+    assert balancer.credential_for_slug(credentials, "nestor_coltatgmail_com").env_name == name
+    result = balancer.parse_probe("nestor_coltatgmail_com", _stream(0.20, 0.30), 100)
+    table = balancer.render_table([result], now=1000, sessions={"nestor_coltatgmail_com": 2})
+    row = next(line for line in table.splitlines() if " nestor_coltatgmail_com " in line)
+    assert " 2/" in row and "80%" in row
+
+
 def test_probe_passes_only_selected_oauth_token(monkeypatch):
     observed = {}
 
@@ -105,6 +120,10 @@ def test_probe_passes_only_selected_oauth_token(monkeypatch):
         observed["env"] = kwargs["env"]
         return subprocess.CompletedProcess(command, 0, _stream(0.20, 0.30), "")
 
+    def unreachable(*args, **kwargs):
+        raise claude_usage.Unreachable
+
+    monkeypatch.setattr(claude_usage, "probe", unreachable)
     monkeypatch.setattr(balancer.subprocess, "run", run)
     credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "selected-secret")
     result = balancer.probe_credential(
@@ -412,17 +431,80 @@ def test_probing_one_account_keeps_other_cached_accounts(monkeypatch, tmp_path):
     beta = balancer.Credential("AH_CC_TOKEN_BETA", "secret-b")
 
     balancer.collect_results([alpha, beta], cache_file=cache, environ={}, now=1000)
-    balancer.collect_results([alpha], cache_file=cache, environ={}, refresh=True, now=1100)
+    monkeypatch.setattr(balancer.operator_env, "fill", lambda environ: environ.update(AH_CC_TOKEN_BETA="secret-b"))
+    (tmp_path / ".env").write_text("")
+    balancer.collect_results(
+        [alpha], cache_file=cache, environ={"AGENTIHOOKS_HOME": str(tmp_path)}, refresh=True, now=1100
+    )
     observations = balancer.cached_observations(cache_file=cache)
 
     assert sorted((result.account, seen) for seen, result in observations) == [("ALPHA", 1100.0), ("BETA", 1000.0)]
+
+
+def test_a_refresh_drops_cached_accounts_whose_token_is_gone_in_every_mode(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        balancer,
+        "probe_credentials",
+        lambda credentials, *args, **kwargs: [
+            balancer.parse_probe(item.account, _stream(0.20, 0.30), 100) for item in credentials
+        ],
+    )
+    cache = tmp_path / "cache.json"
+    reading = balancer._result_data(balancer.parse_probe("GONE", _stream(0.20, 0.30), 100))
+    stale = {"AH_CC_TOKEN_GONE": {"observed_at": 990.0, "result": reading}}
+    modes = {"normal": {"accounts": stale}, "fable": {"accounts": stale}, "broken": "x", "odd": {"accounts": "x"}}
+    cache.write_text(json.dumps({"version": 1, "modes": modes}))
+    alpha = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret-a")
+    (tmp_path / ".env").write_text("")
+    environ = {"AGENTIHOOKS_HOME": str(tmp_path)}
+    monkeypatch.setattr(balancer.operator_env, "fill", lambda filled: filled.update(AH_CC_TOKEN_KEPT="secret-k"))
+
+    balancer.collect_results([alpha], cache_file=cache, environ=environ, now=1000)
+
+    assert environ == {"AGENTIHOOKS_HOME": str(tmp_path)}
+    modes = json.loads(cache.read_text())["modes"]
+    assert (modes.pop("broken"), modes.pop("odd")) == ("x", {"accounts": "x"})
+    assert {mode: sorted(data["accounts"]) for mode, data in modes.items()} == {
+        "normal": ["AH_CC_TOKEN_ALPHA"],
+        "fable": [],
+    }
+    assert [result.account for _, result in balancer.cached_observations(cache_file=cache)] == ["ALPHA"]
+    assert balancer.cached_observations(include_fable=True, cache_file=cache) == []
+
+
+@pytest.mark.parametrize("env_file", [False, True])
+def test_a_refresh_keeps_every_cached_account_without_env_files_or_found_tokens(monkeypatch, tmp_path, env_file):
+    monkeypatch.setattr(
+        balancer,
+        "probe_credentials",
+        lambda credentials, *args, **kwargs: [
+            balancer.parse_probe(item.account, _stream(0.20, 0.30), 100) for item in credentials
+        ],
+    )
+    cache = tmp_path / "cache.json"
+    reading = balancer._result_data(balancer.parse_probe("GONE", _stream(0.20, 0.30), 100))
+    stale = {"AH_CC_TOKEN_GONE": {"observed_at": 990.0, "result": reading}}
+    cache.write_text(json.dumps({"version": 1, "modes": {"normal": {"accounts": stale}}}))
+    if env_file:
+        (tmp_path / ".env").write_text("")
+    fills = []
+    monkeypatch.setattr(balancer.operator_env, "fill", lambda filled: fills.append(sorted(filled)))
+    alpha = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret-a")
+
+    balancer.collect_results([alpha], cache_file=cache, environ={"AGENTIHOOKS_HOME": str(tmp_path)}, now=1000)
+
+    accounts = json.loads(cache.read_text())["modes"]["normal"]["accounts"]
+    assert sorted(accounts) == ["AH_CC_TOKEN_ALPHA", "AH_CC_TOKEN_GONE"]
+    assert fills == ([["AGENTIHOOKS_HOME"]] if env_file else [])
 
 
 def test_table_marks_current_account_and_cache_age():
     alpha = balancer.parse_probe("ALPHA", _stream(0.20, 0.30), 100)
     beta = balancer.parse_probe("BETA", _stream(0.10, 0.40), 100)
 
-    table = balancer.render_table([alpha, beta], now=1000, current="BETA", observed={"ALPHA": 400, "BETA": 1000})
+    table = balancer.render_table(
+        [alpha, beta], now=1000, marks=balancer.RowMarks(current="BETA"), observed={"ALPHA": 400, "BETA": 1000}
+    )
 
     assert "BETA (current)" in table
     assert "ALPHA (current)" not in table
@@ -528,6 +610,50 @@ def test_table_shows_live_sessions_against_each_band_cap():
     assert table.splitlines()[-1] == "unrouted: 2 session(s)"
 
 
+def test_table_marks_the_declared_master_row_with_its_tier():
+    from scripts.routing.master_account import MasterAccount
+
+    alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
+    beta = balancer.parse_probe("beta", _stream(0.10, 0.30), 100)
+
+    table = balancer.render_table(
+        [alpha, beta], now=0, marks=balancer.RowMarks(master=MasterAccount("claude", "beta", "max", SUBSCRIPTION))
+    )
+    rows = {line.split()[1]: line for line in table.splitlines()[2:]}
+
+    assert rows["beta"].split()[1:4] == ["beta", "MASTER", "max"]
+    assert "MASTER" not in rows["alpha"]
+    assert len(table.splitlines()) == 4
+
+
+def test_a_tokenless_master_is_an_interactive_row_serving_masters_only():
+    from scripts.routing.master_account import MasterAccount
+
+    alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
+    marks = balancer.RowMarks(master=MasterAccount("claude", "home", "", INTERACTIVE))
+
+    table = balancer.render_table([alpha], now=0, sessions={"home": 1}, marks=marks)
+    lines = table.splitlines()
+
+    assert lines[3].split() == ["-", "home", "MASTER", "interactive", "MASTERS", "1/?", "-", "?", *["n/a"] * 5]
+    assert "session(s)" not in table
+    wide = balancer.render_table([], now=0, include_fable=True, observed={}, sessions={}, marks=marks)
+    assert wide.splitlines()[2].split() == [
+        "-",
+        "home",
+        "MASTER",
+        "interactive",
+        "MASTERS",
+        "0/?",
+        "-",
+        "?",
+        *["n/a"] * 7,
+        "-",
+    ]
+    subscription = balancer.RowMarks(master=MasterAccount("claude", "home", "", SUBSCRIPTION))
+    assert len(balancer.render_table([alpha], now=0, marks=subscription).splitlines()) == 3
+
+
 def test_reserve_account_is_chosen_only_when_no_other_has_room(monkeypatch, tmp_path):
     env = _three(monkeypatch)
 
@@ -574,7 +700,7 @@ def test_todays_accounts_get_band_caps_and_the_next_session_rotates(monkeypatch,
         "tccgma": 6,
     }
     monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (TODAY, "live"))
-    env = {f"AH_CC_TOKEN_{result.account}": "secret" for result in TODAY}
+    env = {f"AH_CC_TOKEN_{result.account}": f"tok-{result.account}" for result in TODAY}
     live = {"ncgma": 4, "nchotma": 2, "tccgma": 3}
     order = []
     for _ in range(4):
@@ -593,6 +719,23 @@ def test_a_reset_window_counts_as_full_and_a_rejected_account_takes_no_session()
     assert balancer.account_cap(balancer._error_result("x", "failed"), NOW) is None
 
 
+def test_a_ceiling_scales_the_cap_with_the_tighter_window():
+    full = balancer.ProbeResult("a", "allowed", "NORMAL", 96.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(2.0))
+    assert balancer.account_cap(full, 1000) == 6
+    assert balancer.account_cap(full, 1000, ceiling=12) == 11
+    assert balancer.account_cap(full, 1000, ceiling=0) == 0
+    spent = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 0.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(100.0, 2000)
+    )
+    assert balancer.account_cap(spent, 1000, ceiling=12) == 0
+    fable = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 96.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(2.0), balancer.QuotaWindow(50.0)
+    )
+    assert balancer.account_cap(fable, 1000, include_fable=True, ceiling=12) == 6
+    rejected = balancer.ProbeResult("x", "rejected", "BLOCKED", 0.0, full.five_hour, full.seven_day)
+    assert balancer.account_cap(rejected, 1000, ceiling=12) == 0
+
+
 def test_fable_routing_caps_on_the_tighter_weekly_window():
     result = balancer.parse_probe("FABLE", _stream(0.20, 0.30, 0.97), 100, include_fable=True)
     assert balancer.account_cap(result, 1000) == 6
@@ -601,6 +744,25 @@ def test_fable_routing_caps_on_the_tighter_weekly_window():
     assert not balancer.is_routable(result, 1000, include_fable=True)
     table = balancer.render_table([result], now=1000, include_fable=True, sessions={})
     assert " 0/0 " in table.splitlines()[2]
+
+
+def test_an_api_slot_renders_as_its_own_open_row_with_weight_and_cap():
+    from scripts.routing.slots import Slot
+
+    result = balancer.ProbeResult("ALPHA", "allowed", "NORMAL", 70, balancer.QuotaWindow(20), balancer.QuotaWindow(30))
+    slot = Slot("claude", "api", 3, 1, kind=API, weight=25, provider="gateway")
+    table = balancer.render_table([result], now=1000, sessions={"ALPHA": 2, "api": 1}, api=[slot])
+    assert table.splitlines() == [
+        "#  ACCOUNT        KIND          STATE   SESSIONS  WEIGHT  CAP  ROUTING LEFT  5H LEFT  5H RESET  7D LEFT  7D RESET",
+        "-  -------------  ------------  ------  --------  ------  ---  ------------  -------  --------  -------  --------",
+        "1  ALPHA          subscription  NORMAL  2/6       -       6    70%           80%      ?         70%      ?       ",
+        "-  api (gateway)  api           OPEN    1/3       25%     3    n/a           n/a      n/a       n/a      n/a     ",
+    ]
+    wide = balancer.render_table([result], now=1000, include_fable=True, observed={"ALPHA": 990}, api=[slot])
+    assert wide.splitlines()[3] == (
+        "-  api (gateway)  api           OPEN    25%     3    n/a           n/a      n/a       n/a      n/a       "
+        "n/a         n/a          -  "
+    )
 
 
 def test_a_week_that_reset_before_now_counts_as_full():

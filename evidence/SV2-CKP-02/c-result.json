@@ -1,0 +1,118 @@
+{
+  "case": "T-SV2-CKP-02-C",
+  "evidence_class": "mocked: local git repositories, a local durable directory backend behind a granted artifact store and fixture launch registrations; no object store, worker Pod or harness was used",
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
+  },
+  "observed": {
+    "fixture": {
+      "after_restart": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "checkpoint_source_bytes": {
+        "source_bundle": 437,
+        "staged_patch": 416,
+        "unstaged_patch": 400,
+        "untracked_archive": 10240
+      },
+      "first_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "incomplete_material_kept_for_diagnostics": true,
+      "interrupted_manifest": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "reason": "manifest_absent"
+      },
+      "interruption": "worker stopped",
+      "previous_checkpoint_after_restart": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "previous_checkpoint_while_interrupted": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "recapture_after_restart_equal": true,
+      "replay": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "replay_added_keys": [],
+      "restored": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "restored_matches_worker": true,
+      "stale_attempt": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "reason": "scope_mismatch"
+      },
+      "stale_attempt_added_keys": []
+    },
+    "second_fixture": {
+      "after_restart": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "checkpoint_source_bytes": {
+        "source_bundle": 437,
+        "staged_patch": 416,
+        "unstaged_patch": 400,
+        "untracked_archive": 10240
+      },
+      "first_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "incomplete_material_kept_for_diagnostics": true,
+      "interrupted_manifest": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "reason": "manifest_absent"
+      },
+      "interruption": "worker stopped",
+      "previous_checkpoint_after_restart": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "previous_checkpoint_while_interrupted": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "recapture_after_restart_equal": true,
+      "replay": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "replay_added_keys": [],
+      "restored": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "restored_matches_worker": true,
+      "stale_attempt": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "reason": "scope_mismatch"
+      },
+      "stale_attempt_added_keys": []
+    }
+  },
+  "state": "passed"
+}

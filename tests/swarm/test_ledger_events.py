@@ -5,10 +5,8 @@ from pathlib import Path
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import ledger_events
+from scripts.swarm import ledger_events, priority_sweep
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 MINUTE = 60_000
 ANSWERS = Path(__file__).resolve().parents[1] / "fixtures" / "github_pr"
@@ -18,10 +16,13 @@ MASTER_SEAT, ENG_SEAT = "master@sw", "eng-1@sw"
 
 class FakeLedger:
     def __init__(self):
-        self.priorities = []
+        self.priorities, self.comments = [], []
 
     def priority(self, slug, item, text):
         self.priorities.append((item, text))
+
+    def comment(self, slug, task_id, text, by):
+        self.comments.append((slug, task_id, text, by))
 
 
 @pytest.fixture
@@ -32,6 +33,7 @@ def store():
     s.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
     s.put_agent("sw", AgentRecord("sw-master-1", MASTER, MASTER, seat=MASTER_SEAT))
     s.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", seat=ENG_SEAT))
+    s.seats.occupy(ENG_SEAT, "sw-eng-1", 1)
     return s
 
 
@@ -114,6 +116,28 @@ def test_a_replay_of_the_same_ledger_makes_no_item(store):
     assert len(texts(store, MASTER_SEAT)) == 4
 
 
+def test_a_follow_up_already_flagged_for_the_operator_sends_the_master_no_notice(store):
+    run(store, recorded())
+    flagged = event(11, 100_000, "swarm", "added", "followups/f1", "A message to master@sw is still unread")
+    unflagged = event(12, 100_000, "swarm", "added", "followups/f2", "Retries need a cap")
+    rows = [
+        {"id": "f1", "text": flagged["text"], "comments": [], "done": False, "needs_operator": True},
+        {"id": "f2", "text": unflagged["text"], "comments": [], "done": False},
+    ]
+    run(store, recorded([flagged, unflagged], followups=rows))
+    (notice,) = texts(store, MASTER_SEAT)
+    assert "Retries need a cap" in notice
+
+
+def test_a_ledger_without_follow_ups_still_sends_its_notices(store):
+    run(store, recorded())
+    doc = recorded(AGENT_EVENTS[2:3])
+    del doc["followups"]
+    run(store, doc)
+    (notice,) = texts(store, MASTER_SEAT)
+    assert "Build the thing" in notice
+
+
 def test_the_cursor_is_kept_per_swarm(store):
     store.create(SwarmConfig("other", "/repo", max_eng=1, max_ci=0))
     run(store, recorded())
@@ -127,8 +151,34 @@ def test_the_event_cursor_is_stored_under_its_own_name(store):
         InboxStore(store.redis), store, "sw", recorded(rev=7), FakeLedger(), 0, github=lambda u: None
     )
     assert store.redis.get(store.key("sw", "events-cursor")) == "7"
-    assert ledger_events.new_events(store, "sw", recorded(rev=7), "other-cursor") == []
+    assert ledger_events.new_events(store, "sw", recorded(rev=7), "other-cursor", "other writes") == []
     assert store.redis.get(store.key("sw", "other-cursor")) == "7"
+
+
+def test_history_trimmed_past_any_tick_cursor_is_told_to_the_master(store):
+    def sweep(doc):
+        priority_sweep.priority_pass(store, "sw", doc, FakeLedger(), github=lambda url: None)
+
+    run(store, recorded())
+    sweep(recorded())
+    caught_up = recorded()
+    caught_up["_meta"]["events_trimmed"] = 10
+    run(store, caught_up)
+    sweep(caught_up)
+    behind = recorded(rev=40)
+    behind["_meta"]["events_trimmed"] = 30
+    sweep(behind)
+    actions = run(store, behind)
+    assert run(store, behind) == []
+    gap = "Ledger sw trimmed its history after revision 10 through revision 30 before the tick read it, so {} in that "
+    expected = [
+        gap.format(subject) + "range reached no one. Read the ledger for them."
+        for subject in (ledger_events.RELAYED, priority_sweep.JUDGED)
+    ]
+    assert sorted(text for text in texts(store, MASTER_SEAT) if "trimmed" in text) == sorted(expected)
+    assert sorted(actions) == [
+        f"told {MASTER_SEAT}: history-gap:{cursor}:10:30" for cursor in ("events-cursor", "priority-cursor")
+    ]
 
 
 def test_items_go_to_the_master_seat_when_no_master_is_live(store):
@@ -138,12 +188,183 @@ def test_items_go_to_the_master_seat_when_no_master_is_live(store):
     assert len(texts(store, MASTER_SEAT)) == 1
 
 
+def priority(item, text, by="sw-eng-1", pid=""):
+    return {"id": pid or f"p-{item}", "item": item, "text": text, "by": by, "at": 1_000}
+
+
+def with_priorities(*rows):
+    doc = recorded()
+    doc["priorities"] = list(rows)
+    return doc
+
+
+def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store):
+    run(store, with_priorities())
+    actions = run(store, with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")))
+    run(store, with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert item.text == (
+        "New priority on ledger sw for tasks/t1: Blocked: the deploy key is missing\n"
+        "Triage it: resolve it if the call is yours, else leave it for the operator."
+    )
+    assert item.ref == "sw:priority:tasks/t1" and not item.fyi
+    assert actions == [f"told {MASTER_SEAT}: priority tasks/t1"]
+    assert store.redis.smembers(store.key("sw", "priorities-sent")) == {"tasks/t1"}
+    assert texts(store, ENG_SEAT) == []
+
+
+def test_a_priority_on_a_follow_up_the_swarm_raised_for_the_operator_sends_the_master_no_notice(store):
+    raised = event(11, 100_000, "swarm", "added", "followups/f1", "A message to master@sw is still unread")
+    flagged = event(12, 100_000, "sw-eng-1", "added", "followups/f2", "Pick the release date")
+    doc = recorded(
+        [raised, flagged],
+        followups=[
+            {"id": "f1", "text": raised["text"], "comments": [], "done": False, "needs_operator": True},
+            {"id": "f2", "text": flagged["text"], "comments": [], "done": False, "needs_operator": True},
+        ],
+    )
+    run(store, dict(doc, priorities=[]))
+    doc["priorities"] = [priority(f"followups/{n}", "Decide: it", by="ledger") for n in ("f1", "f2")]
+    run(store, doc)
+    doc["_meta"]["events"] = [e for e in doc["_meta"]["events"] if e["target"] != "followups/f1"]
+    run(store, doc)
+    assert [i.ref for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == ["sw:priority:followups/f2"]
+
+
+def test_priorities_open_before_the_first_pass_are_not_announced_and_later_ones_are(store):
+    run(store, with_priorities(priority("questions/q1", "Answer: which port")))
+    run(store, with_priorities(priority("questions/q1", "Answer: which port"), priority("tasks/t1", "Blocked: no key")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "tasks/t1" in item.text and "questions/q1" not in item.text
+
+
+def test_the_first_pass_mark_does_not_expire(store):
+    run(store, with_priorities())
+    assert store.redis.get(store.key("sw", "priorities-seeded")) == "1"
+    assert store.redis.ttl(store.key("sw", "priorities-seeded")) == -1
+
+
+def test_a_repeated_ask_on_the_same_item_makes_nothing_new(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("followups/f1", "Decide: retries need a cap")))
+    run(store, with_priorities(priority("followups/f1", "Decide: retries need a cap now", pid="p-again")))
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def test_a_priority_raised_again_after_it_cleared_makes_a_new_item(store):
+    row = priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    assert len(texts(store, MASTER_SEAT)) == 2
+
+
+def test_a_priority_the_master_added_is_not_announced_beside_an_agent_ask(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("phases/p1", "Approve the plan", by="sw-master-1"), priority("tasks/t1", "Go")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "tasks/t1" in item.text and "phases/p1" not in item.text
+
+
+def test_an_agent_ask_replacing_the_master_priority_on_its_item_makes_one_item(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("phases/p1", "Approve the plan", by="sw-master-1")))
+    run(store, with_priorities(priority("phases/p1", "Approve the plan now", pid="p-agent")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "Approve the plan now" in item.text
+
+
+def test_a_priority_added_by_another_swarm_master_makes_an_item(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("tasks/t1", "Look at this", by="other-master-1")))
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def test_a_priority_the_swarm_raised_after_its_own_ask_makes_no_item(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("followups/f1", "Open half an hour", by="swarm"), priority("tasks/t1", "Go")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "tasks/t1" in item.text and "followups/f1" not in item.text
+
+
+def test_a_swarm_with_no_live_master_gets_no_priority_item_until_a_master_returns(store):
+    run(store, with_priorities())
+    store.drop_agent("sw", "sw-master-1")
+    row = priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")
+    run(store, with_priorities(row))
+    assert texts(store, MASTER_SEAT) == []
+    store.put_agent("sw", AgentRecord("sw-master-2", MASTER, MASTER, seat=MASTER_SEAT))
+    run(store, with_priorities(row))
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def test_a_priority_cleared_during_a_master_gap_is_announced_when_raised_again(store):
+    row = priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    store.drop_agent("sw", "sw-master-1")
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    store.put_agent("sw", AgentRecord("sw-master-2", MASTER, MASTER, seat=MASTER_SEAT))
+    run(store, with_priorities(row))
+    assert len(texts(store, MASTER_SEAT)) == 2
+
+
 def open_followup(added_at, **fields):
     doc = recorded(
         [event(11, added_at, "sw-eng-1", "added", "followups/f1", "Retries need a cap")],
         followups=[{"id": "f1", "text": "Retries need a cap", "comments": [], "done": False, **fields}],
     )
     return doc
+
+
+@pytest.mark.parametrize(
+    ("now_ms", "expected_first"),
+    [
+        (
+            1,
+            "sw-eng-1 added a follow-up f1 on ledger sw: Retries need a cap\n"
+            "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
+            "Close it: agentihooks ledger --slug sw followup done f1",
+        ),
+        (
+            15 * MINUTE,
+            "A follow-up f1 on ledger sw is still open fifteen minutes after sw-eng-1 added it: "
+            "Retries need a cap\nDecide it now, or it goes to the operator's Priorities.\n"
+            "Close it: agentihooks ledger --slug sw followup done f1",
+        ),
+    ],
+)
+def test_follow_up_notices_name_each_item_and_its_completion_command(store, now_ms, expected_first):
+    run(store, recorded())
+    doc = recorded(
+        [
+            event(11, 0, "sw-eng-1", "added", "followups/f1", "Retries need a cap"),
+            event(12, 0, "sw-eng-1", "added", "followups/f2", "Queue needs a limit"),
+        ],
+        followups=[
+            {"id": "f1", "text": "Retries need a cap", "done": False},
+            {"id": "f2", "text": "Queue needs a limit", "done": False},
+        ],
+    )
+    run(store, doc, now_ms=1)
+    run(store, doc, now_ms=now_ms)
+    first, second = texts(store, MASTER_SEAT)[-2:]
+    assert first == expected_first
+    assert "follow-up f2 on ledger sw" in second
+    assert "Queue needs a limit" in second
+    assert second.endswith("Close it: agentihooks ledger --slug sw followup done f2")
+
+
+def test_a_follow_up_event_without_text_keeps_its_identifier_and_completion_command(store):
+    run(store, recorded())
+    run(store, recorded([event(11, 0, "sw-eng-1", "added", "followups/f1")]))
+    assert texts(store, MASTER_SEAT) == [
+        "sw-eng-1 added a follow-up f1 on ledger sw: \n"
+        "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
+        "Close it: agentihooks ledger --slug sw followup done f1"
+    ]
 
 
 def test_an_open_follow_up_is_raised_again_after_fifteen_minutes_then_shown_to_the_operator(store):
@@ -225,6 +446,163 @@ def test_red_checks_with_no_push_for_twenty_minutes_go_to_its_engineer(store):
     told = run(store, in_pr(), now_ms=pushed.pushed_at + 20 * MINUTE, github=lambda url: pushed)
     assert f"told {ENG_SEAT}: https://github.com/o/r/pull/9:red:pushed" in told
     assert len(texts(store, ENG_SEAT)) == 2
+
+
+def _notices():
+    red, closed, merged = answer("open_red"), answer("closed_unmerged"), answer("merged")
+    url = "https://github.com/o/r/pull/9"
+    return [
+        (red, red.red_at + 20 * MINUTE, f"{url}:red:{red.head}", "has red checks and no push"),
+        (closed, 100_000, f"{url}:closed", "was closed without merging"),
+        (merged, merged.merged_at + 10 * MINUTE, f"{url}:merged:engineer", "merged ten minutes ago"),
+    ]
+
+
+def task_notices(store):
+    return store.redis.hgetall(store.key("sw", "task-notices"))
+
+
+def reassign_seat(store, task="t2"):
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", seat=ENG_SEAT, state="finished"))
+    store.put_agent("sw", AgentRecord("sw-eng-2", "eng", task, seat=ENG_SEAT))
+    store.seats.occupy(ENG_SEAT, "sw-eng-2", 2_000)
+
+
+@pytest.mark.parametrize(("pull", "now", "key", "words"), _notices())
+def test_a_task_notice_for_a_seat_now_holding_another_task_goes_onto_the_task(store, pull, now, key, words):
+    ledger = FakeLedger()
+    store.put_agent("sw", AgentRecord("sw-eng-2", "eng", "t2", seat=ENG_SEAT))
+    store.seats.occupy(ENG_SEAT, "sw-eng-2", 1_000)
+    run(store, recorded(), ledger=ledger)
+    told = run(store, in_pr(), now_ms=now, ledger=ledger, github=lambda url: pull)
+    again = run(store, in_pr(), now_ms=now + MINUTE, ledger=ledger, github=lambda url: pull)
+    assert texts(store, ENG_SEAT) == [] and texts(store, MASTER_SEAT) == []
+    ((slug, task_id, text, by),) = ledger.comments
+    assert (slug, task_id, by) == ("sw", "t1", "swarm")
+    assert text.startswith(f"Your pull request {URL} ") and words in text and "task t1 (Build the thing)" in text
+    assert told == [f"noted on tasks/t1: {key}"] and again == []
+
+
+@pytest.mark.parametrize(("pull", "now", "key", "words"), _notices())
+def test_a_task_notice_for_a_seat_its_claimant_still_occupies_goes_to_the_seat(store, pull, now, key, words):
+    ledger = FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    told = run(store, in_pr(), now_ms=now, ledger=ledger, github=lambda url: pull)
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    assert words in item.text and ledger.comments == [] and told == [f"told {ENG_SEAT}: {key}"]
+    assert task_notices(store) == {item.id: "t1"}
+    assert red_index(store) == ({item.id: URL} if ":red:" in key else {})
+
+
+def test_each_pull_request_notice_in_one_pass_reaches_its_engineer(store):
+    red, closed, merged = answer("open_red"), answer("closed_unmerged"), answer("merged")
+    urls = {"https://github.com/o/r/pull/7": red, "https://github.com/o/r/pull/8": closed, URL: merged}
+    tasks = [
+        {"id": f"t{n}", "title": "Build", "state": "pr", "claimed_by": "sw-eng-1", "pr_url": url}
+        for n, url in enumerate(urls)
+    ]
+    run(store, recorded())
+    told = run(store, recorded(tasks=tasks), now_ms=merged.merged_at + 10 * MINUTE, github=urls.get)
+    assert told[-3:] == [
+        f"told {ENG_SEAT}: https://github.com/o/r/pull/7:red:{red.head}",
+        f"told {ENG_SEAT}: https://github.com/o/r/pull/8:closed",
+        f"told {ENG_SEAT}: {URL}:merged:engineer",
+    ]
+
+
+def test_a_task_notice_for_a_claimant_no_longer_running_goes_to_the_master_unindexed(store):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", seat=ENG_SEAT, state="finished"))
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (text,) = texts(store, MASTER_SEAT)
+    assert "was closed without merging" in text and ledger.comments == [] and task_notices(store) == {}
+
+
+def test_a_seat_notice_moves_onto_its_task_once_the_seat_goes_to_an_agent_on_another_task(store):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    reassign_seat(store)
+    told = run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    assert f"moved {item.id} onto tasks/t1" in told
+    assert ledger.comments == [("sw", "t1", item.text, "swarm")]
+    moved = InboxStore(store.redis).get(item.id)
+    assert moved.state == "done" and task_notices(store) == {}
+    assert (
+        "moved onto task t1; eng-1@sw now holds another task" in InboxStore(store.redis).history(item.id)[-1]["reason"]
+    )
+
+
+def test_a_seat_notice_stays_for_a_successor_on_the_same_task(store):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    reassign_seat(store, task="t1")
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    assert InboxStore(store.redis).get(item.id).state == "pending" and ledger.comments == []
+    assert task_notices(store) == {item.id: "t1"}
+
+
+def test_a_seat_notice_closed_by_its_reader_leaves_the_task_index(store):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    InboxStore(store.redis).close(item.id, "sw-eng-1", "done", "fixed it")
+    reassign_seat(store)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    assert task_notices(store) == {} and ledger.comments == []
+
+
+def test_a_seat_notice_for_a_task_gone_from_the_ledger_stays_and_leaves_the_task_index(store):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    reassign_seat(store)
+    run(store, recorded(tasks=[DONE_T2]), ledger=ledger)
+    assert InboxStore(store.redis).get(item.id).state == "pending" and ledger.comments == []
+    assert task_notices(store) == {}
+
+
+def test_skipped_seat_notices_leave_the_later_ones_to_move(store):
+    inbox, ledger = InboxStore(store.redis), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    read, gone, held, due = (inbox.send("swarm", ENG_SEAT, text) for text in ("read", "gone", "held", "due"))
+    inbox.close(read.id, "sw-eng-1", "done", "fixed it")
+    for item, task in ((read, "t1"), (gone, "t9"), (held, "t2"), (due, "t1")):
+        store.redis.hset(store.key("sw", "task-notices"), item.id, task)
+    reassign_seat(store)
+    tasks = [
+        {"id": "t1", "title": "Build the thing", "state": "pr", "claimed_by": "sw-eng-1", "pr_url": URL},
+        {"id": "t2", "title": "Other", "state": "claimed", "claimed_by": "sw-eng-2"},
+    ]
+    told = run(store, recorded(tasks=tasks), ledger=ledger)
+    assert told == [f"moved {due.id} onto tasks/t1"] and ledger.comments == [("sw", "t1", "due", "swarm")]
+    assert task_notices(store) == {held.id: "t2"}
+
+
+def test_a_seat_notice_whose_close_races_is_moved_once_and_left_to_its_reader(store, monkeypatch):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    reassign_seat(store)
+
+    def changed_meanwhile(self, item_id, closer, kind, detail=""):
+        raise ledger_events.InboxError(f"message {item_id} changed meanwhile")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(InboxStore, "close", changed_meanwhile)
+        told = run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    assert told == [f"moved {item.id} onto tasks/t1"] and ledger.comments == [("sw", "t1", item.text, "swarm")]
+    assert InboxStore(store.redis).get(item.id).state == "pending" and task_notices(store) == {}
 
 
 @pytest.mark.parametrize(("gate", "notices"), [("SUCCESS", 0), ("FAILURE", 1)])
@@ -588,14 +966,14 @@ def test_a_head_with_only_skipped_checks_keeps_waiting(suites, gated):
     assert ledger_events.pull_request(raw).resolved is (suites != [QUEUED_TESTS])
 
 
-@pytest.mark.parametrize("gate", [None, "PENDING", "CANCELLED", "TIMED_OUT"])
+@pytest.mark.parametrize("gate", [None, "PENDING", "CANCELLED"])
 def test_a_gate_that_has_not_passed_or_failed_keeps_the_head_unresolved(gate):
     rollup = SKIPPED_ONLY + [{"name": "unit", "conclusion": "SUCCESS"}, {"name": GATE, "conclusion": gate}]
     raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
     assert ledger_events.pull_request(raw).resolved is False
 
 
-def test_a_passed_gate_resolves_green_once_nothing_is_pending():
+def test_a_passed_gate_holds_beside_pending_workflows_and_required_checks():
     rollup = SKIPPED_ONLY + [{"name": GATE, "conclusion": "SUCCESS"}]
     raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN, APP_SUITE]}
     pull = ledger_events.pull_request(raw)
@@ -604,12 +982,14 @@ def test_a_passed_gate_resolves_green_once_nothing_is_pending():
     raw["checkSuites"] = [QUEUED_TESTS]
     assert ledger_events.pull_request(raw).resolved is False
     raw["checkSuites"] = [FINISHED_RUN]
-    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": None}]
-    assert ledger_events.pull_request(raw).resolved is False
+    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": None, "isRequired": False}]
+    assert ledger_events.pull_request(raw).resolved is True
     for state in ("PENDING", "EXPECTED", ""):
-        raw["statusCheckRollup"] = rollup + [{"context": "sonar", "state": state}]
+        raw["statusCheckRollup"] = rollup + [{"context": "sonar", "state": state, "isRequired": False}]
+        assert ledger_events.pull_request(raw).resolved is True
+        raw["statusCheckRollup"] = rollup + [{"context": "sonar", "state": state, "isRequired": True}]
         assert ledger_events.pull_request(raw).resolved is False
-    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": "CANCELLED"}]
+    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": "CANCELLED", "isRequired": False}]
     assert ledger_events.pull_request(raw).resolved is True
 
 
@@ -634,16 +1014,35 @@ def test_the_view_records_whether_the_required_gate_passed_beside_a_red_job(gate
     assert (pull.red, pull.resolved, pull.gate_passed) == (True, True, passed)
     raw["statusCheckRollup"] = [rollup[0], {"context": GATE, "state": gate}]
     assert ledger_events.pull_request(raw).gate_passed is passed
-    raw["statusCheckRollup"] = rollup + [{"name": GATE, "conclusion": "SUCCESS"}]
+    other = {"workflowRun": {"workflow": {"name": "CI Validate"}}}
+    raw["statusCheckRollup"] = rollup + [{"name": GATE, "conclusion": "SUCCESS", "checkSuite": other}]
     assert ledger_events.pull_request(raw).gate_passed is passed
+    raw["statusCheckRollup"] = [rollup[0], {"name": GATE, "conclusion": "FAILURE"}, {"name": GATE, "conclusion": gate}]
+    assert ledger_events.pull_request(raw).gate_passed is passed
+    raw["statusCheckRollup"] = [rollup[0], {"name": GATE, "conclusion": gate}, {"name": GATE, "conclusion": "FAILURE"}]
+    assert ledger_events.pull_request(raw).gate_passed is False
 
 
-def test_a_failed_check_beside_a_pending_gate_resolves_red_once_runs_finish():
+def test_distinct_failed_checks_all_stay_red():
+    rollup = [
+        {"name": "unit", "databaseId": 1, "conclusion": "FAILURE"},
+        {"name": "lint", "databaseId": 2, "conclusion": "FAILURE"},
+        {"context": "sonar", "createdAt": "2026-10-13T10:00:01Z", "state": "FAILURE"},
+        {"context": "codeql", "createdAt": "2026-10-13T10:00:02Z", "state": "FAILURE"},
+        {"name": "docs", "conclusion": "FAILURE"},
+    ]
+    raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
+    assert ledger_events.pull_request(raw).failed == ("unit", "lint", "sonar", "codeql", "docs")
+
+
+def test_a_failed_check_beside_a_pending_gate_resolves_red_while_runs_are_queued():
     rollup = [{"name": "unit", "conclusion": "FAILURE"}, {"name": GATE, "conclusion": None}]
     raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
     assert ledger_events.pull_request(raw).resolved is True
     raw["checkSuites"] = [QUEUED_TESTS]
-    assert ledger_events.pull_request(raw).resolved is False
+    pull = ledger_events.pull_request(raw)
+    assert pull.resolved is True
+    assert pull.red is True
 
 
 def test_a_gate_check_counts_only_by_its_exact_name():
@@ -711,3 +1110,40 @@ def test_dead_gate_resolution_is_red_but_reminders_still_require_actual_failure(
         else []
     )
     assert texts(store, ENG_SEAT) == expected
+
+
+@pytest.mark.parametrize(
+    ("rollup", "suites", "running"),
+    [
+        ([], [QUEUED_TESTS], True),
+        ([{"name": "unit", "conclusion": "SUCCESS"}, {"name": "lint", "conclusion": None}], [], True),
+        ([{"name": "unit", "conclusion": "CANCELLED"}], [FINISHED_RUN], False),
+        ([], [], False),
+        ([{"name": "unit", "conclusion": "SUCCESS"}], [FINISHED_RUN, APP_SUITE], False),
+    ],
+)
+def test_a_pull_request_reports_whether_checks_still_run(rollup, suites, running):
+    raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": suites}
+    assert ledger_events.pull_request(raw).running is running
+
+
+@pytest.mark.parametrize(
+    ("rollup", "suites", "started"),
+    [
+        ([], [QUEUED_TESTS], True),
+        ([{"name": "lint", "conclusion": None}], [], False),
+        ([{"context": "lint", "state": "PENDING"}], [], False),
+        ([{"context": "lint", "state": "EXPECTED"}], [], False),
+        ([], [FINISHED_RUN, APP_SUITE], False),
+        ([], [], False),
+    ],
+)
+def test_a_pull_request_reports_whether_a_run_actually_started(rollup, suites, started):
+    raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": suites}
+    assert ledger_events.pull_request(raw).started is started
+
+
+def test_a_required_workflow_that_never_started_runs_but_has_not_started():
+    raw = {"state": "OPEN", "gated": True, "gate_workflows": ["tests.yml"], "mergeable": "CONFLICTING"}
+    pull = ledger_events.pull_request(raw)
+    assert (pull.running, pull.started, pull.mergeable) == (True, False, "CONFLICTING")

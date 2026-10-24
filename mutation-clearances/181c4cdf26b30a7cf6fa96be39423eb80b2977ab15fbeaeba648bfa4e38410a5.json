@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x_record__mutmut_1:1c848a08b7b72a502502034c1249564011b3d00b2a8362ae6c1b5fbe235a23e9": {
+    "reader": "standards_reader",
+    "reason": "`_store` tests only `if migrate:`, and `None` and `False` are both falsy, so both values skip `_migrate`."
+  }
+}

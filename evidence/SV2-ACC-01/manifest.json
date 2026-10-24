@@ -1,0 +1,14 @@
+{
+  "package": "SV2-ACC-01",
+  "tested_commit": "5c700c834a120384a7862b404f48ab8b779baeaf",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37937300304",
+  "fixture_clock": "Fixture clock list patched into time.time by build(); frozen datetime for the broadcast suspect window",
+  "independent_runs": 2,
+  "cleanup": "pytest fakeredis and temporary session files; no live resource mutations",
+  "mutation_scope": "Fleet session accounting only; local process observations stay supporting evidence",
+  "inputs": {
+    "fleet-registry.json": "e9e3a6cf32219bcb46e1ce7f2f9187dfdb1a78ae95bf04345e097a2165ecb3ba",
+    "task-authority.json": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57"
+  }
+}

@@ -1,0 +1,45 @@
+version: 1
+cases:
+  - name: rename_is_easy
+    state:
+      task: Rename one local variable in a single function
+    params: &difficulty
+      instructions: How difficult is this task?
+      low: trivial, minutes of work
+      high: hard, many modules and careful design
+    expected:
+      verdict: [0.0, 0.1]
+    control: false
+    samples:
+      - source: liquid-d1
+        latency_ms: 297
+        answers:
+          verdict: {type: score, score: 0.024423094314636143, confidence: 0.9511538113707276}
+      - source: jev-1.13
+        latency_ms: 280
+        answers:
+          verdict: {type: score, score: 0.0, confidence: 1.0}
+      - source: pplx-decider-v1-27b
+        latency_ms: 304
+        answers:
+          verdict: {type: score, score: 0.00011992055268550139, confidence: 0.999760158894629}
+  - name: empty_task_is_easy
+    state:
+      task: ""
+    params: *difficulty
+    expected:
+      verdict: [0.0, 0.2]
+    control: false
+    samples:
+      - source: liquid-d1
+        latency_ms: 294
+        answers:
+          verdict: {type: score, score: 0.12592277467581975, confidence: 0.7481544506483604}
+      - source: jev-1.13
+        latency_ms: 319
+        answers:
+          verdict: {type: score, score: 0.07, confidence: 0.86}
+      - source: pplx-decider-v1-27b
+        latency_ms: 305
+        answers:
+          verdict: {type: score, score: 0.1054002975297501, confidence: 0.7891994049404998}

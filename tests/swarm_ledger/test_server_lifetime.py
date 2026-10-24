@@ -317,10 +317,12 @@ def test_server_closes_its_socket_and_cancels_the_watch_on_exit(tmp_path, monkey
     watch = Mock(return_value=stopped)
     monkeypatch.setattr(server_lifetime, "watch", watch)
     ledger_server.serve()
-    factory.assert_called_once_with((ledger_server.HOST, ledger_server.PORT), ledger_server.Handler)
+    factory.assert_called_once_with(
+        (ledger_server.HOST, ledger_server.PORT), ledger_server.Handler, bind_and_activate=False
+    )
     watch.assert_called_once_with(httpd, tmp_path, ledger_server.PORT)
     assert (tmp_path / ".server.pid").read_text() == str(os.getpid())
-    httpd.serve_forever.assert_called_once_with()
+    httpd.serve_forever.assert_called_once_with(ledger_server.POLL_S)
     stopped.set.assert_called_once_with()
     httpd.server_close.assert_called_once_with()
 
