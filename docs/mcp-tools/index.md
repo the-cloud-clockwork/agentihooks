@@ -36,7 +36,7 @@ The recall tools read the recall archive (`$AGENTIHOOKS_HOME/recall/recall.sqlit
 | `recall_search(query, scope, kinds, author, seat, period, limit)` | `hits`: ranked items, each with its item key, kind, ref, title, author, time, snippet, archived flag and parent chain. A task id, ref or pull request number in the query comes first |
 | `recall_get(ref, scope)` | `item`: one item in full, all of its text, its parent chain and its comments and answers, replies nested under each |
 | `recall_timeline(scope, kinds, period, limit)` | `entries`: items oldest first |
-| `recall_sources()` | `sources`: each indexed ledger or swarm with its record count, item count, archived item count, last indexed time in epoch milliseconds (the last sync that changed it) and whether its slug sits in the ledger bin |
+| `recall_sources()` | `sources`: each indexed ledger or swarm with its record count, item count, archived item count, last indexed time in epoch milliseconds (the last sync that changed it) and whether its slug sits in the ledger bin; `swarms`: each swarm with its sources and their summed counts, latest indexed time, and binned when every source is binned |
 
 - `scope` empty means the caller's own swarm, read from the session identity; outside a swarm it means every source. A ledger or swarm slug narrows it, and `all` crosses swarms.
 - `kinds` is a comma separated list of record kinds such as `task,comment`.

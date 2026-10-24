@@ -1,6 +1,7 @@
 import json
 import re
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -237,6 +238,50 @@ def test_sources_list_counts_indexed_time_and_bin(environ):
     SQLiteRecallStore(default_path(environ)).sync("ledger/alpha", ALPHA[:2])
     again = {entry["source"]: entry for entry in tools.sources(environ=environ)["sources"]}["ledger/alpha"]
     assert again == after
+
+
+def test_sources_total_each_swarm_across_its_ledgers(environ, monkeypatch):
+    bin_entries(Path(environ["LEDGER_DIR"]), {"beta": 5, "gamma": 5})
+    store = SQLiteRecallStore(default_path(environ))
+    monkeypatch.setattr("scripts.recall.store.time.time", lambda: 4_000_000_000)
+    gamma = [record("gamma", "tasks/t8", swarm_slug="alpha"), record("gamma", "tasks/t9", swarm_slug="alpha")]
+    store.sync("ledger/gamma", gamma)
+    store.sync("ledger/gamma", gamma[:1])
+    listed = tools.sources(environ=environ)
+    alpha = {entry["source"]: entry for entry in listed["sources"]}["ledger/alpha"]
+    assert listed["swarms"] == [
+        {
+            "swarm_slug": "alpha",
+            "sources": ["ledger/alpha", "ledger/gamma"],
+            "records": 9,
+            "items": 8,
+            "archived": 1,
+            "last_indexed": 4_000_000_000_000,
+            "binned": False,
+        },
+        {
+            "swarm_slug": "beta",
+            "sources": ["ledger/beta"],
+            "records": 1,
+            "items": 1,
+            "archived": 0,
+            "last_indexed": {entry["source"]: entry for entry in listed["sources"]}["ledger/beta"]["last_indexed"],
+            "binned": True,
+        },
+    ]
+    assert alpha["last_indexed"] < 4_000_000_000_000
+
+
+def test_sources_skip_records_without_a_swarm(environ):
+    SQLiteRecallStore(default_path(environ)).sync("ledger/solo", [record("solo", "tasks/t1", swarm_slug="")])
+    assert [swarm["swarm_slug"] for swarm in tools.sources(environ=environ)["swarms"]] == ["alpha", "beta"]
+
+
+def test_an_unreadable_archive_is_an_error(environ, capsys):
+    default_path(environ).write_bytes(b"not a database" * 100)
+    assert tools.search("words", environ=environ) == {"success": False, "error": "file is not a database"}
+    assert main(["sources"], environ) == 1
+    assert json.loads(capsys.readouterr().out) == {"success": False, "error": "file is not a database"}
 
 
 def test_a_missing_archive_is_an_error_and_never_created(tmp_path):

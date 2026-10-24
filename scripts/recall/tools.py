@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, replace
 from functools import wraps
@@ -20,7 +21,7 @@ def _answer(call: Callable[..., dict]) -> Callable[..., dict]:
     def answered(*args, **kwargs) -> dict:
         try:
             return {"success": True, **call(*args, **kwargs)}
-        except (RecallError, ValueError) as error:
+        except (RecallError, ValueError, sqlite3.Error) as error:
             return {"success": False, "error": str(error)}
 
     return answered
@@ -99,4 +100,23 @@ def sources(environ: Mapping[str, str] = os.environ) -> dict:
                 "binned": slug in hidden,
             }
         )
-    return {"archive": str(store.path), "sources": listed}
+    return {"archive": str(store.path), "sources": listed, "swarms": _swarms(listed)}
+
+
+def _swarms(listed: list[dict]) -> list[dict]:
+    grouped: dict[str, list[dict]] = {}
+    for entry in listed:
+        if entry["swarm_slug"]:
+            grouped.setdefault(entry["swarm_slug"], []).append(entry)
+    return [
+        {
+            "swarm_slug": slug,
+            "sources": [entry["source"] for entry in entries],
+            "records": sum(entry["records"] for entry in entries),
+            "items": sum(entry["items"] for entry in entries),
+            "archived": sum(entry["archived"] for entry in entries),
+            "last_indexed": max(entry["last_indexed"] for entry in entries),
+            "binned": all(entry["binned"] for entry in entries),
+        }
+        for slug, entries in sorted(grouped.items())
+    ]
