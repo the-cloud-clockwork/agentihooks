@@ -390,6 +390,14 @@ def test_the_controller_grant_covers_every_bucket_and_queue_the_hub_opens():
     assert not {">", "$JS.API.>", "$KV.>"} & publish
 
 
+def test_the_controller_grant_keeps_legacy_event_routing_and_swarm_discovery():
+    from scripts.events.nats_legacy import legacy_target
+
+    publish = {"allow": list(nats_grant.CONTROLLER_PUBLISH)}
+    assert legacy_target("swarm.demo.task.claimed", publish) == "legacy.swarm.demo.task.claimed"
+    assert "$JS.API.STREAM.LIST" in nats_grant.CONTROLLER_PUBLISH
+
+
 def test_lint_checks_out_the_antoncore_service_users():
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
     checkout = next(s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore")
