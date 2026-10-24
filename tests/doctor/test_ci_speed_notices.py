@@ -55,3 +55,25 @@ def test_finished_runs_are_mentioned_once_when_group_members_join_leave_or_retur
     loop.speed(RedisStore(store.redis), DOCTOR, WATCHED, NOW + 3660000)
     for slug in (DOCTOR, WATCHED):
         assert mentions(store, slug, kind) == {"101": 1, "102": 1}
+
+
+def test_an_unconfirmed_group_does_not_hide_finished_groups_later_in_the_pass(store, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(loop.github_status, "unresolved", lambda: [])
+    batch = [record([job(0, queued=True, created=-1200)], identity=99), finished(101, "ci runner wait")]
+    monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot(batch))
+    loop.speed(store, DOCTOR, WATCHED, NOW)
+    for slug in (DOCTOR, WATCHED):
+        for kind in ("ci runner wait", "ci tier wall time"):
+            assert mentions(store, slug, kind) == {"101": 1}
+
+
+def test_independent_doctors_keep_their_own_finished_run_notice_history(store, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(loop.github_status, "unresolved", lambda: [])
+    batch = [finished(101, "ci runner wait")]
+    monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot(batch))
+    loop.speed(store, DOCTOR, WATCHED, NOW)
+    loop.speed(store, "other-doctor", WATCHED, NOW)
+    for kind in ("ci runner wait", "ci tier wall time"):
+        assert mentions(store, WATCHED, kind) == {"101": 2}
+        assert mentions(store, DOCTOR, kind) == {"101": 1}
+        assert mentions(store, "other-doctor", kind) == {"101": 1}
