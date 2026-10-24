@@ -40,7 +40,7 @@ def imported_files(root: Path) -> set[str]:
             pending += module_files(root, name)
     seen = set()
     while pending:
-        path = pending.pop().resolve()
+        path = pending.pop()
         if path in seen:
             continue
         seen.add(path)
@@ -68,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     hits = triggering(changed_files(root, args.base, args.head), imported_files(root))
     for path in hits:
         print(f"reaches the replays: {path}")
-    with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+    with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
         output.write(f"run={'true' if hits else 'false'}\n")
     return 0
 
