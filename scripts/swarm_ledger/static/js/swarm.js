@@ -355,8 +355,6 @@ function renderAgents(sw, now = Date.now()) {
     ...firstPage("agents", finished, (a) => `agent-${a.name}`).map(row), moreRow("agents", finished.length, "more finished agents", columns, () => renderAgents(swarm)) || "");
 }
 
-}
-
 function freezeRow(r) {
   const end = r.verb === "focus" ? "end focus" : "unfreeze", target = targetText(doc, r.target);
   const row = cells(snowflake(r.verb === "focus" ? "Focus" : "Frozen"), r.verb, target, r.by, r.at ? clock(r.at) : "—",
