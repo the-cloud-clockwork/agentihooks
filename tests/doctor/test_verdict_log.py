@@ -98,6 +98,16 @@ def test_the_doctor_reader_finds_events_written_to_the_retained_log_key(store):
     ]
 
 
+def test_ordinary_finding_verdicts_keep_the_existing_keys_without_an_event_log(store):
+    judgments = verdicts.VerdictStore(store.redis, store.key("watched", "findings"))
+    found = Finding("test", "ordinary", "Ordinary finding", ("evidence",), "above zero", 1)
+    judgments.visible([found], START, DAY)
+    before = set(store.redis.scan_iter())
+    judgments.judge(found.id, "resolved", "done", "judge", START)
+    assert set(store.redis.scan_iter()) == before
+    assert json.loads(store.redis.hget(judgments.key, found.id))["verdict"]["value"] == "resolved"
+
+
 def test_events_have_a_seven_day_bound_and_an_exclusive_window_end(store):
     judgments, found = finding(store)
     for at in (START - 7 * DAY - 1, START - 7 * DAY, START - 1, START):
