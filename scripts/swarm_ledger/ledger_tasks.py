@@ -52,6 +52,8 @@ UPDATABLE = (
     "applied_at",
     "workstation",
     "needs",
+    "doc_items",
+    "watchdog",
     "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up", "workstation")
@@ -68,13 +70,14 @@ LIST_FIELDS = (
     "split_pulls",
     "repositories",
     "needs",
+    "doc_items",
 )
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
 RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
 APPLIED_RE = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)?")
-OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes")
+OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes", "watchdog")
 PULL_SCOPE_KINDS = ("stage", "prerequisite")
 PULL_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")

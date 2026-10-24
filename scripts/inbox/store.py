@@ -410,7 +410,7 @@ class InboxStore:
         )
 
     def withdraw(
-        self, item_id: str, by: str, reason: str, expected_address: str = "", expected_receiver: str = ""
+        self, item_id: str, by: str, reason: str, expected_address: str = "", expected_receiver: str | None = ""
     ) -> Item | None:
         return self.redirect(item_id, by, "", reason, expected_address, expected_receiver)
 
@@ -440,6 +440,8 @@ class InboxStore:
             pipe.watch(key)
             item = _item(pipe.hgetall(key), item_id)
             if item.state in CLOSED or (expected_address and item.address != expected_address):
+                return None
+            if expected_receiver is None and item.state != "pending":
                 return None
             if expected_receiver:
                 history = self.key("history", item_id)

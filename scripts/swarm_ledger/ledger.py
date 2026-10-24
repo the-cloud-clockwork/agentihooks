@@ -864,7 +864,7 @@ def _task_set_fields(values):
     fields = dict(value.split("=", 1) for value in values if "=" in value)
     if len(fields) != len(values):
         sys.exit("task set takes FIELD=VALUE pairs")
-    for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls", "needs"):
+    for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls", "needs", "doc_items"):
         if key in fields:
             fields[key] = task_list(key, fields[key])
     for key in [key for key in ("artifact", "follow_up", "workstation") if key in fields]:

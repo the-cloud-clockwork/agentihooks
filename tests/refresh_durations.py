@@ -60,15 +60,8 @@ def ci_samples(folder: Path, version: str = "*", run: str = "*") -> list[dict[st
     return samples
 
 
-def ci_medians(
-    folder: Path, version: str, source: str | None, collected: list[str], slowest: bool = False
-) -> dict[str, float]:
-    samples = ci_samples(folder, version)
-    measured = (
-        {node: max(run[node] for run in samples if node in run) for node in set().union(*samples)}
-        if slowest
-        else median_durations(samples)
-    )
+def ci_medians(folder: Path, version: str, source: str | None, collected: list[str]) -> dict[str, float]:
+    measured = median_durations(ci_samples(folder, version))
     if not source:
         return measured
     current = set().union(*ci_samples(folder, version, source))
@@ -115,11 +108,7 @@ def main(argv: list[str] | None = None) -> None:
                 ci_download(run_ids, folder)
             for version in VERSIONS:
                 candidates[f".test_durations-{version}"] = ci_medians(folder, version, args.ci_run, collected)
-                candidates[f".test_durations-slowest-{version}"] = ci_medians(
-                    folder, version, args.ci_run, collected, slowest=True
-                )
             merged = ci_medians(folder, "*", args.ci_run, collected)
-            candidates[".test_durations-slowest"] = ci_medians(folder, "*", args.ci_run, collected, slowest=True)
         else:
             merged = median_durations(local_samples(Path(tmp)))
     candidates[".test_durations"] = merged

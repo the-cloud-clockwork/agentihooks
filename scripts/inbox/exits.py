@@ -43,7 +43,7 @@ def _settle_world(inbox, name, seat, exit_text):
             inbox.close(item.id, BY, "done", ended)
         elif successor:
             inbox.redirect(item.id, BY, successor, f"{name} {exit_text}; passed to {successor}, its successor", name)
-        elif seat:
+        elif seat and _task_continues(inbox, item, seat):
             inbox.redirect(item.id, BY, seat, f"{name} {exit_text}; moved to {seat} for its next occupant", name)
         elif names.entry(name).get("type") == "master":
             continue
@@ -73,6 +73,9 @@ def _settle_taken_seat_mail(inbox: "InboxStore", name: str, exit_text: str, goes
 
 def _settle_taken(inbox: "InboxStore", item, held: str, name: str, exit_text: str, goes_on: bool) -> None:
     """Seat mail a gone life took: back to pending for the seat's next occupant when the work goes on, else closed."""
+    if goes_on and not _task_continues(inbox, item, held):
+        exit_text = f"left its seat and task {item.task}"
+        goes_on = False
     if ended := _life_notice_end(item, name, exit_text):
         inbox.close(item.id, BY, "done", ended)
     elif goes_on:
@@ -84,6 +87,21 @@ def _settle_taken(inbox: "InboxStore", item, held: str, name: str, exit_text: st
         inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text), fyi=True)
 
 
+def _task_continues(inbox: "InboxStore", item, seat: str) -> bool:
+    from scripts.swarm.store import RedisStore
+
+    occupant = inbox.names.resolve(inbox.seats.occupant(seat).occupant)
+    task = next(
+        (
+            agent.task
+            for agent in RedisStore(inbox.redis).agents(seat.split("@", 1)[1])
+            if agent.name == occupant and agent.seat == seat and agent.state != "finished"
+        ),
+        "",
+    )
+    return item.fyi or not item.task or not task or item.task == task
+
+
 def _life_notice_end(item, name: str, exit_text: str) -> str:
     """The close reason of a notice meant only for the life that left; '' for any other item."""
     from scripts.gates import push_stop
@@ -93,6 +111,8 @@ def _life_notice_end(item, name: str, exit_text: str) -> str:
         return push_stop.left(name, exit_text)
     if quota_notice.is_notice(item):
         return f"{name} {exit_text}; its quota notice ended with it"
+    if item.sender == BY and ":overrun:" in item.ref:
+        return f"{name} {exit_text}; its overrun request ended with it"
     return ""
 
 
@@ -246,7 +266,7 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
             if item.state in CLOSED:
                 continue
             task = notice_task(item)
-            if not (task or push_stop.is_notice(item)):
+            if not (task or push_stop.is_notice(item) or _life_notice_end(item, "", "")):
                 if item.state != "pending":
                     _settle_left_behind(inbox, item, seat, active)
                 continue
@@ -258,7 +278,12 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
             elif task:
                 reason = f"{owner} left its seat before picking task {task} back up"
             else:
-                reason = push_stop.left(owner, "left its seat")
+                outcome = inbox.seats.exit_of(owner)
+                reason = (
+                    push_stop.left(owner, "left its seat")
+                    if push_stop.is_notice(item)
+                    else _life_notice_end(item, owner, outcome.get("reason", "left its seat"))
+                )
             inbox.close(item.id, BY, "done", reason)
 
 
@@ -283,10 +308,16 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
             if item.state in CLOSED or item.fyi or not item.task or item.task == agent.task:
                 continue
             owner = _taker(inbox, item)
-            if not owner or owner in active:
+            if owner in active:
                 continue
             exit_text = f"left its seat and task {item.task}"
-            if inbox.withdraw(item.id, BY, f"cancelled: {owner} {exit_text} before closing it", agent.seat, owner):
+            if inbox.withdraw(
+                item.id,
+                BY,
+                f"cancelled: {owner or agent.seat} {exit_text} before closing it",
+                agent.seat,
+                owner or None,
+            ):
                 inbox.send(BY, notice_address(inbox, item.sender), _told(item, owner, exit_text), fyi=True)
 
 
