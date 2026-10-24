@@ -366,7 +366,13 @@ def test_a_live_agent_without_a_pid_or_owned_pane_is_refused(tmp_path, monkeypat
     herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes=panes)
     monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
     local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {PID: proc()})
-    assert not RuntimeRouter([local]).terminate(record(pid=None, start=None)).ok
+    outcome = RuntimeRouter([local]).terminate(record(pid=None, start=None))
+    assert not outcome.ok
+    assert outcome.detail == "no owned pane for unrecorded process"
+    assert herdr.refusal(record(pid=None, start=None)) == {
+        "process": 0,
+        "refusal": "no owned pane for unrecorded process",
+    }
     assert ["pane", "close", "w1:p1"] not in calls
 
 
@@ -387,6 +393,86 @@ def test_unrecorded_retirement_refuses_a_named_process_on_another_pane_or_server
     local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {PID: proc()})
     assert not RuntimeRouter([local]).terminate(record(pid=None, start=None)).ok
     assert ended == []
+    assert ["pane", "close", "w1:p1"] not in calls
+
+
+@pytest.mark.parametrize("wrapped", [True, False])
+@pytest.mark.parametrize("named", [True, False])
+def test_unrecorded_retirement_uses_the_oldest_owned_process_with_its_start_and_scratch_homes(
+    tmp_path, monkeypatch, wrapped, named
+):
+    from scripts import terminate_agent
+
+    pane = {
+        "pane_id": "w1:p1",
+        "name": NAME if named else "",
+        "agent_session": {"kind": "id", "value": "conversation"},
+    }
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
+    original = herdr.herdr
+
+    def lookup(args):
+        result = original(args)
+        return result["agent"] if not wrapped and args[:2] == ["agent", "get"] else result
+
+    herdr.herdr = lookup
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/owned/herdr.sock")
+    recent, oldest = proc(PID, 900), proc(PID + 1, 100)
+    sessions = [terminate_agent.Session("", "claude", NAME, p, "", "alive") for p in (recent, oldest)]
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: sessions)
+    monkeypatch.setattr(terminate_agent, "herdr_pane", lambda pid: ("w1:p1", "/owned/herdr.sock"))
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {})
+    agent = replace(record(pid=None, start=None), conversation_id="conversation")
+    assert RuntimeRouter([local]).terminate(agent, ("/scratch/task",)).ok
+    assert ended == [(NAME, PID + 1, ["/scratch/task"], 100)]
+    assert ["pane", "close", "w1:p1"] in calls
+
+
+def test_unrecorded_retirement_reports_an_unavailable_pane_service(tmp_path, monkeypatch):
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch)
+
+    def unavailable(args):
+        calls.append(args)
+        raise RuntimeError("pane service unavailable")
+
+    herdr.herdr = unavailable
+    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {})
+    agent = record(pid=None, start=None)
+    outcome = RuntimeRouter([local]).terminate(agent)
+    assert not outcome.ok and outcome.detail == "pane service unavailable"
+    assert herdr.refusal(agent) == {"process": 0, "refusal": "pane service unavailable"}
+    assert calls == [["agent", "get", "w1:p1"]]
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_unrecorded_retirement_reaps_scratch_homes_when_the_process_is_already_gone(tmp_path, monkeypatch, present):
+    from scripts import terminate_agent
+
+    panes = {"w1:p1": {"pane_id": "w1:p1", "name": NAME}} if present else {}
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes=panes)
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {})
+    assert RuntimeRouter([local]).terminate(record(pid=None, start=None), ("/scratch/task",)).ok
+    assert ended == [(NAME, None, ["/scratch/task"], 0)]
+    closed = [call for call in calls if call[:2] == ["pane", "close"]]
+    assert closed == ([["pane", "close", "w1:p1"]] if present else [])
+
+
+@pytest.mark.parametrize("conversation", ["", "recorded-conversation"])
+def test_unrecorded_retirement_refuses_an_unnamed_pane_without_its_recorded_conversation(
+    tmp_path, monkeypatch, conversation
+):
+    pane = {"pane_id": "w1:p1", "name": "", "agent_session": None}
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
+    monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
+    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {})
+    agent = replace(record(pid=None, start=None), conversation_id=conversation)
+    outcome = RuntimeRouter([local]).terminate(agent)
+    assert not outcome.ok and outcome.detail == "no owned pane for unrecorded process"
     assert ["pane", "close", "w1:p1"] not in calls
 
 
