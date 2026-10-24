@@ -5,6 +5,7 @@ CATEGORY_MODULES = {
     "enforcement": "hooks.mcp.enforcement",
     "conditions": "hooks.mcp.conditions",
     "scheduler": "hooks.mcp.scheduler",
+    "recall": "hooks.mcp.recall",
 }
 
 ALL_CATEGORIES = list(CATEGORY_MODULES.keys())
