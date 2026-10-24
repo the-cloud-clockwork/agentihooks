@@ -253,6 +253,8 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     assert install["env"] == {"PYTHON_PATH": "${{ steps.python.outputs.python-path }}"}
     assert install["run"].strip().splitlines() == [
         'uv venv --python "$PYTHON_PATH" "$HOME/venv"',
+        'uv pip install --offline --no-index --find-links /opt/wheelhouse --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
+        'echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"',
         'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
@@ -782,7 +784,7 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
     ref = checkout["with"]["ref"]
     assert "github.event_name == 'push' && github.sha" in ref
-    assert "github.event_name == 'pull_request' && 'dev'" in ref
+    assert "github.event_name == 'pull_request' && github.base_ref" in ref
     assert ref.index("github.event_name == 'push' && github.sha") < ref.index("github.event.before")
 
 
@@ -871,7 +873,8 @@ def test_unit_shards_read_the_suite_the_split_job_collected():
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
     }
-    assert download["if"] in (upload["if"], f"needs.split.outputs.source == '' && {upload['if']}")
+    assert "if" not in upload
+    assert download["if"] == "needs.split.outputs.source == ''"
 
 
 @pytest.mark.parametrize("missing", [0, 5, 10, 11, 100])

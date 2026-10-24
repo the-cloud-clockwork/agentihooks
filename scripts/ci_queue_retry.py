@@ -17,7 +17,10 @@ RUNNER_LOSS = re.compile(
     r"|" + re.escape(UNREADABLE_LOG)
 )
 FAILED_RESULT = re.compile(r"^(?:\S+Z )?(?:\x1b\[[\d;]*m)*=+ .*?\b[1-9]\d* (?:failed|errors?)\b.*? in [\d.]+s\b", re.M)
-STEP_EXITED = re.compile(r"Process completed with exit code (?:[1-9]|[1-9]\d|1[01]\d|12[0-7])\.")
+STEP_TIMED_OUT = re.compile(r"The action '.+' has timed out after ")
+STEP_EXITED = re.compile(
+    r"(?:Process completed with exit code (?:[1-9]|[1-9]\d|1[01]\d|12[0-7])\.|" + STEP_TIMED_OUT.pattern + ")"
+)
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
 EXIT_POLLS = 60
 EXIT_POLL_SECONDS = 30
@@ -28,7 +31,7 @@ def base_name(job_name: str) -> str:
 
 
 def runner_lost(text: str) -> bool:
-    return bool(RUNNER_LOSS.search(text)) and not FAILED_RESULT.search(text)
+    return bool(RUNNER_LOSS.search(text)) and not (FAILED_RESULT.search(text) or STEP_TIMED_OUT.search(text))
 
 
 def dependents(workflow: dict, root: str = SHARD) -> set[str]:

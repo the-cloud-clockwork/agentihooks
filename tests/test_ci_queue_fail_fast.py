@@ -136,6 +136,41 @@ def test_a_missing_log_waits_and_is_read_again_next_poll(monkeypatch):
     assert seen == {}
 
 
+@pytest.mark.parametrize(
+    ("notes", "lost"),
+    [
+        ([], True),
+        (["The runner has received a shutdown signal."], True),
+        (["Process completed with exit code 1.", "The runner has received a shutdown signal."], True),
+        (["Process completed with exit code 1."], False),
+        (["== 1 failed, 3 passed in 4.10s =="], False),
+        (["The action 'Run tests' has timed out after 12 minutes."], False),
+        (
+            ["The action 'Run tests' has timed out after 12 minutes.", "The runner has received a shutdown signal."],
+            False,
+        ),
+    ],
+)
+def test_missing_logs_use_annotations_before_the_watcher_allows_recovery(monkeypatch, notes, lost):
+    calls = []
+
+    def api(path, *flags):
+        calls.append(path)
+        if path == "repos/o/r/actions/jobs/41/logs":
+            raise subprocess.CalledProcessError(1, ["gh", "api", path])
+        assert path == "repos/o/r/check-runs/41/annotations"
+        return json.dumps([{"message": note} for note in notes])
+
+    monkeypatch.setattr(fail_fast_retry, "_api", api)
+    shard = {**_job("unit (3.12, 4)", "failure"), "id": 41}
+    seen = {}
+    assert fail_fast.failed([shard], lambda job: fail_fast.logged_loss("o/r", job, seen)) == (
+        None if lost else shard["name"]
+    )
+    assert calls == ["repos/o/r/actions/jobs/41/logs", "repos/o/r/check-runs/41/annotations"]
+    assert seen == {}
+
+
 def test_a_judged_shard_log_is_not_read_again(monkeypatch):
     monkeypatch.setattr(fail_fast_retry, "_api", lambda *args: pytest.fail("read again"))
     assert fail_fast.logged_loss("o/r", {"id": 41}, {"41": False}) is False
@@ -220,7 +255,7 @@ def test_the_module_runs_from_the_command_line(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out == "wait\n"
 
 
-def _watch(tmp_path, reads, heads=None, server_error=False, rebuild_fail=False):
+def _watch(tmp_path, reads, heads=None, server_error=False, rebuild_fail=False, classifier_fail=False):
     fake, bin_dir = tmp_path / "fake", tmp_path / "bin"
     fake.mkdir()
     bin_dir.mkdir()
@@ -255,6 +290,9 @@ def _watch(tmp_path, reads, heads=None, server_error=False, rebuild_fail=False):
         '  echo "record queue-rebuild-7-2: unknown cause: g"\n'
         "  exit 0\n"
         "fi\n"
+        'if [[ "$2" == scripts.ci_queue_fail_fast && -n "$FAKE_CLASSIFIER_FAIL" && ! -f "$FAKE/classifier-failed" ]]; then\n'
+        '  touch "$FAKE/classifier-failed"; exit 1\n'
+        "fi\n"
         f'exec "{sys.executable}" "$@"\n',
     }
     for name, body in scripts.items():
@@ -276,6 +314,7 @@ def _watch(tmp_path, reads, heads=None, server_error=False, rebuild_fail=False):
         "GITHUB_REF": "refs/heads/gh-readonly-queue/dev/pr-1-old",
         "FAKE_HEADS": "no" if heads is None else "yes",
         "FAKE_REBUILD_FAIL": "1" if rebuild_fail else "",
+        "FAKE_CLASSIFIER_FAIL": "1" if classifier_fail else "",
     }
     run = _step(_jobs()["queue-fail-fast"], "Watch for the first failed graded job")["run"]
     result = subprocess.run(["bash", "-e", "-c", run], cwd=_ROOT, env=env, capture_output=True, text=True)
@@ -348,6 +387,37 @@ def test_the_watch_step_stops_without_a_name_once_every_graded_job_settled(tmp_p
     assert result.returncode == 0, result.stderr
     assert output == "failed=\n"
     assert sleeps == []
+
+
+@pytest.mark.parametrize(("unit_result", "expected_sleep"), [("", "15"), ("success", "5")])
+def test_the_watch_step_polls_faster_only_after_unit_jobs_finish(tmp_path, unit_result, expected_sleep):
+    result, output, sleeps, _ = _watch(
+        tmp_path,
+        [
+            [_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", unit_result), _job("stage-budget")],
+            [_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", "success"), _job("stage-budget", "success")],
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output == "failed=\n"
+    assert sleeps == [expected_sleep]
+
+
+def test_the_watch_step_keeps_error_backoff_when_completed_units_cannot_be_classified(tmp_path):
+    result, output, sleeps, _ = _watch(
+        tmp_path,
+        [
+            [_job("unit (3.12, 1)", "success"), _job("stage-budget")],
+            [_job("unit (3.12, 1)", "success"), _job("stage-budget", "success")],
+        ],
+        classifier_fail=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "The shard log check failed; this poll waits." in result.stdout
+    assert output == "failed=\n"
+    assert sleeps == ["15"]
 
 
 def test_the_watch_step_gives_up_quietly_after_ten_failed_reads_in_a_row(tmp_path):
