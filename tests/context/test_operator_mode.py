@@ -342,6 +342,7 @@ def test_the_question_tool_passes_a_bound_session_only_after_typed_operator_on_a
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) != ""
     operator_mode.observe("s1", "operator on", True, now=100)
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ""
+    operator_mode.observe("s3", "operator off", True, now=100)
     assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == ""
     assert operator_mode.question_block("Bash", "s4", SWARM) == ""
     assert operator_mode.question_block("Bash", "s4", standalone) == ""
