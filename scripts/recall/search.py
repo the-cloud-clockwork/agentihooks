@@ -9,7 +9,7 @@ from .store import SQLiteRecallStore
 
 DAY = 86_400_000
 SPANS = {"m": 60_000, "h": 3_600_000, "d": DAY, "w": 7 * DAY}
-SPAN = re.compile(r"(\d+)\s*(m|mins?|minutes?|h|hours?|d|days?|w|weeks?)")
+SPAN = re.compile(r"(\d+|an?|one)\s*(m|mins?|minutes?|h|hours?|d|days?|w|weeks?)")
 WORD = re.compile(r"[\w-]+")
 REF = re.compile(r"\b[a-z]+/[\w./@-]+")
 PR_NUMBER = re.compile(r"(?:#|\bpr\s*#?|\bpull request\s*#?)(\d+)\b", re.IGNORECASE)
@@ -122,7 +122,7 @@ def parse_time(value: str | int | None, now: int) -> int | None:
         return value
     text = value.strip()
     if match := SPAN.fullmatch(text):
-        return now - int(match[1]) * SPANS[match[2][0]]
+        return now - (int(match[1]) if match[1].isdigit() else 1) * SPANS[match[2][0]]
     if text.isdigit():
         return int(text)
     try:
@@ -263,7 +263,9 @@ def search(
         return [replace(hit, parents=_parents(connection, row)) for row, hit in order[:limit]]
 
 
-def timeline(store: SQLiteRecallStore, filters: Filters = Filters(), limit: int = 200, *, now: int | None = None):
+def timeline(
+    store: SQLiteRecallStore, filters: Filters = Filters(), limit: int = 200, *, now: int | None = None
+) -> list[Entry]:
     where, params = _where(filters, now_ms() if now is None else now)
     with store.connect() as connection:
         found = connection.execute(

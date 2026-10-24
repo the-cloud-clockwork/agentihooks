@@ -79,5 +79,12 @@ def test_load_golden_refuses_an_empty_set_and_entries_without_question_or_expect
         with pytest.raises(GoldenError) as caught:
             load_golden(path)
         assert str(caught.value) == "golden entry 2 needs a question and an expect"
+    for extra in ({"scope": 1}, {"kinds": "note"}, {"kinds": ["note", 2]}):
+        path.write_text(json.dumps([{"question": "a", "expect": "b", **extra}]))
+        with pytest.raises(GoldenError) as caught:
+            load_golden(path)
+        assert str(caught.value) == "golden entry 1 needs a text scope and a list of kinds"
+    path.write_text(json.dumps([{"question": "a", "expect": "b", "scope": "s", "kinds": ["note"]}]))
+    assert load_golden(path) == [{"question": "a", "expect": "b", "scope": "s", "kinds": ["note"]}]
     path.write_text(json.dumps([{"question": "a", "expect": "b"}]))
     assert load_golden(path) == [{"question": "a", "expect": "b"}]

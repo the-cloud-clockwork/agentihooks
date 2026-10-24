@@ -63,6 +63,9 @@ def test_parse_time_reads_iso_times_epochs_and_relative_spans():
     assert parse_time("2 days", NOW) == NOW - 2 * DAY
     assert parse_time(" 1 week ", NOW) == NOW - 7 * DAY
     assert parse_time("3w", NOW) == NOW - 21 * DAY
+    assert parse_time("one day", NOW) == NOW - DAY
+    assert parse_time("an hour", NOW) == NOW - 3_600_000
+    assert parse_time("a week", NOW) == NOW - 7 * DAY
 
 
 def test_parse_time_refuses_text_that_is_no_time():
