@@ -99,6 +99,11 @@ def test_a_rerun_classifier_or_judge_failure_is_named_even_when_lost(name):
             id="failed-result-then-loss",
         ),
         pytest.param(
+            "##[error]The runner has received a shutdown signal.\n== 1 failed, 3 passed in 4.10s ==",
+            False,
+            id="loss-then-failed-result",
+        ),
+        pytest.param(
             "== 3 passed in 4.10s ==\n##[error]The runner has received a shutdown signal.",
             True,
             id="passed-result-then-loss",
