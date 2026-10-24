@@ -19,6 +19,7 @@ from scripts.profiles import binding, plugins
 from scripts.routing import native_login
 from scripts.swarm import (
     affinity,
+    brain_binding,
     capacity,
     default_models,
     effort_range,
@@ -923,7 +924,7 @@ class HerdrRuntime:
             fields.get("effort", ""),
             fields.get("placement", ""),
             validated["profile"],
-            profile_decision={"validation": validated},
+            profile_decision={"validation": validated, **brain_binding.record(fields)},
             launched_at=launched_at,
             launch_timings=timings,
             conversation_id=(self.conversations() or {}).get(fields.get("pane_id"), ""),
