@@ -52,7 +52,7 @@ runs:
         echo "$RUNNER_TEMP/nats" >> "$GITHUB_PATH"
         echo "NATS_SERVER_REQUIRED=1" >> "$GITHUB_ENV"
     - name: Save the pinned nats server archive
-      if: steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
+      if: steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@v4
       with:
         path: ${{ steps.pin.outputs.archive }}

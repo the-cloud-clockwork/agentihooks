@@ -175,13 +175,11 @@ def test_nats_server_archive_is_cached_on_its_pinned_release_and_checksum():
     }
     assert install["env"]["CACHE_HIT"] == "${{ steps.cache.outputs.cache-hit }}"
     assert save["uses"] == "actions/cache/save@v4"
-    assert save["if"] == (
-        "steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'"
-    )
+    assert save["if"] == "steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
     assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.cache.outputs.cache-primary-key }}"}
 
 
-def _run_nats_install(tmp_path: Path, cache_hit: str, cached: bytes | None) -> list[str]:
+def _run_nats_install(tmp_path: Path, cache_hit: str, cached: str) -> list[str]:
     name = "nats-server-v0-linux-amd64"
     binary = tmp_path / "src" / name / "nats-server"
     binary.parent.mkdir(parents=True)
@@ -192,8 +190,10 @@ def _run_nats_install(tmp_path: Path, cache_hit: str, cached: bytes | None) -> l
         tar.add(binary.parent, arcname=name)
     archive = tmp_path / "runner" / f"{name}.tar.gz"
     archive.parent.mkdir()
-    if cached is not None:
-        archive.write_bytes(cached if cached else good.read_bytes())
+    if cached == "valid":
+        archive.write_bytes(good.read_bytes())
+    elif cached == "corrupt":
+        archive.write_bytes(b"corrupt")
     calls = tmp_path / "curl.log"
     stub = tmp_path / "bin" / "curl"
     stub.parent.mkdir()
@@ -223,15 +223,15 @@ def _run_nats_install(tmp_path: Path, cache_hit: str, cached: bytes | None) -> l
 
 
 def test_nats_server_install_skips_the_download_on_a_verified_cache_hit(tmp_path):
-    assert _run_nats_install(tmp_path, "true", b"") == []
+    assert _run_nats_install(tmp_path, "true", "valid") == []
 
 
 def test_nats_server_install_downloads_on_a_cache_miss(tmp_path):
-    assert len(_run_nats_install(tmp_path, "", None)) == 1
+    assert len(_run_nats_install(tmp_path, "", "none")) == 1
 
 
 def test_nats_server_install_downloads_again_when_the_cached_archive_fails_its_checksum(tmp_path):
-    assert len(_run_nats_install(tmp_path, "true", b"corrupt")) == 1
+    assert len(_run_nats_install(tmp_path, "true", "corrupt")) == 1
 
 
 def test_unit_setup_python_restores_no_pip_cache():
@@ -335,6 +335,18 @@ def test_main_seeds_the_codex_cache_that_unit_shards_restore():
     assert restore["if"] == "runner.environment == 'self-hosted'"
     assert install["if"] == "steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'"
     assert "releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.tar.gz" in install["run"]
+
+
+def test_main_seeds_the_nats_server_cache_that_unit_shards_restore():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/codex-cache.yml").read_text())["jobs"]["seed"]["steps"]
+    names = [step.get("name") for step in steps]
+    take = steps[names.index("Take the nats server action")]
+    seed = steps[names.index("Seed the pinned nats server")]
+    assert take["uses"] == "actions/checkout@v4"
+    assert take["with"] == {"sparse-checkout": ".github/actions/nats-server"}
+    assert seed["uses"] == "./.github/actions/nats-server"
+    assert take["if"] == seed["if"] == "runner.environment == 'self-hosted'"
+    assert steps.index(take) < steps.index(seed)
 
 
 def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():

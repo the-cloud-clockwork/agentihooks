@@ -1,7 +1,8 @@
 name: Codex cache
 
 # Merge queue refs restore caches only from their own ref and main, so the Codex CLI
-# that unit shard 1 restores is saved here on main. Hosted runners compress with zstd,
+# that unit shard 1 restores, and the pinned nats server every unit shard restores, are
+# saved here on main. Hosted runners compress with zstd,
 # which saves a cache version the gzip self-hosted unit runners cannot restore.
 on:
   schedule:
@@ -47,3 +48,14 @@ jobs:
       - name: Check the Codex CLI runs
         if: steps.codex.outcome == 'success'
         run: ~/codex/codex --version
+
+      - name: Take the nats server action
+        if: runner.environment == 'self-hosted'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions/nats-server
+
+      - name: Seed the pinned nats server
+        if: runner.environment == 'self-hosted'
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
