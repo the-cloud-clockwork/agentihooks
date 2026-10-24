@@ -81,6 +81,16 @@ def parked_by(store, who, task):
     return any(a.name == who.name and a.state == "finished" for a in store.agents(who.swarm))
 
 
+def release_verification(task, store, who, now):
+    if task.get("awaiting") != "verify":
+        return False
+    at = (task.get("contract") or {}).get("after_at")
+    if not at or int(at) <= now:
+        return False
+    store.release(who.swarm, who.task, who.name)
+    return True
+
+
 def refusal(owed, slug, task, pull):
     url, block = task.get("pr_url"), f'agentihooks swarm {slug} block "<why>"'
     name_wait = (
@@ -134,6 +144,9 @@ class ClaimStop:
                 and lift.agent_lifted(who.swarm, who.name, self.name, state.home)
             )
         ):
+            streak.clear()
+            return Decision()
+        if release_verification(task, store, who, now):
             streak.clear()
             return Decision()
         if parked_by(store, who, task) or ready.awaiting(task):
