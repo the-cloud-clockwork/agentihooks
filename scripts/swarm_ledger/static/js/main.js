@@ -12,6 +12,8 @@ import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
 import { connectEvents } from "./events.js";
 import { loadArchitecture } from "./architecture.js";
+import { loadTips } from "./api.js";
+import { tips } from "./state.js";
 import { toggleFrozenView } from "./frozen_view.js";
 
 function start() {
@@ -88,6 +90,7 @@ function start() {
   wireRail();
   $("main-content").addEventListener("scroll", markOutline, { passive: true });
   loadMetadata();
+  loadTips().then((values) => { if (values) { Object.assign(tips, values); render(); } });
   connectEvents();
   loaded.then(() => { if (location.hash.length > 1) openHash(); });
   setInterval(refreshQuota, QUOTA_REFRESH_MS);
