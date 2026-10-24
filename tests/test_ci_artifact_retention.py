@@ -8,7 +8,8 @@ pytestmark = pytest.mark.unit
 
 
 def _uploads():
-    files = [*(_ROOT / ".github/workflows").glob("*.yml"), *(_ROOT / ".github/actions").glob("*/action.yml")]
+    workflows = _ROOT / ".github/workflows"
+    files = [*workflows.glob("*.yml"), *workflows.glob("*.yaml"), *(_ROOT / ".github/actions").glob("*/action.y*ml")]
     for path in sorted(files):
         doc = yaml.safe_load(path.read_text())
         jobs = [job.get("steps") or [] for job in (doc.get("jobs") or {}).values()]
@@ -25,7 +26,7 @@ def test_the_walk_finds_upload_steps():
 
 def test_every_upload_step_sets_retention_days():
     missing = [
-        f"{path}: {step.get('name') or step['with'].get('name')}"
+        f"{path}: {step.get('name') or (step.get('with') or {}).get('name')}"
         for path, step in _uploads()
         if not str((step.get("with") or {}).get("retention-days", "")).strip()
     ]
