@@ -57,6 +57,15 @@ def _login(target, account=MASTER_ACCOUNT, grant=GRANT):
     (target / login.CONFIG).write_text(json.dumps({**config, login.ACCOUNT: account}))
 
 
+class _BoundedArguments(list):
+    reads = 0
+
+    def __getitem__(self, index):
+        self.reads += 1
+        assert self.reads <= 10 * max(len(self), 1), "argument parsing must terminate"
+        return super().__getitem__(index)
+
+
 def test_the_login_is_on_only_for_a_claude_front_door_master_with_the_setting_on(monkeypatch):
     monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
     assert login.enabled("rig", "master@rig", "master", "claude") is True
@@ -965,7 +974,9 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
     monkeypatch.setattr(account_slots, "execute", admit)
     monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, environ: executed.append((binary, argv, environ)))
     report = tmp_path / "route"
-    args = ["--remote-control", "master proof", "--remote-control-session-name-prefix", "proof", "--model", "opus"]
+    args = _BoundedArguments(
+        ["--remote-control", "master proof", "--remote-control-session-name-prefix", "proof", "--model", "opus"]
+    )
     login.launch_claude("/opt/claude", args, env, str(report))
     assert capsys.readouterr().out == "[agenti] account=workeratexample_com route=token-fallback remote-control=off\n"
     printed.assert_called_once_with(
@@ -977,7 +988,7 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
     binary, argv, environ = executed[0]
     assert binary == "/opt/claude"
     assert "--remote-control" not in argv and "--remote-control-session-name-prefix" not in argv
-    assert argv[-2:] == ["--model", "opus"]
+    assert argv == ["/opt/claude", "--dangerously-skip-permissions", "--model", "opus"]
     assert environ["CLAUDE_CODE_OAUTH_TOKEN"] == "routed"
     assert "ANTHROPIC_API_KEY" not in environ
     target = Path(environ["CLAUDE_CONFIG_DIR"])
@@ -1140,15 +1151,7 @@ def test_browser_home_reclaims_a_dead_holder(ah, rendered):
     ],
 )
 def test_token_arguments_remove_only_remote_control(args, expected):
-    class Arguments(list):
-        reads = 0
-
-        def __getitem__(self, index):
-            self.reads += 1
-            assert self.reads <= 10 * max(len(self), 1), "argument parsing must terminate"
-            return super().__getitem__(index)
-
-    assert login._token_args(Arguments(args)) == expected
+    assert login._token_args(_BoundedArguments(args)) == expected
 
 
 def test_token_home_without_forced_login_rehomes_the_profile(ah, rendered, tmp_path, monkeypatch):

@@ -462,3 +462,22 @@ def test_browser_request_without_a_task_keeps_a_stable_item_identity(tmp_path, m
     monkeypatch.setattr(store, "new_item_id", lambda: "request")
     assert chain._request(inbox, env, target, output) == "sent"
     assert inbox.send.call_args.kwargs == {"task": "", "item_id": "request"}
+
+
+def test_a_transient_send_failure_cancels_the_request_immediately(tmp_path, monkeypatch):
+    from redis.exceptions import RedisError
+
+    from scripts.inbox import outbox, store
+
+    output = tmp_path / "auth.log"
+    output.write_text("https://claude.ai/oauth/authorize?state=proof\n")
+    inbox = SimpleNamespace(send=Mock(side_effect=RedisError("temporary")), close=Mock())
+    queued = Mock()
+    monkeypatch.setattr(store, "new_item_id", lambda: "request")
+    monkeypatch.setattr(outbox, "waiting", lambda _: False)
+    monkeypatch.setattr(outbox, "append", queued)
+    env = {"AGENTIHOOKS_SWARM": "proof", "AGENTIHOOKS_AGENT_NAME": "engineer@proof"}
+    with pytest.raises(RedisError, match="temporary"):
+        chain._request(inbox, env, tmp_path / "claude", output)
+    inbox.close.assert_called_once_with("request", "engineer@proof", "cancel", "browser attempt ended")
+    queued.assert_not_called()
