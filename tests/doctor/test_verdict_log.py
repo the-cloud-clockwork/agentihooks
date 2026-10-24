@@ -6,7 +6,7 @@ import pytest
 from scripts.doctor import cli, loop
 from scripts.swarm.health import verdicts
 from scripts.swarm.health.findings import Finding
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import RedisStore, SwarmError
 
 DAY = 86400000
 START = int(datetime(2026, 10, 23, tzinfo=timezone.utc).timestamp() * 1000)
@@ -66,6 +66,25 @@ def test_identical_judgments_in_one_millisecond_remain_separate_and_doctors_are_
     other, _ = finding(store, "other-doctor")
     assert len(judgments.events(START, START + 1, START + 1)) == 2
     assert other.events(START, START + 1, START + 1) == []
+
+
+def test_events_have_a_seven_day_bound_and_an_exclusive_window_end(store):
+    judgments, found = finding(store)
+    for at in (START - 7 * DAY - 1, START - 7 * DAY, START - 1, START):
+        judgments.judge(found.id, "resolved", str(at), "judge", at)
+    events = judgments.events(START - 7 * DAY, START, START)
+    assert [event["at"] for event in events] == [START - 7 * DAY, START - 1]
+    assert store.redis.zcard(judgments.event_key) == 3
+    assert 7 * DAY - 10000 <= store.redis.pttl(judgments.event_key) <= 7 * DAY
+    with pytest.raises(SwarmError, match="seven day retention"):
+        judgments.events(START - 7 * DAY - 1, START, START)
+
+
+@pytest.mark.parametrize("since,until", [(START, START), (START + 1, START), (START, START + 2)])
+def test_event_reader_refuses_reversed_or_future_windows(store, since, until):
+    judgments, _ = finding(store)
+    with pytest.raises(SwarmError, match="--since before --until"):
+        judgments.events(since, until, START + 1)
 
 
 def test_verdict_log_counts_all_events_beside_latest_records_for_a_day(store, monkeypatch, capsys):

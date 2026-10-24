@@ -26,6 +26,9 @@ agentihooks doctor <slug> measure FINDING      run the detectors once and print 
                                                finding prints its run's own value, then its tier or runner label
                                                class over the last hour (or --since to --until); a bare class name
                                                prints every tier or label set
+agentihooks doctor <slug> verdict-log --since TIME --until TIME
+                                               print retained verdict events and counts beside latest finding verdicts
+                                               for the half open window, within seven days, as JSON
 agentihooks doctor <slug> rates [--hours N] [--at TIME] [--json]
                                                each coordination failure's number and the gate log counts over the
                                                last N hours (24), or the N hours before and after TIME side by side;
@@ -47,6 +50,7 @@ import os
 import re
 import sys
 from argparse import Namespace
+from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -421,6 +425,30 @@ def _at_ms(text, flag="--at"):
     return int((when if when.tzinfo else when.replace(tzinfo=timezone.utc)).timestamp() * 1000)
 
 
+def cmd_verdict_log(store, args):
+    now = swarm.now_ms()
+    since, until = _at_ms(args.since, "--since"), _at_ms(args.until, "--until")
+    judgments = loop.verdicts(store, doctor_slug(args.slug))
+    events = judgments.events(since, until, now)
+    records = [json.loads(raw) for raw in store.redis.hgetall(judgments.key).values()]
+    latest = [
+        record["verdict"] for record in records if record.get("verdict") and since <= record["verdict"]["at"] < until
+    ]
+    print(
+        json.dumps(
+            {
+                "since": since,
+                "until": until,
+                "event_count": len(events),
+                "latest_count": len(latest),
+                "events_by_value": dict(Counter(event["value"] for event in events)),
+                "latest_by_value": dict(Counter(verdict["value"] for verdict in latest)),
+                "events": events,
+            }
+        )
+    )
+
+
 def cmd_rates(store, args):
     now = swarm.now_ms()
     at = _at_ms(args.at) if args.at else None
@@ -464,6 +492,9 @@ def build_parser():
     measured.add_argument("finding")
     measured.add_argument("--since")
     measured.add_argument("--until")
+    logged = sub.add_parser("verdict-log")
+    logged.add_argument("--since", required=True)
+    logged.add_argument("--until", required=True)
     rated = sub.add_parser("rates")
     rated.add_argument("--hours", type=float, default=24)
     rated.add_argument("--at")
@@ -483,6 +514,7 @@ COMMANDS = {
     "task": cmd_task,
     "measure": cmd_measure,
     "rates": cmd_rates,
+    "verdict-log": cmd_verdict_log,
     "intervene": cmd_intervene,
 }
 
