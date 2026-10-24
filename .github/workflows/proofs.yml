@@ -22,6 +22,11 @@ on:
         type: boolean
         required: false
         default: false
+      existing_only:
+        description: Explicitly skip missing paths and run only existing requested tests
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ${{ inputs.proof == 'tests' && format('focused-proof-{0}', github.run_id) || format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
@@ -87,6 +92,7 @@ jobs:
     timeout-minutes: 15
     env:
       TEST_PATHS: ${{ inputs.tests }}
+      EXISTING_ONLY: ${{ inputs.existing_only }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
@@ -98,10 +104,24 @@ jobs:
           [[ "$TEST_PATHS" != *$'\n'* ]] || { echo '::error::Give every test path on one line.'; exit 1; }
           read -r -a paths <<< "$TEST_PATHS"
           [[ ${#paths[@]} -gt 0 ]] || { echo '::error::Choose explicit test paths under tests/.'; exit 1; }
+          missing=false
+          selected=()
+          annotation=error
+          [[ "${EXISTING_ONLY:-false}" != true ]] || annotation=warning
           for path in "${paths[@]}"; do
             [[ "$path" == tests/* && "$path" != *..* ]] || { echo '::error::Every test path must be under tests/.'; exit 1; }
-            [[ -e "${path%%::*}" ]] || { echo "::error::Test path ${path%%::*} does not exist."; exit 1; }
+            if [[ -e "${path%%::*}" ]]; then
+              selected+=("$path")
+            else
+              echo "::$annotation::Test path ${path%%::*} does not exist."
+              missing=true
+            fi
           done
+          [[ "$missing" == false || "${EXISTING_ONLY:-false}" == true ]] || exit 1
+          [[ ${#selected[@]} -gt 0 ]] || { echo '::error::No requested test paths exist.'; exit 1; }
+          if [[ "${EXISTING_ONLY:-false}" == true ]]; then
+            echo "TEST_PATHS=${selected[*]}" >> "$GITHUB_ENV"
+          fi
 
       - uses: actions/setup-python@v5
         with:

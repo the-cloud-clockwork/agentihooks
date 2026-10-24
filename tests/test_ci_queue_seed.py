@@ -1,10 +1,14 @@
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+
+from tests.test_ci_anton_runners import event as github_event
+from tests.test_ci_anton_runners import resolve
 
 _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
@@ -208,6 +212,7 @@ def test_the_lookup_is_red_when_no_dev_push_run_passed(lookup):
 
 
 def _runs_on(step, event):
+<<<<<<< HEAD
     condition = str(step.get("if", "true")).lower().removeprefix("${{").removesuffix("}}").strip()
     if condition == "true":
         return True
@@ -229,6 +234,13 @@ def _runs_on(step, event):
         if held:
             return True
     return False
+=======
+    condition = str(step.get("if", "true")).removeprefix("${{").removesuffix("}}")
+    condition = re.sub(
+        r"hashFiles\('([^']+)'\)", lambda found: "'x'" if (_ROOT / found.group(1)).exists() else "''", condition
+    )
+    return bool(resolve("${{ " + condition + " }}", **github_event(event, actor="github-merge-queue[bot]")))
+>>>>>>> origin/dev
 
 
 def test_dispatch_runs_restore_durations_and_the_base_baseline_on_the_app_token():

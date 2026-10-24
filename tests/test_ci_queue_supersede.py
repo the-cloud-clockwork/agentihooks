@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.test_ci_anton_runners import event, resolve
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 STEP = "Cancel superseded and dead merge queue runs"
@@ -113,17 +115,31 @@ def test_the_workflow_concurrency_stays_unchanged():
     )
 
 
-def test_the_sweep_runs_only_for_the_merge_queue_bot_on_the_app_token_minted_to_cancel():
+@pytest.mark.parametrize(
+    ("github", "runs"),
+    [
+        (event("merge_group"), True),
+        (event("merge_group", actor="agenticore-app[bot]"), True),
+        (event("merge_group", actor="github-merge-queue[bot]"), True),
+        (event("merge_group", actor="github-merge-queue[bot]", triggering="nestorcolt"), True),
+        (event("merge_group", actor="stranger"), False),
+        (event("merge_group", triggering="stranger"), False),
+        (event("merge_group", actor="github-merge-queue[bot]", triggering="stranger"), False),
+        (event("pull_request"), False),
+        (event("push", actor="github-merge-queue[bot]", ref="refs/heads/dev"), False),
+    ],
+)
+def test_the_sweep_runs_on_merge_group_runs_from_trusted_queue_actors(github, runs):
+    assert resolve("${{ " + _step()["if"] + " }}", **github) is runs
+
+
+def test_the_sweep_runs_on_the_app_token_minted_to_cancel():
     job = _workflow()["jobs"]["durations"]
     names = [step.get("name") for step in job["steps"]]
     mint = job["steps"][names.index("Mint the tcc main ci App token")]
     assert names.index(STEP) == names.index("Mint the tcc main ci App token") + 1
     assert mint["with"]["permission-actions"] == "${{ github.event_name == 'merge_group' && 'write' || 'read' }}"
     step = _step()
-    assert step["if"] == (
-        "github.event_name == 'merge_group' && github.actor == 'github-merge-queue[bot]'"
-        " && github.triggering_actor == 'github-merge-queue[bot]'"
-    )
     assert step["env"] == {
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "QUEUE_REF": "${{ github.event.merge_group.head_ref }}",

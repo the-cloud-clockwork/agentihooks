@@ -307,7 +307,7 @@ jobs:
       # Expressions cannot parse the pull request number out of the queue ref, and a
       # job-level group keyed on it would let an older run's late job cancel the live run.
       - name: Cancel superseded and dead merge queue runs
-        if: github.event_name == 'merge_group' && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]'
+        if: github.event_name == 'merge_group' && (contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor)))
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           QUEUE_REF: ${{ github.event.merge_group.head_ref }}
@@ -921,9 +921,14 @@ jobs:
         run: |
           read -ra files <<< "$FILES"
           [[ ${#files[@]} -gt 0 ]] || { echo "::error::Leg $LEG of the selection names no test file."; exit 1; }
+          missing=false
           for file in "${files[@]}"; do
-            [[ -f "$file" ]] || { echo "::error::Selected test path $file does not exist."; exit 1; }
+            if [[ ! -f "$file" ]]; then
+              echo "::error::Selected test path $file does not exist."
+              missing=true
+            fi
           done
+          [[ "$missing" == false ]]
 
       - *python
 
@@ -1678,9 +1683,63 @@ jobs:
       - name: Report each stage's wall time against its budget
         run: python3 -m scripts.ci_budget --run "$RUNNER_TEMP/run.json" --jobs "$RUNNER_TEMP/jobs.jsonl"
 
+  queue-fail-fast:
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse, admission]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'merge_group'
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Mint the tcc main ci App token
+        id: app-token
+        if: github.event_name == 'merge_group'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: write
+          permission-contents: read
+
+      - name: Watch for the first failed graded job
+        id: watch
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          misses=0
+          while true; do
+            if gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" --jq '.jobs[] | @json' > "$RUNNER_TEMP/jobs.jsonl"; then
+              misses=0
+              verdict=$(python3 -m scripts.ci_queue_fail_fast "$RUNNER_TEMP/jobs.jsonl")
+              if [[ "$verdict" != wait ]]; then
+                echo "$verdict" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            elif (( ++misses == 10 )); then
+              echo "::warning::Ten reads of this run's jobs failed in a row; the entry waits for Gate Required."
+              exit 0
+            fi
+            sleep 15
+          done
+
+      - name: Cancel this queue run so the queue drops the entry
+        if: steps.watch.outputs.failed != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          FAILED: ${{ steps.watch.outputs.failed }}
+        run: |
+          echo "::error::$FAILED failed, so Gate Required cannot pass; cancelling this queue run."
+          gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
+
   gate-required:
     name: Gate — Required
-    needs: [durations, select, split, unit, unit-selected, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-baseline]
+    needs: [durations, select, split, unit, unit-selected, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-baseline, queue-fail-fast]
     if: ${{ always() }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5

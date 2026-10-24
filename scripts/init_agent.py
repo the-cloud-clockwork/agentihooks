@@ -418,7 +418,7 @@ def _write_launcher(
             f'"$(cat {shlex.quote(str(prompt_file))})"' if opening_prompt == prompt else shlex.quote(opening_prompt)
         )
         held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
-        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} {prompt_arg}"
+        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} -- {prompt_arg}"
     cleanup = [
         str(launcher),
         str(_route_report(launcher)),
