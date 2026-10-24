@@ -1368,6 +1368,57 @@ def test_execution_report_deduplicates_processes_and_skips_stale_records(redis, 
     }
 
 
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_beat_counts_a_named_live_execution_once_without_fleet_registration(redis, monkeypatch, harness):
+    from hooks.proc import Process
+    from scripts import terminate_agent
+    from scripts.routing import aggregate, reservation
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    monkeypatch.setattr("time.time", lambda: 100)
+    store = RedisStore(redis)
+    store.create(SwarmConfig("swarm", "repo", 8, 0))
+    agent = store.start_execution(
+        "swarm",
+        AgentRecord(
+            store.next_name("swarm", "eng"),
+            "eng",
+            "task",
+            hive="hive",
+            harness=harness,
+            account="one",
+            seat="eng-1@swarm",
+        ),
+    )
+    store.put_agent("swarm", agent)
+    session = terminate_agent.Session(
+        "session", harness, agent.name, Process(10, 1, 10, 10, 7, "S", harness, (harness,)), "", "alive"
+    )
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(daemon.account_sessions, "local_processes", lambda: {harness: {10: "one"}})
+    slot = f"{harness}:one"
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda **kwargs: {
+            "slots": [{"harness": harness, "account": "one", "kind": "subscription", "cap": 3}],
+            "interactive": {},
+            "repos": [],
+            "quota": {},
+            "sessions": {slot: 1},
+        },
+    )
+    slots = reservation.LaunchSlots(redis)
+    assert slots.reserve(slot, agent.execution_id, 3, 1000)
+    assert slots.acknowledge(agent.execution_id)
+    assert slots.reserve(slot, "unreported", 3, 1000)
+    daemon.beat(redis, "hive")
+    assert json.loads(redis.get(f"{registry.key('hive')}:sessions"))["_executions"] == {slot: [agent.execution_id]}
+    assert aggregate.read(redis, 100)[slot]["sessions"] == 2
+    assert slots.reserve(slot, "next", 3, 1000)
+    assert not slots.reserve(slot, "full", 3, 1000)
+
+
 def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeypatch):
     from dataclasses import replace
 
