@@ -18,8 +18,8 @@ def test_shard_graders_check_out_event_base_before_installing():
     checkout = steps[0]
     assert checkout["uses"] == "actions/checkout@v4"
     assert checkout["with"]["ref"] == (
-        "${{ github.event_name == 'pull_request' && github.base_ref || github.event.pull_request.base.sha || "
-        "github.event.merge_group.base_sha || github.event_name == 'push' && github.sha || github.event.before || "
+        "${{ github.event_name == 'pull_request' && github.base_ref || github.event.merge_group.base_sha || "
+        "github.event_name == 'push' && github.sha || github.event.before || "
         "(inputs.base == 'origin/dev' && 'dev' || inputs.base) }}"
     )
     assert checkout["with"]["persist-credentials"] is False
@@ -70,14 +70,14 @@ def test_shard_grading_keeps_head_data_separate_from_base_modules():
     ]
 
 
-def test_every_base_grades_with_the_trusted_collection_and_no_legacy_grader():
+def test_shard_grading_has_no_legacy_grader_and_no_base_branch_conditions():
     jobs = _jobs()
     steps = jobs["shard-check"]["steps"]
     names = [step.get("name", "") for step in steps]
     assert not any("legacy" in name for name in names)
     assert not any(step.get("uses", "").startswith("astral-sh/setup-uv") for step in steps)
     for job in ("split", "unit", "shard-check"):
-        assert "base.ref" not in str(jobs[job]["steps"])
+        assert "base.ref" not in str(jobs[job])
 
 
 _ACTIONS_SHELLS = {None: ["bash", "-e"], "bash": ["bash", "--noprofile", "--norc", "-eo", "pipefail"]}
