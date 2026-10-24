@@ -96,9 +96,7 @@ def _effective_checks(checks: list[dict], runs: list[dict]) -> list[dict]:
     superseded = {
         r["check_suite_id"]
         for r in runs
-        if r["conclusion"] == "cancelled"
-        and (r.get("workflow_id"), r["head_sha"]) in passed
-        and "check_suite_id" in r
+        if r["conclusion"] == "cancelled" and (r.get("workflow_id"), r["head_sha"]) in passed and "check_suite_id" in r
     }
     return [c for c in checks if c.get("check_suite", {}).get("id") not in superseded]
 
