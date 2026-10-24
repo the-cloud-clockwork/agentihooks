@@ -1,4 +1,3 @@
-import json
 import subprocess
 from types import SimpleNamespace
 
@@ -41,5 +40,7 @@ def test_followups_only_count_retry_passes_after_the_latest_test_fix(monkeypatch
     else:
         assert added == []
     assert any("before the newest merged test change" in action for action in actions)
-    assert any("sha=dev" in command[2] and "path=tests%2Fswarm_ledger%2Ftest_alerts_page.py" in command[2] for command in calls)
+    assert any(
+        "sha=dev" in command[2] and "path=tests%2Fswarm_ledger%2Ftest_alerts_page.py" in command[2] for command in calls
+    )
     assert any(command[2].endswith("/commits/fix-sha/pulls") and "dev" in command[-1] for command in calls)
