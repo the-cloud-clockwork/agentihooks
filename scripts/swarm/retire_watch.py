@@ -1,8 +1,12 @@
 """Retires that keep failing: counted per agent each tick, a health finding for the master from the third tick."""
 
 import json
+from typing import TYPE_CHECKING
 
 from scripts.swarm.health.findings import Finding
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import RedisStore
 
 TICKS = 3
 
@@ -34,7 +38,7 @@ def _evidence(row, host, indexed, absent):
     )
 
 
-def findings(store, slug):
+def findings(store: "RedisStore", slug: str) -> list[Finding]:
     from scripts.hive import registry, reports
 
     waiting = rows(store, slug)
