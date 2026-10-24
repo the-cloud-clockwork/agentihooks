@@ -232,7 +232,7 @@ def test_every_unit_dependency_install_runs_uv_through_the_retry(job):
         assert install.startswith('bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install')
 
 
-@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count"])
+@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split"])
 def test_every_unit_install_tries_the_runner_wheelhouse_offline_before_pypi(job):
     lines = [line.strip() for line in _install_steps()[job]["run"].splitlines()]
     offline = next(i for i, line in enumerate(lines) if "--offline" in line)
