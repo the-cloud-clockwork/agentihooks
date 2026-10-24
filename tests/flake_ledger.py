@@ -67,6 +67,8 @@ class FlakeLedger:
         self.path = path
         self.attempts = {}
         self.errors = {}
+        self.tracebacks = {}
+        self.reports = []
         self.retrying = set()
         self.failed = set()
         self.crashes = {}
@@ -100,6 +102,7 @@ class FlakeLedger:
         else:
             return
         self.errors.setdefault(report.nodeid, []).append(_error(report))
+        self.tracebacks.setdefault(report.nodeid, []).append(report.longreprtext)
         if report.nodeid in self.crashing:
             self.crashing.discard(report.nodeid)
             self.pytest_runtest_logfinish(report.nodeid)
@@ -125,6 +128,12 @@ class FlakeLedger:
             failed = self.crash_failed.get(nodeid, True)
             self._write(nodeid, self.attempts[nodeid], failed, self.errors[nodeid], crashes=crashes)
 
+    def pytest_terminal_summary(self, terminalreporter):
+        for report in self.reports:
+            terminalreporter.write_sep("=", f"Retry failure reports: {report['test']}")
+            for traceback in report["tracebacks"]:
+                terminalreporter.write_line(traceback)
+
     def _write(self, nodeid, attempts, failed, errors, **extra):
         record = {
             "test": nodeid,
@@ -133,8 +142,11 @@ class FlakeLedger:
             "attempts": attempts,
             "outcome": "failed" if failed else "flaky",
             "errors": errors,
+            "tracebacks": self.tracebacks.pop(nodeid, []),
             **extra,
         }
+        if not failed:
+            self.reports.append(record)
         with self.path.open("a") as ledger:
             ledger.write(json.dumps(record) + "\n")
 
