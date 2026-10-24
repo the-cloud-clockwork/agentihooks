@@ -2172,7 +2172,9 @@ def test_unsupported_harness_wait_records_its_lane(setup):
     from scripts.hive.placement import Wait
 
     config = replace(setup.config, lanes={"ci": {"agent": "unsupported"}})
-    assert setup.launcher.select(config, "ci", {"id": "task"}) == Wait("unsupported hive harness: unsupported")
+    selected = setup.launcher.select(config, "ci", {"id": "task"})
+    assert selected == Wait("unsupported hive harness: unsupported")
+    assert selected.role == "eng"
     assert placement_waits.read(setup.store, setup.config.slug)["task"]["lane"] == "ci"
 
 
