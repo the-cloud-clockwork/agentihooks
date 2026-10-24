@@ -466,13 +466,21 @@ def test_unrecorded_retirement_reaps_scratch_homes_when_the_process_is_already_g
 def test_unrecorded_retirement_refuses_an_unnamed_pane_without_its_recorded_conversation(
     tmp_path, monkeypatch, conversation
 ):
+    from scripts import terminate_agent
+
     pane = {"pane_id": "w1:p1", "name": "", "agent_session": None}
     herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
-    monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/owned/herdr.sock")
+    session = terminate_agent.Session("", "claude", NAME, proc(), "", "alive")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(terminate_agent, "herdr_pane", lambda pid: ("w1:p1", "/owned/herdr.sock"))
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
     local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {})
     agent = replace(record(pid=None, start=None), conversation_id=conversation)
     outcome = RuntimeRouter([local]).terminate(agent)
     assert not outcome.ok and outcome.detail == "no owned pane for unrecorded process"
+    assert ended == []
     assert ["pane", "close", "w1:p1"] not in calls
 
 
