@@ -111,6 +111,64 @@ A rerun after another promotion moved `main` is refused with `Graded revision is
 
 A red promotion produces one fixer task per failing check under the [delivery tiers rule](delivery-tiers.md#rules); the fix lands through an ordinary pull request into `dev`, and the next green push run promotes it. When several swarms watch the repository, one of them owns that intake; see [promotion fixer intake](../pillars/swarm.md#promotion-fixer-intake).
 
+## Controller intake without git
+
+The swarm controller checks promotion failures during its tick. Its repository
+lookup works in the controller image even when that image has no `git`
+executable. This keeps promotion fixer intake running; it does not change the
+checks required to release. See [promotion fixer intake](../pillars/swarm.md#promotion-fixer-intake)
+for owner election, duplicate suppression and handover.
+
+Repository identity is selected automatically:
+
+| Lookup result | Identity used for intake ownership |
+|---|---|
+| `git rev-parse --path-format=absolute --git-common-dir` succeeds | The resolved git common directory; a primary checkout and its worktrees share ownership |
+| Starting `git` raises `FileNotFoundError` | The resolved checkout path |
+| `git` exits with a nonzero status, including outside a repository | The resolved checkout path |
+
+The owner record hashes that identity. No flag enables the fallback and no git
+installation is required for this lookup. `AGENTIHOOKS_SWARM_KEY_PREFIX` changes
+the Redis key prefix, as described in [choosing the owner](../pillars/swarm.md#choosing-the-owner);
+it does not choose the repository identity. For example, two linked swarms
+using `/workspace/agentihooks` still elect one intake owner without git. Two
+different checkout paths do not share that fallback identity, even when they
+are worktrees of the same repository. Keep linked watchers on the same resolved
+checkout path when git is unavailable.
+
+### Diagnose a missing git controller crash
+
+The failure repaired by [pull request 4380](https://github.com/the-cloud-clockwork/agentihooks/pull/4380)
+was a controller crash loop ending in `FileNotFoundError` for `git`, reached
+through `promotion_watch.refresh`, promotion owner intake and
+`promotion_owner.repository`. Before that repair, the missing executable escaped
+the repository lookup instead of using the checkout path.
+
+Inspect the failed CI job and compare it with a later dev push after the repair:
+
+```bash
+R=The-Cloud-Clockwork/agentihooks
+BEFORE=39092038586
+AFTER=39098125691
+gh run view "$BEFORE" -R "$R" --log-failed
+gh api "repos/$R/actions/runs/$AFTER/jobs?filter=latest" --paginate \
+  --jq '.jobs[] | select(.name == "helm-kind / kind") | {name, conclusion, html_url}'
+```
+
+These are the delivered repair's evidence runs; substitute the failing run and
+a later run containing your repair when diagnosing a new failure. A skipped or
+cancelled job does not prove recovery. If the same stack trace recurs, check
+whether the controller image includes the repair. Deliver any further fix
+through code and CI; changing a running container does not repair its image.
+
+The original dev push [39092038586](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39092038586)
+failed with the missing git error. The repair's [green regression run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39094909940)
+passed 23 tests, including resolved path fallback and a linked watched swarm and
+Doctor retaining one fixer without git on `PATH`. Its [mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39094879605)
+killed all 24 mutants. After merge, [helm-kind / kind in dev push 39098125691](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39098125691/job/117589554915)
+succeeded. That job proves the missing git recovery; it does not establish that
+every check in that push passed or that a release was promoted.
+
 ## Manual releases
 
 `release.yml` remains for manual and dry run releases:
