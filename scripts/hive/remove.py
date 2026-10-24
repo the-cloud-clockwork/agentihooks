@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
 from scripts.hive import auth, machine, nats_grant, registry
+from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -112,10 +113,18 @@ def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None)
 
 def forget(redis: "Redis", hive: str) -> list[str]:
     keys = [registry.key(hive), *redis.scan_iter(match=f"{registry.key(hive)}:*")]
+    prefix = f"{registry.key(hive)}:swarm:"
+    histories = {
+        f"{ROOT}:swarm:{source.removeprefix(prefix)}": redis.hgetall(source)
+        for source in keys
+        if source.startswith(prefix) and ":wait-history:" in source
+    }
     with redis.pipeline() as pipe:
+        for target, history in histories.items():
+            pipe.hset(target, mapping=history)
         pipe.delete(*keys)
         pipe.srem(registry.INDEX, hive)
-        deleted, _ = pipe.execute()
+        deleted, _ = pipe.execute()[-2:]
     return [f"deleted {deleted} registry records of {hive}"]
 
 
