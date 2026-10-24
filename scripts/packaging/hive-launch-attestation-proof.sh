@@ -3,17 +3,17 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 proof_dir="$(mktemp -d "$PWD/.hive-attestation.XXXXXX")"
-registry=""
-daemon=""
+label="hive-attestation-proof=${proof_dir##*.}"
+registry="hive-attestation-registry-${proof_dir##*.}"
+daemon="hive-attestation-daemon-${proof_dir##*.}"
 original_docker_host="${DOCKER_HOST:-unix:///var/run/docker.sock}"
 cleanup() {
-  if [[ -n "$daemon" ]]; then docker --host "$original_docker_host" rm -f "$daemon"; fi
-  if [[ -n "$registry" ]]; then docker --host "$original_docker_host" rm -f "$registry"; fi
+  docker --host "$original_docker_host" ps -aq --filter "label=$label" | xargs -r docker --host "$original_docker_host" rm -f
   rm -f "$proof_dir/override.yaml" "$proof_dir/pull.log"
   rmdir "$proof_dir"
 }
 trap cleanup EXIT
-registry="$(docker run -d --platform linux/amd64 -p 5000:5000 mirror.gcr.io/library/python:3.12-slim-bookworm python -u -c "$(cat <<'PY'
+docker run -d --name "$registry" --label "$label" --platform linux/amd64 -p 5000:5000 mirror.gcr.io/library/python:3.12-slim-bookworm python -u -c "$(cat <<'PY'
 import hashlib
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -72,15 +72,18 @@ class Registry(BaseHTTPRequestHandler):
 
 HTTPServer(("0.0.0.0", 5000), Registry).serve_forever()
 PY
-)"
-)"
+)" > /dev/null &
+registry_start=$!
+docker run -d --name "$daemon" --label "$label" --privileged --network host --entrypoint dockerd mirror.gcr.io/library/docker:29-dind \
+  --host=tcp://127.0.0.1:2377 --tls=false --insecure-registry=127.0.0.1:5000 > /dev/null &
+daemon_start=$!
+wait "$registry_start"
+wait "$daemon_start"
 for attempt in {1..30}; do
   if docker exec "$registry" python -c 'import urllib.request; urllib.request.urlopen("http://localhost:5000/v2/")' 2>/dev/null; then break; fi
   sleep 1
 done
 docker exec "$registry" python -c 'import urllib.request; urllib.request.urlopen("http://localhost:5000/v2/")'
-daemon="$(docker run -d --privileged --network host --entrypoint dockerd mirror.gcr.io/library/docker:29-dind \
-  --host=tcp://127.0.0.1:2377 --tls=false --insecure-registry=127.0.0.1:5000)"
 proof_docker_host=tcp://127.0.0.1:2377
 for attempt in {1..30}; do
   if docker --host "$proof_docker_host" info > /dev/null 2>&1; then break; fi
@@ -88,17 +91,20 @@ for attempt in {1..30}; do
 done
 docker --host "$proof_docker_host" info --format '{{json .DriverStatus}} {{json .RegistryConfig.IndexConfigs}}'
 fixture=tests/integration/hive_launch/compose.yaml
+DOCKER_HOST="$proof_docker_host" PULL_RETRY_SECONDS=1 bash scripts/packaging/pull-runtime-image.sh \
+  127.0.0.1:5000/proof:missing-image --insecure > "$proof_dir/pull.log" 2>&1 &
+negative=$!
 printf 'services:\n  redis:\n    image: 127.0.0.1:5000/proof:present\n' > "$proof_dir/override.yaml"
 DOCKER_HOST="$proof_docker_host" bash scripts/packaging/pull-runtime-image.sh 127.0.0.1:5000/proof:present --insecure
 docker --host "$proof_docker_host" compose -f "$fixture" -f "$proof_dir/override.yaml" pull --policy missing redis
 docker --host "$proof_docker_host" image inspect 127.0.0.1:5000/proof:present --format '{{.Architecture}}' | grep -x amd64
 printf 'Absent attestation: hive launch image pull passed\n'
-printf 'services:\n  redis:\n    image: 127.0.0.1:5000/proof:missing-image\n' > "$proof_dir/override.yaml"
-if DOCKER_HOST="$proof_docker_host" bash scripts/packaging/pull-runtime-image.sh 127.0.0.1:5000/proof:missing-image --insecure > "$proof_dir/pull.log" 2>&1; then
+if wait "$negative"; then
   cat "$proof_dir/pull.log"
   printf 'Missing runnable image unexpectedly passed\n' >&2
   exit 1
 fi
 cat "$proof_dir/pull.log"
 grep -E 'not found|404|absent' "$proof_dir/pull.log"
+grep -c 'failed on attempt' "$proof_dir/pull.log" | grep -x 2
 printf 'Missing runnable image: hive launch image pull failed as required\n'
