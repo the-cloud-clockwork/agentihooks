@@ -82,7 +82,7 @@ def test_a_judged_wait_returns_only_when_it_grows_by_another_fifteen_minutes():
 def watched():
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0))
-    master = AgentRecord("master@d44a5a-0002", "master", "", seat="master@sw")
+    master = AgentRecord("master", "master", "", seat="master@sw")
     store.put_agent("sw", master)
     runtime = FakeRuntime()
     return store, runtime
@@ -95,7 +95,7 @@ def watch(store, runtime, observation, now_ms):
 
 def test_the_tick_keeps_the_entry_time_while_the_same_prompt_holds_and_clears_it_after():
     store, runtime = watched()
-    name = "master@d44a5a-0002"
+    name = "master"
     watch(store, runtime, PaneObservation("waiting", PROMPT), ENTERED)
     watch(store, runtime, PaneObservation("waiting", PROMPT), ENTERED + 5 * MINUTE)
     assert input_wait.since(store, "sw", name) == ENTERED
@@ -107,9 +107,9 @@ def test_the_tick_keeps_the_entry_time_while_the_same_prompt_holds_and_clears_it
 
 def test_a_wait_that_predates_the_entry_time_starts_counting_at_the_next_tick():
     store, runtime = watched()
-    store.put_agent("sw", AgentRecord("master@d44a5a-0002", "master", "", seat="master@sw", input_prompt=PROMPT))
+    store.put_agent("sw", AgentRecord("master", "master", "", seat="master@sw", input_prompt=PROMPT))
     watch(store, runtime, PaneObservation("waiting", PROMPT), ENTERED)
-    assert input_wait.since(store, "sw", "master@d44a5a-0002") == ENTERED
+    assert input_wait.since(store, "sw", "master") == ENTERED
 
 
 def test_the_doctor_reads_the_watched_master_wait_and_never_types_into_its_pane():
