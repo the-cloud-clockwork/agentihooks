@@ -9,26 +9,31 @@ TIMED_KINDS = {"CronJob"}
 
 
 def charts(root: Path) -> list[Path]:
-    return sorted(p.parent for p in (root / "deploy").rglob("Chart.yaml") if "charts" not in p.relative_to(root).parts)
+    found = sorted(p.parent for p in (root / "deploy").rglob("Chart.yaml"))
+    return [c for c in found if not any(other in c.parents for other in found)]
 
 
 def values_files(chart: Path) -> list[Path | None]:
-    return [None] + sorted(p for folder in ("ci", "examples") for p in (chart / folder).glob("*.yaml"))
+    skipped = {"Chart.yaml", "Chart.lock", "values.yaml"}
+    found = [p for pattern in ("*.yaml", "*.yml") for p in chart.rglob(pattern)]
+    return [None] + sorted(
+        p for p in found if p.name not in skipped and not {"templates", "charts"} & set(p.relative_to(chart).parts)
+    )
 
 
-def render(chart: Path, values: Path | None) -> str:
+def render(chart: Path, values: Path | None) -> subprocess.CompletedProcess:
     command = ["helm", "template", "timer-check", str(chart)] + (["-f", str(values)] if values else [])
-    return subprocess.run(command, check=True, capture_output=True, text=True).stdout
+    return subprocess.run(command, capture_output=True, text=True)
 
 
-def timed_objects(manifest: str) -> list[str]:
+def timed_objects(documents: list) -> list[str]:
     found = []
-    for document in yaml.safe_load_all(manifest):
-        if not isinstance(document, dict):
+    for item in documents:
+        if not isinstance(item, dict):
             continue
-        for item in document.get("items") or [document]:
-            if isinstance(item, dict) and item.get("kind") in TIMED_KINDS:
-                found.append(f"{item['kind']}/{item.get('metadata', {}).get('name')}")
+        if item.get("kind") in TIMED_KINDS:
+            found.append(f"{item['kind']}/{item.get('metadata', {}).get('name')}")
+        found += timed_objects(item.get("items") or [])
     return found
 
 
@@ -37,22 +42,27 @@ def main() -> int:
     if not found:
         print("No chart found under deploy; the check graded nothing.")
         return 1
-    offenders, renders = [], 0
+    offenders, failures, renders = [], [], 0
     for chart in found:
         for values in values_files(chart):
             renders += 1
-            source = values.relative_to(ROOT) if values else "default values"
-            offenders += [
-                f"{chart.relative_to(ROOT)} with {source}: {obj}" for obj in timed_objects(render(chart, values))
-            ]
-    for offender in offenders:
-        print(offender)
-    print(f"{len(offenders)} rendered CronJob objects across {renders} renders of {len(found)} charts.")
+            source = f"{chart.relative_to(ROOT)} with {values.relative_to(ROOT) if values else 'default values'}"
+            result = render(chart, values)
+            if result.returncode:
+                failures.append(f"{source} failed to render: {result.stderr.strip()}")
+                continue
+            documents = list(yaml.safe_load_all(result.stdout))
+            offenders += [f"{source}: {obj}" for obj in timed_objects(documents)]
+    for line in failures + offenders:
+        print(line)
+    print(
+        f"{len(offenders)} rendered CronJob objects and {len(failures)} failed renders across {renders} renders of {len(found)} charts."
+    )
     if offenders:
         print(
             "A CronJob schedules work outside the agentihooks scheduler. Register the job with scripts.scheduler instead."
         )
-    return 1 if offenders else 0
+    return 1 if offenders or failures else 0
 
 
 if __name__ == "__main__":
