@@ -209,7 +209,7 @@ def test_stale_codex_refresh_restores_each_routed_slot(cached, monkeypatch, caps
     assert quota_refresh.refresh(environ, NOW) is True
     slots, readings = daemon._subscriptions(environ, counts, NOW)
     assert [(slot["account"], slot["cap"]) for slot in slots] == [("alpha", 6), ("beta", 0)]
-    assert {name: row["probed_at"] for name, row in readings.items()} == {"codex:alpha": NOW, "codex:beta": NOW}
+    assert {name: row["observed_at"] for name, row in readings.items()} == {"codex:alpha": NOW, "codex:beta": NOW}
     assert [call.args[0].name for call in probing.call_args_list] == ["alpha", "beta"]
     assert quota_refresh.due(environ, NOW) is False
     assert quota_refresh.refresh(environ, NOW) is False
