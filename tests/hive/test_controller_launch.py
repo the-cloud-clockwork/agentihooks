@@ -567,6 +567,7 @@ def test_reservation_contention_ends_the_unlaunched_execution(setup):
         result = setup.launcher.spawn(request)
     assert result.status is Status.UNAVAILABLE
     assert result.detail == "account reservation is full"
+    assert result.value == {"harness": "claude"}
     assert result.operation == "spawn"
     assert result.backend == "hive"
     ended = setup.store.execution_registry.records("fixture")[0]

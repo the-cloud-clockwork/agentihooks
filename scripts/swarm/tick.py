@@ -121,10 +121,11 @@ NUDGE = (
 
 
 class SpawnError(RuntimeError):
-    def __init__(self, message: str, status: str = "refused", pane_id: str = ""):
+    def __init__(self, message: str, status: str = "refused", pane_id: str = "", *, harness: str = ""):
         super().__init__(message)
         self.status = status
         self.pane_id = pane_id
+        self.harness = harness
 
 
 @dataclass(frozen=True)
@@ -1182,7 +1183,19 @@ def _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms):
     _release_admission(slug, runtime, task)
     _release_hive_launch(slug, store, record)
     _record_spawn_failure(slug, store, record, exc, now_ms)
-    actions = [f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}"]
+    actions = []
+    if "account reservation is full" in str(exc):
+        from scripts.swarm import capacity, quota_handoff
+
+        decision = capacity.read(store, slug)
+        readings = decision.get("accounts", []) if decision.get("observed_at") == now_ms else []
+        thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
+        snapshot = {
+            "harness": getattr(exc, "harness", ""),
+            "accounts": [row for row in readings if not quota_handoff.trigger(capacity.Account(**row), thresholds)],
+        }
+        actions.append(f"spawn capacity for {task['id']}: {json.dumps(snapshot)}")
+    actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
     if isinstance(exc, ProfileUnresolved):
         actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
     return actions
