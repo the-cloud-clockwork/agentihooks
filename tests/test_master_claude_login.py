@@ -825,6 +825,7 @@ def test_browser_preparation_skips_a_slot_held_by_another_process(ah, rendered, 
     from scripts.routing import native_login
 
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    login.root(1).mkdir(parents=True)
     login._write(login.root(1) / login.OWNER, {"epoch": 4, "holders": {"other": os.getppid()}})
     observed = []
 
@@ -855,6 +856,7 @@ def test_prepare_launch_keeps_incompatible_settings_out_of_every_fallback(ah, re
 
 def test_browser_home_refuses_when_all_slots_are_occupied(ah, rendered):
     for number in login.numbers():
+        login.root(number).mkdir(parents=True)
         login._write(login.root(number) / login.OWNER, {"holders": {"other": os.getppid()}})
     with pytest.raises(login.LoginRefused, match="^all 5 master login slots hold a login"):
         login.browser_home(_environ(rendered))
@@ -862,6 +864,7 @@ def test_browser_home_refuses_when_all_slots_are_occupied(ah, rendered):
 
 
 def test_release_keeps_other_holders_and_the_owner_epoch(ah, rendered):
+    login.root().mkdir(parents=True)
     login._write(
         login.root() / login.OWNER,
         {"epoch": 7, "alone": "master@a-1", "holders": {"master@a-1": os.getpid(), "other": os.getppid()}},
@@ -871,6 +874,7 @@ def test_release_keeps_other_holders_and_the_owner_epoch(ah, rendered):
 
 
 def test_release_never_drops_a_successor_with_the_same_name(ah, rendered):
+    login.root().mkdir(parents=True)
     login._write(
         login.root() / login.OWNER, {"epoch": 8, "alone": "master@a-1", "holders": {"master@a-1": os.getppid()}}
     )
@@ -884,6 +888,9 @@ def test_release_never_drops_a_successor_with_the_same_name(ah, rendered):
 
 def test_prepare_launch_falls_back_without_touching_fully_held_logins(ah, rendered, tmp_path, monkeypatch):
     from scripts import master_login_chain as chain
+    from scripts import master_logins
+
+    monkeypatch.setattr(master_logins, "left", lambda *_: 100.0)
 
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     for number in login.numbers():
