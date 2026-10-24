@@ -243,7 +243,7 @@ def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_dur
     assert f"permissions violation for publish to {durable}" in refused
 
 
-def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin, signer):
+def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin, signer, capfd):
     from scripts.events import nats
     from scripts.hive import account_slots, buckets
     from scripts.hub import slots
@@ -266,6 +266,10 @@ def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin,
         posing = account_slots.Remote(account_slots.asker(members[1], "rig", "m1", 500), "m1")
         with pytest.raises(TimeoutError, match="^no responders for 'slots.rig.m1'$"):
             posing.release("one", "claude", "a")
+        refusal = "slot request names hive 'm2' but the sending credential is bound to hive 'm1'"
+        with pytest.raises(account_slots.Unavailable, match=f"^{refusal}$"):
+            account_slots.Remote(account_slots.asker(members[0], "rig", "m1"), "m2").release("one", "claude", "a")
+        assert f"hub: refused a release in swarm rig: {refusal}\n" in capfd.readouterr().err
         assert second.take("two", "claude") is None
         first.release("one", "claude", "a")
         assert second.take("two", "claude") == "a"

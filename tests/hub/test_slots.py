@@ -122,8 +122,8 @@ def test_a_slot_request_naming_another_hive_than_its_credential_is_refused_and_l
 def test_a_request_nobody_serves_times_out():
     bus = open_bus(BusConfig())
     try:
-        with pytest.raises(TimeoutError, match="^no responders for 'swarm.rig.slots'$"):
-            bus.request("swarm.rig.slots", b"{}", 10)
+        with pytest.raises(TimeoutError, match="^no responders for 'slots.rig.one'$"):
+            bus.request("slots.rig.one", b"{}", 10)
     finally:
         bus.close()
 
