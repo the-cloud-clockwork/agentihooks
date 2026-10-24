@@ -697,7 +697,7 @@ def live_order(setup, route="subscription"):
     return request, order, ack
 
 
-@pytest.mark.parametrize("task_state", ["blocked", "open", "claimed", "pr"])
+@pytest.mark.parametrize("task_state", ["blocked", "open", "claimed", "pr", "done"])
 @pytest.mark.parametrize("restart", ["reclaimed", ""])
 def test_a_finished_worker_receipt_is_collected_once_without_reviving_it(setup, restart, task_state):
     from scripts.swarm import controller
