@@ -147,6 +147,27 @@ def test_the_head_failure_rate_renders_as_whole_percent():
     assert "Heads fail 75 percent," in merge_path.render("o/r", found)
 
 
+def test_the_smallest_removal_causes_fold_into_other_until_the_line_fits():
+    causes = {"MANUAL": 1, "FAILED_CHECKS": 5, "MERGE_CONFLICT": 3, "INVALID_MERGE_COMMIT": 2, "BRANCH_REMOVED": 4}
+    found = {**merge_path.count(RUNS, PULLS, JOBS, 3, WINDOW), "removals": {**causes, "MERGED": 9}}
+    line = merge_path.render("o/agentihooks", found)
+    assert "removed 5 failed checks, 10 other. Heads" in line
+    assert len(line.split()) == 48
+
+
+def test_a_line_of_exactly_fifty_words_keeps_its_causes():
+    causes = {"MANUAL": 3, "FAILED_CHECKS": 2, "MERGE_CONFLICT": 1}
+    found = {**merge_path.count(RUNS, PULLS, JOBS, 3, WINDOW), "removals": causes}
+    line = merge_path.render("o/agentihooks", found)
+    assert "removed 3 manual, 2 failed checks, 1 other. Heads" in line
+    assert len(line.split()) == 50
+
+
+def test_removal_causes_that_fit_are_all_named_largest_first():
+    found = {**merge_path.count([], [], {}, 0, WINDOW), "removals": {"MANUAL": 1, "FAILED_CHECKS": 2}}
+    assert "removed 2 failed checks, 1 manual. Heads" in merge_path.render("o/r", found)
+
+
 def test_stamps_are_utc_whatever_the_local_zone(monkeypatch):
     monkeypatch.setenv("TZ", "America/New_York")
     time.tzset()

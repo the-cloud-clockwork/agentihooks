@@ -15,6 +15,7 @@ PAGE = 100
 LISTED_CAP = 1000
 STANDARD = frozenset(("anton-oss", "anton-oss-queue"))
 SHORT = {"pull_request": "head", "merge_group": "queue"}
+WORDS = 50
 QUEUE_EVENTS = "ADDED_TO_MERGE_QUEUE_EVENT, REMOVED_FROM_MERGE_QUEUE_EVENT"
 TIMELINE = 100
 PULLS = (
@@ -115,19 +116,29 @@ def render(repo: str, found: dict) -> str:
     def shown(value):
         return "unknown" if value is None else value
 
+    def removed(keep):
+        named = [f"{n} {why.lower().replace('_', ' ')}" for why, n in causes[:keep]]
+        rest = sum(n for _, n in causes[keep:])
+        return ", ".join(named + ([f"{rest} other"] if rest else [])) or "none"
+
     runs = ", ".join(f"{n} {SHORT.get(event, event)}" for event, n in found["tests_runs"].items()) or "none"
-    causes = {why: n for why, n in found["removals"].items() if why.lower() != "merged"}
-    removed = ", ".join(f"{n} {why.lower().replace('_', ' ')}" for why, n in causes.items()) or "none"
-    rate = found["head_failure_rate"]
-    return (
-        f"{repo.rpartition('/')[2].replace('-', ' ')}, {found['hours']} hours: {found['merges']} merges, "
-        f"{found['merges_per_hour']} an hour. Runs {runs}. {found['cancelled_pull_request_runs']} cancelled, "
-        f"{found['reruns']} reruns. {found['enqueues']} enqueues, removed {removed}. "
-        f"Heads fail {shown(None if rate is None else round(rate * 100))} percent, "
-        f"{found['failed_queue_runs']} queue runs failed. Queue cycle {shown(found['queue_cycle_minutes'])} minutes, "
-        f"{shown(found['standard_jobs_per_queue_run'])} standard jobs. {found['open_ready_pull_requests']} open ready. "
-        f"Lead {shown(found['lead_time_minutes'])} minutes."
+    causes = sorted(
+        ((why, n) for why, n in found["removals"].items() if why.lower() != "merged"), key=lambda cause: -cause[1]
     )
+    rate = found["head_failure_rate"]
+    for keep in range(len(causes), -1, -1):
+        line = (
+            f"{repo.rpartition('/')[2].replace('-', ' ')}, {found['hours']} hours: {found['merges']} merges, "
+            f"{found['merges_per_hour']} an hour. Runs {runs}. {found['cancelled_pull_request_runs']} cancelled, "
+            f"{found['reruns']} reruns. {found['enqueues']} enqueues, removed {removed(keep)}. "
+            f"Heads fail {shown(None if rate is None else round(rate * 100))} percent, "
+            f"{found['failed_queue_runs']} queue runs failed. Queue cycle {shown(found['queue_cycle_minutes'])} "
+            f"minutes, {shown(found['standard_jobs_per_queue_run'])} standard jobs. "
+            f"{found['open_ready_pull_requests']} open ready. Lead {shown(found['lead_time_minutes'])} minutes."
+        )
+        if len(line.split()) <= WORDS:
+            break
+    return line
 
 
 def _gh(args: list[str], repo_dir: str, run: Callable) -> str:
