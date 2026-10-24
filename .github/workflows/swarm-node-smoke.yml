@@ -57,6 +57,7 @@ jobs:
         with:
           name: swarm-worker-image-${{ matrix.proof }}
           path: ${{ runner.temp }}/worker-image-evidence
+          retention-days: 7
       - name: Prove worker probes against isolated containers
         if: ${{ !cancelled() && matrix.proof == 'startup' }}
         env:
@@ -67,6 +68,7 @@ jobs:
         with:
           name: swarm-worker-health-evidence
           path: ${{ runner.temp }}/worker-health-evidence
+          retention-days: 7
 
   worker-image-compare:
     needs: [worker-image]
@@ -100,3 +102,4 @@ jobs:
         with:
           name: swarm-worker-image-evidence
           path: ${{ runner.temp }}/worker-image-evidence
+          retention-days: 7

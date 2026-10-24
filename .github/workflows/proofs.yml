@@ -203,6 +203,7 @@ jobs:
           name: operations-cpu
           path: operations-*.json
           if-no-files-found: error
+          retention-days: 7
 
   mutation-replay:
     if: inputs.proof == 'mutation-replay'
