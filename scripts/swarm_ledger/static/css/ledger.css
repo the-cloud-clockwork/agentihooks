@@ -779,6 +779,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   details.sources-box > summary { flex-wrap: wrap; row-gap: 4px; }
   .sw-title .sw-sep { display: none; }
   .sw-caps .sw-cap > .sw-cap-name { min-width: 10em; }
+  .phase-slices-label { flex: 0 0 100%; }
 }
 @media (max-width: 767px) and (max-height: 480px) {
   header { padding-block: 8px; }
@@ -788,7 +789,9 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   #chat-title { white-space: nowrap; }
   .chat-panel { overflow: hidden; }
   #chat-log { flex: 1 1 96px; min-height: 48px; }
-  .chat-compose { flex: none; }
+  .chat-compose { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; }
+  .chat-compose > textarea { order: 2; flex: 0 0 100%; }
+  .chat-to { flex: 1; }
   .notif-head { padding-block: 6px; }
   .chat-panel .hint { display: none; }
   .notif { bottom: 72px; max-height: calc(100dvh - 136px); }
@@ -824,6 +827,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   #agents-table a, #swarm-agents a { display: inline-block; padding-block: 8px; }
   .title-pen, .logo-link { min-width: 32px; min-height: 32px; place-content: center; }
   #jump-to { min-width: 216px; }
+  #chat-to-pick, #stats-sync { min-height: 44px; min-width: 44px; }
   .sw-acts .sw-btn, #freeze-table .sw-btn, #architecture-table .sw-btn { min-height: 32px; }
   .hl-pick, .hl-note, #hives-table .hl-pick, #hives-table .hl-note { font-size: 16px; }
 }
