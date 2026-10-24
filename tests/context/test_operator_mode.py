@@ -31,6 +31,11 @@ def ledgers(tmp_path, monkeypatch):
     return path
 
 
+@pytest.fixture
+def bound(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+
+
 def test_an_unbound_session_always_has_the_operator_present(ledgers):
     env = {"LEDGER_DIR": str(ledgers)}
     assert operator_mode.present("s1", env, now=100)
@@ -68,6 +73,7 @@ def test_presence_commands_match_sentences_with_command_boundaries():
         assert operator_mode.switch(text) == ""
 
 
+@pytest.mark.usefixtures("bound")
 @pytest.mark.parametrize("word", ["on", "off"])
 def test_typed_sentence_switches_only_its_session(word):
     operator_mode.observe("other", "operator on", True, now=100)
@@ -77,6 +83,7 @@ def test_typed_sentence_switches_only_its_session(word):
     assert operator_mode._heard("other")
 
 
+@pytest.mark.usefixtures("bound")
 @pytest.mark.parametrize("word", ["on", "off"])
 def test_relayed_sentence_does_not_switch_presence(word):
     operator_mode.observe("pane", "operator on", True, now=100)
@@ -84,6 +91,7 @@ def test_relayed_sentence_does_not_switch_presence(word):
     assert operator_mode._heard("pane")
 
 
+@pytest.mark.usefixtures("bound")
 def test_idle_scheduler_does_not_end_explicit_presence():
     from scripts.inbox.store import InboxStore
     from scripts.scheduler import Scheduler
@@ -99,6 +107,7 @@ def test_idle_scheduler_does_not_end_explicit_presence():
     assert not operator_mode._heard("pane")
 
 
+@pytest.mark.usefixtures("bound")
 @pytest.mark.parametrize("source", ["startup", "resume", "compact"])
 def test_session_restart_clears_presence_but_compaction_preserves_it(monkeypatch, source):
     from unittest.mock import Mock
@@ -115,6 +124,7 @@ def test_session_restart_clears_presence_but_compaction_preserves_it(monkeypatch
     assert operator_mode._heard("other")
 
 
+@pytest.mark.usefixtures("bound")
 def test_restart_without_a_session_does_not_change_presence():
     operator_mode.observe("pane", "operator on", True, now=100)
     operator_mode.reset({})
