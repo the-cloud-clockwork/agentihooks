@@ -388,6 +388,7 @@ def test_the_controller_grant_covers_every_bucket_and_queue_the_hub_opens():
     assert set(nats_grant.CONTROLLER_BUCKETS) == opened
     publish = set(nats_grant.CONTROLLER_PUBLISH)
     assert {f"$KV.{bucket}.>" for bucket in opened} <= publish
+    assert {"$KV.account-slots.>", "$KV.hive-slot-accounts.>"} <= publish
     assert {"swarm.>", "dead.>", f"{nats.QUEUE_SUBJECT}.>", "$JS.ACK.>"} <= publish
     assert not {">", "$JS.API.>", "$KV.>"} & publish
 
