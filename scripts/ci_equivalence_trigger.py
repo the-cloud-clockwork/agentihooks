@@ -18,6 +18,7 @@ READ = (
     ".github/workflows/equivalence.yml",
     "scripts/ci_equivalence_trigger.py",
     "scripts/ci_mutation/scope.py",
+    "Swarm-v2.md",
 )
 DOTTED = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+")
 
@@ -57,8 +58,13 @@ def imported_files(root: Path) -> set[str]:
     return {path.relative_to(root).as_posix() for path in seen}
 
 
-def triggering(changed: list[str], files: set[str]) -> list[str]:
-    return [path for path in changed if path in files or path.startswith(READ)]
+def triggering(root: Path, changed: list[str], files: set[str]) -> list[str]:
+    # A deleted module is absent from the head graph even when an unchanged importer still names it.
+    return [
+        path
+        for path in changed
+        if path in files or path.startswith(READ) or (path.endswith(".py") and not (root / path).exists())
+    ]
 
 
 def changed_files(root: Path, base: str, head: str) -> list[str]:
@@ -72,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", required=True)
     args = parser.parse_args(argv)
     root = Path.cwd().resolve()
-    hits = triggering(changed_files(root, args.base, args.head), imported_files(root))
+    hits = triggering(root, changed_files(root, args.base, args.head), imported_files(root))
     for path in hits:
         print(f"reaches the replays: {path}")
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:

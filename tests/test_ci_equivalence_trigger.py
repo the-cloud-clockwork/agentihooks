@@ -116,11 +116,13 @@ def test_the_trigger_follows_relative_nested_and_patched_imports(replays):
         ([".github/workflows/equivalence.yml"], [".github/workflows/equivalence.yml"]),
         (["scripts/ci_equivalence_trigger.py"], ["scripts/ci_equivalence_trigger.py"]),
         (["scripts/ci_mutation/scope.py"], ["scripts/ci_mutation/scope.py"]),
+        (["Swarm-v2.md"], ["Swarm-v2.md"]),
+        (["scripts/inbox/deleted.py", "docs/deleted.md"], ["scripts/inbox/deleted.py"]),
         (["scripts/unrelated.py", "docs/page.md"], []),
     ],
 )
 def test_a_change_triggers_only_when_it_reaches_the_replays(replays, changed, hits):
-    assert trigger.triggering(changed, trigger.imported_files(replays)) == hits
+    assert trigger.triggering(replays, changed, trigger.imported_files(replays)) == hits
 
 
 @pytest.mark.parametrize(("touched", "run"), [("scripts/inbox/keys.py", "true"), ("scripts/unrelated.py", "false")])
