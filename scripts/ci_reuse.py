@@ -80,6 +80,7 @@ INLINE_SKIP = (
     ' or (.key == "mutation" and .value.result == "skipped" and $inline == "true")',
 )
 
+POSTGRES_REQUIRED = ('"semgrep", "sonar"]', '"semgrep", "sonar", "writer-lock"]')
 
 QUEUE_TIER = (
     """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
@@ -183,8 +184,7 @@ def lost_rerun(steps: list[dict]) -> list[dict]:
 
 def postgres_required(steps: list[dict]) -> list[dict]:
     [aggregation, *rest] = steps
-    run = aggregation["run"].replace('"semgrep", "sonar"]', '"semgrep", "sonar", "writer-lock"]')
-    return [{**aggregation, "run": run}, *rest]
+    return [{**aggregation, "run": aggregation["run"].replace(*POSTGRES_REQUIRED)}, *rest]
 
 
 def summary_steps() -> list[dict]:
