@@ -743,4 +743,12 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .stat { grid-template-columns: 120px minmax(0, 1fr); padding: 10px 0; }
   .sec-tools { gap: var(--space-tight) var(--space-row); }
   details, .thread { margin-left: 0; }
+  .prio { flex-wrap: wrap; gap: 4px var(--space-row); padding: 10px 0; }
+  .prio-body { flex: 1 1 100%; }
+  .prio-head-line { flex-wrap: wrap; }
+  .prio-link { min-width: 0; overflow-wrap: anywhere; }
+  .prio > .link { min-height: 32px; }
+  .row { flex-wrap: wrap; row-gap: 4px; }
+  .row > div:not(.item-actions) { flex: 1 1 200px; }
+  details.sources-box > summary { flex-wrap: wrap; row-gap: 4px; }
 }
