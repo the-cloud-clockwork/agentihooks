@@ -251,6 +251,16 @@ def _pane_process(agent):
     return min(owned, key=lambda process: process.start_time, default=None)
 
 
+def _launch_timeouts(agent: str, passed: list[str], argv: list[str]) -> tuple[list[str], float]:
+    from scripts.master_login_chain import BUDGET
+
+    if agent != "claude" or passed[:2] != ["--route", "master-login"]:
+        return argv, SPAWN_TIMEOUT_S
+    routed = list(argv)
+    routed[routed.index("--route-timeout") + 1] = str(BUDGET.route)
+    return routed, BUDGET.spawn
+
+
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
 
@@ -863,6 +873,7 @@ class HerdrRuntime:
         agent = argv[argv.index("--agent") + 1]
         proof = None
         passed = argv[argv.index("--") + 1 :] if "--" in argv else []
+        argv, timeout = _launch_timeouts(agent, passed, argv)
         if agent == "claude" and passed[:2] == ["--route", "interactive"]:
             try:
                 proof = native_login.check(os.environ, "native", self.run)
@@ -875,7 +886,7 @@ class HerdrRuntime:
                 argv,
                 capture_output=True,
                 text=True,
-                timeout=SPAWN_TIMEOUT_S,
+                timeout=timeout,
                 env={
                     **{key: value for key, value in os.environ.items() if key not in (PREDECESSOR, *TICK_ONLY)},
                     **({PREDECESSOR: predecessor} if predecessor else {}),

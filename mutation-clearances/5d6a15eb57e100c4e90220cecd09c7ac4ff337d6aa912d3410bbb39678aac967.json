@@ -1,0 +1,6 @@
+{
+  "scripts/hive/launch.py:scripts.hive.launch.x\u01c1HiveLaunch\u01c1record__mutmut_20:8cdb8ddb0fba2f8bef467e1f016efe326246ada31229b4d6a4a95f39c7d14f01": {
+    "reader": "Standards",
+    "reason": "Absent placement defaults to an unaccepted value in both versions. The only consumer accepts forced or fallback, returns false for every such default and produces the identical account mismatch error; present values are unchanged."
+  }
+}
