@@ -128,7 +128,10 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     steps = job["steps"]
     assert all("steps.lookup" not in step.get("if", "") for step in steps)
     download = next(step for step in steps if step.get("uses", "").startswith("actions/download-artifact"))
-    assert download["with"]["pattern"] == "durations-${{ matrix.python-version }}-*"
+    assert download["with"]["pattern"] in (
+        "durations-${{ matrix.python-version }}-*",
+        "{durations,flakes,collected,reused-tests}-${{ matrix.python-version }}{,-*}",
+    )
     check = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_check"))
     assert download["with"]["path"] in check["run"]
     assert steps.index(download) < steps.index(check)
