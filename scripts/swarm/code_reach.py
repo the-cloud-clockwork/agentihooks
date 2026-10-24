@@ -171,7 +171,7 @@ class Program:
         for key in self.units:
             named.setdefault(re.split(r"[:.]", key)[-1], []).append(key)
         self.unique = {name: keys[0] for name, keys in named.items() if len(keys) == 1}
-        self.scoped = {id(unit): self._nested(unit) for unit in self.units.values()}
+        self.scoped: dict[int, dict] = {id(unit): self._nested(unit) for unit in self.units.values()}
         self.clients: set[str] = set()
         self.factories: set[str] = set()
         self._receivers()
@@ -366,16 +366,19 @@ class Program:
         return chained and expr.func.attr in methods(redis.Redis) and self._receiver(expr.func.value, unit, local)
 
     def _typed(self, unit: Unit) -> dict[str, bool]:
-        """The names a unit binds, each true when a binding holds a Redis client or pipeline, read in source order."""
+        """The names a unit binds, each true when a binding holds a Redis client or pipeline, read in source order.
+        A name bound only to a call whose callee cannot be found here gets no entry, so it falls back by name."""
         local = {name: held for node in unit.nodes for name, held in _annotated(node).items()}
         bindings = sorted(
             (found for found in map(_bindings, unit.nodes) if found[0]),
             key=lambda found: (found[0][0].lineno, found[0][0].col_offset),
         )
-        for target, value in (pair for targets, value in bindings for t in targets for pair in _pairs(t, value)):
+        pairs = [pair for targets, value in bindings for t in targets for pair in _pairs(t, value)]
+        for target, value in pairs:
+            unresolved = isinstance(value, ast.Call) and self._callees(value.func, unit) is None
             if value is not None and self._held(value, unit, local):
                 local[target] = True
-            elif not isinstance(value, ast.Call) or self._callees(value.func, unit) is not None:
+            elif not unresolved:
                 local[target] = local.get(target) is True
         return local
 
@@ -393,7 +396,8 @@ class Program:
 
     def _receivers(self) -> None:
         """Grow the names holding a Redis client and the functions returning one, typed from the client and
-        pipeline constructors and annotations, until neither changes, with at most one pass per unit."""
+        pipeline constructors and annotations, until neither changes. Passes are capped at one per unit so a run
+        always ends; the chains in this code resolve in a few passes."""
         for _ in self.units:
             size = len(self.clients), len(self.factories)
             for key, unit in self.units.items():
