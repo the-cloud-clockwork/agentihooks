@@ -32,6 +32,12 @@ def test_a_second_launch_under_the_same_name_replaces_the_record(tmp_path):
     assert launches.find(NAME, tmp_path).pid == os.getpid()
 
 
+def test_record_writes_nothing_when_its_own_process_cannot_be_read(tmp_path, monkeypatch):
+    monkeypatch.setattr(launches, "processes", lambda: {})
+    launches.record({"AGENTIHOOKS_SWARM": "crew", "AGENTIHOOKS_AGENT_NAME": NAME}, tmp_path)
+    assert not (tmp_path / "launches").exists()
+
+
 @pytest.mark.parametrize("environ", [{"AGENTIHOOKS_AGENT_NAME": NAME}, {"AGENTIHOOKS_SWARM": "crew"}, {}])
 def test_record_writes_nothing_outside_a_named_swarm_launch(tmp_path, environ):
     launches.record(environ, tmp_path)
@@ -80,21 +86,27 @@ def test_retire_pane_ends_the_recorded_launch_of_an_agent_with_no_pid_or_pane(tm
     monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
     monkeypatch.setattr("scripts.swarm.runtime._named_process", lambda agent: None)
     environment = {**os.environ, "AGENTIHOOKS_AGENT_NAME": NAME}
+    launcher = "import subprocess, sys; h = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']);"
     child = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)"], env=environment, start_new_session=True
+        [sys.executable, "-c", launcher + " print(h.pid, flush=True); h.wait()"],
+        env=environment,
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        text=True,
     )
     try:
-        for _ in range(100):
-            table = processes()
-            if child.pid in table and table[child.pid].pgid == child.pid:
-                break
-            time.sleep(0.05)
+        harness = int(child.stdout.readline())
         (tmp_path / "launches").mkdir()
         record = {"pid": child.pid, "start_time": processes()[child.pid].start_time}
         (tmp_path / "launches" / f"{NAME}.json").write_text(json.dumps(record))
         agent = replace(AgentRecord(NAME, "eng", "t1"), pane_id="", state="finished")
         assert herdr.retire_pane(agent)
         assert child.wait(timeout=5) == -signal.SIGTERM
+        for _ in range(100):
+            if harness not in processes() or processes()[harness].state == "Z":
+                break
+            time.sleep(0.05)
+        assert harness not in processes() or processes()[harness].state == "Z"
         assert not any(call[:2] == ["pane", "close"] for call in calls)
     finally:
         if child.poll() is None:
@@ -112,3 +124,16 @@ def test_retire_pane_passes_the_recorded_launch_start(tmp_path, monkeypatch):
     agent = replace(AgentRecord(NAME, "eng", "t1"), pane_id="w7:p7", state="finished")
     assert herdr.retire_pane(agent)
     assert ended == [(NAME, os.getpid(), [], processes()[os.getpid()].start_time)]
+
+
+@pytest.mark.parametrize("validated", [False, True])
+def test_legacy_retire_ends_the_recorded_launch_only_when_no_pid_was_validated(tmp_path, monkeypatch, validated):
+    herdr, _ = herdr_runtime(tmp_path, monkeypatch, panes={})
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    launches.record({"AGENTIHOOKS_SWARM": "crew", "AGENTIHOOKS_AGENT_NAME": NAME}, tmp_path)
+    decision = {"validation": {"pid": 4321}} if validated else {}
+    agent = replace(AgentRecord(NAME, "eng", "t1"), pane_id="", profile_decision=decision)
+    assert herdr.retire(agent)
+    own = (os.getpid(), processes()[os.getpid()].start_time)
+    assert ended == [(NAME, 4321, [], 0) if validated else (NAME, own[0], [], own[1])]

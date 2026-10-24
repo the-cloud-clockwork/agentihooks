@@ -20,10 +20,12 @@ def record(environ: dict[str, str], root: Path | None = None) -> None:
     name = environ.get("AGENTIHOOKS_AGENT_NAME")
     if not environ.get("AGENTIHOOKS_SWARM") or not name:
         return
-    pid = os.getpid()
+    own = processes().get(os.getpid())
+    if own is None:
+        return
     target = _path(name, root)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps({"pid": pid, "start_time": processes()[pid].start_time}))
+    target.write_text(json.dumps({"pid": own.pid, "start_time": own.start_time}))
 
 
 def find(name: str, root: Path | None = None) -> Process | None:
