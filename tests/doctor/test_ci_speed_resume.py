@@ -59,3 +59,46 @@ def test_budgeted_passes_resume_jobs_without_losing_active_run_coverage(store, m
     assert set(reads.values()) == {1}
     assert sorted(state["pending"]) == list(range(run_count))
     assert state.get("continuation") is None
+
+
+@pytest.mark.parametrize("status", [403, 503])
+def test_request_errors_keep_safe_http_details_in_the_journal(store, monkeypatch, status):
+    import subprocess
+
+    calls = []
+
+    def api(args, **kwargs):
+        calls.append(args)
+        raise subprocess.CalledProcessError(
+            1, args, stderr=f"gh: server refused (HTTP {status})\n" + "untrusted diagnostic " * 200
+        )
+
+    monkeypatch.setattr(ci_speed_read, "read", functools.partial(ci_speed_read.read, run=api))
+    [line] = loop.speed(store, DOCTOR, WATCHED, NOW)
+    assert f"HTTP {status}" in line
+    assert "repos/the-cloud-clockwork/agentihooks/actions/runs" in line
+    assert "untrusted diagnostic" not in line
+    assert len(line) < 1000
+    assert len(calls) == (2 if status == 503 else 1)
+    state = json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))
+    assert state["last"] == NOW - 60000
+    assert state["report"]["complete"] is False
+
+
+def test_a_transient_request_retries_within_the_same_sixty_call_budget(store, monkeypatch):
+    import subprocess
+
+    calls = []
+
+    def api(args, **kwargs):
+        calls.append(args[2])
+        if len(calls) == 1:
+            raise subprocess.CalledProcessError(1, args, stderr="gh: unavailable (HTTP 503)")
+        return SimpleNamespace(stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
+
+    monkeypatch.setattr(ci_speed_read, "read", functools.partial(ci_speed_read.read, run=api))
+    [line] = loop.speed(store, DOCTOR, WATCHED, NOW)
+    assert line.startswith("doctor CI speed: complete;")
+    assert len(calls) == 7
+    assert calls[0] == calls[1]
+    assert json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))["last"] == NOW
