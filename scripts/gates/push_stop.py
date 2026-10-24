@@ -146,6 +146,13 @@ def record_text(remote, branch, head):
     return f"The stop hook pushed the task branch {web}/tree/{branch} with its head at {web}/commit/{head}"
 
 
+def own_pull(tree, task):
+    """Whether the task's pull request sits in the worktree's own repository; any counts for an origin off GitHub."""
+    url = (task.get("pr_url") or "").lower()
+    found = GITHUB_RE.search(git(tree.path, "remote", "get-url", "origin").stdout.strip())
+    return bool(url) and (not found or f"github.com/{found[1]}/{found[2]}/pull/".lower() in url)
+
+
 def spoke_since(events, name, at):
     return any(event.get("by") == name and event["at"] > at for event in events)
 
@@ -206,7 +213,7 @@ class PushStop:
             elif tree.unpushed and push(tree, branch := target(tree, task), self.left() + RESERVE_S - FLOOR_S):
                 self.record(store, ledger, who, tree, branch)
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
-            owed = owed or (doc and tree.own and not task.get("pr_url") and self.unrecorded(store, doc, who))
+            owed = owed or (doc and tree.own and not own_pull(tree, task) and self.unrecorded(store, doc, who))
         if not owed:
             self.settle(store, who)
             return Decision()

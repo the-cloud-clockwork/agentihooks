@@ -21,6 +21,9 @@ GH_VALUED = frozenset({"-R", "--repo"})
 PUSH_VALUED = frozenset({"-o", "--push-option", "--repo", "--receive-pack", "--exec"})
 PULL_REPO = re.compile(r"github\.com/([^/]+/[^/]+)/pull/\d+")
 MATCHED = re.compile(r"\bpush\b|\bpr\s+(?:create|ready)\b")
+VARIABLE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
+ASSIGNED = re.compile(r"[A-Za-z_]\w*=.*")
+DECLARES = frozenset({"export", "declare", "typeset", "local", "readonly"})
 
 
 def _git_args(here, args):
@@ -37,20 +40,28 @@ def _gh_args(args):
     return args
 
 
+def expand(word, assigned):
+    """The word with each $NAME or ${NAME} put in from the command's assignments or the environment, empty when unset
+    as the shell does; a command substitution stays as written."""
+    return VARIABLE.sub(lambda m: assigned.get(m[1] or m[2], os.environ.get(m[1] or m[2], "")), word)
+
+
 def actions(command, cwd):
     """Each pull request open and push the command runs, with the directory it runs in and its arguments."""
-    here = Path(cwd or ".")
+    here, assigned = Path(cwd or "."), {}
     for words in simple_commands(command):
         index = program_index(words)
-        if index is None:
+        if index is None or words[index] in DECLARES:
+            for name, value in (word.split("=", 1) for word in words if ASSIGNED.fullmatch(word)):
+                assigned[name] = expand(value, assigned)
             continue
         program, rest = PurePosixPath(words[index]).name, words[index + 1 :]
-        if program == "cd" and rest:
-            here = here / Path(rest[0]).expanduser()
+        if program in ("cd", "pushd") and (dirs := [word for word in rest if word == "-" or word[:1] != "-"]):
+            here = here / Path("$OLDPWD" if dirs[0] == "-" else expand(dirs[0], assigned)).expanduser()
         elif program == "gh" and _gh_args(rest)[:2] in OPENS and not DRAFTS.intersection(rest):
             yield "open", here, ()
         elif program == "git":
-            where, args = _git_args(here, rest)
+            where, args = _git_args(here, [expand(word, assigned) for word in rest])
             if args[:1] == ["push"] and not NO_PUSH.intersection(args):
                 yield "push", where, args[1:]
 
@@ -155,7 +166,9 @@ class OnePush:
     def pushing(self, who, where, args):
         task = next((t for t in self.ledger().tasks(who.swarm) if t.get("id") == who.task), {})
         found = PULL_REPO.search(str(task.get("pr_url")))
-        if not found:
+        if not found or (
+            "$" not in str(where) and git(where, "rev-parse", "--is-inside-work-tree").stdout.strip() != "true"
+        ):
             return ""
         repo = repo_of(where, args)
         if repo and repo != found.group(1).lower():
