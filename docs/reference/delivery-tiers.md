@@ -1306,7 +1306,7 @@ The disabled `queue-baseline` job is gone: pull request [3517](https://github.co
 
 ### Clearing a lost line
 
-The ratchet grades a base line only through its place in the head file. `tests/coverage_grade.py` maps each line the base ran onto the head source with a line diff, and a moved definition onto its new file. A base line with no matching head line, because the change deleted it or deleted its file, is not graded. A base line that still exists in the head is graded whether its callers changed or not.
+The ratchet grades a base line only through its place in the head file. `tests/coverage_grade.py` maps each line the base ran onto the head source with a line diff. A renamed file is mapped line by line, and a file whose definitions moved into several files is mapped definition by definition. A base line with no unchanged match in the head, because the change deleted or rewrote it or deleted its file, is not graded. A base line that still exists in the head is graded whether its callers changed or not.
 
 Read `report.txt` first. Each lost line has its own line:
 
@@ -1328,7 +1328,7 @@ Then decide per line:
 | Code still reached in production, which the base's tests only reached indirectly | Add a unit test that calls it directly and asserts what it does. |
 | Code the change's own tests stopped reaching | Restore or add the test that reaches it. |
 
-Every fix goes through a normal pull request into `dev`. The promotion fixer task stays open until a later dev push run passes `coverage-ratchet`.
+Every fix goes through a normal pull request into `dev`. The promotion fixer task is closed by the next green dev push run, which passes `coverage-ratchet`.
 
 #### The 18 October ledger probe loss
 
