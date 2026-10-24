@@ -5,7 +5,16 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from scripts.ci_queue_retry import FAILED_RESULT, SHARD, STEP_EXITED, base_name, job_text, log_errors, runner_lost
+from scripts.ci_queue_retry import (
+    FAILED_RESULT,
+    RERUN,
+    SHARD,
+    STEP_EXITED,
+    base_name,
+    job_text,
+    log_errors,
+    runner_lost,
+)
 
 SELF = "queue-fail-fast"
 # Needs every graded job, so once it completes nothing graded can still fail.
@@ -28,11 +37,14 @@ def failed(jobs: list[dict], lost: Callable[[dict], bool] = lambda job: False) -
 
 
 def settled(jobs: list[dict]) -> bool:
-    shards = [job for job in jobs if base_name(job["name"]) == SHARD]
-    return (
-        bool(shards)
-        and all(job.get("conclusion") == "success" for job in shards)
-        or any(job["name"] == LAST and job["status"] == "completed" for job in jobs)
+    shards = [job["name"].removeprefix(SHARD) for job in jobs if base_name(job["name"]) == SHARD]
+    passed = {
+        job["name"].removeprefix(RERUN if base_name(job["name"]) == RERUN else SHARD)
+        for job in jobs
+        if base_name(job["name"]) in (SHARD, RERUN) and job.get("conclusion") == "success"
+    }
+    return (bool(shards) and all(shard in passed for shard in shards)) or any(
+        job["name"] == LAST and job["status"] == "completed" for job in jobs
     )
 
 

@@ -216,6 +216,24 @@ def test_passing_skipped_and_running_jobs_and_the_watcher_itself_name_nothing():
         ([_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", "failure"), _job("stage-budget")], False),
         ([_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", "cancelled"), _job("unit-lost")], False),
         ([_job("unit-lost", "success"), _job("unit rerun (3.12, 2)", "success")], False),
+        (
+            [
+                _job("unit (3.12, 1)", "success"),
+                _job("unit (3.12, 2)", "failure"),
+                _job("unit rerun (3.12, 2)", "success"),
+                _job("stage-budget"),
+            ],
+            True,
+        ),
+        (
+            [
+                _job("unit (3.12, 1)", "failure"),
+                _job("unit (3.12, 2)", "failure"),
+                _job("unit rerun (3.12, 2)", "success"),
+                _job("unit rerun (3.12, 1)", status="in_progress"),
+            ],
+            False,
+        ),
     ],
 )
 def test_the_run_settles_once_every_unit_shard_passed_or_stage_budget_completed(jobs, expected):
