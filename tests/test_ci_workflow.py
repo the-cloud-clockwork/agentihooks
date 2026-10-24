@@ -646,7 +646,9 @@ def test_equivalence_plants_each_fault_in_a_file_that_exists():
 
 def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())
-    assert "if" not in workflow["jobs"]["ledger-equivalence"]
+    job = workflow["jobs"]["ledger-equivalence"]
+    assert "if" not in job
+    assert all("pull_request.body" not in str(step.get("if", "")) for step in job["steps"])
     paths = workflow[True]["pull_request"]["paths"]
     assert {"scripts/swarm_ledger/**", "tests/swarm_ledger/**"} <= set(paths)
 
