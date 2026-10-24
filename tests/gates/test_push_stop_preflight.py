@@ -31,6 +31,7 @@ def test_clean_pushed_work_without_a_pull_request_passes_during_its_preflight(ri
         {"head": ""},
         {"kind": "checks"},
         {"target": "https://github.com/other/repo/actions/runs/123"},
+        {"target": "not an Actions run"},
     ],
 )
 def test_a_foreign_or_stale_preflight_does_not_release_progress_debt(rig, change):
@@ -40,6 +41,13 @@ def test_a_foreign_or_stale_preflight_does_not_release_progress_debt(rig, change
 
 def test_an_expired_preflight_does_not_release_progress_debt(rig):
     wait_on(rig, preflight(rig), at=NOW - 20, until=NOW)
+    assert not rig.stop().allowed
+
+
+def test_a_preflight_does_not_release_work_in_a_non_github_repository(rig):
+    on = preflight(rig)
+    git(rig.tree, "remote", "set-url", "origin", str(rig.origin))
+    wait_on(rig, on)
     assert not rig.stop().allowed
 
 
