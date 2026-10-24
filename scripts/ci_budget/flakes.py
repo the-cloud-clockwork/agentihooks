@@ -12,8 +12,9 @@ import zipfile
 from collections.abc import Callable
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
+from urllib.parse import urlencode
 
-from scripts.ci_budget import defects
+from scripts.ci_budget import defects, seconds
 from scripts.swarm.store import SwarmError
 
 if TYPE_CHECKING:
@@ -62,6 +63,37 @@ def text(test: dict) -> str:
     )
 
 
+def _github(repo_dir: str, endpoint: str, jq: str, run: Callable) -> str:
+    return run(
+        ["gh", "api", f"repos/{{owner}}/{{repo}}/{endpoint}", "--jq", jq],
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    ).stdout.strip()
+
+
+def _since_fix(repo_dir: str, branch: str, test: dict, run: Callable) -> tuple[list[str], list[str]]:
+    query = urlencode({"sha": branch, "path": test["test"].split("::")[0], "per_page": 1})
+    commit = _github(repo_dir, f"commits?{query}", ".[0].sha // empty", run)
+    if not commit:
+        return test["runs"], []
+    merged = _github(
+        repo_dir,
+        f"commits/{commit}/pulls",
+        f"[.[] | select(.base.ref == {json.dumps(branch)} and .merged_at != null) | .merged_at] | max // empty",
+        run,
+    )
+    if not merged:
+        return test["runs"], []
+    current, before = [], []
+    for run_id in test["runs"]:
+        created = _github(repo_dir, f"actions/runs/{run_id}", ".created_at", run)
+        (before if seconds(created) < seconds(merged) else current).append(run_id)
+    return current, before
+
+
 def refresh(
     slug: str,
     config: SwarmConfig,
@@ -86,7 +118,12 @@ def refresh(
         if redis.exists(raised):
             continue
         try:
-            sent = ledger.followup(slug, text(test))
+            current, before = _since_fix(config.repo, branch, test, run)
+            if before:
+                actions.append(f"{len(before)} retry passes were before the newest merged test change")
+            if not current:
+                continue
+            sent = ledger.followup(slug, text({**test, "runs": current}))
         except (*READ_ERRORS, SwarmError) as exc:
             defects._skipped("one flaky test", exc)
             continue

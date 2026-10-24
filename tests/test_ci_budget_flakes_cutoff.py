@@ -6,11 +6,9 @@ import pytest
 from scripts.ci_budget import flakes
 from tests.test_ci_budget_flakes import NOW_MS, TEST, _budget, _gh
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("newer", [False, True], ids=["before-fix", "after-fix"])
-def test_followups_only_count_retry_passes_after_the_latest_test_fix(monkeypatch, newer):
+def test_followups_only_count_retry_passes_after_the_latest_test_fix(newer):
     import fakeredis
 
     added = []

@@ -37,6 +37,8 @@ def _budget(*tests):
 def _gh(calls, budget=None, artifact="77", archive=None):
     def run(command, **kwargs):
         calls.append((command, kwargs))
+        if "/commits?" in command[2]:
+            return subprocess.CompletedProcess(command, 0, "", "")
         if command[2] == LISTING:
             return subprocess.CompletedProcess(command, 0, f"{artifact}\n", "")
         return subprocess.CompletedProcess(command, 0, archive if archive is not None else _zip(budget), b"")
