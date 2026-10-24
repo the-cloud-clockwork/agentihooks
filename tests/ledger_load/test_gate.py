@@ -243,6 +243,20 @@ def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_
     assert ledger_load.run(tmp_path) == ([], 0.7)
 
 
+@pytest.mark.parametrize("unwritable_log", [False, True])
+def test_a_server_that_fails_at_startup_names_its_exit_status_and_stderr(monkeypatch, tmp_path, unwritable_log):
+    script = tmp_path / "failing_server.py"
+    script.write_text("import sys\nsys.stderr.write('ledger database is locked\\n')\nsys.exit(120)\n")
+    monkeypatch.setattr(ledger_load, "ledger_server", SimpleNamespace(__file__=str(script)))
+    log_path = Path("/dev/full") if unwritable_log else tmp_path / "server.log"
+    with log_path.open("w") as log, pytest.raises(SystemExit) as exited:
+        ledger_load.start_server(tmp_path, ledger_load.free_port(), log)
+    assert "ledger server exited with 120 before listening" in str(exited.value)
+    assert "ledger database is locked" in str(exited.value)
+    if not unwritable_log:
+        assert log_path.read_text() == "ledger database is locked\n"
+
+
 def resource_samples(threads=0, memory=0):
     return [(float(n), 12 + threads * n, 100_000 + memory * n) for n in range(91)]
 
