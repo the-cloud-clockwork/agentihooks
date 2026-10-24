@@ -715,7 +715,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
     backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-top: 1px solid var(--rule); }
   #icon-strip .sync { width: 44px; height: 44px; }
   #main-content { flex: 1 1 0; padding-bottom: 88px; }
-  #stats-column { position: fixed; z-index: 20; top: 0; right: 0; bottom: 0; width: var(--drawer-w); padding: 16px 12px max(16px, env(safe-area-inset-bottom)) 16px;
+  #stats-column { position: fixed; z-index: 20; top: 0; right: 0; bottom: 0; width: var(--drawer-w); padding: 16px 12px 72px 16px;
     background: var(--overlay); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); transform: translateX(100%); visibility: hidden;
     transition: transform .25s cubic-bezier(.4, 0, .2, 1), visibility 0s linear .25s; }
   body.stats-open #stats-column { transform: none; visibility: visible; transition: transform .25s cubic-bezier(.4, 0, .2, 1); }
@@ -733,6 +733,11 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .notif { top: auto; left: 16px; right: 16px; bottom: 88px; width: auto; max-height: calc(100dvh - 176px); }
   .sw-actions { margin-left: 0; width: 100%; }
   .sw-actrow, .sw-doctor { justify-content: flex-start; }
+}
+@media (pointer: coarse) {
+  .sw-head .sw-btn, .tab { min-height: 44px; }
+  .prio > .link, .item-actions .link, .sec-tools > button { min-height: 40px; }
+  .stats-toggle { width: 40px; }
 }
 @media (max-width: 767px) {
   :root { --fs-title: 18px; --fs-body: 14px; --fs-meta: 12px; }
