@@ -71,3 +71,4 @@ li.row:hover,li.row:focus-within{background:var(--hover)}
 .col-grip:hover::after,.col-grip.dragging::after,.col-grip:focus-visible::after{opacity:1}
 .col-grip:focus-visible{outline:none}
 @media (min-width:1101px){.panel.sized-cols .row{grid-template-columns:var(--cols)}}
+*{scrollbar-width:thin;scrollbar-color:var(--edge) transparent}
