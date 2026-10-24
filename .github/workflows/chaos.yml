@@ -47,3 +47,4 @@ jobs:
           name: chaos
           path: ${{ runner.temp }}/chaos
           if-no-files-found: error
+          retention-days: 7
