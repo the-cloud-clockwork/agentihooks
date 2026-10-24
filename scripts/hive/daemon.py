@@ -191,7 +191,6 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     lost = (ConnectionError, TimeoutError)
-    local_id = hive_id()
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
     renewed = time.time()
@@ -200,6 +199,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
         stop = threading.Event()
         try:
             redis, waiter = connect()
+            local_id = hive_id()
             threading.Thread(target=publish_headroom, args=(redis, waiter, local_id, stop), daemon=True).start()
             while True:
                 started = time.monotonic()

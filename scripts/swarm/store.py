@@ -715,7 +715,7 @@ def _hive_recovered(redis, environ, refused):
             except redis.AuthenticationError:
                 pass
             else:
-                environ["AGENTIHOOKS_HIVE_REDIS_URL"] = saved
+                environ.update(cli.saved_member(environ))
                 return client
         try:
             cli.refresh_env(environ)
