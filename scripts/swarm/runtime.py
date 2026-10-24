@@ -1026,6 +1026,21 @@ class HerdrRuntime:
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
         return self.retire_process(agent, pid, homes)
 
+    def retire_pane(self, agent: AgentRecord, homes: tuple = ()) -> bool:
+        found = None
+        if agent.pane_id:
+            try:
+                result = self.herdr(["agent", "get", agent.pane_id])
+                found = result.get("agent", result)
+            except Exception as exc:
+                if "not found" not in str(exc):
+                    self.refusals[agent.name] = {"process": 0, "refusal": str(exc)}
+                    return False
+        if found is not None and _owns(found, agent):
+            return self.retire_process(agent, None, homes)
+        self.refusals[agent.name] = {"process": 0, "refusal": "no owned pane for unrecorded process"}
+        return False
+
     def _retire_managed(self, agent):
         from scripts.codex_session.binding import EXITED, BindingStore
         from scripts.codex_session.supervisor import execution_directory, remove_home
