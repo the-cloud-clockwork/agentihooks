@@ -127,3 +127,79 @@ def test_browser_authorization_reports_through_master_inbox_and_ends_native_logi
     assert (("terminate",) in events) == (outcome != "success")
     records = [json.loads(line) for line in (target.parent / "login-notifications.jsonl").read_text().splitlines()]
     assert records[-1] == {"step": "browser", "outcome": outcome, "transport": "inbox"}
+
+
+def test_browser_request_without_a_master_seat_never_starts_auth(tmp_path, monkeypatch):
+    target = tmp_path / "slot" / "claude"
+    target.mkdir(parents=True)
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("no master can authorize"))
+    assert chain.authorize({}, target) == "failure"
+    assert json.loads((target.parent / "login-notifications.jsonl").read_text()) == {
+        "step": "browser",
+        "outcome": "failure",
+        "transport": "inbox",
+    }
+
+
+def test_native_auth_spawn_failure_is_recorded_without_an_email(tmp_path, monkeypatch):
+    from scripts.inbox import store
+
+    target = tmp_path / "slot" / "claude"
+    target.mkdir(parents=True)
+    monkeypatch.setattr(store, "connect", lambda _: object())
+
+    def missing(*args, **kwargs):
+        raise OSError("native auth unavailable")
+
+    monkeypatch.setattr(subprocess, "Popen", missing)
+    assert chain.authorize({"AGENTIHOOKS_SWARM": "proof"}, target) == "failure"
+    assert json.loads((target.parent / "login-notifications.jsonl").read_text()) == {
+        "step": "browser",
+        "outcome": "failure",
+        "transport": "inbox",
+    }
+    assert (target.parent / "browser-auth.log").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("cleanup", ["terminate", "kill", "already exited"])
+def test_browser_timeout_cleans_up_native_auth_before_returning(tmp_path, monkeypatch, cleanup):
+    from scripts.inbox import store
+
+    target = tmp_path / "slot" / "claude"
+    target.mkdir(parents=True)
+    events = []
+
+    class Process:
+        def __init__(self, *args, **kwargs):
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            events.append("terminate")
+            if cleanup == "already exited":
+                raise ProcessLookupError
+            if cleanup == "terminate":
+                self.returncode = -15
+
+        def kill(self):
+            events.append("kill")
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            events.append(("wait", timeout))
+            if self.returncode is None:
+                raise subprocess.TimeoutExpired("claude", timeout)
+            return self.returncode
+
+    monkeypatch.setattr(store, "connect", lambda _: object())
+    monkeypatch.setattr(subprocess, "Popen", Process)
+    env = {"AGENTIHOOKS_SWARM": "proof", "AGENTIHOOKS_AGENT_NAME": "engineer@proof"}
+    assert chain.authorize(env, target, timeout=0) == "failure"
+    expected = {
+        "terminate": ["terminate", ("wait", 5)],
+        "kill": ["terminate", ("wait", 5), "kill", ("wait", None)],
+        "already exited": ["terminate"],
+    }
+    assert events == expected[cleanup]
