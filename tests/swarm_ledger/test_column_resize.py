@@ -44,7 +44,7 @@ def test_the_ledger_page_and_home_wire_column_grips_and_save_their_widths():
     assert "columns: { ...(layout.columns || {})" in ledger
     home = ROOT.joinpath("static", "home", "home.js").read_text()
     assert 'document.querySelectorAll(".row.head > *")' in home
-    assert 'fetch("/api/layout", { method: "PUT"' in home
+    assert "writeLayout(layout)" in home
 
 
 def test_column_widths_round_trip_beside_panel_sizes_and_reset_with_them():

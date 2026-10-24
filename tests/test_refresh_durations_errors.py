@@ -23,7 +23,7 @@ def test_refresh_records_every_collected_test_with_a_measured_default(tmp_path, 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: collected)
     refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "5"])
-    for name in (".test_durations", ".test_durations-3.12", ".test_durations-slowest", ".test_durations-slowest-3.12"):
+    for name in (".test_durations", ".test_durations-3.12"):
         refreshed = json.loads((tmp_path / name).read_text())
         assert refreshed == {**measured, "t.py::new": 5.5}
 

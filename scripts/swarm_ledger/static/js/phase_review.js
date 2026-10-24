@@ -1,10 +1,15 @@
 import { h, newId } from "./dom.js";
-import { phaseLifecycle } from "./state.js";
+import { pendingOf } from "./state.js";
 import { doc, queue } from "./sync.js";
+
+export function phaseStatus(phase) {
+  return doc.phase_status[phase.id] || { state: "", label: "" };
+}
 
 export function phaseReview(phase) {
   const review = phase.review || {};
-  if (phaseLifecycle(phase, doc) !== "in_review" || (review.state === "sent_back" && !review.escalated)) return null;
+  if (phaseStatus(phase).state !== "in_review" || (review.state === "sent_back" && !review.escalated)) return null;
+  if (pendingOf(doc, `phases/${phase.id}`)) return h("div", { class: "hl-verdict phase-review", text: "review sent" });
   const note = h("input", { class: "hl-note phase-note", type: "text", maxlength: "500", placeholder: "note for the planner", "aria-label": "Review note" });
   const decide = (state) => {
     const text = note.value.trim();

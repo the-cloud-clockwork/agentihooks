@@ -85,9 +85,8 @@ h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
 .task-meta .difficulty { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; cursor: help; }
 .task-meta .kind { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-2); }
 .task-meta .awaiting { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-2); }
-details.phase-fold { margin: 0; }
-details.phase-fold > summary, details.plan-fold > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; text-transform: none; letter-spacing: normal; color: var(--text); }
-details.phase-fold > summary::before, details.plan-fold > summary::before { align-self: center; }
+.phase-head, .plan-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; color: var(--text); }
+.done-head, .task-proof-head { margin-top: 8px; font-size: var(--fs-meta); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .phase-state { font-size: var(--fs-meta); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-2); }
 .plan { padding: 10px 0; border-top: 1px solid var(--rule); }
 .plan:first-child { border-top: 0; padding-top: 0; }
@@ -106,11 +105,11 @@ details.phase-fold > summary::before, details.plan-fold > summary::before { alig
   font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); cursor: pointer; white-space: nowrap; opacity: .45; transition: opacity .15s; }
 .scope::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1px solid currentColor; }
 .item:hover .scope, .scope:focus-visible { opacity: .85; outline: none; }
-.out > .row .scope, .plan.out > details > summary .scope { opacity: 1; color: var(--warn); }
-.out > .row .scope::before, .plan.out > details > summary .scope::before { background: var(--warn); }
+.out > .row .scope, .plan.out > .plan-head .scope { opacity: 1; color: var(--warn); }
+.out > .row .scope::before, .plan.out > .plan-head .scope::before { background: var(--warn); }
 .freeze { flex: none; background: none; border: 0; padding: 2px 0; font: inherit; font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase;
   color: var(--muted); cursor: pointer; white-space: nowrap; opacity: .45; transition: opacity .15s; }
-.item:hover .freeze, .plan:hover > details > summary .freeze, .slice:hover > .freeze, .freeze:focus-visible { opacity: .85; outline: none; }
+.item:hover .freeze, .plan:hover > .plan-head .freeze, .slice:hover > .freeze, .freeze:focus-visible { opacity: .85; outline: none; }
 .freeze[aria-pressed=true] { opacity: 1; color: var(--frozen); }
 .scope:disabled, .item-actions .link:disabled { cursor: not-allowed; opacity: .3; }
 .plan-actions { margin-left: auto; align-self: center; }
@@ -119,9 +118,9 @@ details.phase-fold > summary::before, details.plan-fold > summary::before { alig
 .snowflake svg { display: block; width: 100%; height: 100%; }
 .item:first-child > .snowflake { top: 2px; }
 .slice { display: inline-flex; align-items: baseline; gap: 8px; }
-.slice > .snowflake, .plan-fold > summary > .snowflake, .sw-table .snowflake { position: static; align-self: center; }
+.slice > .snowflake, .plan-head > .snowflake, .sw-table .snowflake { position: static; align-self: center; }
 .frozen > .row > :not(.item-actions), .frozen > .row > .item-actions > :not(.freeze),
-.plan.frozen > details > summary > :not(.plan-actions), .plan.frozen > details > summary > .plan-actions > :not(.freeze),
+.plan.frozen > .plan-head > :not(.plan-actions), .plan.frozen > .plan-head > .plan-actions > :not(.freeze),
 .slice.frozen > .slice-name { opacity: .45; }
 .out .item-title, .out .text, .out .desc, .out .num { color: var(--muted); opacity: .6; }
 .out input[type=checkbox] { opacity: .35; cursor: not-allowed; }
@@ -191,11 +190,9 @@ details.phase-fold > summary::before, details.plan-fold > summary::before { alig
 .art-doc blockquote { margin: 12px 0; padding-left: 12px; border-left: 2px solid var(--edge); color: var(--text-2); }
 .art-doc a { color: var(--link); }
 .json-tree { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-meta); line-height: 1.6; }
-.json-tree details { margin: 0; padding-left: 18px; }
-.json-tree > details { padding-left: 0; }
+.json-tree .json-node { margin: 0; padding-left: 18px; }
+.json-tree > .json-node { padding-left: 0; }
 .json-tree .json-leaf, .json-tree .json-close { padding-left: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.json-tree summary { cursor: pointer; text-transform: none; letter-spacing: normal; }
-.json-tree details:not([open]) > summary::after { content: " … " attr(data-close); color: var(--muted); }
 .json-string { color: var(--positive); }
 .json-number, .json-boolean { color: var(--accent-2); }
 .json-null { color: var(--muted); }

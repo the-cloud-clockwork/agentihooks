@@ -145,7 +145,7 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
   `progress.md` and `proof.md`, where the agent appends a line per step and per
   piece of evidence. A reclaim reuses it, so a successor reads it cold.
   `ledger task add --scaffold` creates it with the task. The ledger page shows
-  its latest lines in the task's Contract and proof fold.
+  its latest lines in the task's Contract and proof block.
 - Every Claude and Codex session whose profile sets `otel.langfuse.enabled`
   is one Langfuse trace in the project its keys belong to, extended at each
   Stop with the new turns and tagged with swarm, agent, lane, task and account

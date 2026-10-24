@@ -10,6 +10,9 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from scripts.events import nkey
+from scripts.events.config import BACKEND_ENV, BusConfig
+from scripts.events.factory import open_bus
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import holder_pod, lease, local_slots, tick_stop
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
@@ -428,6 +431,24 @@ def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
     return run_once(store, runtimes={service.controller.slug: service.runtime})
 
 
+def bus_user(credentials: str | None) -> str:
+    return nkey.claims(nkey.parse_creds(credentials)[0])["name"] if credentials else "anonymous"
+
+
+def open_controller_bus(environ: Mapping[str, str], opener=open_bus):
+    if environ.get(BACKEND_ENV) != "nats":
+        return None
+    try:
+        config = BusConfig.from_environ(environ)
+        user = bus_user(config.credentials)
+        bus = opener(replace(config, provision=False))
+    except Exception as exc:
+        print(f"controller: bus nats refused: {exc}", file=sys.stderr, flush=True)
+        return None
+    print(f"controller: bus nats at {config.url} as {user}", flush=True)
+    return bus
+
+
 def _stopped(*_) -> None:
     # The pod grace period can end before the tick's finally reaches its release.
     tick_stop.STOP.set()
@@ -457,6 +478,7 @@ def main(argv: list[str]) -> int:
     operator_env.classifier(os.environ)
     store = connect()
     service = None
+    bus = open_controller_bus(os.environ)
     previous = signal.signal(signal.SIGTERM, _stopped)
     try:
         proof_swarm.run(os.environ, store)
@@ -477,4 +499,6 @@ def main(argv: list[str]) -> int:
     finally:
         if service is not None:
             service.stop()
+        if bus is not None:
+            bus.close()
         signal.signal(signal.SIGTERM, previous)

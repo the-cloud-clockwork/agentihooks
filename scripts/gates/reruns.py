@@ -13,6 +13,7 @@ from scripts.gates.identity import program_index, simple_commands
 PASSED = frozenset({"success", "skipped", "neutral"})
 VALUE_FLAGS = {"-j": "job", "--job": "job", "-R": "repo", "--repo": "repo"}
 GH_TIMEOUT_SEC = 8
+RERUN_CAP = 2
 
 
 @dataclass(frozen=True)
@@ -76,7 +77,7 @@ class RerunBudget:
     name = "reruns"
     default_mode = "enforce"
 
-    def __init__(self, cap=2, jobs=gh_jobs):
+    def __init__(self, cap=RERUN_CAP, jobs=gh_jobs):
         self.cap, self.jobs = cap, jobs
 
     def matches(self, call):

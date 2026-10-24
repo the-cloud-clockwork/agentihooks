@@ -74,6 +74,26 @@ class Reports:
             return False
         return record is not None and 0 < record["heartbeat_at"] < now_ms - LOST_MS
 
+    def removed(self, agent: "AgentRecord", now_ms: int) -> bool:
+        hive = host(agent)
+        if agent.state != "finished" or not hive:
+            return False
+        since_key = f"{registry.key(hive)}:removed-since:{agent.execution_id}:{agent.generation}"
+        try:
+            record = registry.show(self.redis, hive)
+        except HiveError:
+            self.redis.delete(since_key)
+            return False
+        if (
+            self.redis.sismember(registry.INDEX, hive)
+            or self.read(hive) is not None
+            or (record is not None and registry.live(record, now_ms))
+        ):
+            self.redis.delete(since_key)
+            return False
+        self.redis.set(since_key, str(now_ms), nx=True)
+        return now_ms - int(self.redis.get(since_key)) >= registry.LIVE_MS
+
     def names(self) -> set[str]:
         return {name for report in self.live().values() for name in report["names"]}
 

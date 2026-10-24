@@ -220,7 +220,14 @@ def test_the_ledger_keeps_how_a_replacement_continued_and_from_which_watermark()
     assert applied is True
     assert doc["tasks"][0]["recovery"] == recovery
     assert sorted(ctx.stamps) == ["tasks/t1/recovery"]
-    assert ledger_tasks.OBJECT_FIELDS == ("contract", "proof", "recovery", "repository_branches", "pull_scopes")
+    assert ledger_tasks.OBJECT_FIELDS == (
+        "contract",
+        "proof",
+        "recovery",
+        "repository_branches",
+        "pull_scopes",
+        "watchdog",
+    )
     assert ledger_tasks.UPDATABLE[-1] == "recovery"
 
 

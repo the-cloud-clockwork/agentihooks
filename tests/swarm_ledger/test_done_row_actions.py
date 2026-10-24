@@ -60,7 +60,7 @@ def ledger(browser):
     page.goto(URL)
     loaded(page)
     page.click("#tasks-box > summary")
-    page.click("#tasks-done > summary")
+    page.locator("#item-tasks-t2").wait_for()
     yield page, served
     context.close()
 
@@ -139,7 +139,6 @@ def test_marking_a_follow_up_out_of_scope_drops_its_verdicts(ledger):
 
 def test_a_done_follow_up_offers_no_verdicts_and_no_scope_toggle(ledger):
     page, _ = ledger
-    page.click("#followups-done > summary")
     assert verdicts(page, "#item-followups-f3") == []
     assert scope_dot(page, "#item-followups-f3").count() == 0
 

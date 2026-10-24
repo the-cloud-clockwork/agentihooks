@@ -19,6 +19,7 @@ from scripts.profiles import binding, plugins
 from scripts.routing import native_login
 from scripts.swarm import (
     affinity,
+    brain_binding,
     capacity,
     default_models,
     effort_range,
@@ -471,6 +472,9 @@ class HerdrRuntime:
     def _quota_transfer(self, saved, profile, environ, lane, want, planned=None):
         from scripts.swarm import capacity, quota_handoff
 
+        if not hasattr(self, "_quota_accounts"):
+            read = self.quota_accounts or capacity.accounts
+            self._quota_accounts = read(environ, time.time(), refresh=False)
         thresholds = quota_handoff.Thresholds.from_env(environ)
         allocation = getattr(self, "_quota_allocations", {}).get(lane)
         predecessor = (saved["harness"], saved.get("account"))
@@ -920,7 +924,7 @@ class HerdrRuntime:
             fields.get("effort", ""),
             fields.get("placement", ""),
             validated["profile"],
-            profile_decision={"validation": validated},
+            profile_decision={"validation": validated, **brain_binding.record(fields)},
             launched_at=launched_at,
             launch_timings=timings,
             conversation_id=(self.conversations() or {}).get(fields.get("pane_id"), ""),

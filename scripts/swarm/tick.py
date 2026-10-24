@@ -604,7 +604,8 @@ def _hive_lost(slug, store, agent, now_ms):
 
 def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
     master_retire.forget(store, slug, agent.name)
-    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+    removed = reports.Reports(store.redis).removed(agent, now_ms)
+    if not removed and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
         retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
         return [f"could not retire {agent.name}, retrying next tick"]
     _refund_parked(slug, store, rows, agent)
@@ -1193,9 +1194,16 @@ def _not_launched(slug, store, ledger, runtime, rows, failed, now_ms):
     if _acknowledging_error(failed.error):
         store.record_launch(slug, record, ACKNOWLEDGING)
         return [f"{record.name} waits for the hive acknowledgement of {task['id']}"]
-    if refused := _room_wait(runtime, record.lane, task):
+    if refused := _failed_room_wait(runtime, record.lane, task):
         return [_room_refused(slug, store, ledger, runtime, rows, failed, refused)]
     return _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms)
+
+
+def _failed_room_wait(runtime, lane, task):
+    try:
+        return _room_wait(runtime, lane, task)
+    except SpawnError:
+        return False
 
 
 def _room_refused(slug, store, ledger, runtime, rows, failed, refused):
