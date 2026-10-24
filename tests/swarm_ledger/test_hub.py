@@ -63,12 +63,7 @@ def test_a_publish_appends_a_patch_that_rebuilds_the_new_value():
 def test_a_wait_with_no_new_event_returns_empty_once_its_timeout_passes():
     hub = Hub()
     seq, _ = opened(hub)
-    found = []
-    waiter = threading.Thread(target=lambda: found.append(hub.wait(SLUG, seq, 0.01)), daemon=True)
-    waiter.start()
-    waiter.join(5)
-    assert not waiter.is_alive()
-    assert found == [[]]
+    assert bounded(hub.wait, SLUG, seq, 0.01)[0] == []
 
 
 def test_immutable_snapshot_publication_keeps_names_revisions_and_replay():
@@ -130,7 +125,7 @@ def test_snapshot_comparison_work_is_bounded_by_changed_structure(change, monkey
         20 if change in {"metadata", "equivalent"} else len(shared) * (3 if change in {"append", "reorder"} else 1) + 20
     )
     assert calls <= budget
-    frames = hub.wait(SLUG, 1, 0)
+    frames, _ = bounded(hub.wait, SLUG, 1, 0)
     assert len(frames) == (0 if change == "equivalent" else 1)
     if frames:
         assert apply(old, frames[0][3]["patch"]) == new
