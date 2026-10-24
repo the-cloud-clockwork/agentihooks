@@ -916,3 +916,64 @@ def test_finished_removed_hive_workers_settle_after_an_absence_lease(remote, han
     assert exit_record["reason"] == "exited"
     assert exit_record["seat"] == (remote.agent.seat if handoff else "")
     assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
+
+
+@pytest.mark.parametrize("protection", ["indexed", "heartbeat", "report", "working", "local", "unreadable"])
+def test_removed_hive_retirement_requires_expired_host_evidence(remote, protection):
+    from scripts.hive import registry
+    from scripts.swarm import tick
+
+    remote.agent = replace(remote.agent, state="finished")
+    remote.store.put_agent("fixture", remote.agent)
+    remote.redis.srem(registry.INDEX, HIVE)
+    rows = {"task": {"state": "done"}}
+    ledger = Mock()
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
+    if protection == "indexed":
+        remote.redis.sadd(registry.INDEX, HIVE)
+    elif protection == "heartbeat":
+        remote.redis.hset(registry.key(HIVE), "heartbeat_at", NOW + registry.LIVE_MS)
+    elif protection == "report":
+        _publish(remote)
+    elif protection == "working":
+        remote.agent = replace(remote.agent, state="working")
+        remote.store.put_agent("fixture", remote.agent)
+        rows["task"] = {"state": "claimed", "claimed_by": remote.agent.name}
+    elif protection == "local":
+        remote.agent = replace(remote.agent, runtime_target={**remote.agent.runtime_target, "host_id": "controller"})
+        remote.store.put_agent("fixture", remote.agent)
+    else:
+        remote.redis.hset(registry.key(HIVE), "heartbeat_at", "unknown")
+
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW + registry.LIVE_MS)
+
+    assert len(remote.store.agents("fixture")) == 1
+    ledger.update_task.assert_not_called()
+
+
+@pytest.mark.parametrize("signal", ["index", "heartbeat", "report"])
+def test_a_returning_hive_resets_the_absence_lease(remote, signal):
+    from scripts.hive import registry
+    from scripts.swarm import tick
+
+    remote.agent = replace(remote.agent, state="finished")
+    remote.store.put_agent("fixture", remote.agent)
+    remote.redis.srem(registry.INDEX, HIVE)
+    rows = {"task": {"state": "done"}}
+    ledger = Mock()
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
+    if signal == "index":
+        remote.redis.sadd(registry.INDEX, HIVE)
+    elif signal == "heartbeat":
+        remote.redis.hset(registry.key(HIVE), "heartbeat_at", NOW + registry.LIVE_MS)
+    else:
+        _publish(remote)
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW + registry.LIVE_MS)
+    remote.redis.srem(registry.INDEX, HIVE)
+    remote.redis.delete(registry.key(HIVE), remote.reports.key(HIVE))
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW + registry.LIVE_MS * 2)
+    assert len(remote.store.agents("fixture")) == 1
+
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW + registry.LIVE_MS * 3)
+
+    assert remote.store.agents("fixture") == []
