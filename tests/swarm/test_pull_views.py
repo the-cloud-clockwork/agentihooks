@@ -346,6 +346,27 @@ def test_a_later_tick_snapshot_fetches_only_pull_requests_the_earlier_one_did_no
     assert fallback == []
 
 
+def test_a_later_tick_snapshot_retries_a_pull_request_the_earlier_one_failed_to_read(monkeypatch):
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    inbox = InboxStore(store.redis)
+    doc = {"tasks": [{"state": "pr", "pr_url": "a"}]}
+    monkeypatch.setattr(ledger_events, "views", lambda urls, cache: dict.fromkeys(urls))
+    first = ledger_events.tick_view(inbox, store, "sw", doc)
+    batched = []
+    monkeypatch.setattr(
+        ledger_events, "views", lambda urls, cache: batched.append(urls) or {url: f"fresh {url}" for url in urls}
+    )
+    later = ledger_events.tick_view(inbox, store, "sw", doc, first)
+    assert batched == [["a"]]
+    assert later("a") == "fresh a"
+
+
 def test_metrics_completed_and_split_pulls_are_prefetched_without_late_slow_reads(monkeypatch, tmp_path):
     import time
 

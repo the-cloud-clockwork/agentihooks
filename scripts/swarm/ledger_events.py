@@ -535,7 +535,7 @@ def tick_view(
         urls.extend(url for url, _ in metrics_swarm.pull_targets(doc, at, recent))
     notices = store.redis.hgetall(store.key(slug, "red-notices"))
     urls += [url for item_id, url in notices.items() if _open(inbox, item_id)]
-    known = getattr(earlier, "snapshots", {})
+    known = {url: pr for url, pr in getattr(earlier, "snapshots", {}).items() if pr is not None}
     snapshots = {**known, **views([url for url in dict.fromkeys(urls) if url not in known], cache=store.redis)}
 
     @functools.cache
