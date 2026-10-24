@@ -9,6 +9,7 @@ import pytest
 from scripts.doctor import ci_speed_read, loop
 from tests.doctor.test_ci_speed import NOW, job
 from tests.doctor.test_ci_speed_timer import DOCTOR, WATCHED
+from tests.doctor.test_ci_speed_timer import store as store
 
 pytestmark = pytest.mark.unit
 
