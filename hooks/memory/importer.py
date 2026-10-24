@@ -7,6 +7,7 @@ absolute folder alias; a matching basename never attributes an event, and unknow
 
 import hashlib
 import json
+import os
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ UNKNOWN_ATTRIBUTION = "historical_import_unknown_attribution"
 ACCEPTED = ("committed", "replayed", "would_import")
 SEARCHED = ("text", "tool_name", "tool_input", "tool_result")
 OPTIONAL_METADATA = ("provider_version", "first_event_time", "last_event_time")
-SOURCE_FIELDS = ("provider", "installation", "relative_path", "source_sha256", "importer_version")
+SOURCE_FIELDS = ("provider", "installation", "relative_path", "source_sha256", "importer_version", "unknown")
 HIT_FIELDS = ("event_id", "sequence", "byte_start", "byte_end", "project_id", "record")
 PRAGMAS = ("PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", "PRAGMA busy_timeout=5000")
 SCHEMA = """CREATE TABLE IF NOT EXISTS session_import (
@@ -43,7 +44,8 @@ SESSIONS = (
 UNKNOWN_EVENTS = "SELECT TOTAL(unknown_events) FROM session_import WHERE access_domain = ?"
 RETIRE = "DELETE FROM session_import WHERE access_domain = ?"
 ALL_ROWS = "SELECT * FROM session_import"
-MISMATCH = "the export does not match the current import projections"
+MISMATCH = "the written export does not match the current import projections; nothing was retired"
+EXISTS = "the export destination already exists; nothing was retired"
 
 
 @dataclass(frozen=True)
@@ -222,8 +224,8 @@ class ImportLedger:
     def snapshot(self) -> list:
         return sorted(self.db.execute(ALL_ROWS).fetchall())
 
-    def search(self, catalog: Catalog, domain: str, text: str) -> list[dict]:
-        needle = text.casefold()
+    def search(self, catalog: Catalog, grant: Grant, text: str) -> list[dict]:
+        domain, needle = grant.corpus, text.casefold()
         return [
             {
                 "session_uid": session["session_uid"],
@@ -233,6 +235,7 @@ class ImportLedger:
             }
             for session in self.sessions(domain, current=True)
             for event in catalog.events(domain, session["session_uid"], session["source_generation"])
+            if event["project_id"] is None or event["project_id"] in grant.projects
             if needle in " ".join(str(event["record"][key]) for key in SEARCHED if key in event["record"]).casefold()
         ]
 
@@ -249,12 +252,24 @@ class ImportLedger:
             "events": sum(len(record["events"]) for record in records),
         }
 
-    def retire(self, catalog: Catalog, domain: str, export: dict) -> dict:
+    def retire(self, catalog: Catalog, domain: str, destination: Path) -> dict:
+        if destination.exists():
+            return {"state": "rejected", "error": {"class": "export_exists", "detail": EXISTS}}
         current = self.export(catalog, domain)
-        if export["digest"] != current["digest"] or digest(export["records"]) != current["digest"]:
+        _write_durably(destination, json.dumps(current, ensure_ascii=False, sort_keys=True))
+        if digest(json.loads(destination.read_text(encoding="utf-8"))["records"]) != current["digest"]:
             return {"state": "rejected", "error": {"class": "export_mismatch", "detail": MISMATCH}}
         self.db.execute(RETIRE, (domain,))
-        return {"state": "retired", "sessions": current["sessions"], "catalog_events_kept": current["events"]}
+        manifest = {key: current[key] for key in ("digest", "sessions", "events")}
+        return {"state": "retired", "catalog_events_kept": current["events"], "export": manifest}
+
+
+def _write_durably(destination: Path, text: str) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with open(destination, "x", encoding="utf-8") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _plan_error(grant: Grant, plan: ImportPlan) -> tuple[str, str] | None:

@@ -61,6 +61,11 @@ def outcomes(report):
     return {source["relative_path"]: source["outcome"] for source in report["sources"]}
 
 
+def outcomes_hash(report):
+    (source,) = [source for source in report["sources"] if source["outcome"] == "committed"]
+    return source["source_sha256"]
+
+
 def stored_events(catalog, imports, corpus):
     return {
         session["session_uid"]: catalog.events(corpus, session["session_uid"], session["source_generation"])
@@ -81,16 +86,18 @@ def positive(inputs, root):
     projects = {uid: sorted({str(event["project_id"]) for event in found}) for uid, found in events.items()}
     assert projects["swarm-fixture:claude:workstation-a:5e6f-dup"] == ["None"]
     assert all("raw" not in event["record"] for found in events.values() for event in found)
-    found = imports.search(catalog, corpus, "ROLLOUT cursor")
+    found = imports.search(catalog, grant(inputs), "ROLLOUT cursor")
+    outsider = Grant("outsider", corpus, frozenset({"github.com/acme/other"}))
+    assert {hit["project_id"] for hit in imports.search(catalog, outsider, "breaker")} == {None}
     assert found and all(hit["source"]["provider"] == "codex" for hit in found)
-    assert imports.search(catalog, corpus, "taxes") == []
+    assert imports.search(catalog, grant(inputs), "taxes") == []
     return {
         "dry_run": dry,
         "report": report,
         "provenance": imports.sessions(corpus),
         "event_projects": projects,
         "search_rollout_cursor": found,
-        "search_breaker": imports.search(catalog, corpus, "breaker"),
+        "search_breaker": imports.search(catalog, grant(inputs), "breaker"),
         "metrics": {"historical_import_unknown_attribution": imports.unknown_attribution(corpus)},
     }
 
@@ -140,8 +147,11 @@ def recovery(inputs, root):
     materialize(inputs, root, "appended")
     grown = import_sessions(catalog, imports, grant(inputs), plan(inputs, root))
     export = imports.export(catalog, corpus)
-    retired = imports.retire(catalog, corpus, export)
-    assert imports.sessions(corpus) == [] and imports.search(catalog, corpus, "cursor") == []
+    current_hits = imports.search(catalog, grant(inputs), "rollout cursor")
+    assert {hit["source_generation"] for hit in current_hits} == {f"import:{outcomes_hash(grown)}"}
+    retired = imports.retire(catalog, corpus, root / "export.json")
+    assert json.loads((root / "export.json").read_text(encoding="utf-8"))["digest"] == export["digest"]
+    assert imports.sessions(corpus) == [] and imports.search(catalog, grant(inputs), "cursor") == []
     assert len(catalog.snapshot()["session_event"]) == export["events"]
     return {
         "survived_crash": survived,
@@ -149,6 +159,7 @@ def recovery(inputs, root):
         "rerun_outcomes": outcomes(again),
         "grown_source": grown,
         "export_manifest": {key: export[key] for key in ("digest", "sessions", "events")},
+        "search_after_growth": current_hits,
         "retired": retired,
         "catalog_events_after_retire": len(catalog.snapshot()["session_event"]),
     }

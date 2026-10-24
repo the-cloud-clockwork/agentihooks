@@ -16,11 +16,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--corpus", required=True, help="corpus every root is approved for")
     parser.add_argument("--principal", required=True)
     parser.add_argument("--project", action="append", default=[], help="granted project id")
-    parser.add_argument("--root", action="append", required=True, help="PROVIDER:INSTALLATION:FOLDER")
+    parser.add_argument("--root", action="append", default=[], help="PROVIDER:INSTALLATION:FOLDER")
     parser.add_argument("--alias", action="append", default=[], help="ABSOLUTE_FOLDER=PROJECT")
     parser.add_argument("--expected", action="append", default=[], help="PROVIDER:INSTALLATION:RELATIVE_PATH")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--retire", metavar="EXPORT", help="write a full export there, then remove the import projections"
+    )
     return parser
+
+
+def _run(args: argparse.Namespace, plan: ImportPlan, catalog: Catalog, imports: ImportLedger) -> tuple[dict, bool]:
+    if args.retire:
+        report = imports.retire(catalog, args.corpus, Path(args.retire))
+        return report, report["state"] == "retired"
+    grant = Grant(args.principal, args.corpus, frozenset(args.project))
+    report = import_sessions(catalog, imports, grant, plan, dry_run=args.dry_run)
+    refused = any(source["outcome"] == "refused" for source in report.get("sources", []))
+    return report, report["state"] == "completed" and not refused
 
 
 def _split(parser: argparse.ArgumentParser, value: str, name: str) -> list[str]:
@@ -64,18 +77,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     plan = _plan(parser, args)
-    grant = Grant(args.principal, args.corpus, frozenset(args.project))
     catalog = Catalog(args.catalog)
     try:
         imports = ImportLedger(args.imports)
         try:
-            report = import_sessions(catalog, imports, grant, plan, dry_run=args.dry_run)
+            report, succeeded = _run(args, plan, catalog, imports)
         finally:
             imports.close()
     finally:
         catalog.close()
     print(json.dumps(report, indent=2, ensure_ascii=False))
-    return 0 if report["state"] == "completed" else 2
+    return 0 if succeeded else 2
 
 
 if __name__ == "__main__":

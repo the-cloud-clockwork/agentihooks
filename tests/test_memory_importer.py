@@ -269,7 +269,7 @@ def test_a_rerun_skips_imported_sources_by_hash_and_a_changed_source_is_a_new_ge
     )
     current = stores[1].sessions("corpus-a", current=True)
     assert [s["source_generation"] for s in current] == [f"import:{grown['source_sha256']}"]
-    hits = stores[1].search(stores[0], "corpus-a", "one")
+    hits = stores[1].search(stores[0], GRANT, "one")
     assert [(hit["source_generation"], hit["sequence"]) for hit in hits] == [(current[0]["source_generation"], 1)]
     assert stores[1].export(stores[0], "corpus-a")["events"] == 3
 
@@ -423,7 +423,7 @@ def test_search_returns_imported_events_with_their_source_attribution(stores, tm
     data = claude("Find The Breaker", timestamp="t1") + claude("unrelated")
     only(run(stores, root(tmp_path, files={"p/s-1.jsonl": data})))
     catalog, imports = stores
-    (hit,) = imports.search(catalog, "corpus-a", "the breaker")
+    (hit,) = imports.search(catalog, GRANT, "the breaker")
     assert hit == {
         "session_uid": "corpus-a:claude:host-a:s-1",
         "source_generation": imports.sessions("corpus-a")[0]["source_generation"],
@@ -439,31 +439,83 @@ def test_search_returns_imported_events_with_their_source_attribution(stores, tm
             "relative_path": "p/s-1.jsonl",
             "source_sha256": hashlib.sha256(data).hexdigest(),
             "importer_version": IMPORTER_VERSION,
+            "unknown": ["provider_version"],
         },
     }
-    assert imports.search(catalog, "corpus-b", "breaker") == []
-    assert imports.search(catalog, "corpus-a", "absent words") == []
+    assert imports.search(catalog, Grant("importer", "corpus-b", GRANT.projects), "breaker") == []
+    assert imports.search(catalog, GRANT, "absent words") == []
 
 
-def test_export_and_retire_remove_only_import_projections_after_a_matching_export(stores, tmp_path):
-    only(run(stores, root(tmp_path, files={"p/s-1.jsonl": claude("one") + claude("two")})))
+def test_search_returns_only_unattributed_events_and_granted_projects(stores, tmp_path):
+    data = claude("breaker here") + claude("breaker there", cwd="/work/lib") + claude("breaker free", cwd="/nope")
+    only(
+        run(
+            stores, root(tmp_path, files={"p/s.jsonl": data}), aliases={**ALIASES, "/work/lib": "github.com/acme/other"}
+        )
+    )
     catalog, imports = stores
-    export = imports.export(catalog, "corpus-a")
+    assert [hit["project_id"] for hit in imports.search(catalog, GRANT, "breaker")] == [
+        PROJECT,
+        "github.com/acme/other",
+        None,
+    ]
+    narrow = Grant("reader", "corpus-a", frozenset({"github.com/acme/other"}))
+    assert [hit["record"]["text"] for hit in imports.search(catalog, narrow, "breaker")] == [
+        "breaker there",
+        "breaker free",
+    ]
+    assert [
+        hit["record"]["text"] for hit in imports.search(catalog, Grant("r", "corpus-a", frozenset()), "breaker")
+    ] == ["breaker free"]
+
+
+def test_export_lists_every_projection_with_its_events_and_digest(stores, tmp_path):
+    only(run(stores, root(tmp_path, files={"p/s-1.jsonl": claude("one") + claude("two")})))
+    export = stores[1].export(stores[0], "corpus-a")
+    assert export["access_domain"] == "corpus-a"
     assert export["sessions"] == 1 and export["events"] == 2
     assert export["digest"] == importer_module.digest(export["records"])
     assert export["records"][0]["provenance"]["relative_path"] == "p/s-1.jsonl"
-    assert len(export["records"][0]["events"]) == 2
-    stale = {**export, "digest": "0" * 64}
-    assert imports.retire(catalog, "corpus-a", stale) == {
-        "state": "rejected",
-        "error": {"class": "export_mismatch", "detail": "the export does not match the current import projections"},
-    }
-    assert len(imports.sessions("corpus-a")) == 1
+    assert [event["sequence"] for event in export["records"][0]["events"]] == [1, 2]
+
+
+def test_retire_writes_a_full_export_first_and_removes_only_import_projections(stores, tmp_path):
+    only(run(stores, root(tmp_path, files={"p/s-1.jsonl": claude("one") + claude("two")})))
+    catalog, imports = stores
+    expected = imports.export(catalog, "corpus-a")
     events = catalog.snapshot()["session_event"]
-    assert imports.retire(catalog, "corpus-a", export) == {"state": "retired", "sessions": 1, "catalog_events_kept": 2}
-    assert imports.sessions("corpus-a") == [] and imports.search(catalog, "corpus-a", "one") == []
+    destination = tmp_path / "rollback/export.json"
+    assert imports.retire(catalog, "corpus-a", destination) == {
+        "state": "retired",
+        "catalog_events_kept": 2,
+        "export": {"digest": expected["digest"], "sessions": 1, "events": 2},
+    }
+    assert json.loads(destination.read_text(encoding="utf-8")) == expected
+    assert imports.sessions("corpus-a") == [] and imports.search(catalog, GRANT, "one") == []
     assert catalog.snapshot()["session_event"] == events
     assert imports.unknown_attribution("corpus-a") == 0
+
+
+def test_retire_refuses_an_existing_destination_and_a_mismatched_written_export(stores, tmp_path, monkeypatch):
+    only(run(stores, root(tmp_path, files={"p/s-1.jsonl": claude("one")})))
+    catalog, imports = stores
+    taken = tmp_path / "taken.json"
+    taken.write_text("keep")
+    assert imports.retire(catalog, "corpus-a", taken) == {
+        "state": "rejected",
+        "error": {"class": "export_exists", "detail": "the export destination already exists; nothing was retired"},
+    }
+    assert taken.read_text() == "keep"
+    monkeypatch.setattr(Path, "read_text", lambda self, encoding=None: '{"records": []}')
+    assert imports.retire(catalog, "corpus-a", tmp_path / "fresh.json") == {
+        "state": "rejected",
+        "error": {
+            "class": "export_mismatch",
+            "detail": "the written export does not match the current import projections; nothing was retired",
+        },
+    }
+    monkeypatch.undo()
+    assert len(imports.sessions("corpus-a")) == 1
 
 
 def test_import_ledgers_keep_access_domains_apart(stores, tmp_path):
@@ -496,6 +548,25 @@ def test_the_cli_imports_explicit_roots_and_prints_the_report(tmp_path, capsys):
     assert report["missing_sources"][0]["relative_path"] == "p/lost.jsonl"
     assert cli.main([*args[:-4], "--alias", f"app={PROJECT}"]) == 2
     assert json.loads(capsys.readouterr().out)["error"]["class"] == "invalid_plan"
+    retire = [*args[:8], "--retire", str(tmp_path / "export.json")]
+    assert cli.main(retire) == 0
+    assert json.loads(capsys.readouterr().out)["export"]["sessions"] == 1
+    assert cli.main(retire) == 2
+    assert json.loads(capsys.readouterr().out)["error"]["class"] == "export_exists"
+
+
+def test_the_cli_exits_two_when_a_source_is_refused(tmp_path, capsys, monkeypatch):
+    folder = tmp_path / "claude"
+    (folder / "p").mkdir(parents=True)
+    (folder / "p/s-1.jsonl").write_bytes(claude("one"))
+
+    def unavailable(self, batch):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(Catalog, "commit", unavailable)
+    base = ["--catalog", str(tmp_path / "c"), "--imports", str(tmp_path / "i"), "--corpus", "corpus-a"]
+    assert cli.main([*base, "--principal", "p", "--root", f"claude:h:{folder}"]) == 2
+    assert only(json.loads(capsys.readouterr().out))["outcome"] == "refused"
 
 
 @pytest.mark.parametrize("bad", [["--root", "claude:host-a"], ["--alias", "noequals"], ["--expected", "claude:x"]])
