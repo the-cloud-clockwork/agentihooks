@@ -18,7 +18,7 @@ runs:
         esac
         name="nats-server-${NATS_SERVER_RELEASE}-linux-${arch}"
         archive="$RUNNER_TEMP/$name.tar.gz"
-        curl -fsSL --retry 5 --retry-delay 5 --retry-connrefused -o "$archive" "https://github.com/nats-io/nats-server/releases/download/${NATS_SERVER_RELEASE}/$name.tar.gz"
+        curl -fsSL --connect-timeout 10 --max-time 30 --retry 4 --retry-delay 3 --retry-connrefused -o "$archive" "https://github.com/nats-io/nats-server/releases/download/${NATS_SERVER_RELEASE}/$name.tar.gz"
         sha256sum --check --strict <<< "$sha  $archive"
         mkdir -p "$RUNNER_TEMP/nats"
         tar -xzf "$archive" -C "$RUNNER_TEMP/nats" --strip-components=1 "$name/nats-server"
