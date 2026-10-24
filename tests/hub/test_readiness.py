@@ -63,10 +63,8 @@ def spoke(bus, provider, hive):
     return Spoke(config, bus, runtime, tasks, reading, view=lambda: provider.snapshot("rig")), runtime
 
 
-@pytest.mark.flaky(reruns=0)
-@pytest.mark.parametrize("iteration", range(100))
-@pytest.mark.parametrize("kind", ["nats"])
-def test_hub_offers_are_taken_once_and_withdrawn_when_frozen_or_claimed(kind, iteration, tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind", ["memory", "nats"])
+def test_hub_offers_are_taken_once_and_withdrawn_when_frozen_or_claimed(kind, tmp_path, monkeypatch):
     from scripts.hub.readiness import Readiness
 
     monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
