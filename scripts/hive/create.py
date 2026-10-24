@@ -233,7 +233,7 @@ def _herdr(tools: Tools, options: Options) -> str:
     if tools.state.get("added"):
         return f"kept {target} in herdr"
     if options.dry_run:
-        return f"would trust the hive host key and run hive add {target} --label {tools.state['name']}"
+        return f"would trust the hive host key and save {target} in herdr as {tools.state['name']}"
     _trust(tools)
     machine.save(tools.redis, tools.local_id, target, tools.state["name"], tools.run)
     member = _member(tools)[invite.HIVE_ID]

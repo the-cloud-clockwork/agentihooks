@@ -186,6 +186,9 @@ def test_the_dry_run_names_the_pull_request_files(world):
     assert f"hive create {NAME}: manifests: would open a pull request into {REPO} dev with {files}" in world.lines
     keys = f"hive create {NAME}: ssh keys: would write a new SSH host key and 2 authorized keys into OpenBao secret/{RECORD}"
     assert keys in world.lines
+    assert (
+        f"hive create {NAME}: herdr: would trust the hive host key and save {TARGET} in herdr as {NAME}" in world.lines
+    )
     assert world.published == [(world.tools.environ, SETTINGS_PATH, True)]
 
 
