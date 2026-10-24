@@ -382,12 +382,12 @@ def test_every_consumer_but_the_worker_reaches_redis(published):
 
 def test_the_published_map_drops_calls_on_receivers_that_hold_no_redis_client(published):
     senders = {unit for consumer in published.values() for units in consumer["commands"].values() for unit in units}
-    false = (
+    excluded = (
         "scripts.swarm_v2.checkpoints.native:",
         "scripts.swarm_v2.herdr.endpoints:",
         "scripts.claude_quota_balancer:",
     )
-    assert not {unit for unit in senders if unit.startswith(false)}
+    assert not {unit for unit in senders if unit.startswith(excluded)}
     assert published["worker"]["commands"] == {}
 
 

@@ -60,7 +60,7 @@ uses it to find the Redis user that consumer connects as.
      (`MULTI`, `EXEC`).
 4. A receiver counts as a Redis client only when its type traces back to a
    client or pipeline constructor: `Redis(...)`, `StrictRedis(...)`,
-   `from_url(...)` or `<client>.pipeline()`, a function under `scripts` or
+   `Redis.from_url(...)` or `<client>.pipeline()`, a function under `scripts` or
    `hooks` that returns one (resolved through imports, its own class, or a
    name only one function defines), a parameter annotated `Redis`,
    `StrictRedis` or `Pipeline`, or a chained call on a pipeline. A name a
