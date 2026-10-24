@@ -108,7 +108,7 @@ def test_ledger_retry_does_not_overwrite_a_lifecycle_change_during_probe(monkeyp
     from scripts.hive import join_checks, join_report
 
     redis, agent, before = retry_report()
-    current = {**before, **(change or {})}
+    current = {**before, "ledger_checked_at": 500000, **(change or {})}
 
     def probe(report):
         assert report == {**before, "ledger_checked_at": 500000}
@@ -209,6 +209,40 @@ def test_ledger_retry_yields_to_a_transaction_conflict(monkeypatch, conflict_on)
     assert probe.call_count == conflict_on - 1
     expected = before if conflict_on == 1 else {**before, "ledger_checked_at": 500000}
     assert join_report.read(redis, agent) == expected
+
+
+@pytest.mark.parametrize("conflict_on", [1, 2])
+def test_ledger_retry_watches_the_execution_report_key(monkeypatch, conflict_on):
+    from unittest.mock import Mock
+
+    from scripts.hive import join_checks, join_report
+
+    redis, agent, before = retry_report()
+    original = redis.pipeline
+    calls = []
+    changed = {**before, "status": "ended"}
+    if conflict_on == 2:
+        changed["ledger_checked_at"] = 500000
+
+    def pipeline():
+        pipe = original()
+        calls.append(pipe)
+        if len(calls) == conflict_on:
+            original_multi = pipe.multi
+
+            def mutate_before_transaction():
+                redis.hset(join_report.key("worker"), agent.execution_id, json.dumps(changed))
+                return original_multi()
+
+            monkeypatch.setattr(pipe, "multi", mutate_before_transaction)
+        return pipe
+
+    probe = Mock(return_value={"ledger_join": True, "ledger_write": True})
+    monkeypatch.setattr(redis, "pipeline", pipeline)
+    monkeypatch.setattr(join_checks, "ledger_checks", probe)
+    join_report.retry_ledger(redis, agent, "session", 500000)
+    assert probe.call_count == conflict_on - 1
+    assert join_report.read(redis, agent) == changed
 
 
 @pytest.mark.parametrize(
