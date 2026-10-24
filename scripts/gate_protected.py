@@ -73,6 +73,8 @@ def _aggregator_problems(
         for need in sorted(ci_wiring.needs_of(base_job) - ci_wiring.needs_of(head_job) - retired)
     ]
     fields = sorted((set(base_job) | set(head_job)) - {"needs"})
+    postgres = any(ci_reuse.POSTGRES_REQUIRED[1] in step.get("run", "") for step in base_job.get("steps", []))
+    requirements = (ci_reuse.postgres_required,) if postgres else (list, ci_reuse.postgres_required)
     return problems + [
         f"The head's {GATE} changes its {field}; the protected branch grades with its own."
         for field in fields
@@ -111,11 +113,7 @@ def _aggregator_problems(
                 )
                 for summary in (False, True)
                 for watcher_loss in (False, True)
-                for required in (
-                    (ci_reuse.postgres_required,)
-                    if ci_reuse.POSTGRES_REQUIRED[1] in str(base_job.get("steps"))
-                    else (list, ci_reuse.postgres_required)
-                )
+                for required in requirements
                 for rerun in (list, ci_reuse.lost_rerun)
                 for shape in (list, ci_reuse.inline_mutation)
                 for finish in (list, ci_reuse.pipefail_summary)
