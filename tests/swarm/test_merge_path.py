@@ -70,7 +70,7 @@ PULLS = [
     pull(0, 3000, (added(900), removed(1500, "FAILED_CHECKS"), added(1600), removed(3000, "MERGED"))),
     pull(-7200, None, (added(-60), removed(120, "MANUAL"))),
     pull(-7200, -60, (removed(-60, "MERGED"),)),
-    pull(-7200, None, (removed(3600, "merged"),)),
+    pull(-7200, None, (removed(3600, "merged"), removed(3700, None))),
 ]
 JOBS = {
     5: [["anton-oss-queue"], ["anton-oss-light"], ["anton-oss-queue", "self-hosted"]],
@@ -90,7 +90,7 @@ def test_counts_the_merge_path_inside_the_window_only():
         "cancelled_pull_request_runs": 1,
         "reruns": 1,
         "enqueues": 3,
-        "removals": {"FAILED_CHECKS": 1, "MANUAL": 1, "MERGED": 2, "merged": 1},
+        "removals": {"FAILED_CHECKS": 1, "MANUAL": 1, "MERGED": 2, "merged": 1, "unknown": 1},
         "head_failure_rate": 0.33,
         "failed_queue_runs": 1,
         "queue_cycle_minutes": 15.0,
@@ -114,7 +114,7 @@ def test_the_ledger_line_is_plain_and_within_the_comment_limit():
     line = merge_path.render("o/agentihooks", merge_path.count(RUNS, PULLS, JOBS, 3, WINDOW))
     assert line == (
         "agentihooks, 4.0 hours: 2 merges, 0.5 an hour. Runs 3 queue, 4 head, 2 push. 1 cancelled, 1 reruns. "
-        "3 enqueues, removed 1 failed checks, 1 manual. Heads fail 33 percent, 1 queue runs failed. "
+        "3 enqueues, removed 1 failed checks, 1 manual, 1 unknown. Heads fail 33 percent, 1 queue runs failed. "
         "Queue cycle 15.0 minutes, 1.5 standard jobs. 3 open ready. Lead 70.0 minutes."
     )
     assert len(line.split()) <= 50

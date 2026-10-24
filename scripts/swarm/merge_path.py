@@ -61,7 +61,9 @@ def _queue_events(pulls: list[dict], since_s: float, until_s: float) -> tuple[in
         if _within(event.get("createdAt"), since_s, until_s)
     ]
     added = sum(event["__typename"] == "AddedToMergeQueueEvent" for event in events)
-    removed = Counter(event["reason"] for event in events if event["__typename"] == "RemovedFromMergeQueueEvent")
+    removed = Counter(
+        event["reason"] or "unknown" for event in events if event["__typename"] == "RemovedFromMergeQueueEvent"
+    )
     return added, removed
 
 
@@ -144,7 +146,8 @@ def read_runs(repo_dir: str, event: str, window: tuple[float, float], run: Calla
     for page in range(1, LISTED_CAP // PAGE + 1):
         path = (
             f"repos/{{owner}}/{{repo}}/actions/workflows/{ci_speed.WORKFLOW}/runs?event={event}"
-            f"{'&branch=dev' if event == 'push' else ''}&created={created}&exclude_pull_requests=true&per_page={PAGE}&page={page}"
+            f"{'&branch=dev' if event == 'push' else ''}&created={created}"
+            f"&exclude_pull_requests=true&per_page={PAGE}&page={page}"
         )
         body = json.loads(_gh(["api", path], repo_dir, run))
         listed += body["workflow_runs"]
@@ -197,7 +200,6 @@ def collect(repo_dir: str, window: tuple[float, float], run: Callable = subproce
     runs = [found for event in EVENTS for found in read_runs(repo_dir, event, window, run)]
     jobs = {found["id"]: read_jobs(repo_dir, found["id"], run) for found in runs if found["event"] == "merge_group"}
     pulls = read_pulls(repo_dir, repo, window[0], run)
-    ready = _search(repo_dir, OPEN_READY, {"q": f"repo:{repo} is:pr is:open draft:false base:dev"}, run)[0][
-        "issueCount"
-    ]
+    open_pages = _search(repo_dir, OPEN_READY, {"q": f"repo:{repo} is:pr is:open draft:false base:dev"}, run)
+    ready = open_pages[0]["issueCount"]
     return repo, count(runs, pulls, jobs, ready, window)

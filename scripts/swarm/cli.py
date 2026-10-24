@@ -1343,9 +1343,10 @@ def cmd_merge_path(store, args):
         raise SwarmError("merge-path takes hours above zero")
     until_s = now_ms() / 1000
     repo, found = merge_path.collect(store.config(args.slug).repo, (until_s - args.hours * 3600, until_s))
-    print(json.dumps({"repo": repo, **found}) if args.json else merge_path.render(repo, found))
+    line = merge_path.render(repo, found)
+    print(json.dumps({"repo": repo, **found}) if args.json else line)
     if args.post:
-        LedgerClient().comment_item(args.slug, args.post, merge_path.render(repo, found))
+        LedgerClient().comment_item(args.slug, args.post, line)
 
 
 def cmd_rename(store, args):
