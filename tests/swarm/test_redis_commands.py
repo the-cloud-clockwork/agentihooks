@@ -475,7 +475,7 @@ def looped(rows):
 
 
 def comprehended(rows):
-    return [kk for kk, c in rows if kk.get("type")] + [0 for rows.last in rows]
+    return [kk for kk, c in rows if kk.get("type")] + [0 for {}[0] in rows]
 
 
 def carried():
