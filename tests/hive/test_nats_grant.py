@@ -316,7 +316,8 @@ def test_a_claims_update_the_server_refuses_raises(signer):
         nats_grant.push(signer, "not.a.jwt")
 
 
-def test_a_failed_push_keeps_the_revocation_for_the_next_push(admin, signer):
+def test_a_failed_push_keeps_the_revocation_for_the_next_push(admin, signer, monkeypatch):
+    monkeypatch.setattr(nats_grant, "PUSH_TIMEOUT_S", 0.05)
     unreachable = nats_grant.Signer(
         signer.operator,
         signer.account,
@@ -324,7 +325,7 @@ def test_a_failed_push_keeps_the_revocation_for_the_next_push(admin, signer):
         f"nats://127.0.0.1:{nats_server.free_port()}",
         signer.trusted_operator,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(TimeoutError):
         nats_grant.revoke(admin, unreachable, "m1")
     assert set(admin.hgetall(nats_grant.REVOKED)) == {nats_grant.member_user(signer, "m1").public}
 
