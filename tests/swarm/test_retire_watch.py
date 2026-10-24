@@ -59,7 +59,8 @@ def test_retry_of_an_ended_agent_without_process_or_pane_releases_its_seat(store
     from tests.test_swarm_v2_process import ANTON, record
     from tests.test_swarm_v2_runtime import herdr_runtime
 
-    agent = replace(record(pid=None, start=None), state="finished", seat="eng-1@sw")
+    seed = replace(record(pid=None, start=None, execution=""), name=store.next_name("sw", "eng"), seat="eng-1@sw")
+    agent = replace(store.start_execution("sw", seed), state="finished")
     assert store.claim("sw", "t1", agent.name, 60_000)
     store.put_agent("sw", agent)
     if not projection:
