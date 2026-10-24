@@ -60,7 +60,9 @@ def lookup(tmp_path):
         jobs = [
             {"name": f"unit ({version}, {shard})", "conclusion": "success"}
             for version, count in ([("3.12", 20)] if fault == "twenty-shards" else [("3.11", 6), ("3.12", 12)])
-            for shard in ([*range(1, 7), *range(8, 14)] if fault == "shard-gap" and version == "3.12" else range(1, count + 1))
+            for shard in (
+                [*range(1, 7), *range(8, 14)] if fault == "shard-gap" and version == "3.12" else range(1, count + 1)
+            )
             if fault != "no-units"
         ]
         jobs.extend(
