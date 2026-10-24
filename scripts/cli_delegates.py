@@ -8,6 +8,7 @@ DELEGATED_CLIS = {
     "deps": "scripts.deps_preflight",
     "quota": "scripts.agents_quota",
     "plan": "scripts.swarm_ledger.plan_read",
+    "workflow": "scripts.workflows.cli",
     "hive": "scripts.hive.cli",
     "hub": "scripts.hub.runner",
     "github-webhook": "scripts.hub.github_webhooks",
