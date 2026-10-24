@@ -365,11 +365,12 @@ def test_the_controller_grants_render_the_controller_claims():
 def test_the_controller_grant_covers_every_bucket_and_queue_the_hub_opens():
     from scripts.events import nats
     from scripts.hive import buckets, execution_events, presence
-    from scripts.hub import hive_loss, lease, pulls, reconciler, runner, timers
+    from scripts.hub import hive_loss, lease, pulls, reconciler, runner, slots, timers
     from scripts.inbox import migration
 
     opened = {
         *buckets.NAMES,
+        *slots.BUCKETS,
         presence.BUCKET,
         execution_events.STATE,
         execution_events.STARTS,
