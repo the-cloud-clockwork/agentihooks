@@ -194,11 +194,9 @@ def mentions(text: str) -> tuple[bool, frozenset[str]]:
 
 
 def mentioned(text: str, words: set[str]) -> bool:
+    # A word with a non word character never matches a token, nor can an import name hold it.
     relative, tokens = mentions(text)
-    if relative or not words.isdisjoint(tokens):
-        return True
-    odd = [re.escape(word) for word in words if not re.fullmatch(r"\w+", word)]
-    return bool(odd) and re.search(rf"\b(?:{'|'.join(odd)})\b", unicodedata.normalize("NFKC", text)) is not None
+    return relative or not words.isdisjoint(tokens)
 
 
 def select_tests(root: Path, source: Path) -> list[str]:

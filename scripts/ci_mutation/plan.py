@@ -260,7 +260,7 @@ def main() -> int:
     parser.add_argument("--repository")
     args = parser.parse_args()
     root = Path.cwd()
-    with ThreadPoolExecutor(max_workers=1) as pool:
+    with ThreadPoolExecutor() as pool:
         record = pool.submit(read_record, args.repository) if args.repository else None
         bases = own_bases(root, args.base, args.head, graded_green)
         print(f"Mutation bases: {' '.join(bases)}")
