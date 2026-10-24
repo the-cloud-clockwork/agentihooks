@@ -209,9 +209,10 @@ async function searchMore(list) {
   if (fetching.has(list)) return;
   fetching.add(list);
   const turn = searchTurn;
+  const text = filter.text;
   try {
-    const resp = await searchClosed(list, filter.text, remote[list].length);
-    if (turn !== searchTurn || !resp.ok) return;
+    const resp = await searchClosed(list, text, remote[list].length);
+    if (turn !== searchTurn || text !== filter.text || !resp.ok) return;
     const { data, total } = await resp.json();
     const have = new Set(remote[list].map((i) => i.id));
     remote[list] = [...remote[list], ...data.filter((i) => !have.has(i.id))];
