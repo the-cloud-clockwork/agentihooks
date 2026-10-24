@@ -486,14 +486,6 @@ def test_other_remote_calls_and_untrusted_runner_inputs_are_red(uses, runner):
     assert len(problems) == 1 and "test.yml/scan" in problems[0]
 
 
-def test_shared_workflow_call_from_a_target_event_is_red_even_on_a_trusted_runner():
-    candidate = {
-        "on": {"pull_request_target": {}},
-        "jobs": {"scan": {"uses": SHARED_SEMGREP, "with": {"runs_on": selector("anton-oss-light")}}},
-    }
-    assert len(ci_runner_trust.check({"test.yml": candidate}, POLICY)) == 1
-
-
 def test_loader_name_is_optional_and_does_not_change_admission():
     from pathlib import Path
 

@@ -151,6 +151,14 @@ def _selector(runner: object, policy: object) -> bool:
     return isinstance(runner, str) and any(_compact(runner) in selectors(policy, pool) for pool in POOLS)
 
 
+def _trusted_runner(job: dict, actors: object) -> bool:
+    uses = job.get("uses", "")
+    if uses and not uses.lower().startswith(SHARED):
+        return False
+    runner = (job.get("with") or {}).get("runs_on") if uses else job.get("runs-on")
+    return _hosted(runner) or _selector(runner, actors)
+
+
 def check(workflows: dict[str, dict], actors: object = None) -> list[str]:
     if actors is not None:
         validate_actors(actors)
@@ -174,10 +182,7 @@ def check(workflows: dict[str, dict], actors: object = None) -> list[str]:
                 if Path(uses).name not in workflows:
                     problems.append(f"{file}/{name}: runner trust cannot resolve local workflow {uses}")
                 continue
-            if not uses and (_hosted(job.get("runs-on")) or _selector(job.get("runs-on"), actors)):
-                continue
-            runner = (job.get("with") or {}).get("runs_on")
-            if uses.lower().startswith(SHARED) and (_hosted(runner) or _selector(runner, actors)):
+            if _trusted_runner(job, actors):
                 continue
             if "pull_request_target" in events or not _guarded(job, jobs):
                 problems.append(
