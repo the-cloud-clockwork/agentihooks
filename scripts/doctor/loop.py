@@ -203,9 +203,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
             identity: finding for identity, finding in notices.items() if not store.redis.sismember(notified, identity)
         }
         run_notified = store.key(doctor, "ci-speed-runs-notified", slug)
-        groups, run_ids = ci_speed.fresh_groups(
-            state["groups"], eligible, store.redis.smembers(run_notified)
-        )
+        groups, run_ids = ci_speed.fresh_groups(state["groups"], eligible, store.redis.smembers(run_notified))
         fresh.update({finding.id: finding for finding in ci_speed.grouped(groups)})
         if fresh:
             mail.send(
