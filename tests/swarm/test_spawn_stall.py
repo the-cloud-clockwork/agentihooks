@@ -603,6 +603,26 @@ def test_current_placement_holds_explain_the_spawn_wait(stalled, reason):
     assert InboxStore(store.redis).pending_mail("master@sw") == []
 
 
+def test_a_repeated_hold_uses_its_latest_observation(stalled):
+    store, _, _, clock, _ = stalled
+    placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0] - 1)
+    for _ in range(2):
+        placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0])
+        quiet_watch(stalled)
+        clock[0] += 600_000
+    assert spawn_stall.findings(store, "sw") == []
+
+
+def test_a_legacy_hold_without_seen_at_uses_its_start(stalled):
+    import json
+
+    store, _, _, clock, _ = stalled
+    row = {"lane": "eng", "reason": CPU_WAIT, "started_at": clock[0]}
+    store.redis.hset(store.key("sw", placement_waits.WAITS), "t1", json.dumps(row))
+    quiet_watch(stalled)
+    assert "since" not in spawn_stall.read(store, "sw")
+
+
 @pytest.mark.parametrize("lane", ["eng", "ci"])
 def test_an_unheld_task_keeps_the_stall_alarm_eligible(stalled, lane):
     store, ledger, _, clock, _ = stalled

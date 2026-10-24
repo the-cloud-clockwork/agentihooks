@@ -81,7 +81,7 @@ def launched(store, slug: str) -> int:
 def observe(store, slug: str, ledger, at: int, runtime) -> dict:
     state = read(store, slug)
     last = launched(store, slug)
-    if capped(store, slug, state.get("at", 0)) or not eligible(store, slug, ledger, at, runtime, state.get("at", at)):
+    if capped(store, slug, state.get("at", 0)) or not eligible(store, slug, ledger, at, runtime, state.get("at")):
         state = {}
     elif "since" not in state or last > state["launch"]:
         state = {"since": at, "launch": last}
