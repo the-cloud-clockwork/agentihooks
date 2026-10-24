@@ -188,6 +188,7 @@ jobs:
         with:
           name: swarm-worker-image-attestation
           path: ${{ runner.temp }}/worker-image-attestation
+          retention-days: 7
 
   hive:
     if: github.event_name == 'release'
