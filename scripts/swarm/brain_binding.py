@@ -1,7 +1,8 @@
 """The one brain a managed swarm launch connects to, read from the operator's binding file and never from personal config.
 
 The binding file is the swarm-brain-binding document Anton publishes: an instance name, an API and an MCP origin per
-site, and for each the header, scheme and credential the client sends. A launch carries only the resolved origins and
+site, and for each the header, scheme and credential the client sends. That operator owned file is the authority for
+which origins are authorized; this module only refuses origins no brain client may use. A launch carries only the resolved origins and
 the names of the variables holding each credential, so no value is written to a launcher, a profile home or a record.
 """
 
@@ -137,24 +138,30 @@ def apply(servers: dict, environ: Mapping[str, str]) -> dict:
 
 
 def exports(environ: Mapping[str, str]) -> str:
-    """Launcher lines that make the binding authoritative over whatever the operator's env files exported."""
+    """Launcher lines that make the binding authoritative over whatever the operator's env files exported.
+
+    A bound launch is re-checked in the launcher shell, the environment the harness receives: a credential missing
+    there refuses the brain instead of mounting it with an empty key.
+    """
     binding = current(environ)
     if binding is None:
         return ""
-    lines = [
-        f"export {VARIABLE}={shlex.quote(environ[VARIABLE])}",
-        "export BRAIN_SOURCE_TYPE=none",
-        "unset KB_ROUTER_TOKEN",
-    ]
-    if binding["status"] == BOUND:
-        lines += [
-            f"export BRAIN_URL={shlex.quote(binding['api'])}",
-            f'export BRAIN_HTTP_TOKEN="${{{binding["api_env"]}:-}}"',
-            "export BRAIN_ENABLED=true BRAIN_WRITER_ENABLED=true",
-        ]
-    else:
-        lines += ["unset BRAIN_URL BRAIN_HTTP_TOKEN", "export BRAIN_ENABLED=false BRAIN_WRITER_ENABLED=false"]
-    return "".join(f"{line}\n" for line in lines)
+    common = "export BRAIN_SOURCE_TYPE=none\nunset KB_ROUTER_TOKEN\n"
+    refused = "unset BRAIN_URL BRAIN_HTTP_TOKEN\nexport BRAIN_ENABLED=false BRAIN_WRITER_ENABLED=false\n"
+    if binding["status"] != BOUND:
+        return f"export {VARIABLE}={shlex.quote(environ[VARIABLE])}\n{common}{refused}"
+    missing = {"status": REFUSED, "reason": "a brain credential is unset in the launch shell"}
+    present = " && ".join(f'[ -n "${{{binding[f"{kind}_env"]}:-}}" ]' for kind in KINDS)
+    return (
+        f"{common}if {present}; then\n"
+        f"export {VARIABLE}={shlex.quote(environ[VARIABLE])}\n"
+        f"export BRAIN_URL={shlex.quote(binding['api'])}\n"
+        f'export BRAIN_HTTP_TOKEN="${{{binding["api_env"]}}}"\n'
+        "export BRAIN_ENABLED=true BRAIN_WRITER_ENABLED=true\n"
+        "else\n"
+        f"export {VARIABLE}={shlex.quote(json.dumps(missing, sort_keys=True))}\n{refused}"
+        "fi\n"
+    )
 
 
 def report(environ: Mapping[str, str]) -> list[str]:

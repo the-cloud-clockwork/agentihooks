@@ -234,6 +234,28 @@ def test_bound_exports_win_over_conflicting_personal_env_files(tmp_path):
     assert API_FIXTURE not in brain_binding.exports(environ)
 
 
+@pytest.mark.parametrize("missing", ["SWARM_BRAIN_API_TOKEN", "SWARM_BRAIN_MCP_KEY"])
+def test_a_credential_missing_in_the_launch_shell_refuses_the_brain(tmp_path, missing):
+    _personal_files(tmp_path)
+    environ = {**_environ(tmp_path), "PATH": os.environ["PATH"], **_managed(BOUND)}
+    shell = {key: value for key, value in environ.items() if key != missing}
+    script = operator_env.source_line(environ) + brain_binding.exports(environ)
+
+    seen = _shell(script + f'printf "binding=%s\\n" "${{{brain_binding.VARIABLE}}}"\n', shell)
+
+    assert json.loads(seen.pop("binding")) == {
+        "status": "refused",
+        "reason": "a brain credential is unset in the launch shell",
+    }
+    assert seen == {
+        "BRAIN_URL": "|",
+        "BRAIN_HTTP_TOKEN": "|",
+        "KB_ROUTER_TOKEN": "|",
+        "BRAIN_ENABLED": "set|false",
+        "BRAIN_SOURCE_TYPE": "set|none",
+    }
+
+
 def test_refused_exports_drop_every_personal_brain_setting(tmp_path):
     _personal_files(tmp_path)
     environ = {**_environ(tmp_path), "PATH": os.environ["PATH"], **_managed(REFUSED)}
@@ -449,7 +471,7 @@ def test_every_managed_launch_and_recycle_carries_one_bound_brain(launch, tmp_pa
     assert json.loads(rendered) == BOUND
     assert f"brain_binding={json.dumps(BOUND, sort_keys=True)}" in out.splitlines()
     assert f"export BRAIN_URL={API}\n" in text
-    assert 'export BRAIN_HTTP_TOKEN="${SWARM_BRAIN_API_TOKEN:-}"\n' in text
+    assert 'export BRAIN_HTTP_TOKEN="${SWARM_BRAIN_API_TOKEN}"\n' in text
     assert text.index("set -a;") < text.index("export BRAIN_URL=")
     for fixture in (API_FIXTURE, MCP_FIXTURE, PERSONAL_FIXTURE):
         assert fixture not in text and fixture not in out
