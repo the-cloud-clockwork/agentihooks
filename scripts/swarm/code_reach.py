@@ -169,7 +169,7 @@ class Program:
             self._index(module, tree, is_package)
         named: dict[str, list[str]] = {}
         for key in self.units:
-            named.setdefault(key.rpartition(":")[2].rpartition(".")[2], []).append(key)
+            named.setdefault(re.split(r"[:.]", key)[-1], []).append(key)
         self.unique = {name: keys[0] for name, keys in named.items() if len(keys) == 1}
         self.scoped: dict[int, dict] = {}
         self.clients: set[str] = set()
@@ -374,9 +374,10 @@ class Program:
         while True:
             before = dict(local)
             for target, value in pairs:
-                held = value is not None and self._held(value, unit, local)
-                if held or not isinstance(value, ast.Call) or self._callees(value.func, unit) is not None:
-                    local[target] = local.get(target, False) or held
+                if value is not None and self._held(value, unit, local):
+                    local[target] = True
+                elif not isinstance(value, ast.Call) or self._callees(value.func, unit) is not None:
+                    local.setdefault(target, False)
             if local == before:
                 return local
 

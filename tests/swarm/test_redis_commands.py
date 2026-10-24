@@ -341,6 +341,242 @@ def test_a_list_append_is_not_a_redis_command_while_a_constructed_client_call_st
     assert program.commands(program.reach(("scripts.shelf:drain",))) == {}
 
 
+KINDS = """
+import os
+
+from redis import Redis
+
+import scripts.made
+from scripts.made import connect
+
+
+def annotated(redis: "Redis | None", *rows, **opts):
+    redis.ping()
+    rows.append(1)
+
+
+def plain(items: list):
+    items.append(1)
+
+
+def other():
+    b = connect()
+    b.ping()
+
+
+def builtin():
+    b = list()
+    b.append(1)
+
+
+def external():
+    b = os.getcwd()
+    b.append(1)
+
+
+def nested_external():
+    import os as oo
+
+    b = oo.getcwd()
+    b.append(1)
+
+
+def nested_factory():
+    from scripts.made import connect as mk
+
+    mk().expire("k", 1)
+
+
+def unresolved(holder):
+    get_redis = holder.redis
+    redis = get_redis()
+    redis.pttl("k")
+
+
+def parameter(b):
+    alias = b
+    alias.append(1)
+
+
+def unpacked(rows):
+    a, b = connect(), []
+    a.rpush("l", "v")
+    b.append("x")
+    for b, c in rows:
+        b.append(1)
+    (d, (b, e)) = (connect(), ([], 1))
+    d.lpop("l")
+    first, second = scripts.made.pair()
+
+
+def bound():
+    with connect() as w:
+        w.get("k")
+    n: Redis = connect()
+    n.lrange("l", 0, 1)
+    if m := connect():
+        m.llen("l")
+
+
+def boolop(flag, redis):
+    client = flag or connect()
+    client.hget("k", "f")
+    made = connect()
+    local = flag and made
+    local.hlen("k")
+    (flag or redis).hkeys("k")
+
+
+def ifexp(flag, redis):
+    made = connect()
+    (made if flag else None).sadd("s", "m")
+    (redis if flag else None).sismember("s", "m")
+    (connect() if flag else None).srem("s", "m")
+    (None if flag else made).zscore("z", "m")
+    (None if flag else redis).scard("s")
+    (None if flag else connect()).smembers("s")
+
+
+def piped():
+    made = connect()
+    batch = made.pipeline()
+    batch.incr("n")
+    made.pipeline().sadd("s", "m").lpush("l", "v").execute()
+
+
+def via_unique(holder):
+    holder.only_once().ttl("k")
+    holder.once_method().exists("k")
+
+
+def dotted():
+    scripts.made.build().strlen("k")
+
+
+def attributes(h):
+    h.conn_x.lindex("l", 0)
+    h.alias_x.lset("l", 0, "v")
+    h.rows_x.append(1)
+
+
+def keywords(kwclient, kwalias):
+    kwclient.hsetnx("h", "f", "v")
+    kwalias.hmget("h", "f")
+
+
+def rebinding():
+    c = connect()
+    c.zrem("z", "m")
+    c = None
+"""
+MADE = """
+import os
+
+import redis
+from redis import Redis
+
+
+def connect():
+    return Redis()
+
+
+def build():
+    return Redis()
+
+
+def only_once():
+    return Redis()
+
+
+def pair():
+    return Redis(), []
+
+
+def url():
+    r2 = redis.from_url("redis://")
+    r2.decrby("n", 1)
+
+
+def wire_up(thing):
+    made = connect()
+    thing(kwclient=connect(), kwalias=made)
+
+
+class Box:
+    def make(self):
+        return Redis()
+
+    def build(self):
+        return None
+
+    def once_method(self):
+        return Redis()
+
+    def use(self):
+        self.make().hincrby("h", "f", 1)
+
+    def listing(self):
+        b = os.getcwd()
+        b.append(1)
+
+
+class Holder:
+    def __init__(self):
+        made = connect()
+        self.conn_x = connect()
+        self.alias_x = made
+        self.rows_x = []
+"""
+TYPED = {
+    "scripts/__init__.py": "",
+    "scripts/aa.py": "from scripts.zz import late\n\n\ndef outer():\n    return late()\n\n\ndef chained():\n    outer().zcard('z')\n",
+    "scripts/kinds.py": KINDS,
+    "scripts/made.py": MADE,
+    "scripts/zz.py": "from redis import Redis\n\n\ndef late():\n    return Redis()\n\n\nclass Other:\n    def make(self):\n        return None\n",
+}
+
+
+@pytest.fixture(scope="module")
+def typed(tmp_path_factory):
+    root = tmp_path_factory.mktemp("typed")
+    for name, text in TYPED.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text)
+    return code_reach.Program(code_reach.parse(root))
+
+
+@pytest.mark.parametrize(
+    ("unit", "commands"),
+    [
+        ("scripts.kinds:annotated", {"PING"}),
+        ("scripts.kinds:plain", set()),
+        ("scripts.kinds:other", {"PING"}),
+        ("scripts.kinds:builtin", set()),
+        ("scripts.kinds:external", set()),
+        ("scripts.kinds:nested_external", set()),
+        ("scripts.kinds:nested_factory", {"EXPIRE"}),
+        ("scripts.kinds:unresolved", {"PTTL"}),
+        ("scripts.kinds:parameter", set()),
+        ("scripts.kinds:unpacked", {"RPUSH", "LPOP"}),
+        ("scripts.kinds:bound", {"GET", "LRANGE", "LLEN"}),
+        ("scripts.kinds:boolop", {"HGET", "HLEN", "HKEYS"}),
+        ("scripts.kinds:ifexp", {"SADD", "SISMEMBER", "SREM", "ZSCORE", "SCARD", "SMEMBERS"}),
+        ("scripts.kinds:piped", {"INCRBY", "SADD", "LPUSH", "MULTI", "EXEC"}),
+        ("scripts.kinds:via_unique", {"TTL", "EXISTS"}),
+        ("scripts.kinds:dotted", {"STRLEN"}),
+        ("scripts.kinds:attributes", {"LINDEX", "LSET"}),
+        ("scripts.kinds:keywords", {"HSETNX", "HMGET"}),
+        ("scripts.kinds:rebinding", {"ZREM"}),
+        ("scripts.made:url", {"DECRBY"}),
+        ("scripts.made:Box.use", {"HINCRBY"}),
+        ("scripts.made:Box.listing", set()),
+        ("scripts.aa:chained", {"ZCARD"}),
+    ],
+)
+def test_a_receiver_is_a_client_only_when_its_type_traces_to_a_redis_constructor(typed, unit, commands):
+    assert set(typed.commands([unit])) == commands
+
+
 def test_an_entry_point_missing_from_the_code_is_refused(program):
     with pytest.raises(KeyError, match="no function scripts.app:gone, scripts.app:lost under scripts, hooks"):
         program.reach(("scripts.app:main", "scripts.app:gone", "scripts.app:lost"))
