@@ -66,7 +66,7 @@ def is_copilot_type(value: object) -> bool:
     return isinstance(value, str) and value.startswith(_COPILOT_TYPE_PREFIXES)
 
 
-def _is_inbox_delivery(entry: dict) -> bool:
+def is_inbox_delivery(entry: dict) -> bool:
     origin = entry.get("origin")
     return isinstance(origin, dict) and origin.get("kind") == "channel" and origin.get("server") == "inbox"
 
@@ -79,7 +79,7 @@ def decode_claude(entry: dict, state: TurnState) -> Iterator[TranscriptRecord]:
     kind = "assistant_text" if etype == "assistant" else "user_text"
     # isMeta user entries are harness-injected (reminders, caveats, skill
     # bodies); an inbox channel delivery is isMeta too but stays a prompt.
-    if kind == "user_text" and entry.get("isMeta") and not _is_inbox_delivery(entry):
+    if kind == "user_text" and entry.get("isMeta") and not is_inbox_delivery(entry):
         kind = "system_text"
     if isinstance(message, str):
         yield {"kind": kind, "text": message, "raw": entry}

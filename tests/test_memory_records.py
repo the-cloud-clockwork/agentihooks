@@ -169,7 +169,7 @@ def test_inbox_channel_delivery_stays_a_prompt():
     assert [r["kind"] for r in normalize_entries("claude", [other])] == ["system_text"]
 
 
-def test_records_match_the_prior_reader_golden():
+def test_codex_rollout_golden_records():
     recs = list(iter_transcript_records(SAMPLES["codex"]))
     assert [(r["kind"], r.get("text", r.get("tool_use_id"))) for r in recs] == [
         ("meta", None),
