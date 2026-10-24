@@ -1,0 +1,6 @@
+{
+  "scripts/hive/orders.py:scripts.hive.orders.x_resolved_master_login__mutmut_5:8e90dd7119b3ce9c704d5698775ae70c2fa5be648839ec2051c2a5f70d3dc9c6": {
+    "reader": "Standards",
+    "reason": "Absent validation is empty dict or None. With truthy account the empty dict lookup cannot match it and None fails the dict check; with falsy account both short circuit. Both return false with no output difference."
+  }
+}

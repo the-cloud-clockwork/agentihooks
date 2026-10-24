@@ -57,6 +57,15 @@ def _login(target, account=MASTER_ACCOUNT, grant=GRANT):
     (target / login.CONFIG).write_text(json.dumps({**config, login.ACCOUNT: account}))
 
 
+class _BoundedArguments(list):
+    reads = 0
+
+    def __getitem__(self, index):
+        self.reads += 1
+        assert self.reads <= 10 * max(len(self), 1), "argument parsing must terminate"
+        return super().__getitem__(index)
+
+
 def test_the_login_is_on_only_for_a_claude_front_door_master_with_the_setting_on(monkeypatch):
     monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
     assert login.enabled("rig", "master@rig", "master", "claude") is True
@@ -598,7 +607,9 @@ def test_launch_execs_native_claude_in_the_private_home_with_the_session_setting
     ah, rendered, tmp_path, monkeypatch, capsys
 ):
     from scripts import install
+    from scripts.routing import native_login
 
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
     _seed(rendered)
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     monkeypatch.chdir(tmp_path)
@@ -627,12 +638,15 @@ def test_launch_turns_a_refusal_into_a_routing_error(ah, rendered, tmp_path, mon
     from scripts.claude_quota_balancer import RoutingError
 
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    (rendered / "settings.json").write_text('{"apiKeyHelper":"unsafe"}')
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(RoutingError, match="^no master claude ai login: run"):
+    with pytest.raises(RoutingError, match="sets apiKeyHelper$"):
         login.launch_claude("/opt/claude", [], _environ(rendered), "")
 
 
 def test_the_claude_launcher_hands_the_master_login_route_to_this_module(tmp_path, monkeypatch):
+    import fcntl
+
     from scripts import install
 
     seen = []
@@ -640,7 +654,13 @@ def test_the_claude_launcher_hands_the_master_login_route_to_this_module(tmp_pat
     monkeypatch.setattr("scripts.deps_preflight.ensure", lambda: None)
     monkeypatch.setattr("scripts.claude_quota_balancer._cache_path", lambda _: tmp_path / "quota.json")
     monkeypatch.setattr(install.shutil, "which", lambda name: f"/opt/{name}")
-    monkeypatch.setattr(login, "launch_claude", lambda *args: seen.append(args))
+
+    def launch(*args):
+        with (tmp_path / "claude-route.lock").open("a+") as waiting:
+            fcntl.flock(waiting, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        seen.append(args)
+
+    monkeypatch.setattr(login, "launch_claude", launch)
     install.cmd_claude(["--route", "master-login", "--agentihooks-report", str(tmp_path / "r"), "--version"])
     assert seen == [("/opt/claude", ["--version"], install.os.environ, str(tmp_path / "r"))]
 
@@ -664,7 +684,9 @@ def test_the_stop_hook_checkpoints_the_master_login_and_logs_a_failure(monkeypat
 
 def test_a_worker_token_master_launch_holds_its_workers_at_the_one_master_ceiling(ah, rendered, tmp_path, monkeypatch):
     from scripts.claude_quota_balancer import ClaudeTokenSource, ProbeResult, QuotaWindow
+    from scripts.routing import native_login
 
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
     _seed(rendered)
     store = _store(tmp_path)
     monkeypatch.setattr(login, "routing_store", lambda environ: store)
@@ -768,12 +790,398 @@ def test_a_slot_takeover_records_the_login_time(tmp_path, monkeypatch):
     assert (written[-1]["value"], written[-1]["actor"], written[-1]["at"]) == ("masteratexample_com", "m", 1234.5)
 
 
-@pytest.mark.parametrize(
-    ("logins", "expected"), [({1: "operator"}, ""), ({1: ""}, login.NO_LOGIN), ({}, login.NO_LOGIN)]
-)
+@pytest.mark.parametrize(("logins", "expected"), [({1: "operator"}, ""), ({1: ""}, ""), ({}, "")])
 def test_unusable_names_why_a_hive_cannot_run_the_master_login(monkeypatch, logins, expected):
     monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
     monkeypatch.setattr(login, "logins", lambda: logins)
     assert login.unusable() == expected
     monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", "True")
     assert login.unusable() == login.OFF
+
+
+@pytest.mark.parametrize(
+    "valid,outcome", [(True, "failure"), (False, "success"), (False, "captcha"), (False, "failure")]
+)
+def test_launch_preparation_checks_live_login_then_waits_for_browser(
+    ah, rendered, tmp_path, monkeypatch, valid, outcome
+):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+    from scripts.swarm import operator_email
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    calls = []
+
+    def check(environ, account):
+        calls.append("current")
+        assert account == "masteratexample_com"
+        assert environ["CLAUDE_CONFIG_DIR"] == str(login.home())
+        if not valid and calls.count("current") == 1:
+            raise native_login.LoginError(native_login.EXPIRED)
+        return dict(native_login.PROOF)
+
+    def browser(environ, target):
+        calls.append("browser")
+        assert environ == _environ(rendered)
+        assert target == login.home()
+        return outcome
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", browser, raising=False)
+    monkeypatch.setattr(operator_email, "send", lambda *_: pytest.fail("login must not send email"))
+    prepared = login.prepare_launch(_environ(rendered), tmp_path)
+    if valid or outcome == "success":
+        assert prepared == (login.home(), "masteratexample_com")
+        assert calls == (["current"] if valid else ["current", "browser", "current"])
+    else:
+        assert prepared is None
+        assert calls == ["current", "browser"]
+        assert login.holders(login.root()) == {}
+
+
+def test_browser_preparation_skips_a_slot_held_by_another_process(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    login.root(1).mkdir(parents=True)
+    login._write(login.root(1) / login.OWNER, {"epoch": 4, "holders": {"other": os.getppid()}})
+    observed = []
+
+    def browser(environ, target):
+        observed.append(target)
+        _login(target)
+        return "success"
+
+    monkeypatch.setattr(chain, "authorize", browser, raising=False)
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(2), "masteratexample_com")
+    assert observed == [login.home(2)]
+    assert login.holders(login.root(1)) == {"other": os.getppid()}
+    assert login.holders(login.root(2)) == {"master@a-1": os.getpid()}
+
+
+def test_prepare_launch_keeps_incompatible_settings_out_of_every_fallback(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+
+    (rendered / "settings.json").write_text('{"apiKeyHelper":"unsafe"}')
+    monkeypatch.setattr(
+        chain, "authorize", lambda *_: pytest.fail("settings refusal must precede browser"), raising=False
+    )
+    with pytest.raises(login.LoginRefused, match="sets apiKeyHelper$"):
+        login.prepare_launch(_environ(rendered), tmp_path)
+    assert not login.root().exists()
+
+
+def test_browser_home_refuses_when_all_slots_are_occupied(ah, rendered):
+    for number in login.numbers():
+        login.root(number).mkdir(parents=True)
+        login._write(login.root(number) / login.OWNER, {"holders": {"other": os.getppid()}})
+    with pytest.raises(login.LoginRefused, match="^all 5 master login slots hold a login"):
+        login.browser_home(_environ(rendered))
+    assert all(login.holders(login.root(number)) == {"other": os.getppid()} for number in login.numbers())
+
+
+def test_release_keeps_other_holders_and_the_owner_epoch(ah, rendered):
+    login.root().mkdir(parents=True)
+    login._write(
+        login.root() / login.OWNER,
+        {"epoch": 7, "alone": "master@a-1", "holders": {"master@a-1": os.getpid(), "other": os.getppid()}},
+    )
+    login.release(login.home(), _environ(rendered))
+    assert json.loads((login.root() / login.OWNER).read_text()) == {"epoch": 7, "holders": {"other": os.getppid()}}
+
+
+def test_release_never_drops_a_successor_with_the_same_name(ah, rendered):
+    login.root().mkdir(parents=True)
+    login._write(
+        login.root() / login.OWNER, {"epoch": 8, "alone": "master@a-1", "holders": {"master@a-1": os.getppid()}}
+    )
+    login.release(login.home(), _environ(rendered))
+    assert json.loads((login.root() / login.OWNER).read_text()) == {
+        "epoch": 8,
+        "alone": "master@a-1",
+        "holders": {"master@a-1": os.getppid()},
+    }
+
+
+def test_prepare_launch_falls_back_without_touching_fully_held_logins(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts import master_logins
+
+    monkeypatch.setattr(master_logins, "left", lambda *_: 100.0)
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    for number in login.numbers():
+        target = login.build(rendered) if number == login.slot() else login._rebuild(login.root(number), rendered)
+        _login(target)
+        login._write(
+            login.root(number) / login.OWNER, {"epoch": 3, "alone": "other", "holders": {"other": os.getppid()}}
+        )
+    monkeypatch.setattr(chain, "authorize", lambda *_: pytest.fail("there is no free browser slot"), raising=False)
+    assert login.prepare_launch(_environ(rendered), tmp_path) is None
+    assert all(login.holders(login.root(number)) == {"other": os.getppid()} for number in login.numbers())
+
+
+def test_browser_home_preserves_an_existing_unheld_grant(ah, rendered):
+    _seed(rendered)
+    assert login.browser_home(_environ(rendered)) == login.home(2)
+    assert login.login_account(1) == "masteratexample_com"
+    held = json.loads((login.root(2) / login.OWNER).read_text())
+    assert held == {"epoch": 1, "alone": "master@a-1", "holders": {"master@a-1": os.getpid()}}
+
+
+@pytest.mark.parametrize("outcome", ["captcha", "failure"])
+def test_master_launch_uses_subscription_fallback_without_remote_control(
+    ah, rendered, tmp_path, monkeypatch, outcome, capsys
+):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer as router
+    from scripts import master_login_chain as chain
+    from scripts.hive import account_slots
+    from scripts.routing import native_login
+
+    _seed(rendered)
+    (rendered / "settings.json").write_text('{"forceLoginMethod":"claudeai","hooks":{"Stop":[]}}')
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.chdir(tmp_path)
+    selections, executed = [], []
+    from unittest.mock import Mock
+
+    printed = Mock(wraps=print)
+    monkeypatch.setattr("builtins.print", printed)
+
+    def invalid(*_):
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    env = _environ(rendered, ANTHROPIC_API_KEY="api")
+
+    def select(environ, **options):
+        assert environ is env
+        selections.append(options)
+        return router.RouteDecision(router.Credential("AH_CC_TOKEN_workeratexample_com", "routed"), None, "cache")
+
+    monkeypatch.setattr(native_login, "check", invalid)
+    monkeypatch.setattr(chain, "authorize", lambda *_: outcome)
+    monkeypatch.setattr(router, "select_credential", select)
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+
+    def admit(harness, account, environ, launch):
+        assert (harness, account) == ("claude", "workeratexample_com")
+        return launch(environ)
+
+    monkeypatch.setattr(account_slots, "execute", admit)
+    monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, environ: executed.append((binary, argv, environ)))
+    report = tmp_path / "route"
+    args = _BoundedArguments(
+        ["--remote-control", "master proof", "--remote-control-session-name-prefix", "proof", "--model", "opus"]
+    )
+    login.launch_claude("/opt/claude", args, env, str(report))
+    assert capsys.readouterr().out == "[agenti] account=workeratexample_com route=token-fallback remote-control=off\n"
+    printed.assert_called_once_with(
+        "[agenti] account=workeratexample_com route=token-fallback remote-control=off", flush=True
+    )
+    assert selections[0]["claude_bin"] == "/opt/claude"
+    assert selections[0]["exclude"] == (router.API_ACCOUNT,)
+    assert selections[0]["sessions"] == {}
+    binary, argv, environ = executed[0]
+    assert binary == "/opt/claude"
+    assert "--remote-control" not in argv and "--remote-control-session-name-prefix" not in argv
+    assert argv == ["/opt/claude", "--dangerously-skip-permissions", "--model", "opus"]
+    assert environ["CLAUDE_CODE_OAUTH_TOKEN"] == "routed"
+    assert "ANTHROPIC_API_KEY" not in environ
+    target = Path(environ["CLAUDE_CONFIG_DIR"])
+    assert target != rendered and target != login.home()
+    assert environ["CLAUDE_SECURESTORAGE_CONFIG_DIR"] == str(target)
+    assert json.loads((target / "settings.json").read_text()) == {"hooks": {"Stop": []}}
+    assert not (target / login.CREDENTIALS).exists()
+    assert json.loads((target.parent / "login-notifications.jsonl").read_text()) == {
+        "step": "token",
+        "outcome": "routed",
+        "transport": "none",
+    }
+    assert login.holders(login.root()) == {}
+    assert dict(line.split("=", 1) for line in report.read_text().splitlines()) == {
+        "status": "routed",
+        "account": "workeratexample_com",
+        "placement": "fallback",
+        "remote_control": "off",
+    }
+
+
+def test_native_master_launch_checks_the_session_before_exec(ah, rendered, tmp_path, monkeypatch):
+    from scripts.hive import account_slots
+    from scripts.routing import native_login
+
+    _seed(rendered)
+    checked = []
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.setattr(native_login, "check", lambda environ, account: checked.append(account))
+    monkeypatch.setattr(account_slots, "execute", lambda harness, account, environ, launch: launch(environ))
+    monkeypatch.setattr(login.os, "execvpe", lambda *_: None)
+    monkeypatch.chdir(tmp_path)
+    login.launch_claude("/opt/claude", ["--model", "opus"], _environ(rendered), "")
+    assert checked == ["masteratexample_com"]
+
+
+def test_browser_success_rechecks_the_same_claimed_slot(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts import master_logins
+    from scripts.routing import native_login
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.setattr(master_logins, "left", lambda *_: 100.0)
+    checked = []
+
+    def check(environ, account):
+        checked.append(environ["CLAUDE_CONFIG_DIR"])
+        if len(checked) == 1:
+            raise native_login.LoginError(native_login.EXPIRED)
+        return dict(native_login.PROOF)
+
+    def browser(environ, target):
+        other = login._rebuild(login.root(2), rendered)
+        _login(other)
+        monkeypatch.setenv(login.SLOT_ENV, "2")
+        return "success"
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", browser)
+    assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(1), "masteratexample_com")
+    assert checked == [str(login.home(1)), str(login.home(1))]
+    assert login.holders(login.root(1)) == {"master@a-1": os.getpid()}
+    assert login.holders(login.root(2)) == {}
+
+
+def test_incomplete_account_metadata_renews_the_already_claimed_slot(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    _seed(rendered)
+    login._write(login.home(1) / login.CONFIG, {})
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    seen = []
+
+    def browser(environ, target):
+        seen.append(target)
+        _login(target)
+        return "success"
+
+    monkeypatch.setattr(chain, "authorize", browser)
+    assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(1), "masteratexample_com")
+    assert seen == [login.home(1)]
+    assert login.holders(login.root(1)) == {"master@a-1": os.getpid()}
+    assert login.holders(login.root(2)) == {}
+
+
+def test_browser_renewal_keeps_the_slot_epoch_report_and_audit(ah, rendered, tmp_path, monkeypatch):
+    from unittest.mock import Mock, call
+
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    monkeypatch.setenv(login.SLOT_ENV, "2")
+    _seed(rendered)
+    target = login.home(2)
+    report = tmp_path / "binding.json"
+    env = _environ(rendered, **{binding.REPORT: str(report)})
+    bao = object()
+    from_env = Mock(return_value=bao)
+    keep = Mock()
+    rehome = Mock()
+    checked_account = Mock(wraps=login.account)
+    monkeypatch.setattr(openbao_kv, "from_env", from_env)
+    monkeypatch.setattr(login, "stored", lambda *_: {})
+    monkeypatch.setattr(login, "keep", keep)
+    monkeypatch.setattr(login, "account", checked_account)
+    monkeypatch.setattr(binding, "rehome", rehome)
+    checks = []
+
+    def check(child, account):
+        checks.append((child["CLAUDE_CONFIG_DIR"], account))
+        if len(checks) == 1:
+            raise native_login.LoginError(native_login.EXPIRED)
+
+    def browser(environ, found):
+        assert environ is env and found == target
+        monkeypatch.setenv(login.SLOT_ENV, "1")
+        return "success"
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", browser)
+    assert login.prepare_launch(env, tmp_path) == (target, "masteratexample_com")
+    assert checks == [(str(target), "masteratexample_com")] * 2
+    assert from_env.call_args_list == [call(env), call(env)]
+    assert checked_account.call_args_list == [call(target, env, number=2)] * 2
+    assert keep.call_args_list == [call(bao, target, 1, 2)] * 2
+    assert rehome.call_args_list == [call(report, target, shared=False), call(report, target)]
+    assert [json.loads(line) for line in (target.parent / "login-notifications.jsonl").read_text().splitlines()] == [
+        {"step": "current", "outcome": "unavailable", "transport": "none"},
+        {"step": "current", "outcome": "success", "transport": "none"},
+    ]
+
+
+def test_claimed_home_finds_only_this_process_in_a_non_default_slot(ah, rendered):
+    name = _environ(rendered)["AGENTIHOOKS_AGENT_NAME"]
+    for number, pid in [(1, os.getppid()), (2, os.getpid())]:
+        login.root(number).mkdir(parents=True)
+        login._write(login.root(number) / login.OWNER, {"holders": {name: pid}})
+    assert login.claimed_home(_environ(rendered)) == login.home(2)
+
+
+def test_browser_home_reclaims_a_dead_holder(ah, rendered):
+    login.root().mkdir(parents=True)
+    login._write(login.root() / login.OWNER, {"holders": {"dead": 999999999}})
+    assert login.browser_home(_environ(rendered)) == login.home()
+    assert login.holders(login.root()) == {"master@a-1": os.getpid()}
+
+
+@pytest.mark.parametrize(
+    "args,expected",
+    [
+        (["--model", "opus"], ["--model", "opus"]),
+        (["--remote-control=x=y", "--model", "opus"], ["--model", "opus"]),
+        (["--remote-control", "proof", "--model", "opus"], ["--model", "opus"]),
+        (["--remote-control"], []),
+        (["--remote-control", "--model", "opus"], ["--model", "opus"]),
+        (["--remote-control-session-name-prefix=x", "prompt"], ["prompt"]),
+    ],
+)
+def test_token_arguments_remove_only_remote_control(args, expected):
+    assert login._token_args(_BoundedArguments(args)) == expected
+
+
+def test_token_home_without_forced_login_rehomes_the_profile(ah, rendered, tmp_path, monkeypatch):
+    from unittest.mock import Mock, call
+
+    (rendered / "settings.json").write_text('{"hooks":{"Stop":[]}}')
+    report = tmp_path / "binding.json"
+    rehome = Mock()
+    monkeypatch.setattr(binding, "rehome", rehome)
+    target = login.token_home(_environ(rendered, **{binding.REPORT: str(report)}))
+    assert target == ah / "master-token" / "masterata_1" / "claude"
+    assert json.loads((target / "settings.json").read_text()) == {"hooks": {"Stop": []}}
+    assert rehome.call_args_list == [call(report, target)]
+
+
+def test_token_routing_lock_uses_the_shared_lock_in_a_new_parent(ah, tmp_path, monkeypatch):
+    import fcntl
+
+    from scripts import claude_quota_balancer as router
+
+    cache = tmp_path / "new" / "nested" / "quota.json"
+    monkeypatch.setattr(router, "_cache_path", lambda environ: cache)
+    with login._token_lock({}) as held:
+        assert Path(held.name) == cache.with_name("claude-route.lock")
+        with cache.with_name("claude-route.lock").open() as contender:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_token_home_creates_settings_when_rendered_settings_are_absent(ah, rendered):
+    (rendered / "settings.json").unlink()
+    target = login.token_home(_environ(rendered))
+    assert json.loads((target / "settings.json").read_text()) == {}

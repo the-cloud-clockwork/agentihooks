@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_relay.py:scripts.swarm_ledger.ledger_relay.x_verified__mutmut_13:5287623d5130379af6c74b5c03f0f7fbeeb092c7d2b93ddc79b2605cdf9003bf": {
+    "reader": "standards_reader",
+    "reason": "Changes only the fallback when no recorded words match. The early return guarantees at least three quote tokens, so the search pattern always needs whitespace between words; XXXX holds none, the search cannot match, and the function returns an empty string either way with no side effects."
+  }
+}

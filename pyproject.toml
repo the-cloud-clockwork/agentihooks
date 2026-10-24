@@ -94,6 +94,7 @@ dev = [
     "pytest-random-order>=1.2",
     "pytest-reportlog>=1.0",
     "pytest-rerunfailures>=16.7",
+    "pytest-timeout>=2.4",
     "detect-test-pollution==1.2.0",
     "uv>=0.5",
 ]
@@ -118,6 +119,7 @@ include = ["hooks*", "scripts*", "profiles*"]
 "scripts" = ["packaging/**/*.template"]
 "scripts.swarm_v2.worker" = ["*.sh"]
 "scripts.host_guard" = ["*.sh", "*.json"]
+"scripts.evidence" = ["*.json"]
 "scripts.swarm" = ["stack/*.yaml", "stack/deploy/compose/*.yaml", "stack/deploy/compose/redis/*"]
 "scripts.swarm_ledger" = ["*.html", "*.css", "*.js", "static/**/*.js", "static/**/*.css"]
 # Ship every native config and Markdown artifact under profiles/ — personas,

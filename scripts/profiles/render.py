@@ -16,6 +16,7 @@ from pathlib import Path
 from hooks.context import profile_chain, quarantine
 from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding, browser, bundle_copy, connectors, homes, plugins, sources
+from scripts.swarm import brain_binding
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_hook_trust import trusted_state
@@ -147,6 +148,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         "overlays": _overlays(dirs),
         "mcp_urls": json.loads(os.environ.get("AGENTIHOOKS_MCP_URLS", "{}")),
         "mcp_bearer_env": json.loads(os.environ.get("AGENTIHOOKS_MCP_BEARER_ENV", "{}")),
+        "swarm_brain": brain_binding.current(os.environ),
         "enabled_plugins": _plugins(chain, _settings("claude", bundle, dirs).get("enabledPlugins") or {}),
         **({"browser": browser.spec()} if browser.proxy_enabled(chain) else {}),
         "corrections": quarantine.digest(),
@@ -269,7 +271,7 @@ def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]])
         else server
         for name, server in servers.items()
     }
-    return browser.configure(servers, [name for name, _ in dirs])
+    return brain_binding.apply(browser.configure(servers, [name for name, _ in dirs]), os.environ)
 
 
 def _seed(src: Path) -> dict:

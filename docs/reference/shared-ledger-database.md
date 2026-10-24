@@ -174,9 +174,12 @@ through a pull request. No environment variable overrides them. The only setting
 
 The `Writer lock` workflow (`writer-lock.yml`) runs `tests/swarm_ledger/test_postgres_writer_lock.py` against a
 Postgres 16 service container. One connection takes the writer lock and stays idle while a second writer waits; the
-test passes when the second writer commits within 30 seconds and the holder's backend is gone. The Tests workflow
-calls it on pushes to `dev` and on manual dispatch, and its step fails unless all ten writer lock, outbox and writer
-floor scenarios ran. Unit tests in `tests/swarm_ledger/test_postgres.py` pin the connection settings and the
+test passes when the second writer commits within 30 seconds and the holder's backend is gone.
+`tests/swarm_ledger/test_postgres_repository.py` runs the translated statements against the same service: every
+hierarchy read must match the SQLite repository, and an imported ledger, a write with its events and the relay
+journal must round trip. The Tests workflow calls it on every pull request push, on pushes to `dev` and on manual
+dispatch, `Gate — Required` needs it on pull requests, and its step fails unless all fourteen writer lock, outbox,
+writer floor and repository scenarios ran. Unit tests in `tests/swarm_ledger/test_postgres.py` pin the connection settings and the
 three-wait retry.
 
 Delivery evidence for pull request

@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import time
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -23,7 +24,18 @@ CREATE TABLE IF NOT EXISTS records (
 );
 CREATE INDEX IF NOT EXISTS records_source_ref ON records(source, ref);
 CREATE VIRTUAL TABLE IF NOT EXISTS recall_fts USING fts5(title, text, tokenize="unicode61 tokenchars '-_'");
+CREATE TABLE IF NOT EXISTS indexed (source TEXT PRIMARY KEY, at INTEGER NOT NULL);
 """
+
+
+@dataclass(frozen=True)
+class SourceCount:
+    source: str
+    swarm_slug: str
+    records: int
+    items: int
+    archived: int
+    indexed_at: int
 
 
 @dataclass(frozen=True)
@@ -56,8 +68,11 @@ def content_hash(record: RecallRecord) -> str:
 
 
 class SQLiteRecallStore:
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str, *, read_only: bool = False):
         self.path = Path(path)
+        self.read_only = read_only
+        if read_only:
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
@@ -65,7 +80,8 @@ class SQLiteRecallStore:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        target = f"{self.path.resolve().as_uri()}?mode=ro" if self.read_only else self.path
+        connection = sqlite3.connect(target, timeout=30, isolation_level=None, uri=self.read_only)
         try:
             yield connection
         finally:
@@ -123,7 +139,12 @@ class SQLiteRecallStore:
                 elif state == "present":
                     connection.execute("UPDATE records SET source_state = 'archived' WHERE id = ?", (rowid,))
                     counts["archived"] += 1
+            if counts["written"] or counts["archived"] or counts["removed"] or not self._indexed(connection, source):
+                self._mark(connection, source)
         return SyncCounts(**counts)
+
+    def _indexed(self, connection: sqlite3.Connection, source: str) -> bool:
+        return connection.execute("SELECT 1 FROM indexed WHERE source = ?", (source,)).fetchone() is not None
 
     def _remove(self, connection: sqlite3.Connection, source: str, refs: Iterable[str]) -> int:
         removed = 0
@@ -139,7 +160,32 @@ class SQLiteRecallStore:
 
     def remove(self, source: str, refs: Iterable[str]) -> int:
         with self._write() as connection:
-            return self._remove(connection, source, refs)
+            removed = self._remove(connection, source, refs)
+            if removed:
+                self._mark(connection, source)
+            return removed
+
+    def _mark(self, connection: sqlite3.Connection, source: str) -> None:
+        connection.execute(
+            "INSERT INTO indexed (source, at) VALUES (?, ?) ON CONFLICT(source) DO UPDATE SET at = excluded.at",
+            (source, int(time.time() * 1000)),
+        )
+
+    def sources(self) -> list[SourceCount]:
+        with self.connect() as connection:
+            tables = {name for (name,) in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            indexed = dict(connection.execute("SELECT source, at FROM indexed")) if "indexed" in tables else {}
+            counts = {
+                source: rest
+                for source, *rest in connection.execute(
+                    "SELECT source, max(swarm_slug), count(*), sum(chunk_index = 0),"
+                    " sum(chunk_index = 0 AND source_state = 'archived') FROM records GROUP BY source"
+                )
+            }
+        return [
+            SourceCount(source, *counts.get(source, ("", 0, 0, 0)), indexed.get(source, 0))
+            for source in sorted(indexed.keys() | counts.keys())
+        ]
 
     def match(self, expression: str) -> list[str]:
         with self.connect() as connection:

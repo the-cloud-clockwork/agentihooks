@@ -22,6 +22,7 @@ class Receiver:
     occupant: str = ""
     harness: str = ""
     seat_wait: bool = False
+    task: str = ""
 
 
 def findings(items, now_ms, window_ms, receivers=None):
@@ -60,6 +61,21 @@ def reader(item):
     return next((e.get("by", "") for e in reversed(item["history"]) if e.get("state") in ("delivered", "read")), "")
 
 
+def _task_mismatch(item, receivers):
+    receiver = receivers.get(item["address"], Receiver())
+    task = item.get("task", "")
+    if (
+        item["state"] == "pending"
+        and is_seat(item["address"])
+        and receiver.live
+        and task
+        and receiver.task
+        and task != receiver.task
+    ):
+        return (f"notice task {task}; occupant holds {receiver.task}",)
+    return ()
+
+
 def past_window(items, now_ms, window_ms, receivers=None):
     found, receivers = [], receivers or {}
     for item in items:
@@ -72,7 +88,12 @@ def past_window(items, now_ms, window_ms, receivers=None):
         if not receiver.live and receivers.get(item["address"], Receiver()).seat_wait:
             continue
         minutes = waited // MINUTE_MS
-        category = "unread delivery" if item["state"] == "pending" else "delivered backlog"
+        mismatch = _task_mismatch(item, receivers)
+        category = (
+            "task ownership mismatch"
+            if mismatch
+            else ("unread delivery" if item["state"] == "pending" else "delivered backlog")
+        )
         found.append(
             Finding(
                 "inbox past window",
@@ -84,10 +105,16 @@ def past_window(items, now_ms, window_ms, receivers=None):
                     _recipient(item, receivers),
                     plural(len(_steps(item, WOKEN)), "wake"),
                     plural(sum(len(_steps(item, e)) for e in RAISED), "escalation"),
+                    *mismatch,
                 ),
                 f"open past the {plural(window_ms // 1000, 'second')} retry window",
                 minutes,
-                evidence_identity=(item["state"], len(_steps(item, WOKEN)), sum(len(_steps(item, e)) for e in RAISED)),
+                evidence_identity=(
+                    item["state"],
+                    len(_steps(item, WOKEN)),
+                    sum(len(_steps(item, e)) for e in RAISED),
+                    *mismatch,
+                ),
             )
         )
     return found

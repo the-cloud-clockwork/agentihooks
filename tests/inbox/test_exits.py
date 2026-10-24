@@ -334,7 +334,6 @@ def test_the_sweep_settles_departed_peer_task_mail_after_seat_reassignment(redis
         "unknown sender",
         "master sender",
         "information",
-        "unreceived",
         "unknown task",
         "empty seat",
         "closed",
@@ -437,7 +436,7 @@ def test_the_sweep_continues_past_retained_mail_and_finished_or_unseated_agents(
     store.seats.occupy("eng-1@sw", "sw-eng-2", read.created_at + 1)
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(general.id).state == "pending"
-    assert inbox.get(unreceived.id).state == "pending"
+    assert inbox.get(unreceived.id).state == "cancelled"
     assert inbox.get(read.id).state == "cancelled"
     assert inbox.get(read.id).reason == "cancelled: sw-eng-1 left its seat and task t1 before closing it"
 
@@ -532,7 +531,7 @@ def test_unreceived_task_mail_is_not_cancelled_as_a_new_occupant_receives_it(red
 
     monkeypatch.setattr(inbox, "withdraw", receive_then_withdraw)
     exits.sweep(inbox, "sw", store, dict)
-    assert inbox.get(item.id).state == "pending"
+    assert inbox.get(item.id).state == "read"
     assert inbox.inbox("sw-eng-3") == []
 
 

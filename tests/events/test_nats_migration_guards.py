@@ -139,7 +139,7 @@ def test_work_copy_never_acknowledges_a_conflicting_retained_copy(race):
     work.ack_sync.assert_not_awaited()
 
 
-@pytest.mark.parametrize("case", ["timeout", "foreign", "newer", "valid"])
+@pytest.mark.parametrize("case", ["timeout", "bare timeout", "foreign", "newer", "valid"])
 def test_queue_drain_has_a_finite_budget_and_refuses_source_changes(monkeypatch, case):
     root = backend()
     root._js.stream_info.side_effect = [
@@ -147,7 +147,8 @@ def test_queue_drain_has_a_finite_budget_and_refuses_source_changes(monkeypatch,
         SimpleNamespace(state=SimpleNamespace(last_seq=7, messages=0)),
     ]
     work = message("other" if case == "foreign" else "rig", 8 if case == "newer" else 7)
-    fetch = AsyncMock(side_effect=FetchTimeout() if case == "timeout" else None, return_value=[work])
+    timeouts = {"timeout": FetchTimeout(), "bare timeout": asyncio.TimeoutError()}
+    fetch = AsyncMock(side_effect=timeouts.get(case), return_value=[work])
     source = SimpleNamespace(_stream="source", _consumer=SimpleNamespace(_subscription=SimpleNamespace(fetch=fetch)))
     copied = AsyncMock()
     monkeypatch.setattr(migration, "_copy_work", copied)
@@ -156,11 +157,11 @@ def test_queue_drain_has_a_finite_budget_and_refuses_source_changes(monkeypatch,
         asyncio.run(migration._drain_work(root, source, "target", policy, "rig"))
         copied.assert_awaited_once_with(root, "target", work)
     else:
-        with pytest.raises(RuntimeError if case == "timeout" else ValueError) as caught:
+        with pytest.raises(RuntimeError if case in timeouts else ValueError) as caught:
             asyncio.run(migration._drain_work(root, source, "target", policy, "rig"))
         assert str(caught.value) == (
             "legacy queue still has undelivered work"
-            if case == "timeout"
+            if case in timeouts
             else "legacy queue changed or contains work for another swarm"
         )
         copied.assert_not_awaited()
