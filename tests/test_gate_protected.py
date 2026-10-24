@@ -948,7 +948,9 @@ def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
     if diagnostic:
         step = head["jobs"]["gate-required"]["steps"][0]
         step["run"] = _SELECTION_DIAGNOSTIC + step["run"]
-    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    actors = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _TODAY, actors) == []
 
 
 @pytest.mark.parametrize("diagnostic", [False, True])
