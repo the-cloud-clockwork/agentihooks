@@ -61,7 +61,8 @@ def test_a_hung_worker_fails_before_the_step_timeout(tmp_path, monkeypatch, job)
 
     root = Path(__file__).resolve().parents[1]
     workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
-    command = next(step["run"] for step in workflow["jobs"][job]["steps"] if step.get("name") == "Run tests")
+    step_name = "Run tests" if job == "unit" else "Run the selected tests"
+    command = next(step["run"] for step in workflow["jobs"][job]["steps"] if step.get("name") == step_name)
     options = shlex.split(command)
     assert "--timeout=60" in options
     assert "--timeout-method=thread" in options

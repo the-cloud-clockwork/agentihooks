@@ -54,8 +54,11 @@ def frames(response):
     return stream.parse(lines)
 
 
-def next_of(reader, names):
+def next_of(reader, names, timeout=5):
+    deadline = time.monotonic() + timeout
     for name, data, cursor in reader:
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"stream timed out waiting for {names}")
         if name in names:
             return name, data, cursor
     raise AssertionError(f"stream ended before {names}")
@@ -114,7 +117,9 @@ def test_a_reconnect_replays_the_changes_it_missed_and_nothing_else(live):
     _, snapshot, cursor = next_of(frames(response), {"snapshot"})
     conn.close()
     server.repository.apply_ops(SLUG, ops=[comment(2)])
+    server.repository.drain(5)
     server.repository.apply_ops(SLUG, ops=[comment(3)])
+    server.repository.drain(5)
     conn, response = connect(port, token, cursor)
     assert response.status == 200
     reader = frames(response)
