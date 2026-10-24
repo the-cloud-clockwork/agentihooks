@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_cmd_freeze__mutmut_7:b61bab29ffc6049ce61407fd2ff4ea0445d3257d66d28766dcea3305a2b47186": {
+    "reader": "standards_reader",
+    "reason": "clearance.freezer only returns a name whose lane is dispatch after confirming store.config(slug).autonomy == FULL on that same call; cmd_freeze's own fresh read into full is therefore also True whenever by's lane is dispatch, so not full already makes the guard False before lane_of(by) can matter. holder() never returns a dispatch-lane name for the master or operator branches it serves. No call through cmd_freeze can make lane_of(by) != DISPATCH distinguishable from lane_of(None) != DISPATCH in the guard's outcome."
+  }
+}
