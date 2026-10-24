@@ -108,6 +108,12 @@ def test_cues_the_classifier_rules_content_stay(shipped, judge):
     assert check("judge", _input(CUED)).decision == "allow"
 
 
+def test_a_verdict_word_the_classifier_rules_content_stays_while_cues_go(shipped, judge):
+    judge(rules={BLIND: lambda text: "Finding: passed" not in text})
+    outcome = check("judge", _input("CI passed on the cache test for engineer@323133-0662"))
+    assert outcome.tool_input["evidence"]["items"][0]["claim"] == "CI passed on the cache test for "
+
+
 def test_an_item_ruled_irrelevant_is_dropped_whole(shipped, judge):
     fake = judge(rules={RELEVANCE: lambda text: "weather" in text})
     outcome = check("judge", _input("the cache keeps one entry", "the weather was sunny"))
