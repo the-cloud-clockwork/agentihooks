@@ -504,6 +504,39 @@ def test_only_the_canonical_reuse_protocol_is_an_allowed_transition(weakened):
     assert bool(problems) == weakened, problems
 
 
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {},
+        {"with": {"ref": "untrusted"}},
+        {"with": {"fetch-depth": 1}},
+        {"with": {"filter": "blob:none"}},
+        {"with": {"repository": "untrusted/repository"}},
+        {"env": {"EXTRA": "1"}},
+        {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "999"}},
+        {"env": {"GIT_HTTP_LOW_SPEED_TIME": "61"}},
+    ],
+)
+def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, change):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {"steps": ci_reuse.duration_provenance_steps()}
+    head = copy.deepcopy(base)
+    checkout = head["jobs"]["select"]["steps"][0]
+    if bounded:
+        checkout["env"] = {
+            "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
+            "GIT_HTTP_LOW_SPEED_TIME": "60",
+        }
+    for field, values in change.items():
+        checkout[field] = checkout.get(field, {}) | values
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert bool(problems) == bool(change), problems
+
+
 @pytest.mark.parametrize("weakened", [False, True])
 @pytest.mark.parametrize("anton", [False, True])
 def test_the_protected_grader_admits_only_the_exact_paged_reuse_variant(weakened, anton):
