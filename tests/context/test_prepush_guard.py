@@ -706,12 +706,18 @@ def test_dry_runs_and_diffcheck_pushes_are_never_spaced(repo, command):
 
 
 def test_a_bare_push_reads_the_remote_and_branch_it_pushes_to(repo):
+    _git(repo, "checkout", "-q", "-b", "feature/x")
     _git(repo, "config", "push.default", "current")
+    _pushed(repo, "feature/x", (1000, "update by push"), remote="upstream")
     _git(repo, "config", "remote.pushDefault", "upstream")
-    _git(repo, "update-ref", "refs/remotes/upstream/work", "HEAD")
-    _pushed(repo, "work", (1000, "update by push"), remote="upstream")
-    assert "the last push to work was 10 s ago" in _spacing(repo, "git push", 1010)
+    _git(repo, "update-ref", "refs/remotes/upstream/feature/x", "HEAD")
+    assert "the last push to feature/x was 10 s ago" in _spacing(repo, "git push", 1010)
     assert _spacing(repo, "git push origin", 1010) is None
+
+
+def test_an_option_left_without_its_value_still_spaces_the_push(repo):
+    _pushed(repo, "work", (1000, "update by push"))
+    assert "the last push to work was 10 s ago" in _spacing(repo, "git push origin work -o", 1010)
 
 
 def test_a_worktree_reads_the_push_reflog_of_its_repository(repo, swarm_worktree):

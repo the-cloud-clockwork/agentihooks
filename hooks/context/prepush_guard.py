@@ -2,7 +2,6 @@ import os
 import subprocess
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from pathlib import Path
 
 from hooks.common import log
@@ -161,39 +160,39 @@ def _branches(root: Path, args: list[str]) -> tuple[str, list[str]]:
             next(rest, None)
         elif not arg.startswith("-"):
             words.append(arg)
+    current = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
     if not words:
-        result = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"],
+        pushed = subprocess.run(
+            ["git", "-C", str(root), "for-each-ref", "--format=%(push:short)", f"refs/heads/{current}"],
             capture_output=True,
             text=True,
-        )
-        remote, _, branch = result.stdout.strip().partition("/")
-        if result.returncode == 0 and branch:
+        ).stdout.strip()
+        remote, _, branch = pushed.partition("/")
+        if branch:
             return remote, [branch]
     branches = []
     for spec in words[1:] or ["HEAD"]:
         if _unspaced(spec):
             continue
-        branch = spec.lstrip("+").split(":")[-1].removeprefix("refs/heads/")
-        if branch == "HEAD":
-            result = subprocess.run(
-                ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True
-            )
-            branch = result.stdout.strip()
-        branches.append(branch)
+        branch = spec.removeprefix("+").split(":")[-1].removeprefix("refs/heads/")
+        branches.append(current if branch == "HEAD" else branch)
     return (words[0] if words else "origin"), branches
 
 
 def _last_push(root: Path, remote: str, branch: str) -> float | None:
     common = _common_dir(root)
+    if not common:
+        return None
     named = subprocess.run(["git", "-C", str(root), "remote"], capture_output=True, text=True).stdout.split()
-    log_file = Path(common or "", "logs", "refs", "remotes", remote, branch)
-    if not common or remote not in named or not log_file.is_file():
+    log_file = Path(common, "logs", "refs", "remotes", remote, branch)
+    if remote not in named or not log_file.is_file():
         return None
     stamps = [
-        float(head.rsplit(" ", 2)[1])
-        for head, _, message in (line.partition("\t") for line in log_file.read_text().splitlines())
-        if message.startswith("update by push")
+        float(line.split("\t")[0].split()[-2])
+        for line in log_file.read_text().splitlines()
+        if line.endswith("\tupdate by push")
     ]
     return stamps[-1] if stamps else None
 
@@ -206,7 +205,7 @@ def _crowded(pushes: list[tuple[Path, list[str]]], now: float) -> str | None:
             last = _last_push(root, remote, branch)
             if last is not None and 0 <= now - last < spacing:
                 wait = int(last + spacing - now) + 1
-                after = datetime.fromtimestamp(last + spacing, UTC).strftime("%H:%M:%S")
+                after = time.strftime("%H:%M:%S", time.gmtime(last + spacing))
                 return (
                     f"BLOCKED: the last push to {branch} was {int(now - last)} s ago and its Tests run is still "
                     f"running; pushing now cancels it. Keep committing locally and push {branch} after "
