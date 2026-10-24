@@ -1,6 +1,5 @@
 import json
 
-import fakeredis
 import pytest
 
 from scripts.inbox.store import InboxStore
@@ -16,6 +15,8 @@ WATCHDOG = "master-watchdog"
 
 @pytest.fixture
 def world(monkeypatch, tmp_path):
+    import fakeredis
+
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
     monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
     monkeypatch.delenv(doc_report.ADDRESS_ENV, raising=False)
