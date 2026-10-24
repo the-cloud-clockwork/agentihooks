@@ -3,8 +3,8 @@
   "dependency": "SV2-SES-04",
   "integration_gate": "G4",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/6858",
-  "pull_request": "pending",
-  "tested_commit": "pending",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/6875",
+  "tested_commit": "2e383a033",
   "package_complete": false,
   "evidence_class": "mocked: fixture transcript files in a temporary folder and SQLite catalog and import ledger files stand in for the operator's real Claude and Codex homes and the central database; no live provider home was read",
   "interfaces": [

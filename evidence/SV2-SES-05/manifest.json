@@ -10,5 +10,8 @@
     "tests/fixtures/swarm_v2/session-import.json": "74cf01fbdee514d0c49a3d9db6eb37b261c43dc1717cf1c14fd753d0661901fb"
   },
   "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40131665098",
-  "tested_commit": "pending"
+  "tested_commit": "2e383a033",
+  "green_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40133288836",
+  "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40134971509",
+  "records_note": "each record was printed by the committed evidence assertion failing on absent or stale records in Proofs runs 40132037808, 40132900446 and 40134254754; those runs are not cited as green"
 }
