@@ -70,3 +70,37 @@ def test_an_aggregated_router_counts_hive_sessions_once(monkeypatch):
     monkeypatch.setattr("scripts.hive.registry.hives", lambda redis: (_ for _ in ()).throw(AssertionError))
 
     assert launch._hive_sessions(None, 0) == {}
+
+
+def test_hive_sessions_count_launch_reservations_no_hive_reports_yet(monkeypatch):
+    import fakeredis
+
+    from scripts.hive import registry
+    from scripts.swarm.keyspace import ROOT
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    hives = [{"id": "local", "heartbeat_at": 10}, {"id": "remote", "heartbeat_at": 10}]
+    redis.set(
+        f"{registry.key('local')}:sessions",
+        json.dumps({"claude:room_left": 1, "_executions": {"claude:room_left": ["exe-local"]}}),
+    )
+    redis.set(
+        f"{registry.key('remote')}:sessions",
+        json.dumps({"claude:room_left": 1, "_executions": {"claude:room_left": ["exe-remote"]}}),
+    )
+    rows = {
+        "exe-local": {"slot": "claude:room_left", "state": "live"},
+        "exe-remote": {"slot": "claude:room_left", "state": "live"},
+        "exe-pending": {"slot": "claude:room_left", "state": "reserved"},
+        "exe-second": {"slot": "claude:full_on_hives", "state": "reserved"},
+        "exe-codex": {"slot": "codex:other", "state": "reserved"},
+    }
+    for execution, row in rows.items():
+        redis.set(f"{ROOT}:launch-slot:{execution}", json.dumps(row))
+        redis.sadd(f"{ROOT}:launch-slots", execution)
+    monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
+    monkeypatch.setattr(registry, "hives", lambda r: hives)
+    monkeypatch.setattr(registry, "live", lambda hive, now: True)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
+
+    assert launch._hive_sessions(redis, 0) == {"room-left": 2, "full-on-hives": 1}
