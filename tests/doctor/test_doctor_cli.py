@@ -347,6 +347,16 @@ def test_the_operator_shell_scales_the_doctor_without_a_quote(env, monkeypatch, 
     assert doctor._order(store, WATCHED, "", "start") == ""
 
 
+def test_closing_the_doctor_by_default_tells_the_watched_master_it_is_closed(env, monkeypatch, capsys):
+    store, _, _ = env
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    doctor._close(store, WATCHED, DOCTOR)
+    closed = doctor.CLOSED_NOTICE.format(doctor=DOCTOR)
+    assert [i.text for i in InboxStore(store.redis).pending_items(f"master@{WATCHED}") if i.text == closed] == [closed]
+
+
 def test_start_and_stop_default_to_no_repo_and_no_quote_and_take_whole_number_caps():
     parser = doctor.build_parser()
     start = parser.parse_args([WATCHED, "start", "--max-eng-agents", "2", "--max-ci-agents", "1"])
@@ -369,7 +379,8 @@ def test_the_master_relaying_a_fresh_operator_order_stops_the_doctor_and_records
     typed(ORDER, 60)
     assert doctor.main([WATCHED, "stop", "--quote", ORDER]) == 0, capsys.readouterr().err
     assert state(DOCTOR)["closed_at"] and store.config(DOCTOR).state == "stopped"
-    assert not [i for i in InboxStore(store.redis).pending_items(f"master@{WATCHED}") if "stopped the Doctor" in i.text]
+    closed = doctor.CLOSED_NOTICE.format(doctor=DOCTOR)
+    assert not [i for i in InboxStore(store.redis).pending_items(f"master@{WATCHED}") if i.text == closed]
     assert (
         relays(WATCHED)
         == relays(DOCTOR)
