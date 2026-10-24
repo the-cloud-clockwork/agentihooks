@@ -1,7 +1,7 @@
 import io
 import subprocess
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -13,7 +13,9 @@ def _process(monkeypatch, output):
     spawned = Mock(return_value=process)
     monkeypatch.setattr(native.subprocess, "Popen", spawned)
     monkeypatch.setattr(
-        native.shutil, "which", lambda name: "/native/claude" if name == "claude" else "/windows/powershell.exe"
+        native.shutil,
+        "which",
+        lambda name: {"claude": "/native/claude", "powershell.exe": "/windows/powershell.exe"}.get(name),
     )
     return process, spawned
 
@@ -62,6 +64,7 @@ def test_native_callback_goes_directly_to_stdin_once_without_logs(tmp_path, monk
     with native.start(env, target, stop) as attempt:
         attempt.reader.join(timeout=1)
         assert attempt.process is process
+        assert attempt.reader.daemon is True
         assert attempt.output.read_text() == url
         capture.assert_not_called()
         assert attempt.complete() is True
@@ -78,7 +81,13 @@ def test_native_callback_goes_directly_to_stdin_once_without_logs(tmp_path, monk
     assert options["env"] == {**login.child(env, target), "BROWSER": "true"}
     args, options = capture.call_args
     assert args[0][:4] == ["/windows/powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
-    assert "Get-Clipboard -Raw" in args[0][4] and "Set-Clipboard -Value ''" in args[0][4]
+    assert (
+        args[0][4].casefold()
+        == (
+            "$ErrorActionPreference = 'Stop'; $value = Get-Clipboard -Raw; Set-Clipboard -Value ''; "
+            "if ($value.Length -le 4096) { [Console]::Out.Write($value) }"
+        ).casefold()
+    )
     assert options == {"capture_output": True, "text": True, "timeout": 15}
     assert process.stdin.closed and process.stdout.closed and not attempt.reader.is_alive()
     assert set(tmp_path.iterdir()) == existing
@@ -157,3 +166,26 @@ def test_native_resources_stop_when_the_browser_wait_raises(tmp_path, monkeypatc
             raise RuntimeError("wait ended")
     stop.assert_called_once_with(process)
     assert process.stdin.closed and process.stdout.closed
+
+
+def test_native_output_retains_only_first_url_and_stops_at_eof():
+    url = "https://claude.com/cai/oauth/authorize?state=proof"
+    stream = SimpleNamespace(
+        readline=Mock(side_effect=["private output\n", url + "\n", "", AssertionError("read after eof")])
+    )
+    output = native.AuthorizationOutput(stream)
+    assert output.read_text() == ""
+    output.drain()
+    assert output.read_text() == url
+    assert stream.readline.call_args_list == [call(16384)] * 3
+
+
+@pytest.mark.parametrize("length", [4096, 4097])
+def test_native_callback_accepts_only_the_bounded_single_line(tmp_path, monkeypatch, length):
+    value = "A" * (length - len("#proof")) + "#proof"
+    process, _ = _process(monkeypatch, "https://claude.com/cai/oauth/authorize?state=proof\n")
+    _clipboard(monkeypatch, value)
+    with native.start({}, tmp_path / "claude", Mock()) as attempt:
+        attempt.reader.join(timeout=1)
+        assert attempt.complete() is (length == 4096)
+        assert process.stdin.getvalue() == (value + "\n" if length == 4096 else "")

@@ -67,8 +67,9 @@ def test_pending_browser_never_falls_through_to_a_token():
 
 @pytest.mark.parametrize("outcome", ["success", "captcha", "failure"])
 @pytest.mark.parametrize("origin", ["https://claude.ai/oauth/authorize", "https://claude.com/cai/oauth/authorize"])
+@pytest.mark.parametrize("authorizer", ["", "browser-master@proof"])
 def test_browser_authorization_reports_through_master_inbox_and_ends_native_login(
-    tmp_path, monkeypatch, outcome, origin
+    tmp_path, monkeypatch, outcome, origin, authorizer
 ):
     from scripts.inbox import store
     from scripts.swarm import operator_email
@@ -82,9 +83,12 @@ def test_browser_authorization_reports_through_master_inbox_and_ends_native_logi
         "AH_CC_TOKEN_worker": "test",
         "ANTHROPIC_API_KEY": "test",
     }
+    if authorizer:
+        env["AGENTIHOOKS_MASTER_LOGIN_AUTHORIZER"] = authorizer
+    recipient = authorizer or "master@proof"
     events = []
     request = SimpleNamespace(id="request", state="done", reason="done: replied with message answer")
-    answer = SimpleNamespace(id="answer", ref="request", sender="master@proof", text=outcome)
+    answer = SimpleNamespace(id="answer", ref="request", sender=recipient, text=outcome)
 
     class Inbox:
         def send(self, sender, recipient, text, **kwargs):
@@ -109,9 +113,11 @@ def test_browser_authorization_reports_through_master_inbox_and_ends_native_logi
             assert kwargs["text"] is True
             self.stdin = io.StringIO()
             self.stdout = io.StringIO(f"{origin}?state=proof\n")
-            self.returncode = 0 if outcome == "success" else None
+            self.returncode = None
 
         def poll(self):
+            if outcome == "success" and self.stdin.getvalue() == "code#proof\n":
+                self.returncode = 0
             return self.returncode
 
         def terminate(self):
@@ -125,12 +131,16 @@ def test_browser_authorization_reports_through_master_inbox_and_ends_native_logi
         store, "connect", lambda environ: Inbox() if environ is env else pytest.fail("wrong environment")
     )
     monkeypatch.setattr(store, "new_item_id", lambda: "stable-request")
-    monkeypatch.setattr(native.shutil, "which", lambda name: "/native/claude" if name == "claude" else None)
+    monkeypatch.setattr(
+        native.shutil, "which", lambda name: {"claude": "/native/claude", "powershell.exe": "/powershell"}.get(name)
+    )
+    capture = Mock(return_value=SimpleNamespace(stdout="code#proof", returncode=0))
+    monkeypatch.setattr(native.subprocess, "run", capture)
     monkeypatch.setattr(subprocess, "Popen", Process)
     monkeypatch.setattr(operator_email, "send", lambda *_: pytest.fail("browser must not email"))
     assert chain.authorize(env, target, timeout=1) == outcome
     sent = next(event for event in events if event[0] == "inbox")
-    assert sent[1:3] == ("engineer@proof", "master@proof")
+    assert sent[1:3] == ("engineer@proof", recipient)
     assert sent[3] == (
         "Authorize this native master login using the already signed in claude.ai session in the operator browser connector; "
         "never sign in, sign out or switch accounts. Stop on a login form or CAPTCHA. "
@@ -148,6 +158,7 @@ def test_browser_authorization_reports_through_master_inbox_and_ends_native_logi
     assert "AH_CC_TOKEN_worker" not in child and "ANTHROPIC_API_KEY" not in child
     assert child["BROWSER"] == "true"
     assert (("terminate",) in events) == (outcome != "success")
+    assert capture.call_count == (1 if outcome == "success" else 0)
     records = [json.loads(line) for line in (target.parent / "login-notifications.jsonl").read_text().splitlines()]
     assert records == [
         {"step": "browser", "outcome": "requested", "transport": "inbox"},
@@ -437,6 +448,19 @@ def test_browser_wait_orders_link_reply_and_native_completion(
     assert reply.call_args_list == [call(inbox, request, "master@proof", "engineer@proof")] * len(replies)
     assert finish.call_args_list == ([] if scenario == "no link" else [call(inbox, "engineer@proof", "request")])
     assert process.poll.call_count == len(codes)
+
+
+@pytest.mark.parametrize("reference,authorized", [("old", True), ("request", False)])
+def test_browser_reply_rejects_each_identity_mismatch(reference, authorized):
+    request = SimpleNamespace(id="request")
+    current = SimpleNamespace(state="done", reason="done: replied with message answer")
+    answer = SimpleNamespace(id="answer", ref=reference, sender="master@proof", text="success")
+    close = Mock()
+    store = SimpleNamespace(
+        get=lambda item: current if item == "request" else answer, acts_for=lambda *_: authorized, close=close
+    )
+    assert chain._browser_reply(store, request, "master@proof", "engineer@proof") is None
+    close.assert_not_called()
 
 
 @pytest.mark.parametrize(
