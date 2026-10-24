@@ -350,6 +350,21 @@ def test_the_watch_step_stops_without_a_name_once_every_graded_job_settled(tmp_p
     assert sleeps == []
 
 
+@pytest.mark.parametrize(("unit_result", "expected_sleep"), [("", "15"), ("success", "5")])
+def test_the_watch_step_polls_faster_only_after_unit_jobs_finish(tmp_path, unit_result, expected_sleep):
+    result, output, sleeps, _ = _watch(
+        tmp_path,
+        [
+            [_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", unit_result), _job("stage-budget")],
+            [_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", "success"), _job("stage-budget", "success")],
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output == "failed=\n"
+    assert sleeps == [expected_sleep]
+
+
 def test_the_watch_step_gives_up_quietly_after_ten_failed_reads_in_a_row(tmp_path):
     result, output, sleeps, calls = _watch(tmp_path, [None] * 9 + [[_job("lint")]] + [None] * 10)
     assert result.returncode == 0, result.stderr
