@@ -75,7 +75,9 @@ def test_retry_of_an_ended_agent_without_process_or_pane_releases_its_seat(store
     assert _retire_ended("sw", store, ledger, runtime, ledger.rows, agent, 2) == [f"retired {agent.name}"]
     assert store.claimant("sw", "t1") is None
     assert store.agents("sw") == []
-    successor = store.start_execution("sw", replace(seed, name=store.next_name("sw", "eng"), task="t2"))
+    successor = store.start_execution(
+        "sw", replace(seed, name=store.next_name("sw", "eng"), task="t2"), agent.execution_id
+    )
     assert successor.seat == agent.seat and successor.generation > agent.generation
     assert retire_watch.rows(store, "sw") == []
     assert ["pane", "close", "w1:p1"] not in calls
