@@ -824,4 +824,6 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   #agents-table a, #swarm-agents a { display: inline-block; padding-block: 8px; }
   .title-pen, .logo-link { min-width: 32px; min-height: 32px; place-content: center; }
   #jump-to { min-width: 216px; }
+  .sw-acts .sw-btn, #freeze-table .sw-btn, #architecture-table .sw-btn { min-height: 32px; }
+  .hl-pick, .hl-note, #hives-table .hl-pick, #hives-table .hl-note { font-size: 16px; }
 }
