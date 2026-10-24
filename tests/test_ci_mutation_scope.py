@@ -733,3 +733,19 @@ def test_repeated_selection_scans_each_test_text_once(tmp_path):
     assert scope.mentions.cache_info().misses == 2
     assert select_tests(tmp_path, Path("hooks/context/second_sample.py")) == ["tests/test_second.py"]
     assert scope.mentions.cache_info().misses == 2
+
+
+def test_a_word_inside_a_longer_identifier_does_not_mark_a_file_for_parsing(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_direct.py").write_text("from hooks.context import word_sample\n")
+    (tests / "test_longer.py").write_text("word_sample_extra = 1\n")
+    parsed = []
+    parse = scope.ast.parse
+    monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
+    scope.imported_names.cache_clear()
+    scope.mentions.cache_clear()
+    assert select_tests(tmp_path, Path("hooks/context/word_sample.py")) == ["tests/test_direct.py"]
+    assert parsed == ["from hooks.context import word_sample\n"]

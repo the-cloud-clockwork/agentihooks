@@ -194,7 +194,6 @@ def mentions(text: str) -> tuple[bool, frozenset[str]]:
 
 
 def mentioned(text: str, words: set[str]) -> bool:
-    # A word with a non word character never matches a token, nor can an import name hold it.
     relative, tokens = mentions(text)
     return relative or not words.isdisjoint(tokens)
 
