@@ -13,8 +13,8 @@ proven with canaries on 24 October 2026:
   session persisted, structured JSON output. Used by the judge.
 - **Read only**: read, search and web tools only. Used by scouts.
 
-Versions probed: Claude Code 2.1.310 and codex-cli 0.162.0. Both are newer than
-the 2.1.295 and 0.160.0 the plan named; rerun the probe after a CLI upgrade.
+Versions probed: Claude Code 2.1.310 and codex-cli 0.162.0. Rerun the probe
+after a CLI upgrade.
 
 ## Results
 
@@ -182,9 +182,9 @@ HDL0_CODEX_BIN=<path to the full package codex binary> \
   and user and project `CLAUDE.md` and `AGENTS.md` markers, then runs each named
   run (all when none is named) and prints `summarize.py`'s report.
 - Claude runs under `env -i` with only `HOME`, `PATH`, `CLAUDE_CONFIG_DIR` and
-  `CLAUDE_CODE_OAUTH_TOKEN` taken from the first `AH_CC_TOKEN_*`
+  `CLAUDE_CODE_OAUTH_TOKEN` taken from the alphabetically first `AH_CC_TOKEN_*`
   (`HDL0_CLAUDE_ACCOUNT` picks another).
-- Codex runs through `codex_launch.py`, which routes the first `AH_CX_TOKEN_*`
+- Codex runs through `codex_launch.py`, which routes the alphabetically first `AH_CX_TOKEN_*`
   (`HDL0_CODEX_ACCOUNT` picks another) with the same child environment and
   provider overrides as `agentihooks codex`.
 - Each report entry carries the exit code, whether `written.txt` exists, the
@@ -219,7 +219,7 @@ claude -p --no-session-persistence --output-format stream-json --verbose --model
  "mcp server started": true,
  "canary in answer": true,
  "model": "claude-sonnet-5-5",
- "tools": "25 tools, Bash, Edit, Read, Write and WebFetch among them",
+ "tools": ["Task", "Bash", "CronCreate", "CronDelete", "CronList", "DesignSync", "Edit", "EnterWorktree", "ExitWorktree", "ListAgents", "Monitor", "NotebookEdit", "PushNotification", "Read", "RemoteTrigger", "ReportFindings", "ScheduleWakeup", "SendMessage", "Skill", "TaskStop", "ToolSearch", "WebFetch", "WebSearch", "Workflow", "Write"],
  "mcp_servers": [
   {
    "name": "canary",

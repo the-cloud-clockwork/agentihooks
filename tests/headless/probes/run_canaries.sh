@@ -9,7 +9,8 @@ shift
 RUNS=("$@")
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 PY="${HDL0_PYTHON:-$HOME/dev/tcc-ecosystem/.venv/bin/python}"
-CLAUDE_ACCOUNT="${HDL0_CLAUDE_ACCOUNT:-$(awk 'BEGIN{for(k in ENVIRON) if(k ~ /^AH_CC_TOKEN_/) {print k; exit}}')}"
+CLAUDE_ACCOUNT="${HDL0_CLAUDE_ACCOUNT:-$(compgen -e | grep '^AH_CC_TOKEN_' | sort | head -1 || true)}"
+[[ -n "$CLAUDE_ACCOUNT" ]] || { echo "run_canaries: no AH_CC_TOKEN_* in the environment" >&2; exit 2; }
 
 WORK="$OUT/work"
 CLAUDE_HOME="$OUT/claude-home"
@@ -108,7 +109,7 @@ want() {
 
 if [[ ! -f "$OUT/catalog-sealed.json" ]]; then
   CODEX_HOME="$OUT/codex-empty-home" PYTHONPATH="$REPO" "$PY" "$REPO/tests/headless/probes/codex_launch.py" debug models \
-    </dev/null 2>/dev/null | "$PY" "$REPO/tests/headless/probes/sealed_catalog.py" >"$OUT/catalog-sealed.json"
+    </dev/null 2>"$OUT/catalog.err" | "$PY" "$REPO/tests/headless/probes/sealed_catalog.py" >"$OUT/catalog-sealed.json"
 fi
 
 want claude-control && run_claude claude-control "$READ_PROMPT" -p --no-session-persistence --output-format stream-json --verbose --model sonnet --effort low
