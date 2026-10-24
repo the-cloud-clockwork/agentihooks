@@ -1036,27 +1036,14 @@ def test_a_planner_publishes_a_plan_and_plan_read_prints_its_sliced_task(live, t
 
     planner = "planner@323133-0258"
     client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    plan_task = {"task": "tp", "title": "Slice the proof phase", "lane": "plan", "kind": "plan", "phase": "p1"}
     seed = [
         {"op": "join", "id": "planner-master-join", "by": "boss", "role": "orchestrator"},
         {"op": "join", "id": "planner-join", "by": planner},
-        {
-            "op": "task_add",
-            "id": "planner-task-seed",
-            "by": "boss",
-            "task": "tp",
-            "title": "Slice the proof phase",
-            "lane": "plan",
-            "kind": "plan",
-            "phase": "p1",
-        },
-        {
-            "op": "task_update",
-            "id": "planner-claim-seed",
-            "by": "swarm",
-            "item": "tasks/tp",
-            "fields": {"claimed_by": planner, "state": "claimed"},
-        },
+        {"op": "task_add", "id": "planner-task-seed", "by": "boss", **plan_task},
+        {"op": "task_update", "id": "planner-claim-seed", "by": "swarm", "item": "tasks/tp"},
     ]
+    seed[-1]["fields"] = {"claimed_by": planner, "state": "claimed"}
     assert [client.mutate(SLUG, [op]).get("rejected") for op in seed] == [[], [], [], []]
     monkeypatch.setattr(ledger_core, "LEDGER_DIR", core.LEDGER_DIR)
     one = "".join(f"One detail {n}\n" for n in range(12))
