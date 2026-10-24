@@ -91,6 +91,15 @@ def test_prepare_isolates_only_swarm_codex(profile, agent, swarm):
     assert env[key] == str(root / "rendered" / "qa" / agent)
 
 
+@pytest.mark.parametrize(("agent", "options"), [("codex", {"isolate": True, "push": True}), ("claude", {})])
+def test_prepare_renders_a_push_profile_only_for_codex(profile, agent, options):
+    _, renderer = profile
+
+    select_profile.prepare("qa", agent, "", "", [], {"AGENTIHOOKS_SWARM": "crew", "AGENTIHOOKS_CODEX_PUSH": "1"})
+
+    renderer.assert_called_once_with(agent, "qa", overlays=(), bundle_revision="", **options)
+
+
 @pytest.mark.parametrize("alias", [False, True])
 def test_swarm_codex_prepare_refuses_the_real_home(profile, monkeypatch, alias):
     root, _ = profile
