@@ -365,8 +365,7 @@ class Program:
 
     def _typed(self, unit: Unit) -> dict[str, bool]:
         """The names a unit binds, each true when a binding holds a Redis client or pipeline. Bindings are read in
-        source order and reread until nothing changes, at most once per binding, so a name bound later in a loop
-        still reaches an alias read earlier. A name bound only to a call whose callee cannot be found here, or
+        source order once per binding, so a name bound later in a loop still reaches an alias read earlier. A name bound only to a call whose callee cannot be found here, or
         only as a loop target, gets no entry, so it falls back by name."""
         local = {name: held for node in unit.nodes for name, held in _annotated(node).items()}
         bindings = sorted(
@@ -375,15 +374,12 @@ class Program:
         )
         pairs = [pair for targets, value in bindings for t in targets for pair in _pairs(t, value)]
         for _ in pairs:
-            before = dict(local)
             for target, value in pairs:
                 unresolved = isinstance(value, ast.Call) and self._callees(value.func, unit) is None
                 if self._held(value, unit, local):
                     local[target] = True
                 elif not unresolved:
                     local[target] = local.get(target) is True
-            if local == before:
-                break
         return local
 
     def _spread(self, key: str, unit: Unit) -> None:
