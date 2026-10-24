@@ -1008,3 +1008,17 @@ def test_absent_hive_evidence_cannot_settle_a_nonfinished_execution(remote, stat
 
     assert not remote.runtime.hive.removed(agent, NOW)
     assert not remote.runtime.hive.removed(agent, NOW + registry.LIVE_MS)
+
+
+def test_forgetting_a_hive_clears_its_pending_absence_observation(remote):
+    from scripts.hive import registry
+    from scripts.hive.remove import forget
+
+    remote.redis.srem(registry.INDEX, HIVE)
+    agent = replace(remote.agent, state="finished")
+    assert not remote.runtime.hive.removed(agent, NOW)
+
+    assert forget(remote.redis, HIVE) == ["deleted 1 registry records of remote"]
+
+    assert not remote.runtime.hive.removed(agent, NOW + registry.LIVE_MS)
+    assert remote.runtime.hive.removed(agent, NOW + registry.LIVE_MS * 2)
