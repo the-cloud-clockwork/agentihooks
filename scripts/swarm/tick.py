@@ -604,7 +604,8 @@ def _hive_lost(slug, store, agent, now_ms):
 
 def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
     master_retire.forget(store, slug, agent.name)
-    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+    removed = reports.Reports(store.redis).removed(agent, now_ms)
+    if not removed and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
         retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
         return [f"could not retire {agent.name}, retrying next tick"]
     _refund_parked(slug, store, rows, agent)
