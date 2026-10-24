@@ -369,7 +369,7 @@ def test_hive_heartbeat_keeps_beating_on_a_fresh_bus_until_the_hub_serves_accoun
     client, beats = member(signer), []
 
     def publish(hive, beat_report, beat_hosted):
-        ask = account_slots.asker(client.for_swarm("rig"), "rig", 500)
+        ask = account_slots.asker(client.for_swarm("rig"), "rig", hive, 500)
         account_slots.Remote(ask, hive, lambda: beat_report).heartbeat(beat_report, beat_hosted["executions"])
         beats.append(hive)
 
