@@ -203,16 +203,23 @@ function remoteMore(s) {
     text: `Show more matches · ${left} left`, on: { click: () => searchMore(list) } }));
 }
 
+const fetching = new Set();
+
 async function searchMore(list) {
+  if (fetching.has(list)) return;
+  fetching.add(list);
   const turn = searchTurn;
   try {
     const resp = await searchClosed(list, filter.text, remote[list].length);
     if (turn !== searchTurn || !resp.ok) return;
     const { data, total } = await resp.json();
-    remote[list] = [...remote[list], ...data];
+    const have = new Set(remote[list].map((i) => i.id));
+    remote[list] = [...remote[list], ...data.filter((i) => !have.has(i.id))];
     remoteTotal[list] = data.length ? total : remote[list].length;
-  } catch (e) { return; }
-  renderOutline();
+    renderOutline();
+  } catch (e) { /* offline: the rows already listed stay */ } finally {
+    fetching.delete(list);
+  }
 }
 
 function outlineRow(i) {

@@ -135,13 +135,16 @@ def test_remote_matches_page_until_every_match_is_listed(ledger):
     page.wait_for_function(f"() => ({count})() === 5")
     more = page.locator('#ol-sec-tasks button[data-matches="tasks"]')
     assert more.text_content() == "Show more matches · 6 left"
-    more.click()
-    page.wait_for_function(f"() => ({count})() === 10")
-    assert {"state": "done", "q": "old task", "offset": "5", "limit": "50"} in reads
-    more.click()
+    more.dblclick()
+    page.wait_for_function(f"() => ({count})() >= 10")
+    assert reads.count({"state": "done", "q": "old task", "offset": "5", "limit": "50"}) == 1
+    while more.count():
+        more.click()
+        page.wait_for_timeout(100)
     page.wait_for_function(f"() => ({count})() === 11")
-    assert more.count() == 0
-    assert sorted(shown(page)) == sorted(t["id"] for t in HIDDEN_TASKS if t["id"] != "t5")
+    ids = shown(page)
+    assert len(ids) == len(set(ids))
+    assert sorted(ids) == sorted(t["id"] for t in HIDDEN_TASKS if t["id"] != "t5")
 
 
 def test_tasks_group_under_their_phase_titles_done_tasks_included(ledger):
