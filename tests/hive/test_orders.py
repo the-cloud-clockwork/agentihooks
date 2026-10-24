@@ -410,6 +410,28 @@ def test_only_an_authorized_native_master_may_acknowledge_a_token_account(setup,
         assert ack.execution["placement"] == "fallback"
 
 
+def test_a_private_master_may_resolve_an_initially_unknown_native_account(setup, monkeypatch):
+    from scripts import master_claude_login
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    monkeypatch.setattr(master_claude_login, "unusable", lambda: "")
+    agent = replace(setup.agent, lane="master", profile="master", harness="claude", account="", seat="master@fixture")
+    order = replace(setup.order, lane="master", profile="master", harness="claude", slot="", route_kind="master-login")
+    placed = replace(
+        setup.runtime.spawn.return_value.value,
+        harness="claude",
+        profile="master",
+        account="native-account",
+        placement="forced",
+        profile_decision={"validation": {"pid": 12, "account": "native-account"}},
+    )
+    setup.runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    ack = setup.consumer.launch(order, agent, {"id": order.task})
+    assert ack.status == "live"
+    assert ack.execution["account"] == "native-account"
+    assert ack.execution["placement"] == "forced"
+
+
 def test_launch_that_crosses_expiry_is_terminated(setup, monkeypatch):
     from scripts.swarm import lease
 
