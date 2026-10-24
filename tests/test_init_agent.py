@@ -1282,6 +1282,33 @@ def test_an_undetected_codex_agent_without_a_prompt_waits_for_nothing(monkeypatc
     ]
 
 
+@pytest.mark.parametrize(("resume", "held"), [("c0ffee", False), ("", True)])
+def test_a_codex_resume_passes_its_prompt_to_codex_instead_of_typing_it(tmp_path, monkeypatch, resume, held):
+    from types import SimpleNamespace
+
+    launcher = tmp_path / "eng.sh"
+    launcher.with_suffix(".prompt").write_text("Continue.", encoding="utf-8")
+    opened = {}
+    placed = SimpleNamespace(workspace_id="w1", tab_id="t1", pane_id="w1:p2")
+    monkeypatch.setattr(init_agent.herdr_host, "ensure_server", lambda environ: False)
+    monkeypatch.setattr(init_agent.herdr_host, "open_pane", lambda d, t, env, *rest: opened.update(env) or placed)
+    monkeypatch.setattr(init_agent.herdr_host, "run", lambda *args: None)
+    monkeypatch.setattr(init_agent.herdr_panes, "record", lambda *args: None)
+    args = SimpleNamespace(title="", placement=None, workspace=None, resume=resume)
+    init_agent._start_herdr(launcher, tmp_path, "eng-a", args, "codex", {})
+    assert (init_agent.PROMPT_AFTER_START in opened) is held
+
+
+@pytest.mark.parametrize(
+    ("transport", "resume", "served"),
+    [(init_agent.APP_SERVER, "", True), ("", "c0ffee", True), ("", "", False), ("legacy", "", False)],
+)
+def test_a_resumed_or_served_session_is_named_without_typing(transport, resume, served):
+    from types import SimpleNamespace
+
+    assert init_agent._served(SimpleNamespace(codex_transport=transport, resume=resume)) is served
+
+
 @pytest.mark.parametrize(("held", "argv"), [("1", "<a b>\n"), ("", "<a b><Start the task.>\n")])
 def test_the_codex_launcher_line_runs_its_command_without_the_prompt_only_when_held(tmp_path, held, argv):
     spec = init_agent.AgentSpec(agent="codex")

@@ -721,6 +721,12 @@ class HerdrRuntime:
             raise SpawnError("unsupported resume: original profile is missing", "unsupported")
         if agent.harness not in effort_range.EFFORTS:
             raise SpawnError(f"unsupported resume harness: {agent.harness}", "unsupported")
+        from scripts.profiles import render
+
+        if agent.harness == "codex" and not render.has_codex_rollout(
+            agent.profile, agent.overlays, agent.conversation_id
+        ):
+            raise SpawnError(f"Codex has no saved rollout for conversation {agent.conversation_id}", "unsupported")
         argv = self._argv(
             config,
             agent.name,
