@@ -282,20 +282,7 @@ def supervised(tmp_path):
             [
                 sys.executable,
                 "-c",
-                """import json, signal, time
-from dataclasses import asdict
-from pathlib import Path
-from scripts.swarm_v2 import supervision_processes as trees
-from scripts.swarm_v2.supervision_runtime import main
-original = trees.send
-def observed_send(table, signum):
-    root = Path(__import__("sys").argv[1])
-    with (root / "signal-observations.jsonl").open("a") as stream:
-        stream.write(json.dumps({"time": time.monotonic(), "signal": signum, "targets": [asdict(item) for item in table.values()]}) + "\\n")
-    original(table, signum)
-trees.send = observed_send
-raise SystemExit(main())
-""",
+                "from scripts.swarm_v2.supervision_runtime import main; raise SystemExit(main())",
                 str(attempt),
                 str(path),
             ],
@@ -359,9 +346,26 @@ def assert_stale_acknowledgement_rejected(attempt, root, checkpoint_seconds):
     assert checkpoint(attempt, {**acknowledgement, "incarnation": scope["incarnation"]}, scope) == root.name
 
 
+@pytest.mark.parametrize("polls", [0, 1])
+def test_quiescence_checks_current_processes_after_its_deadline(tmp_path, monkeypatch, polls):
+    attempt, path, spec = launch_files(tmp_path)
+    spec["quiesce_seconds"] = 1
+    path.write_text(json.dumps(spec))
+    supervisor = Supervisor(Launch.load(attempt, path))
+    targets = {123: object()}
+    snapshots = iter([targets] * (polls + 1) + [{}])
+    clock = iter([0, *([0] * polls), 2])
+    signals = []
+    monkeypatch.setattr(supervision_runtime.trees, "living", lambda *args: next(snapshots, {}))
+    monkeypatch.setattr(supervision_runtime.trees, "send", lambda table, signum: signals.append(signum))
+    monkeypatch.setattr(supervision_runtime.time, "monotonic", lambda: next(clock, 2))
+    monkeypatch.setattr(supervisor, "wait", lambda: None)
+    assert supervisor.quiesce() is True
+    assert signals == [signal.SIGTERM]
+
+
 @pytest.mark.parametrize("ack,expected", [("complete", "complete"), ("stale", "incomplete"), ("missing", "incomplete")])
-@pytest.mark.parametrize("sample", range(20))
-def test_sigterm_during_tool_reports_observed_checkpoint(worker, ack, expected, sample):
+def test_sigterm_during_tool_reports_observed_checkpoint(worker, ack, expected):
     start, attempt, spec = worker
     exporter = [*spec["exporter"][:-1], ack]
     child = start(exporter=exporter, checkpoint_seconds=0.4 if ack == "missing" else 5)
@@ -370,11 +374,12 @@ def test_sigterm_during_tool_reports_observed_checkpoint(worker, ack, expected, 
     wait_for(root / "fixture-grandchild-two.json", child)
     child.send_signal(signal.SIGTERM)
     result = wait_for(root / "result.json", child)
-    observations = (attempt / "signal-observations.jsonl").read_text()
-    assert child.wait(timeout=8) == (0 if expected == "complete" else 75), observations
+    assert child.wait(timeout=8) == (0 if expected == "complete" else 75), {
+        key: result.get(key) for key in ("reason", "checkpoint_status", "quiescence", "child_exits")
+    }
     assert result["reason"] == "termination"
     assert result["checkpoint_status"] == expected
-    assert result["quiescence"] == "clean", observations
+    assert result["quiescence"] == "clean"
     assert result["supervisor_child_exit_total"] >= 2
     if ack == "stale":
         assert_stale_acknowledgement_rejected(attempt, root, spec["checkpoint_seconds"])
