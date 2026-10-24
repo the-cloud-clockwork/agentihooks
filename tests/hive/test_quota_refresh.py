@@ -185,7 +185,6 @@ def test_stale_codex_refresh_restores_each_routed_slot(cached, monkeypatch, caps
     pool = [codex_router.CodexAccount(name, f"AH_CX_TOKEN_{name}") for name in ("alpha", "beta")]
     environ = {"AH_CX_TOKEN_alpha": "alpha-sentinel", "AH_CX_TOKEN_beta": "beta-sentinel"}
     monkeypatch.setattr(codex_router, "accounts", lambda env: pool)
-    monkeypatch.setattr(codex_router, "routed", lambda accounts, env: accounts)
     monkeypatch.setattr(daemon, "claude_signed_in", lambda: False)
     monkeypatch.setattr(daemon, "_native_accounts", lambda *args: set())
     monkeypatch.setattr(daemon, "_claude_snapshots", lambda observed: None)
