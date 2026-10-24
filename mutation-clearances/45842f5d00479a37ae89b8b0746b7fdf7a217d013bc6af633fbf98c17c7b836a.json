@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/code_reach.py:scripts.swarm.code_reach.x\u01c1Program\u01c1_receivers__mutmut_2:b8c0e3b1637f7186410198f86e8be7fd0d32cbf6dbebfa50429fea520afddb9e": {
+    "reader": "Standards",
+    "reason": "Detected by non-termination: the tuple comparison against None is never true, so _receivers never returns."
+  }
+}

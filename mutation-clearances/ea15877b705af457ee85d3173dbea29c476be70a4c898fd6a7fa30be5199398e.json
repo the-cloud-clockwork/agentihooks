@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/code_reach.py:scripts.swarm.code_reach.x\u01c1Program\u01c1_typed__mutmut_13:a5073785faff26e9a9e468b5868513ef59bf9c601c2dcb0acefd751b2659c070": {
+    "reader": "Standards",
+    "reason": "Detected by non-termination: a dict never equals None, so _typed never returns and any unit with a pass hangs; the runner's timeout is the detection."
+  }
+}

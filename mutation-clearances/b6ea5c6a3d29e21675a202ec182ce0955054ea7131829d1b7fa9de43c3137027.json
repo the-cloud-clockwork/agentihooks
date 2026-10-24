@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/code_reach.py:scripts.swarm.code_reach.x\u01c1Program\u01c1_typed__mutmut_36:33c64b5165b8c477f7dedb8273541efdc89bd1db06c7f8cbe18ed2ee08ef6f48": {
+    "reader": "Standards",
+    "reason": "Detected by non-termination: a pass that changes nothing, as in any unit with no bindings, now loops forever, so _typed hangs on the first such unit."
+  }
+}
