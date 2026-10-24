@@ -76,6 +76,17 @@ def test_stream_matches_whole_file_reader(fmt):
 
 
 def test_second_independent_fixture_matches(tmp_path):
+    claude = FIXTURES / "claude_injected_sample.jsonl"
+    recs = list(normalize_entries("claude", _load_entries(claude)))
+    assert recs == list(iter_transcript_records(claude))
+    assert [r["kind"] for r in recs] == [
+        "user_text",
+        "system_text",
+        "assistant_text",
+        "tool_call",
+        "tool_result",
+        "assistant_text",
+    ]
     path = _write(tmp_path, "rollout.jsonl", CODEX_TURN)
     assert list(normalize_entries("codex", CODEX_TURN)) == list(iter_transcript_records(path))
     real = FIXTURES / "copilot_events_real.jsonl"

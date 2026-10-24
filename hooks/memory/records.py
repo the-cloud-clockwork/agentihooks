@@ -149,10 +149,7 @@ def _codex_response_item(payload: dict, entry: dict, state: TurnState) -> Iterat
 
 
 def decode_codex(entry: dict, state: TurnState) -> Iterator[TranscriptRecord]:
-    # A codex turn yields its assistant text via a response_item message
-    # record; task_complete's last_agent_message repeats the same text as a
-    # turn-boundary marker, so it is only a fallback for a turn that produced
-    # no assistant_text (e.g. a rollout truncated before the message landed).
+    # task_complete repeats the turn's reply; it is only a fallback for a turn with no assistant_text.
     etype = entry.get("type")
     payload = entry.get("payload", {})
     if not isinstance(payload, dict):
