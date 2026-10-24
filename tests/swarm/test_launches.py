@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -48,6 +49,7 @@ def test_record_defaults_to_the_swarm_home(tmp_path):
     launches.record({"AGENTIHOOKS_SWARM": "crew", "AGENTIHOOKS_AGENT_NAME": NAME})
     assert launches.find(NAME).pid == os.getpid()
     assert (launches.home() / "launches" / f"{NAME}.json").is_file()
+    assert launches.home() == Path.home() / ".agentihooks" / "swarm"
 
 
 @pytest.mark.parametrize(
