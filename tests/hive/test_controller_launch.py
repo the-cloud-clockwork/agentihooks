@@ -1221,6 +1221,11 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
     from scripts.hive import launch
     from scripts.hive.placement import Wait
 
+    from scripts.swarm.capacity import Account
+
+    if harness == "codex":
+        setup.herdr._quota_accounts.append(Account("codex", "account", "room", 0, None, 80, 6))
+        write_hive(setup, slots=[{"harness": "codex", "account": "account", "kind": "subscription"}])
     saved = {"profile": "engineer", "harness": harness, "account": "account"}
     task = {"id": "task", "launch_assignment": saved}
     config = replace(setup.config, lanes={"eng": {"agent": "codex", "profile": "engineer"}})
@@ -1232,7 +1237,8 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
     )
     assert not isinstance(selected, Wait)
     assert (selected.hive, selected.account.name) == ("remote", "account")
-    assert selected.fallback == ("no hive places the saved codex harness" if harness == "codex" else "")
+    assert selected.account.harness == ("claude" if harness == "auto" else harness)
+    assert selected.fallback == ""
 
 
 def test_a_saved_codex_task_with_no_codex_placement_waits_for_codex(setup):
