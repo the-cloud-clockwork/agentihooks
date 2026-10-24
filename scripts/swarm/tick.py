@@ -1193,13 +1193,16 @@ def _not_launched(slug, store, ledger, runtime, rows, failed, now_ms):
     if _acknowledging_error(failed.error):
         store.record_launch(slug, record, ACKNOWLEDGING)
         return [f"{record.name} waits for the hive acknowledgement of {task['id']}"]
-    try:
-        refused = _room_wait(runtime, record.lane, task)
-    except SpawnError:
-        return _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms)
-    if refused:
+    if refused := _failed_room_wait(runtime, record.lane, task):
         return [_room_refused(slug, store, ledger, runtime, rows, failed, refused)]
     return _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms)
+
+
+def _failed_room_wait(runtime, lane, task):
+    try:
+        return _room_wait(runtime, lane, task)
+    except SpawnError:
+        return False
 
 
 def _room_refused(slug, store, ledger, runtime, rows, failed, refused):
