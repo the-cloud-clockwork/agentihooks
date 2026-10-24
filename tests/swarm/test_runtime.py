@@ -48,7 +48,9 @@ def test_native_master_browser_budget_is_carried_to_the_real_launcher(tmp_path, 
         slug="fixture", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
     )
     argv = runtime._argv(config, "master@fixture", "claude", "opening", "master", "master")
-    runtime._launch(config, "master", "master", "master@fixture", [*argv, "--", "--route", "master-login"])
+    runtime._launch(
+        config, "master", "master", "master@fixture", [*argv, "--", "--route", "master-login", "--model", "opus"]
+    )
     assert float(seen["argv"][seen["argv"].index("--route-timeout") + 1]) >= chain.BUDGET.route
     assert seen["timeout"] >= chain.BUDGET.spawn
 

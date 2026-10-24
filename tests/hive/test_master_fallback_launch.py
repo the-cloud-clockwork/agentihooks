@@ -554,7 +554,7 @@ def test_empty_native_sessions_reach_front_door_recovery(setup, monkeypatch):
 def test_empty_native_inventory_is_selected_as_private_recovery(setup):
     task = {**master(setup), "seat": "master@fixture"}
     master_login_hive(setup)
-    write_hive(setup, excluded=[], master_login={"claude": ""}, master_login_enabled="yes")
+    write_hive(setup, excluded=[], master_login={}, master_login_enabled="yes")
     selected = setup.launcher.select(setup.config, "master", task)
     assert selected.route_kind == "master-login"
     assert selected.account.name == ""
@@ -601,8 +601,12 @@ def test_non_native_ack_cannot_replace_the_recorded_account(setup):
             "profile_decision": {"validation": {"account": "other"}},
         },
     )
-    with pytest.raises(SwarmError, match="ack account"):
+    with pytest.raises(SwarmError) as refused:
         setup.launcher.record(admitted, order, ack)
+    assert str(refused.value) == (
+        "hive launch acknowledgement does not match the live execution: "
+        f"ack account expected {admitted.account!r}, got 'other'"
+    )
     assert setup.store.execution_registry.get(order.slug, admitted.execution_id).account == admitted.account
 
 

@@ -924,7 +924,9 @@ def test_browser_home_preserves_an_existing_unheld_grant(ah, rendered):
 
 
 @pytest.mark.parametrize("outcome", ["captcha", "failure"])
-def test_master_launch_uses_subscription_fallback_without_remote_control(ah, rendered, tmp_path, monkeypatch, outcome):
+def test_master_launch_uses_subscription_fallback_without_remote_control(
+    ah, rendered, tmp_path, monkeypatch, outcome, capsys
+):
     from hooks.context import account_sessions
     from scripts import claude_quota_balancer as router
     from scripts import master_login_chain as chain
@@ -936,11 +938,18 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(ah, ren
     monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
     monkeypatch.chdir(tmp_path)
     selections, executed = [], []
+    from unittest.mock import Mock
+
+    printed = Mock(wraps=print)
+    monkeypatch.setattr("builtins.print", printed)
 
     def invalid(*_):
         raise native_login.LoginError(native_login.EXPIRED)
 
+    env = _environ(rendered, ANTHROPIC_API_KEY="api")
+
     def select(environ, **options):
+        assert environ is env
         selections.append(options)
         return router.RouteDecision(router.Credential("AH_CC_TOKEN_workeratexample_com", "routed"), None, "cache")
 
@@ -948,11 +957,21 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(ah, ren
     monkeypatch.setattr(chain, "authorize", lambda *_: outcome)
     monkeypatch.setattr(router, "select_credential", select)
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
-    monkeypatch.setattr(account_slots, "execute", lambda harness, account, environ, launch: launch(environ))
+
+    def admit(harness, account, environ, launch):
+        assert (harness, account) == ("claude", "workeratexample_com")
+        return launch(environ)
+
+    monkeypatch.setattr(account_slots, "execute", admit)
     monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, environ: executed.append((binary, argv, environ)))
     report = tmp_path / "route"
     args = ["--remote-control", "master proof", "--remote-control-session-name-prefix", "proof", "--model", "opus"]
-    login.launch_claude("/opt/claude", args, _environ(rendered, ANTHROPIC_API_KEY="api"), str(report))
+    login.launch_claude("/opt/claude", args, env, str(report))
+    assert capsys.readouterr().out == "[agenti] account=workeratexample_com route=token-fallback remote-control=off\n"
+    printed.assert_called_once_with(
+        "[agenti] account=workeratexample_com route=token-fallback remote-control=off", flush=True
+    )
+    assert selections[0]["claude_bin"] == "/opt/claude"
     assert selections[0]["exclude"] == (router.API_ACCOUNT,)
     assert selections[0]["sessions"] == {}
     binary, argv, environ = executed[0]
@@ -966,6 +985,11 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(ah, ren
     assert environ["CLAUDE_SECURESTORAGE_CONFIG_DIR"] == str(target)
     assert json.loads((target / "settings.json").read_text()) == {"hooks": {"Stop": []}}
     assert not (target / login.CREDENTIALS).exists()
+    assert json.loads((target.parent / "login-notifications.jsonl").read_text()) == {
+        "step": "token",
+        "outcome": "routed",
+        "transport": "none",
+    }
     assert login.holders(login.root()) == {}
     assert dict(line.split("=", 1) for line in report.read_text().splitlines()) == {
         "status": "routed",
@@ -1040,3 +1064,110 @@ def test_incomplete_account_metadata_renews_the_already_claimed_slot(ah, rendere
     assert seen == [login.home(1)]
     assert login.holders(login.root(1)) == {"master@a-1": os.getpid()}
     assert login.holders(login.root(2)) == {}
+
+
+def test_browser_renewal_keeps_the_slot_epoch_report_and_audit(ah, rendered, tmp_path, monkeypatch):
+    from unittest.mock import Mock, call
+
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    monkeypatch.setenv(login.SLOT_ENV, "2")
+    _seed(rendered)
+    target = login.home(2)
+    report = tmp_path / "binding.json"
+    env = _environ(rendered, **{binding.REPORT: str(report)})
+    bao = object()
+    from_env = Mock(return_value=bao)
+    keep = Mock()
+    rehome = Mock()
+    checked_account = Mock(wraps=login.account)
+    monkeypatch.setattr(openbao_kv, "from_env", from_env)
+    monkeypatch.setattr(login, "stored", lambda *_: {})
+    monkeypatch.setattr(login, "keep", keep)
+    monkeypatch.setattr(login, "account", checked_account)
+    monkeypatch.setattr(binding, "rehome", rehome)
+    checks = []
+
+    def check(child, account):
+        checks.append((child["CLAUDE_CONFIG_DIR"], account))
+        if len(checks) == 1:
+            raise native_login.LoginError(native_login.EXPIRED)
+
+    def browser(environ, found):
+        assert environ is env and found == target
+        monkeypatch.setenv(login.SLOT_ENV, "1")
+        return "success"
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", browser)
+    assert login.prepare_launch(env, tmp_path) == (target, "masteratexample_com")
+    assert checks == [(str(target), "masteratexample_com")] * 2
+    assert from_env.call_args_list == [call(env), call(env)]
+    assert checked_account.call_args_list == [call(target, env, number=2)] * 2
+    assert keep.call_args_list == [call(bao, target, 1, 2)] * 2
+    assert rehome.call_args_list == [call(report, target, shared=False), call(report, target)]
+    assert [json.loads(line) for line in (target.parent / "login-notifications.jsonl").read_text().splitlines()] == [
+        {"step": "current", "outcome": "unavailable", "transport": "none"},
+        {"step": "current", "outcome": "success", "transport": "none"},
+    ]
+
+
+def test_claimed_home_finds_only_this_process_in_a_non_default_slot(ah, rendered):
+    name = _environ(rendered)["AGENTIHOOKS_AGENT_NAME"]
+    for number, pid in [(1, os.getppid()), (2, os.getpid())]:
+        login.root(number).mkdir(parents=True)
+        login._write(login.root(number) / login.OWNER, {"holders": {name: pid}})
+    assert login.claimed_home(_environ(rendered)) == login.home(2)
+
+
+def test_browser_home_reclaims_a_dead_holder(ah, rendered):
+    login.root().mkdir(parents=True)
+    login._write(login.root() / login.OWNER, {"holders": {"dead": 999999999}})
+    assert login.browser_home(_environ(rendered)) == login.home()
+    assert login.holders(login.root()) == {"master@a-1": os.getpid()}
+
+
+def test_token_arguments_remove_only_remote_control(args, expected):
+    class Arguments(list):
+        reads = 0
+
+        def __getitem__(self, index):
+            self.reads += 1
+            assert self.reads <= 10 * max(len(self), 1), "argument parsing must terminate"
+            return super().__getitem__(index)
+
+    assert login._token_args(Arguments(args)) == expected
+
+
+def test_token_home_without_forced_login_rehomes_the_profile(ah, rendered, tmp_path, monkeypatch):
+    from unittest.mock import Mock, call
+
+    (rendered / "settings.json").write_text('{"hooks":{"Stop":[]}}')
+    report = tmp_path / "binding.json"
+    rehome = Mock()
+    monkeypatch.setattr(binding, "rehome", rehome)
+    target = login.token_home(_environ(rendered, **{binding.REPORT: str(report)}))
+    assert target == ah / "master-token" / "masterata_1" / "claude"
+    assert json.loads((target / "settings.json").read_text()) == {"hooks": {"Stop": []}}
+    assert rehome.call_args_list == [call(report, target)]
+
+
+def test_token_routing_lock_uses_the_shared_lock_in_a_new_parent(ah, tmp_path, monkeypatch):
+    import fcntl
+
+    from scripts import claude_quota_balancer as router
+
+    cache = tmp_path / "new" / "nested" / "quota.json"
+    monkeypatch.setattr(router, "_cache_path", lambda environ: cache)
+    with login._token_lock({}) as held:
+        assert Path(held.name) == cache.with_name("claude-route.lock")
+        with cache.with_name("claude-route.lock").open() as contender:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_token_home_creates_settings_when_rendered_settings_are_absent(ah, rendered):
+    (rendered / "settings.json").unlink()
+    target = login.token_home(_environ(rendered))
+    assert json.loads((target / "settings.json").read_text()) == {}
