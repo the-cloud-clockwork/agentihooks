@@ -251,13 +251,20 @@ def _pane_process(agent):
 
 
 def _named_process(agent):
-    from scripts.terminate_agent import resolve, sessions, validate
+    from scripts.herdr_host import server_socket
+    from scripts.terminate_agent import agent_environ, resolve, sessions, validate
 
     items = sessions()
     try:
         session = resolve(items, agent.name, agent.harness or "any")
         validate(session, items)
     except ValueError:
+        return None
+    keys = ("HERDR_PANE_ID", "HERDR_SOCKET_PATH", "AGENTIHOOKS_SWARM_TASK")
+    pane, socket, task = agent_environ(session.process.pid, keys)
+    if task != agent.task or agent.pane_id and pane != agent.pane_id:
+        return None
+    if socket and server_socket({"HERDR_SOCKET_PATH": socket}) != server_socket(dict(os.environ)):
         return None
     return session.process
 
