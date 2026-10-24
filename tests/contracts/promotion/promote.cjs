@@ -27,6 +27,7 @@ function fixture(options = {}) {
   const pages = [];
   let reads = 0;
   let readiness = 0;
+  let mainReads = 0;
   const github = { rest: {
     actions: { listJobsForWorkflowRun: async () => ({ data: { jobs: jobs.slice(0, 100) } }) },
     checks: { listForRef: async () => ({ data: { check_runs: checks.slice(0, 100) } }) },
@@ -48,15 +49,17 @@ function fixture(options = {}) {
     },
     repos: {
       getCommit: async ({ ref }) => ({ data: ref === 'graded' ? commit('graded', 'tree') :
+        ref === 'main' && options.mainMoves && ++mainReads > 1 ? commit('moved', 'old', `Promote green dev to main (#8)\n\nGraded dev revision: ${options.mainMoves}\n`) :
         ref === 'main' ? commit('main', options.already ? 'tree' : 'old', options.promoted ? `Promote green dev to main (#6)\n\nGraded dev revision: ${options.promoted}\n` : '') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
       listCommitStatusesForRef: async () => ({ data: statuses.slice(0, 100) }),
-      compareCommits: async args => { refs.push(['compare', args]); return { data: { status: options.order || 'ahead' } }; },
+      compareCommits: async args => { refs.push(['compare', args]); return { data: { status: options.orders?.[args.base] || options.order || 'ahead' } }; },
     },
     pulls: {
       get: async () => ({ data: { ...pull, mergeable: options.conflict ? false : true, rebaseable: !options.nonrebaseable,
         mergeable_state: options.mergeState || (options.pending || options.waitOnce && readiness++ === 0 ? 'blocked' : 'clean') } }),
       list: async () => ({ data: options.existing ? [pull] : [] }),
       create: async args => { writes.push(['create', args]); return { data: pull }; },
+      update: async args => { writes.push(['update', args]); },
       merge: async args => {
         writes.push(['merge', args]);
         if (options.refused) throw new Error('Required checks are pending');
@@ -206,23 +209,42 @@ test('an open pull request without its snapshot branch cannot merge', async () =
 
 const last = 'a'.repeat(40);
 
-for (const order of ['ahead', 'diverged']) {
-  test(`promotes a revision ${order} of the last promotion`, async () => {
+const newer = 'b'.repeat(40);
+
+test('promotes a revision that descends from the last promotion', async () => {
+  const f = fixture({ promoted: last, order: 'ahead' });
+  await promote(f);
+  assert.deepEqual(f.refs[0], ['compare', { owner: 'owner', repo: 'repo', base: last, head: 'graded' }]);
+  assert.equal(f.outputs.main, 'rebased');
+  assert.equal(f.outputs.superseded, undefined);
+});
+
+for (const order of ['behind', 'identical', 'diverged']) {
+  test(`ends superseded when the graded revision is ${order} the last promotion`, async () => {
     const f = fixture({ promoted: last, order });
     await promote(f);
-    assert.deepEqual(f.refs[0], ['compare', { owner: 'owner', repo: 'repo', base: last, head: 'graded' }]);
-    assert.equal(f.outputs.main, 'rebased');
+    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.refs.map(([kind]) => kind), ['compare']);
+    assert.equal(f.outputs.superseded, last);
+    assert.equal(f.outputs.main, undefined);
   });
 }
 
-for (const order of ['behind', 'identical']) {
-  test(`never rolls main back to a revision that is ${order} the last promotion`, async () => {
-    const f = fixture({ promoted: last, order });
-    await assert.rejects(promote(f), /not newer than the last promotion/);
-    assert.deepEqual(f.writes, []);
-    assert.deepEqual(f.refs.map(([kind]) => kind), ['compare']);
-  });
-}
+test('ends superseded when main takes a newer promotion during the wait', async () => {
+  const f = fixture({ promoted: last, mainMoves: newer, orders: { [last]: 'ahead', [newer]: 'behind' } });
+  await promote(f);
+  assert.deepEqual(f.writes, [['create', f.writes[0][1]], ['update', { owner: 'owner', repo: 'repo', pull_number: 7, state: 'closed' }]]);
+  assert.deepEqual(f.refs.map(([kind, args]) => kind === 'compare' ? args.base : kind), [last, 'commit', 'create', newer, 'delete']);
+  assert.equal(f.outputs.superseded, newer);
+  assert.equal(f.outputs.main, undefined);
+});
+
+test('never merges a stale snapshot when main moved without a newer promotion', async () => {
+  const f = fixture({ promoted: last, mainMoves: newer, order: 'ahead' });
+  await assert.rejects(promote(f), /main moved/);
+  assert.deepEqual(f.writes.map(([kind]) => kind), ['create']);
+  assert.equal(f.outputs.main, undefined);
+});
 
 test('a created pull request on another head cannot merge', async () => {
   const f = fixture({ pullHead: 'ungraded' });

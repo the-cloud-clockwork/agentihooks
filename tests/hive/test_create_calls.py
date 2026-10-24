@@ -12,7 +12,7 @@ from scripts import openbao_kv
 from scripts.hive import auth, cli, create, create_github, create_render, invite, machine, registry
 from scripts.hive.bundle_origin import SETTINGS_PATH
 from tests.codex_fakes import http_error
-from tests.hive.test_create import NAME, NFS, NOW, PR, RECORD, REPO, TARGET, TEMPLATE, Run, Store
+from tests.hive.test_create import NAME, NOW, PR, RECORD, REPO, TARGET, TEMPLATE, Run, Store
 from tests.hive.test_invite import LIKE, SWARM, URL, Bao, _bao
 
 pytestmark = pytest.mark.unit
@@ -105,7 +105,6 @@ def test_a_full_create_makes_exactly_these_calls(world):
         ["kubectl", "get", "service", "-A", "-o", "json"],
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", NAME, "-f", "host_key"],
         ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.TEMPLATE_PATH}?ref=dev"],
-        ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.NFS_HOMES_PATH}?ref=dev"],
         ["gh", "pr", "list", "-R", REPO, "--head", NAME, "--state", "all", "--json", "url,state", "--jq", PENDING],
         [*_gh_api(f"repos/{REPO}/git/ref/heads/dev"), ".object.sha"],
         [*_gh_api(f"repos/{REPO}/git/commits/sha"), ".tree.sha"],
@@ -151,14 +150,6 @@ def test_a_full_create_makes_exactly_these_calls(world):
                     for path, text in create.create_render.render(
                         TEMPLATE, create_render.Hive(NAME, RECORD, 2225, "worker-001", "10.10.30.207")
                     ).items()
-                ]
-                + [
-                    {
-                        "path": create_render.NFS_HOMES_PATH,
-                        "mode": "100644",
-                        "type": "blob",
-                        "content": create_render.with_home(NFS, NAME),
-                    }
                 ],
             },
         ),
@@ -196,7 +187,7 @@ def test_a_full_create_makes_exactly_these_calls(world):
 
 def test_the_dry_run_names_the_pull_request_files(world):
     create.create(world.tools, create.Options(dry_run=True))
-    files = f"k8s/manifests/{NAME}/ssh-lan.yaml, {create_render.NFS_HOMES_PATH}"
+    files = f"k8s/manifests/{NAME}/ssh-lan.yaml"
     assert f"hive create {NAME}: manifests: would open a pull request into {REPO} dev with {files}" in world.lines
     keys = f"hive create {NAME}: ssh keys: would write a new SSH host key and 2 authorized keys into OpenBao secret/{RECORD}"
     assert keys in world.lines

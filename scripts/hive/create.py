@@ -161,10 +161,7 @@ def _files(tools: Tools, options: Options) -> dict[str, str]:
     state = tools.state
     hive = create_render.Hive(state["name"], state["record"], state["ssh_port"], state["node"], state["lan_ip"])
     template = create_github.read(tools.run, options.repo, create_render.TEMPLATE_PATH, options.base)
-    homes = create_github.read(tools.run, options.repo, create_render.NFS_HOMES_PATH, options.base)
-    files = create_render.render(template, hive)
-    files[create_render.NFS_HOMES_PATH] = create_render.with_home(homes, state["name"])
-    return files
+    return create_render.render(template, hive)
 
 
 def _manifests(tools: Tools, options: Options) -> str:

@@ -2982,6 +2982,16 @@ The command prints 0 once the finding is gone.
 [Pull request #4024](https://github.com/the-cloud-clockwork/agentihooks/pull/4024) delivered the pin and the
 detector; its red Proofs run reproduced a stripped identity master whose directive returned nothing.
 
+### Doctor master prompt detector
+
+The tick records when each agent entered the input prompt its pane waits on, kept while the same prompt holds and
+cleared once the pane leaves it. The Doctor's `master prompt` detector reads every watched master row with an input
+prompt and that time, and raises a finding once the wait reaches fifteen minutes. The finding id is
+`master-waiting-on-input/<seat>`; its evidence names the seat, the prompt, the minutes waited with the time the wait
+began, and the agent. Its number is the minutes waited rounded down to fifteen minute steps, so a judged finding
+returns only when the wait grows by another fifteen minutes. The Doctor never types into the master pane; the
+operator answers the prompt.
+
 ### Doctor handoff detectors
 
 The Doctor's handoff detectors (`scripts.doctor.handoffs`) run with the other detectors on every Doctor detection
@@ -4513,8 +4523,9 @@ A detection pass reads:
 - **The watched tasks, once.** The CI detector and the trace detector share one read of the watched ledger's tasks.
 - **Every detector side by side.** Each detector runs in its own thread and is still timed as its own
   `doctor.<name>` step: `runtime storage`, `scheduled tick`, `health`, `inbox`, `handoff`, `spawn`,
-  `master launch`, `startup`, `context overrun`, `ci`, `dev workflow` and, with telemetry on, `trace`. A detector
-  that raises is reported as `the <name> detector failed: <error type>: <message>` while the others still report.
+  `master launch`, `startup`, `context overrun`, `master prompt`, `ci`, `dev workflow` and, with telemetry on,
+  `trace`. A detector that raises is reported as `the <name> detector failed: <error type>: <message>` while the
+  others still report.
 - **Pull requests side by side.** The CI detector reads each open pull request of the watched tasks in a thread pool.
 - **Traces inside their budgets.** The trace detector reads active bindings and the historical backfill side by side,
   each inside its own existing budget (15 seconds for active bindings, 45 seconds for the backfill, 55 seconds for
