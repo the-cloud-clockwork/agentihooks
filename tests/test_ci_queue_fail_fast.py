@@ -220,7 +220,7 @@ def test_the_module_runs_from_the_command_line(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out == "wait\n"
 
 
-def _watch(tmp_path, reads, heads=None, server_error=False, rebuild_fail=False):
+def _watch(tmp_path, reads, heads=None, server_error=False, rebuild_fail=False, classifier_fail=False):
     fake, bin_dir = tmp_path / "fake", tmp_path / "bin"
     fake.mkdir()
     bin_dir.mkdir()
@@ -255,6 +255,9 @@ def _watch(tmp_path, reads, heads=None, server_error=False, rebuild_fail=False):
         '  echo "record queue-rebuild-7-2: unknown cause: g"\n'
         "  exit 0\n"
         "fi\n"
+        'if [[ "$2" == scripts.ci_queue_fail_fast && -n "$FAKE_CLASSIFIER_FAIL" && ! -f "$FAKE/classifier-failed" ]]; then\n'
+        '  touch "$FAKE/classifier-failed"; exit 1\n'
+        "fi\n"
         f'exec "{sys.executable}" "$@"\n',
     }
     for name, body in scripts.items():
@@ -276,6 +279,7 @@ def _watch(tmp_path, reads, heads=None, server_error=False, rebuild_fail=False):
         "GITHUB_REF": "refs/heads/gh-readonly-queue/dev/pr-1-old",
         "FAKE_HEADS": "no" if heads is None else "yes",
         "FAKE_REBUILD_FAIL": "1" if rebuild_fail else "",
+        "FAKE_CLASSIFIER_FAIL": "1" if classifier_fail else "",
     }
     run = _step(_jobs()["queue-fail-fast"], "Watch for the first failed graded job")["run"]
     result = subprocess.run(["bash", "-e", "-c", run], cwd=_ROOT, env=env, capture_output=True, text=True)
@@ -363,6 +367,22 @@ def test_the_watch_step_polls_faster_only_after_unit_jobs_finish(tmp_path, unit_
     assert result.returncode == 0, result.stderr
     assert output == "failed=\n"
     assert sleeps == [expected_sleep]
+
+
+def test_the_watch_step_keeps_error_backoff_when_completed_units_cannot_be_classified(tmp_path):
+    result, output, sleeps, _ = _watch(
+        tmp_path,
+        [
+            [_job("unit (3.12, 1)", "success"), _job("stage-budget")],
+            [_job("unit (3.12, 1)", "success"), _job("stage-budget", "success")],
+        ],
+        classifier_fail=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "The shard log check failed; this poll waits." in result.stdout
+    assert output == "failed=\n"
+    assert sleeps == ["15"]
 
 
 def test_the_watch_step_gives_up_quietly_after_ten_failed_reads_in_a_row(tmp_path):
