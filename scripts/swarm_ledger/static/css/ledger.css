@@ -701,7 +701,7 @@ body.reordering, body.reordering .stat-grip { cursor: grabbing; user-select: non
 #stats .bottleneck-stage { font-weight: 600; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 * { scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
-.stats-toggle { display: none; }
+.stats-toggle, .chat-send { display: none; }
 @media (max-width: 1279px) {
   .workspace > .outline { display: none; }
   .jump-menu { display: flex; align-items: center; gap: var(--space-tight); margin-right: auto; font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
@@ -724,6 +724,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   #main-content { transition: opacity .25s cubic-bezier(.4, 0, .2, 1); }
   body.stats-open #main-content { opacity: .35; }
   body.stats-open #chat-fab { visibility: hidden; }
+  .sw-scroll { -webkit-mask-image: linear-gradient(90deg, var(--canvas) calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, var(--canvas) calc(100% - 28px), transparent); }
   body.stats-open .workspace::before { content: ""; position: fixed; inset: 0; z-index: 15; }
   .sw-table th, .sw-table td { padding-right: 12px; }
   .stats-toggle { display: grid; place-content: center; position: fixed; z-index: 21; top: 50%; right: 0; width: 28px; height: 72px; padding: 0; border: 0;
@@ -732,6 +733,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .stats-toggle:hover, .stats-toggle:focus-visible { background: var(--hover); }
   .notif:not([hidden]) ~ .stats-toggle, .chat-panel:not([hidden]) ~ .stats-toggle { display: none; }
   .chat-panel, .chat-panel.big { bottom: 88px; height: min(560px, calc(100dvh - 176px)); }
+  .chat-panel.big { top: 16px; bottom: 76px; height: auto; }
   .stats-toggle svg { width: 18px; height: 18px; transition: transform .25s cubic-bezier(.4, 0, .2, 1); }
   body.stats-open .stats-toggle { right: var(--drawer-w); }
   body.stats-open .stats-toggle svg { transform: rotate(180deg); }
@@ -778,6 +780,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .row > div:not(.item-actions) { flex: 1 1 200px; }
   details.sources-box > summary { flex-wrap: wrap; row-gap: 4px; }
   .sw-title .sw-sep { display: none; }
+  #chat-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sw-caps .sw-cap > .sw-cap-name { min-width: 10em; }
   .phase-slices-label { flex: 0 0 100%; }
 }
@@ -786,9 +789,10 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   #icon-strip { padding-top: 4px; }
   #main-content { padding-bottom: 72px; }
   .chat-panel, .chat-panel.big { top: 48px; bottom: 72px; height: auto; }
+  .chat-panel.big { top: 8px; }
   #chat-title { white-space: nowrap; }
   .chat-panel { overflow: hidden; }
-  #chat-log { flex: 1 1 96px; min-height: 48px; }
+  #chat-log { flex: 1 1 96px; min-height: 32px; }
   .chat-compose { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; }
   .chat-compose > textarea { order: 2; flex: 0 0 100%; }
   .chat-to { flex: 1; }
@@ -805,9 +809,12 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .sw-btn.sw-step { min-width: 32px; }
   .title-pen, .logo-link, .prio-link { position: relative; }
   .title-pen::after, .logo-link::after { content: ""; position: absolute; inset: -10px; }
-  .prio-link::after { content: ""; position: absolute; inset: -10px -4px; }
+  .prio-link::after { content: ""; position: absolute; inset: -12px -4px; }
+  .prio-title { position: relative; }
+  .prio-link { display: inline-flex; align-items: center; min-height: 32px; }
+  .prio-title::after { content: ""; position: absolute; inset: -12px -4px; }
   .jump-menu select { min-height: 44px; }
-  .sw-gate .sw-mode, .sw-ovl-row .sw-mode, .sw-num, .hl-pick, .add { min-height: 32px; }
+  .sw-gate .sw-mode, .sw-ovl-row .sw-mode, .sw-num, .hl-pick, .hl-note, .add { min-height: 32px; }
   .sw-btn.sw-icon { min-width: 32px; min-height: 32px; justify-content: center; }
   input, select, textarea { font-size: 16px; }
   .chat-compose .hint { display: none; }
@@ -815,7 +822,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .sw-btn.sw-step { min-width: 44px; min-height: 44px; }
   .sw-num { min-width: 44px; min-height: 44px; text-align: center; }
   .overview-head .title-pen::after { inset: -14px; }
-  .sw-doctor a { display: inline-block; padding-block: 10px; }
+  .sw-doctor a { display: inline-block; padding-block: 13px; }
   .sw-gate .sw-mode { min-width: 44px; min-height: 44px; }
   .sw-cap.sw-gate { gap: 12px; }
   .prio > .link { min-width: 44px; }
@@ -823,11 +830,23 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   details > summary, .freeze, .scope { min-height: 44px; }
   .sw-fold > summary.sw-blockhead { align-items: center; }
   input[type=checkbox] { width: 24px; height: 24px; }
-  .outline a { padding-block: 10px; }
-  #agents-table a, #swarm-agents a { display: inline-block; padding-block: 8px; }
+  .outline a { padding-block: 13px; }
+  #agents-table a, #swarm-agents a { display: inline-block; padding-block: 13px; }
+  #icon-strip .sync, #chat-fab { width: 44px; height: 44px; }
+  #chat-input { min-height: 44px; }
   .title-pen, .logo-link { min-width: 32px; min-height: 32px; place-content: center; }
   #jump-to { min-width: 216px; }
-  #chat-to-pick, #stats-sync { min-height: 44px; min-width: 44px; }
+  #chat-to-pick, #stats-sync, #chat-clear, #chat-size, #chat-close { min-height: 44px; min-width: 44px; }
+  .chat-compose { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; }
+  .chat-compose > .chat-to, .chat-compose > textarea { flex: 0 0 100%; }
+  .chat-compose > .attach-bar { flex: 1 1 auto; }
+  .chat-send { display: flex; align-items: center; min-height: 44px; margin: 6px 0 0 auto; }
   .sw-acts .sw-btn, #freeze-table .sw-btn, #architecture-table .sw-btn { min-height: 32px; }
   .hl-pick, .hl-note, #hives-table .hl-pick, #hives-table .hl-note { font-size: 16px; }
+}
+@media (pointer: coarse) and (max-width: 767px) and (max-height: 480px) {
+  .chat-compose > .chat-to { flex: 1 1 auto; }
+  .chat-compose > textarea { order: 2; }
+  .chat-send { margin-top: 0; }
+  #chat-log { min-height: 64px; }
 }
