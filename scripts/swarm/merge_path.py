@@ -142,7 +142,7 @@ def _gh(args: list[str], repo_dir: str, run: Callable) -> str:
 
 def read_runs(repo_dir: str, event: str, window: tuple[float, float], run: Callable) -> list[dict]:
     created = f"{_stamp(window[0])}..{_stamp(window[1])}"
-    listed, total = [], 0
+    listed = []
     for page in range(1, LISTED_CAP // PAGE + 1):
         path = (
             f"repos/{{owner}}/{{repo}}/actions/workflows/{ci_speed.WORKFLOW}/runs?event={event}"

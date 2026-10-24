@@ -1936,6 +1936,20 @@ def test_a_fresh_queue_entry_not_yet_listed_holds_until_its_grace_runs_out(mergi
     assert merging.run(NOW + waits.FRESH_MS)[0] == f"task t1 reopened, {URL} {ready.OWN_RED}"
 
 
+def test_a_pull_request_closed_while_it_leaves_the_queue_reopens_without_a_cause(merging):
+    queued_at_now(merging)
+    merging.pulls[URL] = QUEUED
+    merging.run(NOW + 60_000)
+    merging.pulls[URL] = GREEN
+    closing = ready.Pass(
+        merging.store, "sw", merging.ledger, merging.pulls.get, lambda url: CLOSED, NOW + 120_000, merging.queue
+    )
+    assert ready.merge_pass(closing, merging.rows)[0] == (
+        f"task t1 reopened, {URL} left the merge queue without merging"
+    )
+    assert merging.exits.calls == []
+
+
 def test_a_task_a_new_engineer_took_over_leaves_the_merge_pass(merging):
     merging.rows["t1"]["claimed_by"] = "engineer@a1b2c3-0002"
     merging.pulls[URL] = GREEN
