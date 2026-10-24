@@ -61,6 +61,17 @@ def next_of(reader, names):
     raise AssertionError(f"stream ended before {names}")
 
 
+def test_heartbeats_do_not_extend_the_next_event_deadline(monkeypatch):
+    from types import SimpleNamespace
+
+    ticks = iter([0, 0.25, 1])
+    monkeypatch.setattr(sys.modules[__name__], "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    reader = iter([("heartbeat", {}, None), ("heartbeat", {}, None), ("ledger", {}, "late")])
+    with pytest.raises(AssertionError, match="timed out.*ledger"):
+        next_of(reader, {"ledger"}, timeout=1)
+    assert next(reader) == ("ledger", {}, "late")
+
+
 def comment(n):
     return {"op": "add", "thread": "notes", "id": f"n-{n}", "text": f"note {n}"}
 
