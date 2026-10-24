@@ -2025,7 +2025,8 @@ read JSON quoted keys and added the checked worktree to readiness refusals.
 The minute tick runs the promotion watch for every swarm. The watch reads the newest finished push run of Tests on
 `dev`. For a red run it files one urgent `ci` task per failed job with a new cause. When it files, or no promotion
 alert is live, it raises a promotion alert on the ledger, and it sends the master an inbox item for the new tasks. The
-tasks are named `promo-<run id>-<n>`. For a later green run it closes those tasks and the alert. Several swarms can
+tasks are named `promo-<run id>-<n>`. For a later green run whose `promote` job concluded success it closes
+those tasks and the alert. A green run whose `promote` job was skipped, cancelled or missing leaves them open. Several swarms can
 watch one repository, a watched swarm and its Doctor most often. Only one of them, the intake owner, files and closes
 promotion fixer tasks for that repository. A failed check of one run is filed once, in the owner's ledger.
 
