@@ -17,15 +17,11 @@ def test_shard_graders_check_out_event_base_before_installing():
     steps = _jobs()["shard-check"]["steps"]
     checkout = steps[0]
     assert checkout["uses"] == "actions/checkout@v4"
-    legacy = (
-        "${{ github.event.pull_request.base.ref == 'main' && github.sha || "
-        "github.event_name == 'pull_request' && 'dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || "
-        "github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}"
+    assert checkout["with"]["ref"] == (
+        "${{ github.event_name == 'pull_request' && github.base_ref || github.event.pull_request.base.sha || "
+        "github.event.merge_group.base_sha || github.event_name == 'push' && github.sha || github.event.before || "
+        "(inputs.base == 'origin/dev' && 'dev' || inputs.base) }}"
     )
-    promotion = legacy.replace(
-        "github.event.before ||", "github.event_name == 'push' && github.sha || github.event.before ||"
-    )
-    assert checkout["with"]["ref"] in (legacy, promotion)
     assert checkout["with"]["persist-credentials"] is False
     assert sum(step.get("uses", "").startswith("actions/checkout@") for step in steps) == 1
 
@@ -43,7 +39,7 @@ def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data
     split = jobs["split"]["steps"]
     collect = next(step for step in split if step.get("name") == "Adopt latest dev durations")
     upload = next(step for step in split if step.get("name") == "Upload collected tests")
-    assert upload["if"] == "github.event.pull_request.base.ref != 'main'"
+    assert "if" not in upload
     assert collect["run"].endswith(" --collected collected.json")
     assert "--shard" not in collect["run"]
     versions = jobs["split"]["strategy"]["matrix"]["python-version"]
@@ -70,20 +66,18 @@ def test_shard_grading_keeps_head_data_separate_from_base_modules():
         'python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \\\n'
         '  --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl'
         ' | tee -a "$GITHUB_STEP_SUMMARY"\n',
-        "python -m tests.shard_check shard-durations/*/durations.json",
         "python -m tests.shard_budget $REPORT shard-durations/*/durations.json",
     ]
 
 
-def test_release_grading_preserves_legacy_collection_and_dev_never_uses_it():
-    steps = _jobs()["shard-check"]["steps"]
-    trusted = next(step for step in steps if step.get("name") == "Check every collected test ran in exactly one shard")
-    legacy = next(step for step in steps if step.get("name") == "Check release shards with legacy collection")
-    install = next(step for step in steps if step.get("name") == "Install legacy grader dependencies")
-    download = next(step for step in steps if step.get("name") == "Download collected tests")
-    assert legacy["if"] == install["if"] == "github.event.pull_request.base.ref == 'main'"
-    assert trusted["if"] == download["if"] == "github.event.pull_request.base.ref != 'main'"
-    assert legacy["run"] == "python -m tests.shard_check shard-durations/*/durations.json"
+def test_every_base_grades_with_the_trusted_collection_and_no_legacy_grader():
+    jobs = _jobs()
+    steps = jobs["shard-check"]["steps"]
+    names = [step.get("name", "") for step in steps]
+    assert not any("legacy" in name for name in names)
+    assert not any(step.get("uses", "").startswith("astral-sh/setup-uv") for step in steps)
+    for job in ("split", "unit", "shard-check"):
+        assert "base.ref" not in str(jobs[job]["steps"])
 
 
 _ACTIONS_SHELLS = {None: ["bash", "-e"], "bash": ["bash", "--noprofile", "--norc", "-eo", "pipefail"]}
