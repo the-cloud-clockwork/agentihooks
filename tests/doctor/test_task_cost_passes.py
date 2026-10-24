@@ -101,3 +101,21 @@ def test_backlog_first_seen_during_outage_is_not_new_on_recovery(scan):
     record["reader"]["failures"] = []
     assert [f.subject for f in run()] == ["new"]
     assert run() == []
+
+@pytest.mark.parametrize("missing", ["trace", "turns"])
+def test_a_new_merge_waits_for_its_exported_cost_before_it_is_consumed(scan, missing):
+    run, tasks, record = scan
+    assert run() == []
+    _merge(tasks, record)
+    exported = deepcopy(record["traces"][-1])
+    if missing == "trace":
+        record["traces"].pop()
+    else:
+        record["traces"][-1]["observations"] = []
+    assert run() == []
+    if missing == "trace":
+        record["traces"].append(exported)
+    else:
+        record["traces"][-1] = exported
+    assert [f.subject for f in run()] == ["new"]
+    assert run() == []
