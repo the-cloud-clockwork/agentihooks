@@ -18,6 +18,7 @@ pytestmark = pytest.mark.unit
 def test_budgeted_passes_resume_jobs_without_losing_active_run_coverage(store, monkeypatch, run_count, job_count):
     calls, reads = [], Counter()
     runs = [{"id": n, "status": "in_progress", "run_attempt": 1, "event": "push"} for n in range(run_count)]
+    outside = {"id": 1000000, "status": "in_progress", "run_attempt": 1, "event": "push"}
 
     def api(args, **kwargs):
         endpoint = args[2]
@@ -32,7 +33,7 @@ def test_budgeted_passes_resume_jobs_without_losing_active_run_coverage(store, m
             ]
             body = {"total_count": job_count, "jobs": rows}
         else:
-            selected = runs if "created" in query else []
+            selected = runs if "created" in query else [outside] if query["status"] == ["in_progress"] else []
             body = {"total_count": len(selected), "workflow_runs": selected[(page - 1) * 100 : page * 100]}
         return SimpleNamespace(stdout=json.dumps(body))
 
@@ -52,12 +53,12 @@ def test_budgeted_passes_resume_jobs_without_losing_active_run_coverage(store, m
     else:
         pytest.fail("saved window did not finish after bounded resumptions")
 
-    assert reports[-1]["runs"] == run_count
-    assert reports[-1]["jobs"] == run_count * job_count
-    assert reports[-1]["discovered_runs"] == run_count
-    assert len(reads) == run_count * ((job_count + 99) // 100)
+    assert reports[-1]["runs"] == run_count + 1
+    assert reports[-1]["jobs"] == (run_count + 1) * job_count
+    assert reports[-1]["discovered_runs"] == run_count + 1
+    assert len(reads) == (run_count + 1) * ((job_count + 99) // 100)
     assert set(reads.values()) == {1}
-    assert sorted(state["pending"]) == list(range(run_count))
+    assert sorted(state["pending"]) == [*range(run_count), 1000000]
     assert state.get("continuation") is None
 
 
@@ -129,3 +130,45 @@ def test_resuming_a_cached_queue_observation_does_not_invent_elapsed_wait(store,
     assert state["report"]["runs"] == 2
     assert state["report"]["crossings"] == 0
     assert store.redis.hlen(store.key(DOCTOR, "doctor-findings")) == 0
+
+
+def test_retrying_an_incomplete_list_refreshes_its_retained_page():
+    reads = []
+    responses = {}
+
+    def api(args, **kwargs):
+        reads.append(args[2])
+        if len(reads) == 1:
+            body = {"total_count": 2, "workflow_runs": []}
+        elif "created=" in args[2]:
+            body = {"total_count": 1, "workflow_runs": [{"id": 7, "status": "completed", "event": "push"}]}
+        elif "/jobs?" in args[2]:
+            body = {"total_count": 1, "jobs": [job(0)]}
+        else:
+            body = {"total_count": 0, "workflow_runs": []}
+        return SimpleNamespace(stdout=json.dumps(body))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, pending=ci_speed_read.Progress([], responses), run=api)
+    assert result["complete"] is True
+    assert [run["id"] for run in result["runs"]] == [7]
+    assert result["runs"][0]["jobs"] == [job(0)]
+    assert result["api_calls"] == len(reads) == 8
+    assert reads[0] == reads[1]
+
+
+def test_a_legacy_finished_run_cache_survives_the_first_resumable_pass(store, monkeypatch):
+    from tests.doctor.test_ci_speed_read import api
+
+    run, calls = api(records=[{"id": 7, "status": "completed", "run_attempt": 2, "event": "push"}])
+    state_key = store.key(DOCTOR, "ci-speed")
+    kept = {"status": "completed", "run_attempt": 2, "jobs": [job(0)]}
+    store.redis.set(state_key, json.dumps({"last": NOW - 60000, "known": {"7": kept}}))
+    monkeypatch.setattr(ci_speed_read, "read", functools.partial(ci_speed_read.read, run=run))
+    loop.speed(store, DOCTOR, WATCHED, NOW)
+    state = json.loads(store.redis.get(state_key))
+    assert state["report"]["complete"] is True
+    assert state["report"]["jobs"] == 1
+    assert state["report"]["runs"] == 1
+    assert state["report"]["api_calls"] == len(calls) == 6
+    assert state["last"] == NOW
+    assert state["known"] == {}
