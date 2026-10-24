@@ -171,7 +171,18 @@ def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeyp
     assert not any(argument.startswith("/mnt/") for argument in command[1:])
 
 
+def _ordinary_launch_budget(monkeypatch):
+    original = init_agent.LaunchDeadline
+
+    def deadline(seconds):
+        assert seconds == init_agent.LAUNCH_DEADLINE_S
+        return original(seconds)
+
+    monkeypatch.setattr(init_agent, "LaunchDeadline", deadline)
+
+
 def _launch(monkeypatch, tmp_path, popen):
+    _ordinary_launch_budget(monkeypatch)
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: None)
     monkeypatch.setattr(
@@ -957,6 +968,7 @@ def test_report_names_the_model_and_effort(monkeypatch, tmp_path, capsys):
 
 
 def _trust_launch(monkeypatch, tmp_path, project, env_extra=None):
+    _ordinary_launch_budget(monkeypatch)
     seen = {}
 
     def popen(command, **kwargs):
