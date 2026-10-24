@@ -92,7 +92,7 @@ def closed_in_window(value: str, cwd: Path) -> bool:
 
 
 def asks_operator(tool_name: str, session_id: str | None) -> bool:
-    """Whether a permission prompt for this tool may reach the operator, who opens it only by typing operator on."""
+    """Whether a permission prompt for this tool may reach the operator: always unbound, bound only after operator on."""
     from hooks.context.operator_mode import _heard
 
     return tool_name in PERMISSION_TOOLS and _heard(session_id)
