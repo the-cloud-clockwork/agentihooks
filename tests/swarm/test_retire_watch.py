@@ -102,6 +102,7 @@ def test_swarm_status_lists_the_retire_finding(store, monkeypatch):
 @pytest.mark.parametrize("indexed", [False, True])
 def test_retire_findings_identify_the_original_hive_and_removed_host_count(store, monkeypatch, indexed):
     from scripts.hive import registry
+    from scripts.swarm.store import AgentRecord
 
     monkeypatch.setenv("SWARM_HIVE_ID", "controller")
     for name in (NAME, "other"):
