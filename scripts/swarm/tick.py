@@ -452,7 +452,11 @@ def _rebind(slug, store, runtime, agent, pid):
 
 def _ended(agent, rows):
     task = rows.get(agent.task, {})
-    ended = agent.lane != MASTER and (task.get("done") or task.get("state") in {"done", "blocked", "handoff"})
+    ended = agent.lane != MASTER and (
+        task.get("done")
+        or task.get("state") in {"done", "blocked", "handoff"}
+        or (task.get("awaiting") == "verify" and not task.get("claimed_by"))
+    )
     return agent.state == "finished" or bool(ended)
 
 
@@ -557,14 +561,18 @@ def _current_owner(agent, row):
 
 def _restore_owner(slug, store, ledger, rows, agent):
     row = rows.get(agent.task, {})
-    if not _current_owner(agent, row) or not store.ensure_claim(slug, agent, LEASE_MS):
+    if _ended(agent, rows) or not _current_owner(agent, row) or not store.ensure_claim(slug, agent, LEASE_MS):
         return
     if row.get("out_of_scope") or row.get("state") not in ("open", "claimed", "pr"):
         return
     owner = row.get("claimed_by", "")
     if owner == agent.name and row["state"] != "open":
         return
-    expected = {"claimed_by": owner, "claim_generation": row.get("claim_generation", 0)}
+    expected = {
+        "claimed_by": owner,
+        "claim_generation": row.get("claim_generation", 0),
+        "awaiting": row.get("awaiting", ""),
+    }
     fields = {"claimed_by": agent.name}
     if row["state"] == "open":
         fields["state"] = "pr" if row.get("pr_url") else "claimed"
@@ -636,7 +644,10 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live:
             _restore_owner(slug, store, ledger, rows, agent)
-            actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
+            if _ended(agent, rows):
+                actions += _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms)
+            else:
+                actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif resume.recovery_pending(store, slug, agent):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
