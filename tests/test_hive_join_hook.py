@@ -182,7 +182,7 @@ def test_failed_startup_ledger_checks_recover_in_the_same_agent_session(monkeypa
     hive_join.run(payload, "start")
     before = join_report.read(client.redis, agent)
     assert set(before["misses"]) == {"ledger_join", "ledger_write"}
-    monkeypatch.setattr(hive_join.time, "time", lambda: 1061.0)
+    monkeypatch.setattr(hive_join.time, "time", lambda: 1030.0)
     hive_join.run(payload, "tool")
     after = join_report.read(client.redis, agent)
     assert after["grade"] == "complete"

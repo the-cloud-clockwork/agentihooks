@@ -63,23 +63,23 @@ def test_ledger_retry_cadence_preserves_required_failures_until_recovery(monkeyp
     calls = []
     checks = {"ledger_join": False, "ledger_write": False}
     monkeypatch.setattr(join_checks, "ledger_checks", lambda report: calls.append(report) or checks)
-    boundary = before["started_at"] + join_report.HEARTBEAT_MS
+    boundary = before["started_at"] + 30_000
     join_report.retry_ledger(redis, agent, "session", boundary - 1)
     assert not calls
     join_report.retry_ledger(redis, agent, "session", boundary)
     failed = join_report.read(redis, agent)
     assert failed == {**before, "ledger_checked_at": boundary}
     assert len(calls) == 1
-    join_report.retry_ledger(redis, agent, "session", boundary + join_report.HEARTBEAT_MS - 1)
+    join_report.retry_ledger(redis, agent, "session", boundary + 30_000 - 1)
     assert len(calls) == 1
     checks = {"ledger_join": True, "ledger_write": True}
-    join_report.retry_ledger(redis, agent, "session", boundary + join_report.HEARTBEAT_MS)
+    join_report.retry_ledger(redis, agent, "session", boundary + 30_000)
     recovered = join_report.read(redis, agent)
     assert recovered["grade"] == "complete"
     assert recovered["heartbeat_at"] == before["heartbeat_at"]
     assert recovered["context"] == before["context"]
     assert len(calls) == 2
-    join_report.retry_ledger(redis, agent, "session", boundary + 2 * join_report.HEARTBEAT_MS)
+    join_report.retry_ledger(redis, agent, "session", boundary + 2 * 30_000)
     assert len(calls) == 2
 
 

@@ -24,6 +24,7 @@ REQUIRED = (
 )
 OPTIONAL = ("brain",)
 HEARTBEAT_MS = 180_000
+LEDGER_RETRY_MS = 30_000
 GONE = "agent gone from the swarm"
 ENDED = ("finished", "ended")
 
@@ -127,7 +128,7 @@ def claim_ledger_retry(redis: "Redis", agent: "AgentRecord", session: str, at: i
             report = read(pipe, agent)
             if report.get("session_id") != session or report.get("status") != "running":
                 return {}
-            if at - report.get("ledger_checked_at", report["started_at"]) < HEARTBEAT_MS:
+            if at - report.get("ledger_checked_at", report["started_at"]) < LEDGER_RETRY_MS:
                 return {}
             if all(report["checks"].get(name) is True for name in ("ledger_join", "ledger_write")):
                 return {}
