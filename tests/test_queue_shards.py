@@ -18,6 +18,7 @@ def _a_420_second_step(monkeypatch):
 
     monkeypatch.setattr(queue_shards, "STEP_SECONDS", 420)
     monkeypatch.setattr(queue_shards, "SLOWDOWN", 1.15)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
 
 
 def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
