@@ -88,7 +88,11 @@ def test_real_protected_checkout_recovers_within_budget(tmp_path, stall):
     started = time.monotonic()
     try:
         result = subprocess.run(
-            ["node", str(action)], cwd=workspace, env=env, capture_output=True, text=True, timeout=100
+            ["timeout", "--kill-after=5s", "100s", "node", str(action)],
+            cwd=workspace,
+            env=env,
+            capture_output=True,
+            text=True,
         )
         elapsed = time.monotonic() - started
     finally:
