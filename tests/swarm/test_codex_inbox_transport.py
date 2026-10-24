@@ -7,7 +7,7 @@ from scripts.swarm import execution
 from scripts.swarm.store import APP_SERVER_TRANSPORT, LEGACY_TRANSPORT, AgentRecord, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_codex_inbox_transport_defaults_to_app_server(env):  # noqa: F811

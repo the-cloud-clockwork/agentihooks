@@ -18,8 +18,6 @@ from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "alerts-2026-01-01"
 LONG = " ".join(["word"] * 120)
 SIZE_TEXT = "phase {} description has 120 words, limit 100"
@@ -36,7 +34,7 @@ def make_ledger(description="d"):
         "sources": [],
         "phases": [{"title": "one", "description": description}],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -359,8 +357,8 @@ def test_versioned_write_delivers_alert_once(inbox):
         "ops": [op],
         "guards": {"phases": resources.resource_revision(state, "phases")},
     }
-    mutations.apply(ledger_server, SLUG, "", payload)
-    mutations.apply(ledger_server, SLUG, "", payload)
+    mutations.apply(ledger_server.api_services(), SLUG, "", payload)
+    mutations.apply(ledger_server.api_services(), SLUG, "", payload)
     items = inbox.inbox("master") + inbox.inbox(seat_address(SLUG, MASTER)) + inbox.inbox("operator")
     assert len(items) == 1
     assert "phase id p1 is already taken" in items[0].text
@@ -613,7 +611,9 @@ def test_write_with_fifty_alerts_resolves_a_bounded_number_of_names(inbox, monke
     op = {"op": "ack", "id": "one", "by": "writer", "rev": state["_meta"]["rev"]}
     if refused:
         op = {"op": "task_add", "id": "one", "by": "writer", "task": "t1", "title": "Proof", "lane": "eng"}
-    reply = mutations.apply(ledger_server, SLUG, "", {"operation_id": "timed", "ops": [op], "guards": {}})
+    reply = mutations.apply(
+        ledger_server.api_services(), SLUG, "", {"operation_id": "timed", "ops": [op], "guards": {}}
+    )
     assert reply["rejected"] == (["one"] if refused else [])
     assert len(resolved) <= (4 if refused else 2), resolved
 
@@ -702,7 +702,17 @@ def test_a_live_alert_of_another_source_does_not_hold_a_promotion_raise():
     assert [a["source"] for a in state["alerts"]] == ["size", "promotion"]
 
 
-RAISE_REFUSED = "alert_raise takes by, a source among ('promotion',) and a text of up to 2000 characters"
+def test_a_raised_release_alert_opens_one_alert_for_the_master():
+    make_ledger()
+    state, rejected = sync(ops=[{**raise_promotion("r1", "Release tag lookup failed"), "source": "release"}])
+    assert rejected == []
+    assert [(a["source"], a["target"], a["state"]) for a in state["alerts"]] == [("release", "master", "open")]
+
+
+RAISE_REFUSED = (
+    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge') and a text of up to "
+    "2000 characters"
+)
 
 
 @pytest.mark.parametrize(
@@ -785,7 +795,7 @@ def test_expiry_waits_one_scan_interval_after_startup(monkeypatch):
             assert alert["state"] == "done"
             raise InterruptedError("scan observed")
 
-    monkeypatch.setattr(ledger_server.time, "sleep", tick)
+    monkeypatch.setattr(ledger_server, "scheduled_wait", tick)
     with pytest.raises(InterruptedError, match="scan observed"):
         ledger_server.watch_ledgers(interval=0)
     assert len(sleeps) == 16

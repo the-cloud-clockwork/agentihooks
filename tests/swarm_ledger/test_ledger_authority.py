@@ -19,19 +19,20 @@ from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
 from scripts.swarm.store import SwarmError  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
 from scripts.swarm_ledger import ledger_authority as authority  # noqa: E402
-from scripts.swarm_ledger.repository import repository  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
+from tests.mutation_trace import traced  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.api_fakes import as_services  # noqa: E402
 
 server = ledger_server
 from tests.swarm_ledger.test_media import png  # noqa: E402
+
+repository = default_repository()
 
 SLUG = "authority-proof"
 WORKER = "engineer@323133-0256"
 OTHER = "engineer@323133-0257"
 MASTER = "master@323133-0001"
-
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def operation(kind, **fields):
@@ -54,7 +55,7 @@ def live():
     host = f"127.0.0.1:{port}"
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
     page = legacy_page.render(new_ledger.build_doc(content), SLUG, port)
-    core.paths(SLUG)[0].write_text(page)
+    legacy_page.paths(SLUG, core)[0].write_text(page)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     with (
         patch("hooks._redis.get_redis", return_value=None),
@@ -74,11 +75,8 @@ def live():
             thread.join(timeout=2)
 
 
-MUTATION_TRACE_FACTOR = 7
-
-
 def send(live, method, path, body=b"", **headers):
-    timeout = 5 * (MUTATION_TRACE_FACTOR if os.environ.get("MUTANT_UNDER_TEST") else 1)
+    timeout = traced(5)
     conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=timeout)
     try:
         conn.request(method, path, body, {"Host": live["host"], **headers})
@@ -356,7 +354,7 @@ def launched():
 
     client = fakeredis.FakeRedis(decode_responses=True)
     client.hset(NameRegistry.key("name", LAUNCHED), mapping={"swarm": "sw", "operator": "frontend", "retired_at": 0})
-    with patch.object(authority.store, "redis_client", lambda: client):
+    with patch("scripts.swarm.store.redis_client", lambda: client):
         yield
 
 
@@ -374,7 +372,7 @@ def test_the_claim_check_lets_the_claim_through_when_redis_is_down():
     def down():
         raise Down("no redis")
 
-    with patch.object(authority.store, "redis_client", down):
+    with patch("scripts.swarm.store.redis_client", down):
         assert authority.claim_refusal(LAUNCHED) == ""
 
 
@@ -534,7 +532,7 @@ def test_mutation_receiver_checks_epoch_before_and_after_domain_apply():
     from scripts.swarm_ledger.api import mutations
 
     server, payload, seen = _epoch_mutation_server(False)
-    reply = mutations.apply(server, "sw", "", payload)
+    reply = mutations.apply(as_services(server), "sw", "", payload)
     assert seen == [("sw", 1), ("sw", 1)]
     assert reply == {"applied": ["one"], "rejected": [], "_meta": {"rev": 1, "warnings": []}}
 
@@ -545,7 +543,7 @@ def test_mutation_receiver_returns_exact_stale_epoch_error():
 
     server, payload, seen = _epoch_mutation_server(True)
     with pytest.raises(APIError) as error:
-        mutations.apply(server, "sw", "", payload)
+        mutations.apply(as_services(server), "sw", "", payload)
     assert seen == [("sw", 1)]
     assert error.value.status == 409
     assert error.value.code == "stale_controller"

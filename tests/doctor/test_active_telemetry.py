@@ -81,12 +81,31 @@ def test_a_healthy_idle_binding_with_old_freshness_raises_nothing():
     assert traces.findings(_record(idle), LIMITS) == []
 
 
-def test_a_binding_with_no_trace_past_its_grace_is_never_exported_and_names_seat_and_task():
-    [found] = traces.findings(_record(_binding(traces=[], remote=None, local=None, session_id="")), LIMITS)
+def test_a_working_agent_in_its_first_turn_with_no_stop_is_not_never_exported():
+    first = _binding(traces=[], remote=None, local=_local(accepted=0, stopped=False))
+    assert traces.findings(_record(first), LIMITS) == []
+
+
+def test_an_agent_without_local_progress_inside_its_first_turn_bound_is_not_never_exported():
+    assert traces.findings(_record(_binding(traces=[], remote=None, local=None)), LIMITS) == []
+
+
+def test_an_agent_without_local_progress_past_its_first_turn_bound_is_never_exported():
+    old = _binding(traces=[], remote=None, local=None, started_at=NOW - 3_601_000)
+    [found] = traces.findings(_record(old), LIMITS)
+    assert found.kind == "telemetry never exported"
+    assert "no completed turn recorded, working past the 60 minute first turn bound" in found.evidence
+    assert found.measure == 3601
+
+
+def test_a_binding_with_no_trace_after_a_completed_turn_is_never_exported_and_names_seat_and_task():
+    stopped = _binding(traces=[], remote=None, local=_local(accepted=0, stopped=True), session_id="")
+    [found] = traces.findings(_record(stopped), LIMITS)
     assert found.kind == "telemetry never exported"
     assert found.id == f"telemetry-never-exported/{AGENT}.{STARTED}"
     assert "seat eng-1@s" in found.evidence and "task t1" in found.evidence
     assert f"no trace tagged swarm:s and agent:{AGENT}" in found.evidence
+    assert "a turn completed" in found.evidence
     assert found.measure == 600
 
 
@@ -231,8 +250,13 @@ def test_thresholds_read_from_the_environment():
     assert (limits.active_stale_seconds, limits.active_grace_seconds, limits.interval_minutes) == (30, 60, 2)
 
 
+def test_the_first_turn_bound_reads_from_the_environment():
+    assert traces.Limits.from_env({"AGENTIHOOKS_DOCTOR_FIRST_TURN_MINUTES": "5"}).first_turn_minutes == 5
+    assert traces.Limits().first_turn_minutes == 60
+
+
 def test_a_known_session_missing_under_its_agent_is_never_exported_even_beside_other_traces():
-    other = _binding(session_id="sid-2", remote=None, local=None)
+    other = _binding(session_id="sid-2", remote=None, local=_local(accepted=0, stopped=True))
     [found] = traces.findings(_record(other), LIMITS)
     assert found.kind == "telemetry never exported"
     assert "session sid-2" in found.evidence
@@ -245,6 +269,27 @@ def test_an_incomplete_trace_listing_raises_no_untraced_session():
     assert found.kind == "trace coverage partial"
     assert found.measure == 1
     assert "trace listing stopped at its page cap" in found.evidence
+
+
+def test_partial_coverage_names_the_traces_past_the_listing_cap_apart_from_the_unread():
+    historical = {"listed": False, "unlisted": 1430, "traces": 2000, "covered": 1990, "complete": False}
+    [found] = traces.findings(_record(historical=historical), LIMITS)
+    assert found.summary == "observations of 10 traces not read yet"
+    assert found.measure == 10
+    assert "1430 traces past where the listing stopped not counted" in found.evidence
+
+
+def test_traces_read_up_to_the_observation_page_cap_are_named_and_not_counted_unread():
+    historical = {"traces": 100, "covered": 90, "capped": 4, "complete": False}
+    [found] = traces.findings(_record(historical=historical), LIMITS)
+    assert found.summary == "observations of 6 traces not read yet"
+    assert found.measure == 6
+    assert "4 traces read up to the observation page cap" in found.evidence
+
+
+def test_complete_coverage_within_a_capped_listing_raises_no_coverage_finding():
+    historical = {"listed": False, "unlisted": 1430, "traces": 2000, "covered": 2000, "complete": True}
+    assert traces.reader(_record(historical=historical), LIMITS) == []
 
 
 def test_measures_report_each_active_binding_and_the_coverage():
@@ -270,14 +315,14 @@ UNKNOWN = (f"agent {AGENT}", "seat unknown", "task unknown", "session unknown")
 
 
 def test_a_never_exported_finding_reads_in_full():
-    blank = _binding(seat="", task="", session_id="", traces=[], remote=None, local=None)
+    blank = _binding(seat="", task="", session_id="", traces=[], remote=None, local=_local(accepted=0, stopped=True))
     assert traces.findings(_record(blank), LIMITS) == [
         traces.Finding(
             "telemetry never exported",
             f"{AGENT}.{STARTED}",
             "working agent with no Langfuse trace after 600 seconds",
-            (*UNKNOWN, f"no trace tagged swarm:s and agent:{AGENT}"),
-            f"no trace after a 60 second grace, {CADENCE}",
+            (*UNKNOWN, f"no trace tagged swarm:s and agent:{AGENT}", "a turn completed"),
+            f"no trace after a completed turn or past a 60 minute first turn, {CADENCE}",
             600,
         )
     ]
@@ -362,39 +407,78 @@ def test_a_misattributed_finding_reads_in_full():
     "binding",
     [
         _binding(traces=[], remote=None, local=None, started_at=NOW - 60_000),
+        _binding(traces=[], remote=None, local=None, started_at=NOW - 3_600_000),
         _binding(local=_local(generated_bytes=5000, oldest_unaccepted=NOW - 60_000)),
         _binding(
             remote={"trace": "tr-1", "fresh_ms": NOW - 400_000, "observations": 30},
             local=_local(accepted_at=NOW - 60_000),
         ),
     ],
-    ids=["grace", "stale", "acknowledgement"],
+    ids=["grace", "first turn", "stale", "acknowledgement"],
 )
 def test_exactly_at_a_threshold_nothing_is_raised(binding):
     assert traces.findings(_record(binding), LIMITS) == []
 
 
-def test_a_reader_outage_reads_in_full_and_keeps_five_failures():
-    failures = [f"failure {n}" for n in range(7)]
+def test_a_reader_outage_keeps_the_detail_of_every_failed_read():
+    failures = [f"failure {n}" for n in range(11)]
     record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
     assert traces.reader(record, LIMITS) == [
         traces.Finding(
             "trace reader unavailable",
             f"s.{NOW}",
-            "7 Langfuse reads failed or ran out of time",
+            "11 Langfuse reads failed or ran out of time",
             (
-                *failures[:5],
+                *failures,
                 "active bindings read 0 of 1",
                 "observations read for 0 of 0 traces",
                 "unread bindings are not judged on Langfuse evidence",
             ),
             f"any failed or unfinished Langfuse read, {CADENCE}",
-            7,
+            11,
         )
     ]
 
 
-def test_partial_coverage_reads_in_full_and_keeps_three_unreadable_traces():
+def test_a_reader_outage_bounds_its_failure_detail_per_pass():
+    failures = [f"failure {n}" for n in range(53)]
+    record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
+    [found] = traces.reader(record, LIMITS)
+    assert found.evidence[:51] == (*failures[:50], "3 more failed reads past the bound of 50 per pass")
+    assert found.evidence[51] == "active bindings read 0 of 1"
+    assert found.measure == 53
+
+
+def test_a_reader_outage_keeps_unreadable_traces_of_the_pass_without_counting_them():
+    unreadable = ["trace t1 unreadable: TimeoutError", "trace t2 unreadable: TimeoutError"]
+    historical = {"traces": 2, "covered": 0, "complete": False, "unreadable": unreadable}
+    record = _record(
+        _binding(read=False, traces=[], remote=None), failures=["f"], down_since=NOW, historical=historical
+    )
+    [found] = traces.reader(record, LIMITS)
+    assert found.evidence[:4] == ("f", *unreadable, "active bindings read 0 of 1")
+    assert found.measure == 1
+
+
+def test_a_reader_outage_at_the_bound_keeps_every_failure_with_no_overflow_line():
+    failures = [f"failure {n}" for n in range(50)]
+    record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
+    [found] = traces.reader(record, LIMITS)
+    assert found.evidence[:51] == (*failures, "active bindings read 0 of 1")
+
+
+def test_a_reader_outage_one_past_the_bound_names_the_one_dropped_failure():
+    failures = [f"failure {n}" for n in range(51)]
+    record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
+    [found] = traces.reader(record, LIMITS)
+    assert found.evidence[:52] == (
+        *failures[:50],
+        "1 more failed reads past the bound of 50 per pass",
+        "active bindings read 0 of 1",
+    )
+
+
+def test_partial_coverage_reads_in_full_and_keeps_every_unreadable_trace():
     unreadable = [f"trace t{n} unreadable: TimeoutError" for n in range(5)]
     record = _record(historical={"traces": 10, "covered": 4, "complete": False, "unreadable": unreadable})
     assert traces.reader(record, LIMITS) == [
@@ -404,7 +488,7 @@ def test_partial_coverage_reads_in_full_and_keeps_three_unreadable_traces():
             "observations of 6 traces not read yet",
             (
                 "observations read for 4 of 10 traces",
-                *unreadable[:3],
+                *unreadable,
                 "tool error, task cost and turn gap findings cover only the read traces",
                 "each Doctor scan reads more within its read budget",
             ),

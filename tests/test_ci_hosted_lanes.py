@@ -17,43 +17,54 @@ LANE = (
     "((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || "
     "((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c')"
 )
-MUTATION_LANE = LANE.replace("hosted-lane", "mutation-lane")
 
 DIRECT = {
     "ci-templates.yml": ("CI templates", "ci-templates"),
     "helm-kind.yml": ("Helm chart in kind", "helm-kind"),
     "ledger-load.yml": ("Ledger server load", "ledger-load"),
+    "hierarchy-cpu.yml": ("Hierarchy CPU proof", "hierarchy-cpu"),
     "swarm-smoke.yml": ("Swarm container smoke", "swarm-smoke"),
     "swarm-node-smoke.yml": ("Swarm worker image smoke", "swarm-node-smoke"),
     "brain-smoke.yml": ("brain-smoke", "brain-smoke"),
+    "writer-lock.yml": ("Writer lock", "writer-lock"),
     "worker-resources.yml": ("Worker resources", "worker-resources"),
     "startup-stages.yml": ("Startup stages", "startup-stages"),
 }
 LANE_USERS = {
+    "chaos.yml",
+    "mutation-line-selection-proof.yml",
     "mutation-refinement-proof.yml",
     "test.yml",
     "proofs.yml",
     "test-leaks.yml",
     "swarm-node-image.yml",
     "hive-worker.yml",
+    "lost-runner.yml",
+    "chart-release.yml",
     *DIRECT,
 }
-MUTATION_LANE_USERS = {"mutation-preflight.yml:stats", "mutation-preflight.yml:mutation-shard"}
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
 EXCLUDED = {
     "branch-lanes.yml": "every branch push runs one short grader that must refuse and cancel lane skipping workflows at once",
-    "codex-cache.yml": "main push, six hourly and manual, one short job that seeds the Codex cache, no pull request trigger",
+    "codex-cache.yml": "main push, six hourly and manual, one short job that seeds the Codex and nats server caches, no pull request trigger",
     "coverage-stability.yml": "a manual dispatch runs one short job that only reads dev run data",
     "pages.yml": "a rare manual docs build and deploy; the github-pages environment decides which branches deploy",
     "publish-pypi.yml": "operator release path from main",
     "release.yml": "operator release path; a dry run tags and pushes nothing",
     "swarm-image.yml": "a manual dispatch runs no job; its jobs are gated to a dev push",
+    "mutation-preflight.yml": "branch pushes queue each run's legs on the batch runner set, whose ceiling caps them",
 }
 if (_WORKFLOWS / "access-audit.yml").exists():
     EXCLUDED["access-audit.yml"] = "dev push, weekly and manual, one short read only job, no pull request trigger"
 CALLERS = ("test.yml", "proofs.yml")
 REQUIRED = ("pull_request", "merge_group", "pull_request_target")
 REFS = ("refs/heads/dev", "refs/heads/main", "refs/heads/diffcheck/plant", "refs/heads/task-branch")
+
+
+if (_WORKFLOWS / "count-record.yml").is_file():
+    LANE_USERS = LANE_USERS | {"count-record.yml"}
+if (_WORKFLOWS / "actions-storage.yml").is_file():
+    LANE_USERS = LANE_USERS | {"actions-storage.yml"}
 
 
 class _Context(dict):
@@ -144,20 +155,19 @@ def _open(events):
 
 def test_every_non_required_trigger_is_on_a_lane_or_excluded_with_a_reason():
     open_triggers = {path.name for path in _WORKFLOWS.glob("*.yml") if _open(yaml.safe_load(path.read_text())[True])}
-    users = {where.split(":")[0] for where in LANE_USERS | MUTATION_LANE_USERS}
+    users = {where.split(":")[0] for where in LANE_USERS}
     assert not users & set(EXCLUDED)
     assert set(EXCLUDED) <= open_triggers
     assert open_triggers <= users | set(EXCLUDED)
     assert {where for where, block in _blocks() if "hosted-lane" in str(block["group"])} == LANE_USERS
-    assert {where for where, block in _blocks() if "mutation-lane" in str(block["group"])} == MUTATION_LANE_USERS
+    assert not [where for where, block in _blocks() if "mutation-lane" in str(block["group"])]
 
 
 def test_every_lane_user_names_the_same_three_lanes():
     for where, block in _blocks():
-        for name, lane in (("hosted-lane", LANE), ("mutation-lane", MUTATION_LANE)):
-            if name in str(block["group"]):
-                assert str(block["group"]).count(name) == 1, where
-                assert lane in block["group"], where
+        if "hosted-lane" in str(block["group"]):
+            assert str(block["group"]).count("hosted-lane") == 1, where
+            assert LANE in block["group"], where
 
 
 def test_a_run_on_a_lane_queues_and_is_never_cancelled():
@@ -171,12 +181,19 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled():
                 assert not resolved["cancel-in-progress"], (where, github)
             else:
                 assert resolved["queue"] in (None, "single"), (where, github)
-    assert seen == LANE_USERS | MUTATION_LANE_USERS
+    assert seen == LANE_USERS
 
 
 def test_no_required_run_or_its_callee_ever_reaches_a_lane():
     checked = 0
     for where, block in _blocks():
+        if where == "count-record.yml":
+            recorder = _workflow(where)
+            assert recorder[True] == {"push": {"branches": ["dev"]}}
+            assert set(recorder["jobs"]) == {"count-record"}
+            assert recorder["jobs"]["count-record"]["continue-on-error"] is True
+            assert all("count-record" not in job.get("needs", []) for job in _workflow("test.yml")["jobs"].values())
+            continue
         for github in _contexts(where):
             if github["event_name"] in REQUIRED or (github["event_name"], github["ref"]) == ("push", "refs/heads/dev"):
                 checked += 1
@@ -209,9 +226,8 @@ def test_a_branch_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait
     for where, leg in LEGS.items():
         for run_id, index in product(range(1000, 1010), range(3)):
             group = _resolve(_block(where), matrix={leg if leg == "shard" else "part": index}, run_id=run_id, **push)
-            assert group["group"].endswith(f"-{leg}-{index}"), (where, group)
-            mutation.add(group["group"].removesuffix(f"-{leg}-{index}"))
-    assert mutation == {"mutation-lane-a", "mutation-lane-b", "mutation-lane-c"}
+            assert group["group"] == f"mutation-preflight-job-{run_id}-{leg}-{index}", (where, group)
+            mutation.add(group["group"])
     shared = {
         _resolve(block, **github)["group"]
         for where, block in _blocks()
@@ -240,19 +256,16 @@ def test_a_called_workflow_never_waits_on_its_callers_lane(caller):
     for where, leg in LEGS.items():
         mutation = _resolve(_block(where), **github)
         assert mutation["group"] == f"mutation-preflight-job-1000-{leg}-0"
-        assert mutation["queue"] == "single"
+        assert mutation["queue"] is None
         assert mutation["group"] != _resolve(_block("mutation-preflight.yml"), **github)["group"]
 
 
-def test_direct_dispatches_and_mutation_branch_pushes_queue_on_a_lane():
+def test_direct_dispatches_queue_on_a_lane():
     dispatch = {"event_name": "workflow_dispatch", "ref": "refs/heads/diffcheck/plant", "run_id": 1000}
     for name, (title, _) in DIRECT.items():
         assert _is_lane(_resolve(_block(name), workflow=title, **dispatch)["group"]), name
     assert _is_lane(_resolve(_block("test-leaks.yml"), workflow="Test leaks", **dispatch)["group"])
     assert _is_lane(_resolve(_block("swarm-node-image.yml"), workflow="Swarm worker image", **dispatch)["group"])
-    push = {"event_name": "push", "ref": "refs/heads/task-branch", "workflow": "Mutation preflight", "run_id": 1000}
-    assert _resolve(_block("mutation-preflight.yml:stats"), **push)["group"] == "mutation-lane-a-stats-0"
-    assert _resolve(_block("mutation-preflight.yml:mutation-shard"), **push)["group"] == "mutation-lane-a-shard-0"
     schedule = {"event_name": "schedule", "ref": "refs/heads/dev", "workflow": "Test leaks", "run_id": 1000}
     assert _resolve(_block("test-leaks.yml"), **schedule) == {
         "group": "test-leaks-refs/heads/dev",
@@ -288,3 +301,16 @@ def test_only_the_dev_push_worker_image_build_stays_uncapped_because_it_publishe
 def test_lane_titles_match_the_workflow_names():
     for name, (title, _) in DIRECT.items():
         assert _workflow(name)["name"] == title, name
+
+
+@pytest.mark.parametrize("where", sorted(LEGS))
+def test_mutation_legs_of_two_branches_never_share_a_concurrency_lane_and_stay_on_the_batch_pool(where):
+    index = {"shard" if LEGS[where] == "shard" else "part": 0}
+    groups = set()
+    for ref, run_id in (("refs/heads/branch-one", 1000), ("refs/heads/branch-two", 1001)):
+        push = {"event_name": "push", "ref": ref, "workflow": "Mutation preflight", "run_id": run_id}
+        resolved = _resolve(_block(where), matrix=index, **push)
+        assert not _is_lane(resolved["group"]), (where, resolved)
+        groups.add(resolved["group"])
+    assert len(groups) == 2
+    assert "'anton-oss-batch'" in _workflow("mutation-preflight.yml")["jobs"][where.split(":")[1]]["runs-on"]

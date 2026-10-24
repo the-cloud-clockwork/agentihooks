@@ -4,8 +4,6 @@ from scripts.swarm import done_gate
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 URL = "https://github.com/o/r/pull/9"
 DAY_MS = 24 * 60 * 60_000
 NOW = 10 * DAY_MS
@@ -89,9 +87,9 @@ def test_an_unreadable_pull_request_is_refused_with_a_retry():
 
 
 @pytest.mark.parametrize("kind", ["ops", "tune", "troubleshoot", "research", "plan"])
-def test_other_kinds_never_read_github(kind):
+def test_other_kinds_without_a_pull_request_never_read_github(kind):
     read = github("OPEN")
-    assert done_gate.refusal({"kind": kind}, URL, read) == ""
+    assert done_gate.refusal({"kind": kind}, "", read) == ""
     assert read.seen == []
 
 

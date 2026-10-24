@@ -28,17 +28,25 @@ def pool(label):
 
 
 MOVED = {
+    ("chaos.yml", "chaos"): STANDARD,
+    ("chart-release.yml", "publish"): LIGHT,
+    ("mutation-line-selection-proof.yml", "compare"): BATCH,
+    ("test.yml", "docs"): QUEUED,
     ("mutation-refinement-proof.yml", "planning"): LIGHT,
     ("access-audit.yml", "audit"): LIGHT,
     ("branch-lanes.yml", "grade"): LIGHT,
     ("hive-worker.yml", "contracts"): LIGHT,
     ("hive-worker.yml", "kind"): STANDARD,
-    ("hive-worker.yml", "publish"): STANDARD,
     ("brain-smoke.yml", "smoke"): QUEUED,
     ("codex-cache.yml", "seed"): STANDARD,
     ("coverage-stability.yml", "compare"): BATCH,
     ("equivalence.yml", "ledger-equivalence"): STANDARD,
     ("helm-kind.yml", "kind"): QUEUED,
+    ("hierarchy-cpu.yml", "grade"): LIGHT,
+    ("hierarchy-cpu.yml", "hierarchy"): BATCH,
+    ("hierarchy-cpu.yml", "load"): BATCH,
+    ("ledger-load.yml", "compare"): QUEUED,
+    ("ledger-load.yml", "compare-grade"): LIGHT,
     ("ledger-load.yml", "load"): QUEUED,
     ("ledger-row-memory.yml", "replay"): BATCH,
     ("mutation-preflight.yml", "mutation"): LIGHT,
@@ -49,6 +57,7 @@ MOVED = {
     ("mutation-replay.yml", "grade"): BATCH,
     ("mutation-replay.yml", "verify"): LIGHT,
     ("mutation-preflight.yml", "stats"): BATCH,
+    ("mutation-preflight.yml", "touched-tests"): STANDARD,
     ("proofs.yml", "operations-cpu"): BATCH,
     ("proofs.yml", "operations-receipts"): BATCH,
     ("proofs.yml", "tests"): STANDARD,
@@ -57,6 +66,7 @@ MOVED = {
     ("swarm-image.yml", "publish"): STANDARD,
     ("swarm-node-base.yml", "copy"): STANDARD,
     ("swarm-node-image.yml", "image"): STANDARD,
+    ("swarm-node-image.yml", "hive"): STANDARD,
     ("swarm-node-smoke.yml", "worker-health"): QUEUED,
     ("swarm-node-smoke.yml", "worker-image"): QUEUED,
     ("swarm-node-smoke.yml", "worker-image-compare"): LIGHT,
@@ -79,6 +89,7 @@ MOVED = {
     ("test.yml", "mutation-stats"): BATCH,
     ("test.yml", "queue-fail-fast"): LIGHT,
     ("test.yml", "refresh-durations"): QUEUED,
+    ("count-record.yml" if (WORKFLOWS / "count-record.yml").exists() else "test.yml", "count-record"): QUEUED,
     ("test.yml", "reuse"): LIGHT,
     ("test.yml", "select"): LIGHT,
     ("test.yml", "shard-check"): LIGHT,
@@ -86,10 +97,17 @@ MOVED = {
     ("test.yml", "split"): QUEUED,
     ("test.yml", "stage-budget"): LIGHT,
     ("test.yml", "test-count"): QUEUED,
+    ("test.yml", "test-summary"): LIGHT,
     ("test.yml", "unit"): QUEUED,
+    ("test.yml", "unit-lost"): LIGHT,
+    ("test.yml", "unit-rerun"): QUEUED,
     ("test.yml", "unit-selected"): STANDARD,
+    ("writer-lock.yml", "inputs"): LIGHT,
+    ("writer-lock.yml", "scenario"): QUEUED,
     ("worker-resources.yml", "measure"): BATCH,
 }
+if (WORKFLOWS / "actions-storage.yml").exists():
+    MOVED[("actions-storage.yml", "prune")] = LIGHT
 
 # These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
 OIDC = {("pages.yml", "deploy"), ("publish-pypi.yml", "publish")}
@@ -110,6 +128,7 @@ CLASSED = {
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),
     ("queue-retry.yml", "retry"),
+    ("lost-runner.yml", "watch"),
 }
 
 HOSTED = OIDC | PROTECTED | TARGET | CLASSED

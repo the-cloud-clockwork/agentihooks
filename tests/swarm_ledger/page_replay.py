@@ -60,14 +60,15 @@ CAPTURE = """() => {
 
 
 class FakeApi:
-    def __init__(self):
+    def __init__(self, limits):
         self.requests = []
         self.dialogs = []
         self.rev = INPUTS["doc"]["_meta"]["rev"]
+        self.limits = limits
 
     def state(self):
         doc = json.loads(json.dumps(INPUTS["doc"]))
-        doc["_meta"]["rev"] = self.rev
+        doc["_meta"].update(rev=self.rev, limits=self.limits)
         return doc
 
     def note(self, request):
@@ -90,20 +91,23 @@ class FakeApi:
     def handle(self, route):
         request = route.request
         path = self.note(request)
-        if path == f"/api/{SLUG}":
+        if path.startswith(f"/api/v1/ledgers/{SLUG}/files/"):
+            self.requests.pop()
+            return self.media(route) if "/files/media/" in path else self.artifact(route)
+        if path == f"/api/v1/ledgers/{SLUG}/saves":
             if request.method == "PUT":
                 self.rev += 1
             return route.fulfill(json={**self.state(), "rejected": []})
-        if path == f"/api/swarm/{SLUG}":
+        if path == f"/api/v1/ledgers/{SLUG}/swarm/controls":
             return route.fulfill(json=INPUTS["swarm"])
         if path == f"/api/v1/ledgers/{SLUG}/events":
             body = (
                 f"id: c0\nevent: snapshot\ndata: {json.dumps({'ledger': self.state(), 'swarm': INPUTS['swarm']})}\n\n"
             )
             return route.fulfill(body=body, content_type="text/event-stream")
-        if path == "/api/layout":
-            return route.fulfill(json={} if request.method == "GET" else {"ok": True})
-        if path == f"/api/media/{SLUG}":
+        if path == "/api/v1/layout":
+            return route.fulfill(json={"data": {}})
+        if path == f"/api/v1/ledgers/{SLUG}/uploads/media":
             return route.fulfill(json=INPUTS["upload"])
         return route.fulfill(status=404, body="not recorded")
 
@@ -130,7 +134,7 @@ def quiet(page):
         now = page.evaluate(f"() => [window.__inflight, JSON.stringify(({CAPTURE})())]")
         same = same + 1 if now[0] == 0 and now == last else 0
         if same == 3:
-            return
+            return now
         last = now
     raise TimeoutError("the page did not settle")
 
@@ -141,8 +145,14 @@ def settle(page, ms=0):
         page.clock.run_for(min(ms, 1000))
         ms -= 1000
         quiet(page)
-    page.clock.run_for(20)
-    quiet(page)
+    before = None
+    for _ in range(10):
+        page.clock.run_for(20)
+        now = quiet(page)
+        if now == before:
+            return
+        before = now
+    raise TimeoutError("the page kept changing on each clock tick")
 
 
 def steps():
@@ -159,7 +169,6 @@ def steps():
         ("raise eng cap", lambda page: page.click('button[data-swarm="eng_up"]')),
         ("apply caps", lambda page: page.click('button[data-swarm="apply"]')),
         ("gate mode", lambda page: page.click('button[data-gate="watch"][data-gate-mode="off"]')),
-        ("health verdict", lambda page: page.select_option("select.hl-pick >> nth=0", "established")),
         ("lift gate", lambda page: page.dispatch_event('button[data-lift="talk"]', "click")),
         ("restore choice", lambda page: page.dispatch_event('button[data-restore-choice="resume"]', "click")),
         ("refresh quota", lambda page: page.click("#quota-refresh")),
@@ -173,8 +182,8 @@ def steps():
         ("ledger tab", lambda page: page.click("#tab-ledger")),
         ("sections all", lambda page: page.click("#sections-all")),
         ("comments all", lambda page: page.click("#comments-all")),
-        ("check phase", lambda page: page.click('[data-focus="check:phases/p2"]')),
         ("approve plan", lambda page: page.click("#item-phases-p2 .phase-review button >> nth=0")),
+        ("check phase", lambda page: page.click('[data-focus="check:phases/p2"]')),
         ("add comment", lambda page: page.click("#item-phases-p3 button.add")),
         ("type comment", lambda page: type_line(page, '[data-focus="compose:phases/p3/comments"]', "Looks **good**")),
         ("answer", lambda page: page.click("#item-questions-q2 .thread button.add")),
@@ -269,7 +278,9 @@ def record(root: Path, folder: Path) -> list:
         browser = pw.chromium.launch()
         stack.callback(browser.close)
         context = browser.new_context(viewport=VIEWPORT, locale="en-US", timezone_id="UTC")
-        api = FakeApi()
+        import ledger_server
+
+        api = FakeApi(ledger_server.PAGE_LIMITS)
         context.add_init_script(DETERMINISTIC)
         context.route("**/media/**", api.media)
         context.route("**/artifacts/**", api.artifact)

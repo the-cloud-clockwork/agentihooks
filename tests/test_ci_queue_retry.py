@@ -16,11 +16,13 @@ RUN = {"event": "merge_group", "conclusion": "failure", "run_attempt": 1}
 SHUTDOWN = (FIXTURES / "shutdown_signal.txt").read_text()
 LOST = (FIXTURES / "lost_communication.txt").read_text()
 RED = (FIXTURES / "test_failure.txt").read_text()
+QUOTED_LOSS = (FIXTURES / "failure_quoting_a_loss.txt").read_text()
 QUEUE_BRANCH = "gh-readonly-queue/dev/pr-3259-810e2717650390eb596adff102841b05c86eff69"
 REMOVED = {"createdAt": "2026-10-15T05:40:23Z", "reason": "failed_checks"}
+HEAD = "810e2717650390eb596adff102841b05c86eff69"
 PULL_QUERY = (
     'query{repository(owner:"o",name:"r"){pullRequest(number:3259){'
-    "id state isInMergeQueue commits(last:1){nodes{commit{committedDate}}} "
+    "id state isInMergeQueue commits(last:1){nodes{commit{oid committedDate}}} "
     "timelineItems(last:100,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT])"
     "{nodes{... on RemovedFromMergeQueueEvent{createdAt reason}}}}}}"
 )
@@ -30,7 +32,8 @@ def pull(removals):
     return {
         "state": "OPEN",
         "isInMergeQueue": False,
-        "commits": {"nodes": [{"commit": {"committedDate": "2026-10-14T23:06:11Z"}}]},
+        "id": "PR_kwDO3259",
+        "commits": {"nodes": [{"commit": {"oid": HEAD, "committedDate": "2026-10-14T23:06:11Z"}}]},
         "timelineItems": {"nodes": removals},
     }
 
@@ -56,6 +59,36 @@ def test_a_shutdown_signal_on_a_unit_shard_is_retried():
 def test_a_lost_communication_annotation_is_retried():
     failed = [job("unit (3.12, 7)", LOST), job("unit (3.12, 9)", SHUTDOWN), job("Gate — Required", "")]
     assert ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
+
+
+def test_a_shard_lost_again_on_its_in_run_rerun_is_not_requeued():
+    failed = [*lost_run(), job("unit rerun (3.11, 2)", SHUTDOWN), job("unit rerun (3.11, 5)", LOST)]
+    retry, reason = ci_queue_retry.decide(RUN, failed, WORKFLOW)
+    assert not retry
+    assert reason == "failed again on its in-run rerun: unit rerun (3.11, 2), unit rerun (3.11, 5)"
+
+
+def test_a_timed_out_rerun_is_listed_so_it_refuses_the_requeue(monkeypatch):
+    jobs = {
+        "total_count": 2,
+        "jobs": [
+            {"id": 1, "name": "unit (3.12, 2)", "conclusion": "failure"},
+            {"id": 2, "name": "unit rerun (3.12, 2)", "conclusion": "timed_out"},
+        ],
+    }
+
+    def api(*args):
+        if args[0].endswith("jobs?filter=latest&per_page=100"):
+            return json.dumps(jobs)
+        return "##[error]" + SHUTDOWN if args[0].endswith("/logs") else "[]"
+
+    monkeypatch.setattr(ci_queue_retry, "_api", api)
+    failed = ci_queue_retry.failed_jobs("o/r", 7)
+    assert [entry["name"] for entry in failed] == ["unit (3.12, 2)", "unit rerun (3.12, 2)"]
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (
+        False,
+        "failed again on its in-run rerun: unit rerun (3.12, 2)",
+    )
 
 
 def test_a_real_test_failure_is_not_retried():
@@ -149,8 +182,9 @@ def test_main_reads_the_run_and_writes_the_decision(monkeypatch, tmp_path, capsy
         "requeue": True,
         "reason": "runner lost on unit (3.11, 2); first failed checks removal of this head",
     }
-    assert output.read_text() == "requeue=true\npull=3259\n"
+    assert output.read_text() == f"requeue=true\npull=3259\nnode=PR_kwDO3259\nhead={HEAD}\n"
     assert ("graphql", "-f", f"query={PULL_QUERY}") in asked
+    assert ("repos/o/r/actions/jobs/1/logs", "--allow-escape-sequences") in asked
 
 
 def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
@@ -161,10 +195,121 @@ def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
         "repos/o/r/check-runs/1/annotations": "[]",
         "repos/o/r/actions/jobs/1/logs": quoted,
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
     failed = ci_queue_retry.failed_jobs("o/r", 9)
     assert failed == [{"name": "unit (3.11, 2)", "text": "##[error]Process completed with exit code 1."}]
     assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
+
+
+def test_a_shard_whose_tests_reported_failures_is_not_lost_whatever_its_output_quotes(monkeypatch):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.12, 13)", "conclusion": "failure"}]}
+    quoted = "Process completed with exit code 1.\\n##[error]The runner has received a shutdown signal.-True]"
+    pages = {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": json.dumps(
+            [{"message": quoted}, {"message": "Process completed with exit code 1."}]
+        ),
+        "repos/o/r/actions/jobs/1/logs": QUOTED_LOSS,
+    }
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (
+        False,
+        "failed without a runner loss signature: unit (3.12, 13)",
+    )
+
+
+def test_colour_codes_in_the_shard_log_keep_the_runner_loss(monkeypatch):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
+    coloured = "\x1b[36;1mpytest -n auto\x1b[0m\n" + SHUTDOWN.replace("##[error]", "\x1b[31m##[error]") + "\x1b[0m"
+    pages = {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": "[]",
+        "repos/o/r/actions/jobs/1/logs": coloured,
+    }
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (True, "runner lost on unit (3.11, 2)")
+
+
+def unreadable_log_api(conclusion, annotations):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.12, 13)", "conclusion": conclusion}]}
+    pages = {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": json.dumps([{"message": note} for note in annotations]),
+    }
+
+    def api(path, *flags):
+        if path not in pages:
+            raise subprocess.CalledProcessError(1, ["gh", "api", path])
+        return pages[path]
+
+    return api
+
+
+def test_an_unreadable_shard_log_is_a_runner_loss(monkeypatch):
+    monkeypatch.setattr(ci_queue_retry, "_api", unreadable_log_api("cancelled", []))
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert failed == [{"name": "unit (3.12, 13)", "text": "The job log could not be read"}]
+    run = {**RUN, "conclusion": "cancelled"}
+    assert ci_queue_retry.decide(run, failed, WORKFLOW) == (True, "runner lost on unit (3.12, 13)")
+
+
+def test_an_unreadable_log_beside_a_step_exit_is_not_a_runner_loss(monkeypatch):
+    monkeypatch.setattr(ci_queue_retry, "_api", unreadable_log_api("failure", ["Process completed with exit code 1."]))
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert failed == [{"name": "unit (3.12, 13)", "text": "Process completed with exit code 1."}]
+    assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
+
+
+def cancelled_run_pages(lost_log):
+    jobs = {
+        "total_count": 4,
+        "jobs": [
+            {"id": 1, "name": "unit (3.12, 2)", "conclusion": "cancelled"},
+            {"id": 2, "name": "unit (3.12, 3)", "conclusion": "cancelled"},
+            {"id": 3, "name": "shard-check", "conclusion": "cancelled"},
+            {"id": 4, "name": "Gate — Required", "conclusion": "failure"},
+        ],
+    }
+    return {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": json.dumps([{"message": "The operation was canceled."}]),
+        "repos/o/r/check-runs/2/annotations": json.dumps([{"message": "The operation was canceled."}]),
+        "repos/o/r/check-runs/4/annotations": "[]",
+        "repos/o/r/actions/jobs/1/logs": lost_log,
+        "repos/o/r/actions/jobs/2/logs": "##[error]The operation was canceled.",
+    }
+
+
+def test_a_lost_shard_that_ends_cancelled_is_a_runner_loss(monkeypatch):
+    pages = cancelled_run_pages(SHUTDOWN + "##[error]The operation was canceled.")
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert [job["name"] for job in failed] == ["unit (3.12, 2)", "Gate — Required"]
+    run = {**RUN, "conclusion": "cancelled"}
+    assert ci_queue_retry.decide(run, failed, WORKFLOW) == (True, "runner lost on unit (3.12, 2)")
+
+
+def test_a_cancelled_shard_whose_tests_reported_failures_keeps_the_run_red(monkeypatch):
+    pages = cancelled_run_pages(QUOTED_LOSS + "##[error]The operation was canceled.")
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert [job["name"] for job in failed] == ["unit (3.12, 2)", "Gate — Required"]
+    run = {**RUN, "conclusion": "cancelled"}
+    assert ci_queue_retry.decide(run, failed, WORKFLOW) == (
+        False,
+        "failed without a runner loss signature: unit (3.12, 2)",
+    )
+
+
+def test_shards_cancelled_without_a_runner_loss_are_not_retried(monkeypatch):
+    pages = cancelled_run_pages("##[error]The operation was canceled.")
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert failed == [{"name": "Gate — Required", "text": ""}]
+    run = {**RUN, "conclusion": "cancelled"}
+    assert ci_queue_retry.decide(run, failed, WORKFLOW) == (False, "no unit shard failed")
 
 
 @pytest.mark.parametrize("total, extra", [(1, []), (2, [{"name": "1 unlisted jobs", "text": ""}])])
@@ -175,14 +320,14 @@ def test_jobs_beyond_the_listed_page_refuse_the_requeue(monkeypatch, total, extr
         "repos/o/r/check-runs/1/annotations": json.dumps([{"message": "a"}, {"message": "b"}]),
         "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
     failed = ci_queue_retry.failed_jobs("o/r", 9)
     errors = [line for line in SHUTDOWN.splitlines() if "##[error]" in line]
     assert failed == [{"name": "unit (3.11, 2)", "text": "\n".join(["a", "b", *errors])}, *extra]
     assert ci_queue_retry.decide(RUN, failed, WORKFLOW)[0] == (not extra)
 
 
-def test_the_retry_workflow_requeues_only_when_enforcement_is_on():
+def test_the_retry_workflow_requeues_unless_enforcement_is_switched_off():
     workflow = yaml.safe_load((ROOT / ".github/workflows/queue-retry.yml").read_text())
     assert workflow[True] == {"workflow_run": {"workflows": ["Tests"], "types": ["completed"]}}
     retry = workflow["jobs"]["retry"]
@@ -192,12 +337,16 @@ def test_the_retry_workflow_requeues_only_when_enforcement_is_on():
     steps = {step.get("name"): step for step in retry["steps"]}
     assert "ci_queue_retry" in steps["Classify the failed jobs"]["run"]
     log = steps["Log the requeue a runner loss would make"]
-    assert "vars.QUEUE_RETRY_ENFORCE != 'true'" in log["if"]
+    assert "vars.QUEUE_RETRY_ENFORCE == 'false'" in log["if"]
     requeue = steps["Requeue the pull request once"]
-    assert requeue["if"] == "steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE == 'true'"
+    assert requeue["if"] == "steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE != 'false'"
     assert steps["Mint the TCC Main CI queue token"]["if"] == requeue["if"]
     assert requeue["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
-    assert requeue["run"].startswith('gh pr merge "$PULL" --squash --auto')
+    assert requeue["env"]["NODE"] == "${{ steps.classify.outputs.node }}"
+    assert requeue["env"]["HEAD"] == "${{ steps.classify.outputs.head }}"
+    assert requeue["run"].startswith("gh api graphql -f query='mutation($pull: ID!, $head: GitObjectID!)")
+    assert "enqueuePullRequest(input: {pullRequestId: $pull, expectedHeadOid: $head})" in requeue["run"]
+    assert requeue["run"].endswith('-f pull="$NODE" -f head="$HEAD"')
     assert not any("rerun" in str(step.get("run", "")) for step in retry["steps"])
 
 
@@ -313,7 +462,7 @@ def test_a_lost_shard_outside_a_queue_branch_is_not_requeued(monkeypatch, tmp_pa
         "repos/o/r/check-runs/1/annotations": "[]",
         "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
     monkeypatch.chdir(ROOT)
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -324,4 +473,53 @@ def test_a_lost_shard_outside_a_queue_branch_is_not_requeued(monkeypatch, tmp_pa
         "requeue": False,
         "reason": "no pull request in queue branch dev",
     }
-    assert output.read_text() == "requeue=false\npull=\n"
+    assert output.read_text() == "requeue=false\npull=\nnode=\nhead=\n"
+
+
+def queued_then(states, monkeypatch):
+    asked, slept = [], []
+
+    def state(repo, number):
+        asked.append((repo, number))
+        return states[min(len(asked), len(states)) - 1]
+
+    monkeypatch.setattr(ci_queue_retry, "pull_state", state)
+    monkeypatch.setattr(ci_queue_retry.time, "sleep", slept.append)
+    return asked, slept
+
+
+def test_the_requeue_waits_for_the_queue_to_drop_the_pull_request(monkeypatch):
+    queued = {**pull([REMOVED]), "isInMergeQueue": True}
+    left = pull([REMOVED])
+    asked, slept = queued_then([queued, queued, left], monkeypatch)
+    assert ci_queue_retry.pull_after_exit("o/r", 3259) is left
+    assert asked == [("o/r", 3259)] * 3
+    assert slept == [30, 30]
+    assert ci_queue_retry.requeue(left) == (True, "first failed checks removal of this head")
+
+
+def test_a_pull_request_still_queued_after_thirty_minutes_is_not_requeued(monkeypatch):
+    queued = {**pull([REMOVED]), "isInMergeQueue": True}
+    asked, slept = queued_then([queued], monkeypatch)
+    assert ci_queue_retry.pull_after_exit("o/r", 3259) is queued
+    assert len(asked) == 61
+    assert slept == [30] * 60
+    assert ci_queue_retry.requeue(queued) == (False, "pull request is not open outside the queue")
+
+
+def test_main_requeues_once_the_queue_drops_the_pull_request(monkeypatch, tmp_path, capsys):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
+    pages = {
+        "repos/o/r/actions/runs/9": json.dumps({**RUN, "id": 9, "head_branch": QUEUE_BRANCH}),
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": "[]",
+        "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
+    }
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    asked, slept = queued_then([{**pull([REMOVED]), "isInMergeQueue": True}, pull([REMOVED])], monkeypatch)
+    monkeypatch.chdir(ROOT)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    assert ci_queue_retry.main(["--repo", "o/r", "--run-id", "9"]) == 0
+    assert json.loads(capsys.readouterr().out)["requeue"] is True
+    assert asked == [("o/r", 3259)] * 2
+    assert slept == [30]

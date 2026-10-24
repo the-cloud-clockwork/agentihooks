@@ -12,6 +12,8 @@ from scripts.swarm.store import MASTER, SwarmError
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore
 
+TICK_JOURNAL = ["_SYSTEMD_USER_UNIT=agentihooks-swarm.service", "+", "SYSLOG_IDENTIFIER=agentihooks-swarm"]
+
 
 def records(
     store: RedisStore,
@@ -26,8 +28,7 @@ def records(
         [
             "journalctl",
             "--user",
-            "-u",
-            "agentihooks-swarm.service",
+            *TICK_JOURNAL,
             "--since",
             since,
             *(["--until", until] if until is not None else []),
@@ -92,8 +93,7 @@ def _grep(pattern, since, until, run):
     argv = [
         "journalctl",
         "--user",
-        "-u",
-        "agentihooks-swarm.service",
+        *TICK_JOURNAL,
         *(["--since", since] if since is not None else []),
         *(["--until", until] if until is not None else []),
         "-o",

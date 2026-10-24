@@ -132,6 +132,10 @@ def resume_thread(connection: Connection, thread_id: str) -> dict:
     return connection.request("thread/resume", {"threadId": thread_id}).get("thread") or {}
 
 
+def set_thread_name(connection: Connection, thread_id: str, name: str) -> None:
+    connection.request("thread/name/set", {"threadId": thread_id, "name": name})
+
+
 def start_turn(connection: Connection, thread_id: str, text: str) -> str:
     result = connection.request("turn/start", {"threadId": thread_id, "input": [{"type": "text", "text": text}]})
     return (result.get("turn") or {}).get("id", "")

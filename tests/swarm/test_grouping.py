@@ -9,8 +9,6 @@ from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable, tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PAGE = "scripts/swarm_ledger/static/js/render.js"
 
 
@@ -339,6 +337,18 @@ def test_a_grouped_member_leaves_the_claim_queue(store):
     assert [t["id"] for t in _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng")] == [
         "a"
     ]
+
+
+def test_the_claim_queue_judges_readiness_on_the_swarm_snapshot(monkeypatch, store):
+    from scripts.swarm import readiness
+
+    seen = []
+    monkeypatch.setattr(readiness, "claimable", lambda t, lane, view: seen.append((t["id"], lane, view.slug)) or True)
+    rows = {"a": task("a")}
+    assert [t["id"] for t in _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng")] == [
+        "a"
+    ]
+    assert seen == [("a", "eng", "sw")]
 
 
 def test_the_tick_groups_open_tasks(asked, store):

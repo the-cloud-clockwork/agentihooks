@@ -8,7 +8,7 @@ from scripts.swarm import runtime
 from scripts.swarm.store import LEGACY_TRANSPORT
 from tests.swarm.test_managed_lifecycle import rig  # noqa: F401
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_a_managed_nudge_lands_in_the_inbox_and_never_types_into_the_viewer(rig):  # noqa: F811

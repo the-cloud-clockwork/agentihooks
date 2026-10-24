@@ -9,8 +9,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import cli
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ME = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/9"
 

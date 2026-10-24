@@ -1,0 +1,514 @@
+import json
+import os
+import subprocess
+from dataclasses import replace
+
+import pytest
+
+from hooks.context import context_recycle
+from scripts.handoff import transfers
+from scripts.inbox.store import InboxStore
+from scripts.swarm import commands, reboot, resume, snapshot
+from scripts.swarm import tick as tick_module
+from scripts.swarm.store import MASTER, AgentRecord
+from tests.swarm.test_dead_resume import ResumingRuntime
+from tests.swarm.test_tick import tasks
+
+
+@pytest.fixture
+def store(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 1_000)
+    monkeypatch.setattr(reboot, "boot_id", lambda: "boot-1")
+    result = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    result.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, compact_limit=600))
+    return result
+
+
+@pytest.fixture
+def swarm(store):
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    tick_module.tick("sw", store, ledger, runtime, 1)
+    for agent in store.agents("sw"):
+        store.put_agent(
+            "sw",
+            replace(agent, conversation_id=f"conversation-{agent.lane}", profile="engineer", overlays=["frontend"]),
+        )
+    hive = AgentRecord(
+        store.next_name("sw", "eng"),
+        "eng",
+        "t9",
+        harness="claude",
+        account="hive-acct",
+        conversation_id="hive-conversation",
+        profile="engineer",
+        seat="eng-9@sw",
+        runtime_target={"host_id": "anton-hive"},
+    )
+    store.start_execution("sw", hive)
+    store.start_execution(
+        "sw", replace(hive, name=store.next_name("sw", MASTER), lane=MASTER, task=MASTER, seat="hive-master@sw")
+    )
+    return ledger, runtime
+
+
+def _hive(store):
+    return {a.name: a for a in store.agents("sw") if a.runtime_target.get("host_id") == "anton-hive"}
+
+
+def _local(store):
+    return {a.name: a for a in store.agents("sw") if a.name not in _hive(store)}
+
+
+def _taken(monkeypatch, written):
+    def take(taken_store, slug, now_ms, run=None):
+        assert run is subprocess.run
+        assert (taken_store.config(slug).slug, slug) == ("sw", "sw")
+        written.append((now_ms, reboot.record_path(slug).exists()))
+        return snapshot.path(slug)
+
+    monkeypatch.setattr(reboot.snapshot, "take", take)
+
+
+def test_shutdown_records_every_local_agent_and_asks_the_master_for_its_handoff(store, swarm, monkeypatch):
+    written = []
+    _taken(monkeypatch, written)
+
+    doc = reboot.prepare(store, "sw", 500)
+
+    assert written == [(500, True)]
+    assert json.loads(reboot.record_path("sw").read_text()) == doc
+    assert (doc["slug"], doc["taken_at"], doc["hive"], doc["boot"], doc["snapshot"]) == (
+        "sw",
+        500,
+        "workstation",
+        "boot-1",
+        str(snapshot.path("sw")),
+    )
+    local = _local(store)
+    assert doc["agents"] == [
+        {
+            "name": a.name,
+            "lane": a.lane,
+            "seat": a.seat,
+            "task": a.task,
+            "conversation_id": a.conversation_id,
+            "profile": "engineer",
+            "overlays": ["frontend"],
+            "harness": a.harness,
+            "model": a.model,
+            "effort": a.effort,
+            "account": a.account,
+        }
+        for a in store.agents("sw")
+        if a.name in local
+    ]
+    master = next(a for a in local.values() if a.lane == MASTER)
+    items = InboxStore(store.redis).inbox(master.name)
+    assert [i.text for i in items] == [reboot.ASK.format(path=reboot.handoff_path("sw"))]
+    (hive_master,) = [name for name, a in _hive(store).items() if a.lane == MASTER]
+    assert InboxStore(store.redis).inbox(hive_master) == []
+    assert str(reboot.handoff_path("sw")).endswith("/sw/master-shutdown-handoff.md")
+
+
+def test_shutdown_leaves_a_finished_agent_out_of_the_record_and_unasked(store, swarm, monkeypatch):
+    _taken(monkeypatch, [])
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    store.put_agent("sw", replace(master, state="finished"))
+
+    doc = reboot.prepare(store, "sw", 500)
+
+    assert master.name not in {a["name"] for a in doc["agents"]}
+    assert InboxStore(store.redis).inbox(master.name) == []
+
+
+def test_the_shutdown_command_prints_the_record_and_its_local_agents(store, monkeypatch, capsys):
+    from scripts.swarm import cli
+
+    doc = {"agents": [{"name": "engineer@a1b2c3-0001"}, {"name": "master@a1b2c3-0001"}]}
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    calls = []
+    monkeypatch.setattr(cli, "now_ms", lambda: 4242)
+    monkeypatch.setattr(cli.reboot, "prepare", lambda *args: calls.append(args) or doc)
+
+    cli.main(["sw", "shutdown"])
+
+    assert calls == [(store, "sw", 4242)]
+    assert json.loads(capsys.readouterr().out) == {
+        "swarm": "sw",
+        "record": str(reboot.record_path("sw")),
+        "local_agents": ["engineer@a1b2c3-0001", "master@a1b2c3-0001"],
+    }
+
+
+def test_an_automatic_snapshot_without_agents_names_none(store):
+    folder = snapshot.auto_dir("sw")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "auto-700.json").write_text(json.dumps({"taken_at": 700, "state": {"keys": {}}}))
+
+    assert reboot.recorded(store, "sw", "boot-1") == set()
+
+
+def _recorded(store, monkeypatch):
+    _taken(monkeypatch, [])
+    reboot.prepare(store, "sw", 500)
+
+
+def _booted(store, ledger, runtime, current="boot-2", quota=lambda harness, account: True):
+    started = []
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(reboot, "last_quota", quota)
+        patch.setattr(reboot, "start_server", lambda: started.append(1) or [])
+        actions = reboot.boot_pass("sw", store, ledger, runtime, 900, current=current)
+    return actions, started
+
+
+@pytest.fixture
+def rebooted(store, swarm, monkeypatch):
+    ledger, runtime = swarm
+    _recorded(store, monkeypatch)
+    store.redis.set(store.key("sw", "boot", "workstation"), "boot-1")
+    runtime.live.clear()
+    return ledger, runtime
+
+
+def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_account(store, rebooted):
+    ledger, runtime = rebooted
+    before = _local(store)
+
+    actions, started = _booted(store, ledger, runtime)
+
+    assert started == [1]
+    assert sorted(a.name for a in runtime.resumed) == sorted(before)
+    assert not set(_hive(store)) & {a.name for a in runtime.resumed}
+    assert len(_hive(store)) == 2
+    assert sorted(actions) == sorted(f"resumed {name} after the workstation rebooted" for name in before)
+    for name, agent in _local(store).items():
+        assert (agent.conversation_id, agent.seat, agent.task, agent.account) == (
+            before[name].conversation_id,
+            before[name].seat,
+            before[name].task,
+            before[name].account,
+        )
+        assert (agent.pane_id, agent.launched_at) == ("reopened:pane", 900)
+    assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-2"
+
+
+def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, rebooted):
+    ledger, runtime = rebooted
+    eng = next(a for a in _local(store).values() if a.lane == "eng")
+    store.put_agent("sw", replace(eng, account="spent"))
+    store.put_handoff("sw", eng.task, "carry on from the parser", seat=eng.seat)
+    other = {"name": "engineer@ffffff-0001", "outcome": "resumed"}
+    store.put_restored("sw", [other, {"name": eng.name, "outcome": "stale"}])
+
+    actions, _ = _booted(store, ledger, runtime, quota=lambda harness, account: account != "spent")
+
+    action = f"{eng.name} awaits a resume or fresh decision after the workstation rebooted"
+    assert action in actions
+    held = _local(store)[eng.name]
+    assert (held.state, held.conversation_id, held.seat, held.account) == (
+        resume.AWAITING,
+        eng.conversation_id,
+        eng.seat,
+        "spent",
+    )
+    assert eng.name not in {a.name for a in runtime.resumed}
+    (outcome,) = [r for r in store.restored("sw") if r["name"] == eng.name]
+    assert (outcome["outcome"], outcome["task"], outcome["conversation_id"]) == (
+        resume.AWAITING,
+        eng.task,
+        eng.conversation_id,
+    )
+    assert (outcome["reason"], outcome["at"], outcome["lane"]) == (
+        "own conversation did not reopen after the workstation rebooted",
+        900,
+        "eng",
+    )
+    assert other in store.restored("sw")
+    transfer = transfers.get(store, "sw", outcome["transfer"])
+    assert (transfer["handoff"], transfer["reason"], transfer["at"]) == ("carry on from the parser", "restore", 900)
+    assert ledger.rows[eng.task]["claimed_by"] == eng.name
+    assert f"{action}; nothing was started in its place." in ledger.notes
+    assert not any(note.startswith("Starting a fresh agent") for note in ledger.notes)
+
+
+def test_a_resume_that_fails_to_start_awaits_a_decision_without_a_fresh_start_notice(store, rebooted):
+    ledger, runtime = rebooted
+    eng = next(a for a in _local(store).values() if a.lane == "eng")
+
+    def refuse(config, agent, text):
+        raise RuntimeError("herdr refused the pane")
+
+    runtime.resume = refuse
+    before = list(ledger.notes)
+
+    actions, _ = _booted(store, ledger, runtime)
+
+    awaits = sorted(
+        f"{a.name} awaits a resume or fresh decision after the workstation rebooted" for a in _local(store).values()
+    )
+    assert sorted(actions) == awaits
+    assert _local(store)[eng.name].state == resume.AWAITING
+    failed = [
+        f"{name} did not reopen after the workstation rebooted because resume failed: herdr refused the pane."
+        for name in _local(store)
+    ]
+    assert sorted(ledger.notes[len(before) :]) == sorted(
+        [*failed, *(f"{action}; nothing was started in its place." for action in awaits)]
+    )
+
+
+def test_a_master_that_cannot_reopen_carries_its_shutdown_handoff(store, rebooted):
+    ledger, runtime = rebooted
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    store.put_agent("sw", replace(master, conversation_id=""))
+    reboot.handoff_path("sw").write_text("## Intent\nKeep the swarm running\n")
+
+    _booted(store, ledger, runtime)
+
+    (outcome,) = [r for r in store.restored("sw") if r["name"] == master.name]
+    assert transfers.get(store, "sw", outcome["transfer"])["handoff"] == "## Intent\nKeep the swarm running\n"
+
+
+def _awaiting_handoff(store, name):
+    (outcome,) = [r for r in store.restored("sw") if r["name"] == name]
+    return transfers.get(store, "sw", outcome["transfer"])["handoff"]
+
+
+def test_only_a_master_carries_the_shutdown_handoff_and_none_without_one(store, rebooted):
+    ledger, runtime = rebooted
+    for agent in _local(store).values():
+        store.put_agent("sw", replace(agent, conversation_id=""))
+    reboot.handoff_path("sw").unlink(missing_ok=True)
+
+    _booted(store, ledger, runtime)
+
+    assert {_awaiting_handoff(store, name) for name in _local(store)} == {""}
+
+
+def test_an_engineer_never_takes_the_master_shutdown_handoff(store, rebooted):
+    ledger, runtime = rebooted
+    eng = next(a for a in _local(store).values() if a.lane == "eng")
+    store.put_agent("sw", replace(eng, conversation_id=""))
+    reboot.handoff_path("sw").write_text("## Intent\nKeep the swarm running\n")
+
+    _booted(store, ledger, runtime)
+
+    assert _awaiting_handoff(store, eng.name) == ""
+
+
+def test_an_agent_without_a_submitted_handoff_carries_its_task_s_last_transfer(store, rebooted):
+    ledger, runtime = rebooted
+    eng = next(a for a in _local(store).values() if a.lane == "eng")
+    transfers.record(store, "sw", eng, "outage", "## Intent\nFinish the parser\n", 1)
+    store.put_agent("sw", replace(eng, conversation_id=""))
+
+    _booted(store, ledger, runtime)
+
+    assert _awaiting_handoff(store, eng.name) == "## Intent\nFinish the parser\n"
+
+
+def test_a_finished_recorded_agent_is_not_reopened(store, rebooted):
+    ledger, runtime = rebooted
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    store.put_agent("sw", replace(master, state="finished"))
+
+    actions, _ = _booted(store, ledger, runtime)
+
+    assert master.name not in {a.name for a in runtime.resumed}
+    assert not any(master.name in action for action in actions)
+    assert _local(store)[master.name].state == "finished"
+
+
+def test_a_planned_record_taken_with_the_last_automatic_snapshot_wins(store, rebooted):
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    folder = snapshot.auto_dir("sw")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "auto-500.json").write_text(
+        json.dumps({"taken_at": 500, "state": {"keys": {store.key("sw", "agents"): {"value": {master.name: {}}}}}})
+    )
+
+    assert reboot.recorded(store, "sw", "boot-1") == set(_local(store))
+
+
+def test_shutdown_creates_the_swarm_folder(store, swarm, monkeypatch, tmp_path):
+    target = tmp_path / "home" / "swarm" / "sw" / "snapshot.json"
+    monkeypatch.setattr(reboot.snapshot, "path", lambda slug: target)
+    _taken(monkeypatch, [])
+
+    reboot.prepare(store, "sw", 500)
+
+    assert json.loads((target.parent / "reboot.json").read_text())["taken_at"] == 500
+
+
+def test_a_torn_planned_record_falls_back_to_the_automatic_snapshot(store, rebooted):
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    reboot.record_path("sw").write_text('{"slug": "sw", "taken_at": 9')
+    folder = snapshot.auto_dir("sw")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "auto-700.json").write_text(
+        json.dumps({"taken_at": 700, "state": {"keys": {store.key("sw", "agents"): {"value": {master.name: {}}}}}})
+    )
+
+    assert reboot.recorded(store, "sw", "boot-1") == {master.name}
+
+
+def test_a_boot_with_every_recorded_agent_live_starts_nothing(store, rebooted):
+    ledger, runtime = rebooted
+    runtime.live.update(_local(store))
+
+    assert _booted(store, ledger, runtime) == ([], [])
+    assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-2"
+
+
+@pytest.mark.parametrize("reading", [False, None])
+def test_an_account_without_room_resumes_on_whatever_account_the_router_picks(store, rebooted, reading):
+    ledger, runtime = rebooted
+    local = _local(store)
+    for agent in local.values():
+        store.put_agent("sw", replace(agent, account="spent" if agent.lane == MASTER else "roomy"))
+
+    _booted(
+        store,
+        ledger,
+        runtime,
+        quota=lambda harness, account: True if (harness, account) == ("claude", "roomy") else reading,
+    )
+
+    routed = {a.lane: a.account for a in runtime.resumed}
+    assert routed == {MASTER: "", "eng": "roomy"}
+
+
+def test_the_same_boot_and_a_first_sighting_resume_nothing(store, rebooted):
+    ledger, runtime = rebooted
+
+    assert _booted(store, ledger, runtime, current="boot-1") == ([], [])
+    store.redis.delete(store.key("sw", "boot", "workstation"))
+    assert _booted(store, ledger, runtime, current="boot-3") == ([], [])
+    assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-3"
+    assert runtime.resumed == []
+
+
+@pytest.mark.parametrize("state", ["stopped", "stopping"])
+def test_a_live_agent_and_a_stopped_swarm_are_left_alone(store, rebooted, state):
+    ledger, runtime = rebooted
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    runtime.live.add(master.name)
+
+    _booted(store, ledger, runtime)
+    assert master.name not in {a.name for a in runtime.resumed}
+
+    store.redis.set(store.key("sw", "boot", "workstation"), "boot-1")
+    store.update("sw", state=state)
+    runtime.resumed.clear()
+    runtime.live.clear()
+    assert _booted(store, ledger, runtime) == ([], [])
+    assert runtime.resumed == []
+    assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-2"
+    store.update("sw", state="running")
+    assert _booted(store, ledger, runtime) == ([], [])
+
+
+def test_a_planned_record_from_an_older_boot_names_no_agent(store, rebooted):
+    ledger, runtime = rebooted
+    store.redis.set(store.key("sw", "boot", "workstation"), "boot-0")
+
+    assert reboot.recorded(store, "sw", "boot-0") == set()
+    assert _booted(store, ledger, runtime) == ([], [])
+    assert runtime.resumed == []
+
+
+def test_a_herdr_server_that_will_not_start_leaves_the_boot_for_the_next_tick(store, rebooted, monkeypatch):
+    ledger, runtime = rebooted
+    monkeypatch.setattr(reboot, "start_server", lambda: ["herdr server did not start after the reboot: down"])
+
+    actions = reboot.boot_pass("sw", store, ledger, runtime, 900, current="boot-2")
+
+    assert actions == ["herdr server did not start after the reboot: down"]
+    assert runtime.resumed == []
+    assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-1"
+
+
+def test_an_automatic_snapshot_newer_than_the_planned_record_names_the_agents(store, rebooted):
+    ledger, runtime = rebooted
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    folder = snapshot.auto_dir("sw")
+    folder.mkdir(parents=True, exist_ok=True)
+    agents = {master.name: {}}
+    (folder / "auto-700.json").write_text(
+        json.dumps({"taken_at": 700, "state": {"keys": {store.key("sw", "agents"): {"value": agents}}}})
+    )
+
+    assert reboot.recorded(store, "sw", "boot-1") == {master.name}
+    _booted(store, ledger, runtime)
+    assert [a.name for a in runtime.resumed] == [master.name]
+
+
+def test_no_record_and_no_snapshot_name_no_agent(store):
+    assert reboot.recorded(store, "sw", "boot-1") == set()
+
+
+def test_last_quota_reuses_a_stale_reading_only_until_a_window_resets(monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+    from scripts import session_bands
+
+    class Window:
+        def __init__(self, resets_at):
+            self.resets_at = resets_at
+
+    class Reading:
+        def __init__(self, account, cap, resets=(500, 900)):
+            self.account, self.cap = account, cap
+            self.five_hour, self.seven_day = Window(resets[0]), Window(resets[1])
+
+    readings = [
+        (30.0, Reading("a", 0)),
+        (10.0, Reading("a", 3)),
+        (20.0, Reading("b", 2, resets=(150, 900))),
+        (20.0, Reading("c", 2, resets=(None, 900))),
+    ]
+    monkeypatch.setattr(balancer, "cached_observations", lambda: readings)
+    monkeypatch.setattr(balancer, "account_cap", lambda result, now: result.cap if now >= 0 else None)
+    monkeypatch.setattr(session_bands, "fresh", lambda at, now: now - at <= 50)
+
+    assert reboot.last_quota("claude", "a", now=60) is False
+    assert reboot.last_quota("claude", "a", now=200) is False
+    assert reboot.last_quota("claude", "b", now=60) is True
+    assert reboot.last_quota("claude", "b", now=200) is None
+    assert reboot.last_quota("claude", "c", now=200) is None
+    assert reboot.last_quota("claude", "a", now=600) is None
+    assert reboot.last_quota("claude", "a", now=500) is None
+    readings.append((30.0, Reading("a", 5)))
+    assert reboot.last_quota("claude", "a", now=60) is False
+    assert reboot.last_quota("claude", "d", now=60) is None
+    monkeypatch.setattr(balancer, "account_cap", lambda result, now: None)
+    assert reboot.last_quota("claude", "a", now=60) is None
+
+
+def test_last_quota_asks_the_codex_router_for_codex(monkeypatch):
+    monkeypatch.setattr(reboot.resume, "account_quota", lambda harness, account: (harness, account))
+    assert reboot.last_quota("codex", "x") == ("codex", "x")
+
+
+def test_start_server_reports_a_herdr_failure_as_an_action(monkeypatch):
+    def refuse(environ):
+        raise reboot.herdr_host.HerdrError("herdr is not installed")
+
+    monkeypatch.setattr(reboot.herdr_host, "ensure_server", refuse)
+    assert reboot.start_server() == ["herdr server did not start after the reboot: herdr is not installed"]
+    seen = []
+    monkeypatch.setattr(reboot.herdr_host, "ensure_server", lambda environ: seen.append(environ))
+    assert reboot.start_server() == []
+    assert seen == [dict(os.environ)]
+
+
+def test_boot_id_reads_the_kernel_boot_id(tmp_path, monkeypatch):
+    path = tmp_path / "boot_id"
+    path.write_text("abc-123\n")
+    monkeypatch.setattr(reboot, "BOOT_ID", path)
+    assert reboot.boot_id() == "abc-123"

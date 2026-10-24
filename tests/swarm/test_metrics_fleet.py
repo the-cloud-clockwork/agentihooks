@@ -7,7 +7,7 @@ from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import quota
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 SLUG = "scratch"
 NOW = 1_800_000_000_000
 

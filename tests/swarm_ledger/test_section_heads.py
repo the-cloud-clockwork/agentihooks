@@ -1,10 +1,7 @@
-from pathlib import Path
-
 import pytest
 
 from tests.swarm_ledger.ledger_page import ledger_state, loaded, reload_after_folds, serve_modules, shell_html
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
 ANSWER = {"id": "a1", "by": "operator", "at": 1, "text": "yes"}
 DOC = {

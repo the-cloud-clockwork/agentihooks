@@ -12,8 +12,8 @@ function fixture(options = {}) {
     serverUrl: 'https://github.com', runId: 42,
     ...options.context,
   };
-  const commit = (sha, tree) => ({ sha, commit: { tree: { sha: tree } } });
-  const pull = { number: 7, head: { sha: options.pullHead || 'graded', repo: { full_name: 'owner/repo' } },
+  const commit = (sha, tree, message = '') => ({ sha, commit: { tree: { sha: tree }, message } });
+  const pull = { number: 7, head: { sha: options.pullHead || 'snapshot', repo: { full_name: 'owner/repo' } },
     base: { ref: 'main' }, html_url: 'https://github.com/owner/repo/pull/7' };
   const runUrl = 'https://github.com/owner/repo/actions/runs/42';
   const jobs = [{ id: 71, run_id: 42, name: 'promote / promote', status: 'in_progress',
@@ -27,15 +27,19 @@ function fixture(options = {}) {
   const pages = [];
   let reads = 0;
   let readiness = 0;
+  let mainReads = 0;
   const github = { rest: {
     actions: { listJobsForWorkflowRun: async () => ({ data: { jobs: jobs.slice(0, 100) } }) },
     checks: { listForRef: async () => ({ data: { check_runs: checks.slice(0, 100) } }) },
     git: {
       getRef: async ({ ref }) => {
         if (ref === 'heads/dev') return { data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } };
-        if (options.snapshot) return { data: { object: { sha: options.snapshot } } };
+        if (options.snapshot || options.existing) return { data: { object: { sha: options.snapshot || 'snapshot' } } };
         throw Object.assign(new Error('Not Found'), { status: 404 });
       },
+      createCommit: async args => { refs.push(['commit', args]); return { data: { sha: 'snapshot' } }; },
+      getCommit: async ({ commit_sha }) => ({ data: { sha: commit_sha, tree: { sha: commit_sha === 'snapshot' ? 'tree' : 'other' },
+        parents: options.snapshotParents || [{ sha: 'main' }] } }),
       createRef: async args => { refs.push(['create', args]); },
       deleteRef: async args => {
         refs.push(['delete', args]);
@@ -45,14 +49,17 @@ function fixture(options = {}) {
     },
     repos: {
       getCommit: async ({ ref }) => ({ data: ref === 'graded' ? commit('graded', 'tree') :
-        ref === 'main' ? commit('main', options.already ? 'tree' : 'old') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
+        ref === 'main' && options.mainMoves && ++mainReads > 1 ? commit('moved', 'old', `Promote green dev to main (#8)\n\nGraded dev revision: ${options.mainMoves}\n`) :
+        ref === 'main' ? commit('main', options.already ? 'tree' : 'old', options.promoted ? `Promote green dev to main (#6)\n\nGraded dev revision: ${options.promoted}\n` : '') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
       listCommitStatusesForRef: async () => ({ data: statuses.slice(0, 100) }),
+      compareCommits: async args => { refs.push(['compare', args]); return { data: { status: options.orders?.[args.base] || options.order || 'ahead' } }; },
     },
     pulls: {
       get: async () => ({ data: { ...pull, mergeable: options.conflict ? false : true, rebaseable: !options.nonrebaseable,
         mergeable_state: options.mergeState || (options.pending || options.waitOnce && readiness++ === 0 ? 'blocked' : 'clean') } }),
       list: async () => ({ data: options.existing ? [pull] : [] }),
       create: async args => { writes.push(['create', args]); return { data: pull }; },
+      update: async args => { writes.push(['update', args]); },
       merge: async args => {
         writes.push(['merge', args]);
         if (options.refused) throw new Error('Required checks are pending');
@@ -72,20 +79,22 @@ function fixture(options = {}) {
   return { github, context, core, writes, refs, outputs, jobs, checks, statuses, pages, sleep: async () => {} };
 }
 
-test('promotes exactly the graded head with linear history and records both revisions', async () => {
+test('promotes the graded tree as one commit on main and records both revisions', async () => {
   const f = fixture();
   await promote(f);
   assert.equal(f.writes[0][1].base, 'main');
   assert.equal(f.writes[0][1].head, 'promotion/graded');
+  assert.match(f.refs[0][1].message, /graded/);
   assert.deepEqual(f.refs, [
-    ['create', { owner: 'owner', repo: 'repo', ref: 'refs/heads/promotion/graded', sha: 'graded' }],
+    ['commit', { owner: 'owner', repo: 'repo', message: f.refs[0][1].message, tree: 'tree', parents: ['main'] }],
+    ['create', { owner: 'owner', repo: 'repo', ref: 'refs/heads/promotion/graded', sha: 'snapshot' }],
     ['delete', { owner: 'owner', repo: 'repo', ref: 'heads/promotion/graded' }],
   ]);
   assert.match(f.writes[0][1].body, /graded/);
   assert.equal(f.writes[1][0], 'merge');
   const { merge_method, ...request } = f.writes[1][1];
   assert.ok(['rebase', 'squash'].includes(merge_method));
-  assert.deepEqual(request, { owner: 'owner', repo: 'repo', pull_number: 7, sha: 'graded' });
+  assert.deepEqual(request, { owner: 'owner', repo: 'repo', pull_number: 7, sha: 'snapshot', commit_message: f.writes[0][1].body });
   assert.equal(f.outputs.main, 'rebased');
   assert.equal(f.outputs.graded, 'graded');
 });
@@ -106,7 +115,7 @@ test('promotes the graded revision after dev has advanced', async () => {
   const f = fixture({ dev: 'newer' });
   await promote(f);
   assert.equal(f.writes[0][1].head, 'promotion/graded');
-  assert.equal(f.writes[1][1].sha, 'graded');
+  assert.equal(f.writes[1][1].sha, 'snapshot');
   assert.equal(f.outputs.graded, 'graded');
   assert.equal(f.outputs.main, 'rebased');
 });
@@ -139,18 +148,27 @@ test('snapshot deletion failures are reported', async () => {
 });
 
 test('reuses a matching snapshot left before pull request creation', async () => {
-  const f = fixture({ snapshot: 'graded' });
+  const f = fixture({ snapshot: 'snapshot' });
   await promote(f);
   assert.deepEqual(f.refs.map(([kind]) => kind), ['delete']);
   assert.equal(f.outputs.main, 'rebased');
 });
 
-test('rejects a snapshot that does not identify the graded revision', async () => {
+test('rejects a snapshot that does not hold the graded tree', async () => {
   const f = fixture({ snapshot: 'ungraded' });
   await assert.rejects(promote(f), /snapshot/);
   assert.deepEqual(f.writes, []);
   assert.deepEqual(f.refs, []);
 });
+
+for (const snapshotParents of [[{ sha: 'older' }], [{ sha: 'main' }, { sha: 'graded' }], []]) {
+  test(`rejects a snapshot that is not one commit on main ${JSON.stringify(snapshotParents)}`, async () => {
+    const f = fixture({ snapshot: 'snapshot', snapshotParents });
+    await assert.rejects(promote(f), /snapshot/);
+    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.refs, []);
+  });
+}
 
 test('waits for GitHub to compute a clean merge', async () => {
   const f = fixture({ waitOnce: true });
@@ -171,14 +189,67 @@ test('promotes the graded revision while dev keeps moving', async () => {
   const f = fixture({ existing: true, moved: 'newer' });
   await promote(f);
   assert.deepEqual(f.writes.map(([kind]) => kind), ['merge']);
-  assert.equal(f.writes[0][1].sha, 'graded');
+  assert.equal(f.writes[0][1].sha, 'snapshot');
   assert.equal(f.outputs.main, 'rebased');
 });
 
 test('a moved pull request cannot merge', async () => {
   const f = fixture({ existing: true, pullHead: 'ungraded' });
-  await assert.rejects(promote(f), /graded dev head/);
+  await assert.rejects(promote(f), /snapshot commit/);
   assert.deepEqual(f.writes, []);
+});
+
+test('an open pull request without its snapshot branch cannot merge', async () => {
+  const f = fixture({ existing: true });
+  f.github.rest.git.getRef = async () => { throw Object.assign(new Error('Not Found'), { status: 404 }); };
+  await assert.rejects(promote(f), /Not Found/);
+  assert.deepEqual(f.writes, []);
+  assert.deepEqual(f.refs, []);
+});
+
+const last = 'a'.repeat(40);
+
+const newer = 'b'.repeat(40);
+
+test('promotes a revision that descends from the last promotion', async () => {
+  const f = fixture({ promoted: last, order: 'ahead' });
+  await promote(f);
+  assert.deepEqual(f.refs[0], ['compare', { owner: 'owner', repo: 'repo', base: last, head: 'graded' }]);
+  assert.equal(f.outputs.main, 'rebased');
+  assert.equal(f.outputs.superseded, undefined);
+});
+
+for (const order of ['behind', 'identical', 'diverged']) {
+  test(`ends superseded when the graded revision is ${order} the last promotion`, async () => {
+    const f = fixture({ promoted: last, order });
+    await promote(f);
+    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.refs.map(([kind]) => kind), ['compare']);
+    assert.equal(f.outputs.superseded, last);
+    assert.equal(f.outputs.main, undefined);
+  });
+}
+
+test('ends superseded when main takes a newer promotion during the wait', async () => {
+  const f = fixture({ promoted: last, mainMoves: newer, orders: { [last]: 'ahead', [newer]: 'behind' } });
+  await promote(f);
+  assert.deepEqual(f.writes, [['create', f.writes[0][1]], ['update', { owner: 'owner', repo: 'repo', pull_number: 7, state: 'closed' }]]);
+  assert.deepEqual(f.refs.map(([kind, args]) => kind === 'compare' ? args.base : kind), [last, 'commit', 'create', newer, 'delete']);
+  assert.equal(f.outputs.superseded, newer);
+  assert.equal(f.outputs.main, undefined);
+});
+
+test('never merges a stale snapshot when main moved without a newer promotion', async () => {
+  const f = fixture({ promoted: last, mainMoves: newer, order: 'ahead' });
+  await assert.rejects(promote(f), /main moved/);
+  assert.deepEqual(f.writes.map(([kind]) => kind), ['create']);
+  assert.equal(f.outputs.main, undefined);
+});
+
+test('a created pull request on another head cannot merge', async () => {
+  const f = fixture({ pullHead: 'ungraded' });
+  await assert.rejects(promote(f), /snapshot commit/);
+  assert.deepEqual(f.writes.map(([kind]) => kind), ['create']);
 });
 
 for (const options of [{ refused: true }, { wrongTree: true }, { unmerged: true }]) {
@@ -203,7 +274,7 @@ test('admits only its running check after the current run grade passed', async (
   f.checks.push({ name: 'unit-selected', status: 'completed', conclusion: 'skipped' });
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
-  assert.equal(f.writes[0][1].sha, 'graded');
+  assert.equal(f.writes[0][1].sha, 'snapshot');
   assert.ok(f.pages.every(args => args.per_page === 100));
   assert.equal(f.pages.filter(args => args.ref === 'graded').length, 2);
   assert.equal(f.pages.find(args => args.run_id === 42).filter, 'latest');
@@ -281,3 +352,126 @@ test('finds the exact current job beyond the first hundred jobs', async () => {
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
 });
+
+const current = 'e'.repeat(40);
+const appPull = (number, graded, { login = 'promotion-app[bot]', full_name = 'owner/repo', ref = `promotion/${graded}` } = {}) =>
+  ({ number, user: { login }, head: { ref, sha: `snapshot-${number}`, repo: full_name && { full_name } }, base: { ref: 'main' } });
+
+function cleanupFixture(open, options = {}) {
+  const writes = [];
+  const tables = [];
+  const ancestry = { ['a'.repeat(40)]: 'ahead', ['b'.repeat(40)]: 'ahead', ['c'.repeat(40)]: 'behind', ['d'.repeat(40)]: 'diverged' };
+  const pulls = open.map(pull => ({ ...pull, state: 'open' }));
+  const github = { rest: {
+    pulls: {
+      list: () => {},
+      update: async args => {
+        if (options.closeFails === args.pull_number) throw Object.assign(new Error('Validation Failed'), { status: 422 });
+        writes.push(['close', args]);
+        pulls.find(pull => pull.number === args.pull_number).state = 'closed';
+      },
+    },
+    repos: { compareCommits: async ({ base, head }) => {
+      if (options.compareFails === base) throw Object.assign(new Error('No common ancestor'), { status: 404 });
+      return { data: { status: head === current ? ancestry[base] : 'diverged' } };
+    } },
+    issues: { createComment: async args => { writes.push(['comment', args]); } },
+    git: {
+      getRef: async ({ ref }) => {
+        if (options.gone) throw Object.assign(new Error('Not Found'), { status: 404 });
+        const pull = pulls.find(candidate => `heads/${candidate.head.ref}` === ref);
+        return { data: { object: { sha: options.moved === pull.number ? 'elsewhere' : pull.head.sha } } };
+      },
+      deleteRef: async args => {
+        writes.push(['delete', args]);
+        if (options.deleted) throw Object.assign(new Error(options.deleted === 422 ? 'Reference does not exist' : 'Not Found'), { status: options.deleted });
+      },
+    },
+  } };
+  github.paginate = async (method, args) => {
+    assert.equal(method, github.rest.pulls.list);
+    assert.deepEqual(args, { owner: 'owner', repo: 'repo', state: 'open', base: 'main', per_page: 100 });
+    return pulls.filter(pull => pull.state === 'open');
+  };
+  const summary = { addHeading() { return this; }, addTable(rows) { tables.push(rows); return this; }, async write() {} };
+  const context = {
+    repo: { owner: 'owner', repo: 'repo' }, eventName: 'push', ref: 'refs/heads/dev', sha: current,
+    payload: { repository: { full_name: 'owner/repo' } }, serverUrl: 'https://github.com', runId: 42, ...options.context,
+  };
+  return { github, context, core: { summary }, app: 'app' in options ? options.app : 'promotion-app', writes, tables, pulls };
+}
+
+const census = () => [
+  appPull(3, 'a'.repeat(40)), appPull(4, 'b'.repeat(40)), appPull(5, current), appPull(6, 'c'.repeat(40)),
+  appPull(7, 'd'.repeat(40)), appPull(8, 'a'.repeat(40), { login: 'someone' }), appPull(9, 'a'.repeat(40), { full_name: 'fork/repo' }),
+  appPull(10, 'a'.repeat(40), { full_name: null }), appPull(11, 'a'.repeat(40), { ref: 'feature' }),
+  appPull(12, 'a'.repeat(39), { ref: `promotion/${'a'.repeat(39)}` }),
+];
+const kinds = f => f.writes.map(([kind, args]) => [kind, args.pull_number || args.issue_number || args.ref]);
+
+test('closes only the abandoned attempts the promotion app opened and deletes their snapshots', async () => {
+  const f = cleanupFixture(census());
+  await promote.closeAbandoned(f);
+  assert.deepEqual(kinds(f), [
+    ['comment', 3], ['close', 3], ['delete', `heads/promotion/${'a'.repeat(40)}`],
+    ['comment', 4], ['close', 4], ['delete', `heads/promotion/${'b'.repeat(40)}`],
+  ]);
+  assert.match(f.writes[0][1].body, new RegExp(`${current}.*${'a'.repeat(40)}`, 's'));
+  assert.match(f.writes[0][1].body, /actions\/runs\/42/);
+  assert.deepEqual(f.pulls.filter(pull => pull.state === 'open').map(pull => pull.number), [5, 6, 7, 8, 9, 10, 11, 12]);
+  assert.deepEqual(f.tables[0].slice(1).map(([pull]) => pull), ['#3', '#4']);
+});
+
+test('repeating the cleanup changes nothing', async () => {
+  const f = cleanupFixture(census());
+  await promote.closeAbandoned(f);
+  const first = f.writes.length;
+  await promote.closeAbandoned(f);
+  assert.equal(f.writes.length, first);
+});
+
+test('keeps a snapshot branch that moved away from its pull request head', async () => {
+  const f = cleanupFixture([appPull(3, 'a'.repeat(40))], { moved: 3 });
+  await promote.closeAbandoned(f);
+  assert.deepEqual(kinds(f), [['comment', 3], ['close', 3]]);
+});
+
+for (const options of [{ gone: true }, { deleted: 404 }, { deleted: 422 }]) {
+  test(`an already deleted abandoned snapshot is accepted ${JSON.stringify(options)}`, async () => {
+    const f = cleanupFixture([appPull(3, 'a'.repeat(40))], options);
+    await promote.closeAbandoned(f);
+    assert.deepEqual(kinds(f).filter(([kind]) => kind === 'close'), [['close', 3]]);
+  });
+}
+
+for (const options of [{ closeFails: 3 }, { compareFails: 'a'.repeat(40) }]) {
+  test(`a cleanup failure is reported after the other attempts close ${JSON.stringify(options)}`, async () => {
+    const f = cleanupFixture([appPull(3, 'a'.repeat(40)), appPull(4, 'b'.repeat(40))], options);
+    await assert.rejects(promote.closeAbandoned(f), /#3/);
+    assert.deepEqual(kinds(f).filter(([kind]) => kind !== 'comment'), [['close', 4], ['delete', `heads/promotion/${'b'.repeat(40)}`]]);
+  });
+}
+
+test('stops at its time budget and leaves the rest for the next run without failing', async () => {
+  const f = cleanupFixture(census());
+  await promote.closeAbandoned({ ...f, deadline: Date.now() - 1 });
+  assert.deepEqual(f.writes, []);
+  assert.deepEqual(f.tables[0].slice(1), [['10 not examined', '', 'left for the next run, the cleanup time budget ran out']]);
+});
+
+test('refuses to choose pull requests without the promotion app identity', async () => {
+  const f = cleanupFixture(census(), { app: '' });
+  await assert.rejects(promote.closeAbandoned(f), /App/);
+  assert.deepEqual(f.writes, []);
+});
+
+for (const context of [
+  { eventName: 'workflow_dispatch' }, { eventName: 'pull_request' },
+  { ref: 'refs/heads/diffcheck/plant' }, { payload: { repository: { full_name: 'foreign/repo' } } },
+]) {
+  test(`cleanup ignores an untrusted trigger ${JSON.stringify(context)}`, async () => {
+    const f = cleanupFixture(census(), { context });
+    await promote.closeAbandoned(f);
+    assert.deepEqual(f.writes, []);
+  });
+}

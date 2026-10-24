@@ -7,7 +7,7 @@ from scripts.swarm.health import standing
 from tests.swarm.test_stages import agent, delivery, rows, run, stage
 from tests.swarm.test_stages import store as store
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 H = 3_600_000
 NOW = 1_791_744_000_000

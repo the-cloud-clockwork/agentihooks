@@ -10,36 +10,117 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
+_SHARED = {"__init__.py", "conftest.py"}
+
 # Runs inside each tree so the base imports its own sources, never the head's.
 _COLLECT = """
-import json, sys, pytest
+import json, os, sys, pytest
+from pathlib import Path
 
 class Collected:
     nodeids = []
+    root = Path(os.path.abspath(sys.argv[1]))
+    group = set(json.loads(sys.argv[3]))
+
+    def pytest_ignore_collect(self, collection_path):
+        if collection_path.parent == Collected.root and collection_path.name not in Collected.group:
+            return True
+        return None
 
     def pytest_collection_finish(self, session):
         Collected.nodeids = [item.nodeid for item in session.items]
 
+    def pytest_collectreport(self, report: pytest.CollectReport) -> None:
+        if report.failed:
+            print(report.nodeid, report.longrepr, sep="\\n", file=sys.stderr, flush=True)
+
 code = pytest.main(["--collect-only", "-qq", "--assert=plain", "-p", "no:cacheprovider", sys.argv[1]], plugins=[Collected()])
 with open(sys.argv[2], "w") as out:
-    json.dump(Collected.nodeids if code == 0 else None, out)
+    ok = code in (pytest.ExitCode.OK, pytest.ExitCode.NO_TESTS_COLLECTED)
+    json.dump(Collected.nodeids if ok else None, out)
 """
+
+
+def collection_identity(root: Path, tests: str, environment: str) -> str | None:
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=False)
+    if status.returncode or status.stdout:
+        return None
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True).strip()
+    # The project's own version is derived from its commit; the tree hash already names its code.
+    packages = sorted(
+        (name, None if name == "agentihooks" else dist.version)
+        for dist in importlib.metadata.distributions()
+        if (name := dist.metadata["Name"])
+    )
+    options = {name: value for name, value in os.environ.items() if name.startswith("PYTEST_")}
+    identity = json.dumps(
+        [tree, tests, environment, sys.version, sys.platform, packages, _COLLECT, options], sort_keys=True
+    )
+    return hashlib.sha256(identity.encode()).hexdigest()
 
 
 def collection_cache(root: Path, tests: str, cache: Path | None, environment: str) -> Path | None:
     if cache is None or not environment:
         return None
-    status = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=False)
-    if status.returncode or status.stdout:
+    key = collection_identity(root, tests, environment)
+    return cache / f"{key}.json" if key else None
+
+
+def recorded_base(record: Path, tree: Path, tests: str) -> list[str] | None:
+    try:
+        recorded = json.loads(record.read_text())
+    except (OSError, ValueError):
         return None
-    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True).strip()
-    packages = sorted((dist.metadata["Name"], dist.version) for dist in importlib.metadata.distributions())
-    options = {name: value for name, value in os.environ.items() if name.startswith("PYTEST_")}
-    identity = json.dumps(
-        [tree, tests, environment, sys.version, sys.platform, packages, _COLLECT, options], sort_keys=True
+    if not isinstance(recorded, dict) or recorded.get("identity") != collection_identity(tree, tests, ""):
+        return None
+    nodeids = recorded.get("nodeids")
+    return nodeids if isinstance(nodeids, list) and nodeids and all(isinstance(n, str) for n in nodeids) else None
+
+
+def dev_record(listing: dict, base: str) -> int | None:
+    for artifact in listing.get("artifacts", []):
+        run = artifact.get("workflow_run") or {}
+        if (
+            not artifact.get("expired")
+            and run.get("head_branch") == "dev"
+            and run.get("head_sha") == base
+            and run.get("repository_id") is not None
+            and run.get("repository_id") == run.get("head_repository_id")
+        ):
+            return artifact["id"]
+    return None
+
+
+def write_record(head: Path, tests: str, out: Path) -> int:
+    identity = collection_identity(head, tests, "")
+    nodeids = collect_all({"head": head}, tests)["head"]
+    if not nodeids or identity is None or identity != collection_identity(head, tests, ""):
+        print("::error::The tree did not collect cleanly, so no record is written.")
+        return 1
+    out.write_text(json.dumps({"identity": identity, "nodeids": nodeids}))
+    print(f"recorded {len(nodeids)} tests")
+    return 0
+
+
+def base_from_record(base: Path, tests: str) -> list[str] | None:
+    record = os.environ.get("TEST_COUNT_BASE_RECORD")
+    if not record:
+        return None
+    recorded = recorded_base(Path(record), base, tests)
+    print("base count read from the dev record" if recorded else "no dev record matches the base, so it is collected")
+    return recorded
+
+
+def collect_sides(base: Path, head: Path, tests: str) -> dict[str, list[str] | None]:
+    recorded = base_from_record(base, tests)
+    cache = os.environ.get("TEST_COUNT_COLLECTION_CACHE")
+    collected = collect_all(
+        {"head": head} if recorded else {"base": base, "head": head},
+        tests,
+        cache=Path(cache) if cache else None,
+        environment=os.environ.get("TEST_COUNT_ENVIRONMENT", ""),
     )
-    key = hashlib.sha256(identity.encode()).hexdigest()
-    return cache / f"{key}.json"
+    return {"base": recorded, **collected} if recorded else collected
 
 
 def collect_all(
@@ -47,30 +128,61 @@ def collect_all(
 ) -> dict[str, list[str] | None]:
     cached = {side: collection_cache(tree, tests, cache, environment) for side, tree in trees.items()}
     collected = {}
+    for side in trees:
+        if cached[side] and cached[side].is_file():
+            nodeids = json.loads(cached[side].read_text())
+            collected[side] = (
+                nodeids if isinstance(nodeids, list) and all(isinstance(nodeid, str) for nodeid in nodeids) else None
+            )
+    pending = [side for side in trees if side not in collected]
+    processes = collection_processes() // max(1, len(pending))
     with tempfile.TemporaryDirectory() as scratch:
-        outputs = {side: Path(scratch) / f"{side}.json" for side in trees}
         runs = {}
-        for side, tree in trees.items():
-            if cached[side] and cached[side].is_file():
-                nodeids = json.loads(cached[side].read_text())
-                collected[side] = (
-                    nodeids
-                    if isinstance(nodeids, list) and all(isinstance(nodeid, str) for nodeid in nodeids)
-                    else None
-                )
-            else:
-                runs[side] = subprocess.Popen(
-                    [sys.executable, "-c", _COLLECT, tests, str(outputs[side])], cwd=tree, stdout=subprocess.DEVNULL
-                )
-        for side, run in runs.items():
-            run.wait()
-            collected[side] = json.loads(outputs[side].read_text()) if outputs[side].is_file() else None
-            if run.returncode:
-                collected[side] = None
+        for side in pending:
+            runs[side] = []
+            for index, group in enumerate(collection_groups(trees[side] / tests, processes)):
+                output = Path(scratch) / f"{side}-{index}.json"
+                command = [sys.executable, "-c", _COLLECT, tests, str(output), json.dumps(group)]
+                runs[side].append((subprocess.Popen(command, cwd=trees[side], stdout=subprocess.DEVNULL), output))
+        for side, parts in runs.items():
+            results = []
+            for run, output in parts:
+                run.wait()
+                results.append(json.loads(output.read_text()) if output.is_file() and not run.returncode else None)
+            nodeids = None if any(result is None for result in results) else sum(results, [])
+            # Groups are disjoint, so a node id from two groups means the split leaked and would inflate the count.
+            if nodeids and len(set(nodeids)) != sum(len(set(result)) for result in results):
+                nodeids = None
+            collected[side] = nodeids
             if collected[side] and cached[side]:
                 cached[side].parent.mkdir(parents=True, exist_ok=True)
                 cached[side].write_text(json.dumps(collected[side]))
     return collected
+
+
+def collection_processes() -> int:
+    # Imported here: the dev record fetch imports this module from a base tree that may hold only the tests.
+    from scripts.ci_cpu_quota import quota_cpus, worker_count
+
+    return worker_count(len(os.sched_getaffinity(0)), quota_cpus())
+
+
+def collection_groups(root: Path, count: int) -> list[list[str]]:
+    entries = sorted(root.iterdir(), key=lambda path: path.name) if root.is_dir() else []
+    entries = [path for path in entries if path.name not in _SHARED]
+    weights = [
+        sum(1 for _ in path.rglob("test_*.py"))
+        if path.is_dir()
+        else int(path.name.startswith("test_") and path.suffix == ".py")
+        for path in entries
+    ]
+    total, done, groups = sum(weights), 0, [[]]
+    for path, weight in zip(entries, weights):
+        if weight and done * count >= total * len(groups):
+            groups.append([])
+        groups[-1].append(path.name)
+        done += weight
+    return [sorted(_SHARED) + group for group in groups]
 
 
 _DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -243,23 +355,23 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="fail when the head collects fewer tests than the base")
-    parser.add_argument("--base", type=Path, required=True, help="checkout of the base revision")
+    side = parser.add_mutually_exclusive_group(required=True)
+    side.add_argument("--base", type=Path, help="checkout of the base revision")
+    side.add_argument("--record", type=Path, help="write the head's collection as a record a later base can reuse")
     parser.add_argument("--head", type=Path, default=Path.cwd(), help="checkout of the head revision")
     parser.add_argument("--tests", default="tests/")
     args = parser.parse_args(argv)
-    cache = os.environ.get("TEST_COUNT_COLLECTION_CACHE")
-    collected = collect_all(
-        {"base": args.base, "head": args.head},
-        args.tests,
-        cache=Path(cache) if cache else None,
-        environment=os.environ.get("TEST_COUNT_ENVIRONMENT", ""),
-    )
+    if args.record:
+        return write_record(args.head, args.tests, args.record)
+    collected = collect_sides(args.base, args.head, args.tests)
     failed = [side for side, nodeids in collected.items() if not nodeids]
     for side in failed:
         print(f"::error::Collecting the {side} tests failed or found none, so the floor cannot be graded.")
     if failed:
         return 1
     base, head = collected["base"], collected["head"]
+    if output := os.environ.get("TEST_COUNT_HEAD_COLLECTION"):
+        Path(output).write_text(json.dumps(head))
     lost = sorted(set(base) - set(head))
     admitted = {}
     if len(head) < len(base):

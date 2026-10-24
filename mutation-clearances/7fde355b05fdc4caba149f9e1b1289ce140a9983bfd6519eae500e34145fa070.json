@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/channel.py:scripts.inbox.channel.x_main__mutmut_12:c74cf81bf47af51a76be643de48a80e9ea97af5f65e16b3ff59d4317da237a53": {
+    "reader": "Standards",
+    "reason": "The mutated call executes only when active is false, which necessarily assigns store=None. Replacing store with None changes no argument or observable output. Source verified at df2de8574be4510aead8d69b89951d94427424a8; mutation evidence run 39062082096 shard one."
+  }
+}

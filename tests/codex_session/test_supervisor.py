@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import socket
@@ -14,7 +15,7 @@ from scripts.codex_session.binding import CONNECTED, ENDPOINTS, EXITED, FAILED, 
 from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.codex_session.fakes import FIRST_PID, OWN_START, SERVER_START, Clock, Process, Server, hooks
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 SEAT = f"eng-1@{SLUG}"
@@ -118,6 +119,7 @@ def assert_failed_cleanly(store, server, error_class):
 def test_a_launch_admits_one_server_binds_its_thread_and_opens_once(store, server, clock, root, tmp_path):
     started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
     record, agent = started.record, started.agent
+    assert started.slot_hive == ""
     path = Path(record.endpoint_ref.removeprefix("unix://"))
     assert path == root / agent.execution_id.removeprefix("exe-")[:16] / "s"
     assert server.commands == [["codex", "app-server", "--listen", f"unix://{path}"]]
@@ -153,9 +155,97 @@ def test_a_launch_admits_one_server_binds_its_thread_and_opens_once(store, serve
     assert server.params("turn/start") == [
         {"threadId": "thread-new", "input": [{"type": "text", "text": "Start the task."}]}
     ]
-    assert server.methods().index("thread/start") < server.methods().index("turn/start")
+    assert server.params("thread/name/set") == [{"threadId": "thread-new", "name": agent.name}]
+    assert server.methods().index("thread/start") < server.methods().index("thread/name/set")
+    assert server.methods().index("thread/name/set") < server.methods().index("turn/start")
     assert not BindingStore(store).claim_opening(SLUG, agent.execution_id, 2000)
     assert all(connection.closed for connection in server.connections)
+
+
+def test_a_hive_app_server_reserves_its_resolved_account_before_the_subprocess(
+    store, server, clock, root, tmp_path, monkeypatch
+):
+    from dataclasses import replace
+
+    from scripts.hive import account_slots
+
+    spec = launch_spec(store, server, tmp_path)
+    spec = replace(
+        spec, environ={**spec.environ, account_slots.HIVE_ENV: "hive-a", account_slots.EXECUTION_ENV: "pending"}
+    )
+    admitted = []
+
+    def execute(harness, account, environ, invoke):
+        assert server.spawns == []
+        assert harness == "codex"
+        assert account == "default"
+        assert environ[account_slots.HIVE_ENV] == "hive-a"
+        assert environ[account_slots.EXECUTION_ENV] != "pending"
+        admitted.append(environ[account_slots.EXECUTION_ENV])
+        return invoke(
+            {
+                key: value
+                for key, value in environ.items()
+                if key not in (account_slots.HIVE_ENV, account_slots.EXECUTION_ENV)
+            }
+        )
+
+    monkeypatch.setattr(account_slots, "execute", execute)
+    started = supervisor.launch(store, spec, deps(server, clock, root))
+    assert admitted == [started.agent.execution_id]
+    assert len(server.spawns) == 1
+    assert account_slots.HIVE_ENV not in server.spawns[0]["env"]
+    assert account_slots.EXECUTION_ENV not in server.spawns[0]["env"]
+    released = []
+    monkeypatch.setattr(account_slots, "release", lambda *args: released.append(args))
+    supervisor.finish(store, SLUG, started, 2000)
+    assert released == [("hive-a", started.agent.execution_id, "codex", "default")]
+
+
+def test_failed_hive_app_server_start_returns_the_canonical_account_slot(
+    store, server, clock, root, tmp_path, monkeypatch
+):
+    from dataclasses import replace
+
+    from scripts.hive import account_slots
+
+    spec = launch_spec(store, server, tmp_path)
+    spec = replace(spec, environ={**spec.environ, account_slots.HIVE_ENV: "hive-a"})
+    monkeypatch.setattr(account_slots, "execute", lambda harness, account, env, invoke: invoke(env))
+    released = []
+    monkeypatch.setattr(account_slots, "release", lambda *args: released.append(args))
+
+    def failed(*args):
+        raise RuntimeError("startup failed")
+
+    monkeypatch.setattr(supervisor, "_connect_bound", failed)
+    with pytest.raises(RuntimeError, match="^startup failed$"):
+        supervisor.launch(store, spec, deps(server, clock, root))
+    assert server.processes[0].stopped
+    assert released == [("hive-a", only_record(store).execution_id, "codex", "default")]
+
+
+def test_unmanaged_app_server_failure_never_releases_a_hive_slot(store, server, clock, root, tmp_path, monkeypatch):
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(account_slots, "release", lambda *args: pytest.fail("unmanaged launch released a slot"))
+
+    def failed(*args):
+        raise RuntimeError("startup failed")
+
+    monkeypatch.setattr(supervisor, "_connect_bound", failed)
+    with pytest.raises(RuntimeError, match="^startup failed$"):
+        supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+
+
+def test_local_codex_app_server_admission_records_the_root_hive(store, server, clock, root, tmp_path, monkeypatch):
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation-root")
+    spec = launch_spec(store, server, tmp_path)
+    admitted = supervisor.admit(store, spec, deps(server, clock, root))
+    assert admitted.hive == "workstation-root"
+    assert store.execution(SLUG, admitted.execution_id).hive == "workstation-root"
 
 
 def test_no_opening_prompt_sends_no_turn(store, server, clock, root, tmp_path):
@@ -217,6 +307,26 @@ def test_a_resume_binds_the_existing_thread_without_starting_one(store, server, 
     assert (started.record.thread_id, started.record.session_id) == ("thread-kept", "session-resumed")
     assert "thread/start" not in server.methods()
     assert server.params("thread/resume") == [{"threadId": "thread-kept"}]
+    assert server.params("thread/name/set") == [{"threadId": "thread-kept", "name": spec.agent.name}]
+
+
+def test_a_launch_without_an_opening_still_names_its_thread(store, server, clock, root, tmp_path):
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path, opening=""), deps(server, clock, root))
+    assert server.params("thread/name/set") == [{"threadId": "thread-new", "name": started.agent.name}]
+
+
+def test_a_refused_thread_name_still_opens_the_turn(store, server, clock, root, tmp_path):
+    server.refuse = {"thread/name/set"}
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    assert (started.record.state, started.record.active_turn_id) == (CONNECTED, "turn-opening")
+    assert server.methods().index("thread/name/set") < server.methods().index("turn/start")
+
+
+def test_a_connection_lost_while_naming_the_thread_fails_the_launch(store, server, clock, root, tmp_path):
+    server.lose = {"thread/name/set"}
+    failure = failed(store, server, clock, root, launch_spec(store, server, tmp_path, opening=""), "protocol")
+    assert str(failure) == "thread/name/set lost the connection: scripted"
+    assert server.processes[-1].poll() is not None
 
 
 @pytest.mark.parametrize("account", ["default", "quota-successor"])
@@ -750,9 +860,9 @@ def test_the_runtime_root_comes_from_the_launch_environment_when_deps_name_none(
     runtime = Path(tempfile.mkdtemp(prefix="rt-"))
     try:
         spec = launch_spec(store, server, tmp_path)
-        spec = replace(spec, environ={**spec.environ, "XDG_RUNTIME_DIR": str(runtime)})
+        spec = replace(spec, environ={**spec.environ, "HOME": str(runtime), "XDG_RUNTIME_DIR": "/run/user/7"})
         started = supervisor.launch(store, spec, deps(server, clock, None))
-        assert started.record.endpoint_ref.startswith(f"unix://{runtime}/cx/")
+        assert started.record.endpoint_ref.startswith(f"unix://{runtime}/.agentihooks/cx/")
     finally:
         shutil.rmtree(runtime)
 
@@ -793,8 +903,10 @@ def test_a_socket_path_past_the_limit_is_refused_and_one_at_it_is_kept(tmp_path)
         shutil.rmtree(short)
 
 
-def test_the_runtime_root_prefers_the_user_runtime_dir(monkeypatch):
-    assert supervisor.runtime_root({"XDG_RUNTIME_DIR": "/run/user/7", "HOME": "/home/u"}) == Path("/run/user/7/cx")
+def test_the_runtime_root_ignores_the_memory_backed_user_runtime_dir(monkeypatch):
+    assert supervisor.runtime_root({"XDG_RUNTIME_DIR": "/run/user/7", "HOME": "/home/u"}) == Path(
+        "/home/u/.agentihooks/cx"
+    )
     assert supervisor.runtime_root({"HOME": "/home/u"}) == Path("/home/u/.agentihooks/cx")
     monkeypatch.setattr(supervisor.Path, "home", classmethod(lambda cls: Path("/home/fallback")))
     assert supervisor.runtime_root({}) == Path("/home/fallback/.agentihooks/cx")
@@ -827,3 +939,100 @@ def test_finish_marks_the_stored_record_exited_and_frees_the_endpoint(store, ser
 
 def test_the_protocol_module_is_the_default_connector():
     assert supervisor.Deps().connect is protocol.connect
+
+
+CAPACITY = "Selected model is at capacity. Please try a different model."
+
+
+def item(kind):
+    return {"method": "item/started", "params": {"item": {"type": kind, "id": kind}}}
+
+
+def completed(status, message=""):
+    turn = {"id": "turn-opening", "status": status, "error": {"message": message} if message else None}
+    return {"method": "turn/completed", "params": {"turn": turn}}
+
+
+def reported_spec(store, server, tmp_path):
+    from scripts.profiles import binding
+
+    profile = Path(server.codex_home)
+    (profile / "AGENTS.md").write_text(binding.persona("Engineer instructions.\n"))
+    (profile.parent / "codex.sources.json").write_text("[]")
+    binding.write(profile, "engineer", "codex")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", profile)
+    spec = launch_spec(store, server, tmp_path)
+    return replace(spec, environ={**spec.environ, binding.REPORT: str(report)}), report
+
+
+def test_an_opening_turn_ended_on_capacity_is_started_once_more(store, server, clock, root, tmp_path):
+    started_turn = {"method": "turn/started", "params": {"turn": {"id": "turn-opening", "status": "inProgress"}}}
+    opening = [started_turn, item("userMessage"), item("hookPrompt"), completed("failed", CAPACITY)]
+    server.turn_events = [opening, [item("reasoning")]]
+    spec, report = reported_spec(store, server, tmp_path)
+    clock.now = 100.0
+
+    started = supervisor.launch(store, spec, deps(server, clock, root))
+
+    opening = {"threadId": "thread-new", "input": [{"type": "text", "text": "Start the task."}]}
+    assert server.params("turn/start") == [opening, opening]
+    assert (started.record.state, started.record.active_turn_id) == (CONNECTED, "turn-opening")
+    assert json.loads(report.read_text())["state"] == "pending"
+    assert set(server.polls) == {supervisor.OPENING_WATCH_S}
+
+
+def test_a_second_capacity_error_fails_the_launch_naming_it(store, server, clock, root, tmp_path):
+    server.turn_events = [[completed("failed", CAPACITY)], [completed("failed", CAPACITY)]]
+    spec, report = reported_spec(store, server, tmp_path)
+
+    failure = failed(store, server, clock, root, spec, "capacity")
+
+    assert len(server.params("turn/start")) == 2
+    reason = f"the opening Codex turn ended twice on a provider capacity error: {CAPACITY}"
+    assert str(failure) == reason
+    assert json.loads(report.read_text())["state"] == "failed"
+    assert json.loads(report.read_text())["reason"] == reason
+    record = only_record(store)
+    assert (record.state, record.last_error_class) == (FAILED, "capacity")
+    assert server.processes[-1].poll() is not None
+    from scripts.profiles import binding
+
+    with pytest.raises(ValueError, match="ended twice on a provider capacity error: Selected model is at capacity"):
+        binding.wait(report, 1)
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        [completed("failed", "stream disconnected before completion")],
+        [completed("completed")],
+        [completed("failed")],
+        [item("agentMessage"), completed("failed", CAPACITY)],
+    ],
+)
+def test_an_opening_turn_without_a_capacity_failure_is_not_started_again(store, server, clock, root, tmp_path, events):
+    server.turn_events = [events, [completed("failed", CAPACITY)]]
+
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+
+    assert len(server.params("turn/start")) == 1
+    assert started.record.state == CONNECTED
+
+
+def test_a_capacity_retry_without_a_profile_report_still_fails_the_launch(store, server, clock, root, tmp_path):
+    server.turn_events = [[completed("failed", CAPACITY)], [completed("failed", CAPACITY)]]
+
+    failed(store, server, clock, root, launch_spec(store, server, tmp_path), "capacity")
+
+    assert len(server.params("turn/start")) == 2
+
+
+def test_the_opening_watch_ends_at_its_deadline(store, server, clock, root, tmp_path, monkeypatch):
+    server.turn_events = [[completed("failed", CAPACITY)]]
+    monkeypatch.setattr(supervisor, "OPENING_WATCH_S", 0.0)
+
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+
+    assert len(server.params("turn/start")) == 1
+    assert started.record.state == CONNECTED

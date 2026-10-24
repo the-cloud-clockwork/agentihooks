@@ -6,8 +6,6 @@ import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():
@@ -218,13 +216,168 @@ def test_verified_historical_starts_keep_their_life_budget(store):
     assert store.claims("smoke", "t1") == 0
 
 
-def test_a_refunded_claim_gives_back_one_started_life(store):
+def test_the_store_offers_no_unconditional_claim_refund(store):
+    assert not hasattr(store, "refund_claim")
+
+
+def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generation_match(store):
     store.record_launch("smoke", AgentRecord("first", "eng", "t1"), "started")
     store.record_launch("smoke", AgentRecord("second", "eng", "t1"), "started")
-    assert store.refund_claim("smoke", "t1") == 1
+    store.claim("smoke", "t1", "second", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+
+    assert store.refund_held_claim("smoke", "t1", "first", generation) is False
+    assert store.refund_held_claim("smoke", "t1", "second", generation + 1) is False
+    assert store.claims("smoke", "t1") == 2
+    assert store.refund_held_claim("smoke", "t1", "second", generation) is True
     assert store.claims("smoke", "t1") == 1
+    assert store.claimant("smoke", "t1") == "second"
+
+
+def test_a_held_claim_refunds_one_life_however_many_paths_ask(store):
+    for _ in range(3):
+        store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is True
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 2
+    assert store.claimant("smoke", "t1") == "agent"
+
+
+def test_a_held_claim_refund_reads_a_missing_generation_as_zero(store):
+    store.count_claim("smoke", "t1")
+    store.redis.set(store.key("smoke", "claim", "t1"), "agent")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", 1) is False
+    assert store.refund_held_claim("smoke", "t1", "agent", 0) is True
+    assert store.claims("smoke", "t1") == 0
+
+
+def test_a_held_claim_refund_refuses_after_the_hub_released_the_claim(store):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.release("smoke", "t1", "agent")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 1
+
+
+def test_a_held_claim_refund_refuses_after_the_same_claimant_claimed_again(store):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.release("smoke", "t1", "agent")
+    store.claim("smoke", "t1", "agent", 60_000)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 1
+
+
+def test_a_held_claim_refund_refuses_a_second_refund_for_the_same_claimant_and_generation(store):
+    for _ in range(3):
+        store.count_claim("smoke", "t1")
     store.count_claim("smoke", "t2")
-    assert (store.refund_claim("smoke", "t2"), store.claims("smoke", "t2")) == (0, 0)
+    store.claim("smoke", "t1", "agent", 60_000)
+    store.claim("smoke", "t2", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is True
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claimant("smoke", "t1") == "agent"
+    assert store.claims("smoke", "t1") == 2
+    assert store.refund_held_claim("smoke", "t2", "agent", store.claim_generation("smoke", "t2")) is True
+    store.release("smoke", "t1", "agent")
+    store.claim("smoke", "t1", "agent", 60_000)
+    assert store.refund_held_claim("smoke", "t1", "agent", generation + 1) is True
+    assert store.claims("smoke", "t1") == 1
+
+
+@pytest.mark.parametrize(
+    ("moved_key", "move", "lives"),
+    [
+        ("claim", lambda redis, key: redis.set(key, "other"), 1),
+        ("claim", lambda redis, key: redis.incr(f"{key}:generation"), 1),
+        ("claim", lambda redis, key: redis.set(f"{key}:refunded", redis.get(f"{key}:generation")), 1),
+        ("started-lives", lambda redis, key: redis.hset(key, "t1", 5), 5),
+        ("task-authority", lambda redis, key: redis.set(key, "hub"), 1),
+        ("claim-journal", lambda redis, key: redis.set(key, "hub"), 1),
+    ],
+)
+def test_a_held_claim_refund_refuses_when_a_watched_key_moves_during_the_watch(
+    store, monkeypatch, moved_key, move, lives
+):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    started = store._started_lives
+    key = store.key("smoke", moved_key) if moved_key == "started-lives" else store.key("smoke", moved_key, "t1")
+
+    def moved(slug, task):
+        move(store.redis, key)
+        return started(slug, task)
+
+    monkeypatch.setattr(store, "_started_lives", moved)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == lives
+
+
+@pytest.mark.parametrize("guard", ["task-authority", "claim-journal"])
+def test_a_held_claim_refund_refuses_while_a_claim_guard_is_set(store, guard):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.redis.set(store.key("smoke", guard, "t1"), "hub")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 1
+
+
+def test_a_held_claim_refund_refuses_when_no_started_life_is_left(store):
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    store.redis.hset(store.key("smoke", "started-lives"), "t1", 0)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.redis.hget(store.key("smoke", "started-lives"), "t1") == "0"
+
+
+def test_a_held_claim_refund_retries_after_another_task_moved_the_lives_hash(store, monkeypatch):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    started, calls = store._started_lives, []
+
+    def moved(slug, task):
+        calls.append(task)
+        if len(calls) == 1:
+            store.redis.hincrby(store.key("smoke", "started-lives"), "t2", 1)
+        return started(slug, task)
+
+    monkeypatch.setattr(store, "_started_lives", moved)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is True
+    assert (len(calls), store.claims("smoke", "t1"), store.claims("smoke", "t2")) == (2, 0, 1)
+
+
+def test_a_held_claim_refund_gives_up_after_three_watch_conflicts(store, monkeypatch):
+    store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    started, calls = store._started_lives, []
+
+    def moved(slug, task):
+        calls.append(task)
+        store.redis.hincrby(store.key("smoke", "started-lives"), "t2", 1)
+        return started(slug, task)
+
+    monkeypatch.setattr(store, "_started_lives", moved)
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert (len(calls), store.claims("smoke", "t1")) == (3, 1)
 
 
 def test_launch_rows_merge_recorded_launches_with_verified_history(store):
@@ -240,7 +393,16 @@ def test_launch_rows_merge_recorded_launches_with_verified_history(store):
     assert sorted(store.launches("smoke"), key=lambda row: row["agent"]) == [
         {"agent": "first", "task": "t1", "at": 1, "state": "started", "error": ""},
         {"agent": "last", "task": "t2", "at": 3, "state": "started", "error": ""},
-        {"agent": "waiting", "task": "t3", "at": 4, "state": "pending", "error": "", "pane_id": "", "after": ""},
+        {
+            "agent": "waiting",
+            "task": "t3",
+            "at": 4,
+            "state": "pending",
+            "error": "",
+            "pane_id": "",
+            "after": "",
+            "head": "",
+        },
     ]
 
 
@@ -377,6 +539,32 @@ def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store)
     assert DEFAULT_LOAD_LOW < DEFAULT_LOAD_HIGH
 
 
+def test_the_swap_use_share_round_trips_and_an_old_config_reads_the_default(store):
+    from scripts.swarm.store import DEFAULT_SWAP_FULL_SHARE
+
+    store.create(config(swap_full_share=0.75))
+    assert store.config("smoke").swap_full_share == 0.75
+    assert store.update("smoke", swap_full_share=1).swap_full_share == 1
+    store.redis.hdel(store.key("smoke", "config"), "swap_full_share")
+    assert store.config("smoke").swap_full_share == DEFAULT_SWAP_FULL_SHARE == 0.9
+
+
+def test_the_swap_floor_round_trips_and_an_old_config_reads_the_default(store):
+    from scripts.swarm.store import DEFAULT_SWAP_FLOOR_MB
+
+    store.create(config(swap_floor_mb=3000))
+    assert store.config("smoke").swap_floor_mb == 3000
+    assert store.update("smoke", swap_floor_mb=1).swap_floor_mb == 1
+    store.redis.hdel(store.key("smoke", "config"), "swap_floor_mb")
+    assert store.config("smoke").swap_floor_mb == DEFAULT_SWAP_FLOOR_MB == 4096
+
+
+def test_create_refuses_a_swap_use_share_outside_zero_to_one(store):
+    with pytest.raises(SwarmError) as caught:
+        store.create(config(swap_full_share=1.5))
+    assert str(caught.value) == "swap full share must be above 0 and at most 1"
+
+
 def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
     store.create(config(api_url="https://swarm.example.test:8443"))
     assert store.config("smoke").api_url == "https://swarm.example.test:8443"
@@ -397,6 +585,13 @@ def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
         {"load_low": True},
         {"load_high": True},
         {"load_high": "2"},
+        {"swap_full_share": 0},
+        {"swap_full_share": 1.01},
+        {"swap_full_share": True},
+        {"swap_full_share": "0.5"},
+        {"swap_floor_mb": 0},
+        {"swap_floor_mb": 0.5},
+        {"swap_floor_mb": True},
     ],
 )
 def test_update_refuses_bad_scaling_settings_and_keeps_the_stored_ones(store, changes):

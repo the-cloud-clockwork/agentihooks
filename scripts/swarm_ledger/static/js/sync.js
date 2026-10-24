@@ -1,7 +1,7 @@
-import { OFFLINE, PAGE, SYNC_COOLDOWN_MS } from "./config.js";
+import { OFFLINE, PAGE } from "./config.js";
 import { $, banner, newId, span, status } from "./dom.js";
-import { readMetadata, writeLedger } from "./api.js";
-import { applyChecks, applyOp, itemOf, lsRead, lsWrite, setState, withDefaults } from "./state.js";
+import { readClosed, readMetadata, writeLedger } from "./api.js";
+import { applyChecks, applyOp, hiddenDone, itemOf, lsRead, lsWrite, setState, withDefaults } from "./state.js";
 import { attaching } from "./media.js";
 import { composing, editing } from "./threads.js";
 import { render } from "./render.js";
@@ -12,6 +12,7 @@ let statsSent = null;
 export let doc;
 export let meta = {};
 let rev = -1;
+let seenRev = -1;
 export let ops = [];
 export let checks = {};
 let inflight = false;
@@ -40,7 +41,7 @@ function statsCheckText(check) {
 
 function cooldown(op, kind) {
   const last = lastSync(kind);
-  const wait = SYNC_COOLDOWN_MS - (Date.now() - Math.max(sentAt[op], last ? last.at : 0));
+  const wait = ((meta.limits || {}).sync_cooldown_ms || 0) - (Date.now() - Math.max(sentAt[op], last ? last.at : 0));
   return wait > 0 ? `again in ${Math.floor(wait / 60000)}m ${Math.ceil((wait % 60000) / 1000)}s` : "";
 }
 
@@ -97,17 +98,125 @@ export function toggle(key, value, field) {
   flush(false);
 }
 
+const older = {};
+const pulled = {};
+
+export function closedLeft(name) {
+  const closed = (meta.closed || {})[name];
+  return closed ? Math.max(0, closed.hidden - (pulled[name] || 0)) : 0;
+}
+
+export function closedLeftIn(name, key) {
+  const closed = (meta.closed || {})[name];
+  const field = { phases: "plan", tasks: "slice" }[name];
+  if (!closed || !closed.groups || !field) return 0;
+  const plans = new Set(doc.plans.map((p) => `plans/${p.id}`));
+  const group = (i) => (name === "phases" && !plans.has(i.plan) ? "unplanned" : i[field]);
+  return Math.max(0, (closed.groups[key] || 0) - (older[name] || []).filter((i) => group(i) === key).length);
+}
+
+function keepDropped(previous, next) {
+  for (const name of Object.keys(pulled)) {
+    const gone = hiddenDone(next, name);
+    const have = new Set([...next[name], ...(older[name] || [])].map((i) => i.id));
+    const dropped = previous[name].filter((i) => gone.has(i.id) && !have.has(i.id)).reverse();
+    older[name] = [...dropped, ...older[name]].filter((i) => gone.has(i.id));
+    pulled[name] = older[name].length;
+  }
+  for (const name of new Set([...touchedPaged(seenRev), ...unsettled])) refreshClosed(name).catch(() => null);
+  seenRev = meta.rev;
+}
+
+function mergeOlder(d) {
+  for (const [name, rows] of Object.entries(older)) {
+    const known = new Set(d[name].map((i) => i.id));
+    d[name] = [...rows.filter((i) => !known.has(i.id)).reverse(), ...d[name]];
+  }
+}
+
+export function pagedOut(name, id) {
+  return hiddenDone(doc, name).has(id) && !(doc[name] || []).some((i) => i.id === id);
+}
+
+export async function pageIn(name, id) {
+  while (pagedOut(name, id) && closedLeft(name)) {
+    const before = pulled[name] || 0;
+    await loadClosed(name);
+    if ((pulled[name] || 0) === before) return;
+  }
+}
+
+const refreshing = {};
+const unsettled = new Set();
+
+async function refreshClosed(name) {
+  const want = (older[name] || []).length;
+  const turn = (refreshing[name] = (refreshing[name] || 0) + 1);
+  unsettled.add(name);
+  const rows = [];
+  while (rows.length < want) {
+    const closed = (meta.closed || {})[name];
+    if (!closed) break;
+    const resp = await readClosed(name, closed.kept + rows.length);
+    if (turn !== refreshing[name] || !resp.ok) return;
+    const { data } = await resp.json();
+    if (turn !== refreshing[name]) return;
+    if (!data.length) break;
+    rows.push(...withDefaults({ [name]: data })[name]);
+  }
+  unsettled.delete(name);
+  const stale = new Set(older[name].map((i) => i.id));
+  older[name] = rows.slice(0, want);
+  pulled[name] = older[name].length;
+  doc[name] = doc[name].filter((i) => !stale.has(i.id));
+  mergeOlder(doc);
+  render();
+}
+
+function touchedPaged(since) {
+  const names = new Set();
+  for (const e of meta.events || []) {
+    if (e.rev <= since || typeof e.target !== "string") continue;
+    const [name, id] = e.target.split("/");
+    if ((older[name] || []).some((i) => i.id === id)) names.add(name);
+  }
+  return names;
+}
+
+export async function loadClosed(name) {
+  const closed = (meta.closed || {})[name];
+  if (!closed) return;
+  refreshing[name] = (refreshing[name] || 0) + 1;
+  const resp = await readClosed(name, closed.kept + (pulled[name] || 0));
+  if (resp.ok) {
+    const { data } = await resp.json();
+    const have = new Set((older[name] || []).map((i) => i.id));
+    const fresh = withDefaults({ [name]: data })[name].filter((i) => !have.has(i.id));
+    older[name] = [...(older[name] || []), ...fresh];
+    pulled[name] = fresh.length ? older[name].length : closed.hidden;
+    mergeOlder(doc);
+  }
+  if (unsettled.has(name)) refreshClosed(name).catch(() => null);
+}
+
 function applyServer(server) {
   if ((server._meta || {}).rev < rev) return;
   meta = server._meta || {};
   rev = meta.rev;
+  const previous = doc;
   doc = withDefaults(server);
+  keepDropped(previous, doc);
+  mergeOlder(doc);
   for (const op of ops) applyOp(doc, op);
   applyChecks(doc);
   banner([meta.seed_error]);
-  render();
-  lsWrite();
-  firstState();
+  const appliedRev = rev;
+  Promise.resolve(render(null, true)).then(() => {
+    if (rev !== appliedRev) return;
+    if (!performance.getEntriesByName("ledger-rendered").length) performance.mark("ledger-rendered");
+    lsWrite();
+    firstState();
+  });
 }
 
 export async function flush(unloading) {

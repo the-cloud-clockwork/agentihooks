@@ -19,7 +19,7 @@ from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.operations import Observation, OperationRequest, Phase
 from tests import sv2_hdr03_cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 HOST_KEY = sv2_hdr03_cases.HOST_KEY
 
 

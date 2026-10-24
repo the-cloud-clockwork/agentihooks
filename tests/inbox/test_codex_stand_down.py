@@ -12,7 +12,7 @@ from scripts.terminate_agent import Process, Session, main
 from tests.codex_session.fakes import Clock
 from tests.inbox.test_codex_pump import AppServer
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 OLD, NEW = "ci@abc-0815", "ci@abc-0816"
@@ -309,3 +309,130 @@ def test_the_fence_keeps_what_the_pump_wrote_after_the_plan(rig):
     rig.bindings.put(SLUG, TransportRecord(**{**asdict(rig.record("exe-old")), "last_reconcile_at": 4242}))
     rig.execute(chosen)
     assert (rig.record("exe-old").state, rig.record("exe-old").last_reconcile_at) == (STOOD_DOWN, 4242)
+
+
+@pytest.fixture
+def command(rig, monkeypatch):
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [])
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: rig.swarm)
+    return monkeypatch
+
+
+def test_a_redis_error_after_the_fence_exits_one_and_says_it_stays_fenced(rig, command, capsys):
+    def fail(*args):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        raise RedisConnectionError("Connection refused")
+
+    command.setattr(stand_down, "_settle", fail)
+    assert main([OLD, "--stand-down", "--swarm", SLUG]) == 1
+    assert capsys.readouterr().err.splitlines() == [
+        "terminate-agent: Connection refused",
+        "terminate-agent: ci@abc-0815 stays fenced from new inbox turns; "
+        "run the same stand down again to interrupt its turn",
+    ]
+    assert rig.record("exe-old").state == STOOD_DOWN
+
+
+def test_a_redis_error_in_the_fence_exits_one_and_says_it_is_not_fenced(rig, command, capsys):
+    def fail(*args):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        raise RedisConnectionError("Connection refused")
+
+    command.setattr(stand_down, "_fence", fail)
+    assert main([OLD, "--stand-down", "--swarm", SLUG]) == 1
+    assert capsys.readouterr().err.splitlines() == [
+        "terminate-agent: Connection refused",
+        "terminate-agent: ci@abc-0815 is not fenced; run the same stand down again",
+    ]
+    assert rig.record("exe-old").state == CONNECTED
+
+
+def test_a_redis_error_before_the_plan_exits_one_and_says_nothing_is_fenced(rig, command, capsys):
+    def fail(*args):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        raise RedisConnectionError("Connection refused")
+
+    command.setattr(stand_down, "plan", fail)
+    assert main([OLD, "--stand-down", "--swarm", SLUG]) == 1
+    assert capsys.readouterr().err.splitlines() == [
+        "terminate-agent: Connection refused",
+        "terminate-agent: ci@abc-0815 is not fenced; run the same stand down again",
+    ]
+
+
+def test_an_unregistered_process_is_refused_as_hosting_unknown_conversations(rig, command, capsys):
+    unregistered = [sharing("", "", pid=2448581, argv=("codex", "--no-daemon"))]
+    command.setattr("scripts.terminate_agent.sessions", lambda: unregistered)
+    assert main(["2448581", "--stand-down", "--swarm", SLUG]) == 2
+    assert capsys.readouterr().err.splitlines()[1] == (
+        "terminate-agent: safe alternative: process 2448581 hosts conversations that agentihooks has not registered, "
+        "so which ones is unknown; "
+        "agentihooks terminate-agent 2448581 --force-shared --dry-run names its process group, "
+        "and the same command without --dry-run ends every conversation in that process, "
+        "so run it only when all of them belong to this agent"
+    )
+
+
+def test_the_fence_leaves_a_record_whose_agent_exited_after_the_plan(rig, command, capsys):
+    planned = stand_down.plan
+
+    def plan_then_exit(*args):
+        chosen = planned(*args)
+        rig.bindings.put(SLUG, TransportRecord(**{**asdict(rig.record("exe-old")), "state": EXITED}))
+        return chosen
+
+    command.setattr(stand_down, "plan", plan_then_exit)
+    assert main([OLD, "--stand-down", "--swarm", SLUG]) == 2
+    assert capsys.readouterr().err.splitlines() == [
+        "terminate-agent: refused: conversation thread-old of ci@abc-0815 already ended (exited)",
+        "terminate-agent: safe alternative: nothing needs standing down",
+    ]
+    assert rig.record("exe-old").state == EXITED
+    assert rig.connects == []
+
+
+def test_the_command_refuses_a_claude_type(rig, command, capsys):
+    assert main([OLD, "--stand-down", "--swarm", SLUG, "--type", "claude"]) == 2
+    assert capsys.readouterr().err.splitlines() == [
+        "terminate-agent: --stand-down stops Codex conversations only, not --type claude",
+    ]
+    assert rig.record("exe-old").state == CONNECTED
+
+
+@pytest.mark.parametrize("kind", ["codex", "any"])
+def test_the_command_never_offers_a_claude_process_as_the_alternative(rig, command, capsys, kind):
+    process = Process(2448581, 1, 2448581, 2448581, 9, "S", "claude", ("claude",))
+    claude = Session("uuid-c", "claude", "ci@abc-0700", process, "/repo", "alive")
+    command.setattr("scripts.terminate_agent.sessions", lambda: [claude])
+    assert main(["2448581", "--stand-down", "--swarm", SLUG, "--type", kind]) == 2
+    assert capsys.readouterr().err.splitlines()[1] == (f"terminate-agent: safe alternative: {stand_down.LISTING}")
+
+
+def test_the_command_prints_one_json_report_for_a_dry_run(rig, command, capsys):
+    assert main([OLD, "--stand-down", "--swarm", SLUG, "--dry-run", "--json", "--type", "codex"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report == {
+        "action": "stand-down-dry-run",
+        "stops": [
+            "conversation thread-old of ci@abc-0815 (execution exe-old generation 1): "
+            "its active turn (last recorded: none) is interrupted and it takes no new turns"
+        ],
+        "keeps": [f"app-server pid {SERVER_PID + 1}: not signalled"],
+        "result": "validated",
+        "signal": "none",
+    }
+
+
+def test_the_command_prints_one_json_report_for_a_stand_down(rig, command, capsys):
+    command.setattr(stand_down, "execute", lambda bindings, plan: {"stood_down": OLD, "interrupted": ""})
+    assert main([OLD, "--stand-down", "--swarm", SLUG, "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert (report["action"], report["result"], report["stood_down"], report["interrupted"]) == (
+        "stand-down",
+        "stood-down",
+        OLD,
+        "",
+    )

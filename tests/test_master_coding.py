@@ -13,6 +13,15 @@ GUARD = runpy.run_path(str(ROOT / "profiles" / "package" / "roles" / "_guards" /
 SID = "master-session"
 
 
+@pytest.fixture(autouse=True)
+def scheduler_storage(monkeypatch):
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
+    monkeypatch.setattr("scripts.scheduler.service.ensure_running", lambda: True)
+
+
 @pytest.fixture
 def master(tmp_path, monkeypatch):
     for key, value in {"AGENTIHOOKS_SWARM": "rig", "AGENTIHOOKS_SWARM_TASK": "master"}.items():
@@ -26,6 +35,7 @@ def unseated(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path / "ledgers"))
     return tmp_path
 
 
@@ -33,8 +43,7 @@ def test_a_seat_record_opens_the_window_without_the_swarm_env(unseated):
     assert master_coding.observe(SID, "allow-master-coding", typed=True) == ""
     master_coding.record_seat(SID, "rig", "master@rig-1")
     assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
-    assert master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC - 1)
-    assert not master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC)
+    assert master_coding.is_open(SID)
     assert master_coding.observe(SID, "disallow-master-coding", typed=True) == "closed"
     assert not master_coding.is_open(SID)
 
@@ -63,8 +72,7 @@ def test_only_the_typed_phrase_in_the_master_pane_opens_the_window(master):
     assert master_coding.observe(SID, "allow-master-coding", typed=False) == ""
     assert not master_coding.is_open(SID)
     assert master_coding.observe(SID, "please allow-master-coding now", typed=True, now=1000) == "open"
-    assert master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC - 1)
-    assert not master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC)
+    assert master_coding.is_open(SID)
     assert master_coding.observe(SID, None, typed=True) == ""
     assert master_coding.observe(None, "allow-master-coding", typed=True) == ""
 
@@ -101,15 +109,11 @@ def guard(home, file_path):
 def test_the_operator_can_renew_an_already_open_window(master):
     assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
     assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1001) == "open"
-    assert master_coding.is_open(SID, now=2800)
-    assert not master_coding.is_open(SID, now=2801)
+    assert master_coding.is_open(SID)
 
 
-def test_a_taken_master_keeps_permission_and_protection_checks_without_env(unseated, monkeypatch):
+def test_a_taken_master_keeps_protection_checks_without_env(unseated, monkeypatch):
     master_coding.record_seat(SID, "rig", "master@rig-1")
-    monkeypatch.setattr(operator_mode, "_heard", lambda *args: True)
-    assert master_coding.asks_operator("AskUserQuestion", SID)
-    assert not master_coding.asks_operator("AskUserQuestion", "unseated")
     payload = {"session_id": SID, "tool_input": {"command": "gh ruleset list"}}
     assert master_coding.protection_refusal(payload) == master_coding.PROTECTION_REFUSAL
     payload["session_id"] = "unseated"
@@ -201,18 +205,28 @@ def test_the_window_opens_serena_edits_by_project_relative_path(master):
     assert "cannot edit outside" in GUARD["deny_reason"](payload, "master", master)
 
 
-def test_an_expired_window_record_no_longer_opens_edits(master):
+def test_an_old_window_record_opens_edits_until_explicitly_closed(master):
     record = master_coding.path(SID)
     record.parent.mkdir(parents=True)
     record.write_text(json.dumps({"at": 0}))
-    assert "cannot edit outside" in guard(master, master / "dev" / "worktrees" / "a" / "b" / "x.py")
+    target = master / "dev" / "worktrees" / "a" / "b" / "x.py"
+    assert guard(master, target) == ""
+    master_coding.close(SID)
+    assert "cannot edit outside" in guard(master, target)
 
 
 def test_the_typed_prompt_opens_the_window_and_tells_the_master(master, monkeypatch):
     shown = Mock()
     monkeypatch.setattr("hooks.common.inject_context", shown)
     hook_manager._master_coding({"session_id": SID, "prompt": "allow-master-coding"}, True)
-    shown.assert_called_once_with(master_coding.NOTICES["open"], also_log=False, skip_compression=True, kind="alert")
+    shown.assert_called_once_with(
+        "Master hotfix window open until deny-master-coding or a session restart: the master may create a worktree with wt.sh new, edit "
+        "inside it, commit, push its branch and merge its pull request into dev on green. Main, rulesets, branch "
+        "protection, condition folders, credential files and secrets stay closed. deny-master-coding ends it.",
+        also_log=False,
+        skip_compression=True,
+        kind="alert",
+    )
     assert master_coding.is_open(SID)
 
 
@@ -255,29 +269,53 @@ def test_every_typed_prompt_reaches_the_window(monkeypatch):
     window.assert_called_once_with(payload, True)
 
 
-def test_the_master_asks_the_present_operator_and_other_seats_stay_denied(master, monkeypatch):
+def test_any_seat_asks_the_operator_only_after_he_typed_operator_on(master, monkeypatch):
     heard = Mock(return_value=True)
     monkeypatch.setattr(operator_mode, "_heard", heard)
     assert master_coding.asks_operator("AskUserQuestion", SID)
-    heard.assert_called_with(SID, None, None)
+    heard.assert_called_with(SID)
     assert master_coding.asks_operator("ExitPlanMode", SID)
     assert not master_coding.asks_operator("Bash", SID)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t12")
+    assert master_coding.asks_operator("AskUserQuestion", SID)
     heard.return_value = False
     assert not master_coding.asks_operator("AskUserQuestion", SID)
-    heard.return_value = True
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t12")
-    assert not master_coding.asks_operator("AskUserQuestion", SID)
+    assert not master_coding.asks_operator("ExitPlanMode", SID)
 
 
-def test_the_permission_request_passes_to_the_present_operator_only_from_the_master(master, monkeypatch, capsys):
-    heard = Mock(return_value=True)
-    monkeypatch.setattr(operator_mode, "_heard", heard)
-    hook_manager.on_permission_request({"tool_name": "AskUserQuestion", "session_id": SID})
-    assert capsys.readouterr().out == ""
-    heard.assert_called_with(SID, None, None)
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t12")
-    hook_manager.on_permission_request({"tool_name": "AskUserQuestion", "session_id": SID})
-    assert "swarm sessions and subagents cannot wait for permission" in capsys.readouterr().out
+def _permission(capsys, tool_name, session_id):
+    hook_manager.on_permission_request({"tool_name": tool_name, "session_id": session_id})
+    out = capsys.readouterr().out
+    return json.loads(out)["hookSpecificOutput"]["decision"] if out else None
+
+
+PROMPT_REFUSAL = (
+    "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
+    "Keep working without it."
+)
+
+
+@pytest.mark.parametrize("task", ["master", "t12"])
+def test_the_question_and_plan_prompts_reach_the_operator_only_after_operator_on(master, monkeypatch, capsys, task):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
+    for tool in ("AskUserQuestion", "ExitPlanMode"):
+        assert _permission(capsys, tool, SID) == {"behavior": "deny", "message": PROMPT_REFUSAL.format(tool=tool)}
+    operator_mode.observe(SID, "rebase it", True, now=100)
+    assert _permission(capsys, "ExitPlanMode", SID)["behavior"] == "deny"
+    operator_mode.observe(SID, "operator on", True, now=101)
+    assert _permission(capsys, "AskUserQuestion", SID) is None
+    assert _permission(capsys, "ExitPlanMode", SID) is None
+    assert "swarm sessions and subagents cannot wait for permission" in _permission(capsys, "Bash", SID)["message"]
+
+
+def test_a_standalone_session_gets_every_permission_prompt_without_operator_on(unseated, capsys):
+    for prompt in ("plan it", "operator off"):
+        operator_mode.observe("solo", prompt, True, now=100)
+        for tool in ("AskUserQuestion", "ExitPlanMode", "Bash"):
+            assert _permission(capsys, tool, "solo") is None
+    assert master_coding.asks_operator("ExitPlanMode", "solo")
+    assert master_coding.asks_operator("AskUserQuestion", "")
+    assert not master_coding.asks_operator("Bash", "solo")
 
 
 @pytest.mark.parametrize(

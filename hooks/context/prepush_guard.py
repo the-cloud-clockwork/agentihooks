@@ -73,7 +73,7 @@ def _branch_worktree(cwd: Path, task: dict) -> Path | None:
 
 def _swarm_cwd(cwd: Path) -> tuple[Path | None, str]:
     from scripts.gates.base import Who
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm_ledger.storage import read_ledger
 
     who = Who.from_env()
     if not (who.pinned and who.task):

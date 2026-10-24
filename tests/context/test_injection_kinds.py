@@ -23,6 +23,8 @@ def test_inbox_refocus_ledger_and_quota_helpers_tag_their_kind(monkeypatch):
     inbox = Mock(return_value=["mail"])
     monkeypatch.setattr(hook_manager, "_inbox_blocks", inbox)
     monkeypatch.setattr(hook_manager, "_refocus_blocks", Mock(return_value=["focus"]))
+    waiting = Mock(return_value=["wait"])
+    monkeypatch.setattr(hook_manager, "_wait_nudge_blocks", waiting)
     monkeypatch.setattr("hooks.context.ledger_decision.directive", Mock(return_value="decision"))
     monkeypatch.setattr("hooks.context.quota_policy.posttool_context", Mock(return_value="quota"))
 
@@ -33,9 +35,11 @@ def test_inbox_refocus_ledger_and_quota_helpers_tag_their_kind(monkeypatch):
         (("decision",), {**QUIET, "kind": "alert"}),
         (("mail",), {**QUIET, "kind": "inbox"}),
         (("focus",), {**QUIET, "kind": "refocus"}),
+        (("wait",), {**QUIET, "kind": "refocus"}),
         (("quota",), {**QUIET, "kind": "alert"}),
     ]
     inbox.assert_called_once_with("s", "/w")
+    waiting.assert_called_once_with({"session_id": "s", "cwd": "/w", "tool_name": "Bash"})
 
 
 def test_prompt_submit_tags_policy_secret_warning_and_enforcements(monkeypatch):

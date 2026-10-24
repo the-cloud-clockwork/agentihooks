@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 MINUTE = 60_000
 SENDERS = ("direct message", "swarm message", "operator chat", "operator comment", "operator answer", "tick notice")
@@ -117,7 +117,7 @@ class Drill:
 
         async def deliver():
             for agent in [rig.master, *rig.agents]:
-                await channel._deliver(rig.inbox, agent.name, Receiver(agent))
+                await channel._deliver(rig.inbox, agent.name, Receiver(agent), channel.Pushed())
 
         anyio.run(deliver)
 
@@ -206,7 +206,7 @@ def drill(tmp_path, monkeypatch):
     from scripts.swarm import cli as swarm_cli
     from scripts.swarm import outage, snapshot
     from scripts.swarm.store import RedisStore, SwarmConfig
-    from scripts.swarm_ledger import ledger_link, ledger_server
+    from scripts.swarm_ledger import ledger_link, ledger_server, storage
 
     server = fakeredis.FakeServer()
     redis = fakeredis.FakeRedis(server=server, decode_responses=True)
@@ -229,7 +229,7 @@ def drill(tmp_path, monkeypatch):
     monkeypatch.setattr(swarm_cli, "connect", lambda: store)
     monkeypatch.setattr(outbox, "home", lambda: tmp_path / "outbox")
     monkeypatch.setattr(outage, "HOME", tmp_path / "outages")
-    monkeypatch.setattr(ledger_server, "unrelayed_path", lambda: tmp_path / "unrelayed.json")
+    monkeypatch.setattr(ledger_server, "stored", storage.build(tmp_path / storage.DATABASE))
     monkeypatch.setattr(ledger_server.repository, "get_document", ledger.state)
     monkeypatch.setattr(ledger_link, "serving", lambda: ledger.online)
     monkeypatch.setattr(snapshot, "worktrees", lambda repo, names: {name: str(tmp_path) for name in names})

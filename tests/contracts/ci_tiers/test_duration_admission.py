@@ -35,7 +35,9 @@ def legacy(workflows):
             job.update(json.loads(encoded))
             job["needs"] = list(dict.fromkeys(job["needs"] + ["durations"]))
     jobs["gate-required"]["needs"].append("durations")
-    jobs["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
+    jobs["gate-required"]["steps"] = ci_reuse.gate_steps(
+        queue_tier=True, promotion=True, docs="docs" in jobs["gate-required"]["needs"]
+    )
     return base
 
 
@@ -51,7 +53,9 @@ def combined(base, promotion=True):
         if isinstance(job.get("needs"), list):
             job["needs"] = list(dict.fromkeys("select" if name == "durations" else name for name in job["needs"]))
     head["test.yml"]["jobs"] = json.loads(json.dumps(jobs).replace("needs.durations.outputs.", "needs.select.outputs."))
-    head["test.yml"]["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=promotion)
+    head["test.yml"]["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(
+        queue_tier=True, promotion=promotion, docs="docs" in jobs["gate-required"]["needs"]
+    )
     step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
     step["run"] = (
         step["run"]

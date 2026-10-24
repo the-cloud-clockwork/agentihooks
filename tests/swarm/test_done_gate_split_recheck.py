@@ -7,8 +7,6 @@ from scripts.swarm.store import SwarmError
 from tests.swarm.test_done_gate import NOW, Ledger, doc, done, pull, store, task  # noqa: F401
 from tests.swarm.test_merge_queue import swarm_of
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 FIRST = "https://github.com/o/r/pull/9"
 SECOND = "https://github.com/o/r/pull/10"
 

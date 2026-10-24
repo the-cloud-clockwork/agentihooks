@@ -12,7 +12,7 @@ from scripts.swarm_v2.runtime.operations import (
     Phase,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 class LostAcknowledgement:
@@ -121,6 +121,19 @@ def test_stale_generation_is_refused_before_dispatch(fixture):
         operations.execute("fixture", request(agent))
     assert store.redis.hgetall(store.key("fixture", "runtime-operations")) == before
     assert not transport.lookups
+    assert transport.creations == 0
+
+
+def test_an_archived_attempt_is_refused_as_stale(fixture):
+    store, agent, transport, operations = fixture
+    store.start_execution(
+        "fixture",
+        replace(agent, name=store.next_name("fixture", "eng"), execution_id="", generation=0),
+        agent.execution_id,
+    )
+    assert store.execution_registry.archive("fixture") == 1
+    with pytest.raises(OperationConflict, match="stale"):
+        operations.execute("fixture", request(agent))
     assert transport.creations == 0
 
 

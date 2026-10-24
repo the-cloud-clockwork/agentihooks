@@ -105,7 +105,7 @@ def _clip(text, limit):
 
 
 def _read_ledger(folder, slug, task_id):
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm_ledger.storage import read_ledger
 
     focus = ("priorities",) if task_id == "master" else (f"tasks/{task_id}",)
     return read_ledger(folder, slug, "title", "overview", "phases", *focus)

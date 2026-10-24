@@ -14,6 +14,11 @@ services:
       LEDGER_DIR: ${LEDGER_DIR:?set by ledger_server.py --ensure}
       LEDGER_HOST: 127.0.0.1
       LEDGER_PORT: ${LEDGER_PORT:-8765}
+      AGENTIHOOKS_SWARM_DATABASE_URL: ${AGENTIHOOKS_SWARM_DATABASE_URL:-}
+      AGENTIHOOKS_SWARM_REDIS_URL: ${AGENTIHOOKS_SWARM_REDIS_URL:-}
+      # The certificate and key must sit under a mounted folder, such as ~/.agentihooks.
+      LEDGER_TLS_CERT: ${LEDGER_TLS_CERT:-}
+      LEDGER_TLS_KEY: ${LEDGER_TLS_KEY:-}
       SWARM_RELOAD: "1"
       MALLOC_ARENA_MAX: "2"
     volumes:

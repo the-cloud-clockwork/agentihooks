@@ -83,9 +83,10 @@ def test_the_sweep_queues_oldest_first_and_keeps_going_past_a_refusal(monkeypatc
     monkeypatch.setattr(ci_requeue, "candidates", lambda repo, run: pulls if (repo, run) == ("o/r", runner) else [])
     seen = []
 
-    def operate(action, url, run):
+    def operate(action, url, run, journal):
         seen.append((action, url))
         assert run is runner
+        assert journal == ("journal", url, runner)
         if url.endswith("/1"):
             return {"queued": True, "state": "OPEN"}
         if url.endswith("/2"):
@@ -93,7 +94,7 @@ def test_the_sweep_queues_oldest_first_and_keeps_going_past_a_refusal(monkeypatc
         return {"queued": False, "state": "OPEN", "waiting": "checks"}
 
     monkeypatch.setattr(ci_requeue.merge_queue, "operate", operate)
-    rows = list(ci_requeue.sweep("o/r", run=runner))
+    rows = list(ci_requeue.sweep("o/r", run=runner, journal=lambda url, run: ("journal", url, run)))
     assert seen == [("queue", pull["url"]) for pull in pulls]
     assert [row["outcome"] for row in rows] == [
         "queued",
@@ -105,7 +106,7 @@ def test_the_sweep_queues_oldest_first_and_keeps_going_past_a_refusal(monkeypatc
 def test_a_repository_without_a_queue_reports_the_merge(monkeypatch):
     monkeypatch.setattr(ci_requeue, "candidates", lambda repo, run: [_pull(4, "2026-10-15T01:00:00Z")])
     monkeypatch.setattr(
-        ci_requeue.merge_queue, "operate", lambda action, url, run: {"queued": False, "state": "MERGED"}
+        ci_requeue.merge_queue, "operate", lambda action, url, run, journal: {"queued": False, "state": "MERGED"}
     )
     assert [row["outcome"] for row in ci_requeue.sweep("o/r", run=None)] == ["merged"]
 
@@ -114,7 +115,8 @@ def test_rows_queued_before_an_unexpected_failure_are_already_printed(monkeypatc
     pulls = [_pull(1, "2026-10-15T01:00:00Z"), _pull(2, "2026-10-15T02:00:00Z")]
     monkeypatch.setattr(ci_requeue, "candidates", lambda repo, run: pulls)
 
-    def operate(action, url, run):
+    def operate(action, url, run, journal):
+        assert isinstance(journal, ci_requeue.queue_record.Journal)
         if url.endswith("/2"):
             raise KeyError("files")
         return {"queued": True, "state": "OPEN"}

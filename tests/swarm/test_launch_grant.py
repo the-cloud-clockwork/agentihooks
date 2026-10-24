@@ -20,7 +20,7 @@ from scripts.swarm_v2.auth_context import (
     launch_grant_rejections_total,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 FIXTURE = json.loads((Path(__file__).parents[1] / "fixtures/swarm_v2/launch-grant.json").read_text())
 SCHEMA = json.loads((Path(__file__).parents[2] / "docs/swarm-v2/schemas/launch-grant.json").read_text())

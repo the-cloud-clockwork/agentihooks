@@ -27,8 +27,9 @@ def budget(history: list[dict]) -> dict:
     runs = {}
     for line in history:
         runs.setdefault(line["test"], set()).add(line["run"])
-    over = [{"test": test, "runs": sorted(ids)} for test, ids in sorted(runs.items()) if len(ids) >= BUDGET_RUNS]
-    return {"flaky_tests": len(runs), "over_budget": over}
+    retried = [{"test": test, "count": len(ids), "runs": sorted(ids)} for test, ids in sorted(runs.items())]
+    over = [{"test": test["test"], "runs": test["runs"]} for test in retried if test["count"] >= BUDGET_RUNS]
+    return {"flaky_tests": len(runs), "over_budget": over, "retried": retried}
 
 
 def _lines(path: Path) -> list[dict]:
@@ -44,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     files = sorted(args.reports.rglob("*.jsonl"))
     if not files:
-        print(f"no flake reports under {args.reports}", file=sys.stderr)
+        print(f"::error::No flake reports under {args.reports}")
         return 1
     history = _lines(args.history) if args.history.exists() else []
     now_s = time.time() if args.now is None else args.now
@@ -54,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
     found = budget(kept)
     args.out.write_text(json.dumps(found, indent=2) + "\n")
     print(f"Flaky test ids in the last seven days of dev runs: {found['flaky_tests']}")
+    for test in found["retried"]:
+        print(f"{test['test']} passed on a retry in {test['count']} dev runs: {', '.join(test['runs'])}")
     for test in found["over_budget"]:
         print(
             f"::warning title=Flake budget::{test['test']} was flaky in {len(test['runs'])} dev runs: {', '.join(test['runs'])}"

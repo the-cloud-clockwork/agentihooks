@@ -1,6 +1,6 @@
 """The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself, then refuses the stop over
 uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push,
-unless a checked wait on another task not yet done holds it."""
+unless a checked wait on another task not yet done, or on the merge of a pull request still open, holds it."""
 
 import os
 import re
@@ -110,10 +110,11 @@ def gate_refusal(tree, budget):
     return None if code == 0 else GATE_FAILED.format(path=tree.path)
 
 
-def push(tree, seconds):
-    ref = f"refs/heads/{tree.branch}"
+def push(tree, branch, seconds):
+    ref = f"refs/heads/{branch}"
+    lease = [] if branch == tree.branch else [f"--force-with-lease={ref}"]
     process = subprocess.Popen(
-        ["git", "-C", str(tree.path), "push", "--set-upstream", "origin", f"{ref}:{ref}"],
+        ["git", "-C", str(tree.path), "push", *lease, "--set-upstream", "origin", f"refs/heads/{tree.branch}:{ref}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
@@ -126,12 +127,30 @@ def push(tree, seconds):
         return False
 
 
+def target(tree, task):
+    """The retained pull request branch HEAD continues, as swarm publish pushes it, else the worktree's own branch."""
+    from scripts.swarm.continuation import retained
+
+    branch = retained(task)
+    if not branch:
+        return tree.branch
+    continues = git(tree.path, "merge-base", "--is-ancestor", f"refs/remotes/origin/{branch}", "HEAD")
+    return branch if continues.returncode == 0 else tree.branch
+
+
 def record_text(remote, branch, head):
     found = GITHUB_RE.search(remote)
     if not found:
         return f"The stop hook pushed the task branch {branch} to origin"
     web = f"https://github.com/{found.group(1)}/{found.group(2)}"
     return f"The stop hook pushed the task branch {web}/tree/{branch} with its head at {web}/commit/{head}"
+
+
+def own_pull(tree, task):
+    """Whether the task's pull request sits in the worktree's own repository; any counts for an origin off GitHub."""
+    url = (task.get("pr_url") or "").lower()
+    found = GITHUB_RE.search(git(tree.path, "remote", "get-url", "origin").stdout.strip())
+    return bool(url) and (not found or f"github.com/{found[1]}/{found[2]}/pull/".lower() in url)
 
 
 def spoke_since(events, name, at):
@@ -170,8 +189,9 @@ class PushStop:
     name = "push-stop"
     default_mode = "enforce"
 
-    def __init__(self, connect=None, ledger=None, root=None, now=None, clock=None):
+    def __init__(self, connect=None, ledger=None, root=None, now=None, clock=None, github=None):
         self._connect, self._ledger, self._root, self._now, self._clock = connect, ledger, root, now, clock
+        self._github = github
         # The hook process builds its gates right after its imports; the reserve covers the startup before this.
         self.started = self.clock()
 
@@ -186,18 +206,18 @@ class PushStop:
         task = next((t for t in doc["tasks"] if t.get("id") == who.task), None) if doc else {}
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
-        store, owed, failed = self.connect(), False, []
-        for tree in trees(self.root(), who.name):
+        store, owed, failed, found = self.connect(), False, [], trees(self.root(), who.name)
+        for tree in found:
             if tree.unpushed and (refused := self.held(tree)):
                 failed.append(refused)
-            elif tree.unpushed and push(tree, self.left() + RESERVE_S - FLOOR_S):
-                self.record(store, ledger, who, tree)
+            elif tree.unpushed and push(tree, branch := target(tree, task), self.left() + RESERVE_S - FLOOR_S):
+                self.record(store, ledger, who, tree, branch)
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
-            owed = owed or (doc and tree.own and not task.get("pr_url") and self.unrecorded(store, doc, who))
+            owed = owed or (doc and tree.own and not own_pull(tree, task) and self.unrecorded(store, doc, who))
         if not owed:
             self.settle(store, who)
             return Decision()
-        if self.waiting(store, who, doc, task):
+        if self.waiting(store, who, doc, task, any(tree.dirty for tree in found)):
             return Decision()
         self.notify(store, who)
         return Decision.deny(" ".join([TEMPLATE, *failed]))
@@ -209,14 +229,22 @@ class PushStop:
     def on_origin(self, tree):
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0
 
-    def waiting(self, store, who, doc, task):
-        """Whether a live checked wait on another unfinished task holds the stop, so a refused push never deadlocks."""
+    def waiting(self, store, who, doc, task, dirty):
+        """Whether a live checked wait holds the stop, so a refused push never deadlocks: one on another unfinished
+        task, or one on the merge of a pull request still open, which a push would drop from the queue, while every
+        change is committed."""
         from scripts.swarm import idle, waits
 
         held = idle.wait(store.redis, who.swarm, who.name)
-        if not (doc and held and held["until"] > self.now() and (held.get("on") or {}).get("kind") == "task"):
+        on = (held or {}).get("on") or {}
+        if not (held and held["until"] > self.now()):
             return False
-        return waits.dependency(held["on"], task, {row.get("id"): row for row in doc["tasks"]}, None)
+        if on.get("kind") == "merge" and not dirty:
+            pull = self.github()(on["target"])
+            return pull is not None and pull.state == "OPEN"
+        if not (doc and on.get("kind") == "task"):
+            return False
+        return waits.dependency(on, task, {row.get("id"): row for row in doc["tasks"]}, None)
 
     def unrecorded(self, store, doc, who):
         from scripts.gates.progress import Progress
@@ -226,7 +254,7 @@ class PushStop:
             doc.get("_meta", {}).get("events", []), who.name, mark.outcome_at
         )
 
-    def record(self, store, ledger, who, tree):
+    def record(self, store, ledger, who, tree, branch):
         from scripts.gates.progress import Progress
         from scripts.swarm.store import SwarmError
 
@@ -234,7 +262,7 @@ class PushStop:
         head = git(tree.path, "rev-parse", "HEAD").stdout.strip()
         Progress(store.redis, who.swarm).outcome(who.name, PUSHED, self.now())
         try:
-            ledger.comment(who.swarm, who.task, record_text(remote, tree.branch, head), by=SENDER)
+            ledger.comment(who.swarm, who.task, record_text(remote, branch, head), by=SENDER)
         except SwarmError:
             pass
 
@@ -270,6 +298,11 @@ class PushStop:
         from scripts.swarm.ledger_client import LedgerClient
 
         return LedgerClient()
+
+    def github(self):
+        from scripts.swarm.ledger_events import view
+
+        return self._github or view
 
     def now(self):
         if self._now:

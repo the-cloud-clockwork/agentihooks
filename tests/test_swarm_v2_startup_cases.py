@@ -7,7 +7,7 @@ import pytest
 from scripts.swarm_v2 import startup_stages as stages
 from tests import sv2_prf02_cases as cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-PRF-02"
 

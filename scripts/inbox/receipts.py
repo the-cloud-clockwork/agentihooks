@@ -15,6 +15,10 @@ class DispatchError(InboxError):
     pass
 
 
+class InboxContention(DispatchError):
+    pass
+
+
 @dataclass(frozen=True)
 class Delivery:
     id: str
@@ -43,12 +47,13 @@ def transact(redis, body, keys=()):
                 return result
             except WatchError:
                 continue
-    raise DispatchError("the inbox changed meanwhile; run it again")
+    raise InboxContention("the inbox changed meanwhile; run it again")
 
 
-def check_owner(pipe, recipient, owner):
-    pipe.watch(owner_key(recipient))
-    held = pipe.get(owner_key(recipient))
+def check_owner(pipe, recipient, owner, world):
+    key = owner_key(recipient, world)
+    pipe.watch(key)
+    held = pipe.get(key)
     if held != owner:
         raise DispatchError(f"{owner} does not deliver for {recipient}; {held or 'nobody'} does")
 
@@ -96,7 +101,7 @@ class Receipts:
 
     def recover(self, recipient, owner):
         recipient = self.store.names.resolve(recipient)
-        held = self.redis.get(owner_key(recipient))
+        held = self.redis.get(owner_key(recipient, self.store.world))
         if held != owner:
             raise DispatchError(f"{owner} does not deliver for {recipient}; {held or 'nobody'} does")
         recovered = []
@@ -126,8 +131,10 @@ class Receipts:
             return self._stage_close(pipe, delivery, "superseded", REASSIGNED)
         last = self.store.last_pending(pipe, item)
         pipe.multi()
-        delivered = replace(item, state="delivered", updated_at=now_ms(), reason="")
-        self.store.stage_move(pipe, item, delivered, delivery.recipient, last, indexed=False)
+        delivered = replace(
+            item, state="delivered", updated_at=now_ms(), reason="", delivery_session=self.store.session_id
+        )
+        self.store.stage_move(pipe, item, delivered, delivery.recipient, last, indexed=bool(self.store.session_id))
         if delivery.ref:
             pipe.sadd(SeenMarks.key(delivery.recipient), delivery.ref)
             pipe.expire(SeenMarks.key(delivery.recipient), TTL_S)
@@ -146,7 +153,7 @@ class Receipts:
         key = self.key("delivery", delivery_id)
         pipe.watch(key)
         delivery = _delivery(pipe.hgetall(key), delivery_id)
-        check_owner(pipe, delivery.recipient, owner)
+        check_owner(pipe, delivery.recipient, owner, self.store.world)
         if delivery.state not in before or delivery.committed:
             raise DispatchError(f"delivery {delivery_id} is {delivery.state}")
         return delivery

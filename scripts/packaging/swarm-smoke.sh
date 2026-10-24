@@ -8,6 +8,7 @@ export SWARM_REDIS_PASSWORD
 SWARM_REDIS_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe())')"
 trap 'docker compose down --volumes' EXIT
 bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/nats:2.15.1-alpine
 build=(--build)
 if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
   docker tag "$SWARM_SMOKE_IMAGE" ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
@@ -54,6 +55,7 @@ print("PUT /api/v1/layout: persisted height 240")
 PY
 docker compose exec -T swarm python -c 'import importlib.metadata as m, os; from mcp import ClientSession; from mcp.client.streamable_http import streamablehttp_client; assert os.getuid() == 10001; packages = sorted(d.metadata["Name"] for d in m.distributions()); assert not {"playwright", "tree-sitter", "opentelemetry-sdk"} & set(packages); print("reader imports: ready", "uid:", os.getuid(), "packages:", packages)'
 docker compose exec -T swarm python -c 'from scripts.swarm.store import connect; store = connect(); print("Redis connection: ready")'
+docker compose exec -T swarm python -c 'import os; from scripts.swarm_ledger.api import architecture; from scripts.swarm_v2.architecture import load_record; revision = architecture.view(os.environ)["data"]["revision"]; assert revision == load_record(architecture.paths(os.environ)[0])["revision"] >= 1; print("architecture record revision:", revision)'
 docker compose up --pull never --force-recreate --no-deps --wait --wait-timeout 120 swarm
 python3 - <<'PY'
 import json

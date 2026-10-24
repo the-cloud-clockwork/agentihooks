@@ -1,15 +1,19 @@
 import json
 import subprocess
+import time
 from collections import Counter
+from contextvars import ContextVar
 from datetime import datetime
 
 from scripts.swarm import timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import SwarmError
 
+DEADLINE = ContextVar("merge_observation_deadline", default=None)
 HOUR_MS = 3_600_000
 CACHE_MS = 300_000
 RUNS = 10
+STREAK = 3
 FAILED = frozenset({"failure", "timed_out", "action_required", "startup_failure"})
 QUERY = """
 query($owner:String!,$name:String!,$cursor:String){
@@ -26,7 +30,11 @@ query($owner:String!,$name:String!,$cursor:String){
 
 def request(repo: str, args: list[str]) -> dict:
     timing.keep()
-    result = subprocess.run(["gh", *args], cwd=repo, capture_output=True, text=True, timeout=20)
+    remaining = 20 if DEADLINE.get() is None else DEADLINE.get() - time.monotonic()
+    if remaining <= 0:
+        raise SwarmError("GitHub merge observation exhausted its read budget")
+    with timing.step("scripts.swarm.health.merge_stall.github_read"):
+        result = subprocess.run(["gh", *args], cwd=repo, capture_output=True, text=True, timeout=min(20, remaining))
     if result.returncode:
         raise SwarmError(result.stderr.strip() or "GitHub API failed")
     data = json.loads(result.stdout)
@@ -80,10 +88,36 @@ def failed_checks(repo: str, name: str) -> str:
 
 
 def observe(repo: str, at: int) -> dict:
-    name = request(repo, ["repo", "view", "--json", "nameWithOwner"])["nameWithOwner"]
-    length, merged = queue(repo, name)
-    failed = failed_checks(repo, name) if length and merged and at - merged >= HOUR_MS else "none observed"
-    return {"repo": name, "queue": length, "merged": merged, "failed": failed, "at": at}
+    token = DEADLINE.set(time.monotonic() + 10)
+    try:
+        name = request(repo, ["repo", "view", "--json", "nameWithOwner"])["nameWithOwner"]
+        length, merged = queue(repo, name)
+        streak, head = failing(repo, name)
+        stalled = length and merged and at - merged >= HOUR_MS
+        failed = failed_checks(repo, name) if stalled else "none observed"
+        return {
+            "repo": name,
+            "queue": length,
+            "merged": merged,
+            "failed": failed,
+            "streak": streak,
+            "head": head,
+            "at": at,
+        }
+    finally:
+        DEADLINE.reset(token)
+
+
+def failing(repo: str, name: str) -> tuple[int, int]:
+    path = f"repos/{name}/actions/runs?event=merge_group&status=completed&per_page={RUNS}"
+    streak, head = 0, 0
+    for run in request(repo, ["api", path])["workflow_runs"]:
+        if run["conclusion"] in ("cancelled", "skipped"):
+            continue
+        if run["conclusion"] not in FAILED:
+            break
+        streak, head = streak + 1, head or run["id"]
+    return streak, head
 
 
 def findings(store, slug: str, repo: str, at: int) -> list[Finding]:
@@ -100,6 +134,27 @@ def findings(store, slug: str, repo: str, at: int) -> list[Finding]:
             state = observed
         state["tried"] = at
         store.redis.set(key, json.dumps(state))
+    return _stalled(state) + _failing(state)
+
+
+def _failing(state: dict) -> list[Finding]:
+    streak = state.get("streak", 0)
+    if streak < STREAK:
+        return []
+    return [
+        Finding(
+            "merge failures",
+            state["repo"],
+            f"The last {'at least ' if streak >= RUNS else ''}{streak} merge group runs failed in a row "
+            f"with {state['queue']} queued entries",
+            (f"Queue length: {state['queue']}", f"Newest failed merge group run: {state['head']}"),
+            f"{STREAK} merge group runs failing in a row",
+            streak,
+        )
+    ]
+
+
+def _stalled(state: dict) -> list[Finding]:
     if not state.get("queue") or not state.get("merged") or state["at"] - state["merged"] < HOUR_MS:
         return []
     minutes = (state["at"] - state["merged"]) // 60_000

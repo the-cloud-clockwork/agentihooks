@@ -71,11 +71,18 @@ def test_a_task_alone_on_its_own_slice_is_graded_against_its_chunk(doc):
     )
 
 
-def test_tasks_sharing_a_placeholder_slice_are_graded_against_their_own_description(doc):
+def test_tasks_sharing_a_table_slice_are_graded_against_their_own_rows(doc):
     first, second = task("t1", "tasks", "2-5"), task("t2", "tasks", "2-5")
+    graded = state(doc, first, second)
+    assert (graded["plan_lines"], graded["plan_chunk"]) == ("4-4", "| t1 | Build the queue |\n")
+    assert state(doc, second, first)["plan_chunk"] == "| t2 | Ship the release |\n"
+
+
+def test_tasks_sharing_a_slice_that_names_neither_are_graded_against_their_own_description(doc):
+    first, second = task("t3", "tasks", "2-5"), task("t4", "tasks", "2-5")
     for graded in (state(doc, first, second), state(doc, second, first)):
         assert "plan_chunk" not in graded and "plan_lines" not in graded
-    assert state(doc, first, second)["task_text"] == "The description of t1."
+    assert state(doc, first, second)["task_text"] == "The description of t3."
 
 
 def test_a_slice_named_after_another_task_belongs_to_that_task(doc):
@@ -112,9 +119,12 @@ def test_lines_without_a_slice_name_keep_their_chunk(doc):
 
 def test_an_intent_verdict_on_a_placeholder_slice_is_graded_from_the_description(doc):
     asked = []
-    graded = state(doc, task("t1", "tasks", "2-5"), task("t2", "tasks", "2-5"))
-    verdict = intent.judge(graded, decide=chunk_classifier(underdelivers=0.99, seen=asked))
-    assert verdict == ("pass", "the phase can use it as delivered at probability 0.90")
+    graded = state(doc, task("t3", "tasks", "2-5"), task("t4", "tasks", "2-5"))
+    verdict, reason = intent.judge(graded, decide=chunk_classifier(underdelivers=0.99, seen=asked))
+    assert (verdict, reason.split(";")[0]) == ("pass", "the phase can use it as delivered at probability 0.90")
+    assert reason.endswith(
+        "plan lines 2-5 are shared with tasks t4, and no row names this task, so none of them is its scope"
+    )
     assert asked == [list(intent.BASE_QUESTIONS)]
 
 

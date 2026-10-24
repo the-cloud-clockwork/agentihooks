@@ -22,6 +22,7 @@ from hooks.filters import check as filters
 from scripts.inbox import links, outbox
 from scripts.inbox.store import DuplicateItem, InboxError, InboxStore, Unreachable, close_reason, connect
 from scripts.swarm_ledger import ledger_comments
+from scripts.swarm_v2 import master_fence
 
 OPERATOR = "operator"
 
@@ -116,16 +117,19 @@ def apply(store: InboxStore, record: dict) -> dict:
 
 def _apply_send(store, me, record):
     from scripts.inbox.addresses import check_address, dispatcher_status
+    from scripts.inbox.recipient import empty_seat
 
     args = record["args"]
     check_address(store, me, args["address"])
     links.check_send(store, me, args["address"])
     status = dispatcher_status(store, args["address"]) if not args["fyi"] else {}
     address = status.get("dispatch", {}).get("owner", args["address"])
+    master_fence.check_send(store, me, address)
+    hint = empty_seat(store, me, address)
     task = store.receiver_task(address)
     item = store.send(me, address, args["text"], fyi=args["fyi"], task=task, item_id=record["item"])
     result = {"id": item.id, "from": item.sender, "to": item.address, "state": item.state}
-    return result | status
+    return result | status | hint
 
 
 def _apply_reply(store, me, record):
@@ -137,6 +141,7 @@ def _apply_reply(store, me, record):
         close = {"kind": "done", "detail": args["text"]}
         return _apply_close(store, me, {**record, "item": args["id"], "args": close})
     check_address(store, me, sender)
+    master_fence.check_send(store, me, sender)
     check_answer(store, args["id"], sender, args["text"])
     answer = store.reply(args["id"], me, args["text"], fyi=args["fyi"], answer_id=record["item"])
     return {"id": answer.id, "to": answer.address, "closed": args["id"]}

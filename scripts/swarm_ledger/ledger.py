@@ -32,7 +32,12 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   edit chat|ITEM ENTRY TEXT           rewrite an entry (yours; the orchestrator: any agent's)
   delete chat|ITEM ENTRY...           delete entries (yours; the orchestrator: any agent's)
   audit                               list every agent text the filter refuses, the cleanup worklist
-  show                                print the whole ledger as JSON: every task, note, answer and comment (no --as needed)
+  show                                print the whole ledger as JSON: every task, note, answer and comment (no --as needed);
+                                      masters never run it, it slows every write
+  get ITEM                            print one item through the ledger API: tasks/<id>, phases/<id>, followups/<id>
+                                      or priorities/<id> (no --as needed)
+  tasks [--state S] [--lane L] [--text T]
+                                      list open tasks, one line each, by state, lane or title text (no --as needed)
   priority add ITEM TEXT              ask the operator: only what blocks on his answer, at most 20 words; ITEM may
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
@@ -49,19 +54,24 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
-           [--kind K] [--must M --check C --judge J] [--push] [--scaffold] [--artifact] [--rank R] [--difficulty D]
+           [--kind K] [--must M --check C --judge J] [--push] [--scaffold] [--artifact] [--workstation] [--rank R]
+           [--difficulty D]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
                                       --push marks a proof that needs a pushed branch and a CI run, so the task
                                       always gets the engineer profile, never qa;
                                       --scaffold creates its work folder (steering, progress, proof) in the same call;
                                       --artifact marks a file the operator asked for, so the task may publish it;
+                                      --workstation keeps a task that acts on the workstation checkout or its
+                                      task folders off every remote hive (task set workstation=yes or no);
                                       R is the queue rank, urgent, high, normal (default) or low, next meaning
                                       urgent: the swarm claims eligible tasks highest rank first, then by
                                       critical path; only the master, a planner or the operator sets it;
                                       D is the task size, S, M or L, recorded as the operator's choice
   task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind, rank,
                                       difficulty (S, M or L), artifact (yes or no) or plan_slice of a task;
+                                      after_release=vX.Y.Z holds its claim until a newer release tag exists;
+                                      applied_at=YYYY-MM-DDTHH:MM:SSZ records when the Doctor applied a merged fix;
                                       phase moves it to another phase, from the master or a planner;
                                       a move naming no slice drops it, into a phase with a plan as a follow up;
                                       plan_slice computes its plan lines from the published plan;
@@ -89,6 +99,7 @@ import functools
 import itertools
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -96,6 +107,8 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+
+from scripts.swarm_ledger import ledger_route
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -112,8 +125,9 @@ import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
 from scripts.inbox import outbox
-from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates, ports, storage
+
+repository = storage.default()
 
 BASE = "" if ledger_link.remote() else ledger_link.base()
 REMOTE_READ_ATTEMPTS = 3
@@ -124,19 +138,28 @@ TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("ta
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
+LEDGER_ITEM = re.compile(r"(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
-    "contract": (ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_FLAGS, "contract.must=M contract.check=C"),
+    "contract": (
+        ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_TIMES + ledger_kinds.CONTRACT_FLAGS,
+        "contract.must=M contract.check=C",
+    ),
 }
 
 
-def base():
-    return BASE or ledger_link.base()
+def base(slug=""):
+    return ledger_route.url(slug) or BASE or ledger_link.base(slug=slug)
 
 
 def credentials(slug, service=False):
+    from scripts.swarm_ledger.authority_context import tick_headers
+
     who = Who.from_env()
-    if ledger_link.remote():
+    if ledger_link.remote(slug=slug):
+        tick = tick_headers(slug)
+        if tick:
+            return tick
         controller = os.environ.get("AGENTIHOOKS_CONTROLLER_CREDENTIAL")
         if controller and not who.pinned:
             return {"X-Controller-Credential": controller}
@@ -146,7 +169,7 @@ def credentials(slug, service=False):
             raise unauthenticated(
                 "a remote ledger client needs a pinned agent identity; the operator credential stays on its host"
             )
-        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or launch_token(slug, who.name)
+        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or derived_token(slug, who.name)
         return {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}
     return local_credentials(slug, who.name if who.pinned else "", service)
 
@@ -161,7 +184,14 @@ def local_credentials(slug, agent, service):
 def replay(slug, ops, agent, service):
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    return ResourceClient(base(), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
+    return ResourceClient(base(slug), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
+
+
+def derived_token(slug, name):
+    from scripts.swarm_ledger.authority_context import secret as trusted_secret
+
+    secret = trusted_secret()
+    return authority.agent_token(secret, slug, name) if secret else launch_token(slug, name)
 
 
 def launch_token(slug, name):
@@ -171,9 +201,9 @@ def launch_token(slug, name):
     if not credential:
         raise unauthenticated(
             "a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
-            "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
+            "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive add"
         )
-    client = ResourceClient(base(), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
+    client = ResourceClient(base(slug), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
     try:
         return client.request(slug, "agent-token", {})["data"]["token"]
     except urllib.error.HTTPError as exc:
@@ -185,7 +215,7 @@ def launch_token(slug, name):
 def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    client = ResourceClient(base(), credentials(slug, service), timeout)
+    client = ResourceClient(base(slug), credentials(slug, service), timeout)
     return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
 
 
@@ -195,19 +225,21 @@ def resource(
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
-        client = ResourceClient(base(), credentials(slug, service) if headers is None else headers, REQUEST_TIMEOUT)
+        client = ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, REQUEST_TIMEOUT)
         return client.collection(slug, path) if collection else client.request(slug, path)["data"]
 
-    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote() else read()
+    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote(slug=slug) else read()
 
 
 def export(slug: str, service: bool = False) -> dict:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
-        return ResourceClient(base(), credentials(slug, service), REQUEST_TIMEOUT).request(slug, "export", {})["data"]
+        return ResourceClient(base(slug), credentials(slug, service), REQUEST_TIMEOUT).request(slug, "export", {})[
+            "data"
+        ]
 
-    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote() else read()
+    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote(slug=slug) else read()
 
 
 class Missing(SystemExit):
@@ -228,7 +260,7 @@ def ledger_remote_auth_failures_total() -> int:
 
 
 def call(slug, ops=None, service=False):
-    if ledger_link.remote():
+    if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)
     if outbox.waiting("ledger"):
@@ -388,6 +420,22 @@ def cmd_tree(args):
         print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
 
 
+def cmd_get(args):
+    print(SHOW_JSON(resource(args.slug, args.item)))
+
+
+def cmd_tasks(args):
+    text = (args.text or "").lower()
+    for task in resource(args.slug, "tasks", collection=True):
+        state, lane, title = task.get("state") or "open", task.get("lane") or "", task.get("title") or ""
+        if state == "done" or task.get("out_of_scope"):
+            continue
+        if args.state not in (None, state) or args.lane not in (None, lane):
+            continue
+        if text in title.lower():
+            print(f"{task['id']}  {state}  {lane}  {title}")
+
+
 def cmd_status(args):
     state = call(args.slug)
     print(
@@ -451,7 +499,7 @@ def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with ledger_link.urlopen(req, REQUEST_TIMEOUT) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused the file: {exc.code} {exc.read().decode(errors='replace')}")
@@ -593,6 +641,7 @@ def cmd_followup(args):
             text=args.value,
             **({"needs_operator": True} if args.needs_operator else {}),
             **hive_fields(args),
+            **({"task": task} if (task := os.environ.get("AGENTIHOOKS_SWARM_TASK")) else {}),
         )
     elif args.action in ("flag", "unflag"):
         send(args, "set", path=f"followups/{args.value}/needs_operator", value=args.action == "flag")
@@ -649,7 +698,7 @@ def cmd_relay(args):
 
 
 def swarm_autonomy(slug):
-    from scripts.swarm.store import SwarmError, connect
+    SwarmError, connect = ports.swarm().store.SwarmError, ports.swarm().store.connect
 
     try:
         return connect().config(slug).autonomy
@@ -715,6 +764,12 @@ def _duration(value):
     return minutes
 
 
+def _ledger_item(value):
+    if not LEDGER_ITEM.fullmatch(value):
+        raise argparse.ArgumentTypeError("name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>")
+    return value
+
+
 def cmd_fold(args):
     from scripts.swarm_ledger import ledger_fold
 
@@ -772,52 +827,44 @@ def _add_task(args, title, fields):
     return {}
 
 
-def cmd_task(args):
-    refuse_unset_quote(args)
-    if args.action == "add":
-        if args.id == "-":
-            args.id = ledger_tasks.next_id(resource(args.slug, "tasks", collection=True))
-        title = " ".join(args.values)
-        lists = {
-            k: comma_list(v)
-            for k, v in (
-                ("depends_on", args.depends_on),
-                ("territory", args.territory),
-                ("overlays", args.overlays),
-                ("repositories", args.repositories),
-            )
-            if v
-        }
-        if args.gain is not None:
-            lists["gain"] = args.gain
-        contract = {k: getattr(args, k) for k in ("must", "check", "judge", "push") if getattr(args, k)}
-        if contract:
-            lists["contract"] = contract
-        lists.update((key, True) for key in ("artifact", "follow_up") if getattr(args, key))
-        options = (
-            ("kind", args.kind),
-            ("profile", args.profile),
-            ("rank", args.rank),
-            ("difficulty", args.difficulty),
-            ("plan_url", args.plan),
-            ("not_duplicate", args.not_duplicate),
-            ("plan_slice", args.plan_slice),
+def _task_add_fields(args):
+    lists = {
+        k: comma_list(v)
+        for k, v in (
+            ("depends_on", args.depends_on),
+            ("territory", args.territory),
+            ("overlays", args.overlays),
+            ("repositories", args.repositories),
         )
-        lists.update((key, value) for key, value in options if value)
-        print(json.dumps({"task": args.id, "added": title, **_add_task(args, title, lists)}))
-        return
-    if args.action in TASK_LISTS:
-        kind, field, shown = TASK_LISTS[args.action]
-        send(args, kind, item=f"tasks/{args.id}", **{field: args.values})
-        print(json.dumps({"task": args.id, shown: args.values}))
-        return
-    fields = dict(value.split("=", 1) for value in args.values if "=" in value)
-    if len(fields) != len(args.values):
+        if v
+    }
+    if args.gain is not None:
+        lists["gain"] = args.gain
+    contract = {k: getattr(args, k) for k in ("must", "check", "judge", "push") if getattr(args, k)}
+    if contract:
+        lists["contract"] = contract
+    lists.update((key, True) for key in ("artifact", "follow_up", "workstation") if getattr(args, key))
+    options = (
+        ("kind", args.kind),
+        ("profile", args.profile),
+        ("rank", args.rank),
+        ("difficulty", args.difficulty),
+        ("plan_url", args.plan),
+        ("not_duplicate", args.not_duplicate),
+        ("plan_slice", args.plan_slice),
+    )
+    lists.update((key, value) for key, value in options if value)
+    return lists
+
+
+def _task_set_fields(values):
+    fields = dict(value.split("=", 1) for value in values if "=" in value)
+    if len(fields) != len(values):
         sys.exit("task set takes FIELD=VALUE pairs")
     for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls"):
         if key in fields:
             fields[key] = task_list(key, fields[key])
-    for key in [key for key in ("artifact", "follow_up") if key in fields]:
+    for key in [key for key in ("artifact", "follow_up", "workstation") if key in fields]:
         if fields[key] not in ("yes", "no"):
             sys.exit(f"task set takes {key}=yes or {key}=no")
         fields[key] = fields[key] == "yes"
@@ -831,6 +878,24 @@ def cmd_task(args):
         if not isinstance(fields.get(name, {}), dict):
             sys.exit(f"task set takes {name}=VALUE or {name}.KEY=VALUE pairs, not both")
         fields.setdefault(name, {})[sub] = fields.pop(dotted)
+    return fields
+
+
+def cmd_task(args):
+    refuse_unset_quote(args)
+    if args.action == "add":
+        if args.id == "-":
+            args.id = ledger_tasks.next_id(resource(args.slug, "tasks", collection=True))
+        title = " ".join(args.values)
+        lists = _task_add_fields(args)
+        print(json.dumps({"task": args.id, "added": title, **_add_task(args, title, lists)}))
+        return
+    if args.action in TASK_LISTS:
+        kind, field, shown = TASK_LISTS[args.action]
+        send(args, kind, item=f"tasks/{args.id}", **{field: args.values})
+        print(json.dumps({"task": args.id, shown: args.values}))
+        return
+    fields = _task_set_fields(args.values)
     refuse_plain_objects(fields)
     quote = vars(args).get("quote")
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields, **({"quote": quote} if quote else {}))
@@ -937,6 +1002,12 @@ def build_parser():
     sub.add_parser("tree", help="print a plan, phase, slice or task and everything under it, with states").add_argument(
         "node", nargs="?", help="plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger"
     )
+    sub.add_parser("get", help="print one task, phase, follow up or priority through the ledger API").add_argument(
+        "item", type=_ledger_item, help="tasks/<id>, phases/<id>, followups/<id> or priorities/<id>"
+    )
+    tasks = sub.add_parser("tasks", help="list open tasks, one line each, filtered by state, lane or title text")
+    for flag in ("--state", "--lane", "--text"):
+        tasks.add_argument(flag)
     priority = sub.add_parser("priority")
     priority.add_argument("action", choices=["add", "clear"])
     priority.add_argument("values", nargs="*")
@@ -986,6 +1057,11 @@ def build_parser():
         "--scaffold", action="store_true", help="create the task's work folder now and store it as its workspace"
     )
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
+    task.add_argument(
+        "--workstation",
+        action="store_true",
+        help="the task acts on the workstation checkout, so no remote hive runs it",
+    )
     task.add_argument("--profile")
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
     task.add_argument(
@@ -1018,16 +1094,21 @@ def build_parser():
 def main():
     from scripts.gates import Who
     from scripts.gates.identity import refusal
-    from scripts.swarm.naming import resolve_name
+
+    resolve_name = ports.swarm().naming.resolve_name
 
     args = build_parser().parse_args()
     if text := refusal(args.name, Who.from_env()):
         sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
-    if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy")):
+    if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy", "get", "tasks")):
         sys.exit("--slug and --as are required")
-    globals()[f"cmd_{args.command.replace('-', '_')}"](args)
+    with ledger_route.session(args.slug):
+        globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 
 
 if __name__ == "__main__":
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     main()

@@ -16,7 +16,7 @@ ENGINEER = "engineer@abcdef-0002"
 def ledger_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     ops = [
         {"op": "task_add", "id": "seed-1", "by": "swarm", "task": "t1", "title": "task one", "lane": "eng"},
@@ -102,6 +102,9 @@ def test_an_unknown_task_is_skipped():
         (["1-2", "x"], "halves: plan line ranges"),
         (["4-5", "1-2"], "halves: ordered, not overlapping"),
         (["1-3", "3-4"], "halves: ordered, not overlapping"),
+        (["repair", "1-2"], "halves: plan line ranges"),
+        (["repair", ""], "halves: plan line ranges"),
+        (["repair", "repair"], "halves: distinct labels"),
     ],
 )
 def test_a_malformed_split_is_refused(halves, reason):
@@ -228,3 +231,17 @@ def test_the_ledger_refuses_a_split_that_misses_plan_lines(monkeypatch):
     assert "tasks/t1: halves: cover plan lines 1-4" in state["_meta"]["warnings"][-1]
     state, rejected = split("t1", ["1-2", "3-4"], n=2)
     assert rejected == [] and row(state, "t1")["split"] == ["1-2", "3-4"]
+
+
+def test_a_task_without_a_plan_records_labelled_halves_in_order():
+    state, rejected = split("t1", ["compatibility", "repair"])
+    assert rejected == [] and row(state, "t1")["split"] == ["compatibility", "repair"]
+    pulls = ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"]
+    state, rejected = update("t1", {"split_pulls": pulls}, by=ENGINEER)
+    assert rejected == [] and row(state, "t1")["split_pulls"] == pulls
+
+
+@pytest.mark.parametrize("plan", [{"plan_lines": "12-20"}, {"plan_slice": "SV2-01"}])
+def test_a_planned_task_still_needs_plan_line_ranges(plan):
+    assert ledger_splits.refusal({"kind": "code", **plan}, ["compatibility", "repair"]) == "halves: plan line ranges"
+    assert ledger_splits.refusal({"kind": "code"}, ["compatibility", "repair"]) == ""

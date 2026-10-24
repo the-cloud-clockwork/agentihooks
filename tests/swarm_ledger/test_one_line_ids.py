@@ -2,13 +2,11 @@ import json
 import re
 import subprocess
 import unittest
-from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
 from tests.swarm_ledger.test_flat_buttons import css_rules, declarations
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
-PROSE_CELLS = {".sw-table .sw-empty td", "#health-table td:nth-child(3)"}
+PROSE_CELLS = {".sw-table .sw-empty td"}
 FAKE_DOM = """
 const document = { createElement: (tag) => ({ tag, attrs: {}, kids: [],
   setAttribute(k, v) { this.attrs[k] = v; }, append(k) { this.kids.push(k); }, addEventListener() {},
@@ -62,14 +60,9 @@ class OneLineIds(unittest.TestCase):
         self.assertEqual(out["attrs"], {"class": "sw-id", "title": "engineer@323133-0085"})
         self.assertEqual(out["text"], "engineer@323133-0085")
 
-    def test_agent_quota_health_and_seat_names_render_as_id_cells(self):
-        render = (
-            function_source("agentRow")
-            + function_source("quotaRow")
-            + function_source("healthRow")
-            + function_source("renderHandoffs")
-        )
-        for value in ("a.name", "q.account", "f.subject", "seatText(r.seat)", "r.successor"):
+    def test_agent_quota_and_seat_names_render_as_id_cells(self):
+        render = function_source("agentRow") + function_source("quotaRow") + function_source("renderHandoffs")
+        for value in ("a.name", "q.account", "seatText(r.seat)", "r.successor"):
             self.assertIn(f"idCell({value})", render, value)
 
 

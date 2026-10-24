@@ -1,12 +1,8 @@
-import pytest
-
 from scripts.swarm.ledger_client import LedgerClient, _ledger
 from scripts.swarm.tick import tick
 from tests.swarm.test_lifetime import idle_master
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.test_tick import store as store
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 class ClosingLedger(FakeLedger):

@@ -1,484 +1,276 @@
-# agentihooks
+# AgentiHooks
 
-[![Standalone](https://img.shields.io/badge/runs-standalone-brightgreen)](https://the-cloud-clockwork.github.io/agentihooks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE)
 [![Tests](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml/badge.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://the-cloud-clockwork.github.io/agentihooks/)
 
-The production harness for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Turn Claude Code into a managed fleet — with profile chaining, guardrails, context intelligence, and real-time broadcast messaging across every active session.
+AgentiHooks is a harness for [Claude Code](https://code.claude.com/docs) and
+[Codex](https://developers.openai.com/codex). It installs lifecycle hooks, an MCP
+tool server, rules, skills and settings into each agent's config home, then runs
+those agents on their own or as a swarm that works a shared task ledger.
 
-> **Full documentation:** [the-cloud-clockwork.github.io/agentihooks](https://the-cloud-clockwork.github.io/agentihooks/)
+Full documentation: [the-cloud-clockwork.github.io/agentihooks](https://the-cloud-clockwork.github.io/agentihooks/)
 
----
+## What it does
 
-## The Four Pillars
+- **Guards every tool call.** Hooks run before and after each tool call and on
+  every prompt. They block secrets written to files, credential files read into
+  context, pushes and pull requests into protected branches, and repeated
+  identical failures.
+- **Gives each agent an identity.** A profile carries the persona, rules,
+  skills, settings and MCP servers. Profiles chain, and a bundle repository
+  holds your own.
+- **Keeps the agent informed.** Hooks inject enforcements, broadcasts and the
+  brain's memory feed into the session as it runs.
+- **Routes work across your quota.** Each launch goes to the Claude or Codex
+  account with room left, and a session whose quota runs out is told by fixed
+  rules to hand off, wait or stop.
+- **Runs a swarm.** A ledger holds the plan and its tasks. A master, planners,
+  engineers and CI agents work those tasks, each in its own worktree, and close
+  each one with a merged pull request.
 
-```mermaid
-graph LR
-    A["Identity<br/>Who your agents are"] --> E["AgentiHooks"]
-    B["Guardrails<br/>What keeps them safe"] --> E
-    C["Context Intelligence<br/>What keeps them sharp"] --> E
-    D["Fleet Command<br/>Talk to your entire fleet"] --> E
-```
+## Quick start
 
-### Pillar 1: Identity — *Who your agents are*
+Requirements: Python 3.12 or later, [uv](https://docs.astral.sh/uv/), and Claude
+Code or Codex. A swarm also needs Docker with the Compose plugin and
+[herdr](https://herdr.dev), the terminal runtime the swarm
+opens its agent panes in.
 
-One command transforms your agent's entire personality, permissions, and toolset.
-
-```bash
-agentihooks init --profile coding,anton     # chain profiles
-agentihooks settings-profile admin          # swap permissions without touching persona
-```
-
-- **Profile chaining** — comma-separated profiles merge left-to-right (rules accumulate, settings deep-merge, CLAUDE.md concatenates)
-- **Two-axis model** — persona (rules/CLAUDE.md) and settings (permissions/MCP) are independent layers
-- **Bundle system** — external repos of profiles, auto-discovered via `agentihooks bundle link`
-- **Built-in profiles:** `default` (auto mode), `coding` (acceptEdits), `admin` (bypassPermissions)
-- **Live rule refresh** — `agentihooks refresh-rules` pushes rule updates into every running Claude session without restart. One-shot per session, session-snapshotted so new sessions don't re-consume.
-
-[Full docs: Identity](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/identity/)
-
-### Pillar 2: Guardrails — *What keeps them safe*
-
-9+ guardrails active by default. Your fleet operates within boundaries you set.
-
-| Guardrail | What it does |
-|-----------|-------------|
-| **Secrets — two-tier** | Hard-block on Write/Edit/Bash-to-file containing secrets; inline Bash args scan + log + note only (operator-managed transcript) |
-| **Branch + PR guard** | Branch creation requires an operator signal; pull requests into `dev` are open; agents cannot create promotion pull requests into `main`/`master`/`v1` |
-| **Prod lockdown** | CI alone creates releases and merges protected promotion pull requests; `release dance` authorizes only PyPI publication; production image operations retain their hotfix gate |
-| **Controls toggle (bypass mode)** | Operator phrase `disable controls` lifts branch, non-protected PR, hotfix and non-main force-push gates; subagents inherit; protected promotion, publication authorization and HARD FLOOR remain enforced; restored by `enable controls` or SessionEnd |
-| **Retry breaker** | Soft directive at N=5 (launch error-researcher agents) → hard block at N=10 on repeated identical failures |
-| **Dependency banner** | Visible banner on every pip/npm/cargo/uv/poetry/apt/brew install — supply chain audit surface |
-| **Version guard** | Blocks AI from editing version fields in manifests |
-| **CLAUDE.md sanity** | Prevents bloat past configurable line limit |
-| **MCP surface area** | Warns when too many tools are loaded |
-| **Bash output filter** | Truncates verbose output to save tokens |
-| **File read dedup** | Blocks redundant re-reads of unchanged files |
-
-[Full docs: Guardrails](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/guardrails/)
-
-### Pillar 3: Context Intelligence — *What keeps them sharp*
-
-LLMs lose focus on early instructions as conversations grow. AgentiHooks keeps the highest-signal context live in the recent window.
-
-- **Token compression** — 4 levels (off/light/standard/aggressive) with safety-preserving protection mask, applied to injected banners and tool output
-- **Tool memory** — past errors injected so agents don't repeat mistakes
-- **Brain adapter** — pluggable source that pumps knowledge (hot arcs, operational memory) into agents via broadcast channels
-- **Context audit** — tracks what's being injected and how much budget is used
-
-```bash
-# In ~/.agentihooks/.env
-CONTEXT_REFRESH_COMPRESSION=standard    # default
-CONTEXT_COMPRESSION_SCOPE=all           # compress all injections
-```
-
-[Full docs: Context Intelligence](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/context/)
-
-### Pillar 4: Fleet Command — *Talk to your entire fleet*
-
-> **No other tool does this.** Send messages to every active Claude Code session simultaneously — like a PA system for your AI workforce. Now with **channels** for targeted delivery — subscribe agents to topics, and only the right sessions hear the right messages.
-
-```bash
-# Manual — full control
-agentihooks broadcast "Deploy freeze until 3am" -s alert -t 8h
-agentihooks broadcast "STOP ALL WRITES" -s critical -t 15m
-
-# AI-assisted — describe intent in plain English
-agentihooks broadcast emit "production incident, all agents stop deploying"
-agentihooks broadcast emit "clear all broadcasts"
-```
-
-| Severity | Delivery | Default TTL | Use case |
-|----------|----------|-------------|----------|
-| `info` | Once per session | 4 hours | Reminders, FYI notices |
-| `alert` | Every user turn | 1 hour | Deploy freezes, degraded services |
-| `critical` | Every turn + every tool call | 30 min | Incidents, immediate stops |
-
-`emit` is sandboxed: Claude Haiku can **only** run `agentihooks broadcast` commands — all other tools are disallowed.
-
-**Account load balancing.** Several Claude subscriptions (`AH_CC_TOKEN_<slug>`)
-share the fleet: `agenti` puts each new session on the account with the most quota
-left that runs fewer than 2 sessions, and `agentihooks balance` shows sessions per
-account. When a session's own quota runs out (98% of the week or 99% of the 5-hour
-window), the hook tells it, by fixed rules, to hand the task to a new terminal on
-another account, wait for the 5-hour reset, or stop and ask you.
-
-[Full docs: Fleet Command](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/fleet-command/) ·
-[Account load balancing](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/load-balancing/)
-
----
-
-## Quick Start
-
-**Requirement:** [uv](https://docs.astral.sh/uv/getting-started/installation/) must be installed.
+### 1. Install the harness
 
 ```bash
 git clone https://github.com/The-Cloud-Clockwork/agentihooks
 cd agentihooks
-
-# 1. Create a venv next to the repo (or its parent) and install everything
 uv venv .venv
 uv pip install --python .venv/bin/python -e ".[all]"
 
-# 2. Install hooks + settings + MCP into ~/.claude
-agentihooks init
+.venv/bin/agentihooks init                  # Claude Code, ~/.claude
+.venv/bin/agentihooks init --target codex   # Codex, ~/.codex
 ```
 
-`agentihooks init` wires hooks into `~/.claude/settings.json`, symlinks skills/agents/commands/rules, merges MCP servers into `~/.claude.json`, and installs the CLI globally. Re-run any time — it is idempotent.
+`init` writes the hook wiring and settings in the target's own format, links the
+skills, rules, agents and commands of the chosen profile chain that the target
+supports, writes the
+persona (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex), registers the
+`agentihooks` MCP server and installs the `agentihooks` command with `uv tool`.
+It also adds an `agenti` alias to `~/.bashrc`. Running it again is safe.
 
-## Architecture
-
-```
-Claude Code
-  |
-  |-- Hook Events (stdin JSON) --> python -m hooks --> hook_manager.py
-  |     SessionStart, PreToolUse,       |
-  |     PostToolUse, Stop, ...         |-- brain + enforcement drumbeat
-  |     (10 events total)              |-- guardrails pipeline
-  |                                    |-- broadcast delivery
-  |                                    |-- transcript logging
-  |
-  |-- statusLine (native setting) --> python -m hooks.statusline
-  |     pipes JSON on every turn       --> 2-3 line status bar
-  |
-  +-- MCP Tools --> python -m hooks.mcp --> category modules
-        channels, enforcement                --> hooks/mcp/*
-        stdio by default; sse / streamable-http for clients
-        that filter stdio MCP servers out -- see docs/hooks/mcp-transport.md
-```
-
-## CLI Reference
+### 2. Start the local swarm stack with Docker Compose
 
 ```bash
-# Install / configure
-agentihooks init                             # global install with default profile
-agentihooks init --profile coding,anton       # chain profiles
-agentihooks settings-profile admin           # quick-switch settings layer
-
-# Fleet messaging
-agentihooks broadcast "msg"                  # send info broadcast
-agentihooks broadcast "msg" -s critical      # critical severity
-agentihooks broadcast emit "natural lang"    # AI-assisted
-agentihooks broadcast --list                 # active broadcasts
-agentihooks broadcast --clear                # clear all
-
-# Launch claude with --dangerously-skip-permissions
-agentihooks claude                           # bypassPermissions + your extra args
-agenti                                       # alias (after source ~/.bashrc)
-agenti --route 0                             # force AH_CC_TOKEN_0 (ignores the session cap)
-agentihooks balance                          # rank every AH_CC_TOKEN_* by quota left + live SESSIONS n/cap
-agentihooks balance --current                # account this session runs on + quota table
-agentihooks init-agent --handoff --prompt-file handoff.md   # quota handoff to another account
-# agenti skips an account past its live session cap (from its five-hour window: 6 at 60%+ left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5%);
-# the quota policy hands a session off at 98% weekly / 99% 5-hour use, waits for the 5h reset
-# or stops — see docs/pillars/load-balancing.md
-
-# Bundle management
-agentihooks bundle link ~/dev/my-tools       # link a bundle
-agentihooks bundle pull                      # update linked bundle
-
-# Link an external profile dir into the chain.
-# Chain edits span EVERY installed target (claude + codex + copilot) so they
-# cannot silently diverge; --for-target narrows to one. unlink is always global —
-# it de-registers the profile, so leaving another target naming it would
-# make that chain unresolvable.
-agentihooks link-profile link ~/dev/brain-profile     # auto-appends to chain + re-installs
-agentihooks link-profile link ~/dev/brain --name br   # disambiguate name on collision
-agentihooks link-profile link ~/dev/x --for-target copilot  # copilot's chain only
-agentihooks link-profile list                         # show all linked external profiles
-agentihooks link-profile unlink brain-profile         # remove from chain + sweep symlinks
-
-# Broadcast channels — subscriptions are env-driven via AGENTIHOOKS_BASE_CHANNELS
-# (set in profile's settings.overrides.json env block; override per-repo via
-# .claude/settings.local.json env, or per-container via launch ENV)
-agentihooks channel publish brain "msg"      # publish to a channel
-agentihooks channel list                     # active channels + message counts
-
-# Brain adapter (knowledge injection)
-agentihooks brain status                     # source type, entries, refresh state
-agentihooks brain refresh                    # force re-read + republish
-
-# Enforcement drumbeats
-agentihooks enforcement set "run tests before commit" 5
-agentihooks enforcement set --local "project-only reminder" 10
-agentihooks enforcement list --local
-agentihooks enforcement clear --local
-agentihooks enforcement set "cluster writes go through GitOps" 1 --matcher bash.kubectl
-agentihooks enforcement set --type rule --path rules/deploy.md
-
-# Conditions: what fires for a call
-agentihooks conditions list --tool Bash --command "git push"
-
-# Live rule refresh (push rule updates into running sessions)
-agentihooks refresh-rules --dry-run          # preview payload + target session IDs
-agentihooks refresh-rules                    # one-shot push to all alive sessions
-agentihooks refresh-rules --clear            # cancel a pending marker
-
-# Diagnostics
-agentihooks status                           # full system health
-agentihooks lint-claude [path]               # CLAUDE.md token cost analysis
-agentihooks mcp report                       # MCP surface area
-
-# agentihooks daemon (network transport only — see docs/hooks/mcp-transport.md)
-agentihooks mcp status                       # config vs. reality; 0 ok, 1 stopped, 2 diverged
-agentihooks mcp start                        # once per boot where there is no systemd
-agentihooks mcp restart
-agentihooks mcp stop
-
-# Utilities
-agentihooks ignore [path]                    # create .claudeignore
-agentihooks --list-profiles                  # available profiles
-agentihooks --query                          # active profile name
-agentihooks uninstall [--yes]                # remove everything
-
-# Self-update — upgrades the install this command runs from
-agentihooks update                           # compare against PyPI, upgrade if newer
-agentihooks update --check                   # report only, install nothing
-agentihooks update --source <index-url>      # upgrade from a custom package index
+agentihooks swarm init my-swarm --plan ~/plans/my-plan.md --repo ~/dev/my-repo \
+  --operator-asked "start a swarm for my plan"
 ```
 
-`update` resolves how this copy was installed — venv/pip, `uv tool`, pipx, or an
-editable checkout — and upgrades that one. An editable install is left alone;
-update it with `git pull` in the checkout.
+This copies the Compose files packaged with AgentiHooks into
+`~/.agentihooks/swarm-stack` and starts four services:
 
-## What `init` Does
+| Service | What it does |
+|---|---|
+| `redis` | Swarm state, claims, leases and the inbox, behind a generated password |
+| `nats` | The swarm event bus with JetStream, reachable only inside the stack |
+| `swarm` | The ledger server and its web page |
+| `controller` | Holds the swarm lease and reconciles every swarm each minute |
 
-1. Links bundle (if `--bundle` provided)
-2. Merges settings **in the target's own format**: `_base/<target base>` -> bundle overrides -> profile overrides -> settings-profile overlay
-3. Symlinks skills, agents, commands, and rules (3-layer merge, additive across chain)
-4. Writes `CLAUDE.md` to `~/.claude/CLAUDE.md`
-5. Installs MCP servers (agentihooks + bundle + profile)
-6. Reconciles MCP servers — removes ones agentihooks installed on a prior run but that are no longer in any profile/bundle source (servers you added by hand are preserved)
-7. Installs CLI globally via `uv tool`
-8. Writes bashrc block (`agentienv` shell function + `agenti` alias)
-
-Under a network `MCP_TRANSPORT`, step 5 also renders the systemd unit and
-**starts the agentihooks daemon** — restarting it unconditionally, since init has
-just rewritten the url and possibly the port and a running process carries
-neither. That interrupts every Claude Code session on the machine for about a
-second, because the install is global. On a stdio install no daemon exists and
-none of this runs.
-
-> Per-repo init (`--repo` / `--local`) and `.agentihooks.json` were removed
-> 2026-05-07. `agentihooks init` is global-only.
-
-## Profiles
-
-Profiles mirror the Claude Code project structure:
-
-```
-profiles/<name>/
-|-- CLAUDE.md                    # system prompt (-> ~/.claude/CLAUDE.md)
-|-- .claude/
-|   |-- settings.overrides.json  # merged into ~/.claude/settings.json
-|   |-- .mcp.json                # profile MCP servers
-|   |-- skills/                  # -> ~/.claude/skills/
-|   |-- agents/                  # -> ~/.claude/agents/
-|   |-- commands/                # -> ~/.claude/commands/
-|   +-- rules/                   # -> ~/.claude/rules/
-|-- .codex/                      # optional, codex-native
-|   +-- config.overrides.toml    # merged into ~/.codex/config.toml
-+-- .copilot/                    # optional, copilot-native
-    |-- settings.overrides.json  # merged into ~/.copilot/settings.json
-    +-- mcp-config.overrides.json
-
-Content (skills/agents/commands/rules/CLAUDE.md) is authored once in `.claude/`
-and re-projected to every target. SETTINGS and MCP are authored per target, in
-that target's own file format — a profile ships only the target dirs it cares
-about.
-```
-
-Built-in profiles: `default` (auto), `coding` (acceptEdits), `admin` (bypassPermissions). Bundle profiles are discovered automatically.
-
-**3-layer merge:** agentihooks built-in -> bundle global `.claude/` -> profile-specific `.claude/`. Applies to skills, agents, commands, rules, and MCP servers.
-
-**Profile chaining:** `agentihooks init --profile coding,anton` applies each profile sequentially — hooks append, CLAUDE.md concatenates, rules/skills accumulate additively.
-
-**Settings profiles (two-axis model):** Control settings independently from persona:
+The first run writes `.env` there with a random Redis password, free ledger and
+Redis ports and the released swarm image. Later runs keep them, so running it
+again keeps your data. When every service is healthy and the ledger page
+answers, it creates the swarm `my-swarm` and its ledger, paused, and prints the
+ledger address and the next steps:
 
 ```bash
-agentihooks init --profile anton --settings-profile admin
-agentihooks settings-profile admin           # quick-switch (every installed target)
-agentihooks settings-profile admin --for-target codex   # one target only
-agentihooks settings-profile --clear         # revert
+set -a; . ~/.agentihooks/swarm-stack/client.env; set +a   # point this shell at the stack
+agentihooks swarm my-swarm start                            # run it
 ```
 
-Each target reads settings authored in its OWN format: claude
-`settings.overrides.json`, codex `config.overrides.toml`, copilot
-`settings.overrides.json` (plus `mcp-config.overrides.json`). An earlier design
-translated one Claude document into each target, but that could carry only
-`permissions.defaultMode` and left every target-native capability — codex's
-`model_reasoning_effort`, copilot's `effortLevel` and per-server MCP tool
-allowlists — unreachable from a bundle. The settings layer is meaningful on all
-three targets, so `settings-profile` applies to all of them by default.
+`swarm init` never starts a swarm by itself. A missing Docker, daemon or
+Compose plugin, or an unhealthy service, is named with its fix. Details:
+[Docker Compose quick start](docs/getting-started/compose-quick-start.md).
 
-## Install Targets
+Other install paths:
 
-AgentiHooks installs into three agent CLIs. One bundle, three projections:
+- [Single machine quick start](docs/getting-started/single-machine-quick-start.md): the stack and this machine as its hive.
+- [Kubernetes quick start](docs/getting-started/kubernetes-quick-start.md): the hub from the OCI Helm chart on ghcr, with NATS and JetStream.
+- [Add a hive](docs/getting-started/add-hive-quick-start.md): join another machine or a Kubernetes worker hive with one invite.
 
-```bash
-agentihooks init --profile anton --target claude    # ~/.claude   (default)
-agentihooks init --profile anton --target codex     # ~/.codex
-agentihooks init --profile anton --target copilot   # ~/.copilot
-agentihooks doctor --target copilot                 # per-target health check
-```
+## What ships
 
-| | Claude Code | Codex CLI | Copilot CLI |
-|---|---|---|---|
-| Config home | `~/.claude` | `~/.codex` | `~/.copilot` |
-| Settings | `settings.json` | `config.toml` | `settings.json` |
-| Persona | `CLAUDE.md` | `AGENTS.md` | `copilot-instructions.md` |
-| Skills | `~/.claude/skills` | `~/.agents/skills` | `~/.agents/skills` |
-| Agents | native | not supported | `~/.copilot/agents` |
-| Commands | native | profile homes, as hardlinked skills | translated to skills |
-| MCP | `.mcp.json` | `[mcp_servers.*]` | `mcp-config.json` |
-| MCP over SSE | yes | no | yes |
-| Status line | command | built-in items only | command |
+### Hooks and guardrails
 
-The bundle only ever ships Claude-shaped content; each target's adapter
-(`scripts/targets/<name>_target.py`) re-projects it. Details, including each
-CLI's hook contract and the evidence behind it:
-[CODEX-COMPAT](docs/reference/CODEX-COMPAT.md),
-[COPILOT-COMPAT](docs/reference/COPILOT-COMPAT.md).
+Every Claude Code and Codex lifecycle event calls `python -m hooks`. The guards
+include:
 
-## Hook Events
+| Guard | Behavior |
+|---|---|
+| Secrets | Blocks Write, Edit and file redirects that contain a secret; scans prompts and inline commands |
+| Credential files | Blocks reads of `.env` files, shell rc files and credential stores, and names a leak free alternative |
+| Branch and PR guard | Agents never open or merge pull requests into `main`, `master` or `v1` |
+| Production lockdown | Only CI creates releases and merges promotion pull requests |
+| Retry breaker | Directs research after 5 identical failures, blocks at 10 |
+| Kubernetes mutation guard | Blocks live behavior changes such as `kubectl edit`, `patch` and `set`, and Helm upgrades outside CI |
+| Dependency banner | Prints a banner on every package install |
+| Version guard | Blocks agent edits to version fields |
 
-10 lifecycle events, all handled by `python -m hooks`:
+Operator controls sit beside the guards: **enforcements** re-inject a rule every
+N tool calls, **broadcasts** reach every live session or one channel, and
+**conditions** are your own scripts that run on the tool calls their filename
+matches and can add context, rewrite input or deny the call. The `agentihooks`
+MCP server exposes channel, enforcement, condition and timer tools to the agent.
 
-| Event | Key behavior |
-|-------|-------------|
-| `SessionStart` | Register session, inject all enforcements, brain injection, deliver broadcasts, MCP warnings |
-| `PreToolUse` | Secrets and branch guards, brain cadence, immediate first delivery, critical broadcasts, enforcement cadence |
-| `PostToolUse` | Bash filtering, file dedup, errors, Codex first-delivery/cadence fallback |
-| `UserPromptSubmit` | Secrets scan, immediate new enforcements, CI doctrine, amygdala, broadcasts |
-| `Stop` | Transcript scan, auto-memory, cost metrics |
-| `SessionEnd` | Deregister session, clear caches, log summary |
-| `SubagentStop` | Subagent transcript logging |
-| `Notification` | Log notifications |
-| `PreCompact` | Log before compaction |
-| `PermissionRequest` | Log permission requests |
+Docs: [Guardrails](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/guardrails/),
+[Fleet Command](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/fleet-command/),
+[Conditions](https://the-cloud-clockwork.github.io/agentihooks/docs/hooks/conditions/).
 
-## Conditions
+### Profiles and bundles
 
-Scripts in a bundle or profile that run on the tool calls they match. The filename
-is the configuration: `<step>-<matcher>-<name>[.async].<ext>`.
+A profile is a folder: a `CLAUDE.md` persona plus `.claude/` rules, skills,
+agents, commands, settings overrides and MCP servers, and optional `.codex/`
+settings in Codex's own TOML format. Profiles chain with commas
+(`agentihooks init --profile base,ops`); rules and skills accumulate and
+settings deep merge. Content is written once and projected into each target.
 
-```
-<bundle>/.claude/conditions/pre-bash.git-guard.sh          # before every Bash call that runs git
-<bundle>/profiles/anton/.claude/conditions/post-bash-trim.py  # after every Bash call, anton only
-```
+A bundle is your own git repository of profiles, linked with
+`agentihooks bundle link <path>`. AgentiHooks ships a `default` profile and the
+swarm role profiles; your bundle adds the rest, and overlays add domain experts
+to a base role.
 
-- **Input:** the hook payload on stdin plus `AH_*` environment variables.
-- **Output:** plain text (context), or JSON with `context`, `tool_input` (pre rewrite), `tool_output` (post rewrite) and `decision`. Exit 2 denies.
-- **Matchers:** `any`, a tool name, `mcp`, `mcp__<server>`, `bash.<cli>`, joined with `+`. Enforcements accept the same grammar as a `matcher` property.
-- **Execution:** matching conditions run in parallel and merge in layer order. Guardrails judge the rewritten input. A cached index keeps the per-call lookup to a few `stat` calls.
-- **Layers:** bundle, profile chain, `~/.agentihooks/conditions/`, and the repository's own `.agentihooks/conditions/` (trusted repos only).
-- **From a session:** say "set a condition: …" and the agent creates it through the `agentihooks` `condition_set` tool, live on the next tool call. Only a phrase in your typed prompt opens that gate; agents never add conditions on their own.
+For remote HTTP MCP servers, `AGENTIHOOKS_MCP_URLS` maps server names to URLs.
+`AGENTIHOOKS_MCP_BEARER_ENV` maps server names to environment variable names
+for bearer authentication. Both are JSON objects, apply when rendering profiles,
+and are published by `agentihooks hive setup`. Store credential values in OpenBao;
+put only their environment variable names in the bearer mapping.
 
-[Full docs: Conditions](https://the-cloud-clockwork.github.io/agentihooks/docs/hooks/conditions/)
+Docs: [Identity](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/identity/),
+[Bundles](https://the-cloud-clockwork.github.io/agentihooks/docs/bundles/),
+[Overlays](https://the-cloud-clockwork.github.io/agentihooks/docs/overlays/).
+
+### The brain
+
+The brain is shared memory that outlives a session. It runs as its own service,
+[agentibrain-kernel](https://github.com/The-Cloud-Clockwork/agentibrain-kernel).
+AgentiHooks is its client: at session start and every 20 tool calls it reads
+the brain's feed of hot arcs, recent lessons and active signals and injects it
+into the session, and at Stop it posts the lesson, decision, milestone and
+signal markers the agent wrote. It finds the brain through `BRAIN_URL`, read from
+`~/.agentibrain/.env` when the brain is installed. Without a brain the hooks
+skip this step.
+
+Docs: [Context Intelligence](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/context/).
+
+### The ledger
+
+The ledger is one plan as a live web page served by the ledger server
+(port 8765 by default). It holds the overview, phases, tasks with their pull
+requests and proofs, follow ups, open questions, priorities waiting on you,
+artifacts and a chat with the master. Agents read and write it with
+`agentihooks ledger`, and every operator write on the page reaches the agent it
+concerns as an inbox message.
+
+The page has a Ledger tab for the plan and its tasks and a Swarm tab for the
+agents, quota, capacity and health findings.
+
+![Ledger tab of a working ledger: priorities, outline and stats](docs/images/ledger-tab.png)
+
+![Swarm tab of the same ledger: controls, capacity, gates, overlays and agents](docs/images/swarm-tab.png)
+
+### The swarm and its roles
+
+A swarm is a crew of Claude Code and Codex agents working one ledger. The
+minute tick spawns agents up to each lane's cap, gives each claimed task a work
+folder, nudges silent agents and retires idle ones. Each agent runs one task in
+its own git worktree and herdr pane.
+
+| Role | Work |
+|---|---|
+| Master | The one agent you talk to. Keeps the ledger, turns requests into tasks, troubleshoots read only. Never edits code. |
+| Planner | Slices a phase into pull request sized tasks with their seams, territory and proof contract. |
+| Dispatcher | Settles what the tick could not: ranking, grouping, the lane split and stale priorities. |
+| Engineer | Works one code task end to end and closes it with one merged pull request. |
+| CI engineer | Owns red pipelines and CI speed, one change per task. |
+| QA | Reads proofs, gate, mutation and smoke results against their contracts. Never edits. |
+| Documentation | Documents a delivered feature against the code and runs the docs build. |
+
+Agents talk through a durable inbox, hand their work to a successor when their
+context fills, and the swarm snapshots its state so it can be restored after a
+reboot.
+
+Docs: [Swarm](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/swarm/).
+
+### Quota routing
+
+Each Claude subscription is one `AH_CC_TOKEN_<name>` variable and each Codex
+subscription one `AH_CX_TOKEN_<name>`. `agenti` (alias of `agentihooks claude`)
+and `agentihooks codex` read each account's quota windows and place the
+session on the account with room and the fewest live sessions.
+`agentihooks balance` and `agentihooks quota` show where each account stands.
+While a session runs, the quota policy tells it by fixed rules to hand its work
+to a new session on another account, wait for the five hour reset, or stop.
+The swarm places its agents by the same rules.
+
+Docs: [Account load balancing](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/load-balancing/).
+
+## Standalone or as a swarm
+
+**Standalone.** Install with `agentihooks init` and launch Claude Code with
+`agenti` or Codex with `agentihooks codex`. Each session gets the hooks,
+guards, profile, brain feed and quota routing. No ledger, Redis or Docker is
+needed.
+
+**As a swarm.** Run `agentihooks swarm init <name>` to start the stack and
+create a paused swarm on a repository, then start it. The master takes your
+requests in its pane or on the ledger page chat, and the tick staffs the
+tasks. You steer it with `agentihooks swarm <id> start|pause|stop` and `set`
+for the lane caps, or the same controls on the Swarm tab.
+
+## Where it runs
+
+### One machine
+
+A developer, hobbyist or professional runs everything on one machine: the
+Compose stack for the ledger, Redis and controller, and the agents in herdr
+panes on the same host. Credentials come from any mix of:
+
+- **Subscriptions.** One or many Claude and Codex accounts, each as an
+  `AH_CC_TOKEN_<name>` or `AH_CX_TOKEN_<name>` variable, loaded from OpenBao or
+  from a private `~/.agentihooks/accounts/claude.env` or `codex.env` file.
+  Routing spreads sessions across them by quota left.
+- **A direct API key.** `ANTHROPIC_API_KEY` for Claude Code, `OPENAI_API_KEY` or
+  `CODEX_API_KEY` for Codex. The router treats it as an api slot with no quota
+  windows, limited only by an optional session cap.
+- **An AI gateway.** `ANTHROPIC_BASE_URL` pointing at a host other than
+  `api.anthropic.com` with its token, or `OPENAI_BASE_URL` for Codex. The router
+  labels it `gateway`. A weight setting decides what share of sessions goes to
+  the api side; at weight 0 it takes the overflow once every subscription is
+  full.
+
+### Several machines
+
+A small company adds machines to one stack as hives. On the UI hive,
+`agentihooks hive add <ssh target> --label <name> --url <hive endpoint>` saves
+the machine in herdr with `herdr machine add` and delivers its member
+credentials over SSH; headless hives add none. On each member,
+`agentihooks hive install` runs the hive service, which reports the machine's
+accounts and repositories and opens the agents the controller places on it.
+
+### Kubernetes
+
+Enterprises run the swarm in distributed mode with the Helm chart in
+`deploy/helm/agentihooks-swarm`: the ledger, Redis and the lease holding
+controller as cluster services, engineer and CI agents as worker Pods sized by
+an approved Pod policy, and secrets through External Secrets. The master and
+planning seats stay on workstation hives. Private bundles reach workers through
+a bundle image, never the worker image.
+
+Docs: [Deployed host capacity](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/swarm/#deployed-host-capacity).
 
 ## Configuration
 
-All configuration in `.env` files in `~/.agentihooks/`. Key variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CONTEXT_REFRESH_COMPRESSION` | `standard` | Token compression level for injected banners/tool output |
-| `CONTEXT_COMPRESSION_SCOPE` | `refresh` | Scope: `refresh` or `all` |
-| `BROADCAST_ENABLED` | `true` | Fleet messaging master switch |
-| `BROADCAST_CRITICAL_ON_PRETOOL` | `false` | Re-inject critical broadcasts on every PreToolUse (default off — alerts still land on UserPromptSubmit) |
-| `BROADCAST_PRETOOL_MIN_SEVERITY` | `critical` | Minimum severity for PreToolUse re-injection. `alert` widens it. |
-| `BROADCAST_MAX_BYTES_PRETOOL` | `0` | PreToolUse banner byte cap. `0` = no cap. Set >0 to opt in to truncation under Claude Code's 10K hook output limit. |
-| `BROADCAST_MAX_BYTES_PROMPT` | `0` | UserPromptSubmit banner byte cap. Same semantics. |
-| `AGENTIHOOKS_BASE_CHANNELS` | `""` (empty) | Comma-separated channel subscription floor for the session. Default ships in `profiles/default/.claude/settings.overrides.json` env block as `"brain,amygdala"`. Layered: profile env → repo `.claude/settings.json` → repo `.claude/settings.local.json` → container ENV (highest). Wildcard `*` subscribes to everything. |
-| `CI_MANIFESTO_MAX_BYTES` | `0` | CI manifesto inject byte cap. `0` = full doctrine ships through. Set >0 (e.g. `7500`) to truncate with a "Read full file at \<path\>" footer. |
-| `TOKEN_CONTROL_ENABLED` | `true` | Token control layer master switch |
-| `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
-| `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
-| `BRAIN_ENABLED` | `true` when `BRAIN_URL` resolves, else `false` | Brain adapter master switch. An explicit value always wins. |
-| `BRAIN_URL` | discovered from `$AGENTIBRAIN_HOME/.env` | Brain HTTP endpoint. When it resolves, hooks fetch `/feed`, `/signal` and post `/marker` instead of reading the filesystem — and the reader and writer default on. |
-| `BRAIN_HTTP_TOKEN` | discovered from `$AGENTIBRAIN_HOME/.env` | Bearer for `BRAIN_URL`. Falls back to `KB_ROUTER_TOKEN`. |
-| `AGENTIBRAIN_HOME` | `~/.agentibrain` | The brain's own config directory. Its `.env` is read as the default source for `BRAIN_URL` and `KB_ROUTER_TOKEN` — only those keys; the file's database and provider credentials are ignored. |
-| `BRAIN_SOURCE_PATH` | `$AGENTIHOOKS_HOME/brain-feed` | Filesystem fallback, used only when no `BRAIN_URL` resolves. |
-| `BRAIN_CHANNEL` | `brain` | Broadcast channel the brain adapter publishes to. Receivers must include this name in `AGENTIHOOKS_BASE_CHANNELS`. |
-| `BRAIN_HOT_ARCS_TOP_N` | `10` | Maximum hot arcs included in the injected hot-arcs table. |
-| `BRAIN_PAYLOAD_MAX_BYTES` | `1536` | Maximum characters injected from each brain feed entry. |
-| `BRAIN_REFRESH_TOOL_CALLS` | `20` | Reconcile the brain source every N tool calls |
-| `AMYGDALA_ENABLED` | `false` | Active-signal injection (uses `BRAIN_URL` `/signal`). |
-| `BRAIN_WRITER_ENABLED` | `true` when `BRAIN_URL` resolves, else `false` | POST `/marker` on Stop / SubagentStop. |
-
-Complete table: [Configuration Reference](https://the-cloud-clockwork.github.io/agentihooks/docs/reference/configuration/)
-
-#### Hook output and the 10K cap
-
-Claude Code injects hook stdout (and any `hookSpecificOutput.additionalContext`)
-into the model's context up to a documented **10,000-character hard cap**.
-Beyond the cap, the harness silently writes the body to a temp file and the
-model receives a filepath instead of the content. If your SessionStart or
-UserPromptSubmit injection accumulates above 10K, it is **silently lost**.
-
-AgentiHooks does not enforce a default cap — full content ships through so
-agents have the most context possible. To audit what each event actually
-emits and whether anything is over the limit, run:
-
-```bash
-agentihooks doctor --debug-hook
-```
-
-If you stack many injections (CI manifesto + brain feed + amygdala + custom
-overlays + tool memory), use the `*_MAX_BYTES` knobs above to cap the
-biggest contributors and leave headroom for the rest.
-
-### Remote brain quickstart
-
-Nothing to copy by hand. agentihooks reads the brain's own config file —
-`$AGENTIBRAIN_HOME/.env`, default `~/.agentibrain/.env`, the same file that
-feeds the kernel's docker compose — and adopts `BRAIN_URL`, `KB_ROUTER_TOKEN`
-and the brain settings `agentibrain install` writes there (`BRAIN_ENABLED`,
-`BRAIN_SOURCE_PATH`, `AMYGDALA_ENABLED`, `AMYGDALA_SIGNAL_PATH`,
-`BRAIN_WRITER_ENABLED`, `BRAIN_WRITER_MAX_MARKERS`, `BRAIN_WRITER_OUTBOX`) from
-it. One home each, so nothing goes stale in a copy. Only those keys are adopted;
-that file's database, object-store and provider credentials never enter a
-session's environment.
-
-On the machine hosting the brain, `agentibrain install` writes that file. On a
-machine that only talks to one:
-
-```bash
-agentibrain install --brain-url http://<your-brain-api-host>:8103 --token <bearer>
-```
-
-That writes the same file locally and skips the stack and the vault, since both
-belong to the brain's own machine. To repoint it later, edit
-`~/.agentibrain/.env` — there is nothing to reinstall.
-
-Restart your Claude Code session. The hook stack fetches hot arcs and active
-signals on every prompt and injects them as broadcast banners. No profile
-install required — works alongside any profile, or none.
-
-Overriding still works the way it always did: a value set in
-`~/.agentihooks/*.env` outranks the discovery, and the process environment
-outranks both. `AMYGDALA_ENABLED` remains an opt-in you set yourself.
-
-## Portability
-
-Everything user-specific lives in `~/.agentihooks/`. To move to a new machine:
-
-```bash
-uv venv .venv
-uv pip install --python .venv/bin/python -e ".[all]"
-agentihooks init
-```
-
-## Related Projects
-
-| Project | Description |
-|---------|-------------|
-| [agenticore](https://github.com/The-Cloud-Clockwork/agenticore) | Claude Code runner and orchestrator |
-| [agentibridge](https://github.com/The-Cloud-Clockwork/agentibridge) | MCP server for session persistence and remote control |
+Settings live in `~/.agentihooks/.env` and the profile chain; every feature flag
+is an environment variable. See the
+[Configuration reference](https://the-cloud-clockwork.github.io/agentihooks/docs/reference/configuration/)
+and the [CLI reference](https://the-cloud-clockwork.github.io/agentihooks/docs/reference/cli-commands/).
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE).

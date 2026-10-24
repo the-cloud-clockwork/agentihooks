@@ -1,3 +1,5 @@
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -69,6 +71,38 @@ def _collection_tree(tmp_path):
     ):
         subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
     return root
+
+
+@pytest.mark.parametrize("lost", [False, True])
+def test_the_floor_exports_the_same_head_collection_without_collecting_it_again(tmp_path, monkeypatch, lost):
+    from tests.count_floor import main
+
+    base = _collection_tree(tmp_path / "base")
+    head = _collection_tree(tmp_path / "head")
+    expected = ["tests/test_a.py::test_a", "tests/test_a.py::test_b[1]", "tests/test_a.py::test_b[2]"]
+    if lost:
+        (head / "tests" / "test_a.py").write_text("def test_a():\n    pass\n")
+        expected = ["tests/test_a.py::test_a"]
+    output = tmp_path / "collected.json"
+    monkeypatch.setenv("TEST_COUNT_HEAD_COLLECTION", str(output))
+    assert main(["--base", str(base), "--head", str(head)]) == int(lost)
+    assert json.loads(output.read_text()) == expected
+    assert (head / ".collection-runs").read_text() == "x"
+    from tests.duration_coverage import collected_tests
+
+    assert json.loads(output.read_text()) == collected_tests(head)
+
+
+def test_a_failed_head_collection_exports_no_list_for_splitting(tmp_path, monkeypatch):
+    from tests.count_floor import main
+
+    base = _collection_tree(tmp_path / "base")
+    head = _collection_tree(tmp_path / "head")
+    (head / "tests" / "test_a.py").write_text("this is invalid python\n")
+    output = tmp_path / "collected.json"
+    monkeypatch.setenv("TEST_COUNT_HEAD_COLLECTION", str(output))
+    assert main(["--base", str(base), "--head", str(head)]) == 1
+    assert not output.exists()
 
 
 def test_collection_reuses_only_an_exact_clean_tree_and_environment(tmp_path):
@@ -151,6 +185,238 @@ def test_changed_pytest_selection_cannot_reuse_a_full_collection(tmp_path, monke
     assert (root / ".collection-runs").read_text() == "xx"
 
 
+def test_collection_splits_across_processes_and_matches_one_process(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(
+        tmp_path / "tree",
+        {
+            "test_a.py": SUITE,
+            "alpha/test_x.py": OTHER,
+            "helpers/__init__.py": "",
+            "test_m.py": OTHER.replace("test_c", "test_m"),
+            "zeta/inner/test_z.py": SUITE,
+            "conftest.py": "import os\nwith open('pids', 'a') as out:\n    out.write(f'{os.getpid()}\\n')\n",
+        },
+    )
+    single = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "tests/"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    expected = [line for line in single.stdout.splitlines() if "::" in line]
+    (root / "pids").unlink()
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 3)
+    assert count_floor.collect_all({"head": root}, "tests/") == {"head": expected}
+    assert len(expected) == 8
+    assert len(set((root / "pids").read_text().split())) == 3
+
+
+def test_collection_groups_are_contiguous_runs_weighted_by_test_files(tmp_path, monkeypatch):
+    from tests.count_floor import collection_groups
+
+    root = (
+        _tree(
+            tmp_path,
+            {
+                "__init__.py": "",
+                "conftest.py": "",
+                "alpha/test_x.py": OTHER,
+                "alpha/test_y.py": OTHER,
+                "beta/data.txt": "",
+                "notes.txt": "",
+                "test_a.py": SUITE,
+                "test_b.py": OTHER,
+                "test_data.json": "",
+            },
+        )
+        / "tests"
+    )
+    shared = ["__init__.py", "conftest.py"]
+    assert collection_groups(root, 2) == [
+        [*shared, "alpha", "beta", "notes.txt"],
+        [*shared, "test_a.py", "test_b.py", "test_data.json"],
+    ]
+    assert collection_groups(root, 3) == [
+        [*shared, "alpha", "beta", "notes.txt"],
+        [*shared, "test_a.py"],
+        [*shared, "test_b.py", "test_data.json"],
+    ]
+    assert collection_groups(root, 1) == [
+        [*shared, "alpha", "beta", "notes.txt", "test_a.py", "test_b.py", "test_data.json"]
+    ]
+    assert collection_groups(tmp_path / "missing", 4) == [shared]
+    listed = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda path: reversed(list(listed(path))))
+    assert collection_groups(root, 2)[0] == [*shared, "alpha", "beta", "notes.txt"]
+
+
+def test_each_collected_side_shares_the_processes(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    files = {
+        "alpha/test_x.py": OTHER,
+        "test_a.py": SUITE,
+        "test_m.py": OTHER.replace("test_c", "test_m"),
+        "zeta/test_z.py": SUITE,
+        "conftest.py": "import os\nwith open('pids', 'a') as out:\n    out.write(f'{os.getpid()}\\n')\n",
+    }
+    trees = {side: _tree(tmp_path / side, files) for side in ("base", "head")}
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 4)
+    collected = count_floor.collect_all(trees, "tests/")
+    assert len(collected["base"]) == len(collected["head"]) == 8
+    assert [len(set((tree / "pids").read_text().split())) for tree in trees.values()] == [2, 2]
+
+
+def test_one_failed_group_fails_the_whole_side(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(tmp_path, {"alpha/test_x.py": "raise RuntimeError('collection fails')\n", "test_a.py": SUITE})
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 2)
+    assert count_floor.collect_all({"head": root}, "tests/") == {"head": None}
+
+
+def test_groups_that_overlap_fail_the_side_instead_of_inflating_the_count(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(tmp_path, {"test_a.py": SUITE, "test_b.py": OTHER})
+    every = ["__init__.py", "conftest.py", "test_a.py", "test_b.py"]
+    monkeypatch.setattr(count_floor, "collection_groups", lambda root, count: [every, every])
+    assert count_floor.collect_all({"head": root}, "tests/") == {"head": None}
+
+
+def test_a_group_that_collects_no_tests_adds_nothing(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(tmp_path, {"test_a.py": SUITE, "test_empty.py": "x = 1\n"})
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 2)
+    assert count_floor.collection_groups(root / "tests", 2)[1][-1] == "test_empty.py"
+    assert count_floor.collect_all({"head": root}, "tests/") == {
+        "head": ["tests/test_a.py::test_a", "tests/test_a.py::test_b[1]", "tests/test_a.py::test_b[2]"]
+    }
+
+
+def test_collection_processes_follow_the_cpu_quota(monkeypatch):
+    import scripts.ci_cpu_quota as quota
+    from tests.count_floor import collection_processes
+
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(6)))
+    monkeypatch.setattr(quota, "quota_cpus", lambda: 2.5)
+    assert collection_processes() == 2
+    monkeypatch.setattr(quota, "quota_cpus", lambda: None)
+    assert collection_processes() == 6
+
+
+def _recorded_floor(tmp_path, base_files, head_files, recorded, environ=None):
+    base = _collection_tree(tmp_path / "b")
+    for name, text in base_files.items():
+        (base / "tests" / name).write_text(text)
+    subprocess.run(["git", "add", "tests"], cwd=base, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Base",
+        ],
+        cwd=base,
+        check=True,
+        capture_output=True,
+    )
+    record = tmp_path / "record.json"
+    subprocess.run(
+        [sys.executable, "-m", "tests.count_floor", "--record", str(record), "--head", str(base)],
+        cwd=_ROOT,
+        check=True,
+        capture_output=True,
+    )
+    if recorded is not None:
+        record.write_text(recorded(record.read_text()))
+    head = _tree(tmp_path / "head", head_files)
+    runs_before = (base / ".collection-runs").read_text()
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.count_floor", "--base", str(base), "--head", str(head)],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "TEST_COUNT_BASE_RECORD": str(record), **(environ or {})},
+    )
+    return result, (base / ".collection-runs").read_text() != runs_before
+
+
+def test_a_matching_dev_record_grades_the_base_without_collecting_it(tmp_path):
+    result, collected = _recorded_floor(tmp_path, {}, {"test_a.py": SUITE}, None)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "head collects 3 tests, base floor 3" in result.stdout
+    assert "base count read from the dev record" in result.stdout
+    assert not collected
+
+
+def test_a_dev_record_keeps_the_floor_red_on_a_lost_test(tmp_path):
+    result, collected = _recorded_floor(tmp_path, {}, {"test_a.py": OTHER}, None)
+    assert result.returncode == 1
+    assert "tests/test_a.py::test_a is in the base and not in the head" in result.stdout
+    assert not collected
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    [
+        lambda text: json.dumps({**json.loads(text), "identity": "0" * 64}),
+        lambda text: "not json",
+        lambda text: json.dumps({"identity": json.loads(text)["identity"]}),
+        lambda text: json.dumps({**json.loads(text), "nodeids": [3]}),
+    ],
+    ids=["other-tree-or-environment", "unreadable", "no-tests", "invalid-tests"],
+)
+def test_a_record_that_does_not_match_the_base_falls_back_to_collecting_it(tmp_path, recorded):
+    result, collected = _recorded_floor(tmp_path, {"test_a.py": SUITE + OTHER}, {"test_a.py": SUITE}, recorded)
+    assert collected
+    assert result.returncode == 1
+    assert "no dev record matches the base, so it is collected" in result.stdout
+    assert "base floor 4" in result.stdout
+
+
+def test_a_missing_record_file_collects_the_base(tmp_path):
+    result, collected = _recorded_floor(
+        tmp_path, {}, {"test_a.py": SUITE}, None, {"TEST_COUNT_BASE_RECORD": str(tmp_path / "absent.json")}
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert collected
+
+
+@pytest.mark.parametrize(
+    "artifact, picked",
+    [
+        ({}, True),
+        ({"head_branch": "ci-plant"}, False),
+        ({"head_sha": "f" * 40}, False),
+        ({"head_repository_id": 2}, False),
+        ({"expired": True}, False),
+    ],
+    ids=["dev-push", "pull-request-branch", "other-commit", "fork", "expired"],
+)
+def test_only_an_artifact_from_dev_for_the_exact_base_commit_is_trusted(artifact, picked):
+    from tests.count_floor import dev_record
+
+    run = {"head_branch": "dev", "head_sha": "a" * 40, "repository_id": 1, "head_repository_id": 1}
+    expired = artifact.pop("expired", False)
+    listing = {
+        "artifacts": [
+            {"id": 7, "expired": False, "workflow_run": {**run, "head_branch": "ci-plant"}},
+            {"id": 9, "expired": expired, "workflow_run": {**run, **artifact}},
+        ]
+    }
+    assert dev_record(listing, "a" * 40) == (9 if picked else None)
+
+
 def test_head_matching_the_base_count_passes(tmp_path):
     result = _floor(tmp_path, {"test_a.py": SUITE}, {"test_a.py": SUITE})
     assert result.returncode == 0, result.stdout + result.stderr
@@ -180,12 +446,21 @@ def test_a_renamed_test_keeps_the_floor(tmp_path):
 
 @pytest.mark.parametrize("side", ["base", "head"])
 def test_a_collection_error_on_either_side_is_red(tmp_path, side):
-    broken = {"test_a.py": SUITE, "test_x.py": "import not_a_module_anywhere\n"}
+    broken = {
+        "test_a.py": SUITE,
+        "test_x.py": "import not_a_module_anywhere\n",
+        "test_y.py": "raise RuntimeError('another collection exception')\n",
+    }
     sides = {"base": {"test_a.py": SUITE}, "head": {"test_a.py": SUITE}}
     sides[side] = broken
     result = _floor(tmp_path, sides["base"], sides["head"])
     assert result.returncode == 1
     assert f"::error::Collecting the {side} tests failed" in result.stdout
+    output = result.stdout + result.stderr
+    assert "tests/test_x.py" in output
+    assert "ModuleNotFoundError: No module named 'not_a_module_anywhere'" in output
+    assert "tests/test_y.py" in output
+    assert "RuntimeError: another collection exception" in output
 
 
 SUBJECT = "def subject():\n    return 1\n"

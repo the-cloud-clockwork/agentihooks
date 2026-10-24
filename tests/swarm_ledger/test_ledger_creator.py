@@ -1,4 +1,5 @@
 import datetime
+import importlib
 import json
 from pathlib import Path
 
@@ -7,7 +8,10 @@ import pytest
 from scripts.swarm import naming
 from scripts.swarm.store import DEFAULT_URL
 from scripts.swarm_ledger import ledger_creator, new_ledger
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
+
+repository = default_repository()
+
 
 pytestmark = pytest.mark.unit
 
@@ -37,8 +41,8 @@ def content_file(tmp_path, phases):
 
 def new(monkeypatch, tmp_path, folder, content, *extra, size="small"):
     monkeypatch.setenv("LEDGER_DIR", str(folder))
-    monkeypatch.setattr(new_ledger.core, "LEDGER_DIR", folder)
-    monkeypatch.setattr(new_ledger.ledger_link, "serving", lambda: str(folder))
+    monkeypatch.setattr(importlib.import_module("ledger_core"), "LEDGER_DIR", folder)
+    monkeypatch.setattr(new_ledger.ledger_link, "serving", lambda **kw: str(folder))
     plan = tmp_path / "creator-plan.md"
     plan.write_text("plan")
     if isinstance(content, int):
@@ -88,10 +92,13 @@ def test_content_that_is_not_an_object_counts_as_no_tasks(monkeypatch, tmp_path)
     assert str(refused.value) == ledger_creator.FLOOR.format(need=3, have=0)
 
 
-def test_a_swarm_ledger_leaves_the_floor_to_swarm_create_where_its_tasks_exist(monkeypatch, tmp_path, capsys):
+def test_a_swarm_ledger_is_left_to_swarm_init_even_for_a_master(monkeypatch, tmp_path):
     as_lane(monkeypatch, "master")
-    assert new(monkeypatch, tmp_path, shared(), 2, size="swarm")["size"] == "swarm"
-    assert created(capsys)
+    with pytest.raises(SystemExit) as refused:
+        new(monkeypatch, tmp_path, shared(), 2, size="swarm")
+    assert str(refused.value).startswith(
+        "a swarm ledger is created with its swarm by one command: agentihooks swarm init"
+    )
 
 
 @pytest.mark.parametrize("quote", ["make a two task ledger", "two task ledger"])

@@ -10,6 +10,7 @@ import yaml
 
 from scripts import ci_budget
 from scripts import ci_queue_fail_fast as fail_fast
+from scripts import ci_queue_retry as fail_fast_retry
 
 _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
@@ -52,6 +53,109 @@ def test_a_failed_timed_out_or_cancelled_job_is_named(conclusion):
 
 def test_the_first_failed_job_listed_is_named():
     assert fail_fast.failed([_job("lint", "failure"), _job("sonar", "failure")]) == "lint"
+
+
+def test_a_timed_out_unit_shard_is_named_at_once():
+    assert fail_fast.failed([_job("unit (3.12, 4)", "timed_out")], lambda job: True) == "unit (3.12, 4)"
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled"])
+def test_a_unit_shard_that_lost_its_runner_waits_for_its_rerun(conclusion):
+    jobs = [_job("unit (3.12, 4)", conclusion), _job("lint", "success")]
+    assert fail_fast.failed(jobs, lambda job: True) is None
+    assert fail_fast.verdict(jobs, lambda job: True) == "wait"
+
+
+def test_a_unit_shard_that_failed_its_tests_is_named():
+    jobs = [_job("unit (3.12, 4)", "failure"), _job("unit (3.12, 5)", "failure")]
+    assert fail_fast.failed(jobs, lambda job: job["name"] == "unit (3.12, 4)") == "unit (3.12, 5)"
+
+
+@pytest.mark.parametrize("name", ["unit rerun (3.12, 4)", "unit-lost", "unit-selected", "shard-check (3.12)"])
+def test_a_rerun_classifier_or_judge_failure_is_named_even_when_lost(name):
+    assert fail_fast.failed([_job(name, "failure")], lambda job: True) == name
+
+
+@pytest.mark.parametrize(
+    ("log", "lost"),
+    [
+        ("##[error]The runner has received a shutdown signal.", True),
+        ("##[error]Process completed with exit code 1.", False),
+        ("##[error]Process completed with exit code 128.\n##[error]The runner has received a shutdown signal.", True),
+        ("##[error]Process completed with exit code 1.\n##[error]The runner has received a shutdown signal.", True),
+        ("", True),
+        ("##[error]Process completed with exit code 127.", False),
+        ("##[error]Process completed with exit code 137.", True),
+        ("##[error]Process completed with exit code 143.", True),
+        ("E   AssertionError: Process completed with exit code 1", True),
+        pytest.param(
+            (_ROOT / "tests/fixtures/queue_retry/failure_quoting_a_loss.txt").read_text(),
+            False,
+            id="failure-quoting-a-loss",
+        ),
+        pytest.param(
+            "== 1 failed, 3 passed in 4.10s ==\n##[error]The runner has received a shutdown signal.",
+            False,
+            id="failed-result-then-loss",
+        ),
+        pytest.param(
+            "##[error]The runner has received a shutdown signal.\n== 1 failed, 3 passed in 4.10s ==",
+            False,
+            id="loss-then-failed-result",
+        ),
+        pytest.param(
+            "== 3 passed in 4.10s ==\n##[error]The runner has received a shutdown signal.",
+            True,
+            id="passed-result-then-loss",
+        ),
+        pytest.param(
+            "== 3 passed, 0 failed in 4.10s ==\n##[error]The runner has received a shutdown signal.",
+            True,
+            id="zero-failed-result-then-loss",
+        ),
+    ],
+)
+def test_only_a_nonzero_step_exit_without_a_loss_signature_is_a_real_failure(monkeypatch, log, lost):
+    def api(*args):
+        assert args[0] == "repos/o/r/actions/jobs/41/logs"
+        return log
+
+    monkeypatch.setattr(fail_fast_retry, "_api", api)
+    seen = {}
+    assert fail_fast.logged_loss("o/r", {"id": 41}, seen) is lost
+    assert seen == {"41": lost}
+
+
+def test_a_missing_log_waits_and_is_read_again_next_poll(monkeypatch):
+    def api(*args):
+        raise subprocess.CalledProcessError(1, ["gh", "api", *args])
+
+    monkeypatch.setattr(fail_fast_retry, "_api", api)
+    seen = {}
+    assert fail_fast.logged_loss("o/r", {"id": 41}, seen) is True
+    assert seen == {}
+
+
+def test_a_judged_shard_log_is_not_read_again(monkeypatch):
+    monkeypatch.setattr(fail_fast_retry, "_api", lambda *args: pytest.fail("read again"))
+    assert fail_fast.logged_loss("o/r", {"id": 41}, {"41": False}) is False
+
+
+def test_main_with_a_repository_keeps_each_shard_verdict_between_polls(tmp_path, monkeypatch, capsys):
+    reads = []
+
+    def errors(repo, job_id):
+        reads.append((repo, job_id))
+        return ["##[error]The runner has received a shutdown signal."]
+
+    monkeypatch.setattr(fail_fast, "log_errors", errors)
+    listing = _listing(tmp_path, {**_job("unit (3.12, 4)", "failure"), "id": 41}, _job("lint", "success"))
+    seen = tmp_path / "seen.json"
+    for _ in range(2):
+        assert fail_fast.main([str(listing), "--repo", "o/r", "--seen", str(seen)]) == 0
+    assert capsys.readouterr().out == "wait\nwait\n"
+    assert reads == [("o/r", 41)]
+    assert json.loads(seen.read_text()) == {"41": True}
 
 
 def test_passing_skipped_and_running_jobs_and_the_watcher_itself_name_nothing():
@@ -116,7 +220,7 @@ def test_the_module_runs_from_the_command_line(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out == "wait\n"
 
 
-def _watch(tmp_path, reads, heads=None, server_error=False):
+def _watch(tmp_path, reads, heads=None, server_error=False, rebuild_fail=False):
     fake, bin_dir = tmp_path / "fake", tmp_path / "bin"
     fake.mkdir()
     bin_dir.mkdir()
@@ -145,7 +249,13 @@ def _watch(tmp_path, reads, heads=None, server_error=False):
         'n=$(cat "$FAKE/count" 2>/dev/null || echo 0)\necho $((n + 1)) > "$FAKE/count"\n'
         'if [[ "$*" == *--jq* ]]; then cat "$FAKE/$n.json"; else cat "$FAKE/$n.page"; fi\n',
         "sleep": 'echo "$1" >> "$FAKE/sleeps"\n(( $(wc -l < "$FAKE/sleeps") <= 30 ))\n',
-        "python3": f'exec "{sys.executable}" "$@"\n',
+        "python3": 'if [[ "$2" == scripts.ci_queue_rebuild ]]; then\n'
+        '  echo "${3-unset}" > "$FAKE/rebuild-arg"\n'
+        '  [[ -z "$FAKE_REBUILD_FAIL" ]] || exit 1\n'
+        '  echo "record queue-rebuild-7-2: unknown cause: g"\n'
+        "  exit 0\n"
+        "fi\n"
+        f'exec "{sys.executable}" "$@"\n',
     }
     for name, body in scripts.items():
         (bin_dir / name).write_text("#!/usr/bin/env bash\n" + body)
@@ -165,6 +275,7 @@ def _watch(tmp_path, reads, heads=None, server_error=False):
         "GITHUB_SHA": "old",
         "GITHUB_REF": "refs/heads/gh-readonly-queue/dev/pr-1-old",
         "FAKE_HEADS": "no" if heads is None else "yes",
+        "FAKE_REBUILD_FAIL": "1" if rebuild_fail else "",
     }
     run = _step(_jobs()["queue-fail-fast"], "Watch for the first failed graded job")["run"]
     result = subprocess.run(["bash", "-e", "-c", run], cwd=_ROOT, env=env, capture_output=True, text=True)
@@ -182,12 +293,19 @@ def _watch(tmp_path, reads, heads=None, server_error=False):
 def test_a_deleted_or_replaced_queue_group_stops_before_jobs_finish(tmp_path, head):
     result, output, sleeps, calls = _watch(tmp_path, [[_job("lint")]], heads=[head])
     assert result.returncode == 0, result.stderr
-    assert output == "failed=queue group is no longer current\n"
+    assert output == "failed=queue group is no longer current (record queue-rebuild-7-2: unknown cause: g)\n"
+    assert (tmp_path / "fake" / "rebuild-arg").read_text() == head + "\n"
     assert sleeps == []
     assert calls == []
     ref_call = (tmp_path / "fake" / "ref-calls").read_text()
     assert "git/matching-refs/heads/gh-readonly-queue/dev/pr-1-old" in ref_call
     assert 'select(.ref == "refs/heads/gh-readonly-queue/dev/pr-1-old")' in ref_call
+
+
+def test_a_failed_rebuild_record_still_cancels_the_stale_group(tmp_path):
+    result, output, _, _ = _watch(tmp_path, [[_job("lint")]], heads=["replacement"], rebuild_fail=True)
+    assert result.returncode == 0, result.stderr
+    assert output == "failed=queue group is no longer current (record unavailable)\n"
 
 
 def test_a_queue_lookup_error_is_retried_without_cancelling_a_live_group(tmp_path):
@@ -272,6 +390,7 @@ def test_the_watcher_reads_and_cancels_on_the_app_token():
         "repositories": "${{ github.event.repository.name }}",
         "permission-actions": "write",
         "permission-contents": "read",
+        "permission-pull-requests": "read",
     }
     assert watch["id"] == "watch"
     assert watch["env"] == {"GH_TOKEN": _APP_TOKEN}
@@ -295,10 +414,11 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         for job_id, job in jobs.items()
         if "github.event_name == 'push'" in str(job.get("if", "")) and "merge_group" not in str(job.get("if", ""))
     }
-    queued = set(jobs) - push_only - {"admission", "gate-required"}
-    assert push_only == {
+    queued = set(jobs) - push_only - {"admission", "gate-required", "test-summary"}
+    expected = {
         "promote",
         "refresh-durations",
+        "count-record",
         "flake-budget",
         "coverage-baseline",
         "coverage-ratchet",
@@ -307,8 +427,13 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         "worker-image",
         "swarm-image",
         "brain-smoke",
+        "writer-lock",
         "ledger-load",
+        "hierarchy-cpu",
     }
+    if (_ROOT / ".github/workflows/count-record.yml").exists():
+        expected.remove("count-record")
+    assert push_only == expected
     assert queued <= _gate_needs(jobs)
 
 

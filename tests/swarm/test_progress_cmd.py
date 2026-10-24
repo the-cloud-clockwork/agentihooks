@@ -10,8 +10,6 @@ from scripts.swarm.store import AgentRecord
 from scripts.swarm_ledger import ledger_workspace
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ME = "engineer@a1b2c3-0001"
 MIN = 60_000
 

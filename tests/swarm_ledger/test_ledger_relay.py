@@ -46,7 +46,7 @@ def make_ledger():
         "questions": [{"text": "which broker?"}],
         "followups": [{"text": "check disk"}],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -116,6 +116,29 @@ class Relay(unittest.TestCase):
     def test_an_unknown_item_is_rejected(self):
         _, rejected = core.sync(SLUG, ops=[relay(6, "questions/nope")])
         self.assertEqual(rejected, ["rl-6"])
+
+    def test_refused_relays_name_the_failed_check_in_the_cli(self):
+        cases = (
+            (relay(60, "questions/nope"), "relay on questions/nope refused: the entry does not exist"),
+            (
+                relay(61, self.question, by="stranger"),
+                f"relay on {self.question} refused: stranger is not an orchestrator of this ledger",
+            ),
+            (
+                relay(62, self.question, quote="words never recorded"),
+                f"relay on {self.question} refused: the server could not verify at least three quoted operator words "
+                "in its recorded prompts or answers",
+            ),
+        )
+        for op, reason in cases:
+            with self.subTest(reason=reason):
+                state, rejected = core.sync(SLUG, ops=[op])
+                self.assertEqual(rejected, [op["id"]])
+                self.assertEqual(state["_meta"]["warnings"], [reason])
+                with self.assertRaises(SystemExit) as refused:
+                    ledger.refused({**state, "rejected": rejected}, [op])
+                self.assertEqual(refused.exception.code, reason)
+                self.assertEqual(state["questions"][0]["answers"], [])
 
     def test_only_the_orchestrator_relays_and_only_words_the_operator_said(self):
         core.sync(SLUG, ops=[{"op": "join", "id": "j2", "by": "eng-1@a1-1", "role": "member"}])
@@ -227,6 +250,27 @@ def test_a_planners_words_count_and_an_engineers_or_another_swarms_do_not():
     assert ledger_relay.verified("master@abc123-0002", "slice the filters phase") == "slice the filters phase"
     assert ledger_relay.verified("master@abc123-0002", "merge the filters work") == ""
     assert ledger_relay.verified("master@abc123-0002", "drop the filters idea") == ""
+
+
+def test_a_hosted_ledger_lands_a_relay_of_words_recorded_on_the_workstation_and_refuses_others(monkeypatch, tmp_path):
+    import fakeredis
+
+    shared = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(operator_words, "_shared", lambda: shared)
+    operator_words.record("master@a1-1", "scale the stable hive to eight agents", swarm=SLUG)
+    operator_words.record("engineer@a1-3", "merge the filters work", swarm=SLUG)
+    monkeypatch.setattr(operator_words, "_dir", lambda: tmp_path / "hosted")
+    state = make_ledger()
+    phase = f"phases/{state['phases'][0]['id']}"
+    ops = [
+        relay(70, phase, text="Scale the hive.", quote="scale the stable hive"),
+        relay(71, phase, quote="words never recorded anywhere"),
+        relay(72, phase, quote="merge the filters work"),
+    ]
+    state, rejected = core.sync(SLUG, ops=ops)
+    assert rejected == ["rl-71", "rl-72"]
+    comment = state["phases"][0]["comments"][-1]
+    assert (comment["id"], comment["by"], comment["quote"]) == ("rl-70", "operator", "scale the stable hive")
 
 
 def test_cli_refuses_a_quote_in_no_operator_prompt_of_the_swarm(monkeypatch):

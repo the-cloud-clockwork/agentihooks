@@ -17,7 +17,7 @@ def ledger_page(monkeypatch, tmp_path):
     core = server.core
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
     doc = new_ledger.build_doc({"title": "Alias timeout proof", "phases": [{"title": "Keep requests readable"}]})
-    html_path, _ = core.paths("demo")
+    html_path, _ = legacy_page.paths("demo", core)
     html_path.write_text(legacy_page.render(doc, "demo", server.PORT))
     core.sync("demo", ops=[{"op": "join", "id": "join", "by": "engineer"}])
     token = legacy_page.stored_token(html_path)

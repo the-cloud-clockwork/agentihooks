@@ -60,7 +60,7 @@ def calculate(
     total = target
     if target > current:
         prior = previous["pending_raise"] if previous is not None else pending
-        ticks = min(prior["ticks"] + 1, 3) if prior["target"] == target else 1
+        ticks = min(prior["ticks"] + 1, 3)
         pending = {"target": target, "ticks": ticks}
         total = current if ticks < 3 else min(target, current + 2)
         if total == target:
@@ -70,8 +70,12 @@ def calculate(
     extra, shifted = _shifted(ceilings, live, demand, shift) if shift else ({}, "")
     harnesses = ", ".join(f"{harness} {seats}" for harness, seats in sorted(free_seats.items()))
     host_text = "unknown" if host_room is None else host_room
-    reason = f"Quota seats {seats} ({harnesses}); host room {host_text}; ceiling {total} of {target}"
-    if target > total:
+    allocated = sum(ceilings.values())
+    reason = f"Quota seats {seats} ({harnesses}); host room {host_text}; ceiling {allocated} of {target}"
+    if allocated < target and allocated >= sum(live.values()) + sum(demand.values()):
+        ready = ", ".join(f"{lane} {demand.get(lane, 0)}" for lane in ("eng", "ci", "plan"))
+        reason += f"; capped by ready work {ready}"
+    elif target > total:
         reason += (
             f"; raise held at tick {pending['ticks']} of 3"
             if pending["ticks"] < 3

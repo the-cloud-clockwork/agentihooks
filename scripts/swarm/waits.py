@@ -6,17 +6,23 @@ through its inbox, which the wake ladder delivers. A bare minutes wait, checked 
 
 import json
 import re
+import subprocess
 from collections.abc import Callable
 
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
+from scripts.hive import scope
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import idle, mutation_wait
+from scripts.swarm import idle, merge_queue, mutation_wait
 from scripts.swarm.store import SwarmError
 
 KINDS = ("checks", "merge", "reply", "task", "mutation", "intent")
 BARE_MAX_MINUTES = 60
 CHECKED_MINUTES = 12 * 60
+FINISH_TURN = (
+    "finish the current turn now unless you have independent work; do not sleep or poll, "
+    "the swarm tick ends this wait and sends your next prompt"
+)
 FRESH_MS = 5 * 60_000
 TASK_ENDS = ("done", "blocked")
 SENDER = "swarm"
@@ -37,10 +43,10 @@ def dependency(held: dict, task: dict, rows: dict, github: Callable) -> bool:
 def on(kind, target, task=""):
     if kind not in KINDS:
         raise SwarmError(f"wait on one of: {', '.join(KINDS)}")
-    return {"kind": kind, "target": target, **({"task": task} if kind == "intent" else {})}
+    return {"kind": kind, "target": target, **({"task": task} if kind in ("intent", "mutation") else {})}
 
 
-def checks_resolution(held, github):
+def checks_resolution(held, github, reread=None):
     target = held["target"]
     pull = github(target)
     if pull is None:
@@ -54,7 +60,7 @@ def checks_resolution(held, github):
         return ""
     if not pull.resolved or (pull.unpassed_gate and not pull.failed):
         return ""
-    current = github(target)
+    current = (reread or github)(target)
     if current is None or not current.head:
         return ""
     if current.head != pull.head:
@@ -62,23 +68,35 @@ def checks_resolution(held, github):
         return ""
     if not current.resolved or (current.unpassed_gate and not current.failed):
         return ""
+    if not current.red and not required_green(target, current.head):
+        return ""
     outcome = f"checks on {target}, now {'red' if current.red else 'green'}"
     if current.red and current.failed:
         outcome += f"; failed: {', '.join(current.failed)}"
     return f"{outcome}; {current.unpassed_gate} never passed" if current.unpassed_gate else outcome
 
 
+def required_green(target, head):
+    try:
+        pull = merge_queue.required_view(target, subprocess.run)
+    except (SwarmError, KeyError, TypeError):
+        return False
+    return pull is not None and pull.head == head and pull.resolved and not pull.red
+
+
 def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
-    key = idle.key(slug, "wait", name)
+    prefix = scope.readings(redis, slug, name)
+    key = idle.key(slug, "wait", name, prefix)
 
     def update(pipe):
         if pipe.get(key) != previous:
             return False
         pipe.multi()
         if outcome:
-            idle.remember_wait(pipe, slug, name, json.loads(previous), now_ms)
+            idle.remember_wait(pipe, slug, name, json.loads(previous), now_ms, prefix)
             pipe.delete(key)
-            pipe.set(idle.key(slug, "waited", name), now_ms, ex=idle.BEAT_TTL_S)
+            pipe.set(idle.key(slug, "waited", name, prefix), now_ms, ex=idle.BEAT_TTL_S)
+            pipe.set(idle.key(slug, "woke", name, prefix), now_ms, ex=idle.BEAT_TTL_S)
         else:
             pipe.set(key, json.dumps(held), keepttl=True)
         return True
@@ -155,17 +173,22 @@ def intent_resolution(held, record, github):
     return f"the intent verdict on {held['target']}, now {record['verdict']}: {record['reason']}"
 
 
+def stacked_branches(task, rows):
+    deps = (rows.get(task) or {}).get("depends_on") or []
+    return [rows[dep]["branch"] for dep in deps if rows[dep].get("state") != "done" and rows[dep].get("branch")]
+
+
 def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
     """What ended the wait, in plain words, or '' while it still holds."""
     kind, target = held["kind"], held["target"]
     if kind == "mutation":
-        return mutation_wait.resolution(held)
+        return mutation_wait.resolution(held, stacked_branches(held.get("task"), rows))
     if kind == "intent":
         return intent_resolution(held, verdicts.read(held["task"]), github)
     if kind == "checks" and mutation_wait.RUN_URL.fullmatch(target):
         return mutation_wait.run_resolution(target)
     if kind == "checks":
-        return checks_resolution(held, github)
+        return checks_resolution(held, github, reread)
     if kind == "merge":
         return merge_resolution(held, github, reread, fresh)
     if kind == "task":
@@ -217,8 +240,9 @@ def notice_task(item):
 
 def settle_notices(inbox, agent, action):
     """Close the open wait ended notices for the agent's task, naming the action it recorded on that task."""
-    for address in dict.fromkeys(filter(None, (agent.seat, agent.name))):
-        for item in inbox.inbox(address):
-            if item.sender != SENDER or item.state in CLOSED or _pick_up(agent.task) not in item.text:
-                continue
-            inbox.close(item.id, SENDER, "done", f"{agent.name} recorded {action} on task {agent.task}")
+    for world in inbox.worlds():
+        for address in dict.fromkeys(filter(None, (agent.seat, agent.name))):
+            for item in world.inbox(address):
+                if item.sender != SENDER or item.state in CLOSED or _pick_up(agent.task) not in item.text:
+                    continue
+                world.close(item.id, SENDER, "done", f"{agent.name} recorded {action} on task {agent.task}")

@@ -2,12 +2,14 @@
 
 import argparse
 import ast
+import collections
 import inspect
 import itertools
 import json
 import math
 import os
 import socket
+import statistics
 import subprocess
 import sys
 import threading
@@ -15,7 +17,7 @@ import time
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import TextIO
+from typing import BinaryIO, TextIO
 
 from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
@@ -39,14 +41,23 @@ READS_PER_SECOND = 1.0
 WRITE_P95_S = 2.0
 CPU_CORES = 1.0
 CPU_WINDOW_S = 10
+RESOURCE_WARMUP_S = 20
+RESOURCE_WINDOW_S = 60
+THREAD_GROWTH = 8
+RSS_GROWTH_KIB = 65_536
 MIN_WRITES = 0.9
 SERVER_WAIT_S = 60.0
+STDERR_TAIL_LINES = 200
 ALERT_QUIET_MS = 3_600_000
 WRITE_BREACH = "write p95"
 BUDGETS = {
     "WRITE_P95_S": min,
     "CPU_CORES": min,
     "CPU_WINDOW_S": min,
+    "RESOURCE_WARMUP_S": min,
+    "RESOURCE_WINDOW_S": max,
+    "THREAD_GROWTH": min,
+    "RSS_GROWTH_KIB": min,
     "LEDGER_BYTES": max,
     "CLIENTS": max,
     "LIVE_PEAK_WRITES_PER_MINUTE": max,
@@ -55,6 +66,7 @@ BUDGETS = {
     "READS_PER_SECOND": max,
     "SWEEPS": max,
 }
+RELAYS: dict[int, threading.Thread] = {}
 WORDS = "the swarm keeps every task with its comments proof and the work that landed for the operator".split()
 
 
@@ -154,6 +166,31 @@ def cpu_seconds(pid: int) -> float:
     return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
 
 
+def server_resources(pid: int) -> tuple[int, int]:
+    fields = dict(line.split(":", 1) for line in Path(f"/proc/{pid}/status").read_text().splitlines())
+    return int(fields["Threads"]), int(fields["VmRSS"].split()[0])
+
+
+def resource_verdict(samples: list[tuple[float, int, int]]) -> list[str]:
+    if not samples:
+        return [f"server resource sampling did not cover {RESOURCE_WINDOW_S}s after warmup"]
+    warmed = [sample for sample in samples if sample[0] >= samples[0][0] + RESOURCE_WARMUP_S]
+    if len(warmed) < 3 or warmed[-1][0] - warmed[0][0] < RESOURCE_WINDOW_S:
+        return [f"server resource sampling did not cover {RESOURCE_WINDOW_S}s after warmup"]
+    width = (warmed[-1][0] - warmed[0][0]) / 3
+    windows = [[sample for sample in warmed if min(int((sample[0] - warmed[0][0]) / width), 2) == n] for n in range(3)]
+    if not all(windows):
+        return ["server resource sampling missed a growth window"]
+    problems = []
+    for index, name, limit in ((1, "threads", THREAD_GROWTH), (2, "RSS", RSS_GROWTH_KIB)):
+        first, middle, last = [statistics.median(sample[index] for sample in window) for window in windows]
+        if first < middle < last and last - first > limit:
+            problems.append(
+                f"server {name} kept growing: medians {first:g}, {middle:g}, {last:g}; growth budget {limit}"
+            )
+    return problems
+
+
 def write_every() -> float:
     """Each client's seconds between writes: all clients together write HEADROOM times the live peak minute."""
     return CLIENTS * 60 / (LIVE_PEAK_WRITES_PER_MINUTE * HEADROOM)
@@ -202,19 +239,46 @@ def free_port() -> int:
 def start_server(folder: Path, port: int, log: TextIO) -> subprocess.Popen:
     env = {**os.environ, "LEDGER_DIR": str(folder), "LEDGER_PORT": str(port), "SWARM_RELOAD": "0"}
     server = subprocess.Popen(
-        [sys.executable, ledger_server.__file__, "--serve"], env=env, stdout=log, stderr=log, stdin=subprocess.DEVNULL
+        [sys.executable, ledger_server.__file__, "--serve"],
+        env=env,
+        stdout=log,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
     )
+    startup_stderr: collections.deque[bytes] = collections.deque(maxlen=STDERR_TAIL_LINES)
+    relay = threading.Thread(target=relay_stderr, args=(server.stderr, log.fileno(), startup_stderr), daemon=True)
+    relay.start()
+    RELAYS[server.pid] = relay
     deadline = time.monotonic() + SERVER_WAIT_S
     while time.monotonic() < deadline:
         if server.poll() is not None:
-            raise SystemExit(f"ledger server exited with {server.returncode}")
+            raise SystemExit(
+                startup_failure(server, startup_stderr, f"exited with {server.returncode} before listening")
+            )
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=1):
                 return server
         except OSError:
             time.sleep(0.2)
     server.kill()
-    raise SystemExit(f"ledger server did not listen on port {port} within {SERVER_WAIT_S}s")
+    server.wait()
+    raise SystemExit(startup_failure(server, startup_stderr, f"did not listen on port {port} within {SERVER_WAIT_S}s"))
+
+
+def startup_failure(server: subprocess.Popen, startup_stderr: collections.deque[bytes], outcome: str) -> str:
+    RELAYS.pop(server.pid).join()
+    return f"ledger server {outcome}; its stderr:\n" + b"".join(startup_stderr).decode(errors="replace")
+
+
+def relay_stderr(pipe: BinaryIO, fd: int, tail: collections.deque[bytes]) -> None:
+    for line in pipe:
+        tail.append(line)
+        view = memoryview(line)
+        try:
+            while view:
+                view = view[os.write(fd, view) :]
+        except OSError:
+            pass
 
 
 def stop_server(server: subprocess.Popen) -> None:
@@ -224,14 +288,16 @@ def stop_server(server: subprocess.Popen) -> None:
     except subprocess.TimeoutExpired:
         server.kill()
         server.wait()
+    if relay := RELAYS.pop(server.pid, None):
+        relay.join()
 
 
 def client(api: ResourceClient, name: str, item: str, start: float, deadline: float, results: dict) -> None:
     for n in itertools.count():
         began = start + n * write_every()
-        time.sleep(max(0.0, began - time.monotonic()))
         if began >= deadline:
             return
+        time.sleep(max(0.0, began - time.monotonic()))
         op = {"op": "add", "thread": f"{item}/comments", "id": f"c-{uuid.uuid4().hex[:10]}", "by": name}
         try:
             sent = time.monotonic()
@@ -251,9 +317,9 @@ def reader(api: ResourceClient, items: list[str], start: float, deadline: float,
     """One agent polling its own task, phase and follow up, READS_PER_SECOND single resource reads a second."""
     for n in itertools.count():
         began = start + n / READS_PER_SECOND
-        time.sleep(max(0.0, began - time.monotonic()))
         if began >= deadline:
             return
+        time.sleep(max(0.0, began - time.monotonic()))
         try:
             sent = time.monotonic()
             api.request(SLUG, items[n % len(items)])
@@ -273,8 +339,15 @@ def watcher(base: str, credentials: dict, deadline: float, results: dict) -> Non
     )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as stream:
-            while time.monotonic() < deadline:
-                if not stream.read1(65536):
+            while (remaining := deadline - time.monotonic()) > 0:
+                stream.fp.raw._sock.settimeout(min(TIMEOUT_S, remaining))
+                try:
+                    chunk = stream.read1(65536)
+                except TimeoutError:
+                    if remaining <= TIMEOUT_S:
+                        break
+                    raise
+                if not chunk and time.monotonic() < deadline:
                     raise ConnectionError("the server closed the stream before the load ended")
     except Exception as exc:  # a dropped or silent stream is a red request
         results["errors"].append(f"event stream: {type(exc).__name__}: {exc}")
@@ -282,17 +355,20 @@ def watcher(base: str, credentials: dict, deadline: float, results: dict) -> Non
 
 def sample_cpu(pid: int, deadline: float, results: dict) -> None:
     try:
-        while time.monotonic() < deadline:
-            results["cpu"].append((time.monotonic(), cpu_seconds(pid)))
+        while True:
+            at = time.monotonic()
+            results["cpu"].append((at, cpu_seconds(pid)))
+            results["resources"].append((at, *server_resources(pid)))
+            if at >= deadline:
+                break
             time.sleep(1)
-        results["cpu"].append((time.monotonic(), cpu_seconds(pid)))
-    except Exception as exc:  # a lost sample leaves the CPU budget unproven
-        results["errors"].append(f"cpu sampler: {type(exc).__name__}: {exc}")
+    except Exception as exc:
+        results["errors"].append(f"server sampler: {type(exc).__name__}: {exc}")
 
 
 def load(port: int, token: str, pid: int, seconds: float) -> dict:
     base = f"http://127.0.0.1:{port}"
-    results = {"writes": [], "reads": [], "item_reads": [], "errors": [], "cpu": []}
+    results = {"writes": [], "reads": [], "item_reads": [], "errors": [], "cpu": [], "resources": []}
     apis = []
     for n in range(CLIENTS):
         name = f"ci@ab0000-{n:04d}"
@@ -337,6 +413,7 @@ def run(folder: Path) -> tuple[list[str], float | None]:
     writes, cores = results["writes"], busiest_window(results["cpu"])
     expected = CLIENTS * math.ceil(seconds / write_every())
     problems = verdict(writes, expected, cores, results["errors"])
+    problems.extend(resource_verdict(results["resources"]))
     item_reads, expected_reads = results["item_reads"], CLIENTS * math.ceil(seconds * READS_PER_SECOND)
     if len(item_reads) < MIN_WRITES * expected_reads:
         problems.append(f"{len(item_reads)} single resource reads completed of {expected_reads} expected")
@@ -360,7 +437,13 @@ def run(folder: Path) -> tuple[list[str], float | None]:
                 "item_read_p95_s": round(p95(item_reads), 3) if item_reads else None,
                 "busiest_cores": None if cores is None else round(cores, 3),
                 "errors": len(results["errors"]),
-                "budget": {"write_p95_s": WRITE_P95_S, "cores": CPU_CORES},
+                "resources": results["resources"],
+                "budget": {
+                    "write_p95_s": WRITE_P95_S,
+                    "cores": CPU_CORES,
+                    "thread_growth": THREAD_GROWTH,
+                    "rss_growth_kib": RSS_GROWTH_KIB,
+                },
             }
         ),
         flush=True,
@@ -394,6 +477,9 @@ def budgets(source: str) -> dict:
         and isinstance(node.targets[0], ast.Name)
         and node.targets[0].id in BUDGETS
     }
+    legacy = {"RESOURCE_WARMUP_S": 20, "RESOURCE_WINDOW_S": 60, "THREAD_GROWTH": 8, "RSS_GROWTH_KIB": 65_536}
+    if not set(legacy).intersection(found):
+        found.update(legacy)
     if missing := sorted(set(BUDGETS) - set(found)):
         sys.exit(f"the base gate assigns no {', '.join(missing)}")
     return found

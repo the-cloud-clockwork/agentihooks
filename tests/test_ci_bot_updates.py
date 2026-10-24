@@ -34,7 +34,7 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
     assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
     assert job["permissions"] == {"contents": "read"}
-    upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")
+    upload = next(s for s in job["steps"] if s.get("uses") == "./.github/actions/retry-upload")
     assert upload["with"]["name"] == "durations-merged"
     assert upload["with"]["path"] == ".test_durations*"
     assert upload["with"]["include-hidden-files"] is True
@@ -50,17 +50,26 @@ def test_a_newer_dev_push_replaces_only_the_pending_dev_push_run():
 ADOPT = (
     'python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json'
 )
+PRECOLLECTED_ADOPT = (
+    'collection=()\nif [[ "$GITHUB_EVENT_NAME" != push ]]; then\n'
+    "  collection=(--collection collected.json)\nfi\n"
+    + ADOPT.replace(" --collected collected.json", ' "${collection[@]}" --collected collected.json')
+)
 ADOPT_ENV = {"PYTHON_VERSION": "${{ matrix.python-version }}"}
 
 
 def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run():
     jobs = _workflow("test.yml")["jobs"]
     step = next(s for s in jobs["split"]["steps"] if s.get("name") == "Adopt latest dev durations")
-    assert step["run"].strip() == ADOPT
+    assert step["run"].strip() in (ADOPT, PRECOLLECTED_ADOPT)
     assert step["env"] == ADOPT_ENV
     steps = jobs["unit"]["steps"]
     download = next(s for s in steps if s.get("name") == "Download the durations this run splits on")
-    assert download["with"] == {"name": "split-${{ matrix.python-version }}"}
+    assert download["with"] == {
+        "name": "split-${{ matrix.python-version }}",
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+    }
     assert steps.index(download) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
 
@@ -84,7 +93,11 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert restore["with"]["key"] == "${{ needs." + producer + ".outputs.key }}"
     assert restore["if"] == f"needs.{producer}.outputs.source == '' && needs.{producer}.outputs.key != ''"
     assert restore["with"]["fail-on-cache-miss"] is True
-    assert jobs["split"]["needs"] in (["durations", "select", "reuse", "admission"], ["select", "reuse", "admission"])
+    assert jobs["split"]["needs"] in (
+        ["durations", "select", "reuse", "admission"],
+        ["select", "reuse", "admission"],
+        ["test-count", "select", "reuse", "admission"],
+    )
     lookup = next(s for s in jobs.get("durations", jobs["select"])["steps"] if s.get("id") == "stored")
     assert {
         key: jobs.get("durations", jobs["select"])["outputs"][key] for key in ("key", "queued", "base", "source")
@@ -109,7 +122,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     }
     assert {"durations" if "durations" in jobs else "select", "split"} <= set(jobs["gate-required"]["needs"])
     assert "run" not in restore
-    assert adopt["run"] == ADOPT
+    assert adopt["run"] in (ADOPT, PRECOLLECTED_ADOPT)
     assert adopt["env"] == ADOPT_ENV
 
 

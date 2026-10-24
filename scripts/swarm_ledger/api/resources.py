@@ -1,6 +1,8 @@
 import hashlib
 import json
 
+from scripts.swarm_ledger import ledger_closed, models, ports
+
 from .errors import APIError
 
 
@@ -61,39 +63,60 @@ def thread_rows(doc: dict) -> list:
     ]
 
 
-def read(doc: dict, path: str, query: dict | None = None) -> dict:
+def collection_revisions(rows: list) -> tuple[str, list]:
+    digest = hashlib.sha256(b"[")
+    items = []
+    for index, row in enumerate(rows):
+        encoded = json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        if index:
+            digest.update(b",")
+        digest.update(encoded)
+        items.append(hashlib.sha256(encoded).hexdigest() if isinstance(row, dict) else None)
+    digest.update(b"]")
+    return digest.hexdigest(), items
+
+
+def read(doc: dict, path: str, query: dict | None = None, cache: dict | None = None) -> dict:
+    if query and ("state" in query or "offset" in query):
+        return closed_page(doc, path, query)
     raw = value(doc, path)
-    rev = resource_revision(doc, path)
     if isinstance(raw, list):
-        return page(raw, rev, query or {}, hash_page=path == "tasks")
-    return bounded({"data": project(raw), "revision": rev})
+        hash_page = path == "tasks"
+        if cache is None:
+            return page(raw, resource_revision(doc, path), query or {}, hash_page=hash_page)
+        key = (collection_revisions, path)
+        if key not in cache:
+            cache[key] = collection_revisions(raw)
+        digest, items = cache[key]
+        rev = resource_revision(doc, path) if hash_page else digest
+        return page(raw, rev, query or {}, items, hash_page)
+    return bounded({"data": project(raw), "revision": resource_revision(doc, path)})
 
 
-COLLECTIONS = (
-    "tasks",
-    "phases",
-    "questions",
-    "followups",
-    "notes",
-    "chat",
-    "priorities",
-    "notifications",
-    "artifacts",
-    "artifact_trash",
-    "sources",
-    "alerts",
-    "freezes",
-    "plans",
-    "slices",
-)
-THREADS = {
-    "tasks": ("comments",),
-    "phases": ("comments",),
-    "questions": ("comments", "answers"),
-    "followups": ("comments",),
-    "notes": ("comments",),
-}
+def closed_page(doc: dict, path: str, query: dict) -> dict:
+    if path not in ledger_closed.COLLECTIONS or query.get("state") != "done":
+        raise APIError(400, "schema_invalid", DONE_ONLY)
+    rows = ledger_closed.recent(path, doc.get(path) or [])
+    offset = query.get("offset", 0)
+    selected = []
+    for row in rows[offset : offset + query.get("limit", ledger_closed.KEPT)]:
+        if reply_size(closed_reply([*selected, row], len(rows), offset)) > MAX_REPLY:
+            if not selected:
+                raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
+            break
+        selected.append(row)
+    return closed_reply(selected, len(rows), offset)
+
+
+def closed_reply(rows: list, total: int, offset: int) -> dict:
+    end = offset + len(rows)
+    return {"data": rows, "revision": revision(rows), "total": total, "next_offset": end if end < total else None}
+
+
+COLLECTIONS = models.COLLECTIONS
+THREADS = models.THREADS
 MAX_REPLY = 262144
+DONE_ONLY = "State and offset read the done rows of a collection"
 
 
 def value(doc: dict, path: str) -> object:
@@ -135,10 +158,12 @@ def project(raw: object) -> object:
     return result
 
 
-def page(rows: list, rev: str, query: dict, hash_page: bool = False) -> dict:
+def page(rows: list, rev: str, query: dict, revisions: list | None = None, hash_page: bool = False) -> dict:
     from .schemas import PAGINATION, validate
 
     validate(PAGINATION, query)
+    if "state" in query or "offset" in query:
+        raise APIError(400, "schema_invalid", DONE_ONLY)
     offset = 0
     cursor = query.get("cursor")
     if cursor:
@@ -147,28 +172,32 @@ def page(rows: list, rev: str, query: dict, hash_page: bool = False) -> dict:
             raise APIError(409, "revision_conflict", "Collection changed; restart pagination")
         offset = int(offset_text)
     selected = []
-    result = {"data": selected, "revision": rev, "next_cursor": None}
-    if hash_page:
-        result["page_hash"] = revision(selected)
+    size = reply_size(envelope([], rev, None, hash_page))
     for row in rows[offset : offset + query.get("limit", 50)]:
         item = project(row)
-        if isinstance(item, dict):
-            item = {**item, "revision": revision(row)}
         end = offset + len(selected) + 1
-        candidate = {
-            "data": [*selected, item],
-            "revision": rev,
-            "next_cursor": f"{rev}:{end}" if end < len(rows) else None,
-        }
-        if hash_page:
-            candidate["page_hash"] = revision(candidate["data"])
-        if reply_size(candidate) > MAX_REPLY:
+        if isinstance(item, dict):
+            item = {**item, "revision": revisions[end - 1] if revisions is not None else revision(row)}
+        next_cursor = f"{rev}:{end}" if end < len(rows) else None
+        item_size = reply_size(item) + (2 if selected else 0)
+        cursor_size = reply_size(next_cursor) - 4
+        if size + item_size + cursor_size > MAX_REPLY:
             if not selected:
                 raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
             break
         selected.append(item)
-        result = candidate
-    return bounded(result)
+        size += item_size
+    end = offset + len(selected)
+    next_cursor = f"{rev}:{end}" if end < len(rows) else None
+    reply = envelope(selected, rev, next_cursor, hash_page)
+    return reply if selected else bounded(reply)
+
+
+def envelope(rows: list, rev: str, next_cursor: str | None, hash_page: bool) -> dict:
+    reply = {"data": rows, "revision": rev, "next_cursor": next_cursor}
+    if hash_page:
+        reply["page_hash"] = revision(rows)
+    return reply
 
 
 def swarm_read(status: dict | None, path: str, query: dict) -> dict:
@@ -195,7 +224,7 @@ def hierarchy_read(repository, slug: str, path: str, query: dict) -> dict:
         rows = repository.nodes(slug, name or "subtree", node or None)
     except KeyError:
         raise APIError(404, "resource_missing", "No such node") from None
-    doc = {"tasks": [], **repository.read(slug, *KINDS)}
+    doc = {"tasks": [], **repository.current(slug).state}
     items = {
         f"{key}/{item['id']}": item
         for key in KINDS
@@ -207,10 +236,8 @@ def hierarchy_read(repository, slug: str, path: str, query: dict) -> dict:
 
 
 def node_state(kind: str, item: dict, doc: dict) -> str:
-    from scripts.swarm.phase_state import lifecycle
-
     if kind == "phase":
-        return lifecycle(item, doc)
+        return ports.swarm().phase_state.lifecycle(item, doc)
     if item.get("out_of_scope"):
         return "out_of_scope"
     return item.get("state") or ("done" if item.get("done") else "open")

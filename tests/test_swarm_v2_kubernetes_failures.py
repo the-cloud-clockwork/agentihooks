@@ -15,7 +15,7 @@ from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.base import Outcome, Status
 from tests import sv2_kub05_cases as cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-KUB-05"
 POD = {"metadata": {}, "spec": {}, "status": {}}
@@ -1595,6 +1595,24 @@ def test_a_restore_receipt_requires_a_directive_and_accepts_zero_cursor(world):
     with pytest.raises(SwarmError) as caught:
         recovery.confirm(decision.replacement, restored)
     assert str(caught.value) == "no restore directive for this attempt"
+
+
+def test_a_choice_interrupted_before_its_record_cannot_leave_a_stale_directive(world, monkeypatch):
+    recovery = world.recovery(world.live, automatic=False)
+    recovery.handle(world.old.execution_id, "oom_killed")
+    record = recovery._record
+
+    def interrupted(*args):
+        monkeypatch.setattr(recovery, "_record", record)
+        raise SwarmError("interrupted")
+
+    monkeypatch.setattr(recovery, "_record", interrupted)
+    with pytest.raises(SwarmError):
+        recovery.request(world.old.execution_id, "resume")
+    decision = recovery.request(world.old.execution_id, "fresh")
+    assert decision.mode == "fresh"
+    assert recovery.restore(decision.replacement)["recovery"] == "fresh"
+    assert recovery.restore(decision.replacement)["checkpoint_id"] == ""
 
 
 @pytest.mark.parametrize("first", ["verified", "superseded"])

@@ -9,8 +9,6 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_cli import _handoff_doc, env, run  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks, workers  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 RECAPS = [
     {"occupant": "engineer@a1b2c3-0004", "task": "t1", "text": "latest recap text", "at": 20},
     {"occupant": "engineer@a1b2c3-0001", "task": "t1", "text": "older recap text", "at": 10},
@@ -28,7 +26,7 @@ def test_the_successor_prompt_carries_the_chain_in_order(monkeypatch):
     order = [text.index(part) for part in ("handoff doc text", "latest recap text", "learned note text")]
     assert order == sorted(order) and order[-1] < text.index("older recap text")
     assert "eng-1@sw" in text
-    assert text.index("older recap text") < text.index("agentihooks ledger --slug sw show")
+    assert text.index("older recap text") < text.index("Read your task through the ledger API")
 
 
 def test_a_missing_recap_is_named_in_the_prompt():

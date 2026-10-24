@@ -7,8 +7,6 @@ from scripts.doctor import loop, priming
 from scripts.swarm import ci_speed, freeze, time_left
 from scripts.swarm.ledger_client import LedgerClient
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 OBSERVED = SimpleNamespace(quota_capacity=lambda *args: {})
 PLAIN = SimpleNamespace(template="")
 DOCTOR = SimpleNamespace(template=priming.TEMPLATE)

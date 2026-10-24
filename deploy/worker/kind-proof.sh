@@ -20,12 +20,19 @@ trap cleanup EXIT
 kind create cluster --name "$cluster" --image mirror.gcr.io/kindest/node:v1.37.0 --wait 120s > "$out/cluster.log" 2>&1 &
 cluster_pid=$!
 build_started="$SECONDS"
-docker build -f docker/swarm-node/Dockerfile -t local/worker-base:dev .
-docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev -t "$image" .
-printf 'worker_hive_image_build_seconds=%s\n' "$((SECONDS - build_started))" | tee "$out/build.txt"
+if bash deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-worker:dev; then
+  worker_base=published
+  docker build -f deploy/worker/Dockerfile --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" -t "$image" .
+else
+  worker_base=rebuilt
+  docker build -f docker/swarm-node/Dockerfile -t local/worker-base:dev .
+  docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" -t "$image" .
+fi
+printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
+docker run --rm --tmpfs /home/worker:uid=10001,gid=10001 --entrypoint bash "$image" -c 'agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"' > "$out/init.txt"
 wait "$cluster_pid"
 kind load docker-image "$image" --name "$cluster"
-docker run --rm --entrypoint bash "$image" -c 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && agentihooks hive --help' > "$out/tools.txt"
+docker run --rm --entrypoint bash "$image" -c 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && node --version && npm --version && uv --version && gh --version && ruff --version && test "$(npm config get prefix)" = "$HOME/.local" && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] && agentihooks hive --help' > "$out/tools.txt"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=hive-join -addext subjectAltName=DNS:hive-join \
   -keyout "$out/key.pem" -out "$out/cert.pem" 2>/dev/null
 kubectl create secret generic hive-tls --from-file=key.pem="$out/key.pem" --from-file=cert.pem="$out/cert.pem" >/dev/null
@@ -94,13 +101,18 @@ spec:
 EOF
 kubectl rollout status deployment/hive-redis --timeout=120s
 kubectl rollout status deployment/hive-join --timeout=120s
-code="$(kubectl exec deployment/hive-join -- agentihooks hive invite worker)"
-printf '%s' "$code" | kubectl create secret generic hive-code --from-file=code=/dev/stdin >/dev/null
-unset code
-helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml --show-only templates/worker-hive-state.yaml \
-  --set workers.replicas=1 --set workers.image.repository=local/agentihooks-hive-worker \
-  --set workers.image.pullPolicy=Never --set workers.joinUrl=https://hive-join:8770 \
-  --set workers.joinCodeSecret.name=hive-code --set workers.joinCodeSecret.key=code \
+member_env="$(kubectl exec deployment/hive-join -- python -c '
+import os
+from scripts.hive import auth
+from scripts.swarm.store import redis_client
+print(auth.env_text("https://hive-join:8770", auth.mint(redis_client(), "worker", os.environ["AGENTIHOOKS_SWARM_REDIS_URL"])), end="")
+')"
+printf '%s' "$member_env" | kubectl create secret generic hive-member --from-file=credential=/dev/stdin >/dev/null
+unset member_env
+sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
+helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml \
+  --set workers.replicas=1 --set workers.maxAgents=1 --set workers.drainSeconds=120 --set workers.image.repository=local/agentihooks-hive-worker \
+  --set workers.image.pullPolicy=Never --set workers.credentialSecret.name=hive-member --set workers.credentialSecret.key=credential \
   --set workers.caSecret.name=hive-tls --set workers.caSecret.key=cert.pem | kubectl apply -f -
 deployment=proof-agentihooks-swarm-worker-hive
 kubectl rollout status "deployment/$deployment" --timeout=120s
@@ -120,8 +132,8 @@ for _ in range(60):
     time.sleep(1)
 assert record and registry.live(record, int(time.time() * 1000)), 'pod did not register a live hive'
 assert record['ui'] == 'no' and record['ephemeral'] == 'yes'
-assert record['roles'] == ['eng', 'ci', 'plan'] and record['max_agents'] == 1
-print('pod registered a live worker hive with configured roles and capacity')
+assert record['excluded'] == ['master'] and record['max_agents'] == 1 and 'roles' not in record
+print('pod registered a live worker hive with its excluded list and capacity')
 orders = Orders(redis)
 order = CommandOrder('scratch-reap', 'reap', name='scratch-absent')
 orders.command(hive, order)
@@ -136,18 +148,66 @@ assert redis.xlen(orders.commands(hive)) == 0
 print(json.dumps({'scratch_order': order.action, 'ack': ack.status, 'pending': 0}, sort_keys=True))
 PY
 }
+member_id() {
+  local member
+  for _ in {1..60}; do
+    member="$(kubectl exec "$1" -- python3 -c 'import hooks.config; from scripts.hive.scope import member; print(member())')"
+    if [[ -n "$member" ]]; then
+      printf '%s\n' "$member"
+      return
+    fi
+    sleep 1
+  done
+  echo 'pod did not acquire hive membership' >&2
+  return 1
+}
 pod="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
-prove_worker "$pod" | tee "$out/orders.txt"
+member="$(member_id "$pod")"
+prove_worker "$member" | tee "$out/orders.txt"
 kubectl logs "$pod" > "$out/worker.log"
 restarts="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
 [[ "$restarts" == 0 ]]
-kubectl delete pod "$pod" --wait --timeout=60s
+hold_agent() {
+kubectl exec -i deployment/hive-join -- env HIVE="$member" STEP="$1" NAME="${2:-}" python - <<'PY'
+import os
+from scripts.swarm.store import PREFIX, AgentRecord, RedisStore, redis_client
+
+store = RedisStore(redis_client())
+if os.environ['STEP'] == 'start':
+    store.redis.sadd(f'{PREFIX}:index', 'drain-proof')
+    store.names.adopt('drain-proof', '999999', '', '')
+    name = store.names.next('drain-proof', 'eng')
+    store.start_execution('drain-proof', AgentRecord(name, 'eng', 't1', seat='eng-1@drain-proof', hive=os.environ['HIVE']))
+    print(name)
+elif os.environ['STEP'] == 'draining':
+    from scripts.hive import registry
+    assert registry.show(store.redis, os.environ['HIVE'])['draining'] == 'yes', 'the preStop did not mark the hive draining'
+else:
+    store.drop_agent('drain-proof', os.environ['NAME'])
+PY
+}
+held="$(hold_agent start)"
+kubectl patch deployment "$deployment" --type merge -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+kubectl rollout restart "deployment/$deployment"
+sleep 45
+[[ -n "$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" ]] || { echo "the hive drain preStop let $pod stop while an agent worked" >&2; exit 1; }
+[[ "$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o name)" == "pod/$pod" ]] || { echo "a replacement hive pod started while $pod drained" >&2; exit 1; }
+hold_agent draining
+echo "the hive drain preStop kept $pod running and draining for 45 seconds of a roll while its agent worked, with no replacement pod" | tee "$out/drain.txt"
+[[ -n "$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" ]] || { echo "the hive drain preStop let $pod stop before its agent finished" >&2; exit 1; }
+hold_agent finish "$held"
+kubectl wait --for=delete "pod/$pod" --timeout=25s
+hook_failures="$(kubectl get events --field-selector "involvedObject.name=$pod,reason=FailedPreStopHook" -o name)"
+if [[ -n "$hook_failures" ]]; then
+  echo "the hive drain preStop failed on $pod" >&2
+  exit 1
+fi
+echo "the hive drain preStop released $pod within 25 seconds of its agent finishing" | tee -a "$out/drain.txt"
 kubectl rollout status "deployment/$deployment" --timeout=120s
 replacement="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
 [[ "$replacement" != "$pod" ]]
-prove_worker "$replacement" | tee "$out/replacement.txt"
-echo 'replacement pod reused durable membership without redeeming the join code again' | tee -a "$out/replacement.txt"
+replacement_member="$(member_id "$replacement")"
+[[ "$replacement_member" == "$member" ]]
+prove_worker "$replacement_member" | tee "$out/replacement.txt"
+echo 'replacement pod reused the mounted member credential without minting again' | tee -a "$out/replacement.txt"
 echo 'worker hive kind registration and scratch order acknowledgement: passed'
-if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF:-}" == refs/heads/dev ]]; then
-  docker save "$image" -o "$out/image.tar"
-fi

@@ -14,7 +14,7 @@ from scripts.swarm import ledger_read, profile_choice, prompt
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger, ledger_close, ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
 from scripts.swarm_v2.auth_context import GrantRefused
 from tests.test_swarm_v2_control_service import (
     LEDGER_TASK,
@@ -29,7 +29,9 @@ from tests.test_swarm_v2_control_service import (
     _store,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+repository = default_repository()
+
+pytestmark = pytest.mark.unit
 
 PINNED = {"AGENTIHOOKS_SWARM": "rig-grade-swarm", "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0400"}
 MASTER = "master@323133-0001"
@@ -198,16 +200,18 @@ def test_a_claim_lost_before_hosted_apply_cannot_change_the_task(deployed, store
 
 
 def test_an_expired_claim_is_refused_by_the_hosted_apply(deployed, store):
+    from scripts.swarm_v2.api.executions import DEFAULT_LEASE_MS
+
     _, read = _read(deployed)
-    original = _hl().ResourceClient.request
+    original = ResourceClient.request
     stamp = store.redis.time()
 
     def expire_claim(client, slug, path, *args, **kwargs):
         if path == "operations":
-            store.redis.time = lambda: (stamp[0] + 61, stamp[1])
+            store.redis.time = lambda: (stamp[0] + DEFAULT_LEASE_MS // 1000 + 1, stamp[1])
         return original(client, slug, path, *args, **kwargs)
 
-    with patch.object(_hl().ResourceClient, "request", expire_claim):
+    with patch.object(ResourceClient, "request", expire_claim):
         status, refusal = _patch(deployed, read["revision"], {"state": "pr"})
 
     assert status == 409
@@ -220,7 +224,7 @@ def test_an_expired_claim_is_refused_by_the_hosted_apply(deployed, store):
 )
 def test_hosted_worker_writes_pin_the_spec_and_count_conflicts(deployed, store, fields, expected_status):
     _, read = _read(deployed)
-    original = _hl().ResourceClient.request
+    original = ResourceClient.request
 
     def edit_task(client, slug, path, *args, **kwargs):
         if path == "operations":
@@ -229,7 +233,7 @@ def test_hosted_worker_writes_pin_the_spec_and_count_conflicts(deployed, store, 
             repository.apply_ops(SLUG, ops=[operation])
         return original(client, slug, path, *args, **kwargs)
 
-    with patch.object(_hl().ResourceClient, "request", edit_task):
+    with patch.object(ResourceClient, "request", edit_task):
         status, response = _patch(deployed, read["revision"], {"state": "pr"})
 
     assert status == expected_status
@@ -241,7 +245,7 @@ def test_hosted_worker_writes_pin_the_spec_and_count_conflicts(deployed, store, 
 
 def test_hosted_receipts_survive_claim_loss_after_the_server_answers(deployed, store):
     _, read = _read(deployed)
-    original = _hl().ResourceClient.request
+    original = ResourceClient.request
 
     def lose_after_reply(client, slug, path, *args, **kwargs):
         reply = original(client, slug, path, *args, **kwargs)
@@ -249,7 +253,7 @@ def test_hosted_receipts_survive_claim_loss_after_the_server_answers(deployed, s
             store.redis.delete(store.key(SLUG, "task-authority", "t1"))
         return reply
 
-    with patch.object(_hl().ResourceClient, "request", lose_after_reply):
+    with patch.object(ResourceClient, "request", lose_after_reply):
         status, ack = _patch(deployed, read["revision"], {"state": "pr"})
 
     assert status == 200
@@ -627,8 +631,7 @@ def test_the_hosted_read_returns_every_phase_past_the_first_page(controller_read
 
 def test_a_local_host_reads_intent_from_its_ledger_folder(hosted, tmp_path):
     _hold("engineer@323133-0300", tmp_path)
-    with patch.dict(os.environ):
-        os.environ.pop("AGENTIHOOKS_DEPLOYMENT")
+    with patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "local"}):
         read = ledger_read.parts(SLUG, "overview", "phases")
         absent = ledger_read.parts("absent-ledger", "overview")
 

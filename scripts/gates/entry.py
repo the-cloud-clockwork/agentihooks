@@ -15,6 +15,7 @@ from scripts.gates.build import BuildGate
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.identity import PinnedIdentity
 from scripts.gates.intent import IntentGate
+from scripts.gates.one_push import OnePush
 from scripts.gates.placement import PlacementGate
 from scripts.gates.prompts import PromptGuard
 from scripts.gates.push_stop import PushStop
@@ -38,6 +39,7 @@ GATES = {
         ClaimStop(),
         PushStop(),
         QuietClaim(),
+        OnePush(),
     )
 }
 HOST_GATES = {gate.name: gate for gate in (PlacementGate(), PromptGuard())}

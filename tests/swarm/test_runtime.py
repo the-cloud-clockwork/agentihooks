@@ -35,7 +35,7 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
 
 def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypatch):
     clock = iter([5_000.0, 9_000.0])
-    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: next(clock))
+    monkeypatch.setattr("scripts.swarm.runtime.time", SimpleNamespace(time=lambda: next(clock), sleep=lambda _: None))
 
     def run(argv, **kwargs):
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
@@ -56,7 +56,7 @@ def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypa
 def test_spawn_records_each_launch_step_and_the_host_load(tmp_path, monkeypatch):
     clock = iter([5_000.0, 9_000.0])
     loads = iter([(7.25, 6.5, 5.0), (12.0, 8.0, 6.0)])
-    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: next(clock))
+    monkeypatch.setattr("scripts.swarm.runtime.time", SimpleNamespace(time=lambda: next(clock), sleep=lambda _: None))
     monkeypatch.setattr("scripts.swarm.runtime.os.getloadavg", lambda: next(loads))
     out = "status=started\nlauncher_at=5001000\nroute_status=routed\nharness_at=5004000\n"
 
@@ -267,10 +267,9 @@ def _spawn_env(tmp_path, monkeypatch, task=None, **config):
     runtime.spawn(
         SimpleNamespace(
             slug="sw",
-            repo=str(tmp_path),
             code="a1b2c3",
             lanes={},
-            **{"autonomy": "delegate", **config},
+            **{"repo": str(tmp_path), "autonomy": "delegate", **config},
         ),
         "eng",
         "engineer@a1b2c3-0001",
@@ -287,8 +286,33 @@ def test_spawn_without_a_swarm_compact_limit_leaves_the_default(tmp_path, monkey
     assert "AGENTIHOOKS_COMPACT_LIMIT" not in _spawn_env(tmp_path, monkeypatch, compact_limit=0)
 
 
+def test_spawn_hands_agents_the_local_checkout_of_the_swarm_repo(tmp_path, monkeypatch):
+    from scripts.hive import daemon
+
+    monkeypatch.setattr(daemon, "local_checkout", lambda repo: f"/hive/dev/{repo.rsplit('/', 1)[-1]}")
+    spawned = _spawn_env(tmp_path, monkeypatch, compact_limit=0, repo="github.com/the-cloud-clockwork/agentihooks")
+    assert spawned["AGENTIHOOKS_SWARM_REPO"] == "/hive/dev/agentihooks"
+
+
 def test_spawn_marks_the_launch_as_the_tick_s_own(tmp_path, monkeypatch):
     assert _spawn_env(tmp_path, monkeypatch, compact_limit=0)["AGENTIHOOKS_SWARM_SPAWN"] == "1"
+
+
+def test_spawn_hands_each_agent_its_own_ledger_token_and_never_the_server_secret(tmp_path, monkeypatch):
+    from scripts.swarm_ledger.ledger_authority import agent_token
+
+    monkeypatch.setenv("SWARM_SECRET", "seed-one")
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "the-tick-s-own")
+    env = _spawn_env(tmp_path, monkeypatch, compact_limit=0)
+    assert env["AGENTIHOOKS_LEDGER_AGENT_TOKEN"] == agent_token("seed-one", "sw", "engineer@a1b2c3-0001")
+    assert "SWARM_SECRET" not in env
+
+
+def test_spawn_without_the_server_secret_never_passes_on_the_tick_s_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("SWARM_SECRET", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "the-tick-s-own")
+    env = _spawn_env(tmp_path, monkeypatch, compact_limit=0)
+    assert "AGENTIHOOKS_LEDGER_AGENT_TOKEN" not in env and "SWARM_SECRET" not in env
 
 
 def test_spawn_names_the_predecessor_conversation_of_an_attached_transfer(tmp_path, monkeypatch):
@@ -881,6 +905,25 @@ def test_spawn_preserves_profile_and_prompt_boundary_arguments(tmp_path, monkeyp
     assert observed == ["profile", "prompt"]
 
 
+def test_spawn_passes_the_pinned_claim_to_the_shared_launcher(tmp_path):
+    import json
+
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="swarm-buildout", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    fence = {"key": "claim-a", "revision": 7}
+    runtime.spawn(config, "eng", "swarm-buildout-eng-4", {"id": "t4", "title": "x", "claim_fence": fence})
+    args = seen["argv"]
+    assert json.loads(args[args.index("--claim-fence") + 1]) == fence
+
+
 SEAT_TASKS = {
     "eng": {"id": "t1", "title": "x"},
     "ci": {"id": "t1", "title": "x"},
@@ -1188,6 +1231,8 @@ def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, mon
     runtime.quota_capacity(config, [], 5.0, {"eng": 1})
     assert seen == {"environ": dict(os.environ), "now": 5.0, "refresh": True, "demand": {"eng": 1}}
     runtime.quota_capacity(config, [], 5.0, {"eng": 0})
+    assert seen["refresh"] is True
+    runtime.quota_capacity(config, [], 5.0, {"eng": 0}, refresh=False)
     assert seen["refresh"] is False
 
 

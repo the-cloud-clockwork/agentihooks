@@ -171,5 +171,5 @@ def _checks(rollup):
 
 
 def _open_items(store, agent):
-    items = InboxStore(store.redis).mailbox(agent.name)
+    items = [i for world in InboxStore(store.redis).worlds() for i in world.mailbox(agent.name)]
     return [{"id": i.id, "from": i.sender, "state": i.state} for i in items if i.state not in CLOSED]

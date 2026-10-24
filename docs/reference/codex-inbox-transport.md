@@ -14,7 +14,7 @@ chosen by the swarm setting `codex-inbox-transport`:
 | `app_server` (stored by `swarm create`) | The supervised `codex app-server` owns the thread; the push pump starts or steers a turn for each item, idle or busy. No pane typing. | Ends its turn when idle; no `wait --inbox`. |
 | `legacy` | The tick types one wake prompt into an idle worker pane; the agent reads `agentihooks msg inbox`. | Runs the foreground `wait --inbox` loop. |
 
-`agentihooks swarm <id> create` stores `app_server` for a new swarm. A swarm
+`agentihooks swarm init <name>` stores `app_server` for a new swarm. A swarm
 created before this default change stores `legacy`, and a stored config without
 the setting reads `legacy`; either keeps it until someone sets the value. The
 Swarm v2 proof controller creates its proof swarms without the setting, so they

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_core.py:scripts.swarm_ledger.ledger_core.x\u01c1Context\u01c1__init____mutmut_1:180641e346fa28ec70e7347c9887ebb610d3e5824c38c636e226f5067b25916e": {
+    "reader": "standards_reader",
+    "reason": "The initial self.unstored = set() is never observed. mutation.apply always calls sweep, which assigns ctx.unstored = dropped - used on the writable path; on the non-writable path it returns early with the value still None. Both paths reach apply_ops with an empty or None value, and artifact_files.drop returns on `if not file_ids` for None and an empty set alike, so the database I/O is identical."
+  }
+}

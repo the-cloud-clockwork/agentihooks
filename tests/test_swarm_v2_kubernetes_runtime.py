@@ -11,7 +11,7 @@ from scripts.swarm_v2.kubernetes.spec import PodTemplate
 from scripts.swarm_v2.runtime.operations import Observation, Operation, Phase
 from tests import sv2_kub02_cases as cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-KUB-02"
 EXECUTION = "exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0"

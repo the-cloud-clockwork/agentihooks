@@ -4,8 +4,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 AT = 1_800_000_000_000
 HOUR = 3_600_000
 REPO = "owner/repo"
@@ -330,9 +328,13 @@ def test_observation_of_a_queue_without_a_stall_skips_workflow_requests(rig, len
         "queue": expected_length,
         "merged": expected_merged,
         "failed": "none observed",
+        "streak": 2,
+        "head": 11,
         "at": AT,
     }
-    assert len(state["calls"]) == 2
+    runs = [command for command, _ in state["calls"] if "/actions/runs?" in command[-1]]
+    assert len(runs) == 1
+    assert not any("/jobs?" in command[-1] for command, _ in state["calls"])
 
 
 def test_most_common_failed_check_wins_over_alphabetical_order(monkeypatch):
@@ -398,3 +400,95 @@ def test_a_queue_without_observed_merge_history_has_no_invented_merge_time_or_fi
     inbox = InboxStore(store.redis)
     assert ledger_events.findings_pass(inbox, store, "proof", []) == []
     assert inbox.inbox("master@proof") == []
+
+
+@pytest.mark.parametrize("start", [0.0, 100.0])
+def test_slow_merge_refresh_budget_uses_elapsed_monotonic_time(rig, monkeypatch, start):
+    import time
+
+    from scripts.swarm.health import merge_stall
+
+    store, config, state = rig
+    merge_stall.findings(store, "proof", "/repo", AT)
+    state["at"] += merge_stall.CACHE_MS
+    clock, original = [start], subprocess.run
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    def run(command, **kwargs):
+        duration = min(14, kwargs["timeout"])
+        clock[0] += duration
+        if duration < 14:
+            raise subprocess.TimeoutExpired(command, duration)
+        return original(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert len(merge_stall.findings(store, "proof", "/repo", state["at"])) == 1
+    assert clock[0] - start < 30
+
+
+def test_exact_merge_read_deadline_reports_its_exhausted_budget(rig, monkeypatch):
+    import time
+
+    from scripts.swarm.health import merge_stall
+
+    store, config, state = rig
+    merge_stall.findings(store, "proof", "/repo", AT)
+    state["at"] += merge_stall.CACHE_MS
+    clock, original, calls = [100.0], subprocess.run, []
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if kwargs["timeout"] < 5:
+            clock[0] += kwargs["timeout"]
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        clock[0] += 5
+        return original(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert len(merge_stall.findings(store, "proof", "/repo", state["at"])) == 1
+    cached = json.loads(store.redis.get(store.key("proof", "merge-stall")))
+    assert cached["error"] == "GitHub merge observation exhausted its read budget"
+    assert len(calls) == 2 and clock[0] == 110.0
+
+
+def test_positive_remaining_merge_budget_can_finish_a_refresh(rig, monkeypatch):
+    import time
+
+    from scripts.swarm.health import merge_stall
+
+    store, config, state = rig
+    merge_stall.findings(store, "proof", "/repo", AT)
+    cached = json.loads(store.redis.get(store.key("proof", "merge-stall")))
+    cached["failed"] = "Previous check"
+    store.redis.set(store.key("proof", "merge-stall"), json.dumps(cached))
+    state["at"] += merge_stall.CACHE_MS
+    clock, original = [100.0], subprocess.run
+    durations = iter((8, 1, 0.4, 0.2, 0.2, 0.1))
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    def run(command, **kwargs):
+        duration = next(durations)
+        assert duration <= kwargs["timeout"]
+        clock[0] += duration
+        return original(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    found = merge_stall.findings(store, "proof", "/repo", state["at"])
+    assert len(found) == 1
+    assert "Coverage (2 runs)" in " ".join(found[0].evidence)
+
+
+def test_merge_observation_records_github_read_wall_time(rig, capsys):
+    from scripts.swarm import timing
+    from scripts.swarm.health import merge_stall
+
+    token = timing.SWARM.set("proof")
+    try:
+        merge_stall.observe("/repo", AT)
+    finally:
+        timing.SWARM.reset(token)
+    events = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    finished = [row for row in events if row.get("phase") == "finished"]
+    assert len(finished) == 6
+    assert all(row["step"] == "scripts.swarm.health.merge_stall.github_read" and row["wall_s"] >= 0 for row in finished)

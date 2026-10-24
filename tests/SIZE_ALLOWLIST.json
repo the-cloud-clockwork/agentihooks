@@ -21,8 +21,8 @@
   "PLR0913": 8
  },
  "hooks/context/kubectl_mutation_guard.py::check_kubectl_mutation_command": {
-  "C901": 20,
-  "PLR0912": 19
+  "C901": 17,
+  "PLR0912": 16
  },
  "hooks/context/quota_policy.py::decide": {
   "PLR0913": 12
@@ -59,10 +59,6 @@
  "hooks/hook_manager.py::on_stop": {
   "C901": 23,
   "PLR0912": 22
- },
- "hooks/hook_manager.py::on_user_prompt_submit": {
-  "C901": 44,
-  "PLR0912": 44
  },
  "hooks/hook_manager.py::parse_transcript_metrics": {
   "C901": 17,
@@ -111,14 +107,6 @@
  "hooks/mcp/enforcement.py::register.enforcement_set": {
   "PLR0913": 8
  },
- "hooks/memory/transcript_reader.py::_iter_codex_records": {
-  "C901": 15,
-  "PLR0912": 14
- },
- "hooks/memory/transcript_reader.py::_iter_copilot_records": {
-  "C901": 19,
-  "PLR0912": 18
- },
  "hooks/quota.py::fmt_quota": {
   "C901": 15,
   "PLR0912": 14
@@ -152,7 +140,6 @@
   "PLR0913": 8
  },
  "scripts/inbox/wake.py::wake_pass": {
-  "C901": 13,
   "PLR0913": 8
  },
  "scripts/init_agent.py::main": {
@@ -160,7 +147,7 @@
   "PLR0912": 27
  },
  "scripts/install.py": {
-  "file-lines": 6906
+  "file-lines": 6900
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,
@@ -252,14 +239,6 @@
  "scripts/swarm/tick.py::_spawn": {
   "PLR0913": 8
  },
- "scripts/swarm_ledger/ledger.py::cmd_task": {
-  "C901": 15,
-  "PLR0912": 14
- },
- "scripts/swarm_ledger/ledger_agent_ops.py::check": {
-  "C901": 17,
-  "PLR0912": 16
- },
  "scripts/swarm_ledger/ledger_core.py::apply_op": {
   "C901": 18,
   "PLR0912": 18
@@ -279,11 +258,8 @@
   "C901": 13
  },
  "scripts/swarm_ledger/ledger_server.py::control_argv": {
-  "C901": 21,
-  "PLR0912": 20
- },
- "scripts/swarm_ledger/ledger_tasks.py::_update": {
-  "C901": 13
+  "C901": 19,
+  "PLR0912": 18
  },
  "scripts/targets/codex_target.py::CodexAdapter.teardown": {
   "C901": 20,

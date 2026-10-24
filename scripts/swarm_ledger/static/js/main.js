@@ -12,6 +12,7 @@ import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
 import { connectEvents } from "./events.js";
 import { loadArchitecture } from "./architecture.js";
+import { toggleFrozenView } from "./frozen_view.js";
 
 function start() {
   loadSaved();
@@ -62,6 +63,7 @@ function start() {
     }, true);
   }
   $("sections-all").addEventListener("click", foldSections);
+  $("frozen-view").addEventListener("click", () => { toggleFrozenView(); render(); });
   $("comments-all").addEventListener("click", () => {
     const open = !groupOpen("all-comments");
     for (const section of document.querySelectorAll(".col > section")) setAllComments(section, open);
@@ -75,7 +77,7 @@ function start() {
   document.querySelector(".col").addEventListener("toggle", (ev) => {
     if (!sectionBoxes().includes(ev.target)) return;
     rememberUnanimous("sections", sectionBoxes());
-    if (ev.target.open) render();
+    if (ev.target.open) render(null, true);
     else markToggles();
   }, true);
   $("outline").addEventListener("toggle", (ev) => {

@@ -9,7 +9,6 @@ from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm_ledger.test_caps_columns import browser
 from tests.swarm_ledger.test_remote_control_process import remote_server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 __all__ = ["browser", "remote_server"]
 
 
@@ -27,7 +26,8 @@ def test_page_shows_no_note_text_for_pending_or_acknowledged_control_states(
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(url + "/sw#swarm")
-        page.locator('[data-swarm="pause"]').click()
+        with page.expect_response(lambda response: response.url.endswith("/swarm/controls")):
+            page.locator('[data-swarm="pause"]').click()
         expect(page.locator("#swarm-note")).to_have_text("")
         page.screenshot(path=str(tmp_path / "pending.png"))
         assert request("GET")["commands"][0]["state"] == "pending"

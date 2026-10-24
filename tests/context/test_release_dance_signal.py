@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 import hooks.context.branch_guard as branch_guard
@@ -7,6 +9,12 @@ from hooks.context.controls_toggle import set_controls_disabled
 from hooks.hook_manager import BlockAction
 
 
+def gh(argv, base="dev", queue=None):
+    if argv[1:3] == ["api", "graphql"]:
+        return json.dumps({"data": {"resource": {"repository": {"mergeQueue": queue}}}}), ""
+    return f"{base} https://github.com/owner/repo/pull/123\n", ""
+
+
 @pytest.fixture
 def session(tmp_path, monkeypatch):
     for module in (branch_guard, prod_lockdown):
@@ -14,7 +22,7 @@ def session(tmp_path, monkeypatch):
         monkeypatch.setattr(module, "AGENTIHOOKS_HOME", tmp_path)
     import subprocess
 
-    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "dev\n", ""))
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, *gh(argv)))
     monkeypatch.setattr(ci_manifesto, "_manifesto_paths", lambda: [])
     return "release-publication"
 
@@ -171,12 +179,12 @@ def test_merge_looks_up_the_actual_base(session, monkeypatch, tmp_path, command,
         expected.append(selector)
     if repo:
         expected.extend(["--repo", repo])
-    expected.extend(["--json", "baseRefName", "--jq", ".baseRefName"])
+    expected.extend(["--json", "baseRefName,url", "--jq", '.baseRefName + " " + .url'])
 
     def run(argv, **kwargs):
         seen.append(argv)
         assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 10, "cwd": str(tmp_path)}
-        return subprocess.CompletedProcess(argv, 0, f"{base}\n", "")
+        return subprocess.CompletedProcess(argv, 0, *gh(argv, base))
 
     monkeypatch.setattr(subprocess, "run", run)
     if base == "dev":
@@ -187,7 +195,8 @@ def test_merge_looks_up_the_actual_base(session, monkeypatch, tmp_path, command,
         assert str(blocked.value) == (
             "BLOCKED [gh pr merge to main/master/v1]: CI alone promotes dev into protected branches."
         )
-    assert seen == [expected]
+    assert seen[0] == expected
+    assert len(seen) == (2 if base == "dev" else 1)
 
 
 @pytest.mark.parametrize("failure", ["missing", "failed", "timeout", "empty"])
@@ -207,6 +216,80 @@ def test_unresolved_merge_stays_closed(session, monkeypatch, failure):
     with pytest.raises(BlockAction) as blocked:
         check("gh pr merge 123 --rebase", session)
     assert str(blocked.value) == "BLOCKED: Cannot resolve the pull request base; promotion protection remains closed."
+
+
+def test_merge_into_a_merge_queue_branch_is_refused(session, monkeypatch):
+    import subprocess
+
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, *gh(argv, queue={"id": "MQ"}))
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(BlockAction) as blocked:
+        check("gh pr merge 123 --squash", session)
+    assert str(blocked.value) == (
+        "BLOCKED [gh pr merge into a merge queue branch]: 'dev' merges only through its merge queue, "
+        "and gh pr merge lands it directly. Queue it with `agentihooks swarm <slug> merge queue "
+        "https://github.com/owner/repo/pull/123`, or outside a swarm with the GitHub enqueuePullRequest mutation."
+    )
+    assert seen[1] == [
+        "gh",
+        "api",
+        "graphql",
+        "-f",
+        f"query={prod_lockdown._MERGE_QUEUE}",
+        "-f",
+        "url=https://github.com/owner/repo/pull/123",
+        "-f",
+        "branch=dev",
+    ]
+
+
+def test_operator_bypass_lets_a_merge_skip_the_queue(session, monkeypatch):
+    import subprocess
+
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, *gh(argv, queue={"id": "MQ"}))
+
+    monkeypatch.setattr(subprocess, "run", run)
+    set_controls_disabled(session)
+    check("gh pr merge 123 --squash", session)
+    assert [argv[1:3] for argv in seen] == [["pr", "view"]]
+
+
+def test_emergency_phrase_does_not_open_the_merge_queue(session, monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(
+        subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, *gh(argv, queue={"id": "MQ"}))
+    )
+    prod_lockdown.set_bypass(session)
+    with pytest.raises(BlockAction) as blocked:
+        check("gh pr merge 123 --squash", session)
+    assert str(blocked.value).startswith("BLOCKED [gh pr merge into a merge queue branch]")
+
+
+@pytest.mark.parametrize("answer", ["failed", "{}", "not json", '{"data": {"resource": null}}'])
+def test_unknown_merge_queue_keeps_the_merge_closed(session, monkeypatch, answer):
+    import subprocess
+
+    def run(argv, **kwargs):
+        if argv[1:3] != ["api", "graphql"]:
+            return subprocess.CompletedProcess(argv, 0, *gh(argv))
+        if answer == "failed":
+            raise subprocess.CalledProcessError(1, argv)
+        return subprocess.CompletedProcess(argv, 0, answer, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(BlockAction) as blocked:
+        check("gh pr merge 123 --squash", session)
+    assert str(blocked.value) == "BLOCKED: Cannot tell whether 'dev' has a merge queue; the merge stays closed."
 
 
 def test_loaded_legacy_signals_cannot_expand_publication(session, tmp_path, monkeypatch):
@@ -246,11 +329,11 @@ def test_absent_merge_cwd_uses_the_calling_directory(session, tmp_path, monkeypa
 
     def run(argv, **kwargs):
         seen.append(kwargs["cwd"])
-        return subprocess.CompletedProcess(argv, 0, "dev", "")
+        return subprocess.CompletedProcess(argv, 0, *gh(argv))
 
     monkeypatch.setattr(subprocess, "run", run)
     prod_lockdown.check_prod_lockdown({"tool_input": {"command": "gh pr merge 123 --squash"}, "session_id": session})
-    assert seen == [str(tmp_path)]
+    assert seen == [str(tmp_path), str(tmp_path)]
 
 
 def test_pr_refusal_preserves_the_full_diagnostic_and_log(session, monkeypatch):

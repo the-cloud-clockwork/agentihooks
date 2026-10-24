@@ -144,5 +144,54 @@ def test_the_kind_job_restores_and_saves_the_layers_it_builds_with():
 def test_requirements_layer_depends_on_the_lock_alone():
     stage = (ROOT / "Dockerfile").read_text()
     stage = stage[: stage.index("COPY hooks/ hooks/")]
-    assert "COPY docker/swarm/requirements.lock ./\nRUN python -m venv /opt/venv" in stage
+    assert any(
+        command in stage
+        for command in (
+            "COPY docker/swarm/requirements.lock ./\nRUN python -m venv /opt/venv",
+            "COPY docker/swarm/requirements.lock ./\nRUN --mount=type=cache,target=/root/.cache/uv \\\n"
+            "    uv venv /opt/venv && uv pip install --python /opt/venv/bin/python "
+            "--compile-bytecode --require-hashes -r requirements.lock",
+        )
+    )
     assert stage.index("-r requirements.lock") < stage.index("COPY pyproject.toml README.md ./")
+
+
+def test_controller_setup_runs_beside_the_lease_proof_and_finishes_before_the_upgrade():
+    start = _at('ca_dir="$(mktemp -d)"\n(\n')
+    started = _at("prep=$!\n")
+    background = SCRIPT[start:started]
+    for step in (
+        "kubectl create secret generic swarm-launch-signing",
+        "kubectl create serviceaccount swarm-controller",
+        "kubectl create configmap swarm-pod-policy",
+        "kubectl create secret generic swarm-terminal-attach-ca",
+    ):
+        assert step in background
+        assert SCRIPT.count(step) == 1
+    order = [
+        'helm test "$release"',
+        'ca_dir="$(mktemp -d)"\n(\n',
+        "prep=$!\n",
+        "registered, no lease bound",
+        "pkill -STOP",
+        'if ! wait "$prep"; then',
+        'fi\nhelm upgrade "$release"',
+    ]
+    assert [_at(text) for text in order] == sorted(_at(text) for text in order)
+
+
+def test_one_exec_waits_for_the_lease_and_its_renewal():
+    watch = SCRIPT[_at("python - <<'LEASE'\nimport dataclasses") : _at("pkill -STOP")]
+    assert "controller lease: " in watch
+    assert "controller lease renewed: " in watch
+    assert 'held["expires_at"] > first["expires_at"]' in watch
+    assert "sleep 1" not in watch
+    assert "current = lease.current(connect(), slug)\n        except Exception:\n            current = None" in watch
+
+
+def test_every_controller_probe_still_runs_and_fails_the_proof():
+    probes = SCRIPT[_at("declare -A probe_jobs") : _at('kubectl wait pod "${controller[@]}" --for=condition=Ready')]
+    assert probes.count("for probe in startup liveness readiness; do") == 3
+    reaped = probes.index('wait "${probe_jobs[$probe]}" || probe_status[$probe]=$?')
+    failed = probes.index("if [[ ${probe_status[$probe]} != 0 ]]; then")
+    assert reaped < failed < probes.index("probe failed: %s\\n", failed) < probes.index("exit 1", failed)

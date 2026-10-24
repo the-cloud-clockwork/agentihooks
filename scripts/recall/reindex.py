@@ -2,7 +2,7 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 
-from scripts.swarm_ledger.repository.sqlite import read_document, read_registry, read_slugs
+from scripts.swarm_ledger.storage import read_document, read_registry, read_slugs
 
 from .ledger import COLLECTIONS, THREADS, extract_ledger
 from .store import RecallStore

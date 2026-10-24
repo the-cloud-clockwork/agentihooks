@@ -22,18 +22,54 @@ def test_main_image_is_built_once_before_every_compatible_smoke():
     build = builds[0]
     step = steps[build]
     if "run" in step:
-        assert step["run"] == f"docker build -t {IMAGE} ."
+        assert step["run"] in {
+            f"docker build -t {IMAGE} .",
+            f"docker build -t {IMAGE} --output type=image,compression=uncompressed .",
+            """docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
+build=$!
+status=0
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &&
+  docker tag public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 &
+redis=$!
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nats:2.15.1-alpine &&
+  docker tag public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine &
+nats=$!
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
+  docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
+wait "$redis" || status=$?
+wait "$nats" || status=$?
+wait "$build" || status=$?
+exit "$status"
+""",
+        }
     else:
         assert step["with"]["context"] == "."
         assert step["with"]["load"] is True
         assert step["with"]["tags"] == IMAGE
-    for script in ("hive-launch-smoke", "swarm-smoke", "hive-join-smoke", "compose-hive-smoke"):
+    for script in (
+        "hive-launch-smoke",
+        "swarm-smoke",
+        "hive-join-smoke",
+        "compose-hive-smoke",
+        "compose-task-smoke",
+        "compose-recovery-drill",
+    ):
         assert build < next(
             i for i, step in enumerate(steps) if f"scripts/packaging/{script}.sh" in step.get("run", "").split()
         )
 
 
-@pytest.mark.parametrize("script", ["hive-launch-smoke", "swarm-smoke", "hive-join-smoke", "compose-hive-smoke"])
+@pytest.mark.parametrize(
+    "script",
+    [
+        "hive-launch-smoke",
+        "swarm-smoke",
+        "hive-join-smoke",
+        "compose-hive-smoke",
+        "compose-task-smoke",
+        "compose-recovery-drill",
+    ],
+)
 @pytest.mark.parametrize("shared", [False, True])
 def test_smoke_uses_supplied_image_without_building_or_pulling_it(tmp_path, script, shared):
     tools = tmp_path / "bin"

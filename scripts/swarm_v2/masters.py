@@ -1,18 +1,21 @@
 """Master seats of one swarm and the phases each owns. Seat one is the lead, at the single master swarm's address."""
 
 import json
+import re
 from collections.abc import Callable
 
-from scripts.inbox.seats import seat_address
-from scripts.swarm.store import MASTER, PREFIX, SwarmError
+from scripts.inbox.seats import SeatRegistry, seat_address
+from scripts.swarm.store import MASTER, PREFIX, RedisStore, SwarmError
 
 DEFAULT_COUNT = 1
 SAVE_ATTEMPTS = 5
 UNNUMBERED = 10_000
 HIVES = "hives"
 RETIRED = "retired"
+GONE = ("finished", "retiring")
 HIVE_KEY = "hive."
 HIVE_PAIR = f"a hive owner is set as {HIVE_KEY}<hive id>=<master seat>"
+TITLE = re.compile(rf"{MASTER} \d+ · \S+")
 
 
 class MasterError(SwarmError):
@@ -21,6 +24,16 @@ class MasterError(SwarmError):
 
 def seat(index: int) -> str:
     return MASTER if index == 1 else f"{MASTER}-{index}"
+
+
+def title(slug: str, address: str) -> str:
+    """The name a master shows in Claude.ai, herdr and Remote Control: its seat number, then its swarm."""
+    number = 1 if address in ("", seat_address(slug, MASTER)) else _number(slug, address)
+    return f"{MASTER} {number} · {slug}"
+
+
+def is_title(text: str) -> bool:
+    return TITLE.fullmatch(text) is not None
 
 
 def is_lead(slug: str, agent) -> bool:
@@ -65,8 +78,26 @@ def _number(slug: str, address: str) -> int:
     return int(found) if found.isdecimal() else UNNUMBERED
 
 
-def live_seats(live: list) -> list[str]:
-    return [a.seat or a.name for a in live if a.lane == MASTER]
+def held(redis, slug: str, agents: list) -> dict[str, str]:
+    """Each live master seat, lead first then by number, with the name holding it. The seat registry decides every
+    seat it has an occupant for: live while that occupant has neither left nor finished nor retired nor been asked to
+    retire. A master record whose seat the registry does not hold yet counts by its record."""
+    from scripts.swarm import master_retire
+
+    registry, table, store = SeatRegistry(redis), MasterSeats(redis), RedisStore(redis)
+    gone = {a.name for a in agents if a.state in GONE}
+    retired = set(table.retired(slug))
+    records = {a.seat or a.name: a.name for a in agents if a.lane == MASTER and a.name not in gone}
+    found = {}
+    for address in {*seats(slug, table.count(slug)), *records} - retired:
+        occupant = registry.occupant(address).occupant
+        name = occupant or records.get(address)
+        if occupant and (occupant in gone or registry.left(occupant, address)):
+            continue
+        if name and not master_retire.reason(store, slug, name):
+            found[address] = name
+    lead = seat_address(slug, MASTER)
+    return dict(sorted(found.items(), key=lambda pair: (pair[0] != lead, _number(slug, pair[0]))))
 
 
 def assign(phases: list[str], seat_list: list[str], previous: dict[str, str], known: list[str]) -> dict[str, str]:
@@ -101,8 +132,12 @@ def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
     if kind == HIVES:
         return owners.get(f"{HIVES}/{item}", "")
     if kind in ("questions", "followups"):
-        hive = next((row.get("hive") for row in doc.get(kind, []) if row.get("id") == item), None)
-        return owners.get(f"{HIVES}/{hive}", "") if hive else ""
+        row = next((row for row in doc.get(kind, []) if row.get("id") == item), {})
+        if row.get("hive"):
+            return owners.get(f"{HIVES}/{row['hive']}", "")
+        if not row.get("task"):
+            return ""
+        kind, item = "tasks", row["task"]
     if kind == "tasks":
         item = {t.get("id"): t.get("phase") for t in doc.get("tasks", [])}.get(item)
     elif kind != "phases":

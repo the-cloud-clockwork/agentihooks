@@ -24,7 +24,7 @@ connector-specific companion environment files.
 
 ## Install & Automation
 
-These variables control how `agentihooks init` installs and configures Claude Code. They are read at install time, not at hook runtime.
+These variables control how `agentihooks init` installs and configures Claude Code and Codex. Harness-specific variables apply only to their named client. They are read at install time, not at hook runtime.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -75,7 +75,7 @@ load time. See [MCP Transport](../hooks/mcp-transport.md) for the full setup.
 | `CLAUDE_HOOK_LOG_FILE` | `~/.agentihooks/logs/hooks.log` | Hook event log file path. |
 | `AGENT_LOG_FILE` | `~/.agentihooks/logs/agent.log` | Agent transcript log file path. |
 | `AGENTIHOOKS_LOG_MAX_MB` | `20` | Size at which `hooks.log`, `agent.log` and `async-hooks.log` rotate. |
-| `LIFECYCLE_GC_ENABLED` | `true` | Workspace lifecycle: per-call claims, disk warning, session-triggered sweeps and the hourly `agentihooks-gc.timer`. `false` removes the timer on the next install. |
+| `LIFECYCLE_GC_ENABLED` | `true` | Workspace lifecycle: per-call claims, disk warning, session-triggered sweeps and the hourly `agentihooks-gc` scheduler cron. `false` removes the cron on the next install. |
 | `AGENTIHOOKS_GC_INTERVAL_MIN` | `60` | Minimum minutes between session-triggered sweeps. |
 | `AGENTIHOOKS_DISK_WARN_GB` | `100` | Free space (smaller of `$HOME` and, on WSL, `/mnt/c`) below which every tool call is warned and a sweep starts. |
 | `AGENTIHOOKS_LOG_BACKUPS` | `3` | Rotated copies kept per log (`.1` newest). `0` truncates instead. |
@@ -95,7 +95,7 @@ load time. See [MCP Transport](../hooks/mcp-transport.md) for the full setup.
 | `REDIS_SESSION_TTL` | `86400` | Session TTL in seconds (24 hours). |
 | `REDIS_POSITION_TTL` | `3600` | Position TTL in seconds (1 hour). |
 | `REDIS_KEY_PREFIX` | `agenticore` | Redis key prefix for all stored keys. |
-| `REDIS_SOCKET_TIMEOUT` | `5.0` | Redis socket timeout in seconds. |
+| `REDIS_SOCKET_TIMEOUT` | `5.0` | Hook runtime Redis socket timeout in seconds. The hive endpoint does not read it. |
 
 ---
 
@@ -231,6 +231,7 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | `AGENTIHOOKS_ROUTE_ACCOUNT` | set by the router | Account a Claude launch was routed to (`api` for the api side) |
 | — | — | Api weights and caps are routing settings, not variables: `agentihooks balance set` (see [CLI Commands](cli-commands.md#agentihooks-balance)) |
 | — | — | Each account's live session cap comes from its five-hour window alone: 6 at 60%+ left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5% until reset; no new session below 5% of the week. The next session goes to the eligible account with the fewest live sessions, ties to the soonest resetting week. |
+| `AGENTIHOOKS_HIVE_SESSION_CEILING` | `12` | Most live sessions a hive reports for one Claude subscription; the hive cap is this ceiling times the smaller of five hour and week left, at least the band unless the ceiling is lower |
 | `QUOTA_POLICY_ENABLED` | `true` | Hand off / wait / stop when a session's own quota runs out |
 | `AGENTIHOOKS_HANDOFF_WEEK_PCT` | `98` | 7-day used % that triggers the quota policy |
 | `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the quota policy |
@@ -242,13 +243,26 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 
 ---
 
+## Hook Injection Budget
+
+Claude hook context uses a shared event budget, independently of compression.
+See [Hook Injection Budget](../hooks/injection-budget.md) for priority order,
+examples, inbox exceptions and size diagnostics. Codex and Copilot retain their
+own limits and arrival order.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOOK_INJECTION_MAX_CHARS` | `9000` | Claude event budget in UTF-16 code units. Keep positive and below 10,000; zero or negative disables fitting and priority sorting. |
+
+---
+
 ## Tool Memory
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AGENTICORE_TOOL_MEMORY_PATH` | `~/.agenticore_tool_memory.ndjson` | Path to the tool error memory file. |
 | `AGENTICORE_TOOL_MEMORY_MAX` | `100` | Maximum number of error entries to store. |
-| `AGENTICORE_TOOL_MEMORY_SHOW` | `15` | Number of entries to inject per `PreToolUse` event. |
+| `AGENTICORE_TOOL_MEMORY_SHOW` | `5` | Maximum selected entries per `PreToolUse` event, each limited to 160 characters before event budget fitting. |
 
 ---
 
@@ -261,6 +275,95 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | `AGENTICORE_AGENT` | `unknown` | Agent identifier tag. |
 | `AGENT_NAME` | `Agent` | Agent display name for notifications and logs. |
 | `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | -- | Output token limit. Injected into session context if set. |
+
+---
+
+## GitHub CLI Config Pin
+
+gh 2.x moves the operator's login: the gh 2.4.0 binary on the operator's
+machine carries `autoMigrateConfigDir`, recorded in #3502. When
+`XDG_CONFIG_HOME` is set, `GH_CONFIG_DIR` is unset and `$XDG_CONFIG_HOME/gh`
+does not exist, gh renames `~/.config/gh` into `$XDG_CONFIG_HOME/gh` on its
+next run. A proof, render or
+launch that points `XDG_CONFIG_HOME` at a scratch folder then takes the login
+with it, and every other session on the machine loses GitHub until the folder is
+moved back. This happened twice on 15 October: once from a proof wrapper and
+once from the Claude session it had already started
+([#3502](https://github.com/the-cloud-clockwork/agentihooks/issues/3502), fixed by
+[#3505](https://github.com/the-cloud-clockwork/agentihooks/pull/3505)).
+
+AgentiHooks pins `GH_CONFIG_DIR` to the home gh folder whenever
+`XDG_CONFIG_HOME` points away from the home default, so gh reads the operator's
+login in place and never migrates it.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GH_CONFIG_DIR` | -- | Read by gh. AgentiHooks sets it to `$HOME/.config/gh` when `XDG_CONFIG_HOME` is set to anything other than `$HOME/.config` and `GH_CONFIG_DIR` is unset or empty. A value you set is kept. |
+| `XDG_CONFIG_HOME` | -- | Decides whether the pin applies. Unset, or equal to `$HOME/.config`, leaves the environment unchanged. |
+| `CLAUDE_ENV_FILE` | -- | Set by Claude Code for each session. When a hook pins `GH_CONFIG_DIR`, it appends `export GH_CONFIG_DIR=...` to this file once, so the agent's own shell commands inherit the pin. |
+
+### Where the pin applies
+
+| Process | How |
+|---------|-----|
+| Every `agentihooks` CLI command and every `scripts` module | Importing the `scripts` package pins its own environment and every child it starts. |
+| Every hook | The hook process pins its environment after loading `~/.agentihooks/.env` and `~/.agentihooks/*.env`, which may set `XDG_CONFIG_HOME`. |
+| A Claude session's shell | The hook writes the pin to `CLAUDE_ENV_FILE`, which covers a session that was not started by an AgentiHooks launcher. The line is written once; an existing copy is left alone. |
+| Agents opened by `init-agent`, including swarm spawns and handoffs | The launcher script runs the same check in shell before it starts Claude or Codex. |
+
+The pin never stops a hook. If `CLAUDE_ENV_FILE` cannot be read, decoded or
+written, the hook continues without it.
+
+### Isolated proofs you write
+
+A wrapper that sets `XDG_CONFIG_HOME` and runs commands outside AgentiHooks must
+pin gh itself, in every shell and session it starts. The engineer role carries
+this rule.
+
+```bash
+export XDG_CONFIG_HOME="$SCRATCH/config"
+export XDG_STATE_HOME="$SCRATCH/state"
+export XDG_DATA_HOME="$SCRATCH/data"
+export GH_CONFIG_DIR="$HOME/.config/gh"
+```
+
+The same check the launcher writes, for a script that may or may not be isolated:
+
+```bash
+if [ -n "${XDG_CONFIG_HOME:-}" ] && [ "$XDG_CONFIG_HOME" != "$HOME/.config" ]; then
+  export GH_CONFIG_DIR="${GH_CONFIG_DIR:-$HOME/.config/gh}"
+fi
+```
+
+### Limits
+
+- A session started before the pin shipped keeps its old environment. A long
+  lived isolated session runs gh too, for example for pull request status, so it
+  needs the pin as much as a new command does. Restart it.
+- The pin only fills an unset value. A `GH_CONFIG_DIR` pointing elsewhere is
+  used as given.
+- An `XDG_CONFIG_HOME` of `$HOME/.config/`, with a trailing slash, is pinned by
+  the launcher's shell check, which compares text, and left alone by hooks and
+  the CLI, which compare paths. Both outcomes keep the login in place.
+
+### Troubleshooting
+
+Every agent reports gh as logged out at once:
+
+1. Check whether the home folder is gone: `test -d ~/.config/gh && echo present || echo missing`.
+2. Look for a moved copy anywhere under your home folder:
+   `find ~ -maxdepth 8 -type d -name gh -not -path "$HOME/.config/gh"`.
+   Isolated proofs usually put their config folder under `~/scratchpad`. The moved `gh`
+   folder keeps its original modification time; its new parent `config` folder
+   carries the time of the move.
+3. Confirm nothing has recreated the home folder, `test ! -e ~/.config/gh && echo free`,
+   since `mv` would otherwise nest the login inside it. Move it back with
+   `mv <found folder> ~/.config/gh`, then confirm with
+   `gh api user --jq .login`. List the folder rather than reading its files: it
+   holds the login token.
+4. The scratch folder that held the moved copy names the proof or session that
+   set `XDG_CONFIG_HOME`. Add the pin to that wrapper and restart any session it
+   started, which still carries the unpinned environment.
 
 ---
 
@@ -340,6 +443,28 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 
 ---
 
+## Master Inbox Intent Grouping
+
+See [Intent grouping](../pillars/swarm.md#intent-grouping). Read by every process that hands out a swarm's master inbox pool.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` | `on` | `1`, `true`, `yes` or `on` keep grouping on; any other value turns it off and the pool deals items round robin |
+| `MASTER_INBOX_CLASSIFIER_TIMEOUT_S` | `3` | Seconds one pool pass waits for its intent verdicts before unanswered items go round robin |
+
+---
+
+## Swarm Grafana Alerts
+
+See [Grafana bottleneck alerts](grafana-bottleneck-alerts.md). The swarm tick reads alert state through the gateway with these; no listener, token or secret path of its own.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_KEY_GATEWAY` | — | LiteLLM gateway key; its LiteLLM unit must reach the `grafana` MCP server. Unset → the tick reads no alerts |
+| `LANGFUSE_MCP_URL` | — | Gateway MCP endpoint, shared with the Langfuse summary pass. Unset → the tick reads no alerts |
+
+---
+
 ## Brain Adapter
 
 Every variable in this section is owned by Agentibrain and stored in
@@ -375,4 +500,4 @@ duplicating them into its own environment file.
 | `RETRY_BREAKER_TTL` | `300` | Seconds before a failure fingerprint expires from the counter. |
 | `CONTROLS_BYPASS_ENABLED` | `true` | Enable the controls toggle (bypass mode). Operator phrase `disable controls` lifts branch, non-protected PR, hotfix and non-main force-push gates session-wide. Protected promotion remains CI-only; PyPI publication still requires `release dance`. See [Guardrail 9](/docs/pillars/guardrails/#guardrail-9-controls-toggle-bypass-mode). |
 | `KUBECTL_MUTATION_GUARD_ENABLED` | `true` | HARD-FLOOR live-patching guard. PreToolUse Bash hook that blocks `kubectl exec`/`cp` writes, `kubectl edit`/`patch`/`set`/`scale`/`rollout-restart`/`annotate`/`label`/`drain`/`debug`/`create -f`/`apply -f`/`autoscale`, `helm install`/`upgrade`/`rollback` outside CI, `argocd app sync --local`, SSH-edit, `scp` INTO host, and `docker exec` writes. Does NOT honor bypass mode, hotfix signals, or release-gate signals — code is the source of truth. See CI Manifesto §3.5 and `rules/code-is-source.md`. |
-| `AGENTIHOOKS_SERENA` | `true` | Serena edit guard. PreToolUse hook that blocks a built-in or shell rewrite of Python in a linked worktree, routing it to Serena's symbol tools instead. `false` turns the whole guard off for that session or machine: every edit is let through and no Serena directive is injected; unset or any other value keeps it on. See Development Manifesto §7 and `rules/code-intelligence.md`. |
+| `AGENTIHOOKS_SERENA` | `true` | Serena edit guard. PreToolUse hook that blocks a built-in or shell rewrite of Python in a linked worktree, routing it to Serena's symbol tools instead. `false` turns the whole guard off for that session or machine: every edit is let through and no Serena directive is injected; unset or any other value keeps it on. Deleting a whole Python file stays open in the session's own checkout and is refused in any other. See [Guardrail 10](/docs/pillars/guardrails/#guardrail-10-serena-edit-guard), Development Manifesto §7 and `rules/code-intelligence.md`. |

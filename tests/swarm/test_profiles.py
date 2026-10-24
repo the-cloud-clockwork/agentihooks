@@ -5,12 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm import cli, runtime, status, store, templates, tick
-from tests.swarm.test_tick import FakeLedger
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 from tests.swarm.profile_fixture import validated
+from tests.swarm.test_tick import FakeLedger
 
 
 def test_template_role_defaults_and_master_settings_round_trip(tmp_path):
@@ -77,6 +73,10 @@ def test_runtime_forwards_and_records_profile(tmp_path, lane, profile, harness):
     calls = []
 
     def launch(argv, **kwargs):
+        from scripts.routing import native_login
+
+        if argv[1:] == list(native_login.COMMAND):
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
         calls.append(argv)
         return SimpleNamespace(
             returncode=0,
@@ -99,7 +99,7 @@ def test_runtime_forwards_and_records_profile(tmp_path, lane, profile, harness):
     saved.create(config)
     saved.put_agent("sw", record)
     assert record.transport == ("legacy" if harness == "codex" else "")
-    assert saved.agents("sw") == [replace(record, transport="")]
+    assert saved.agents("sw") == [replace(record, transport="", remote_control={})]
     assert (saved.agents("sw")[0].profile, saved.agents("sw")[0].model) == (profile, "chosen")
     raw = json.loads(saved.redis.hget(saved.key("sw", "agents"), "a"))
     raw.pop("profile")

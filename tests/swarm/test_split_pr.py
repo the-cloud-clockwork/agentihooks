@@ -3,15 +3,14 @@ import pytest
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_intent_cli import started  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 FIRST = "https://github.com/o/r/pull/9"
 SECOND = "https://github.com/o/r/pull/10"
 
 
-def test_swarm_pr_binds_each_pull_request_of_a_split_task_to_the_half_it_names(started):  # noqa: F811
+@pytest.mark.parametrize("halves", [["1-2", "3-4"], ["compatibility", "repair"]])
+def test_swarm_pr_binds_each_pull_request_of_a_split_task_to_the_half_it_names(started, halves):  # noqa: F811
     _, ledger, _ = started
-    ledger.rows["t1"]["split"] = ["1-2", "3-4"]
+    ledger.rows["t1"]["split"] = halves
     assert run("sw", "pr", FIRST, "--half", "1") == 0
     assert ledger.rows["t1"]["split_pulls"] == [FIRST]
     assert run("sw", "pr", FIRST) == 0

@@ -6,7 +6,7 @@ from pathlib import Path
 import ledger_comments
 import ledger_kinds
 
-from scripts.swarm_ledger import ledger_plans, ledger_rank, task_dependencies
+from scripts.swarm_ledger import ledger_plans, ledger_rank, ports, task_dependencies
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -47,9 +47,13 @@ UPDATABLE = (
     "slice",
     "follow_up",
     "split_pulls",
+    "pull_scopes",
+    "after_release",
+    "applied_at",
+    "workstation",
     "recovery",
 )
-BOOL_FIELDS = ("artifact", "follow_up")
+BOOL_FIELDS = ("artifact", "follow_up", "workstation")
 DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
@@ -58,7 +62,11 @@ LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
-OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches")
+RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
+APPLIED_RE = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)?")
+OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes")
+PULL_SCOPE_KINDS = ("stage", "prerequisite")
+PULL_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
@@ -130,6 +138,8 @@ def check(op):
     check_quote(op)
     check_lists(fields)
     check_stack(fields)
+    check_release(fields)
+    check_applied(fields)
     check_bools(fields)
     check_profile(fields)
     check_urls(fields)
@@ -182,6 +192,18 @@ def check_stack(fields):
         raise ValueError("parked_on must list task ids")
 
 
+def check_release(fields):
+    value = fields.get("after_release", "")
+    if not (isinstance(value, str) and RELEASE_RE.fullmatch(value)):
+        raise ValueError("after_release must be a release tag such as v2.17.1, or empty to clear it")
+
+
+def check_applied(fields):
+    value = fields.get("applied_at", "")
+    if not (isinstance(value, str) and APPLIED_RE.fullmatch(value)):
+        raise ValueError("applied_at must be a UTC time such as 2026-10-18T12:00:00Z, or empty to clear it")
+
+
 def check_rank(fields):
     if "rank" in fields:
         ledger_rank.canonical(fields["rank"])
@@ -221,8 +243,25 @@ def check_repository_branches(fields: dict) -> None:
         raise ValueError("repository_branches must map absolute local repository paths to branch names")
 
 
+def check_pull_scopes(fields: dict) -> None:
+    scopes = fields.get("pull_scopes", {})
+    if not isinstance(scopes, dict) or not all(
+        PULL_URL_RE.fullmatch(url)
+        and isinstance(declared, dict)
+        and set(declared) == {"kind", "scope"}
+        and declared["kind"] in PULL_SCOPE_KINDS
+        and isinstance(declared["scope"], str)
+        and declared["scope"].strip()
+        for url, declared in scopes.items()
+    ):
+        raise ValueError(
+            "pull_scopes must map pull request URLs to a kind, stage or prerequisite, and a nonempty scope"
+        )
+
+
 def check_lists(fields):
     check_repository_branches(fields)
+    check_pull_scopes(fields)
     for key in LIST_FIELDS:
         value = fields.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
@@ -260,6 +299,8 @@ def check_task(task):
         raise ValueError(f"tasks/{task.get('id')}/state must be one of {STATES}")
     check_lists(task)
     check_stack(task)
+    check_release(task)
+    check_applied(task)
     check_urls(task)
     check_profile(task)
     check_rank(task)
@@ -320,6 +361,7 @@ def _add(doc, op, ctx):
         "repository_branches",
         "slice",
         "follow_up",
+        "workstation",
     ):
         if key in op:
             task[key] = op[key]
@@ -338,7 +380,9 @@ def _add(doc, op, ctx):
             ctx.refused.append(str(exc))
             return False
         task["plan_slice"] = op["plan_slice"]
-    if refusal := ledger_plans.task_refusal(doc, task):
+    if refusal := (
+        ledger_plans.task_refusal(doc, task) or shared_refusal(doc, task) or ledger_rank.urgent_refusal(task, doc)
+    ):
         ctx.refused.append(refusal)
         return False
     tasks.append(task)
@@ -349,7 +393,7 @@ def _add(doc, op, ctx):
 
 
 def add_refusal(tasks, op, appended):
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     by, lane = op["by"], lane_of(op["by"])
     if lane in WORKER_LANES:
@@ -391,7 +435,7 @@ def unsliced_refusal(doc: dict, task: dict, by: str) -> str:
 
 
 def rank_refusal(by, field="rank"):
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     lane = lane_of(by)
     if field == "rank":
@@ -417,12 +461,22 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
-    return park_refusal(op, task)
+    return park_refusal(op, task) or urgent_update_refusal(op, task, doc)
+
+
+def urgent_update_refusal(op: dict, task: dict, doc: dict) -> str:
+    fields = op["fields"]
+    if "rank" not in fields and "phase" not in fields:
+        return ""
+    rank = fields.get("rank", task.get("rank"))
+    return ledger_rank.urgent_refusal({**task, **fields, "rank": ledger_rank.ALIASES.get(rank, rank)}, doc)
 
 
 def park_refusal(op: dict, task: dict) -> str:
     after = {**task, **op["fields"]}
     if "parked_on" not in op["fields"] or not after["parked_on"] or (after.get("branch") and after.get("stacked_base")):
+        return ""
+    if ledger_kinds.read_only(after):
         return ""
     return f"{op['item']} cannot be parked without a branch and a stacked base: park it with agentihooks swarm park"
 
@@ -485,7 +539,7 @@ def _update_fields(task: dict, fields: dict) -> dict:
 
 
 def _block_author(by: str) -> bool:
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     return by == "operator" or lane_of(by) == "master"
 
@@ -509,32 +563,25 @@ def _record_timing(task, changed, op, ctx):
         ctx.record(op["by"], "task parked" if changed["parked_on"] else "task unparked", op["item"])
 
 
-def _update(doc, op, ctx):
-    task_id = op["item"].split("/")[1]
-    task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
-    others = [t for t in doc["tasks"] if t["id"] != task_id]
-    if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
-        return False
-    if _held_block(task, op, ctx) or _guarded(task, op) or task_dependencies.held(task, op, doc["tasks"]):
-        return True
-    if refusal := update_refusal(doc, op, ctx.meta):
-        ctx.refused.append(refusal)
-        return False
+def _normalized(op):
     if "rank" in op["fields"]:
         op = {**op, "fields": {**op["fields"], "rank": ledger_rank.canonical(op["fields"]["rank"])}}
     if "difficulty" in op["fields"]:
         op = {**op, "fields": sized(op["fields"])}
-    fields = _update_fields(task, op["fields"])
-    after = {**task, **fields}
-    check_lane(after)
-    if after.get("state") == "done" and ledger_kinds.unmet(after):
-        ctx.refused.append(f"{op['item']} cannot be done without its proof: {', '.join(ledger_kinds.unmet(after))}")
-        return False
-    if after.get("state") == "done" and ledger_kinds.kind(after) == "plan":
-        if refusal := slice_refusal(op["item"], after, doc):
-            ctx.refused.append(refusal)
-            return False
-    changed = _changed(task, fields, op, ctx)
+    return op
+
+
+def _done_refusal(doc, op, after):
+    if after.get("state") != "done":
+        return None
+    if ledger_kinds.unmet(after):
+        return f"{op['item']} cannot be done without its proof: {', '.join(ledger_kinds.unmet(after))}"
+    if ledger_kinds.kind(after) == "plan":
+        return slice_refusal(op["item"], after, doc)
+    return None
+
+
+def _apply_update(task, after, changed, op, ctx):
     if "kind" in changed and after.get("workspace"):
         from scripts.swarm_ledger import ledger_workspace
 
@@ -548,6 +595,33 @@ def _update(doc, op, ctx):
     for key in changed:
         ctx.stamp(f"{op['item']}/{key}", op["by"])
     ctx.dirty = ctx.dirty or bool(changed)
+
+
+def _gated(doc, op, ctx, task):
+    others = [t for t in doc["tasks"] if t["id"] != op["item"].split("/")[1]]
+    if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
+        return False
+    if _held_block(task, op, ctx) or _guarded(task, op) or task_dependencies.held(task, op, doc["tasks"]):
+        return True
+    if refusal := update_refusal(doc, op, ctx.meta):
+        ctx.refused.append(refusal)
+        return False
+    return None
+
+
+def _update(doc, op, ctx):
+    task_id = op["item"].split("/")[1]
+    task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
+    if (gated := _gated(doc, op, ctx, task)) is not None:
+        return gated
+    op = _normalized(op)
+    fields = _update_fields(task, op["fields"])
+    after = {**task, **fields}
+    check_lane(after)
+    if refusal := _done_refusal(doc, op, after):
+        ctx.refused.append(refusal)
+        return False
+    _apply_update(task, after, _changed(task, fields, op, ctx), op, ctx)
     return True
 
 
@@ -558,6 +632,9 @@ def _relay_rank(doc, op, ctx):
     rank, words = ledger_rank.canonical(op["fields"]["rank"]), relayed(op, ctx.meta)
     if task is None or not ledger_rank.quoted(rank, words):
         ctx.refused.append(UNRELAYED)
+        return False
+    if refusal := ledger_rank.urgent_refusal({**task, "rank": rank}, doc):
+        ctx.refused.append(refusal)
         return False
     task["rank"] = rank
     ctx.stamp(f"{op['item']}/rank", ledger_rank.OPERATOR)
@@ -676,7 +753,21 @@ def _set_slice(doc: dict, op: dict, ctx) -> bool:
     except ValueError as exc:
         ctx.refused.append(str(exc))
         return False
+    if fields["plan_slice"] != task.get("plan_slice") and (refusal := shared_refusal(doc, {**task, **fields})):
+        ctx.refused.append(refusal)
+        return False
     return True
+
+
+def shared_refusal(doc: dict, task: dict) -> str:
+    from scripts.swarm_ledger import plan_read
+
+    if not task.get("plan_slice") or not (others := plan_read.sharers(doc, task)):
+        return ""
+    return (
+        f"plan slice {task['plan_slice']} already belongs to open task {', '.join(others)}: give each task its own "
+        "slice anchor, a <!-- slice: name --> line above its own row or section, or group the tasks into one grouped task"
+    )
 
 
 def apply(doc, op, ctx):

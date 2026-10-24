@@ -6,7 +6,6 @@ from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 VOID = {"meta", "input", "br", "img", "hr", "link", "path"}
 SECTIONS = {
     "Original sources": False,
@@ -73,14 +72,14 @@ def sections():
 
 SWARM_PANELS = {
     "quota-fold",
+    "hives-fold",
     "overlays-fold",
     "agents-fold",
-    "health-fold",
     "handoff-fold",
     "freeze-fold",
     "architecture-fold",
 }
-DESIGN = TEMPLATE.parents[2] / "DESIGN.md"
+DESIGN = Path(__file__).resolve().parents[2] / "DESIGN.md"
 
 
 def in_ledger_section(node):
@@ -271,6 +270,10 @@ class El {
 const document = { createElement: (tag) => new El(tag) };
 const wired = [];
 function collapsible(box) { wired.push(box.attrs.id); }
+function closedLeft() { return 0; }
+function closedMore() { return null; }
+function viewItems(list, all) { return all; }
+function viewCount() { return ""; }
 function shape(el) { return { tag: el.tag, attrs: el.attrs, text: el.textContent, kids: el.kids.map(shape) }; }
 """
 

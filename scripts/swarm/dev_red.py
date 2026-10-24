@@ -65,7 +65,6 @@ def reopen_pass(slug, config, store, ledger, rows, run: Callable = subprocess.ru
         rows[task_id].update(live)
         hold(store.redis, slug, task_id, None)
         if live.get("state") == "open":
-            store.refund_claim(slug, task_id)
             ledger.comment(slug, task_id, REOPENED, by="swarm")
             actions.append(f"task {task_id} reopened, dev Tests passed after the red run that blocked it")
     return actions

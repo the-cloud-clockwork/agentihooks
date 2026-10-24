@@ -86,6 +86,13 @@ def test_each_task_has_its_own_budget(tmp_path):
     assert not gate.decide(launch(), ME, state(tmp_path)).allowed
 
 
+def test_a_review_reader_launched_twice_is_recorded_once(tmp_path):
+    gate = SubagentBudget()
+    for _ in range(2):
+        gate.decide(Call("Agent", {"name": "spec-reader", "prompt": "go"}), ME, state(tmp_path))
+    assert Budget("demo", "subagents", tmp_path).spent("t1", "spec-reader") == 1
+
+
 def test_a_session_outside_a_swarm_task_is_never_counted(tmp_path):
     gate = SubagentBudget(launches=0, continuations=0)
     for who in (Who(), Who(name="master@1-1", swarm="demo", lane="master"), Who(swarm="demo", task="t1")):

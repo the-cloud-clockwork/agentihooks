@@ -5,7 +5,7 @@ from scripts.swarm import ledger_events, status
 from scripts.swarm.health import standing
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 NOW = 1_800_000_000_000
 HOUR = 3_600_000

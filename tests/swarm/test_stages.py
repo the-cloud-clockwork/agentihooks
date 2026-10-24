@@ -6,7 +6,7 @@ from scripts.swarm import stages
 from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 SLUG = "scratch"
 M = 60_000
 H = 60 * M
@@ -480,6 +480,48 @@ def test_quota_holds_carry_the_held_harness_and_split_where_it_changes():
         ("host_hold", ""): 300.0,
         ("seat_wait", ""): 2400.0,
     }
+
+
+def test_a_hold_charges_only_as_many_waiting_tasks_as_spawns_it_held_earliest_ready_first():
+    tasks = [
+        {"id": "t0", "state": "done"},
+        *({"id": f"t{n}", "state": "open", "depends_on": ["t0"]} for n in (2, 3, 4)),
+    ]
+    held = [
+        {**sample(at(9), 1, "quota"), "held_harness": "codex"},
+        {**sample(at(9, 5), 2, "quota"), "held_harness": "codex"},
+        sample(at(9, 10), 0, ""),
+    ]
+    source = rows(ledger_events=[ledger("task done", at(8), "tasks/t0")], host_samples=held)
+    assert seconds_of(stages.report(source, tasks, NOW)) == {
+        ("quota_hold", "codex"): 900.0,
+        ("seat_wait", ""): 20700.0,
+    }
+    charged = {timeline.task: seconds for timeline, seconds in stages._charged(source, tasks, NOW, 4 * H, None)}
+    assert [charged[task].get(("quota_hold", "codex"), 0.0) for task in ("t2", "t3", "t4")] == [600.0, 300.0, 0.0]
+
+
+def test_a_hold_splits_where_a_waiting_task_starts_or_stops_inside_it():
+    hold = stages.Span("quota_hold", 100_000, 200_000, "codex", 1)
+    starts = (("a", "t1"), 120_000, 300_000, 0, "")
+    stops = (("b", "t2"), 50_000, 150_000, 1, "")
+    spans = (("c", "t3"), 0, 400_000, 2, "")
+    charged, _ = stages._held_pieces([("eng", starts), ("eng", stops), ("eng", spans)], [hold])
+    assert charged == [
+        (1, "quota_hold", "codex", 20.0),
+        (0, "quota_hold", "codex", 30.0),
+        (0, "quota_hold", "codex", 50.0),
+    ]
+
+
+def test_a_piece_held_twice_with_a_gap_keeps_the_claim_wait_around_and_between_the_holds():
+    piece = (("k", "t1"), 0, 100, 3, "")
+    assert stages._uncut(piece, [(50, 60), (10, 20), (15, 30)]) == [
+        (("k", "t1"), 0, 10, 3, ""),
+        (("k", "t1"), 30, 50, 3, ""),
+        (("k", "t1"), 60, 100, 3, ""),
+    ]
+    assert stages._uncut(piece, [(0, 100)]) == []
 
 
 def test_a_reopen_at_the_claim_instant_is_the_ready_time():

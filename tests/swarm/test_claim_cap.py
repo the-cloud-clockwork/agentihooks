@@ -4,10 +4,9 @@ import pytest
 
 from scripts.gates.claims import refusal
 from scripts.swarm import dispatcher
+from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, store  # noqa: F401
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 class CommentingLedger(FakeLedger):
@@ -148,3 +147,43 @@ def test_a_crashed_cap_lets_the_claim_through_and_counts_a_fail_open_row(store, 
         ("claims", "fail-open", "swarm", "t1", "ConnectionError: redis blip"),
         ("claims", "fail-open", "swarm", "t2", "ConnectionError: redis blip"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("failure_at", "expected"),
+    [
+        (1_792_439_999_999, "none"),
+        (1_792_440_000_000, "2026-10-19 20:00:00 UTC: no space left on device"),
+        (1_792_440_001_000, "2026-10-19 20:00:01 UTC: no space left on device"),
+    ],
+)
+def test_cap_report_dates_only_failures_within_the_counted_claims(store, failure_at, expected):  # noqa: F811
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
+    for name, at in (
+        ("previous", 1_792_008_000_000),
+        ("third", 1_792_440_003_000),
+        ("first", 1_792_440_000_000),
+        ("second", 1_792_440_002_000),
+    ):
+        store.record_launch("sw", AgentRecord(name, "eng", "t1", started_at=at), "started")
+    store.reset_claims("sw", "t1")
+    lives(store, 3)
+    store.record_launch(
+        "sw", AgentRecord("failed", "eng", "t1", started_at=failure_at), "failed", "no space left on device"
+    )
+    store.note_launch_failure("sw", "t1", "no space left on device")
+    for name, task, at, state in (
+        ("older_failure", "t1", failure_at - 1, "failed"),
+        ("other_task", "t2", 1_792_440_100_000, "failed"),
+        ("other_life", "t2", 1_792_440_101_000, "started"),
+        ("waiting", "t1", 1_792_440_102_000, "waiting"),
+        ("pending", "t1", 1_792_440_103_000, "pending"),
+    ):
+        store.record_launch("sw", AgentRecord(name, "eng", task, started_at=at), state, "different error")
+    original = store.launches("sw")
+    actions = tick("sw", store, ledger, runtime, now_ms=1_792_440_004_000)
+    report = ledger.comments[0][2]
+    assert f"Last launch failure: {expected}. Change its scope" in report
+    assert f"blocked t1: {report}" in actions
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert all(row in store.launches("sw") for row in original)

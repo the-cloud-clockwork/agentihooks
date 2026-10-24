@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/master_fence.py:scripts.swarm_v2.master_fence.x_check_send__mutmut_22:a0f07b9bdaea60208d65386d6671f7ae03ef931f06122288a08b4c0a932d3a48": {
+    "reader": "standards_reader",
+    "reason": "Seats.__init__ only stores doc, and check_send either returns before any owner lookup or assigns seats.doc from the ledger state before calling owner, so an initial empty dict and None are never read."
+  }
+}

@@ -8,11 +8,12 @@ import pytest
 
 from scripts.swarm_ledger import ledger, ledger_server, ledger_workspace, new_ledger
 from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
+repository = default_repository()
+
 SLUG = "lean-reads-2026-01-01"
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +31,7 @@ def make_ledger():
             "followups": [{"text": "check disk"}],
         }
     )
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(doc, SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     return core.sync(SLUG)[0]
@@ -81,7 +82,7 @@ def test_the_page_read_leaves_published_work_folder_lines_to_the_task_read(serve
     store.create(SwarmConfig(SLUG, "/hive", 0, 0))
     commands.publish(store, SLUG, {}, {"t1": {"latest_progress": "red test seen"}})
     monkeypatch.setattr(ledger_server, "swarm_store", lambda: store)
-    token = legacy_page.stored_token(core.paths(SLUG)[0])
+    token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
     request = urllib.request.Request(f"{served}/api/{SLUG}", headers={"X-Ledger-Token": token})
     with pytest.raises(urllib.error.HTTPError) as error:
         urllib.request.urlopen(request)
@@ -123,7 +124,7 @@ def test_an_agent_write_returns_the_agent_view_with_its_result(served):
 
 def test_the_whole_document_endpoint_is_gone_from_any_position_in_the_query(served):
     with_work_folder()
-    token = legacy_page.stored_token(core.paths(SLUG)[0])
+    token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
     request = urllib.request.Request(f"{served}/api/{SLUG}?x=1&view=agent", headers={"X-Ledger-Token": token})
     with pytest.raises(urllib.error.HTTPError) as error:
         urllib.request.urlopen(request)

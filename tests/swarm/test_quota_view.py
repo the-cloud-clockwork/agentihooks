@@ -138,3 +138,14 @@ def test_codex_status_and_page_report_week_remaining(five):
 
 def test_codex_status_keeps_a_missing_week_unknown():
     assert quota_view.routing_left(row("a", five=90.0, week=None, harness="codex")) is None
+
+
+def test_each_read_account_line_names_its_reading_age_and_an_unread_one_names_none():
+    read = {**row("alpha", sessions=2), "observed_at": 1_000.0}
+    reserved = {**row("beta", week=30.0), "observed_at": 400.0, "reserved": "held"}
+    decision = {**DECISION, "accounts": [read, reserved, row("gamma")]}
+    assert quota_view.lines(decision, 1_000_000 + 2 * MINUTE)[1:] == [
+        "quota account claude alpha  open  routing 60% left, read 2m ago  sessions 2",
+        "quota account claude beta  open  routing 30% left, held, read 12m ago  sessions 0",
+        "quota account claude gamma  open  routing 60% left  sessions 0",
+    ]

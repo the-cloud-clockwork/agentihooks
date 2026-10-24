@@ -3,6 +3,7 @@ when that launch fails, promote one live engineer whose only purpose is restorin
 
 import json
 import os
+from dataclasses import replace
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
@@ -15,12 +16,13 @@ SENDER = "swarm"
 FORCED = "master down {minutes} minutes, forced a master launch"
 NO_HOOK = "the forced master launch reported no hook within two minutes"
 NO_LAUNCH = "no master launched"
+SUSPECT = "suspect"
 PROMPT = (
     "PROMOTED: swarm {slug} has had no live master for {minutes} minutes and the forced master launch failed: "
     "{reason}. The exact launch error: {error}. This replaces any master down notice you were sent. You stay {name} "
     "on task {task}, but until a master binds your only purpose is, in this order: "
     "1. Bring the master back as soon as possible. The tick forces a new master launch every {minutes} minutes; read "
-    "why it fails with agentihooks swarm {slug} status and journalctl --user -u agentihooks-swarm.service. "
+    "why it fails with agentihooks swarm {slug} status and journalctl --user _SYSTEMD_USER_UNIT=agentihooks-swarm.service + SYSLOG_IDENTIFIER=agentihooks-swarm. "
     "2. Fix the causes of the outage right away in code: find where that error is raised and fix it through your own "
     "pull request into dev, never as follow ups. Once it merges and wt.sh done syncs local dev, the next forced "
     "launch runs the fixed code, or start one at once with agentihooks swarm {slug} master up --new. "
@@ -73,10 +75,13 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
     """launch runs the tick's own master launch and returns its actions."""
     state, minutes = read(store, slug), down_minutes(os.environ)
     forcing = bool(state) and config.state != "stopping" and _due(state, now_ms, minutes)
+    finished = _finish_dead(store, slug) if forcing else []
     if forcing and not _starting(store, slug):
-        store.redis.delete(store.key(slug, "master-start"))
+        master_start.clear_unalerted(store, slug)
     launched = launch()
-    actions = [FORCED.format(minutes=_shown(minutes)), *launched] if forcing else launched
+    if forcing and not launched:
+        launched = [_launch_refusal(store, slug)]
+    actions = [FORCED.format(minutes=_shown(minutes)), *finished, *launched] if forcing else launched
     if config.state == "stopping":
         master_alarm.drop(store, slug)
         return actions + _stop(slug, store, ledger, state, now_ms)
@@ -117,6 +122,28 @@ def _masters(store, slug):
 
 def _starting(store, slug):
     return bool(_masters(store, slug))
+
+
+def _finish_dead(store, slug):
+    """A suspect lead has not answered through the whole down window, so the forced launch may replace it."""
+    actions = []
+    for lead in _masters(store, slug):
+        if lead.state == SUSPECT:
+            store.put_agent(slug, replace(lead, state="finished"))
+            actions.append(f"finished dead lead {lead.name} ({SUSPECT})")
+    return actions
+
+
+def _launch_refusal(store, slug):
+    if leads := _masters(store, slug):
+        names = ", ".join(f"{a.name} ({a.state})" for a in leads)
+        return f"master launch refused: unfinished lead {names}"
+    pending = master_start.read(store, slug)
+    if name := pending.get("name"):
+        return f"master launch refused: startup pending for {name}"
+    if pending.get("alerted"):
+        return "master launch refused: startup retry backoff pending"
+    return NO_LAUNCH
 
 
 def _bound(store, slug, runtime):

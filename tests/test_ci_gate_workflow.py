@@ -2,6 +2,8 @@ import json
 import os
 import re
 import subprocess
+import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,7 @@ LINT_CONTROLS = [
     "Check every pull request job is a need of Gate Required",
     "Hold the size and complexity limits",
     "Fail on known vulnerabilities new against the base",
+    "Run every Swarm Ledger dashboard query against this head's metrics tables",
 ]
 LINT_SETUP = [
     "Install ruff",
@@ -102,6 +105,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "worker-image",
             "shard-check",
             "brain-smoke",
+            "writer-lock",
             "wiring",
             "size",
             "dependency-audit",
@@ -114,14 +118,21 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "mutation-stats",
             "reuse",
             "queue-fail-fast",
+            "unit-lost",
+            "unit-rerun",
             "stage-budget",
             "select",
             "unit-selected",
+            "docs",
         }
     )
     assert gate["if"] == "${{ always() }}"
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
-    assert jobs["split"]["needs"] in (["durations", "select", "reuse", "admission"], ["select", "reuse", "admission"])
+    assert jobs["split"]["needs"] in (
+        ["durations", "select", "reuse", "admission"],
+        ["select", "reuse", "admission"],
+        ["test-count", "select", "reuse", "admission"],
+    )
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
@@ -146,6 +157,46 @@ def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_re
     step = _workflow()["jobs"]["lint"]["steps"][names.index(control)]
     assert step["if"] == "${{ !cancelled() }}"
     assert max(names.index(name) for name in LINT_SETUP) < names.index(control)
+
+
+def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
+    steps = _workflow()["jobs"]["lint"]["steps"]
+    token = next((s for s in steps if s.get("id") == "antoncore-token"), None)
+    assert token is not None
+    assert token["with"]["repositories"] == "antoncore"
+    assert token["with"]["permission-contents"] == "read"
+    checkout = next((s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore"), None)
+    assert checkout is not None
+    assert checkout["if"] == "${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}"
+    assert checkout["with"]["token"] == "${{ steps.antoncore-token.outputs.token }}"
+    assert checkout["with"]["ref"] == "dev"
+    assert checkout["with"]["persist-credentials"] is False
+    assert "scripts/swarm_dashboard_columns.py" in checkout["with"]["sparse-checkout"]
+    check = next((s for s in steps if "swarm_dashboard_columns.py check" in s.get("run", "")), None)
+    assert check is not None
+    assert steps.index(token) < steps.index(checkout) < steps.index(check)
+    assert '--agentihooks "$GITHUB_WORKSPACE"' in check["run"]
+    assert "No module named" in check["run"]
+
+
+def test_lint_prepares_the_dashboard_checker_in_the_background_before_the_other_lint_steps():
+    steps = _workflow()["jobs"]["lint"]["steps"]
+    names = [step.get("name") for step in steps]
+    prepare = steps[names.index("Prepare the dashboard query checker in the background")]
+    check = steps[names.index("Run every Swarm Ledger dashboard query against this head's metrics tables")]
+    assert names.index(prepare["name"]) < min(names.index(name) for name in LINT_SETUP)
+    assert prepare["env"]["CLICKHOUSE"] == check["env"]["CLICKHOUSE"]
+    assert "orjson==" in prepare["run"]
+    assert "-m pip install" not in check["run"]
+    assert "docker run" not in check["run"]
+    for status in ("columns-venv.status", "clickhouse.status"):
+        assert f'echo $? > "$RUNNER_TEMP/{status}"' in prepare["run"]
+        assert f'-s "$RUNNER_TEMP/{status}"' in check["run"]
+        assert f'[[ "$(cat "$RUNNER_TEMP/{status}" 2>/dev/null)" == 0 ]] || {{' in check["run"]
+    assert check["run"].splitlines()[1].startswith('trap \'docker rm -f "$CLICKHOUSE"')
+    background = [line for line in prepare["run"].splitlines() if line.rstrip().endswith("&")]
+    assert len(background) == 2
+    assert all("2>&1 < /dev/null &" in line for line in background)
 
 
 def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
@@ -230,7 +281,7 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
     assert base["run"].replace('echo "BASE: $BASE"\n', "") == (
         'BASE="$(git merge-base "$BASE" HEAD)"\ngit worktree add --detach "$RUNNER_TEMP/base" "$BASE"\n'
     )
-    assert floor["run"] == (
+    serial = (
         'if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then\n'
         '  echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."\n'
         "  exit 1\n"
@@ -238,6 +289,118 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
         'cd "$RUNNER_TEMP/base"\n'
         'python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
+    parallel = serial.replace(
+        'cd "$RUNNER_TEMP/base"\npython -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n',
+        """python -c 'import json; from pathlib import Path; from tests.duration_coverage import collected_tests; Path("collected.json").write_text(json.dumps(collected_tests(Path.cwd())))' > "$RUNNER_TEMP/collection.log" 2>&1 &
+collection_pid=$!
+(
+  cd "$RUNNER_TEMP/base"
+  python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+) &
+floor_pid=$!
+status=0
+wait "$collection_pid" || status=$?
+wait "$floor_pid" || status=$?
+cat "$RUNNER_TEMP/collection.log"
+exit "$status"
+""",
+    )
+    shared = serial + (
+        'if [[ ! -f "$TEST_COUNT_HEAD_COLLECTION" ]]; then\n'
+        '  cd "$GITHUB_WORKSPACE"\n'
+        "  python -c 'import json, os; from pathlib import Path; from tests.duration_coverage import collected_tests; "
+        'Path(os.environ["TEST_COUNT_HEAD_COLLECTION"]).write_text(json.dumps(collected_tests(Path.cwd())))\'\n'
+        "fi\n"
+    )
+    assert floor["run"] in (serial, parallel, shared)
+
+
+def test_dev_records_the_suite_count_and_the_count_floor_reads_it_only_through_the_base_grader():
+    jobs = _workflow()["jobs"]
+    recorder_path = _ROOT / ".github/workflows/count-record.yml"
+    recorder = (
+        yaml.safe_load(recorder_path.read_text())["jobs"]["count-record"]
+        if recorder_path.exists()
+        else jobs["count-record"]
+    )
+    assert recorder["if"] == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}"
+    assert recorder["continue-on-error"] is True
+    assert recorder["strategy"]["matrix"] == jobs["test-count"]["strategy"]["matrix"]
+    steps = {step.get("name"): step for step in recorder["steps"]}
+    record, upload = steps["Record the suite count for later bases"], steps["Upload the suite count record"]
+    assert record["continue-on-error"] is True
+    assert "Record the suite count for later bases" not in str(jobs["split"]["steps"])
+    assert 'python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json"' in record["run"]
+    assert 'git worktree add --detach "$RUNNER_TEMP/base" HEAD' in record["run"]
+    assert upload["with"]["name"] == "count-record-${{ matrix.python-version }}"
+    count = jobs["test-count"]["steps"]
+    names = [step.get("name") for step in count]
+    fetch = count[names.index("Fetch the base suite count recorded on dev")]
+    floor = count[names.index("Hold the base revision's test count")]
+    assert names.index("Check out the base revision") < names.index(fetch["name"]) < names.index(floor["name"])
+    assert fetch["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert fetch["env"]["RECORD"] == upload["with"]["name"]
+    assert 'cd "$RUNNER_TEMP/base" && python -c' in fetch["run"]
+    assert "from tests.count_floor import dev_record" in fetch["run"]
+    assert floor["env"]["TEST_COUNT_BASE_RECORD"] == "${{ runner.temp }}/base-record.json"
+    assert jobs["test-count"]["permissions"] == {"contents": "read"}
+
+
+def test_every_dev_head_records_its_count_outside_the_promotion_queue():
+    from scripts.ci_branch_lanes import problems
+
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/count-record.yml").read_text())
+    assert workflow[True] == {"push": {"branches": ["dev"]}}
+    assert problems(workflow) == []
+    assert workflow["concurrency"]["queue"] == "max"
+    assert workflow["concurrency"].get("cancel-in-progress", False) is False
+    assert workflow["permissions"] == {"contents": "read"}
+    assert set(workflow["jobs"]) == {"count-record"}
+    assert "needs" not in workflow["jobs"]["count-record"]
+    assert "count-record" not in _workflow()["jobs"]
+
+
+@pytest.mark.parametrize("answer", ["fail", "none", "branch", "badzip", "match"])
+def test_fetching_the_dev_count_record_never_fails_and_writes_only_a_dev_record(tmp_path, answer):
+    runner = tmp_path / "runner"
+    base = runner / "base"
+    (base / "tests").mkdir(parents=True)
+    (base / "tests" / "count_floor.py").write_text((_ROOT / "tests" / "count_floor.py").read_text())
+    git = ["git", "-C", str(base), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "tests"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "base"], check=True)
+    sha = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    run = {"head_branch": "ci-plant" if answer == "branch" else "dev", "head_sha": sha}
+    listing = {"artifacts": [{"id": 5, "workflow_run": {**run, "repository_id": 1, "head_repository_id": 1}}]}
+    archive = tmp_path / "record.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("record.json", '{"identity": "x", "nodeids": ["t"]}')
+    (tmp_path / "listing.json").write_text(json.dumps({"artifacts": []} if answer == "none" else listing))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/usr/bin/env bash\n"
+        f'[[ "{answer}" == fail ]] && exit 1\n'
+        f'if [[ "$2" == *"/zip" ]]; then [[ "{answer}" == badzip ]] && echo junk || cat "{archive}"; exit 0; fi\n'
+        f'cat "{tmp_path / "listing.json"}"\n'
+    )
+    gh.chmod(0o755)
+    env = dict(
+        os.environ,
+        PATH=f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+        RUNNER_TEMP=str(runner),
+        GITHUB_REPOSITORY="o/r",
+        RECORD="count-record-3.12",
+    )
+    step = _step("test-count", "Fetch the base suite count recorded on dev")
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    record = runner / "base-record.json"
+    assert record.is_file() == (answer == "match")
+    if answer == "match":
+        assert json.loads(record.read_text())["nodeids"] == ["t"]
 
 
 def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_current_merge_base(tmp_path):
@@ -261,7 +424,7 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
     steps = {
         "test-count": _step("test-count", "Check out the base revision"),
         "lint": _step("lint", "Check out the base revision"),
-        "docs": next(s for s in jobs["lint"]["steps"] if s.get("id") == "docs"),
+        "docs": next(s for s in jobs.get("docs", jobs["lint"])["steps"] if s.get("id") == "docs"),
         "artifacts": next(s for s in jobs["lint"]["steps"] if s.get("id") == "artifacts"),
     }
     event = {"pull_request": {"base": {"sha": pinned}}}
@@ -698,7 +861,7 @@ def test_mutation_runs_in_tests_beside_unit_and_lint():
     assert workflow["jobs"]["mutation-plan"].get("needs", []) in ([], ["admission"])
     assert job["if"] in (
         "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
-        "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+        "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
     )
     dispatch = workflow[True]["workflow_dispatch"]["inputs"]["base"]
     assert dispatch["required"] is True

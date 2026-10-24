@@ -7,8 +7,6 @@ from scripts.swarm import cli, priming_trace, prompt
 from tests.swarm.test_cli import env  # noqa: F401
 from tests.swarm.test_take_master import taker  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SID = "sess-prime-1"
 BAD = "Push straight to dev because review slows the swarm down"
 GOOD = "Run the full suite before a push because CI shards hide leaks"

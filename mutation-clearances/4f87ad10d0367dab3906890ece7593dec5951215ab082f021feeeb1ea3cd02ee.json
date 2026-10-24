@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_fence__mutmut_3:24f86f4932d9e5eeb537f168322d2677e80badade73141f736e1b31ce19c6af9": {
+    "reader": "Standards",
+    "reason": "SQLite keyword, table, column and OLD or NEW identifier case is insensitive, including generated trigger names; the global wildcard, bindings, error text and commit behavior are unchanged."
+  }
+}

@@ -10,7 +10,7 @@ permalink: /docs/pillars/guardrails/
 
 **What keeps them safe.**
 
-Claude Code agents are powerful. Without boundaries, they can push to production branches, bump versions without a release workflow, leak credentials into tool calls, loop infinitely on broken commands, or quietly bloat their own instruction files. Guardrails close all of these gaps — automatically, at the hook layer, before any damage reaches your codebase.
+Guardrails apply to Claude Code and Codex. Both harnesses can run powerful tools. Without boundaries, they can push to production branches, bump versions without a release workflow, leak credentials into tool calls, loop infinitely on broken commands, or quietly bloat their own instruction files. Guardrails close all of these gaps — automatically, at the hook layer, before any damage reaches your codebase.
 
 > Your fleet operates within boundaries you set.
 
@@ -194,6 +194,8 @@ Prevents destructive git operations that bypass the normal PR and release workfl
 | `git push --force-with-lease` | Force push variant — same risk |
 | `git tag` | Tagging is a release operation; must go through CI |
 
+The prod lockdown guard also refuses `gh pr merge` into a base branch with a merge queue: the installed gh predates merge queues and lands the pull request directly through the admin bypass, cancelling the running group build. Queue it with `agentihooks swarm <slug> merge queue <url>` (the GraphQL `enqueuePullRequest` mutation). Only bypass mode lifts this refusal. The guard reads `gh pr merge` only; a merge through `gh api` is not checked.
+
 All blocked operations return exit code 2 with a human-readable explanation. CI alone promotes green `dev` into `main` and issues release tags. Agent pull requests target `dev`; no signal or bypass opens their creation or merge into `main`, `master` or `v1`.
 
 ### What is allowed
@@ -362,6 +364,7 @@ While bypass mode is ACTIVE:
 - PR creation into non-protected bases — `gh pr create` with no per-session counter cap; `--base dev` already needs no signal
 - Hotfix-category prod ops (§5) — `:latest`/`:prod`/`:stable` image push, tag, build
 - Force push to non-main branches — `git push --force`, `-f`, `--force-with-lease`
+- `gh pr merge` past the merge queue of a non-protected base
 
 ### What stays HARD FLOOR
 
@@ -412,6 +415,111 @@ Agents must NOT volunteer the toggle ("want me to disable controls?"). The opera
 
 ---
 
+## Guardrail 10: Serena edit guard
+
+**Hook:** `PreToolUse` (Bash, Edit, MultiEdit and Write; Codex `apply_patch` reaches the hook as Edit)
+**Default:** On — `AGENTIHOOKS_SERENA=true`
+
+Python in a linked worktree is edited through Serena's symbol tools (Development Manifesto §7), so the guard refuses built-in and shell rewrites of an existing `.py` file there. A linked worktree is a checkout whose `.git` is a file; the primary checkout, whose `.git` is a folder, stays open for work done directly on the base branch. Serena exposes no file deletion, so deleting a whole Python file is a separate path: allowed inside the session's own checkout, refused in any other checkout.
+
+### What it refuses
+
+- `Edit`, `MultiEdit` and `Write` on an existing `.py` file in a linked worktree.
+- A Codex `apply_patch` that updates, adds over, or moves an existing `.py` file there. Every patch target is checked, so a patch that deletes one file and updates another is refused for the update.
+- Shell rewrites of an existing `.py` file in a linked worktree: `sed -i`, `perl -i`, `cp` / `mv` / `install` onto it, `>` / `>>` redirects, `tee`, `dd of=`, and `open(..., "w")` or `Path(...).write_text()` in inline Python.
+
+The refusal names the worktree and the fix:
+
+```text
+BLOCKED: pkg/mod.py is Python in the worktree /home/me/dev/worktrees/agentihooks/engineer-abc123-0042, which is edited through Serena (Development Manifesto §7).
+Call mcp__serena__activate_project with /home/me/dev/worktrees/agentihooks/engineer-abc123-0042, then edit with replace_symbol_body, insert_after_symbol / insert_before_symbol, rename_symbol or replace_content. A new .py file may be created with Write; a whole file in this worktree is deleted with git rm or rm.
+```
+
+### What stays open
+
+- Serena's own tools, new `.py` files created with `Write`, and every non-Python file.
+- Formatters (`ruff format`, `black`), `patch` and `git apply`.
+- Deleting a whole Python file in the session's own checkout, through any of these:
+
+| Path | Example |
+|---|---|
+| `git rm` | `git rm tests/proof_probe.py` |
+| `rm` | `rm tests/proof_probe.py`, `rm -r scratch_pkg` |
+| `git -C` into the session's worktree | `git -C ~/dev/worktrees/antoncore/engineer-abc123-0042 rm pkg/old.py` |
+| Codex `apply_patch` | a patch whose only action on that path is `*** Delete File: tests/proof_probe.py` |
+
+A patch that deletes a file and then adds it again in the same patch is an edit and stays refused. A `Write` whose body only looks like a patch is a write and stays refused: patch deletions are read only from the `apply_patch` mapping.
+
+### The session's own checkout
+
+A deletion target counts as the session's own when either holds:
+
+- It lies in the checkout that contains the hook payload's `cwd`.
+- It lies in a worktree at `$WORKTREE_ROOT/<repo>/<name>` (default `~/dev/worktrees`, compared after resolving symlinks) whose name is the session's base name or that name with `-2`, `-3` and so on, or in a throwaway checkout at `$WORKTREE_ROOT/<repo>/_tmp/<base>-tmp-<n>`. The base name is the plain swarm agent name from `AGENTIHOOKS_AGENT_NAME` (`engineer@abc123-0042` gives `engineer-abc123-0042`), else `session-` and the first eight hex characters of `CLAUDE_CODE_SESSION_ID`. This covers a session whose task worktree is in another repository while the harness keeps `cwd` at its launch checkout.
+
+The second rule follows the names `wt.sh new` and `wt.sh tmp` give, so it reaches only worktrees this session created.
+
+### Deletions refused in another checkout
+
+Deleting Python in any other checkout, another agent's worktree or the primary checkout, is refused for every ordinary deletion form:
+
+- `rm` and `git rm`, including after `sudo`, `env`, `nohup`, `command`, `exec` or `time`, as `\rm` or `/bin/rm`, and with globs such as `rm pkg/*.py`.
+- `git -C <dir> rm`.
+- `find ... -delete`, `find ... -exec rm` and `-execdir rm`.
+- `... | xargs rm`, judged by the paths of the producing command.
+- `rm -r <dir>` of a folder that holds any `.py` file.
+
+```text
+BLOCKED: /home/me/dev/worktrees/agentihooks/engineer-abc123-0041/pkg/mod.py is Python in another checkout, /home/me/dev/worktrees/agentihooks/engineer-abc123-0041. A session deletes Python files only inside its own checkout.
+```
+
+Deleting non-Python files there, or a `.py` path that does not exist, is not checked.
+
+### Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENTIHOOKS_SERENA` | `true` | `false` turns the guard off for a session or a machine: every edit and deletion is let through and no Serena directive is injected |
+| `WORKTREE_ROOT` | `~/dev/worktrees` | Folder whose `<repo>/<name>` worktrees named after the session count as its own |
+| `AGENTIHOOKS_AGENT_NAME` | _(set by the swarm)_ | Swarm agent name that gives the session's base name; without it the session id is used |
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `is Python in the worktree ..., which is edited through Serena` on a deletion | The call is an edit, not a whole-file deletion: a patch with an update or an add on that path, or a `Write` | Delete with `git rm` / `rm`, or a patch whose only action on the path is `Delete File` |
+| `is Python in another checkout` for a file in your own task worktree in another repo | The worktree name does not match the session's base name, or it sits outside `WORKTREE_ROOT` | Create the worktree with `wt.sh new` so the name comes from the session; check `AGENTIHOOKS_AGENT_NAME` and `WORKTREE_ROOT` |
+| `is Python in another checkout` in a session without a swarm agent name | Only the launch checkout and worktrees named `session-<first eight of the session id>` count as its own | Run the deletion from that checkout, or from a worktree `wt.sh new` created for the session |
+
+### Current limits
+
+- `git -C` with a quoted folder path that contains spaces is not parsed, so that deletion is not checked.
+- A guard failure other than a refusal prints `WARNING: serena_edit_guard check failed (...) — guard bypassed` and lets the call through.
+
+The edit guard was delivered by pull request [#445](https://github.com/the-cloud-clockwork/agentihooks/pull/445). Whole-file deletion was added by [#4513](https://github.com/the-cloud-clockwork/agentihooks/pull/4513) (red Proofs runs 39128039655 and 39129889642, green 39128167690) and extended to the session's worktrees in other repositories by [#5242](https://github.com/the-cloud-clockwork/agentihooks/pull/5242) (red 39413853717, green 39416415454). Tests: `tests/context/test_serena_edit_guard.py`.
+
+---
+
+## Local test and mutation execution
+
+The local test guard blocks shell commands that execute tests or mutation by
+default, while permitting narrow source and symbol inspections and prose that
+mentions runners. See [Local test guard](../reference/local-test-guard.md) for
+examples, configuration, syntax limits and troubleshooting.
+
+---
+
+## Process environment reads
+
+The credential guard refuses every shell, `Read`, `NotebookRead` and `Grep`
+read of a process environment file under `/proc`, such as
+`/proc/<pid>/environ`, and names the leak free alternatives: a test of one
+variable or a names only listing. See
+[Process environment reads](../reference/credential-guard-proc-environ.md) for
+the refused forms, what still passes, configuration and troubleshooting.
+
+---
+
 ## All guardrails at a glance
 
 | # | Guardrail | Hook event | Default | Block or warn | Config key |
@@ -425,6 +533,7 @@ Agents must NOT volunteer the toggle ("want me to disable controls?"). The opera
 | 7 | Output token limit | `SessionStart` | Passive | Inject awareness | `CLAUDE_CODE_MAX_OUTPUT_TOKENS` |
 | 8 | File read dedup | `PreToolUse` / `PostToolUse` | On | Block | `FILE_READ_CACHE_ENABLED` |
 | 9 | Controls toggle (bypass) | `UserPromptSubmit` / `PreToolUse` / `SessionEnd` | On | Operator-toggled | `CONTROLS_BYPASS_ENABLED` |
+| 10 | Serena edit guard | `PreToolUse` | On | Block | `AGENTIHOOKS_SERENA` |
 
 ---
 

@@ -3,8 +3,6 @@ import pytest
 from scripts.gates import progress
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG, ME = "demo", "engineer@abcdef-0001"
 
 

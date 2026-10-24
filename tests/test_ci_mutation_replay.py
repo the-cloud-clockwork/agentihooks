@@ -91,7 +91,7 @@ def test_replay_accepts_complete_survivor_failures_and_rejects_incomplete_grades
     (tmp_path / "stats").mkdir()
     (tmp_path / "grades/shard-0").mkdir(parents=True)
     (tmp_path / "manifest.json").write_text(json.dumps({"case": "third", "mutants": 1}))
-    (tmp_path / "stats/plan.json").write_text(json.dumps({"shards": 1}))
+    (tmp_path / "stats/plan.json").write_text(json.dumps({"shards": 1, "assignments": {"survivor": 0}}))
     survivor = {"name": "survivor", "status": "survived"}
     file = {
         "path": "scripts/sample.py",
@@ -217,3 +217,56 @@ def test_replay_cli_defaults_to_its_work_folder_and_accepts_the_third_case(tmp_p
     monkeypatch.setattr("sys.argv", ["replay", "prepare", "--case", "third"])
     assert replay.main() == 0
     assert calls == [("third", tmp_path / ".mutation-replay")]
+
+
+@pytest.mark.parametrize("cleared", [False, True])
+def test_replay_verify_counts_every_unit_and_grades_split_survivors_against_the_source_clearances(
+    tmp_path, monkeypatch, capsys, cleared
+):
+    from scripts.ci_mutation.clearances import write_clearance
+
+    (tmp_path / "manifest.json").write_text(json.dumps({"case": "third", "mutants": 1}))
+    (tmp_path / "stats").mkdir()
+    (tmp_path / "stats/plan.json").write_text(json.dumps({"shards": 2, "assignments": {"split": [1, 0]}}))
+    (tmp_path / "source").mkdir()
+    if cleared:
+        write_clearance(tmp_path / "source", "scripts/sample.py:split:f", {"reader": "Standards", "reason": "same"})
+    row = {"name": "split", "status": "survived", "lines": [2], "fingerprint": "f", "diff": "changed"}
+    for index in range(2):
+        shard = {"index": index, "expected": 1, "graded": 1, "complete": True, "budget_exhausted": False}
+        report = {
+            "files": [],
+            "not_mutated": [],
+            "failed": False,
+            "units": [{"path": "scripts/sample.py", "lines": [2], "rows": [row]}],
+            "shard": shard,
+        }
+        (tmp_path / f"grades/shard-{index}").mkdir(parents=True)
+        (tmp_path / f"grades/shard-{index}/report.json").write_text(json.dumps(report))
+    monkeypatch.setattr("sys.argv", ["replay", "verify", "--folder", str(tmp_path)])
+    assert replay.main() == (1 if cleared else 0)
+    proof = json.loads((tmp_path / "replay-proof.json").read_text())
+    assert (proof["complete"], proof["expected"], proof["graded"]) == (True, 2, 2)
+    assert proof["survivor_failures"] == (0 if cleared else 1)
+    assert [entry["name"] for entry in proof["files"][0]["cleared"]] == (["split"] if cleared else [])
+
+
+def test_replay_grade_hands_split_units_to_the_merge_instead_of_grading_them(tmp_path, monkeypatch, capsys):
+    (tmp_path / "source").mkdir()
+    stats = tmp_path / "stats"
+    stats.mkdir()
+    name = "scripts.sample.x_f__mutmut_1"
+    split = {"head": ["h"], "slices": [["a"], ["b"]], "costs": [3, 4]}
+    plan = {"assignments": {name: [0, 1]}, "costs": {name: 7}, "splits": {"scripts.sample.x_f": split}}
+    (stats / "plan.json").write_text(json.dumps(plan))
+    (tmp_path / "scope.json").write_text(
+        json.dumps({"scripts/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]}})
+    )
+    row = {"name": name, "status": "survived", "lines": [2], "fingerprint": "abc", "diff": "changed"}
+    monkeypatch.setattr(replay, "mutate_files", lambda *args: ({"scripts/sample.py": [row]}, ""))
+    monkeypatch.setattr("sys.argv", ["replay", "grade", "--folder", str(tmp_path)])
+    assert replay.main() == 0
+    report = json.loads((tmp_path / "grade-0/report.json").read_text())
+    assert report["files"][0]["counts"] == {}
+    assert report["units"] == [{"path": "scripts/sample.py", "lines": [2], "rows": [row]}]
+    assert report["failed"] is False

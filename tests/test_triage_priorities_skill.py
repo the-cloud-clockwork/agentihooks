@@ -11,11 +11,18 @@ SLUG = "demo-2026-01-01"
 FAKE = r"""#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
-if args[3:] == ["show"]:
+if args[3] == "get":
     path = os.path.join(os.environ["LEDGER_DIR"], args[2] + ".json")
     if not os.path.exists(path):
         sys.exit(f"ledger {args[2]} does not exist")
-    print(os.environ.get("FAKE_SHOW") or open(path).read())
+    doc = json.load(open(path))
+    name, _, item_id = args[4].partition("/")
+    data = doc.get(name, [])
+    if item_id:
+        data = next((row for row in data if row["id"] == item_id), None)
+        if data is None:
+            sys.exit(44)
+    print(os.environ.get("FAKE_SHOW") or json.dumps(data))
     sys.exit(0)
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
@@ -133,8 +140,25 @@ def env(tmp_path):
 
 
 def run(env, script, *args):
+    wrapper = """
+import json, runpy, subprocess, sys
+from urllib.error import HTTPError
+from scripts.swarm_ledger import ledger
+def resource(slug, path, collection=False):
+    assert collection == (path == "priorities")
+    done = subprocess.run(["agentihooks", "ledger", "--slug", slug, "get", path], capture_output=True, text=True)
+    if done.returncode == 44:
+        raise HTTPError("url", 404, "missing", {}, None)
+    if done.returncode:
+        raise ValueError((done.stderr or done.stdout).strip())
+    return json.loads(done.stdout)
+ledger.resource = resource
+sys.path.insert(0, str(__import__("pathlib").Path(sys.argv[1]).parent))
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
     return subprocess.run(
-        [sys.executable, str(SCRIPTS / script), *args],
+        [sys.executable, "-c", wrapper, str(SCRIPTS / script), *args],
         env=env,
         capture_output=True,
         text=True,

@@ -40,7 +40,7 @@ jobs:
           permission-pull-requests: write
           permission-workflows: write
 
-      - name: Squash the graded dev head into main
+      - name: Squash the graded tree snapshot into main
         id: promote
         uses: actions/github-script@v7
         with:
@@ -91,3 +91,14 @@ jobs:
             bash scripts/ci_release.sh notes "$RELEASE_SHA" "$NEXT" "$RUNNER_TEMP/notes.md"
             gh release create "v$NEXT" --repo "$GITHUB_REPOSITORY" --title "v$NEXT" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes --latest --verify-tag
           fi
+
+      - name: Close abandoned promotion pull requests
+        if: "!cancelled() && steps.app-token.outcome == 'success'"
+        uses: actions/github-script@v7
+        env:
+          PROMOTION_APP: ${{ steps.app-token.outputs.app-slug }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const { closeAbandoned } = require('./.github/scripts/promote.cjs');
+            await closeAbandoned({ github, context, core, app: process.env.PROMOTION_APP, deadline: Date.now() + 180000 });

@@ -3,7 +3,8 @@
 A larger swarm raises the count at once and master_fill launches a master in each empty seat. A smaller one, once it has
 stayed smaller for the hold window, asks each extra seat's master to hand off; the count falls only past seats whose
 master has left, so no seat is cut mid answer. Each count change rebalances phase ownership by code and posts the new
-owners on the masters channel. Without a rule the count stays the manual one and the tick still fills its seats.
+owners on the masters channel. Without a rule the swarm's masters step sizes the count; with step 0 the count stays the
+manual one and the tick still fills its seats.
 """
 
 import json
@@ -19,6 +20,7 @@ OFF = "off"
 PER_HIVE = "hive"
 RULE = "per"
 BELOW = "below"
+BELOW_WANT = "below-want"
 RETIRING = "retiring"
 RETIRE_SECONDS = "retire-seconds"
 TABLE = metrics_outbox.Table("master_scaling", (("metric", "String"), ("value", "Int64"), ("seat", "String")))
@@ -66,13 +68,17 @@ def wanted(rule: str, agents: list) -> int:
     return max(1, -(-len(found) // int(rule)))
 
 
+def stepped(step: int, agents: list) -> int:
+    return 1 + len(working(agents)) // step
+
+
 def run(slug: str, config, store, runtime, doc: dict, now_ms: int) -> list[str]:
     seats, found = masters.MasterSeats(store.redis), rule(store.redis, slug)
-    if not found or config.state in ENDED:
+    if not (found or config.masters_step) or config.state in ENDED:
         store.redis.hdel(seats.key(slug), masters.RETIRED)
         return master_fill.run(slug, config, store, runtime, doc, now_ms)
     agents = [a for a in store.agents(slug) if a.state != "finished"]
-    want = wanted(found, agents)
+    want = wanted(found, agents) if found else stepped(config.masters_step, agents)
     actions = _resize(slug, store, doc, agents, seats.count(slug), want, now_ms)
     return actions + master_fill.run(slug, config, store, runtime, doc, now_ms, min(seats.count(slug), want))
 
@@ -85,10 +91,8 @@ def _resize(slug, store, doc, agents, count, want, now_ms):
         _withdraw_asks(store, retiring)
         store.redis.hdel(key, BELOW, RETIRING)
         return _recount(slug, store, doc, agents, count, want, now_ms) if want > count else []
-    below = int(store.redis.hget(key, BELOW) or 0)
-    if not below:
-        store.redis.hset(key, BELOW, now_ms)
-    if now_ms - (below or now_ms) < HOLD_MS:
+    _withdraw_wanted_again(slug, store, key, retiring, want)
+    if now_ms - _below_since(store.redis, key, want, now_ms) < HOLD_MS:
         return []
     occupied = {a.seat: a for a in agents if a.lane == MASTER}
     actions = _ask(slug, store, occupied, retiring, range(count, want, -1), want, now_ms)
@@ -101,6 +105,14 @@ def _resize(slug, store, doc, agents, count, want, now_ms):
             actions.append(_retire_early(slug, store, doc, address, retiring.pop(address), now_ms))
     store.redis.hset(key, RETIRING, json.dumps(retiring))
     return actions + (_recount(slug, store, doc, agents, count, keep, now_ms) if keep < count else [])
+
+
+def _below_since(redis, key: str, want: int, now_ms: int) -> int:
+    since, last = int(redis.hget(key, BELOW) or 0), int(redis.hget(key, BELOW_WANT) or want)
+    if not since or want > last:
+        since = now_ms
+    redis.hset(key, mapping={BELOW: since, BELOW_WANT: want})
+    return since
 
 
 def _address(slug: str, index: int) -> str:
@@ -159,6 +171,13 @@ def _withdraw_asks(store, retiring):
     inbox = InboxStore(store.redis)
     for address, (_, ask_id) in retiring.items():
         inbox.withdraw(ask_id, SENDER, f"the swarm grew again, so seat {address} stays", expected_address=address)
+
+
+def _withdraw_wanted_again(slug, store, key, retiring, want):
+    wanted_again = [address for address in retiring if address in masters.seats(slug, want)]
+    if wanted_again:
+        _withdraw_asks(store, {address: retiring.pop(address) for address in wanted_again})
+        store.redis.hset(key, RETIRING, json.dumps(retiring))
 
 
 def _measure(slug, metric, value, seat, now_ms):

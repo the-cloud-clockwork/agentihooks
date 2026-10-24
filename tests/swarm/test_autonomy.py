@@ -7,8 +7,6 @@ from scripts.swarm.store import AUTONOMY, MASTER, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, home, run  # noqa: F401
 from tests.swarm.test_runtime import _spawn_env
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 TASK = {"id": "t1", "title": "x", "phase": "p1"}
 
 
@@ -110,7 +108,11 @@ def test_full_engineers_merge_on_green_like_delegate():
 
 def test_the_level_shapes_only_code_and_ci_tasks():
     for kind in ("ops", "tune", "troubleshoot", "research"):
-        assert build("manual", kind=kind) == build("delegate", kind=kind)
+        manual, delegate = build("manual", kind=kind).splitlines(), build("delegate", kind=kind).splitlines()
+        changed = [(m, d) for m, d in zip(manual, delegate, strict=True) if m != d]
+        assert len(changed) == 1
+        assert "leaves the merge to the operator" in changed[0][0]
+        assert "ready <handoff doc> instead of done" in changed[0][1]
     assert "open a draft pull request into dev" in build("manual", "ci", kind="ci")
 
 

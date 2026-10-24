@@ -4,12 +4,15 @@ import os
 import subprocess
 import time
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 PROC = Path("/proc")
 SAMPLE_S = 0.5
 GIT_TIMEOUT_S = 5
+GH_TIMEOUT_S = 10
+MERGED_JQ = 'map(.merged_at | values) | first // ""'
 NO_DEV = {"newest": None, "merged_minutes": None}
 
 
@@ -27,6 +30,26 @@ def server_pid(ledger_dir: Path) -> int | None:
 def _stat(pid: int, proc: Path) -> tuple[int, int]:
     tail = (proc / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
     return int(tail[11]) + int(tail[12]), int(tail[19])
+
+
+def snapshot() -> dict | None:
+    pid = server_pid(folder(os.environ))
+    if pid is None:
+        return None
+    try:
+        ticks, start = _stat(pid, PROC)
+    except (OSError, ValueError, IndexError):
+        return None
+    return {"pid": pid, "start": start, "ticks": ticks, "hertz": os.sysconf("SC_CLK_TCK")}
+
+
+def cpu_over_pass(before: dict | None, after: dict | None, elapsed: float) -> float | None:
+    if before is None or after is None or elapsed <= 0:
+        return None
+    if any(before[field] != after[field] for field in ("pid", "start", "hertz")):
+        return None
+    ticks = after["ticks"] - before["ticks"]
+    return ticks / before["hertz"] / elapsed * 100 if ticks >= 0 else None
 
 
 def server(
@@ -53,17 +76,45 @@ def server(
 def newest_on_dev(repo: Path = REPO, now: float | None = None) -> dict:
     try:
         found = subprocess.run(
-            ["git", "-C", str(repo), "log", "-1", "--format=%ct%x09%s", "origin/dev"],
+            [
+                "git",
+                "-C",
+                str(repo),
+                "log",
+                "-g",
+                "-1",
+                "--date=unix",
+                "--format=%H%x09%gd%x09%s",
+                "refs/remotes/origin/dev",
+            ],
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired):
         return dict(NO_DEV)
-    stamp, _, subject = found.stdout.strip().partition("\t")
-    if found.returncode or not stamp.isdigit():
+    sha, _, rest = found.stdout.strip().partition("\t")
+    selector, _, subject = rest.partition("\t")
+    _, brace, stamp = selector.rpartition("@{")
+    stamp = stamp.removesuffix("}")
+    if found.returncode or not brace or not stamp.isdigit():
         return dict(NO_DEV)
-    return {"newest": subject, "merged_minutes": int(((now or time.time()) - int(stamp)) / 60)}
+    merged = merged_at(repo, sha) or int(stamp)
+    return {"newest": subject, "merged_minutes": int(((now or time.time()) - merged) / 60)}
+
+
+def merged_at(repo: Path, sha: str) -> float | None:
+    try:
+        found = subprocess.run(
+            ["gh", "api", f"repos/{{owner}}/{{repo}}/commits/{sha}/pulls", "--jq", MERGED_JQ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT_S,
+        )
+        return datetime.fromisoformat(found.stdout.strip()).timestamp() if found.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
 
 
 def facts() -> dict:

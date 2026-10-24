@@ -1,13 +1,9 @@
 from dataclasses import replace
 
-import pytest
-
 from scripts.doctor import rates, rates_read
 from scripts.doctor.inbox import no_outcome
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def item(name, created, state="done", reason="done", fyi=False):

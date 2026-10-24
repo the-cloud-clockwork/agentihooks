@@ -1,3 +1,4 @@
+import fcntl
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
@@ -31,6 +32,7 @@ VALIDATORS = {
     "master-account-codex": _name,
     "master-tier-claude": _name,
     "master-tier-codex": _name,
+    **{f"master-account-claude-{slot}": _name for slot in range(2, 6)},
 }
 DEFAULTS = {"claude-api-weight": 0, "codex-api-weight": 0}
 
@@ -56,8 +58,19 @@ class SettingsStore(ABC):
             raise ValueError("a routing setting write needs an actor")
         self._write(key, value, {"key": key, "value": value, "actor": actor, "at": now})
 
+    def claim(self, key: str, value: object, actor: str, now: float) -> object:
+        _known(key)
+        if value is None or not VALIDATORS[key](value):
+            raise ValueError(f"invalid value for {key}: {value!r}")
+        if not actor:
+            raise ValueError("a routing setting write needs an actor")
+        return self._claim(key, value, {"key": key, "value": value, "actor": actor, "at": now})
+
     @abstractmethod
     def history(self) -> list[dict]: ...
+
+    @abstractmethod
+    def _claim(self, key: str, value: object, entry: dict) -> object: ...
 
     @abstractmethod
     def _read(self) -> dict[str, object]: ...
@@ -87,6 +100,12 @@ class RedisSettings(SettingsStore):
         pipe.rpush(self.history_key, json.dumps(entry))
         pipe.execute()
 
+    def _claim(self, key: str, value: object, entry: dict) -> object:
+        if self.client.hsetnx(self.key, key, json.dumps(value)):
+            self.client.rpush(self.history_key, json.dumps(entry))
+            return value
+        return json.loads(self.client.hget(self.key, key))
+
 
 class FileSettings(SettingsStore):
     def __init__(self, path: Path) -> None:
@@ -113,6 +132,16 @@ class FileSettings(SettingsStore):
         temp = self.path.with_name(f"{self.path.name}.tmp")
         temp.write_text(json.dumps(data))
         temp.replace(self.path)
+
+    def _claim(self, key: str, value: object, entry: dict) -> object:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.with_name(f"{self.path.name}.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            held = self._read().get(key)
+            if held is not None:
+                return held
+            self._write(key, value, entry)
+        return value
 
 
 def open_store(client: "Redis | None", environ: Mapping[str, str]) -> SettingsStore:

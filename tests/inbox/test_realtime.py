@@ -7,8 +7,6 @@ from scripts.inbox.seen import SeenMarks
 from scripts.inbox.store import NOTIFY, InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 W = 300_000
 
 

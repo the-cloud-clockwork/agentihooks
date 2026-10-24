@@ -6,6 +6,12 @@ import pytest
 from scripts.ci_mutation.__main__ import main
 
 
+@pytest.fixture(autouse=True)
+def plugin_autoload_restored(monkeypatch):
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "")
+    monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD")
+
+
 def test_cli_uses_requested_revisions_budget_output_and_exit_code(tmp_path, monkeypatch, capsys):
     calls = []
     monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", raising=False)
@@ -76,6 +82,41 @@ def test_cli_defaults_and_success(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", discover)
     monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", gate)
     assert main() == 0
+
+
+def test_cli_names_every_failing_clean_baseline_test_in_the_job_summary(tmp_path, monkeypatch):
+    summary = tmp_path / "summary.md"
+    summary.write_text("earlier\n")
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr("sys.argv", ["gate"])
+    monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", lambda root, base, head: {})
+    failing = ["tests/test_a.py::test_one - AssertionError: no", "tests/test_b.py::test_two"]
+    monkeypatch.setattr(
+        "scripts.ci_mutation.__main__.run_gate", lambda *args: {"failed": True, "failing_tests": failing}
+    )
+    assert main() == 1
+    assert summary.read_text() == (
+        "earlier\n"
+        "### Mutation clean baseline failed\n\n"
+        "- `tests/test_a.py::test_one - AssertionError: no`\n"
+        "- `tests/test_b.py::test_two`\n"
+    )
+
+
+def test_cli_leaves_the_job_summary_alone_without_failing_tests(tmp_path, monkeypatch):
+    summary = tmp_path / "summary.md"
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr("sys.argv", ["gate"])
+    monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", lambda root, base, head: {})
+    monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", lambda *args: {"failed": True})
+    assert main() == 1
+    assert not summary.exists()
 
 
 def test_cli_passes_the_original_checkout_to_cached_collectors(tmp_path, monkeypatch):

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from scripts import agent_choice
 from scripts.handoff import transfers
-from scripts.swarm import idle, outage, snapshot
+from scripts.swarm import deliberate_exit, idle, outage, profile_choice, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
 
@@ -58,7 +58,7 @@ def blocker(agent, worktree, exists=os.path.isdir, has_quota=account_quota):
 def restored_text(slug, agent, ledger):
     sources = f"the ledger, printed by {ledger}"
     if agent.lane != MASTER:
-        folder = ledger_workspace.folder(slug, agent.task)
+        folder = ledger_workspace.named(slug, agent)
         sources = f"your task folder {folder} (steering.md, progress.md, proof.md) and {sources}"
     return RESTORED.format(slug=slug, name=agent.name, task=agent.task, sources=sources)
 
@@ -297,6 +297,7 @@ def recovery_pending(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
         record.get("state") == "pending"
         and record["attempts"] < RECOVERY_ATTEMPTS
         and record["identity"] == _recovery_identity(store, slug, agent)
+        and not deliberate_exit.recorded(store, slug, agent.name)
     )
 
 
@@ -316,7 +317,7 @@ def _recovery_current(store, slug, agent, context):
 
 
 def _recovery_text(slug, agent, task):
-    folder = task.get("workspace") or str(ledger_workspace.folder(slug, agent.task))
+    folder = ledger_workspace.named(slug, agent, task.get("workspace"))
     return (
         f"Service is back after the outage. As {agent.name}, re-read your task folder {folder} "
         f"(steering.md, progress.md, proof.md), then run agentihooks msg inbox and continue your own task {agent.task}. "
@@ -393,7 +394,7 @@ def _recover_process(store, slug, agent, task, context, text):
                         model=placed.model or agent.model,
                         effort=placed.effort or agent.effort,
                         model_source=placed.model_source or agent.model_source,
-                        profile_decision=placed.profile_decision or agent.profile_decision,
+                        profile_decision={**agent.profile_decision, **placed.profile_decision},
                     ),
                 )
                 return ""
@@ -403,19 +404,28 @@ def _recover_process(store, slug, agent, task, context, text):
 
 
 def _restart_from_handoff(store, slug, agent, task, context):
-    from scripts.swarm.tick import placed_record, primed
+    from scripts.swarm.tick import SpawnError, placed_record, primed
 
     if not _recovery_current(store, slug, agent, context):
         return "task ownership changed"
     handoff = recovery_text(store, slug, agent.task)
-    transfer = transfers.record(store, slug, agent, "outage", handoff, context.at)
-    transfers.attach(store, slug, agent)
-    task = primed(store, slug, agent.seat, {**task, "handoff": handoff, "transfer": transfer["id"]})
+    transfers.record(store, slug, agent, "outage", handoff, context.at)
+    transfer = transfers.attach(store, slug, agent)
+    task = primed(store, slug, agent.seat, {**task, "handoff": handoff, "transfer": transfer})
     if not _recovery_current(store, slug, agent, context):
         return "task ownership changed"
-    placed = context.runtime.spawn(store.config(slug), agent.lane, agent.name, task)
+    config = store.config(slug)
+    try:
+        placed = context.runtime.spawn(config, agent.lane, agent.name, task)
+    except SpawnError as error:
+        if error.status != "unsupported":
+            raise
+        placed = context.runtime.spawn(config, agent.lane, agent.name, {**task, profile_choice.FRESH: True})
     store.put_agent(
-        slug, replace(placed_record(agent, placed), conversation_id="", started_at=context.at, idle_ticks=0)
+        slug,
+        replace(
+            placed_record(agent, placed), conversation_id=placed.conversation_id, started_at=context.at, idle_ticks=0
+        ),
     )
     return ""
 
