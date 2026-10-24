@@ -1,7 +1,5 @@
 import json
 import os
-import re
-import shutil
 import subprocess
 import time
 from collections.abc import Callable, Mapping
@@ -94,14 +92,17 @@ def _request(store, environ, target, output):
     from redis.exceptions import RedisError
 
     from scripts.inbox.store import new_item_id
+    from scripts.master_login_native import authorization_url
 
-    link = re.search(r"https://(?:claude\.ai|claude\.com)/oauth/authorize\?[^\s\x1b]+", output.read_text())
+    link = authorization_url(output.read_text())
     if link is None:
         return None
     text = (
         "Authorize this native master login using the already signed in claude.ai session in the operator browser connector; "
         "never sign in, sign out or switch accounts. Stop on a login form or CAPTCHA. "
-        f"Open {link.group(0)} and reply exactly success, captcha or failure. "
+        f"Open {link} and reply exactly success, captcha or failure. "
+        "If shown a manual authorization code, click the page Copy button immediately before replying success; "
+        "the matching native login will privately consume and clear the Windows clipboard. Do not snapshot the code. "
         "Never send authorization codes or credentials."
     )
     sender = environ["AGENTIHOOKS_AGENT_NAME"]
@@ -116,7 +117,9 @@ def _request(store, environ, target, output):
     return request
 
 
-def _wait_for_browser(process, store, environ: Mapping[str, str], target: Path, output: Path, timeout: float) -> str:
+def _wait_for_browser(
+    process, store, environ: Mapping[str, str], target: Path, output, timeout: float, complete=lambda: True
+) -> str:
     sender = environ["AGENTIHOOKS_AGENT_NAME"]
     recipient = f"master@{environ['AGENTIHOOKS_SWARM']}"
     deadline = time.monotonic() + timeout
@@ -130,6 +133,8 @@ def _wait_for_browser(process, store, environ: Mapping[str, str], target: Path, 
             if reported in ("captcha", "failure"):
                 return reported
             code = process.poll()
+            if reported == "success" and code is None and not complete():
+                return "failure"
             if reported == "success" and code == 0:
                 return "success"
             if code is not None and (code != 0 or request is None):
@@ -169,30 +174,19 @@ def _stop_login(process) -> None:
 def authorize(environ: Mapping[str, str], target: Path, timeout: float = BUDGET.browser) -> str:
     from redis.exceptions import RedisError
 
-    from scripts import master_claude_login as login
+    from scripts import master_login_native as native
     from scripts.inbox import store as inbox
 
     outcome = "failure"
     if not environ.get("AGENTIHOOKS_SWARM"):
         notification(target, "browser", outcome, "inbox")
         return outcome
-    output = target.parent / "browser-auth.log"
     try:
         store = inbox.connect(environ)
-        descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            process = subprocess.Popen(
-                [shutil.which("claude") or "claude", *login.SETTINGS, *login.LOGIN],
-                env={**login.child(environ, target), "BROWSER": "true"},
-                stdin=subprocess.DEVNULL,
-                stdout=stream,
-                stderr=subprocess.STDOUT,
-                text=True,
+        with native.start(environ, target, _stop_login) as attempt:
+            outcome = _wait_for_browser(
+                attempt.process, store, environ, target, attempt.output, timeout, attempt.complete
             )
-            try:
-                outcome = _wait_for_browser(process, store, environ, target, output, timeout)
-            finally:
-                _stop_login(process)
     except (OSError, inbox.InboxError, RedisError):
         outcome = "failure"
     notification(target, "browser", outcome, "inbox")

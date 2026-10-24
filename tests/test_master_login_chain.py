@@ -1,3 +1,4 @@
+import io
 import json
 import subprocess
 from types import SimpleNamespace
@@ -6,6 +7,7 @@ from unittest.mock import Mock, call
 import pytest
 
 from scripts import master_login_chain as chain
+from scripts import master_login_native as native
 
 
 @pytest.mark.parametrize(
@@ -102,11 +104,11 @@ def test_browser_authorization_reports_through_master_inbox_and_ends_native_logi
     class Process:
         def __init__(self, argv, **kwargs):
             events.append(("process", argv, kwargs["env"]))
-            assert kwargs["stdin"] == subprocess.DEVNULL
+            assert kwargs["stdin"] == kwargs["stdout"] == subprocess.PIPE
             assert kwargs["stderr"] == subprocess.STDOUT
             assert kwargs["text"] is True
-            kwargs["stdout"].write(f"{origin}?state=proof\n")
-            kwargs["stdout"].flush()
+            self.stdin = io.StringIO()
+            self.stdout = io.StringIO(f"{origin}?state=proof\n")
             self.returncode = 0 if outcome == "success" else None
 
         def poll(self):
@@ -123,7 +125,7 @@ def test_browser_authorization_reports_through_master_inbox_and_ends_native_logi
         store, "connect", lambda environ: Inbox() if environ is env else pytest.fail("wrong environment")
     )
     monkeypatch.setattr(store, "new_item_id", lambda: "stable-request")
-    monkeypatch.setattr(chain.shutil, "which", lambda name: "/native/claude" if name == "claude" else None)
+    monkeypatch.setattr(native.shutil, "which", lambda name: "/native/claude" if name == "claude" else None)
     monkeypatch.setattr(subprocess, "Popen", Process)
     monkeypatch.setattr(operator_email, "send", lambda *_: pytest.fail("browser must not email"))
     assert chain.authorize(env, target, timeout=1) == outcome
@@ -133,6 +135,8 @@ def test_browser_authorization_reports_through_master_inbox_and_ends_native_logi
         "Authorize this native master login using the already signed in claude.ai session in the operator browser connector; "
         "never sign in, sign out or switch accounts. Stop on a login form or CAPTCHA. "
         f"Open {origin}?state=proof and reply exactly success, captcha or failure. "
+        "If shown a manual authorization code, click the page Copy button immediately before replying success; "
+        "the matching native login will privately consume and clear the Windows clipboard. Do not snapshot the code. "
         "Never send authorization codes or credentials."
     )
     assert ("close", "answer", "engineer@proof", "done", "browser outcome consumed") in events
@@ -150,6 +154,7 @@ def test_browser_authorization_reports_through_master_inbox_and_ends_native_logi
         {"step": "browser", "outcome": outcome, "transport": "inbox"},
     ]
     assert (target.parent / "login-notifications.jsonl").stat().st_mode & 0o777 == 0o600
+    assert not (target.parent / "browser-auth.log").exists()
 
 
 def test_browser_request_without_a_master_seat_never_starts_auth(tmp_path, monkeypatch):
@@ -181,7 +186,7 @@ def test_native_auth_spawn_failure_is_recorded_without_an_email(tmp_path, monkey
         "outcome": "failure",
         "transport": "inbox",
     }
-    assert (target.parent / "browser-auth.log").stat().st_mode & 0o777 == 0o600
+    assert not (target.parent / "browser-auth.log").exists()
 
 
 @pytest.mark.parametrize("cleanup", ["terminate", "kill", "already exited"])
@@ -194,6 +199,7 @@ def test_browser_timeout_cleans_up_native_auth_before_returning(tmp_path, monkey
 
     class Process:
         def __init__(self, *args, **kwargs):
+            self.stdin, self.stdout = io.StringIO(), io.StringIO()
             self.returncode = None
 
         def poll(self):
@@ -252,9 +258,9 @@ def test_browser_ignores_an_outcome_for_another_request_or_master(tmp_path, monk
             closed.append(args)
 
     def spawn(*args, **kwargs):
-        kwargs["stdout"].write("https://claude.ai/oauth/authorize?state=proof\n")
-        kwargs["stdout"].flush()
-        return SimpleNamespace(poll=lambda: 0)
+        return SimpleNamespace(
+            stdin=io.StringIO(), stdout=io.StringIO("https://claude.ai/oauth/authorize?state=proof\n"), poll=lambda: 0
+        )
 
     monkeypatch.setattr(store, "connect", lambda _: Inbox())
     monkeypatch.setattr(subprocess, "Popen", spawn)
@@ -288,8 +294,8 @@ def test_inbox_outage_ends_native_auth_and_returns_browser_failure(tmp_path, mon
 
     class Process:
         def __init__(self, *args, **kwargs):
-            kwargs["stdout"].write("https://claude.ai/oauth/authorize?state=proof\n")
-            kwargs["stdout"].flush()
+            self.stdin = io.StringIO()
+            self.stdout = io.StringIO("https://claude.ai/oauth/authorize?state=proof\n")
             self.returncode = None
 
         def poll(self):
@@ -433,6 +439,39 @@ def test_browser_wait_orders_link_reply_and_native_completion(
     assert process.poll.call_count == len(codes)
 
 
+@pytest.mark.parametrize(
+    "outcome,delivered,expected",
+    [
+        ("success", True, "success"),
+        ("success", False, "failure"),
+        ("captcha", True, "captcha"),
+        ("failure", True, "failure"),
+    ],
+)
+def test_browser_callback_is_consumed_only_after_matching_success(tmp_path, monkeypatch, outcome, delivered, expected):
+    env = {"AGENTIHOOKS_SWARM": "proof", "AGENTIHOOKS_AGENT_NAME": "engineer@proof"}
+    request = SimpleNamespace(id="request")
+    events = []
+    process = SimpleNamespace(poll=Mock(side_effect=[None, 0]))
+    monkeypatch.setattr(chain, "_request", lambda *_: request)
+
+    def reply(*_):
+        events.append("matched reply")
+        return outcome
+
+    def complete():
+        events.append("private callback")
+        return delivered
+
+    monkeypatch.setattr(chain, "_browser_reply", reply)
+    monkeypatch.setattr(chain, "_finish_request", lambda *_: events.append("finished"))
+    monkeypatch.setattr(chain.time, "sleep", lambda *_: None)
+    assert chain._wait_for_browser(process, object(), env, tmp_path, object(), 1, complete) == expected
+    assert events == (
+        ["matched reply", "private callback", "finished"] if outcome == "success" else ["matched reply", "finished"]
+    )
+
+
 def test_browser_deadline_does_not_start_work_at_expiry(tmp_path, monkeypatch):
     monkeypatch.setattr(chain.time, "monotonic", lambda: 1.0)
     monkeypatch.setattr(chain, "_request", lambda *_: pytest.fail("deadline expired"))
@@ -444,9 +483,9 @@ def test_native_authorization_uses_path_fallback_when_binary_is_missing(tmp_path
     from scripts import master_claude_login as login
     from scripts.inbox import store
 
-    monkeypatch.setattr(chain.shutil, "which", lambda _: None)
+    monkeypatch.setattr(native.shutil, "which", lambda _: None)
     monkeypatch.setattr(store, "connect", lambda _: object())
-    spawned = Mock(return_value=SimpleNamespace(poll=lambda: 0))
+    spawned = Mock(return_value=SimpleNamespace(poll=lambda: 0, stdin=io.StringIO(), stdout=io.StringIO()))
     monkeypatch.setattr(chain.subprocess, "Popen", spawned)
     monkeypatch.setattr(chain, "_wait_for_browser", lambda *_: "failure")
     target = tmp_path / "claude"
