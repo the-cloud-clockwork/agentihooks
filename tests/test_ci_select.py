@@ -516,8 +516,29 @@ def test_the_workflow_runs_a_swarm_tick_sized_selection_selected(repo):
     assert len(legs) == 9
 
 
-def test_the_workflow_hands_every_leg_its_files():
-    count = workflow_legs()
-    outputs = {key: value for key, value in jobs()["select"]["outputs"].items() if key.startswith("files_")}
-    assert outputs == {f"files_{leg}": f"${{{{ steps.select.outputs.files_{leg} }}}}" for leg in range(1, count + 1)}
-    assert jobs()["unit-selected"]["env"]["FILES"] == "${{ needs.select.outputs[format('files_{0}', matrix.leg)] }}"
+def test_the_workflow_hands_every_leg_its_files(repo, monkeypatch, tmp_path, capsys):
+    write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 10)})
+    durations = seconds(test_sample=15.0, **{f"test_tick{index}": 160.0 for index in range(1, 10)})
+    write(repo, {"hooks/sample.py": "VALUE = 4\n", ".test_durations": json.dumps(durations)})
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "change")
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    arguments = ["--base", "HEAD~1", "--head", "HEAD", "--event", "pull_request", "--legs", str(workflow_legs())]
+    assert ci_select.main([*arguments, "--root", str(repo)]) == 0
+    printed = capsys.readouterr().out
+    (tmp_path / "selection").mkdir()
+    (tmp_path / "selection/selection.txt").write_text(printed)
+    upload = next(s for s in jobs()["select"]["steps"] if s.get("name") == "Upload the selected legs")
+    assert upload["with"]["path"] == "${{ runner.temp }}/selection/selection.txt"
+    assert (
+        'tee "$RUNNER_TEMP/selection/selection.txt"'
+        in next(s for s in jobs()["select"]["steps"] if s.get("id") == "select")["run"]
+    )
+    read = next(s for s in jobs()["unit-selected"]["steps"] if s.get("name") == "Read this leg's test paths")
+    expected = dict(line.split("=", 1) for line in printed.splitlines() if line.startswith("files_"))
+    assert len(expected) == 9
+    for leg in range(1, 10):
+        environment = tmp_path / f"env-{leg}"
+        given = {"PATH": os.environ["PATH"], "RUNNER_TEMP": str(tmp_path), "LEG": str(leg)}
+        subprocess.run(["bash", "-e", "-c", read["run"]], check=True, env=given | {"GITHUB_ENV": str(environment)})
+        assert environment.read_text() == f"FILES={expected[f'files_{leg}']}\n"

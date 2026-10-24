@@ -234,15 +234,6 @@ jobs:
       files_1: ${{ steps.select.outputs.files_1 }}
       files_2: ${{ steps.select.outputs.files_2 }}
       files_3: ${{ steps.select.outputs.files_3 }}
-      files_4: ${{ steps.select.outputs.files_4 }}
-      files_5: ${{ steps.select.outputs.files_5 }}
-      files_6: ${{ steps.select.outputs.files_6 }}
-      files_7: ${{ steps.select.outputs.files_7 }}
-      files_8: ${{ steps.select.outputs.files_8 }}
-      files_9: ${{ steps.select.outputs.files_9 }}
-      files_10: ${{ steps.select.outputs.files_10 }}
-      files_11: ${{ steps.select.outputs.files_11 }}
-      files_12: ${{ steps.select.outputs.files_12 }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
@@ -592,7 +583,18 @@ jobs:
             [[ -f "$file" ]] && durations+=("$file")
           done
           cd "$RUNNER_TEMP/grader"
-          python -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 12 --durations "${durations[@]}"
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/selection"
+          python -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 12 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
+
+      # Job outputs are protected, so each leg reads its files from this artifact.
+      - name: Upload the selected legs
+        if: steps.select.outputs.scope == 'selected'
+        uses: actions/upload-artifact@v4
+        with:
+          name: selection
+          path: ${{ runner.temp }}/selection/selection.txt
+          retention-days: 1
 
   test-count:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'push' }}
@@ -1365,7 +1367,6 @@ jobs:
     env:
       CODEX_RELEASE: rust-v0.160.0
       UNIT_SOURCE: ""
-      FILES: ${{ needs.select.outputs[format('files_{0}', matrix.leg)] }}
       LEG: ${{ matrix.leg }}
     strategy:
       fail-fast: false
@@ -1378,6 +1379,15 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           filter: blob:none
+
+      - name: Download the selected legs
+        uses: actions/download-artifact@v4
+        with:
+          name: selection
+          path: ${{ runner.temp }}/selection
+
+      - name: Read this leg's test paths
+        run: echo "FILES=$(sed -n "s/^files_${LEG}=//p" "$RUNNER_TEMP/selection/selection.txt")" >> "$GITHUB_ENV"
 
       - name: Require selected test paths
         run: |
