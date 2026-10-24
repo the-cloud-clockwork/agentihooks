@@ -15,7 +15,9 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def environ(tmp_path):
     ledgers = tmp_path / "ledgers"
     ledgers.mkdir()
-    legacy_page.store(ledgers, "fixture", json.loads((FIXTURES / "ledger.json").read_text()))
+    doc = json.loads((FIXTURES / "ledger.json").read_text())
+    doc["_meta"]["events"] = [{**event, "rev": 1} for event in doc["_meta"]["events"]]
+    legacy_page.store(ledgers, "fixture", doc)
     environ = {"LEDGER_DIR": str(ledgers), "AGENTIHOOKS_HOME": str(tmp_path / "home")}
     assert main(["reindex", "--ledger", "fixture"], environ) == 0
     return environ
