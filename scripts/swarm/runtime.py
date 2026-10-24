@@ -233,6 +233,23 @@ def _carries(pid, name):
     return bool(carried) and (carried == name or resolve_name(carried) == name)
 
 
+def _pane_process(agent):
+    from scripts.herdr_host import server_socket
+    from scripts.terminate_agent import herdr_pane, sessions
+
+    socket = server_socket(dict(os.environ))
+    owned = []
+    for session in sessions():
+        pane, target_socket = herdr_pane(session.process.pid)
+        if (
+            session.name == agent.name
+            and pane == agent.pane_id
+            and server_socket({"HERDR_SOCKET_PATH": target_socket}) == socket
+        ):
+            owned.append(session.process)
+    return min(owned, key=lambda process: process.start_time, default=None)
+
+
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
 
@@ -1025,6 +1042,29 @@ class HerdrRuntime:
             return self._retire_managed(agent)
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
         return self.retire_process(agent, pid, homes)
+
+    def retire_pane(self, agent: AgentRecord, homes: tuple = ()) -> bool:
+        found = None
+        if agent.pane_id:
+            try:
+                result = self.herdr(["agent", "get", agent.pane_id])
+                found = result.get("agent", result)
+            except Exception as exc:
+                if "not found" not in str(exc):
+                    self.refusals[agent.name] = {"process": 0, "refusal": str(exc)}
+                    return False
+        if found is not None and _owns(found, agent):
+            conversation = _conversation_id(found.get("agent_session"))
+            if found.get("name") or agent.conversation_id and conversation == agent.conversation_id:
+                launch = _pane_process(agent)
+                if launch is not None:
+                    return self.retire_process(agent, launch.pid, homes, launch.start_time)
+                if agent.name not in self.live_names():
+                    return self.retire_process(agent, None, homes)
+        if found is None and agent.name not in self.live_names():
+            return self.retire_process(replace(agent, pane_id=""), None, homes)
+        self.refusals[agent.name] = {"process": 0, "refusal": "no owned pane for unrecorded process"}
+        return False
 
     def _retire_managed(self, agent):
         from scripts.codex_session.binding import EXITED, BindingStore

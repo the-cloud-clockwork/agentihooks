@@ -34,7 +34,7 @@ def test_inventory_walks_every_page_and_ignores_unrelated_streams():
 
 
 def test_inventory_refuses_a_page_that_cannot_advance():
-    js = SimpleNamespace(streams_info_iterator=AsyncMock(return_value=Page([], 1)))
+    js = SimpleNamespace(streams_info_iterator=AsyncMock(side_effect=[Page([], 1), AssertionError("paged again")]))
     with pytest.raises(RuntimeError) as caught:
         asyncio.run(nats_scope.discover_swarms(js))
     assert str(caught.value) == "NATS stream inventory did not advance"

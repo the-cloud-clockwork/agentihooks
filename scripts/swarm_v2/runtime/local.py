@@ -92,6 +92,8 @@ class LocalHerdrRuntime:
             return refused
         if legacy(agent) or reports.host(agent) or live_binding.managed(agent):
             retired = self.herdr.retire(agent, homes=homes)
+        elif not agent.runtime_target.get("pid") and not agent.runtime_target.get("pid_start"):
+            retired = self.herdr.retire_pane(agent, homes)
         else:
             namespace = self.namespace()
             ended_boot = process.previous_boot(agent.runtime_target.get("process_namespace", ""), namespace)

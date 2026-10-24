@@ -88,21 +88,14 @@ def test_scoped_claims_keep_the_member_reply_inbox(signer):
     assert nkey.claims(jwt)["nats"]["sub"]["allow"] == ["swarm.rig.>", f"_INBOX.{user.public}.>"]
 
 
-def test_scoped_global_slot_grants_match_exactly_the_existing_capacity_contract():
+def test_member_credentials_hold_no_grant_on_the_hub_owned_account_buckets():
     from scripts.hive.nats_grant import MEMBER_PUBLISH, member_claims
 
-    expected = {
-        "$KV.account-slots.>",
-        "$KV.hive-slot-accounts.>",
-        "$JS.API.STREAM.INFO.KV_account-slots",
-        "$JS.API.STREAM.INFO.KV_hive-slot-accounts",
-        "$JS.API.STREAM.MSG.GET.KV_account-slots",
-        "$JS.API.STREAM.MSG.GET.KV_hive-slot-accounts",
-    }
     claims = member_claims("member", ("rig",))
-    global_state = {value for value in claims["pub"]["allow"] if value.startswith("$KV.") or ".KV_" in value}
-    assert global_state == expected
-    assert expected <= set(MEMBER_PUBLISH)
+    for granted in (claims["pub"]["allow"], MEMBER_PUBLISH):
+        assert not [value for value in granted if "account-slots" in value or "hive-slot-accounts" in value]
+    assert not [value for value in claims["pub"]["allow"] if value.startswith("$KV.") or ".KV_" in value]
+    assert "swarm.*.slots" in MEMBER_PUBLISH
 
 
 @pytest.mark.parametrize("kind", ["EVENTS", "DEAD", "QUEUE_eng", "STATE_spoke-work"])
@@ -201,8 +194,6 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
         "STATE_hive-presence",
         "STATE_hive-executions",
         "STATE_execution-starts",
-        "STATE_account-slots",
-        "STATE_hive-slot-accounts",
     )
     expected = {"swarm.rig.>"}
     for resource in resources:
@@ -216,16 +207,6 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
                 f"$JS.ACK.{stream}.>",
             )
         )
-    expected.update(
-        {
-            "$KV.account-slots.>",
-            "$KV.hive-slot-accounts.>",
-            "$JS.API.STREAM.INFO.KV_account-slots",
-            "$JS.API.STREAM.INFO.KV_hive-slot-accounts",
-            "$JS.API.STREAM.MSG.GET.KV_account-slots",
-            "$JS.API.STREAM.MSG.GET.KV_hive-slot-accounts",
-        }
-    )
     claims = nkey.claims(jwt)["nats"]
     assert set(claims) == {"type", "version", "pub", "sub", "subs", "data", "payload"}
     assert set(claims["pub"]) == {"allow"}
