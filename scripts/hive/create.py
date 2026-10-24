@@ -127,13 +127,11 @@ def _member(tools: Tools) -> dict[str, str]:
 def _invite(tools: Tools, options: Options) -> str:
     listing = Listing(_signer_path(tools.environ), member_swarms.swarms(tools.redis, ()))
     member = _member(tools).get(invite.HIVE_ID)
-    if member and not tools.redis.exists(f"{auth.PREFIX}:member:{member}"):
-        member = None
     where = f"OpenBao {openbao_kv.MOUNT}/{tools.state['record']}"
-    if member:
+    if member and tools.redis.exists(f"{auth.PREFIX}:member:{member}"):
         done = f"kept hive member {member} in {where}"
     elif options.dry_run:
-        done = f"would mint a hive member into {where} like {options.like}"
+        done, member = f"would mint a hive member into {where} like {options.like}", "the new member"
     else:
         name, record = tools.state["name"], tools.state["record"]
         request = invite.Request(
@@ -160,7 +158,7 @@ def _signer_path(environ: Mapping[str, str]) -> str:
     return path
 
 
-def _listed(tools: Tools, options: Options, listing: Listing, member: str | None) -> str:
+def _listed(tools: Tools, options: Options, listing: Listing, member: str) -> str:
     try:
         listed = openbao_kv.read(tools.bao, listing.path)[0].get(member_swarms.FIELD)
     except openbao_kv.OpenBaoError as exc:
@@ -171,7 +169,7 @@ def _listed(tools: Tools, options: Options, listing: Listing, member: str | None
         return f"kept {member} on the hub signer record {listing.path}"
     swarms = ", ".join(listing.swarms)
     if options.dry_run:
-        return f"would list {member or 'it'} on the hub signer record {listing.path} for {swarms} and refresh {SIGNER_SYNC}"
+        return f"would list {member} on the hub signer record {listing.path} for {swarms} and refresh {SIGNER_SYNC}"
     member_swarms.assign(tools.bao, listing.path, [member], listing.swarms)
     resync = f"force-sync={int(tools.clock() * 1000)}"
     _kubectl(tools, ["-n", SIGNER_NAMESPACE, "annotate", "externalsecret", SIGNER_SYNC, resync, "--overwrite"])

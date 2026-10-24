@@ -352,6 +352,14 @@ def test_an_openbao_failure_is_a_refusal_naming_it(world, sealed):
     assert str(refused.value) == "OpenBao HTTP 503: sealed"
 
 
+def test_a_hub_record_that_cannot_be_read_is_a_refusal_naming_it(world):
+    sealed = Sealed(world.bao.records, lambda request: SIGNER in request.full_url)
+    world.tools.bao = openbao_kv.OpenBao(world.tools.bao.url, world.tools.bao.token, sealed)
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(dry_run=True))
+    assert str(refused.value) == "OpenBao HTTP 503: sealed"
+
+
 def test_gh_keeps_leading_space_and_trims_only_trailing_newlines():
     def run(argv, **kwargs):
         assert kwargs == {"input": '{"a": 1}', **GH}

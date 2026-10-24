@@ -510,7 +510,17 @@ def test_the_dry_run_names_the_listing_and_writes_no_hub_record(world):
     assert world.run.named("kubectl", "-n") == []
     assert world.lines[0] == (
         f"hive create {NAME}: invite: would mint a hive member into OpenBao secret/{RECORD} like {LIKE}; "
-        f"would list it on the hub signer record {SIGNER} for demo and refresh {SYNC}"
+        f"would list the new member on the hub signer record {SIGNER} for demo and refresh {SYNC}"
+    )
+
+
+def test_the_listing_names_every_swarm_it_grants(world, monkeypatch):
+    monkeypatch.setattr(Store, "slugs", lambda self: ["demo", "rig", "third"])
+
+    create.create(world.tools, create.Options(dry_run=True))
+
+    assert _listing_line(world) == (
+        f"would list the new member on the hub signer record {SIGNER} for demo, rig, third and refresh {SYNC}"
     )
 
 
