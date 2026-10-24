@@ -70,6 +70,7 @@ def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_p
             first.wait(timeout=30)
         except subprocess.TimeoutExpired:
             pytest.fail((tmp_path / "server.out").read_text())
+        until(lambda: pid_of(tmp_path) not in (None, first.pid))
         successor = pid_of(tmp_path)
         time.sleep(0.2)
         stop.set()
