@@ -4,6 +4,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from contextlib import contextmanager, suppress
 from dataclasses import replace
 
@@ -387,6 +388,11 @@ def test_a_live_agent_with_no_pid_and_no_recorded_pane_retires_by_its_session_na
     )
     try:
         table = processes()
+        for _ in range(100):
+            if child.pid in table and table[child.pid].pgid == child.pid:
+                break
+            time.sleep(0.05)
+            table = processes()
         session = terminate_agent.Session("", "claude", NAME, table[child.pid], "", "alive")
         monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
         local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: table)
