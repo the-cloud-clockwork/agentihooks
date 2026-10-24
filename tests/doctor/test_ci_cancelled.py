@@ -92,6 +92,8 @@ def _github_record(pr, checks, runs):
     }
 
     def gh(argv, **kwargs):
+        if argv[2] == f"{root}/actions/runs?head_sha={sha}&per_page=100":
+            assert argv[3:] == ["--paginate", "--jq", ".workflow_runs[] | @json"]
         return subprocess.CompletedProcess(argv, 0, responses[argv[2]], "")
 
     return ci_read.pull_request("the-cloud-clockwork/agentihooks", number, run=gh)
