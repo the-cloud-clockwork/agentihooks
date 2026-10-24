@@ -10,7 +10,12 @@ def test_a_released_verification_owner_frees_its_seat_without_reclaiming(store, 
     tick("sw", store, ledger, runtime, now_ms=1_000)
     owner = workers(store)[0]
     ledger.rows["t1"].update(
-        state="open", claimed_by="", claim_generation=2, awaiting="verify", after_at=100_000, pr_url=pr_url
+        state="open",
+        claimed_by="",
+        claim_generation=2,
+        awaiting="verify",
+        contract={"after_at": 100_000_000_000_000},
+        pr_url=pr_url,
     )
     store.release("sw", "t1", owner.name)
     released = dict(ledger.rows["t1"])
@@ -33,7 +38,9 @@ def test_a_verification_release_at_the_repair_write_frees_the_owner(store, monke
     update = ledger.update_task
 
     def released(slug, task_id, fields, by="swarm", if_state=(), if_match=None):
-        ledger.rows[task_id].update(awaiting="verify", after_at=100_000, claim_generation=generation)
+        ledger.rows[task_id].update(
+            awaiting="verify", contract={"after_at": 100_000_000_000_000}, claim_generation=generation
+        )
         return update(slug, task_id, fields, by, if_state, if_match)
 
     monkeypatch.setattr(ledger, "update_task", released)
