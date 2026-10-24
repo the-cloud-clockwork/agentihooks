@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from scripts.swarm import merge_queue
+from scripts.swarm import ledger_events, merge_queue
 from scripts.swarm.store import SwarmError
 
 URL = "https://github.com/o/r/pull/7"
@@ -12,6 +12,7 @@ FORBIDDEN = {
     "path": ["resource", "statusCheckRollup"],
     "message": "Resource not accessible by integration",
 }
+READ_PULL = ledger_events.view
 RULES = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "Gate — Required"}]}}]
 
 
@@ -99,6 +100,7 @@ class GitHub:
 
 @pytest.fixture(autouse=True)
 def no_sleep(monkeypatch):
+    monkeypatch.setattr(merge_queue.ledger_events, "view", READ_PULL)
     slept = []
     monkeypatch.setattr(merge_queue.time, "sleep", slept.append)
     return slept
