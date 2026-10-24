@@ -5,13 +5,11 @@ from scripts.hive.placement import Wait, place
 
 NOW = 10_000_000
 REPO = "agentihooks"
-NO_UI = Wait("no UI hive live")
 
 
 def hive(hive_id: str, **fields) -> dict:
-    return {
-        **registry._default(hive_id),
-        "ui": "yes",
+    record = {
+        **registry._default(hive_id, "yes"),
         "max_agents": 2,
         "slots": [{"harness": "claude", "account": "acct", "kind": "subscription", "cap": 4}],
         "interactive": {"claude": "acct", "codex": ""},
@@ -20,20 +18,24 @@ def hive(hive_id: str, **fields) -> dict:
         "agents": 0,
         **fields,
     }
+    return {"room": record["max_agents"] - record["agents"], **record}
 
 
 def fleet(*off: str, **changes: dict) -> list[dict]:
     hives = [
-        hive("pc", roles=["master"], prefer={"master": 1}, max_agents=1),
-        hive("vm", roles=["master", "qa", "frontend"], prefer={"master": 2, "qa": 1, "frontend": 1}),
-        hive("pods", ui="no", ephemeral="yes", roles=["eng", "ci", "plan"], max_agents=4),
+        hive("pc", excluded=["qa", "frontend", "eng", "ci", "plan"], prefer={"master": 1}, max_agents=1),
+        hive("vm", excluded=["eng", "ci", "plan"], prefer={"master": 2, "qa": 1, "frontend": 1}),
+        hive("pods", ui="no", ephemeral="yes", excluded=["master", "qa", "frontend"], max_agents=4),
     ]
     return [
-        {
-            **record,
-            **changes.get(record["id"], {}),
-            **({"heartbeat_at": NOW - registry.LIVE_MS - 1} if record["id"] in off else {}),
-        }
+        hive(
+            record["id"],
+            **{
+                **{key: value for key, value in record.items() if key != "room"},
+                **changes.get(record["id"], {}),
+                **({"heartbeat_at": NOW - registry.LIVE_MS - 1} if record["id"] in off else {}),
+            },
+        )
         for record in hives
     ]
 
@@ -47,16 +49,30 @@ CASES = {
     "all live plan": ("plan", fleet(), "subscription", REPO, "pods"),
     "pc off master": ("master", fleet("pc"), "subscription", REPO, "vm"),
     "pc off qa": ("qa", fleet("pc"), "subscription", REPO, "vm"),
-    "both off master": ("master", fleet("pc", "vm"), "subscription", REPO, "pods"),
-    "both off qa": ("qa", fleet("pc", "vm"), "subscription", REPO, NO_UI),
-    "both off frontend": ("frontend", fleet("pc", "vm"), "subscription", REPO, NO_UI),
+    "both off master": ("master", fleet("pc", "vm"), "subscription", REPO, Wait("no live hive takes master")),
+    "headless hive that allows the master": (
+        "master",
+        fleet("pc", "vm", pods={"excluded": ["qa", "frontend"]}),
+        "subscription",
+        REPO,
+        "pods",
+    ),
+    "unfit UI master hive beside a headless hive that allows the master": (
+        "master",
+        fleet("pc", vm={"repos": []}, pods={"excluded": ["qa", "frontend"]}),
+        "subscription",
+        REPO,
+        "pods",
+    ),
+    "both off qa": ("qa", fleet("pc", "vm"), "subscription", REPO, Wait("no live hive takes qa")),
+    "both off frontend": ("frontend", fleet("pc", "vm"), "subscription", REPO, Wait("no live hive takes frontend")),
     "both off eng": ("eng", fleet("pc", "vm"), "subscription", REPO, "pods"),
-    "all off master": ("master", fleet("pc", "vm", "pods"), "subscription", REPO, NO_UI),
+    "all off master": ("master", fleet("pc", "vm", "pods"), "subscription", REPO, Wait("no live hive takes master")),
     "pods off eng": ("eng", fleet("pods"), "subscription", REPO, Wait("no live hive takes eng")),
     "all off eng": ("eng", fleet("pc", "vm", "pods"), "subscription", REPO, Wait("no live hive takes eng")),
     "master beside the only live hive, a qa hive": (
         "master",
-        fleet("pc", "pods", vm={"roles": ["qa", "frontend"]}),
+        fleet("pc", "pods", vm={"excluded": ["master", "eng", "ci", "plan"]}),
         "subscription",
         REPO,
         Wait("no live hive takes master"),
@@ -64,7 +80,7 @@ CASES = {
     "vm off qa beside a live pc": ("qa", fleet("vm"), "subscription", REPO, Wait("no live hive takes qa")),
     "master beside a live qa hive": (
         "master",
-        fleet("pc", vm={"roles": ["qa", "frontend"]}),
+        fleet("pc", vm={"excluded": ["master", "eng", "ci", "plan"]}),
         "subscription",
         REPO,
         Wait("no live hive takes master"),
@@ -100,6 +116,14 @@ CASES = {
     "login missing on pc": ("master", fleet(pc={"interactive": {}}), "interactive", REPO, "vm"),
     "login present": ("master", fleet(), "interactive", REPO, "pc"),
     "login ignored for subscription": ("master", fleet(pc={"interactive": {}}), "subscription", REPO, "pc"),
+    "master login missing": (
+        "master",
+        fleet(vm={"master_login": {"claude": "other"}}),
+        "master-login",
+        REPO,
+        Wait("no hive for master holds the claude master login for acct"),
+    ),
+    "master login on vm": ("master", fleet(vm={"master_login": {"claude": "acct"}}), "master-login", REPO, "vm"),
 }
 
 
@@ -109,7 +133,7 @@ def test_each_operator_example_case_places_or_waits(role, hives, route_kind, rep
 
 
 def eng(hive_id: str, **fields) -> dict:
-    return hive(hive_id, ui="no", roles=["eng"], max_agents=4, **fields)
+    return hive(hive_id, ui="no", excluded=["master"], max_agents=4, **fields)
 
 
 ORDER = {
@@ -126,10 +150,30 @@ def test_the_order(hives, expected):
     assert place("eng", "claude", "acct", "subscription", REPO, hives, NOW) == expected
 
 
-def test_the_master_fallback_ranks_by_room_without_counting_against_it():
-    hives = [eng("a", agents=4), eng("b", agents=5), hive("vm", roles=["qa"], heartbeat_at=0)]
-    assert place("master", "claude", "acct", "subscription", REPO, hives, NOW) == "a"
-    assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == NO_UI
+def test_the_master_never_lands_on_a_hive_that_excludes_it():
+    hives = [eng("a", agents=4), eng("b", agents=5), hive("vm", heartbeat_at=0)]
+    assert place("master", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live hive takes master")
+    assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live UI hive takes qa")
+
+
+def test_a_full_fleet_names_every_hive_refusal_in_order():
+    hives = [eng("a", room=0, refusal="cpu: busy"), eng("b", room=0), eng("c", room=0, refusal="ram: low")]
+    assert place("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Wait(
+        "no hive for eng has room: a cpu: busy; c ram: low"
+    )
+
+
+def test_a_full_master_ui_hive_keeps_the_master_without_counting_against_it():
+    hives = [hive("vm", agents=2), eng("a")]
+    assert place("master", "claude", "acct", "subscription", REPO, hives, NOW) == "vm"
+
+
+@pytest.mark.parametrize("role", ["frontend", "qa"])
+def test_a_ui_profile_task_waits_for_a_ui_host_instead_of_a_headless_hive(role):
+    headless = [eng("anton-test"), eng("anton-stable")]
+    assert place(role, "claude", "acct", "subscription", REPO, headless, NOW) == Wait(f"no live UI hive takes {role}")
+    full = [hive("workstation", agents=2), *headless]
+    assert place(role, "claude", "acct", "subscription", REPO, full, NOW) == Wait(f"no UI hive for {role} has room")
 
 
 def test_the_codex_harness_matches_its_own_slot_and_login():
@@ -141,3 +185,34 @@ def test_the_codex_harness_matches_its_own_slot_and_login():
     ]
     assert place("eng", "codex", "acct", "interactive", REPO, hives, NOW) == "b"
     assert place("eng", "codex", "acct", "subscription", REPO, hives, NOW) == "a"
+
+
+@pytest.mark.parametrize("role", ["eng", "ci", "plan", "dispatch"])
+@pytest.mark.parametrize(
+    ("records", "expected"),
+    [
+        ([hive("large", ui="no", max_agents=10, agents=5), hive("small", ui="no", max_agents=2)], "small"),
+        ([hive("small", ui="no", max_agents=2, agents=1), hive("large", ui="no", max_agents=10, agents=2)], "large"),
+        ([hive("headless", ui="no", agents=1), hive("workstation", ui="yes")], "workstation"),
+        ([hive("headless", ui="no"), hive("workstation", ui="yes", agents=1)], "headless"),
+        (
+            [
+                hive("headless", ui="no"),
+                hive("workstation", ui="yes", agents=1, prefer={"eng": 1, "ci": 1, "plan": 1, "dispatch": 1}),
+            ],
+            "workstation",
+        ),
+    ],
+    ids=["occupied share", "unequal positive shares", "emptier workstation", "emptier headless", "explicit preference"],
+)
+def test_workers_use_the_least_filled_eligible_environment(role, records, expected):
+    from scripts.hive import placement
+
+    assert placement.choose(role, "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice(expected)
+
+
+def test_a_master_compares_a_full_one_slot_hive_with_a_partly_filled_hive():
+    from scripts.hive import placement
+
+    records = [hive("a", max_agents=1, agents=1), hive("b", max_agents=4, agents=3)]
+    assert placement.choose("master", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice("b")

@@ -232,10 +232,22 @@ def test_the_owning_master_decides_flags_and_comments_on_it(world):
 
 
 @pytest.mark.parametrize("path", ["done", "needs_operator"])
-def test_another_master_is_refused_on_it(world, path):
+def test_another_live_master_decides_it_and_the_owner_is_kept(world, path):
     add(world, task="t2")
 
-    assert decide(world, LEAD_NAME, path)["warnings"] == [f"{ON_TASK} belongs to {SECOND}, so {LEAD} cannot decide it"]
+    assert decide(world, LEAD_NAME, path) == {"accepted": True, "warnings": []}
+    rows = world.cross()[ON_TASK]
+    assert [(r["owner"], r["seat"], r["by"]) for r in rows] == [(SECOND, LEAD, LEAD_NAME)]
+    assert world.refusals() == 0
+
+
+@pytest.mark.parametrize("path", ["done", "needs_operator"])
+def test_a_master_without_a_live_seat_is_refused_on_it(world, path):
+    add(world, task="t2")
+
+    assert decide(world, cases.FORMER, path)["warnings"] == [
+        f"{ON_TASK} belongs to {SECOND}, so {cases.FORMER} cannot decide it"
+    ]
     assert world.refusals() == 1
 
 

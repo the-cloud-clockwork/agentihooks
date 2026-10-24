@@ -30,7 +30,7 @@ export function withDefaults(d) {
     alerts: (Array.isArray(d.alerts) ? d.alerts : []).filter((a) => a && typeof a.id === "string" && typeof a.text === "string"),
     artifacts: (Array.isArray(d.artifacts) ? d.artifacts : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
     artifact_trash: (Array.isArray(d.artifact_trash) ? d.artifact_trash : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
-    plans: entries(d.plans), slices: entries(d.slices),
+    plans: entries(d.plans), slices: entries(d.slices), closed: (d._meta && d._meta.closed) || d.closed || {},
     freezes: entries(d.freezes).filter((r) => ["freeze", "focus"].includes(r.verb) && typeof r.target === "string"),
     phase_status: d.phase_status && typeof d.phase_status === "object" ? d.phase_status : {}, pending: {},
     marks: Object.fromEntries(["frozen", "held"].map((k) => [k, (Array.isArray((d.marks || {})[k]) ? d.marks[k] : []).filter((key) => typeof key === "string")])),
@@ -156,6 +156,10 @@ export function lsWrite() {
   } catch (e) { /* storage blocked */ }
 }
 
+export function hiddenDone(doc, list) {
+  return new Set(((doc.closed || {})[list] || {}).ids || []);
+}
+
 export function taskRanks() {
   return ["urgent", "high", "normal", "low"];
 }
@@ -171,4 +175,18 @@ export function itemState(list, i) {
   if (i.out_of_scope) return "out";
   const done = list === "questions" ? (i.answers || []).some((a) => !a.deleted) : !!i.done;
   return done ? "done" : "open";
+}
+
+export function taskBlockers(task, tasks) {
+  if ((task.state || "open") !== "open") return "";
+  const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
+  const title = (id) => (byId[id] ? byId[id].title : `task ${id}`);
+  const unfinished = (ids) => (ids || []).filter((id) => (byId[id] || {}).state !== "done");
+  const done = (ids) => ids.map((id) => `${title(id)} is done`).join(", and ");
+  const parked = unfinished(task.parked_on);
+  if (parked.length) return `Parked on ${task.branch ? `branch ${task.branch}` : "its branch"} until ${done(parked)}`;
+  const open = unfinished(task.depends_on);
+  const held = open.filter((id) => !(["claimed", "pr"].includes((byId[id] || {}).state) && byId[id].branch));
+  if (held.length) return `Waiting until ${done(held)}`;
+  return open.length ? `Ready to start on ${open.map((id) => `branch ${byId[id].branch} of ${title(id)}`).join(", and ")}` : "";
 }

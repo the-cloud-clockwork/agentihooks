@@ -13,11 +13,16 @@ _PROBE = """
 import importlib, json, sys
 sys.path[:0] = [".", "scripts"]
 groups = {}
+loaded_by = {}
 for name in sys.argv[1:]:
+    print(f"Importing {name}", file=sys.stderr, flush=True)
     marks = getattr(importlib.import_module(name), "pytestmark", [])
+    for module in ("fakeredis", "redis"):
+        if module in sys.modules:
+            loaded_by.setdefault(module, name)
     marks = marks if isinstance(marks, list) else [marks]
     groups[name] = [m.args[0] for m in marks if m.name == "xdist_group"]
-print(json.dumps({"loaded": sorted(m for m in ("fakeredis", "redis") if m in sys.modules), "groups": groups}))
+print(json.dumps({"loaded": sorted(m for m in ("fakeredis", "redis") if m in sys.modules), "groups": groups, "loaded_by": loaded_by}))
 """
 
 
@@ -35,16 +40,19 @@ def fakeredis_modules():
         if path != Path(__file__).resolve() and "fakeredis" in path.read_text()
     )
     names = [".".join(path.relative_to(_ROOT).with_suffix("").parts) for path in paths]
-    out = subprocess.run(
-        [sys.executable, "-c", _PROBE, *names], cwd=_ROOT, capture_output=True, text=True, check=True
-    ).stdout
-    return names, json.loads(out)
+    out = subprocess.run([sys.executable, "-c", _PROBE, *names], cwd=_ROOT, capture_output=True, text=True)
+    if out.returncode:
+        pytest.fail(
+            f"Import probe exited {out.returncode}\nstdout:\n{out.stdout}\nstderr:\n{out.stderr}",
+            pytrace=False,
+        )
+    return names, json.loads(out.stdout)
 
 
 def test_fakeredis_test_modules_import_without_loading_redis(fakeredis_modules):
     names, probe = fakeredis_modules
     assert names
-    assert probe["loaded"] == []
+    assert probe["loaded"] == [], probe["loaded_by"]
 
 
 def test_fakeredis_test_modules_run_on_every_worker(fakeredis_modules):

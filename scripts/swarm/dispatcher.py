@@ -191,7 +191,7 @@ def _band(task, fixed, guard):
 
 
 def rank_pass(slug, config, store, ledger, doc, now_ms):
-    from scripts.swarm import tick
+    from scripts.swarm import readiness
 
     known, named = {t["id"]: t for t in doc["tasks"]}, bottleneck.read(store, slug).get("bottleneck")
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
@@ -200,7 +200,7 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     claimable = {
         task_id
         for task_id, t in known.items()
-        if task_id not in deferred and tick.ready(t, known, doc, graph, fix) and released(t) and applied(t)
+        if task_id not in deferred and readiness.ready(t, known, doc, graph, fix) and released(t) and applied(t)
     }
     scores, fixed = leverage(doc), _fixed(doc)
     if config.autonomy in APPLIES:

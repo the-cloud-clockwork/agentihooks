@@ -266,6 +266,36 @@ def _close_pane(pane: str, socket: str) -> str:
     return "closed"
 
 
+def _mark_exit(pid: int) -> tuple[str, str]:
+    import redis
+
+    from scripts.swarm import deliberate_exit, store
+
+    swarm, agent = agent_environ(pid, ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"))
+    if not swarm or not agent:
+        return "", ""
+    try:
+        deliberate_exit.record(store.connect(), swarm, agent, int(time.time() * 1000))
+    except (store.SwarmError, redis.RedisError) as exc:
+        print(f"swarm_exit=not-recorded ({exc})")
+        return "", ""
+    print("swarm_exit=recorded")
+    return swarm, agent
+
+
+def _withdraw_exit(swarm: str, agent: str) -> None:
+    import redis
+
+    from scripts.swarm import deliberate_exit, store
+
+    if not swarm or not agent:
+        return
+    try:
+        deliberate_exit.take(store.connect(), swarm, agent)
+    except (store.SwarmError, redis.RedisError) as exc:
+        print(f"swarm_exit=not-withdrawn ({exc})")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="List or terminate a Claude Code or Codex agent session")
     parser.add_argument("selector", nargs="?", default="", help="Exact session name, UUID, or PID")
@@ -329,9 +359,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("result=validated signal=none")
         return 0
+    marked = _mark_exit(selected.process.pid)
     try:
         escalated = terminate(selected, members, args.term_timeout)
     except (OSError, RuntimeError) as exc:
+        _withdraw_exit(*marked)
         print(f"terminate-agent: {exc}", file=sys.stderr)
         return 1
     print(f"result=terminated escalation={'SIGKILL' if escalated else 'none'}")

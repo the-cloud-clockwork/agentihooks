@@ -3,13 +3,19 @@ import ast
 import json
 import math
 import os
+import subprocess
+import time
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
 from functools import cache
 from pathlib import Path
 
+from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
-from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
+from scripts.ci_mutation.selection import changed_mutations, file_seconds, split_parts, stats_shards
 from scripts.ci_test_plan import find_record
 from tests.dep_manifest import GLOBAL_FILES, MEASURED, _spans, changed_units, line_units, node
 from tests.dep_manifest import changes as recorded_changes
@@ -17,6 +23,13 @@ from tests.dep_manifest import changes as recorded_changes
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
 WORKERS = 4
+RECORD_RETRY_SECONDS = 10
+RECORD_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError, zipfile.BadZipFile)
+
+
+def shard_workers() -> int:
+    quota = os.environ.get("MUTATION_SHARD_CPU_QUOTA")
+    return quota_workers(WORKERS, float(quota) if quota else None)
 
 
 def estimate(
@@ -24,19 +37,26 @@ def estimate(
     changes: dict[str, set[int]],
     selection: dict[str, list[str]] | None = None,
     manifest: dict | None = None,
+    everything: bool = False,
 ) -> tuple[float, int, list[str]]:
     mutants, tests = 0, set()
     drift = record_drift(root, manifest) if manifest is not None else None
     if drift is not None:
         stale, drifted, paths = drift
         units, unrecorded = changed_recorded_units(root, manifest, changes)
-        covering = covering_tests(manifest, units | drifted, paths)
+        if "lines" in manifest:
+            covering = line_covering_tests(root, manifest, changes, paths)
+        else:
+            covering = covering_tests(manifest, units | drifted, paths)
         recorded = {}
         for test in manifest["tests"]:
+            if not manifest["tests"][test]["units"] or "lines" in manifest and test not in manifest["lines"]:
+                stale.add(test_file(test))
+                continue
             path, _, name = node(test).partition("[")[0].partition("::")
             recorded.setdefault(path, set()).add(name)
     for path, lines in changes.items():
-        chosen = select_tests(root, Path(path))
+        chosen = every_test(root) if everything else select_tests(root, Path(path))
         if manifest is not None:
             chosen = sorted({*chosen, *recorded_tests(root, manifest, path, lines)})
         if drift is not None and path not in unrecorded:
@@ -55,6 +75,30 @@ def estimate(
         # mutmut emits only mutants inside a function or method.
         mutants += sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
     return mutants * MUTANT_SECONDS, mutants, sorted(tests)
+
+
+def every_test(root: Path) -> list[str]:
+    return sorted(path.relative_to(root).as_posix() for path in (root / "tests").rglob("test_*.py") if path.is_file())
+
+
+def record_failure(error: Exception) -> str:
+    detail = getattr(error, "stderr", None)
+    if isinstance(detail, bytes):
+        detail = detail.decode(errors="replace")
+    return f"{type(error).__name__}: {(detail or '').strip() or error}"
+
+
+def read_record(repository: str) -> tuple[tuple[dict, dict] | None, str]:
+    before = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for attempt in (1, 2):
+        try:
+            return find_record(repository, before), ""
+        except RECORD_ERRORS as error:
+            reason = record_failure(error)
+            print(f"Reading the recorded dev coverage failed on attempt {attempt}: {reason}")
+        if attempt == 1:
+            time.sleep(RECORD_RETRY_SECONDS)
+    return None, reason
 
 
 def recorded_tests(root: Path, manifest: dict, path: str, lines: set[int]) -> set[str]:
@@ -112,6 +156,46 @@ def covering_tests(manifest: dict, units: set[int], paths: set[str]) -> set[str]
     }
 
 
+def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[dict[str, set[int]], set[int]]:
+    lines = {path: set(found) for path, found in changes.items()}
+    fallback = set()
+    index = {unit: number for number, unit in enumerate(manifest["units"])}
+    for path, old, new in recorded_changes(root, manifest["commit"], "HEAD"):
+        if not path.endswith(".py") or not path.startswith(MEASURED):
+            continue
+        if old is None or new is None:
+            fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
+            continue
+        mapping, affected = {}, set()
+        for kind, a, b, c, d in SequenceMatcher(None, old.splitlines(), new.splitlines(), autojunk=False).get_opcodes():
+            if kind == "equal" or kind == "replace" and b - a == d - c:
+                mapping.update(zip(range(c + 1, d + 1), range(a + 1, b + 1)))
+                if kind == "replace":
+                    affected.update(range(a + 1, b + 1))
+            else:
+                for source, start, end in ((old, a, b), (new, c, d)):
+                    for first, _, last, name in _spans(ast.parse(source)):
+                        if first <= end and start < last and (unit := f"{path}::{name}") in index:
+                            fallback.add(index[unit])
+        by_line = line_units(old)
+        if any(line not in by_line for line in affected) or "<module>" in changed_units(old, new):
+            fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
+        lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
+    return lines, fallback
+
+
+def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]], paths: set[str]) -> set[str]:
+    lines, fallback = recorded_lines(root, manifest, changes)
+    return {
+        node(test).partition("[")[0]
+        for test, found in manifest["tests"].items()
+        if test not in manifest["lines"]
+        or fallback.intersection(found["units"])
+        or paths.intersection(found.get("files", ()))
+        or any(changed.intersection(manifest["lines"][test].get(path, ())) for path, changed in lines.items())
+    }
+
+
 @cache
 def defined_tests(path: Path) -> set[str]:
     return {name for _, _, _, name in _spans(ast.parse(path.read_text())) if name.rpartition(".")[2].startswith("test")}
@@ -131,21 +215,23 @@ def narrow(
 
 
 def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
-    return max(1, min(limit, mutants, math.ceil(seconds / (WORKERS * target))))
+    return max(1, min(limit, mutants, math.ceil(seconds / (shard_workers() * target))))
 
 
-def slowest_bucket(root: Path, tests: list[str], parts: int) -> float:
-    seconds = file_seconds(root, tests)
+def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, float] | None = None) -> float:
+    if seconds is None:
+        seconds = file_seconds(root, tests)
     buckets = [
         bucket
         for index in range(parts)
-        for bucket in stats_shards(root, part_files(root, tests, (index, parts)), WORKERS)
+        for bucket in stats_shards(root, split_parts(tests, seconds, (index, parts)), shard_workers(), seconds)
     ]
     return max(sum(seconds[path] for path in bucket) for bucket in buckets)
 
 
 def stats_part_count(root: Path, tests: list[str], target: float, limit: int) -> tuple[int, float]:
-    walls = [slowest_bucket(root, tests, parts) for parts in range(1, limit + 1)]
+    seconds = file_seconds(root, tests)
+    walls = [slowest_bucket(root, tests, parts, seconds) for parts in range(1, limit + 1)]
     # One file never splits, so past the floor another part only adds a job.
     reachable = max(target, min(walls))
     parts = next(parts for parts, wall in enumerate(walls, 1) if wall <= reachable)
@@ -174,19 +260,26 @@ def main() -> int:
     parser.add_argument("--repository")
     args = parser.parse_args()
     root = Path.cwd()
-    bases = own_bases(root, args.base, args.head, graded_green)
-    print(f"Mutation bases: {' '.join(bases)}")
-    changes = discover_changes(root, bases, args.head)
-    manifest = None
-    if args.repository:
-        found = find_record(args.repository, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
-        if found is None:
+    with ThreadPoolExecutor() as pool:
+        record = pool.submit(read_record, args.repository) if args.repository else None
+        bases = own_bases(root, args.base, args.head, graded_green)
+        print(f"Mutation bases: {' '.join(bases)}")
+        changes = discover_changes(root, bases, args.head)
+    manifest, failure = None, ""
+    if record is not None:
+        found, failure = record.result()
+        if failure:
+            print(
+                "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"
+                f" test module is selected for each changed file: {failure}"
+            )
+        elif found is None:
             print("No dev test dependency manifest found; tests are selected by import only.")
         else:
             run, manifest = found
             print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
     selection = {}
-    seconds, mutants, tests = estimate(root, changes, selection, manifest)
+    seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
     validate_tests(root, tests)
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")

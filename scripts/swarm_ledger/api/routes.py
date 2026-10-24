@@ -4,7 +4,7 @@ import os
 import re
 from urllib.parse import parse_qs, urlsplit
 
-from scripts.hive.auth import HiveError
+from scripts.swarm_ledger import ledger_closed, ports
 
 from . import resources, schemas
 from .errors import APIError
@@ -56,6 +56,8 @@ def dispatch(handler: object, services: Services) -> dict | str | None:
 
 def ledger_get(handler: object, services: Services, slug: str, path: str) -> dict | None:
     query = pagination(handler.path)
+    if ("state" in query or "offset" in query) and path not in ledger_closed.COLLECTIONS:
+        raise APIError(400, "schema_invalid", resources.DONE_ONLY)
     if path == "events" and handler.headers.get("Accept") == "text/event-stream":
         return events(handler, services, slug)
     if path == "swarm/models":
@@ -69,6 +71,10 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
 
 
 def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
+    if path == "controller-lease":
+        from . import controller_lease
+
+        return controller_lease.read(slug)
     if path.split("/")[0] == "hierarchy":
         return resources.hierarchy_read(services.repository, slug, path, query)
     if path == "architecture":
@@ -90,7 +96,7 @@ def agent_token(handler: object, services: Services, slug: str) -> dict:
         raise APIError(403, "forbidden", "Agent is not placed on this member's hive")
     try:
         token = services.ledger.authority.hive_agent_token(member, slug, agent)
-    except HiveError as exc:
+    except ports.hive().auth.HiveError as exc:
         raise APIError(403, "forbidden", str(exc)) from exc
     return {"data": {"agent": agent, "token": token}}
 
@@ -159,6 +165,10 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
     if handler.command == "PUT" and path in PAGE_WRITES:
         return getattr(handler, PAGE_WRITES[path])(slug)
     payload = body(handler, services)
+    if path == "controller-lease/actions":
+        from . import controller_lease
+
+        return controller_lease.act(slug, principal, payload)
     if path == "lifecycle/actions":
         return admin.lifecycle(services, principal, slug, payload)
     if path == "swarm/actions":
@@ -210,10 +220,11 @@ def pagination(url: str) -> dict:
     if any(len(values) != 1 for values in parsed.values()):
         raise APIError(400, "schema_invalid", "Query parameters must be unique")
     query = {key: values[0] for key, values in parsed.items()}
-    if "limit" in query:
-        try:
-            query["limit"] = int(query["limit"])
-        except ValueError:
-            raise APIError(400, "schema_invalid", "Limit must be an integer") from None
+    for key in ("limit", "offset"):
+        if key in query:
+            try:
+                query[key] = int(query[key])
+            except ValueError:
+                raise APIError(400, "schema_invalid", f"{key.capitalize()} must be an integer") from None
     schemas.validate(schemas.PAGINATION, query)
     return query

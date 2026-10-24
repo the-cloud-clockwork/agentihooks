@@ -43,6 +43,15 @@ def test_a_waiting_label_names_every_unfinished_dependency_by_title_or_id():
     assert phase_state.label(doc["phases"][1], doc) == phase_state.LABELS["building"] == "Building"
 
 
+def test_a_ledger_without_a_tasks_list_still_serves_each_phase_status():
+    view = server.page_view({"phases": PHASES, "_meta": {}}, *server.NO_DOCTOR)
+    assert view["phase_status"]["b"] == {"state": "to_plan", "label": "Needs a plan"}
+
+
+def test_a_waiting_label_without_a_phases_list_names_the_dependency_id():
+    assert phase_state.label(phase("x", "", depends_on=["gone"]), {"tasks": []}) == "Waits for phase gone"
+
+
 def test_the_page_renders_the_served_phase_status_and_keeps_no_lifecycle_of_its_own():
     state, render = ((MODULES / name).read_text(encoding="utf-8") for name in ("state.js", "render.js"))
     assert "phaseLifecycle" not in state + render

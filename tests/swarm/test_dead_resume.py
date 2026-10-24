@@ -517,6 +517,85 @@ def test_a_legacy_lost_claim_without_a_generation_reopens(store):
     assert ledger.rows["t1"]["claimed_by"] == ""
 
 
+def test_a_tick_drop_refunds_the_life_of_a_claim_it_still_holds(store):
+    ledger, runtime, agent = prepared_recovery(store)
+    rows = {"t1": dict(ledger.rows["t1"])}
+    lives = store.claims("sw", "t1")
+
+    assert tick_module._drop("sw", store, ledger, rows, agent, refund=True) == ", task t1 reopened"
+    assert store.claims("sw", "t1") == lives - 1
+
+
+def test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone(store):
+    ledger, runtime, agent = prepared_recovery(store)
+    rows = {"t1": dict(ledger.rows["t1"])}
+    store.count_claim("sw", "t1")
+    lives = store.claims("sw", "t1")
+    ledger.update_task("sw", "t1", {"state": "open", "claimed_by": ""})
+    store.redis.hincrby(store.key("sw", "started-lives"), "t1", -1)
+
+    tick_module._drop("sw", store, ledger, rows, agent, refund=True)
+
+    assert store.claims("sw", "t1") == lives - 1
+    assert ledger.rows["t1"]["claimed_by"] == ""
+
+
+@pytest.mark.parametrize("live", [{"claimed_by": "engineer@other-0001"}, {"claim_generation": 7}, {"state": "done"}])
+def test_a_tick_drop_refunds_nothing_when_one_claim_field_moved(store, live):
+    ledger, runtime, agent = prepared_recovery(store)
+    rows = {"t1": dict(ledger.rows["t1"])}
+    store.count_claim("sw", "t1")
+    lives = store.claims("sw", "t1")
+    ledger.rows["t1"].update(live)
+
+    tick_module._drop("sw", store, ledger, rows, agent, refund=True)
+
+    assert store.claims("sw", "t1") == lives
+
+
+def test_a_tick_drop_refunds_a_legacy_claim_without_a_generation(store):
+    ledger, runtime, agent = prepared_recovery(store)
+    ledger.rows["t1"].pop("claim_generation")
+    rows = {"t1": dict(ledger.rows["t1"])}
+    lives = store.claims("sw", "t1")
+
+    assert tick_module._drop("sw", store, ledger, rows, agent, refund=True) == ", task t1 reopened"
+    assert store.claims("sw", "t1") == lives - 1
+
+
+def test_a_tick_drop_refunds_nothing_when_the_live_task_is_gone(store):
+    ledger, runtime, agent = prepared_recovery(store)
+    rows = {"t1": dict(ledger.rows["t1"])}
+    lives = store.claims("sw", "t1")
+    read = []
+    ledger.task = lambda slug, task_id: read.append((slug, task_id))
+
+    tick_module._drop("sw", store, ledger, rows, agent, refund=True)
+
+    assert store.claims("sw", "t1") == lives
+    assert read == [("sw", "t1")]
+
+
+def test_a_tick_drop_refunds_nothing_when_the_hub_settles_after_the_live_task_read(store):
+    ledger, runtime, agent = prepared_recovery(store)
+    rows = {"t1": dict(ledger.rows["t1"])}
+    store.count_claim("sw", "t1")
+    lives = store.claims("sw", "t1")
+    read = ledger.task
+
+    def settled_after_read(slug, task_id):
+        row = dict(read(slug, task_id))
+        assert store.release(slug, task_id, agent.name)
+        ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""})
+        return row
+
+    ledger.task = settled_after_read
+
+    tick_module._drop("sw", store, ledger, rows, agent, refund=True)
+
+    assert store.claims("sw", "t1") == lives
+
+
 def test_reap_reports_every_lost_engineer_in_the_pass(store):
     store.update("sw", max_eng=2)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), ResumingRuntime()
@@ -530,3 +609,65 @@ def test_reap_reports_every_lost_engineer_in_the_pass(store):
 
     assert actions == [f"lost {agent.name}, task {agent.task} reopened" for agent in engineers]
     assert len(engineers) == 2
+
+
+def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(store, monkeypatch):
+    from scripts.swarm import deliberate_exit
+
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    tick_module.tick("sw", store, ledger, runtime, 1)
+    agent = next(a for a in store.agents("sw") if a.lane == "eng")
+    store.put_agent("sw", replace(agent, conversation_id="original-conversation", profile="engineer"))
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+    monkeypatch.setattr(tick_module.reaper, "scratch_homes", lambda slug, task: [f"{slug}/{task}"])
+    claims = store.claims("sw", "t1")
+    deliberate_exit.record(store, "sw", agent.name, 5)
+    runtime.live.discard(agent.name)
+    rows = {task_id: dict(row) for task_id, row in ledger.rows.items()}
+
+    actions = tick_module._reap("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2)
+
+    assert actions == [f"retired {agent.name} after a deliberate terminate, task t1 reopened"]
+    assert runtime.homes[agent.name] == ["sw/t1"]
+    assert runtime.resumed == []
+    assert agent.name not in {a.name for a in store.agents("sw")}
+    assert ledger.rows["t1"]["state"] == "open"
+    assert ledger.rows["t1"]["claimed_by"] == ""
+    assert store.claims("sw", "t1") == claims - 1
+    assert deliberate_exit.recorded(store, "sw", agent.name) is False
+
+
+def test_a_deliberate_exit_overrides_a_pending_outage_recovery(store):
+    import json
+
+    from scripts.swarm import deliberate_exit, resume
+
+    ledger, runtime, agent = prepared_recovery(store)
+    identity = resume._recovery_identity(store, "sw", agent)
+    record = {"state": "pending", "attempts": 0, "identity": identity, "last_at": 0}
+    store.redis.hset(store.key("sw", resume.RECOVERY), agent.name, json.dumps(record))
+    assert resume.recovery_pending(store, "sw", agent) is True
+    deliberate_exit.record(store, "sw", agent.name, 5)
+    rows = {task_id: dict(row) for task_id, row in ledger.rows.items()}
+
+    assert resume.recovery_pending(store, "sw", agent) is False
+    assert resume.recover_outages("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2) == []
+    actions = tick_module._reap("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2)
+
+    assert actions == [f"retired {agent.name} after a deliberate terminate, task t1 reopened"]
+    assert runtime.resumed == []
+    assert ledger.rows["t1"]["state"] == "open"
+
+
+def test_a_deliberate_exit_is_kept_per_swarm_and_agent_until_taken(store):
+    from scripts.swarm import deliberate_exit
+
+    deliberate_exit.record(store, "sw", "eng@a-1", 7)
+
+    assert deliberate_exit.recorded(store, "sw", "eng@a-1") is True
+    assert deliberate_exit.recorded(store, "sw", "eng@a-2") is False
+    assert deliberate_exit.recorded(store, "other", "eng@a-1") is False
+    assert store.redis.hget(store.key("sw", "deliberate-exits"), "eng@a-1") == "7"
+    assert deliberate_exit.take(store, "sw", "eng@a-1") is True
+    assert deliberate_exit.take(store, "sw", "eng@a-1") is False
+    assert deliberate_exit.recorded(store, "sw", "eng@a-1") is False

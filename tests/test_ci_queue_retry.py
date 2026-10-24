@@ -16,6 +16,7 @@ RUN = {"event": "merge_group", "conclusion": "failure", "run_attempt": 1}
 SHUTDOWN = (FIXTURES / "shutdown_signal.txt").read_text()
 LOST = (FIXTURES / "lost_communication.txt").read_text()
 RED = (FIXTURES / "test_failure.txt").read_text()
+QUOTED_LOSS = (FIXTURES / "failure_quoting_a_loss.txt").read_text()
 QUEUE_BRANCH = "gh-readonly-queue/dev/pr-3259-810e2717650390eb596adff102841b05c86eff69"
 REMOVED = {"createdAt": "2026-10-15T05:40:23Z", "reason": "failed_checks"}
 HEAD = "810e2717650390eb596adff102841b05c86eff69"
@@ -58,6 +59,36 @@ def test_a_shutdown_signal_on_a_unit_shard_is_retried():
 def test_a_lost_communication_annotation_is_retried():
     failed = [job("unit (3.12, 7)", LOST), job("unit (3.12, 9)", SHUTDOWN), job("Gate — Required", "")]
     assert ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
+
+
+def test_a_shard_lost_again_on_its_in_run_rerun_is_not_requeued():
+    failed = [*lost_run(), job("unit rerun (3.11, 2)", SHUTDOWN), job("unit rerun (3.11, 5)", LOST)]
+    retry, reason = ci_queue_retry.decide(RUN, failed, WORKFLOW)
+    assert not retry
+    assert reason == "failed again on its in-run rerun: unit rerun (3.11, 2), unit rerun (3.11, 5)"
+
+
+def test_a_timed_out_rerun_is_listed_so_it_refuses_the_requeue(monkeypatch):
+    jobs = {
+        "total_count": 2,
+        "jobs": [
+            {"id": 1, "name": "unit (3.12, 2)", "conclusion": "failure"},
+            {"id": 2, "name": "unit rerun (3.12, 2)", "conclusion": "timed_out"},
+        ],
+    }
+
+    def api(*args):
+        if args[0].endswith("jobs?filter=latest&per_page=100"):
+            return json.dumps(jobs)
+        return "##[error]" + SHUTDOWN if args[0].endswith("/logs") else "[]"
+
+    monkeypatch.setattr(ci_queue_retry, "_api", api)
+    failed = ci_queue_retry.failed_jobs("o/r", 7)
+    assert [entry["name"] for entry in failed] == ["unit (3.12, 2)", "unit rerun (3.12, 2)"]
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (
+        False,
+        "failed again on its in-run rerun: unit rerun (3.12, 2)",
+    )
 
 
 def test_a_real_test_failure_is_not_retried():
@@ -170,6 +201,24 @@ def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
     assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
 
 
+def test_a_shard_whose_tests_reported_failures_is_not_lost_whatever_its_output_quotes(monkeypatch):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.12, 13)", "conclusion": "failure"}]}
+    quoted = "Process completed with exit code 1.\\n##[error]The runner has received a shutdown signal.-True]"
+    pages = {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": json.dumps(
+            [{"message": quoted}, {"message": "Process completed with exit code 1."}]
+        ),
+        "repos/o/r/actions/jobs/1/logs": QUOTED_LOSS,
+    }
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (
+        False,
+        "failed without a runner loss signature: unit (3.12, 13)",
+    )
+
+
 def test_colour_codes_in_the_shard_log_keep_the_runner_loss(monkeypatch):
     jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
     coloured = "\x1b[36;1mpytest -n auto\x1b[0m\n" + SHUTDOWN.replace("##[error]", "\x1b[31m##[error]") + "\x1b[0m"
@@ -181,6 +230,36 @@ def test_colour_codes_in_the_shard_log_keep_the_runner_loss(monkeypatch):
     monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
     failed = ci_queue_retry.failed_jobs("o/r", 9)
     assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (True, "runner lost on unit (3.11, 2)")
+
+
+def unreadable_log_api(conclusion, annotations):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.12, 13)", "conclusion": conclusion}]}
+    pages = {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": json.dumps([{"message": note} for note in annotations]),
+    }
+
+    def api(path, *flags):
+        if path not in pages:
+            raise subprocess.CalledProcessError(1, ["gh", "api", path])
+        return pages[path]
+
+    return api
+
+
+def test_an_unreadable_shard_log_is_a_runner_loss(monkeypatch):
+    monkeypatch.setattr(ci_queue_retry, "_api", unreadable_log_api("cancelled", []))
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert failed == [{"name": "unit (3.12, 13)", "text": "The job log could not be read"}]
+    run = {**RUN, "conclusion": "cancelled"}
+    assert ci_queue_retry.decide(run, failed, WORKFLOW) == (True, "runner lost on unit (3.12, 13)")
+
+
+def test_an_unreadable_log_beside_a_step_exit_is_not_a_runner_loss(monkeypatch):
+    monkeypatch.setattr(ci_queue_retry, "_api", unreadable_log_api("failure", ["Process completed with exit code 1."]))
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert failed == [{"name": "unit (3.12, 13)", "text": "Process completed with exit code 1."}]
+    assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
 
 
 def cancelled_run_pages(lost_log):
@@ -210,6 +289,18 @@ def test_a_lost_shard_that_ends_cancelled_is_a_runner_loss(monkeypatch):
     assert [job["name"] for job in failed] == ["unit (3.12, 2)", "Gate — Required"]
     run = {**RUN, "conclusion": "cancelled"}
     assert ci_queue_retry.decide(run, failed, WORKFLOW) == (True, "runner lost on unit (3.12, 2)")
+
+
+def test_a_cancelled_shard_whose_tests_reported_failures_keeps_the_run_red(monkeypatch):
+    pages = cancelled_run_pages(QUOTED_LOSS + "##[error]The operation was canceled.")
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert [job["name"] for job in failed] == ["unit (3.12, 2)", "Gate — Required"]
+    run = {**RUN, "conclusion": "cancelled"}
+    assert ci_queue_retry.decide(run, failed, WORKFLOW) == (
+        False,
+        "failed without a runner loss signature: unit (3.12, 2)",
+    )
 
 
 def test_shards_cancelled_without_a_runner_loss_are_not_retried(monkeypatch):

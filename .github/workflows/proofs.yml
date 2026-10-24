@@ -301,6 +301,10 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
 
+      - name: Install the pinned nats server for the bus backend tests
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
+
       - name: Install the browser that page tests drive
         if: inputs.browser
         timeout-minutes: 6
@@ -311,4 +315,4 @@ jobs:
           PYTHONUNBUFFERED: '1'
         run: |
           read -r -a paths <<< "$TEST_PATHS"
-          workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup --tb=short
+          workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short

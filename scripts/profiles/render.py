@@ -21,7 +21,8 @@ from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_hook_trust import trusted_state
 from scripts.targets.codex_target import codex_home
 
-SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json", "keybindings.json")
+SHARED_DIRS = ("projects", "sessions", "todos")
+SHARED = (*SHARED_DIRS, "plugins", ".credentials.json", "keybindings.json")
 CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
 CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
 COPILOT_STATE = ("config.json", "settings.json", "agentihooks-hook.sh", "hooks", "session-state", "logs")
@@ -144,6 +145,8 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         "profiles": _profiles_digest(dirs),
         "chain": chain,
         "overlays": _overlays(dirs),
+        "mcp_urls": json.loads(os.environ.get("AGENTIHOOKS_MCP_URLS", "{}")),
+        "mcp_bearer_env": json.loads(os.environ.get("AGENTIHOOKS_MCP_BEARER_ENV", "{}")),
         "enabled_plugins": _plugins(chain, _settings("claude", bundle, dirs).get("enabledPlugins") or {}),
         **({"browser": browser.spec()} if browser.proxy_enabled(chain) else {}),
         "corrections": quarantine.digest(),
@@ -251,6 +254,21 @@ def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]])
         )
         if path:
             servers.update(_i._load_native_layer(path).get("mcpServers") or {})
+    urls = json.loads(os.environ.get("AGENTIHOOKS_MCP_URLS", "{}"))
+    servers = {
+        name: {**server, "url": urls[name]} if name in urls and "url" in server else server
+        for name, server in servers.items()
+    }
+    bearer_env = json.loads(os.environ.get("AGENTIHOOKS_MCP_BEARER_ENV", "{}"))
+    servers = {
+        name: {
+            **server,
+            "headers": {**server.get("headers", {}), "Authorization": "Bearer ${" + bearer_env[name] + "}"},
+        }
+        if name in bearer_env and "url" in server
+        else server
+        for name, server in servers.items()
+    }
     return browser.configure(servers, [name for name, _ in dirs])
 
 
@@ -347,6 +365,10 @@ def owner(home: Path) -> str | None:
     return homes.owner(rendered_root(), home)
 
 
+def has_codex_rollout(name: str, overlays: Sequence[str], conversation_id: str) -> bool:
+    return homes.has_codex_rollout(rendered_root(), home_key(name, overlays), conversation_id)
+
+
 def _claude_fresh(root: Path, stamp: dict, required: set[str]) -> bool:
     out = root / "claude"
     mounts = connectors.path(root.name, "claude", root.parent)
@@ -398,6 +420,8 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
     _atomic_write(out / "CLAUDE.md", _persona(root, "claude", bundle, dirs, current["chain"]))
     _claude_json(out, servers)
     shared = claude_home(_global_env())
+    for item in SHARED_DIRS:
+        (shared / item).mkdir(parents=True, exist_ok=True)
     for item in SHARED:
         (out / item).symlink_to(shared / item)
     # Claude Code refuses plan file writes that resolve through a symlink.
@@ -451,7 +475,20 @@ def _codex_skills(bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict
     return below, plugins.layer_skills(_roots(bundle, dirs))
 
 
-def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), isolate: bool = False) -> Path | None:
+def _link_codex_state(out: Path, operator: Path, login: bool, rollouts: Path | None) -> None:
+    for item in CODEX_STATE:
+        if rollouts is not None and item not in ("auth.json", "hooks.json"):
+            continue
+        if item != "auth.json" or login:
+            _link(out / item, operator / item)
+    for item in homes.CODEX_ROLLOUTS if rollouts is not None else ():
+        (rollouts / item).mkdir(parents=True, exist_ok=True)
+        _link(out / item, rollouts / item)
+
+
+def render_codex(
+    name: str, force: bool = False, overlays: Sequence[str] = (), isolate: bool = False, push: bool = False
+) -> Path | None:
     import tomlkit
 
     from scripts.profiles import codex_master
@@ -473,6 +510,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
         "hooks": _file_digest(operator / "hooks.json"),
         "login": (operator / "auth.json").is_file(),
         "isolate": isolate,
+        **({"push": True} if push else {}),
         "skills": {skill: str(path) for skill, path in {**below, **above}.items()},
     }
     root = profile_dir(name, overlays)
@@ -484,6 +522,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
         and (out / binding.FILE).is_file()
         and connectors.path(root.name, "codex", root.parent).is_file()
         and _read_json(out / STAMP) == current
+        and all((out / item).is_symlink() for item in (homes.CODEX_ROLLOUTS if isolate else ()))
         and (not master or ((out / "AGENTS.md").is_file() and not (out / "AGENTS.md").is_symlink()))
     ):
         return None
@@ -500,16 +539,14 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
         agents = out / "AGENTS.md"
         if agents.is_symlink():
             agents.unlink()
-        _atomic_write(agents, codex_master.persona((claude / "CLAUDE.md").read_text()))
+        _atomic_write(agents, codex_master.persona((claude / "CLAUDE.md").read_text(), push))
     else:
         _link(out / "AGENTS.md", claude / "CLAUDE.md")
     _relink(out / "skills", {**below, **{p.name: p for p in sorted((claude / "skills").iterdir())}, **above})
     _link_commands(out / "skills", claude / "commands")
-    for item in CODEX_STATE:
-        if isolate and item not in ("auth.json", "hooks.json"):
-            continue
-        if item != "auth.json" or current["login"]:
-            _link(out / item, operator / item)
+    _link_codex_state(
+        out, operator, current["login"], homes.rollouts(rendered_root(), home_key(name, overlays)) if isolate else None
+    )
     _link(manifest, sources.path(root.name, "claude", root.parent))
     doc = _codex_config(installed, operator, out, _settings("codex", bundle, dirs))
     if isolate:
@@ -572,11 +609,12 @@ def render(
     overlays: Sequence[str] = (),
     bundle_revision: str = "",
     isolate: bool = False,
+    push: bool = False,
 ) -> Path | None:
     renderers = {"claude": render_claude, "codex": render_codex, "copilot": render_copilot}
     if target not in renderers:
         raise ValueError(f"{target} per-run profiles are not supported")
-    options = {"isolate": isolate} if target == "codex" else {}
+    options = {"isolate": isolate, "push": push} if target == "codex" else {}
     if bundle_revision:
         with bundle_copy.recorded(_bundle(), bundle_revision, rendered_root()):
             return renderers[target](name, force=force, overlays=overlays, **options)

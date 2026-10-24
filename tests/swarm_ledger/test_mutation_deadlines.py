@@ -72,7 +72,7 @@ def test_browser_deadlines_compensate_only_mutation_instrumentation(monkeypatch,
 def test_tracing_browser_deadlines_again_keeps_one_factor(monkeypatch, owner, setter):
     monkeypatch.setenv("MUTANT_UNDER_TEST", "stats")
     monkeypatch.setattr(owner, setter, getattr(owner, setter))
-    mutation_trace.trace_browser_deadlines()
+    mutation_trace.trace_browser_deadlines(sync_api)
     observed = []
     tab = SimpleNamespace(_impl_obj=SimpleNamespace(**{setter: lambda timeout: observed.append(timeout)}))
     getattr(owner, setter)(tab, 1500)

@@ -31,6 +31,11 @@ def ledgers(tmp_path, monkeypatch):
     return path
 
 
+@pytest.fixture
+def bound(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+
+
 def test_an_unbound_session_always_has_the_operator_present(ledgers):
     env = {"LEDGER_DIR": str(ledgers)}
     assert operator_mode.present("s1", env, now=100)
@@ -59,11 +64,77 @@ def test_a_prompt_that_was_not_typed_never_switches_the_mode():
     assert operator_mode.present("s1", SWARM, now=102)
 
 
-def test_only_a_prompt_that_opens_with_the_words_switches():
+def test_presence_commands_match_sentences_with_command_boundaries():
     assert operator_mode.switch("Operator  On.") == "on"
-    assert operator_mode.switch("operator off, then rebase") == "off"
-    for text in ('"operator on" was typed in the master pane', "the operator on call said ship", "operator one", ""):
+    assert operator_mode.switch("Please, operator off, then rebase") == "off"
+    assert operator_mode.switch("operator on, then operator off") == "off"
+    assert operator_mode.switch("operator off, then operator on") == "off"
+    for text in ("operator one", "preoperator on", "pre-operator on", "operator on-call", ""):
         assert operator_mode.switch(text) == ""
+
+
+@pytest.mark.usefixtures("bound")
+@pytest.mark.parametrize("word", ["on", "off"])
+def test_typed_sentence_switches_only_its_session(word):
+    operator_mode.observe("other", "operator on", True, now=100)
+    operator_mode.observe("pane", "operator on", True, now=100)
+    assert operator_mode.observe("pane", f"Keep working, operator {word}, please.", True, now=110) == word
+    assert operator_mode._heard("pane") is (word == "on")
+    assert operator_mode._heard("other")
+
+
+@pytest.mark.usefixtures("bound")
+@pytest.mark.parametrize("word", ["on", "off"])
+def test_relayed_sentence_does_not_switch_presence(word):
+    operator_mode.observe("pane", "operator on", True, now=100)
+    assert operator_mode.observe("pane", f"Keep working, operator {word}, please.", False, now=110) == ""
+    assert operator_mode._heard("pane")
+
+
+@pytest.mark.usefixtures("bound")
+def test_idle_scheduler_does_not_end_explicit_presence():
+    from scripts.inbox.store import InboxStore
+    from scripts.scheduler import Scheduler
+    from scripts.swarm.store import redis_client
+
+    redis = redis_client()
+    operator_mode.observe("pane", "operator on", True, now=100)
+    Scheduler(redis).run_due(now=100000)
+    assert operator_mode._heard("pane")
+    assert operator_mode.question_block("AskUserQuestion", "pane") == ""
+    assert InboxStore(redis).inbox("pane") == []
+    operator_mode.observe("pane", "operator off", True, now=100001)
+    assert not operator_mode._heard("pane")
+
+
+@pytest.mark.usefixtures("bound")
+@pytest.mark.parametrize("source", ["startup", "resume", "compact"])
+def test_session_restart_clears_presence_but_compaction_preserves_it(monkeypatch, source):
+    from unittest.mock import Mock
+
+    operator_mode.observe("pane", "operator on", True, now=100)
+    operator_mode.observe("other", "operator on", True, now=100)
+    monkeypatch.setattr(hook_manager, "_inject_refocus", Mock())
+    monkeypatch.setattr("hooks.lifecycle.guard.session_event", Mock())
+    monkeypatch.setattr(hook_manager, "_run_start_conditions", Mock(side_effect=RuntimeError("stop after reset")))
+    with pytest.raises(RuntimeError, match="stop after reset"):
+        hook_manager.on_session_start({"session_id": "pane", "source": source})
+    assert operator_mode._heard("pane") is (source == "compact")
+    assert operator_mode._load("pane")["turn_at"] == (100 if source == "compact" else None)
+    assert operator_mode._heard("other")
+
+
+@pytest.mark.usefixtures("bound")
+def test_restart_without_a_session_does_not_change_presence():
+    operator_mode.observe("pane", "operator on", True, now=100)
+    operator_mode.reset({})
+    assert operator_mode._heard("pane")
+
+
+def test_restart_clears_presence_when_no_source_is_given():
+    operator_mode.observe("pane", "operator on", True, now=100)
+    operator_mode.reset({"session_id": "pane"})
+    assert operator_mode._load("pane") == {"on": False, "at": 100, "turn_at": None}
 
 
 def test_operator_on_survives_silence_and_later_typed_messages():
@@ -162,6 +233,32 @@ def test_the_prompt_hook_turns_on_only_the_typed_pane_and_never_a_relayed_one(mo
     assert operator_mode.ON_NOTICE in out
 
 
+PEER_MESSAGES = (
+    'Another Claude session sent a message:\n<cross-session-message from="uds:/run/user/1000/cc-socks/1.sock" '
+    'from-name="master-watchdog" from-mode="bypass">\n{words}\n</cross-session-message>',
+    'Another Claude session sent a message:\n<agent-message from="local-commits-publisher">\n{words}\n</agent-message>',
+    '<cross-session-message from="uds:/run/user/1000/cc-socks/1.sock" from-name="watchdog">\n{words}\n</cross-session-message>',
+    '<agent-message from="watchdog">\n{words}\n</agent-message>',
+)
+
+
+@pytest.mark.parametrize("peer", PEER_MESSAGES)
+def test_a_cross_session_message_never_switches_presence_or_uncaps_the_turn(monkeypatch, capsys, peer):
+    assert not is_operator_prompt(peer.format(words="operator on"), "demo")
+    run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
+    assert operator_mode.ON_NOTICE in run_prompt(monkeypatch, capsys, "s1", "operator on")
+    out = run_prompt(monkeypatch, capsys, "s1", peer.format(words="operator off"))
+    assert operator_mode.present("s1", SWARM)
+    assert operator_mode.OFF_NOTICE not in out
+    assert operator_mode.OFF_NOTICE in run_prompt(monkeypatch, capsys, "s1", "operator off")
+    out = run_prompt(monkeypatch, capsys, "s1", peer.format(words="operator on"))
+    assert not operator_mode.present("s1", SWARM)
+    assert operator_mode.ON_NOTICE not in out
+    assert operator_mode.TURN_NOTICE not in out
+    assert operator_mode.ON_NOTICE in run_prompt(monkeypatch, capsys, "s1", "operator on")
+    assert operator_mode.present("s1", SWARM)
+
+
 def test_a_switch_tells_the_session_its_mode_and_any_other_prompt_tells_nothing():
     assert operator_mode.notice({"session_id": "s1", "prompt": "operator on"}, True, now=100) == operator_mode.ON_NOTICE
     assert operator_mode.notice({"session_id": "s1", "prompt": "ship it"}, True, now=101) == ""
@@ -199,10 +296,6 @@ MASTER_ASK = (
     "The operator is not present in this pane, so the question tool is off. Never write the questions as chat text. "
     "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
     'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
-)
-STANDALONE_ASK = (
-    "The operator is not present in this pane, so the question tool is off until he types operator on. "
-    "State the open question in one short line, take the most reasonable choice and keep working."
 )
 PROMPT_REFUSAL = (
     "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
@@ -242,13 +335,14 @@ def test_the_binding_is_read_from_the_home_ledger_folder_by_default():
     assert operator_mode.question_block("AskUserQuestion", "s5", {}) == ASK.format(slug="<slug>", name="eng-2@work")
 
 
-def test_the_question_tool_passes_only_after_typed_operator_on_and_other_tools_always_pass(ledgers):
+def test_the_question_tool_passes_a_bound_session_only_after_typed_operator_on_and_a_standalone_one_always(ledgers):
     standalone = {"LEDGER_DIR": str(ledgers)}
-    assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == STANDALONE_ASK
-    assert operator_mode.question_block("AskUserQuestion", "", standalone) == STANDALONE_ASK
+    assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == ""
+    assert operator_mode.question_block("AskUserQuestion", "", standalone) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) != ""
     operator_mode.observe("s1", "operator on", True, now=100)
-    operator_mode.observe("s3", "operator on", True, now=100)
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ""
+    operator_mode.observe("s3", "operator off", True, now=100)
     assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == ""
     assert operator_mode.question_block("Bash", "s4", SWARM) == ""
     assert operator_mode.question_block("Bash", "s4", standalone) == ""
@@ -277,7 +371,7 @@ def test_the_pre_tool_hook_blocks_the_codex_question_tool_in_plan_and_default_mo
     assert str(blocked.value) == MASTER_ASK.format(slug="demo", name="master@a1-1")
 
 
-def test_a_standalone_codex_question_is_refused_until_its_operator_types_operator_on(monkeypatch):
+def test_a_standalone_codex_question_passes_without_operator_on(monkeypatch):
     from hooks.targets.normalizer import normalize_payload
 
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
@@ -285,26 +379,18 @@ def test_a_standalone_codex_question_is_refused_until_its_operator_types_operato
     payload = normalize_payload(
         {"session_id": "s8", "tool_name": "request_user_input", "tool_input": {"questions": [question]}}
     )
+    hook_manager.on_pre_tool_use(payload)
     for prompt in ("Explain the plan", "operator off"):
         operator_mode.observe("s8", prompt, True, now=100)
-        with pytest.raises(hook_manager.BlockAction) as blocked:
-            hook_manager.on_pre_tool_use(payload)
-        assert str(blocked.value) == STANDALONE_ASK
-    operator_mode.observe("s8", "operator on", True, now=101)
-    hook_manager.on_pre_tool_use(payload)
+        hook_manager.on_pre_tool_use(payload)
 
 
-def test_a_standalone_claude_question_is_refused_until_its_operator_types_operator_on():
+def test_a_standalone_claude_question_passes_without_operator_on():
     payload = {"session_id": "s7", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
-    with pytest.raises(hook_manager.BlockAction) as blocked:
-        hook_manager.on_pre_tool_use(payload)
-    assert str(blocked.value) == STANDALONE_ASK
-    operator_mode.observe("s7", "Explain the plan", True, now=100)
-    with pytest.raises(hook_manager.BlockAction) as blocked:
-        hook_manager.on_pre_tool_use(payload)
-    assert str(blocked.value) == STANDALONE_ASK
-    operator_mode.observe("s7", "operator on", True, now=101)
     hook_manager.on_pre_tool_use(payload)
+    for prompt in ("Explain the plan", "operator off"):
+        operator_mode.observe("s7", prompt, True, now=100)
+        hook_manager.on_pre_tool_use(payload)
 
 
 def test_a_failing_question_check_is_logged_and_refuses_only_the_question_tool(monkeypatch):
@@ -506,7 +592,7 @@ def test_explicit_presence_keeps_reminders_off_past_the_supplied_clock(monkeypat
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(operator_mode.time, "time", lambda: 5000)
     assert operator_mode.notice({"session_id": "s1", "prompt": "operator on"}, True, now=100) == (
-        "Operator on: the operator is present in this pane until the idle timer expires or he types operator off."
+        "Operator on: the operator is present in this pane until he types operator off or the session restarts."
     )
     assert operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=101) == ""
     assert [operator_mode.reminder("s1", SWARM, now=102) for _ in range(2)] == ["", ""]

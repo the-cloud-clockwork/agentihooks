@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_cutover.py:scripts.swarm.ledger_cutover.x__activate__mutmut_143:712c42d5001d4d4622dd8b35a5b9264849dae23831fe603539fd5b718b943f58": {
+    "reader": "standards_reader",
+    "reason": "Inside ledger_route.scoped(slug, address) the address is non-empty because settings rejects a falsy address and cli.api_address rejects any value that is not http or https with a host, so lease.release takes its remote branch and returns before reading store; the mutated argument is never used."
+  }
+}

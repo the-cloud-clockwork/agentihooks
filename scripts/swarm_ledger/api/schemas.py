@@ -57,11 +57,13 @@ PAGINATION = {
     "properties": {
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
         "cursor": {"type": "string", "pattern": "^[a-f0-9]{64}:[0-9]{1,12}$"},
+        "state": {"enum": ["done"]},
+        "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
     },
 }
 
 FIELDS = {
-    "add": "thread text by long attachments to reply_to outcome",
+    "add": "thread text by long attachments to reply_to outcome notice",
     "edit": "thread text by",
     "delete": "thread by",
     "clear": "thread",
@@ -80,7 +82,7 @@ FIELDS = {
     "priority_clear": "by target reason",
     "notification_clear": "target",
     "notice": "by text",
-    "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up",
+    "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up workstation",
     "task_update": "by item fields if_state if_match if_plan_lines_missing quote",
     "task_rank": "by item rank if_owned",
     "task_group": "by item members",
@@ -117,10 +119,12 @@ FIELDS = {
 }
 TYPES = {
     "long": {"type": "boolean"},
+    "notice": {"const": True},
     "to": {"const": "operator"},
     "needs_operator": {"type": "boolean"},
     "artifact": {"type": "boolean"},
     "follow_up": {"type": "boolean"},
+    "workstation": {"type": "boolean"},
     "release": {"type": "boolean"},
     "if_plan_lines_missing": {"type": "boolean"},
     "rounds": {"type": "integer", "minimum": 0},

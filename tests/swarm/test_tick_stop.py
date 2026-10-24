@@ -228,6 +228,21 @@ def test_release_all_releases_each_held_tick_lock_once():
     assert tick_stop.release_all() == 0
 
 
+def test_a_signal_that_lands_while_the_thread_holds_the_guard_still_releases():
+    released = []
+    tick_stop.hold("token", lambda: released.append("token"))
+
+    def interrupted():
+        with tick_stop._GUARD:
+            tick_stop.release_all()
+
+    worker = threading.Thread(target=interrupted, daemon=True)
+    worker.start()
+    worker.join(5)
+    assert not worker.is_alive()
+    assert released == ["token"]
+
+
 def test_a_tick_drops_a_lock_the_stop_already_released():
     tick_stop.hold("t", lambda: None)
     assert tick_stop.release_all() == 1
@@ -291,11 +306,17 @@ def test_a_stopped_tick_skips_the_herdr_sweep(monkeypatch):
     monkeypatch.setattr(timer, "reconcile", lambda binary: True)
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
     monkeypatch.setattr(operator_env, "classifier", lambda environ: None)
-    monkeypatch.setattr(herdr_gc, "run", lambda *args: swept.append(args) or [])
+    monkeypatch.setattr(herdr_gc, "run", lambda *args, **kwargs: swept.append(args) or [])
     monkeypatch.setattr(cli, "run_tick", lambda store, slug, scheduled: tick_stop.STOP.wait(10) and [])
     monkeypatch.setattr(tick_stop, "DEADLINE_S", 0.2)
     monkeypatch.setattr(cli, "_tickable", lambda slug: True)
-    cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)
+    store = types.SimpleNamespace(
+        slugs=lambda: ["sw"],
+        config=lambda slug: types.SimpleNamespace(api_url="", pending_api_url=""),
+        redis=types.SimpleNamespace(hget=lambda *_: None),
+        key=lambda slug, tail: f"{slug}:{tail}",
+    )
+    cli.cmd_tick(store, None)
     assert swept == []
 
 

@@ -65,13 +65,18 @@ def test_the_holder_hands_its_locked_descriptor_to_the_tick(monkeypatch):
 
 
 def _host_tick(monkeypatch, ticked):
-    store = SimpleNamespace(slugs=lambda: ["one"])
+    store = SimpleNamespace(
+        slugs=lambda: ["one"],
+        config=lambda slug: SimpleNamespace(api_url="", pending_api_url=""),
+        redis=SimpleNamespace(hget=lambda *_: None),
+        key=lambda slug, tail: f"{slug}:{tail}",
+    )
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(binned=lambda s: False, closed=lambda s: False))
     monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
     monkeypatch.setattr(cli, "_reconcile_services", lambda: ticked.append("reconcile"))
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
     monkeypatch.setattr(operator_env, "classifier", lambda environ: None)
-    monkeypatch.setattr(herdr_gc, "run", lambda *args: ticked.append("herdr") or [])
+    monkeypatch.setattr(herdr_gc, "run", lambda *args, **kwargs: ticked.append("herdr") or [])
     monkeypatch.setattr(cli, "run_tick", lambda store, slug, scheduled: ticked.append(slug) or [])
     return store
 

@@ -1,13 +1,14 @@
 import { $, h } from "./dom.js";
 import { itemState } from "./state.js";
-import { doc } from "./sync.js";
+import { closedLeft, doc, pageIn, pagedOut } from "./sync.js";
 import { noticeTarget, showAlerts, showNotifications } from "./notices.js";
 import { showArtifacts } from "./artifacts.js";
 import { renderSwarm, swarm } from "./swarm.js";
 import { collapsible, groupOpen, markToggles, rememberGroup } from "./folds.js";
 import { selectTab } from "./layout.js";
 import { render } from "./render.js";
-import { firstPage, lazy, moreButton, wanted } from "./pages.js";
+import { closedMore, firstPage, lazy, moreButton, wanted } from "./pages.js";
+import { revealFrozenTarget, viewCount, viewItems } from "./frozen_view.js";
 
 let outlinePick = null;
 
@@ -28,12 +29,14 @@ const PANEL_ROWS = { notice: () => showNotifications(true), alert: () => showAle
 function fetchTarget(id) {
   const kind = id.split("-")[0];
   if (kind === "item") {
-    const section = document.querySelector(`section[data-outline="${id.split("-")[1]}"] > details.fold`);
+    wanted.ids = new Set(revealFrozenTarget(doc, id));
+    const list = id.split("-")[1];
+    const section = document.querySelector(`section[data-outline="${["plans", "slices"].includes(list) ? "phases" : list}"] > details.fold`);
     if (section) section.open = true;
   } else if (!Object.hasOwn(PANEL_ROWS, kind)) return;
   wanted.id = id;
   (kind === "item" ? render : PANEL_ROWS[kind])();
-  setTimeout(() => { wanted.id = null; }, 0);
+  setTimeout(() => { wanted.id = null; wanted.ids.clear(); }, 0);
 }
 
 export function revealTarget(id) {
@@ -43,10 +46,24 @@ export function revealTarget(id) {
   return el;
 }
 
+export function pageTo(id) {
+  const [kind, list, ...rest] = id.split("-");
+  if (kind !== "item" || document.getElementById(id) || !pagedOut(list, rest.join("-"))) return false;
+  pageIn(list, rest.join("-")).then(() => land(revealTarget(id)));
+  return true;
+}
+
 export function jumpTo(ev, item) {
-  const el = revealTarget(`item-${item.replace("/", "-")}`);
+  const id = `item-${item.replace("/", "-")}`;
+  if (pageTo(id)) return ev.preventDefault();
+  const el = revealTarget(id);
   if (!el) return;
   ev.preventDefault();
+  land(el);
+}
+
+function land(el) {
+  if (!el) return;
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.classList.remove("flash");
   void el.offsetWidth;
@@ -57,11 +74,13 @@ function outlineOf(doc, heads) {
   const entry = (list) => (i, n) => typeof i === "string" ? { id: `item-${list}-${n}`, title: i }
     : { id: `item-${list}-${i.id}`, title: list === "tasks" ? `${i.id} ${i.title}` : i.title || i.text || i.item || i.id, state: itemState(list, i) };
   return heads.map((head) => {
-    const list = (head.list ? doc[head.list] || [] : []).filter((i) => !i.deleted);
+    const all = (head.list ? doc[head.list] || [] : []).filter((i) => !i.deleted);
+    const list = viewItems(head.list, all);
     const grouped = ["tasks", "followups"].includes(head.list);
-    const counts = grouped ? [...new Set(list.map((i) => i.state || (i.done ? "done" : "open")))]
-      .map((state) => `${list.filter((i) => (i.state || (i.done ? "done" : "open")) === state).length} ${state}`).join(" · ") : "";
-    return { id: head.id, title: head.title + (counts ? ` · ${counts}` : ""),
+    const hidden = head.list ? closedLeft(head.list) : 0;
+    const counts = grouped ? [...new Set([...list.map((i) => i.state || (i.done ? "done" : "open")), ...(hidden ? ["done"] : [])])]
+      .map((state) => `${list.filter((i) => (i.state || (i.done ? "done" : "open")) === state).length + (state === "done" ? hidden : 0)} ${state}`).join(" · ") : "";
+    return { id: head.id, title: head.title + (counts ? ` · ${counts}` : "") + viewCount(head.list, all),
       items: head.list === "followups" ? [] : list.map(entry(head.list)) };
   });
 }
@@ -80,7 +99,8 @@ function outlineGroup(s) {
   collapsible(box);
   const key = `ol-${s.id}`;
   return h("li", { class: "ol-sec" }, lazy(box, () => h("ul", { class: "ol-items" },
-    ...firstPage(key, s.items, (i) => i.id).map((i) => h("li", {}, outlineLink(i))), moreButton(key, s.items.length, "more items", outlineAgain) || "")));
+    ...firstPage(key, s.items, (i) => i.id).map((i) => h("li", {}, outlineLink(i))), moreButton(key, s.items.length, "more items", outlineAgain) || "",
+    (s.items.length && closedMore(s.id.replace(/^sec-/, ""), "done", () => render())) || "")));
 }
 
 export function outlineBoxes() {

@@ -347,3 +347,15 @@ def test_a_patch_that_cannot_apply_reconnects_without_a_cursor(monkeypatch, caps
     with pytest.raises(SystemExit):
         watch_ledger.main()
     assert calls == [None, None]
+
+
+def test_a_comment_on_a_hidden_done_task_still_reaches_its_claimant(capsys):
+    members = {"engineer@demo-0001": {}, "master@demo-0001": {"role": "orchestrator"}}
+    comment = {"rev": 2, "by": "operator", "kind": "comment added", "target": "tasks/t1", "id": "c1", "text": "look"}
+    closed = {"tasks": {"hidden": 1, "kept": 10, "ids": ["t1"], "claimed_by": {"t1": "engineer@demo-0001"}}}
+    state = {"tasks": [], "_meta": {"rev": 2, "events": [comment], "members": members, "closed": closed}}
+    watch = watch_ledger.Watch(args(since_rev=0, name="engineer@demo-0001"), "path.json", None)
+    watch.take("snapshot", {"ledger": state})
+    assert [line for line in capsys.readouterr().out.splitlines() if line.startswith("OPERATOR")] == [
+        'OPERATOR rev=2 comment added on tasks/t1 [c1]: "look"'
+    ]

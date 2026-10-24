@@ -6,7 +6,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 
 @pytest.mark.parametrize("slug", ["demo", "demo@partition"])
-def test_empty_successor_seat_is_an_aged_wait_until_a_live_agent_binds(slug):
+def test_unread_or_taken_items_on_an_empty_successor_seat_are_not_past_window_until_a_live_agent_binds(slug):
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -22,10 +22,11 @@ def test_empty_successor_seat_is_an_aged_wait_until_a_live_agent_binds(slug):
         "history": [],
     }
     receivers = read.inbox_receivers(store, box, slug, [row])
-    [finding] = inbox.past_window([row], 660_000, 300_000, receivers)
-    assert finding.summary == "seat wait; sent 10 minutes ago"
-    assert finding.measure == 10
-    assert any("seat is empty" in evidence for evidence in finding.evidence)
+    assert receivers[row["address"]] == inbox.Receiver(seat_wait=True)
+    assert inbox.past_window([row], 660_000, 300_000, receivers) == []
+    delivered = {**row, "id": "taken", "state": "delivered", "history": [{"state": "delivered", "by": "demo-ci-1"}]}
+    receivers = read.inbox_receivers(store, box, slug, [delivered])
+    assert inbox.past_window([delivered], 660_000, 300_000, receivers) == []
 
     store.seats.occupy(row["address"], "demo-ci-2", 1)
     store.put_agent(slug, AgentRecord(name="demo-ci-2", lane="ci", task="t2", harness="codex"))

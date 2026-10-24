@@ -3,14 +3,15 @@ import time
 
 from redis import RedisError
 
-from scripts.hive import registry
-from scripts.hive.auth import HiveError
-from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ports
 
 from . import resources, schemas
 from .errors import APIError
 from .routing import _principal
 from .services import BodyReader, Services
+
+registry, HiveError = ports.hive().registry, ports.hive().auth.HiveError
+SwarmError = ports.swarm().store.SwarmError
 
 FLAG = {"enum": ["yes", "no"]}
 PATCH = {
@@ -21,18 +22,19 @@ PATCH = {
         "name": {"type": "string", "minLength": 1, "maxLength": 200},
         "ui": FLAG,
         "ephemeral": FLAG,
-        "roles": {"type": "array", "items": {"enum": list(registry.ROLES)}},
+        "excluded": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "prefer": {"type": "object", "additionalProperties": {"type": "integer"}},
         "max_agents": {"type": "integer"},
     },
 }
 MISSING = "resource_missing"
+GONE_MS = 86400000
 
 
 def pairs(payload: dict) -> list[str]:
     found = []
     for field, value in payload.items():
-        if field == "roles":
+        if field == "excluded":
             value = ",".join(value)
         elif field == "prefer":
             value = ",".join(f"{role}:{rank}" for role, rank in value.items())
@@ -41,7 +43,7 @@ def pairs(payload: dict) -> list[str]:
 
 
 def masters(store: object) -> dict[str, dict]:
-    from scripts.swarm import affinity
+    affinity = ports.swarm().affinity
 
     found = {}
     for slug in store.slugs():
@@ -52,12 +54,13 @@ def masters(store: object) -> dict[str, dict]:
 
 
 def view(store: object, now_ms: int) -> list[dict]:
-    from scripts.hive.launch import loaded_hives
-
+    loaded_hives = ports.hive().launch.loaded_hives
     leads = masters(store)
-    hives = loaded_hives(store)
+    hives = [hive for hive in loaded_hives(store) if now_ms - hive["heartbeat_at"] <= GONE_MS]
     for hive in hives:
         sessions = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
+        if hive["name"] == hive["id"]:
+            hive["name"] = store.redis.hget(f"{ports.hive().auth.PREFIX}:member:{hive['id']}", "name") or hive["id"]
         hive["live"] = registry.live(hive, now_ms)
         hive["master"] = leads.get(hive["id"])
         hive["slots"] = [

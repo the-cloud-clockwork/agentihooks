@@ -79,9 +79,11 @@ fi
         assert "runtime images ready for startup" in result.stdout, result.stderr
         assert len(starts) == 1
         pulls = [call for call in calls if " pull " in f" {call} "]
-        assert len(pulls) == 2
+        assert len(pulls) == (2 if script == "hive-launch-smoke" else 3)
         assert all("@sha256:runtime" in call for call in pulls)
         assert any("redis:7@sha256:runtime" in call for call in pulls)
+        if script != "hive-launch-smoke":
+            assert any("nats:2.15.1-alpine@sha256:runtime" in call for call in pulls)
         if script != "hive-launch-smoke":
             assert any("agentihooks-swarm:dev@sha256:runtime" in call for call in pulls)
         for pull in pulls:
@@ -125,7 +127,7 @@ def tools_with(tmp_path, docker):
     return tools
 
 
-def pull_runtime(tmp_path, failures, manifest_failures=0, stalls=0, manifest_stalls=0):
+def pull_runtime(tmp_path, failures, manifest_failures=0, stalls=0, manifest_stalls=0, extra_env=None):
     tools = tools_with(tmp_path, LAYER_DOCKER)
     log, waits = tmp_path / "docker.log", tmp_path / "waits.log"
     result = subprocess.run(
@@ -140,6 +142,7 @@ def pull_runtime(tmp_path, failures, manifest_failures=0, stalls=0, manifest_sta
             "STALLS": str(stalls),
             "MANIFEST_STALLS": str(manifest_stalls),
             "PULL_ATTEMPT_SECONDS": "1",
+            **(extra_env or {}),
         },
         text=True,
         capture_output=True,
@@ -167,6 +170,26 @@ def test_runtime_pull_stops_at_three_attempts_and_keeps_the_final_failure(tmp_pa
     assert len(waits) == 2
     assert not tags
     assert result.stderr.rstrip().endswith("not found on attempt 3")
+
+
+@pytest.mark.parametrize("extra_env,delay", [(None, "10"), ({"PULL_RETRY_SECONDS": "1"}, "1")])
+def test_runtime_pull_waits_the_configured_retry_delay_between_all_three_attempts(tmp_path, extra_env, delay):
+    result, pulls, tags, waits = pull_runtime(tmp_path, 99, extra_env=extra_env)
+    assert result.returncode == 17
+    assert len(pulls) == 3
+    assert waits == [delay, delay]
+    assert result.stderr.count(f"retrying in {delay} seconds") == 2
+
+
+def test_attestation_proof_runs_its_negative_pull_beside_the_positive_one():
+    proof = (ROOT / "scripts/packaging/hive-launch-attestation-proof.sh").read_text()
+    negative = proof.index("PULL_RETRY_SECONDS=1 bash scripts/packaging/pull-runtime-image.sh")
+    positive = proof.index("bash scripts/packaging/pull-runtime-image.sh 127.0.0.1:5000/proof:present")
+    assert negative < positive
+    assert '--insecure > "$proof_dir/pull.log" 2>&1 &\nnegative=$!' in proof
+    assert proof.index('if wait "$negative"; then') > positive
+    assert "grep -c 'failed on attempt' \"$proof_dir/pull.log\" | grep -x 2" in proof
+    assert proof.index('wait "$daemon_start"') < proof.index("for attempt in {1..30}")
 
 
 def test_runtime_pull_retries_a_failed_digest_lookup_within_the_same_bound(tmp_path):
@@ -204,11 +227,55 @@ def test_runtime_pull_fails_with_the_timeout_status_after_three_stalled_attempts
     assert not tags
 
 
+def test_runtime_pull_falls_back_to_the_mirror_when_public_ecr_throttles(tmp_path):
+    image = "public.ecr.aws/docker/library/redis:7"
+    log = tmp_path / "docker.log"
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+if [[ "$1" == manifest ]]; then
+  if [[ "$3" == public.ecr.aws/* ]]; then
+    echo 'toomanyrequests: Rate exceeded' >&2
+    exit 1
+  fi
+  printf '%s\\n' '{"manifests":[{"digest":"sha256:runtime","platform":{"os":"linux","architecture":"amd64"}}]}'
+fi
+""",
+    )
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts/packaging/pull-runtime-image.sh"), image],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "PULL_LOG": str(log),
+            "WAITS": str(tmp_path / "waits.log"),
+            "PULL_ATTEMPT_SECONDS": "1",
+        },
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    calls = log.read_text().splitlines()
+    assert [call.split()[-1] for call in calls if call.startswith("manifest inspect ")] == [
+        image,
+        "mirror.gcr.io/library/redis:7",
+    ]
+    assert [call for call in calls if " pull " in f" {call} "][-1].endswith(
+        " pull mirror.gcr.io/library/redis:7@sha256:runtime"
+    )
+    assert calls[-1].endswith(f" tag mirror.gcr.io/library/redis:7@sha256:runtime {image}")
+
+
 @pytest.mark.parametrize(
     "image,architecture,expected",
     [
         ("redis:7", "amd64", 0),
         ("redis:7-alpine", "amd64", 0),
+        ("nats:2.15.1-alpine", "amd64", 0),
+        ("nats:2.15.1-alpine", "arm64", 17),
         ("redis:7", "arm64", 17),
         ("python:3.12-slim-bookworm", "amd64", 17),
     ],
@@ -253,7 +320,7 @@ exit 17
         assert any(call.startswith("manifest inspect ") for call in calls)
 
 
-@pytest.mark.parametrize("failure", ["", "redis:7", "redis:7-alpine", "build"])
+@pytest.mark.parametrize("failure", ["", "redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "build"])
 def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path, failure):
     log = tmp_path / "docker.log"
     tools = tools_with(
@@ -310,6 +377,12 @@ fi
     assert sum(call.startswith("build ") for call in calls) == 1
     assert (sync / "redis:7").exists()
     assert (sync / "redis:7-alpine").exists()
+    assert (sync / "nats:2.15.1-alpine").exists()
+    assert {call.split()[1] for call in calls if call.startswith("tag ")} == {
+        f"public.ecr.aws/docker/library/{image}"
+        for image in ("redis:7", "redis:7-alpine", "nats:2.15.1-alpine")
+        if image != failure
+    }
 
 
 def dockerfile_bases():

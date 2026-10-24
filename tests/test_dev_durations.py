@@ -82,6 +82,25 @@ def test_main_adopts_the_restored_dev_durations(tmp_path, monkeypatch):
     assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 3.0, "t.py::b": 4.0}
 
 
+@pytest.mark.parametrize("cached", [False, True])
+def test_planner_prices_every_new_case_from_the_measured_median(tmp_path, monkeypatch, cached):
+    from tests.shards import assign_nodes
+
+    measured = {f"t.py::test_{index}": float(index + 1) for index in range(10)}
+    collected = [*measured, "new.py::test_new"]
+    monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(dev_durations, "collected_tests", lambda root: collected)
+    (tmp_path / ".test_durations").write_text(json.dumps(measured))
+    restored = _restored(tmp_path / "restored", measured) if cached else tmp_path / "missing"
+    digest = tmp_path / "durations.sha256"
+    dev_durations.main(["3.12", str(restored), "--hash", str(digest)])
+    chosen = json.loads((tmp_path / ".test_durations").read_text())
+    assert chosen == {**measured, "new.py::test_new": 5.5}
+    parts = assign_nodes(chosen, 2, set(), 1)
+    assert sorted(node for part in parts for node in part) == sorted(collected)
+    assert digest.read_text().strip() == hashlib.sha256((tmp_path / ".test_durations").read_bytes()).hexdigest()
+
+
 @pytest.mark.parametrize("version", ["3.11", "3.12"])
 @pytest.mark.parametrize("cached", [False, True])
 def test_precollected_suite_preserves_durations_hash_and_shard_assignments(tmp_path, monkeypatch, version, cached):

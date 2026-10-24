@@ -83,7 +83,10 @@ def test_the_allow_list_refuses_every_other_action_and_touches_nothing(store, ac
 def test_pull_dev_fast_forwards_the_main_checkout_and_logs_on_both_ledgers(store):
     ctx = context(store)
     interventions.apply(ctx, "pull-dev", args())
-    assert ctx.run.calls[-1] == ["git", "-C", "/repo", "pull", "--ff-only", "origin", "dev"]
+    assert ctx.run.calls[-2:] == [
+        ["git", "-C", "/repo", "fetch", "origin", "dev"],
+        ["git", "-C", "/repo", "merge", "--ff-only", "origin/dev"],
+    ]
     assert logged_on_both(ctx)
 
 
@@ -91,7 +94,7 @@ def test_pull_dev_refuses_a_checkout_that_is_not_on_dev(store):
     ctx = context(store, FakeRun({"rev-parse": "feature\n"}))
     with pytest.raises(SwarmError, match="not dev"):
         interventions.apply(ctx, "pull-dev", args())
-    assert not any("pull" in call for call in ctx.run.calls) and ctx.ledger.noted == []
+    assert not any("fetch" in call or "merge" in call for call in ctx.run.calls) and ctx.ledger.noted == []
 
 
 def test_pull_dev_records_the_applied_time_of_each_merged_fix_an_open_tune_task_measures(store):
@@ -117,7 +120,7 @@ def test_pull_dev_records_the_applied_time_of_each_merged_fix_an_open_tune_task_
     assert stamped == [(DOCTOR, t, f"master@{DOCTOR}") for t in ("a", "b", "h")]
     times = {fields["applied_at"] for *_, fields, _ in ctx.ledger.updates}
     assert len(times) == 1 and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", times.pop())
-    pull = ["git", "-C", "/repo", "pull", "--ff-only", "origin", "dev"]
+    pull = ["git", "-C", "/repo", "fetch", "origin", "dev"]
     assert run.calls.index(["ledger-read", DOCTOR]) < run.calls.index(pull)
     assert ["git", "-C", "/repo", "remote", "get-url", "origin"] in run.calls
     assert (
@@ -140,7 +143,7 @@ class SourceRun(FakeRun):
 
     def __call__(self, argv, **kwargs):
         done = super().__call__(argv, **kwargs)
-        if "pull" in argv:
+        if "merge" in argv:
             self.text = self.after
         return subprocess.CompletedProcess(argv, 0, self.text, "") if "show" in argv else done
 
@@ -178,7 +181,7 @@ def test_record_applied_stamps_utc_whatever_the_local_zone(store, monkeypatch):
 
 
 def test_a_failed_command_is_reported_and_not_logged(store):
-    ctx = context(store, FakeRun({"rev-parse": "dev\n"}, failing=("pull",)))
+    ctx = context(store, FakeRun({"rev-parse": "dev\n"}, failing=("merge",)))
     with pytest.raises(SwarmError, match="refused"):
         interventions.apply(ctx, "pull-dev", args())
     assert ctx.ledger.noted == []

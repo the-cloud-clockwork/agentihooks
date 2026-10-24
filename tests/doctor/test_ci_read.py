@@ -161,8 +161,8 @@ def test_completed_attempts_are_reused_while_new_attempts_are_read():
     assert first[1]["tests"][0]["outcome"] == "PASSED"
     assert len(calls) == 4
     key = f"{ci_read.ROOT}:doctor:ci-attempt:o/r:{workflow['id']}:1"
-    assert json.loads(cache.get(key)) == first[0]
-    assert 604790 <= cache.ttl(key) <= 604800
+    assert len(cache.get(key).encode()) < 1024 * 1024
+    assert 3590 <= cache.ttl(key) <= 3600
     assert ci_read._attempts("o/r", [workflow], gh, cache) == first
     assert len(calls) == 4
     workflow["run_attempt"] = 3

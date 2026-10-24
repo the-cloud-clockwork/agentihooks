@@ -8,6 +8,8 @@ VERDICTS = ("false-positive", "early-real", "established", "insufficient-evidenc
 
 
 class VerdictStore:
+    HISTORY_MS = 7 * 86400000
+
     def __init__(self, redis, key):
         self.redis, self.key = redis, key
 
@@ -36,6 +38,8 @@ class VerdictStore:
             if grew and new_evidence:
                 key = "evidence_identity" if finding.evidence_identity is not None else "evidence"
                 grew = record[key] != verdict.get(key, before.get(key))
+            elif verdict and finding.evidence_identity is not None and not new_evidence:
+                grew = record["evidence_identity"] != verdict["evidence_identity"]
             if grew and not show and now_ms >= verdict["at"] + cooldown_ms:
                 record["returned"] = show = True
             if record != before:
@@ -64,6 +68,10 @@ class VerdictStore:
             verdict["evidence_identity"] = record["evidence_identity"]
         if record.get("basis"):
             verdict["basis"] = record["basis"]
+        prior = record.get("verdict")
+        if prior:
+            earlier = [*prior.get("earlier", []), {"at": prior["at"], "measure": prior["measure"]}]
+            verdict["earlier"] = [entry for entry in earlier if entry["at"] >= now_ms - self.HISTORY_MS]
         record.update(verdict=verdict, returned=False)
         self.redis.hset(self.key, finding_id, json.dumps(record))
         return verdict

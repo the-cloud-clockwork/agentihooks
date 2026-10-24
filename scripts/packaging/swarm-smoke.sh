@@ -8,6 +8,7 @@ export SWARM_REDIS_PASSWORD
 SWARM_REDIS_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe())')"
 trap 'docker compose down --volumes' EXIT
 bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/nats:2.15.1-alpine
 build=(--build)
 if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
   docker tag "$SWARM_SMOKE_IMAGE" ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev

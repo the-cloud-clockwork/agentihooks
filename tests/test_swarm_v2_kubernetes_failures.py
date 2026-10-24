@@ -1597,6 +1597,24 @@ def test_a_restore_receipt_requires_a_directive_and_accepts_zero_cursor(world):
     assert str(caught.value) == "no restore directive for this attempt"
 
 
+def test_a_choice_interrupted_before_its_record_cannot_leave_a_stale_directive(world, monkeypatch):
+    recovery = world.recovery(world.live, automatic=False)
+    recovery.handle(world.old.execution_id, "oom_killed")
+    record = recovery._record
+
+    def interrupted(*args):
+        monkeypatch.setattr(recovery, "_record", record)
+        raise SwarmError("interrupted")
+
+    monkeypatch.setattr(recovery, "_record", interrupted)
+    with pytest.raises(SwarmError):
+        recovery.request(world.old.execution_id, "resume")
+    decision = recovery.request(world.old.execution_id, "fresh")
+    assert decision.mode == "fresh"
+    assert recovery.restore(decision.replacement)["recovery"] == "fresh"
+    assert recovery.restore(decision.replacement)["checkpoint_id"] == ""
+
+
 @pytest.mark.parametrize("first", ["verified", "superseded"])
 def test_replacement_receipts_continue_after_an_already_settled_attempt(world, first):
     recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch()
@@ -1628,7 +1646,7 @@ def test_a_repeated_restore_request_reuses_the_accepted_decision_without_a_secon
     assert recovery.restore(first.replacement) == restored
     with pytest.raises(SwarmError, match="^no recovery decision is pending for this attempt$"):
         recovery.request(world.old.execution_id, "fresh")
-    with pytest.raises(SwarmError, match="^a recovery decision is fresh or resume$"):
+    with pytest.raises(SwarmError, match="^a recovery decision is native, context, fresh or resume$"):
         recovery.request(world.old.execution_id, "recovery_pending")
     assert world.attempts() == attempts
 

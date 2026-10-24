@@ -37,6 +37,7 @@ import ledger_gate as gate  # noqa: E402
 import ledger_link  # noqa: E402
 
 from scripts.inbox import seen  # noqa: E402
+from scripts.swarm_ledger import ledger_closed  # noqa: E402
 from scripts.swarm_ledger.events import Expired, patch  # noqa: E402
 from scripts.swarm_ledger.events import stream as events_stream  # noqa: E402
 
@@ -89,7 +90,7 @@ class Watch:
                 self.since = state["_meta"]["rev"]
         self.state = state
         meta, args = state["_meta"], self.args
-        members, tasks = meta.get("members", {}), state.get("tasks", [])
+        members, tasks = meta.get("members", {}), state.get("tasks", []) + ledger_closed.hidden_claims(state)
         if meta.get("events_trimmed", self.since) > self.since:
             say(
                 f"WARNING ledger history trimmed events after revision {self.since}"

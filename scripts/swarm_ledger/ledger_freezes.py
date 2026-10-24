@@ -3,7 +3,7 @@
 import re
 import time
 
-from scripts.swarm.naming import lane_of, resolve_name
+from scripts.swarm_ledger import ports
 from scripts.swarm_ledger.ledger_kinds import KINDS
 from scripts.swarm_ledger.ledger_tasks import LANES
 from scripts.swarm_ledger.repository.hierarchy import project
@@ -18,6 +18,10 @@ FULL = "full"
 FIELDS = {"freeze_set": ("verb", "target", "reason", "quote"), "freeze_clear": ("target", "reason", "quote")}
 EVENTS = {"freeze": "frozen", "focus": "focused"}
 MAX_TEXT = 2000
+
+
+def resolve_name(name):
+    return ports.swarm().naming.resolve_name(name)
 
 
 def selector(target: str) -> bool:
@@ -42,7 +46,7 @@ def check(op):
 def autonomy(slug: str) -> str:
     from redis import RedisError
 
-    from scripts.swarm.store import SwarmError, connect
+    SwarmError, connect = ports.swarm().store.SwarmError, ports.swarm().store.connect
 
     try:
         return connect().config(slug).autonomy
@@ -57,11 +61,12 @@ def author(op, ctx) -> tuple[str, str] | None:
     by = op.get("by")
     if by is None:
         return "operator", op.get("quote")
-    if lane_of(resolve_name(by)) == DISPATCH:
+    if ports.swarm().naming.lane_of(resolve_name(by)) == DISPATCH:
         return (by, "") if autonomy(ctx.slug) == FULL else None
-    master = ctx.meta["members"].get(by, {}).get("role") == "orchestrator"
-    words = ledger_relay.verified(by, op["quote"]) if master and op.get("quote") else ""
-    return (by, words) if words else None
+    if ctx.meta["members"].get(by, {}).get("role") != "orchestrator":
+        return None
+    words = ledger_relay.verified(by, op["quote"]) if op.get("quote") else ""
+    return by, words
 
 
 def _set(doc, op, ctx, by, words):

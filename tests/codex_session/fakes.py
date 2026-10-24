@@ -61,6 +61,15 @@ class Connection:
     def __init__(self, server):
         self.server = server
         self.closed = False
+        self.listener = protocol.ignore
+        self.events = []
+
+    def poll(self, timeout):
+        self.server.polls.append(timeout)
+        if timeout <= 0 or not self.events:
+            return False
+        self.listener(self.events.pop(0))
+        return True
 
     def request(self, method, params=None):
         self.server.requests.append((method, params))
@@ -82,6 +91,7 @@ class Connection:
         if method == "thread/name/set":
             return {}
         if method == "turn/start":
+            self.events = self.server.turn_events.pop(0) if self.server.turn_events else []
             return {"turn": {"id": "turn-opening"}}
         raise AssertionError(f"unexpected method {method}")
 
@@ -102,6 +112,8 @@ class Server:
         self.thread = {"id": "thread-new", "sessionId": "session-new"}
         self.refuse = set()
         self.lose = set()
+        self.turn_events = []
+        self.polls = []
         self.answers = True
         self.exits = False
         self.server_start = SERVER_START

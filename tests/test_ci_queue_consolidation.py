@@ -24,10 +24,16 @@ def test_container_proofs_share_one_runner_without_losing_commands():
             """docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
 build=$!
 status=0
-bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7 &
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &&
+  docker tag public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 &
 redis=$!
-bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine || status=$?
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nats:2.15.1-alpine &&
+  docker tag public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine &
+nats=$!
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
+  docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
 wait "$redis" || status=$?
+wait "$nats" || status=$?
 wait "$build" || status=$?
 exit "$status"
 """,
@@ -39,7 +45,8 @@ exit "$status"
         "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm",
         "docker build -t local/agentihooks-swarm:clients-check .",
         "bash scripts/packaging/swarm-smoke-parallel.sh scripts/packaging/hive-launch-smoke.sh"
-        " scripts/packaging/swarm-smoke.sh scripts/packaging/hive-join-smoke.sh scripts/packaging/compose-hive-smoke.sh",
+        " scripts/packaging/swarm-smoke.sh scripts/packaging/hive-join-smoke.sh scripts/packaging/compose-hive-smoke.sh"
+        " scripts/packaging/compose-task-smoke.sh scripts/packaging/compose-recovery-drill.sh",
         "bash scripts/packaging/swarm-init-smoke.sh",
         "bash scripts/packaging/hive-launch-attestation-proof.sh",
         "bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check",
@@ -50,8 +57,10 @@ exit "$status"
             assert step["if"] == "github.event_name == 'workflow_dispatch'"
         elif step.get("run", "").startswith("bash scripts/packaging/pull-runtime-image.sh "):
             assert "if" not in step
+        elif step.get("id") == "build":
+            assert "if" not in step
         elif "run" in step:
-            assert step["if"] == "${{ !cancelled() }}"
+            assert step["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
         assert not step.get("continue-on-error", False)
 
 

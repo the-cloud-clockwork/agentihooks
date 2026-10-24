@@ -10,6 +10,8 @@ from scripts.swarm.store import SwarmError
 real_roots = timer._roots
 real_reconcile = timer.reconcile
 real_schedule = timer.schedule
+real_undelivered = timer.undelivered
+real_guard = timer.guard
 
 
 @pytest.fixture
@@ -171,6 +173,28 @@ def test_a_refused_tick_exits_non_zero_and_logs_why(monkeypatch, capsys):
     assert "this run comes from a worktree" in capsys.readouterr().err
 
 
+def test_the_stale_tick_watcher_is_its_own_restarting_user_service():
+    from configparser import ConfigParser
+
+    parsed = ConfigParser(interpolation=None, strict=False)
+    parsed.optionxform = str
+    parsed.read_string(timer.units("/installed/bin/agentihooks")["agentihooks-tick-watch.service"])
+
+    assert parsed.sections() == ["Unit", "Service", "Install"]
+    assert parsed["Unit"]["Description"] == "agentihooks stale tick watcher, apart from the tick it watches"
+    assert dict(parsed["Service"]) == {
+        "Type": "simple",
+        "Environment": "PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin",
+        "EnvironmentFile": "-%h/.agentihooks/.env",
+        "ExecStart": '"/installed/bin/agentihooks" swarm tick-watch',
+        "Restart": "always",
+        "RestartSec": "5",
+        "NotifyAccess": "main",
+        "WatchdogSec": "600",
+    }
+    assert dict(parsed["Install"]) == {"WantedBy": "default.target"}
+
+
 def test_wait_checks_have_a_separate_short_timer_and_service(tmp_path):
     import subprocess
     from configparser import ConfigParser
@@ -202,9 +226,27 @@ def test_wait_checks_have_a_separate_short_timer_and_service(tmp_path):
         "EnvironmentFile": "-%h/.agentihooks/.env",
         "ExecStart": '"/installed/bin/agentihooks" swarm waits',
         "TimeoutStartSec": "120",
+        "KillMode": "process",
     }
     assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"] in calls
     assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.service"] not in calls
+
+
+def test_a_wait_service_without_kill_mode_process_is_rewritten_and_reloaded(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "reconcile", real_reconcile)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=run)
+    service = tmp_path / "agentihooks-swarm-waits.service"
+    service.write_text(service.read_text().replace("KillMode=process\n", ""))
+    calls.clear()
+    assert timer.reconcile("/installed/bin/agentihooks", tmp_path, run=run)
+    assert service.read_text().endswith("TimeoutStartSec=120\nKillMode=process\n")
+    assert calls[0] == ["systemctl", "--user", "daemon-reload"]
 
 
 def _systemctl(calls, failing=()):
@@ -514,14 +556,19 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     ]
     calls.clear()
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
-    assert [argv[2] for argv, _ in calls] == ["enable"] * 3
+    assert [argv[2] for argv, _ in calls] == ["enable"] * 4
 
 
-def test_ensure_fails_when_the_scheduled_tick_cannot_be_registered(tmp_path, monkeypatch):
+def test_ensure_fails_and_keeps_the_tick_timer_when_registration_fails_before_any_delivery(tmp_path, monkeypatch):
     monkeypatch.setattr(timer, "schedule", lambda: False)
+    monkeypatch.setattr(timer, "undelivered", lambda: NONE_YET)
     calls = []
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is False
-    assert [argv[2] for argv, _ in calls][-3:] == ["enable"] * 3
+    assert [argv[2] for argv, _ in calls][-4:] == ["enable"] * 4
+    assert calls[-1][0] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
+    assert (tmp_path / "agentihooks-swarm.timer").read_text() == timer.tick_units("/installed/bin/agentihooks")[
+        "agentihooks-swarm.timer"
+    ]
 
 
 def test_reconcile_reruns_ensure_while_a_retired_tick_unit_is_left(tmp_path, monkeypatch):
@@ -587,3 +634,346 @@ def test_schedule_reports_a_redis_failure_and_starts_no_runner(monkeypatch, caps
     assert real_schedule() is False
     assert started == []
     assert capsys.readouterr().err == "the scheduled swarm tick could not be registered: ConnectionError: down\n"
+
+
+TICK_SERVICE = (
+    "[Unit]\nDescription=agentihooks swarm tick\n\n"
+    "[Service]\nType=oneshot\n"
+    "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+    "EnvironmentFile=-%h/.agentihooks/.env\n"
+    'ExecStart="/installed/bin/agentihooks" swarm tick\n'
+    "TimeoutStartSec=540\nKillMode=process\n"
+)
+TICK_TIMER = (
+    "[Unit]\nDescription=agentihooks swarm tick every minute\n\n"
+    "[Timer]\nOnBootSec=1min\nOnUnitActiveSec=60s\nAccuracySec=5s\n\n"
+    "[Install]\nWantedBy=timers.target\n"
+)
+NONE_YET = "no scheduler has delivered a swarm tick yet"
+
+
+def test_the_tick_units_run_the_installed_tick_every_minute():
+    assert timer.tick_units("/installed/bin/agentihooks") == {
+        "agentihooks-swarm.service": TICK_SERVICE,
+        "agentihooks-swarm.timer": TICK_TIMER,
+    }
+
+
+def test_ensure_keeps_the_tick_timer_until_the_installed_scheduler_delivered_a_tick(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(timer, "undelivered", lambda: NONE_YET)
+    (tmp_path / "agentihooks-swarm.timer").write_text(TICK_TIMER)
+    (tmp_path / "agentihooks-swarm.service").write_text(TICK_SERVICE)
+    calls = []
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    argvs = [argv for argv, _ in calls]
+    assert not [argv for argv in argvs if "disable" in argv]
+    assert (tmp_path / "agentihooks-swarm.timer").read_text() == TICK_TIMER
+    assert (tmp_path / "agentihooks-swarm.service").read_text() == TICK_SERVICE
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"] in argvs
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.service"] not in argvs
+    assert capsys.readouterr().err == f"the agentihooks-swarm timer stays: {NONE_YET}\n"
+
+
+def test_ensure_reloads_nothing_while_the_kept_units_are_current(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "undelivered", lambda: NONE_YET)
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
+    calls = []
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    argvs = [argv for argv, _ in calls]
+    assert ["systemctl", "--user", "daemon-reload"] not in argvs
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"] in argvs
+
+
+def test_ensure_restores_a_retired_tick_timer_while_delivery_fails(tmp_path, monkeypatch):
+    calls = []
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    assert not (tmp_path / "agentihooks-swarm.timer").exists()
+    monkeypatch.setattr(timer, "undelivered", lambda: "the last swarm tick was delivered 400 seconds ago")
+    calls.clear()
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    assert (tmp_path / "agentihooks-swarm.timer").read_text() == TICK_TIMER
+    assert (tmp_path / "agentihooks-swarm.service").read_text() == TICK_SERVICE
+    argvs = [argv for argv, _ in calls]
+    assert argvs.index(["systemctl", "--user", "daemon-reload"]) < argvs.index(
+        ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
+    )
+
+
+def test_an_unreadable_delivery_keeps_the_tick_timer(tmp_path, monkeypatch, capsys):
+    from redis.exceptions import ConnectionError
+
+    def down():
+        raise ConnectionError("down")
+
+    monkeypatch.setattr(timer, "undelivered", down)
+    (tmp_path / "agentihooks-swarm.timer").write_text(TICK_TIMER)
+    calls = []
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    assert (tmp_path / "agentihooks-swarm.timer").exists()
+    assert not [argv for argv, _ in calls if "disable" in argv]
+    assert capsys.readouterr().err == (
+        "the agentihooks-swarm timer stays: the swarm tick delivery could not be read: ConnectionError: down\n"
+    )
+
+
+def test_reconcile_keeps_rerunning_ensure_while_the_tick_timer_is_kept(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "reconcile", real_reconcile)
+    monkeypatch.setattr(timer, "undelivered", lambda: NONE_YET)
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
+    monkeypatch.setattr(timer, "undelivered", lambda: "")
+    calls = []
+    assert timer.reconcile("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    assert calls[0][0] == ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"]
+    assert not (tmp_path / "agentihooks-swarm.timer").exists()
+
+
+def test_undelivered_reads_this_machine_against_the_installed_root(monkeypatch):
+    import time
+
+    import fakeredis
+
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm import scheduled_tick, store
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    monkeypatch.setattr(time, "time", lambda: 1_000.0)
+    assert real_undelivered() == NONE_YET
+    scheduled_tick.record(Scheduler(redis), "/installed", 900.0)
+    assert real_undelivered() == ""
+    scheduled_tick.record(Scheduler(redis), "/main", 900.0)
+    assert real_undelivered() == (
+        "the last swarm tick was delivered by a scheduler running /main, not the installed /installed"
+    )
+
+
+def test_guard_restarts_a_dead_supervisor_on_every_pass(tmp_path, monkeypatch):
+    started = []
+    monkeypatch.setattr(timer, "supervise", lambda: started.append(True) or True)
+    monkeypatch.setattr(timer, "undelivered", lambda: "")
+    monkeypatch.setattr(timer, "ensure", lambda *args, **kwargs: pytest.fail("ensure ran"))
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert started == [True, True]
+
+
+def test_guard_restores_the_tick_timer_once_delivery_goes_stale(tmp_path, monkeypatch):
+    ensured = []
+    monkeypatch.setattr(timer, "supervise", lambda: True)
+    monkeypatch.setattr(timer, "undelivered", lambda: "the last swarm tick was delivered 400 seconds ago")
+    monkeypatch.setattr(timer, "ensure", lambda binary, unit_dir, run: ensured.append((binary, unit_dir, run)) or False)
+    runner = _systemctl([])
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=runner) is False
+    assert ensured == [("/installed/bin/agentihooks", tmp_path, runner)]
+    (tmp_path / "agentihooks-swarm.timer").write_text(TICK_TIMER)
+    (tmp_path / "agentihooks-swarm.service").write_text(TICK_SERVICE)
+    calls = []
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is True
+    assert len(ensured) == 1
+    assert calls == [
+        (
+            ["systemctl", "--user", "is-enabled", "--quiet", "agentihooks-swarm.timer"],
+            {"capture_output": True, "text": True, "timeout": 30},
+        )
+    ]
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([], failing={"is-enabled"})) is False
+    assert len(ensured) == 2
+
+
+def test_guard_restores_the_tick_timer_when_delivery_cannot_be_read(tmp_path, monkeypatch):
+    from redis.exceptions import ConnectionError
+
+    def down():
+        raise ConnectionError("down")
+
+    ensured = []
+    monkeypatch.setattr(timer, "supervise", lambda: True)
+    monkeypatch.setattr(timer, "undelivered", down)
+    monkeypatch.setattr(timer, "ensure", lambda binary, unit_dir, run: ensured.append(binary) or True)
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert ensured == ["/installed/bin/agentihooks"]
+
+
+def test_supervise_starts_the_scheduler_with_the_swarm_redis(monkeypatch):
+    from scripts.scheduler import service
+
+    seen = []
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://swarm:6379/3")
+    monkeypatch.setattr(service, "ensure_running", lambda environ: seen.append(environ) or False)
+    assert timer.supervise() is False
+    assert seen[0]["AGENTIHOOKS_SWARM_REDIS_URL"] == "redis://swarm:6379/3"
+
+
+def _supervisor(monkeypatch, record, order, drained=True):
+    from scripts.scheduler import service
+    from scripts.swarm.store import redis_url
+
+    def swarm(environ):
+        assert environ["AGENTIHOOKS_SWARM_REDIS_URL"] == redis_url(os.environ)
+        return environ
+
+    monkeypatch.setattr(service, "holder", lambda environ: swarm(environ) and record)
+    monkeypatch.setattr(service, "revision", lambda root: f"revision at {root}")
+    monkeypatch.setattr(
+        service, "drain", lambda pid, environ: swarm(environ) and order.append(f"drain {pid}") or drained
+    )
+    monkeypatch.setattr(timer, "supervise", lambda: order.append("supervise") or True)
+
+
+CURRENT = {"pid": 4242, "root": "/installed", "revision": "revision at /installed", "started": 1_000.0}
+
+
+@pytest.mark.parametrize(
+    ("record", "why"),
+    [
+        ({**CURRENT, "root": "/main"}, "the scheduler supervisor 4242 runs /main, not the installed /installed"),
+        (
+            {**CURRENT, "revision": "older"},
+            "the scheduler supervisor 4242 loaded revision older, not the installed revision revision at /installed",
+        ),
+        ({"pid": 4242}, "the scheduler supervisor 4242 left no record of the code it loaded"),
+    ],
+)
+def test_guard_drains_a_supervisor_off_the_installed_code_and_starts_one_from_it(
+    tmp_path, monkeypatch, capsys, record, why
+):
+    order = []
+    _supervisor(monkeypatch, record, order)
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert order == ["drain 4242", "supervise"]
+    assert capsys.readouterr().err == f"recycling the scheduler supervisor: {why}\n"
+
+
+@pytest.mark.parametrize("record", [CURRENT, None])
+def test_guard_leaves_a_current_or_absent_supervisor_alone(tmp_path, monkeypatch, capsys, record):
+    order = []
+    _supervisor(monkeypatch, record, order)
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert order == ["supervise"]
+    assert capsys.readouterr().err == ""
+
+
+def test_guard_says_when_a_drained_supervisor_holds_on_and_recycles_it_on_a_later_pass(tmp_path, monkeypatch, capsys):
+    order = []
+    _supervisor(monkeypatch, {**CURRENT, "root": "/main"}, order, drained=False)
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert order == ["drain 4242", "supervise", "drain 4242", "supervise"]
+    assert capsys.readouterr().err.splitlines()[1] == (
+        "the scheduler supervisor 4242 still holds its lock; the next wait pass tries again"
+    )
+
+
+def _delivering(monkeypatch):
+    import fakeredis
+
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm import store
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    return Scheduler(redis)
+
+
+def _kept_units(unit_dir):
+    for name, text in timer.tick_units("/installed/bin/agentihooks").items():
+        (unit_dir / name).write_text(text)
+
+
+@pytest.mark.parametrize(("delivered", "retired"), [(999.0, False), (1_000.0, True), (1_001.0, True)])
+def test_guard_retires_a_kept_timer_only_after_the_running_supervisor_delivered(
+    tmp_path, monkeypatch, delivered, retired
+):
+    from scripts.swarm import scheduled_tick
+
+    here = _delivering(monkeypatch)
+    _supervisor(monkeypatch, CURRENT, [])
+    ensured = []
+    monkeypatch.setattr(timer, "ensure", lambda binary, unit_dir, run: ensured.append((binary, unit_dir, run)) or True)
+    _kept_units(tmp_path)
+    scheduled_tick.record(here, "/installed", delivered)
+    runner = _systemctl([])
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=runner) is True
+    assert ensured == ([("/installed/bin/agentihooks", tmp_path, runner)] if retired else [])
+
+
+def test_guard_retires_nothing_once_the_timer_units_are_gone(tmp_path, monkeypatch):
+    from scripts.swarm import scheduled_tick
+
+    here = _delivering(monkeypatch)
+    _supervisor(monkeypatch, CURRENT, [])
+    monkeypatch.setattr(timer, "ensure", lambda *args, **kwargs: pytest.fail("ensure ran"))
+    scheduled_tick.record(here, "/installed", 2_000.0)
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+
+
+@pytest.mark.parametrize("record", [None, {"pid": 4242}])
+def test_guard_keeps_the_timer_without_a_recorded_supervisor(tmp_path, monkeypatch, record):
+    from scripts.scheduler import service
+    from scripts.swarm import scheduled_tick
+
+    here = _delivering(monkeypatch)
+    monkeypatch.setattr(service, "holder", lambda environ: record)
+    monkeypatch.setattr(timer, "recycle", lambda: None)
+    monkeypatch.setattr(timer, "supervise", lambda: True)
+    monkeypatch.setattr(timer, "ensure", lambda *args, **kwargs: pytest.fail("the timer was retired"))
+    _kept_units(tmp_path)
+    scheduled_tick.record(here, "/installed", 5_000.0)
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+
+
+def test_guard_keeps_the_timer_while_a_tick_runs_in_its_service(tmp_path, monkeypatch):
+    from scripts.swarm import scheduled_tick
+
+    here = _delivering(monkeypatch)
+    _supervisor(monkeypatch, CURRENT, [])
+    monkeypatch.setattr(timer, "ensure", lambda *args, **kwargs: pytest.fail("the timer was retired"))
+    _kept_units(tmp_path)
+    scheduled_tick.record(here, "/installed", 2_000.0)
+    busy = _draining([], [("/user.slice/agentihooks-swarm.service", 2)], [0.0])
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=busy) is True
+
+
+def test_guard_keeps_the_timer_when_the_delivery_cannot_be_read(tmp_path, monkeypatch):
+    from redis.exceptions import ConnectionError
+
+    from scripts.swarm import store
+
+    def down():
+        raise ConnectionError("down")
+
+    _supervisor(monkeypatch, CURRENT, [])
+    monkeypatch.setattr(store, "redis_client", down)
+    monkeypatch.setattr(timer, "ensure", lambda *args, **kwargs: pytest.fail("the timer was retired"))
+    _kept_units(tmp_path)
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+
+
+def test_a_foreign_supervisor_is_recycled_and_the_timer_and_finding_clear_on_its_successor_tick(tmp_path, monkeypatch):
+    import time
+
+    from scripts.doctor import tick_delivery
+    from scripts.scheduler import service
+    from scripts.swarm import scheduled_tick
+
+    here = _delivering(monkeypatch)
+    monkeypatch.setattr(timer, "undelivered", real_undelivered)
+    monkeypatch.setattr(time, "time", lambda: 1_100.0)
+    order = []
+    _supervisor(monkeypatch, {**CURRENT, "root": "/main", "started": 10.0}, order)
+    ensured = []
+    monkeypatch.setattr(timer, "ensure", lambda binary, unit_dir, run: ensured.append(len(order)) or True)
+    scheduled_tick.record(here, "/main", 1_090.0)
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert order == ["drain 4242", "supervise"]
+    assert ensured == [2]
+    assert [finding.id for finding in tick_delivery.read()] == [f"scheduled-tick/{tick_delivery.socket.gethostname()}"]
+    _kept_units(tmp_path)
+    monkeypatch.setattr(service, "holder", lambda environ: {**CURRENT, "started": 1_095.0})
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert ensured == [2]
+    scheduled_tick.record(here, "/installed", 1_096.0)
+    assert tick_delivery.read() == []
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert ensured == [2, 4]
+    assert order == ["drain 4242", "supervise", "supervise", "supervise"]

@@ -20,6 +20,7 @@ from scripts.swarm.pane import typed_input
 
 GRACE_ENV = "AGENTIHOOKS_HERDR_GC_GRACE_MINUTES"
 DEFAULT_GRACE_MINUTES = 5
+IDLE_MS = 5 * 60_000
 RUN_FILE_AGE_S = 24 * 3600
 RUN_SUFFIXES = (".sh", ".route", ".prompt", ".started")
 SHELLS = frozenset({"bash", "zsh", "sh", "dash", "fish", "ksh", "tcsh", "csh"})
@@ -36,6 +37,8 @@ class Finding:
     record: PaneRecord
     action: str
     reason: str
+    task: str = ""
+    idle_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -101,7 +104,7 @@ def _connect(url: str):
 def _fate(store, record: PaneRecord) -> str:
     slug = record.owner_swarm
     if slug not in store.slugs():
-        return REMOVED
+        return UNKNOWN if record.swarm_store == herdr_panes.WITHHELD else REMOVED
     if store.config(slug).state == "stopped":
         return STOPPED
     names = {naming.plain(agent.name) for agent in store.agents(slug) if agent.state != "finished"}
@@ -111,12 +114,12 @@ def _fate(store, record: PaneRecord) -> str:
 class Owners:
     """What became of a recorded pane's swarm agent, read from the swarm store it was launched against."""
 
-    def __init__(self, connect=_connect):
-        self.connect, self.stores = connect, {}
+    def __init__(self, connect=_connect, environ: dict[str, str] | None = None):
+        self.connect, self.stores, self.environ = connect, {}, environ or {}
 
     def _store(self, record: PaneRecord):
-        url = record.swarm_store
-        if not record.owner_swarm or url == herdr_panes.WITHHELD:
+        url = herdr_panes.store_url(record.swarm_store, self.environ) if record.owner_swarm else None
+        if url is None:
             return None
         if url not in self.stores:
             try:
@@ -133,6 +136,15 @@ class Owners:
             return UNKNOWN if store is None else _fate(store, record)
         except Exception:
             return UNKNOWN
+
+    def task(self, record: PaneRecord) -> str:
+        store = self._store(record)
+        try:
+            agents = store.agents(record.owner_swarm) if store is not None else []
+            found = [a.task for a in agents if naming.plain(a.name) == naming.plain(record.owner_session)]
+        except Exception:
+            return ""
+        return found[-1] if found else ""
 
     def prompted_at(self, record: PaneRecord) -> int | None:
         store = self._store(record)
@@ -213,12 +225,13 @@ def _look(record: PaneRecord, ctx: Context) -> Finding:
     active = record.active_at if seen == record.seen else ctx.now_ms
     if seen != record.seen:
         herdr_panes.update(record, ctx.environ, seen=seen, active_at=active)
-    if ctx.now_ms - max(active, ctx.owners.prompted_at(record) or 0) < wake.quiet_ms(ctx.environ):
+    idle = ctx.now_ms - max(active, ctx.owners.prompted_at(record) or 0)
+    if idle < max(wake.quiet_ms(ctx.environ), IDLE_MS):
         return Finding(record, KEEP, "used inside the quiet window")
     if ctx.act:
         ctx.herdr.close_pane(record.pane_id)
         herdr_panes.forget(record, ctx.environ)
-    return Finding(record, CLOSE, reason)
+    return Finding(record, CLOSE, reason, ctx.owners.task(record), idle)
 
 
 def judge(record: PaneRecord, pane: dict | None, ctx: Context) -> Finding:
@@ -251,12 +264,36 @@ def _close_emptied(closed: list[PaneRecord], herdr) -> list[Emptied]:
     return done
 
 
-def sweep(environ: dict[str, str], now_ms: int, act: bool, herdr: Herdr, owners: Owners) -> list:
+def sweep(
+    environ: dict[str, str], now_ms: int, act: bool, herdr: Herdr, owners: Owners, swarm_only: bool = False
+) -> list:
     ctx = Context(environ, now_ms, act, herdr, owners)
     panes = herdr.list_panes()
-    found = [judge(record, panes.get(record.pane_id), ctx) for record in herdr_panes.load(environ)]
+    records = [record for record in herdr_panes.load(environ) if record.owner_swarm or not swarm_only]
+    found = [judge(record, panes.get(record.pane_id), ctx) for record in records]
     closed = [f.record for f in found if f.action == CLOSE]
     return found + (_close_emptied(closed, herdr) if act and closed else [])
+
+
+def close_dead_tabs(environ: dict[str, str], now_ms: int, herdr: Herdr, live: set[str]) -> list[str]:
+    alive = {herdr_host.agent_name(name) for name in live}
+    panes = herdr.list_panes()
+    fresh = {
+        record.tab_id
+        for record in herdr_panes.load(environ)
+        if now_ms - record.launched_at < grace_ms(environ)
+        and panes.get(record.pane_id, {}).get("terminal_id") == record.terminal_id
+    }
+    closed = []
+    for tab in herdr.tabs():
+        label, tab_id = tab["label"], tab["tab_id"]
+        if not naming.PATTERNS["pane"].fullmatch(label) or label in alive or tab_id in fresh:
+            continue
+        held = [pane_id for pane_id, pane in panes.items() if pane["tab_id"] == tab_id]
+        if held and all(bare_shell(herdr.process_info(pane_id)) for pane_id in held):
+            herdr.close_tab(tab_id)
+            closed.append(tab_id)
+    return closed
 
 
 def lines(findings: list, act: bool) -> list[str]:
@@ -265,8 +302,10 @@ def lines(findings: list, act: bool) -> list[str]:
         if isinstance(found, Emptied):
             out.append(f"closed {found.kind} {found.ident}, left empty")
         elif found.action == CLOSE:
-            owner = found.record.owner_session or "no session"
-            out.append(f"{'closed' if act else 'would close'} pane {found.record.pane_id} of {owner}: {found.reason}")
+            owner, task = found.record.owner_session or "no session", found.task or "none"
+            idle = f"task {task}, idle {found.idle_ms // 60_000} minutes"
+            verb = "closed" if act else "would close"
+            out.append(f"{verb} pane {found.record.pane_id} of {owner}, {idle}: {found.reason}")
     return out
 
 
@@ -310,11 +349,12 @@ def clean_run_dir(folder: Path, now_s: float, act: bool, alive: Callable[[int], 
     return out
 
 
-def run(environ: dict[str, str], now_ms: int, act: bool) -> list[str]:
+def run(environ: dict[str, str], now_ms: int, act: bool, swarm_only: bool = False) -> list[str]:
     out = clean_run_dir(herdr_panes.run_folder(environ), now_ms / 1000, act)
     if not herdr_host.binary() or not herdr_host.server_running(environ):
         return out
     try:
-        return out + lines(sweep(environ, now_ms, act, Herdr(environ), Owners()), act)
+        found = sweep(environ, now_ms, act, Herdr(environ), Owners(environ=environ), swarm_only)
+        return out + lines(found, act)
     except READ_ERRORS as exc:
         return [*out, f"herdr sweep failed: {exc}"]

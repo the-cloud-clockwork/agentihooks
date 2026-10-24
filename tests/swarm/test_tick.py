@@ -106,6 +106,9 @@ class FakeLedger:
     def comment(self, slug, task_id, text, by):
         self.comments.append((task_id, text, by))
 
+    def notice(self, slug, task_id, text):
+        self.comments.append((task_id, text, "swarm"))
+
 
 class FakeRuntime:
     def __init__(self, fail=False, full=False, crash=None):
@@ -249,6 +252,18 @@ def test_a_second_tick_does_not_overspawn(store):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert len(runtime.spawned) == 2
+
+
+class RefusingRuntime(FakeRuntime):
+    def placement_refusal(self, lane, task):
+        return "no headless hive for eng lists the repo /repo" if task.get("id") == "t1" else ""
+
+
+def test_a_placement_wait_is_logged_in_the_tick_output(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), RefusingRuntime()
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert "task t1 waits: no headless hive for eng lists the repo /repo" in actions
+    assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
 
 
 @pytest.mark.parametrize("lost_ledger", ["missing", "retained", False])
@@ -620,6 +635,328 @@ def test_a_launch_is_pending_while_the_runtime_spawns_it(store):
     assert [row["state"] for row in store.launches("sw")] == ["started"]
 
 
+class HiveAcks(FakeRuntime):
+    def __init__(self, fail=()):
+        super().__init__()
+        self.ordered, self.collected, self.acked, self.failing, self.broken = [], [], set(), set(fail), set()
+        self.refused, self.collected_slugs, self.conflicted = set(), set(), set()
+        self.expired, self.expire_broken, self.kept = [], {}, set()
+
+    def expire(self, config, lane, name, task):
+        from scripts.swarm.tick import ACK_LATER
+
+        assert (config.slug, task) == ("sw", {"id": task["id"], "seat": task["seat"], ACK_LATER: True})
+        assert task["seat"].startswith(f"{lane}-")
+        self.expired.append(name)
+        if name in self.expire_broken:
+            raise self.expire_broken[name]
+        if name in self.kept:
+            return False
+
+    def spawn(self, config, lane, name, task):
+        from scripts.swarm.tick import ACK_LATER
+
+        if lane == MASTER:
+            return super().spawn(config, lane, name, task)
+        assert task[ACK_LATER] is True
+        if task["id"] in self.refused:
+            raise SpawnError("hive refused the order", "refused")
+        self.ordered.append(name)
+        raise SpawnError("hive launch ordered, waiting for its acknowledgement", "pending")
+
+    def collect(self, config, lane, name, task):
+        from scripts.swarm.tick import ACK_LATER
+
+        assert task[ACK_LATER] is True
+        assert task["seat"].startswith(f"{lane}-")
+        self.collected.append(name)
+        self.collected_slugs.add(config.slug)
+        if name in self.broken:
+            raise ConnectionError("redis went away")
+        if name in self.conflicted:
+            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        if name in self.failing:
+            raise SpawnError("hive launch failed: prompt", "refused", pane_id=f"pane-{name}")
+        if name not in self.acked:
+            raise SpawnError("hive launch ordered, waiting for its acknowledgement", "pending")
+        return super().spawn(config, lane, name, task)
+
+
+def test_a_tick_pass_never_waits_on_hive_acknowledgements_and_a_later_pass_records_them(store):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), HiveAcks()
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    names = list(runtime.ordered)
+    waits = {f"{ledger.rows[t]['claimed_by']} waits for the hive acknowledgement of {t}" for t in ("t1", "t2", "t3")}
+    assert waits <= set(actions)
+    assert len(names) == 3 and runtime.spawned == []
+    assert sorted(row["state"] for row in store.launches("sw")) == ["acknowledging"] * 3
+    tick("sw", store, ledger, runtime, now_ms=STARTUP_GRACE_MS + 2_000)
+    assert sorted(runtime.collected) == sorted(names) and runtime.ordered == names
+    assert [store.claimant("sw", t) for t in ("t1", "t2", "t3")] == [
+        ledger.rows[t]["claimed_by"] for t in ("t1", "t2", "t3")
+    ]
+    assert all(ledger.rows[t]["claimed_by"] in names for t in ("t1", "t2", "t3"))
+    runtime.acked.update(names)
+    actions = tick("sw", store, ledger, runtime, now_ms=STARTUP_GRACE_MS + 3_000)
+    spawned = {f"spawned {ledger.rows[t]['claimed_by']} for {t}" for t in ("t1", "t2", "t3")}
+    assert spawned <= set(actions)
+    assert sorted(name for _, name, _ in runtime.spawned) == sorted(names)
+    assert {lane for lane, _, _ in runtime.spawned} == {"eng"}
+    assert sorted(row["state"] for row in store.launches("sw")) == ["started"] * 3
+    assert [store.claims("sw", t) for t in ("t1", "t2", "t3")] == [1, 1, 1]
+    assert runtime.ordered == names
+
+
+@pytest.mark.wall_clock
+def test_a_tick_pass_with_three_unacknowledged_hive_orders_ends_within_seconds(store):
+    import time
+
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), HiveAcks()
+    started = time.monotonic()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert time.monotonic() - started < 5
+    assert len(runtime.ordered) == 3
+
+
+def test_a_refused_hive_acknowledgement_reopens_its_task(store, monkeypatch):
+    from scripts.swarm import failed_panes
+    from scripts.swarm import tick as tick_module
+
+    store.update("sw", max_eng=2)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    names = list(runtime.ordered)
+    runtime.failing.update(names)
+    released, release = [], tick_module._release_admission
+    monkeypatch.setattr(
+        tick_module, "_release_admission", lambda *args: released.append((args[1], args[2]["id"])) or release(*args)
+    )
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert sorted(released) == [(runtime, "t1"), (runtime, "t2")]
+    assert sum(action.startswith("spawn failed for ") for action in actions) == 2
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    for name in names:
+        assert (launches[name]["state"], launches[name]["error"]) == ("failed", "hive launch failed: prompt")
+        assert failed_panes.held(store, "sw")[f"pane-{name}"]["failed_at"] == 2_000
+    assert not set(names) & {agent.name for agent in store.agents("sw")}
+    assert ledger.rows["t1"]["claimed_by"] not in names and ledger.rows["t2"]["claimed_by"] not in names
+
+
+def test_a_refused_acknowledgement_of_a_task_gone_from_the_ledger_names_the_task(store):
+    from scripts.swarm.tick import _collect_acks
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.failing.update(runtime.ordered)
+    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, {"tasks": []}, 2_000)
+    assert [action.split(":")[0] for action in actions] == ["spawn failed for t1"]
+
+
+def test_every_refused_hive_order_in_one_pass_reports_its_failure(store):
+    store.update("sw", max_eng=2)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
+    runtime.refused.update({"t1", "t2"})
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    failures = sorted(action for action in actions if action.startswith("spawn failed for "))
+    assert len(failures) == 2
+    assert [failure.startswith(f"spawn failed for {t}") for failure, t in zip(failures, ("t1", "t2"))] == [True, True]
+    assert all(failure.endswith(": hive refused the order") for failure in failures)
+    assert runtime.ordered == []
+
+
+def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(store, monkeypatch, capsys):
+    from scripts.swarm import tick as tick_module
+    from scripts.swarm.tick import LEASE_MS
+    from scripts.swarm_v2.runtime import codex
+
+    admitted, admit = [], codex.admit_legacy
+    monkeypatch.setattr(codex, "admit_legacy", lambda *args: admitted.append(args) or admit(*args))
+    refreshed, refresh = [], store.refresh
+    monkeypatch.setattr(store, "refresh", lambda *args: refreshed.append(args) or refresh(*args))
+    started, start = [], tick_module._started
+    monkeypatch.setattr(tick_module, "_started", lambda *args: started.append(args) or start(*args))
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    runtime.broken.add(first)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
+    assert ledger.rows["t1"]["claimed_by"] == first and store.claimant("sw", "t1") == first
+    assert ("sw", "t1", first, LEASE_MS) in refreshed
+    assert f"{first} collect for t1 raised ConnectionError('redis went away'), waiting for the hive" in (
+        capsys.readouterr().err
+    )
+    runtime.broken.clear()
+    runtime.acked.add(first)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert [row["state"] for row in store.launches("sw")] == ["started"]
+    assert runtime.ordered == [first]
+    assert [(args[0], args[1], args[3]) for args in admitted if args[2].name == first] == [(store, "sw", runtime)]
+    assert [(args[3], args[5].task["lane"]) for args in started if args[5].record.name == first] == [(ledger, "eng")]
+    assert runtime.collected_slugs == {"sw"}
+
+
+def test_a_swarm_error_during_collect_fails_the_launch_instead_of_waiting_forever(store):
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    runtime.conflicted.add(first)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS - 1)
+    assert any(action.startswith("spawn failed for t1, task t1 reopened:") for action in actions)
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    assert launches[first]["state"] == "failed"
+    assert "hive launch acknowledgement does not match the live execution" in launches[first]["error"]
+    assert first not in {agent.name for agent in store.agents("sw")}
+    runtime.conflicted.clear()
+    second = runtime.ordered[-1]
+    assert second != first and ledger.rows["t1"]["claimed_by"] == second
+    runtime.acked.add(second)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS + STARTUP_GRACE_MS)
+    assert [row["state"] for row in store.launches("sw") if row["agent"] == second] == ["started"]
+    assert ledger.rows["t1"]["claimed_by"] == second
+
+
+@pytest.mark.parametrize("broken", [False, True])
+def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(store, broken):
+    from scripts.swarm.tick import ACK_EXPIRED, LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    if broken:
+        runtime.broken.add(first)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS - 1)
+    assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
+    assert runtime.expired == []
+    collected = len(runtime.collected)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    assert (launches[first]["state"], launches[first]["error"]) == ("failed", ACK_EXPIRED)
+    assert runtime.collected[collected:] == [first]
+    assert runtime.expired == [first]
+    assert first not in {agent.name for agent in store.agents("sw")}
+    assert ledger.rows["t1"]["claimed_by"] != first
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ConnectionError("redis went away"), SwarmError("the controller lease is stale"), SpawnError("refused")],
+)
+def test_a_launch_the_hive_cannot_expire_at_the_claim_lease_keeps_waiting(store, capsys, error):
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    runtime.expire_broken[first] = error
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
+    assert runtime.expired == [first]
+    assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
+    assert ledger.rows["t1"]["claimed_by"] == first and store.claimant("sw", "t1") == first
+    assert f'{first} collect for t1 raised RuntimeError("expiring the launch raised {error!r}"), waiting' in (
+        capsys.readouterr().err
+    )
+
+
+def test_an_acknowledgement_collected_at_the_claim_lease_keeps_the_agent_and_its_claim(store):
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    runtime.acked.add(first)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
+    assert [row["state"] for row in store.launches("sw") if row["agent"] == first] == ["started"]
+    assert ledger.rows["t1"]["claimed_by"] == first
+
+
+@pytest.mark.parametrize(
+    ("kind", "reason"),
+    [
+        ("failing", "hive launch failed: prompt"),
+        ("conflicted", "hive launch acknowledgement does not match the live execution"),
+    ],
+)
+def test_a_definitive_collect_failure_at_the_claim_lease_keeps_its_own_reason(store, kind, reason):
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = runtime.ordered[0]
+    getattr(runtime, kind).add(first)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    assert (launches[first]["state"], launches[first]["error"]) == ("failed", reason)
+    assert runtime.expired == []
+
+
+def _hive_reservations(store, name):
+    from scripts.hive import admission
+    from scripts.routing.reservation import LaunchSlots
+
+    agent = next(a for a in store.agents("sw") if a.name == name)
+    started = store.start_execution(
+        "sw", replace(agent, hive="remote", runtime_target={"host_id": "remote"}, state="launching"), ""
+    )
+    slots = LaunchSlots(store.redis)
+    assert slots.reserve("claude:acct", started.execution_id, 6, 300_000)
+    assert admission.reserve(store.redis, "remote", f"sw/{name}", 3) == (True, 0)
+    return slots
+
+
+@pytest.mark.parametrize("ending", ["refused", "expired"])
+def test_a_failed_hive_launch_releases_its_hive_room_and_launch_slot(store, ending):
+    from scripts.hive import admission
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    (name,) = runtime.ordered
+    slots = _hive_reservations(store, name)
+    if ending == "refused":
+        runtime.failing.add(name)
+    tick("sw", store, ledger, runtime, now_ms=2_000 if ending == "refused" else 1_000 + LEASE_MS)
+    launches = {row["agent"]: row for row in store.launches("sw")}
+    assert launches[name]["state"] == "failed"
+    assert admission.pending(store.redis, "remote") == 0
+    assert slots.counts() == {}
+
+
+class HiveFailsAfterAdmission(HiveAcks):
+    def __init__(self, store):
+        super().__init__()
+        self.store, self.slots = store, None
+
+    def spawn(self, config, lane, name, task):
+        if lane == MASTER:
+            return super().spawn(config, lane, name, task)
+        self.slots = _hive_reservations(self.store, name)
+        raise SpawnError("hive launch failed: ambiguous", "ambiguous")
+
+
+def test_a_hive_launch_failing_after_admission_releases_its_hive_room_and_launch_slot(store):
+    from scripts.hive import admission
+
+    ledger, runtime = tasks(("t1", "eng")), HiveFailsAfterAdmission(store)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert any(action.startswith("spawn failed for t1") for action in actions)
+    assert admission.pending(store.redis, "remote") == 0
+    assert runtime.slots.counts() == {}
+
+
+def test_a_failed_hive_launch_gone_from_the_store_still_releases_its_hive_room(store):
+    from scripts.hive import admission
+    from scripts.swarm.tick import _release_hive_launch
+
+    assert admission.reserve(store.redis, "remote", "sw/eng@gone", 3) == (True, 0)
+    _release_hive_launch("sw", store, AgentRecord("eng@gone", "eng", "t1", hive="remote"))
+    assert admission.pending(store.redis, "remote") == 0
+
+
 def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -657,6 +994,123 @@ def test_every_lane_takes_a_session_before_any_lane_takes_a_second(store):
 def test_the_spawn_pass_says_when_it_stops_at_the_session_cap(store):
     actions = tick("sw", store, tasks(("t1", "eng"), ("t2", "eng")), SessionsLeft(1), now_ms=1_000)
     assert "every agent is at its session cap, waiting" in actions
+
+
+def _slow_launches(monkeypatch, runtime, seconds):
+    from types import SimpleNamespace
+
+    from scripts.swarm import tick as tick_module
+
+    clock = [0.0]
+    monkeypatch.setattr(tick_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    spawn = runtime.spawn
+
+    def slow(config, lane, name, task):
+        clock[0] += seconds
+        return spawn(config, lane, name, task)
+
+    runtime.spawn = slow
+    return clock
+
+
+def test_a_launch_that_spends_the_budget_leaves_the_next_task_for_the_next_pass(store, monkeypatch):
+    from scripts.swarm.tick import SPAWN_BUDGET_S
+
+    assert SPAWN_BUDGET_S == 20
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 20)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1")]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
+    assert ledger.rows["t2"].get("claimed_by", "") == ""
+    assert ledger.rows["t2"]["state"] == "open"
+    assert not store.redis.exists(store.key("sw", "claim", "t2"))
+
+
+def test_time_spent_before_the_first_launch_never_holds_it_back(store, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm import tick as tick_module
+
+    clock = [0.0]
+    monkeypatch.setattr(tick_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    stop = tick_module._spawn_stop
+
+    def slow_stop(*args):
+        clock[0] += 30.0
+        return stop(*args)
+
+    monkeypatch.setattr(tick_module, "_spawn_stop", slow_stop)
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
+
+
+def test_launches_inside_the_budget_keep_filling_the_lanes(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 9.9)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+    assert not any("launch budget" in action for action in actions)
+
+
+def test_a_launch_the_mean_launch_cost_would_carry_past_the_budget_waits_a_pass(store, monkeypatch):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 7.5)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+    assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
+    assert ledger.rows["t3"]["state"] == "open"
+
+
+def test_launches_whose_mean_cost_fits_the_rest_of_the_budget_all_start(store, monkeypatch):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 6)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2", "t3"]
+    assert not any("launch budget" in action for action in actions)
+
+
+def test_a_launch_whose_mean_cost_lands_exactly_on_the_budget_waits_a_pass(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 10)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
+
+
+def test_a_launch_just_under_half_the_budget_lets_the_next_one_start(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 9.99)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+
+
+def test_pass_work_after_a_launch_counts_toward_the_mean_launch_cost(store, monkeypatch):
+    from scripts.swarm import dispatcher
+
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    clock = _slow_launches(monkeypatch, runtime, 6)
+    chain = dispatcher.chain_claimed
+
+    def slow_chain(*args):
+        clock[0] += 4
+        return chain(*args)
+
+    monkeypatch.setattr(dispatcher, "chain_claimed", slow_chain)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
+
+
+def test_a_slow_failed_launch_spends_the_budget_too(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FailingFor("t1")
+    _slow_launches(monkeypatch, runtime, 30)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.tried == ["t1"]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
 
 
 def test_a_spawn_claims_its_task_for_one_lease_and_records_its_seat_at_launch_time(store):
@@ -1463,13 +1917,17 @@ def test_account_reads_and_spawns_hold_the_placement_lock_and_the_rest_does_not(
     assert not tick_module.PLACING.locked()
 
 
-def test_the_tick_hands_the_ci_budget_pass_its_store_and_clock(store, monkeypatch):
-    from scripts.ci_budget import defects
+def test_the_tick_leaves_the_ci_budget_and_flake_passes_to_the_refresh_job(store, monkeypatch):
+    from scripts.ci_budget import defects, flakes
+    from scripts.swarm import ci_speed
 
     seen = []
-    monkeypatch.setattr(defects, "refresh", lambda *args: seen.append(args) or ["updated"])
-    assert "updated" in tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
-    assert [(args[0], args[2], args[3]) for args in seen] == [("sw", store, 1)]
+    monkeypatch.setattr(defects, "refresh", lambda *args: seen.append("defects") or ["updated"])
+    monkeypatch.setattr(flakes, "refresh", lambda *args: seen.append("flakes") or ["filed"])
+    monkeypatch.setattr(ci_speed, "refresh", lambda *args: seen.append("speed") or [])
+    actions = tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
+    assert seen == []
+    assert "updated" not in actions and "filed" not in actions
 
 
 def test_tick_captures_panes_before_any_retirement(store, monkeypatch):
@@ -1485,16 +1943,6 @@ def test_tick_captures_panes_before_any_retirement(store, monkeypatch):
     assert seen[1][0] == "recover"
 
 
-def test_the_tick_hands_the_flake_budget_pass_its_ledger(store, monkeypatch):
-    from scripts.ci_budget import flakes
-
-    seen = []
-    monkeypatch.setattr(flakes, "refresh", lambda *args: seen.append(args) or ["filed"])
-    ledger = tasks(("t1", "eng"))
-    assert "filed" in tick("sw", store, ledger, FakeRuntime(), 1)
-    assert [(args[0], args[3], args[4]) for args in seen] == [("sw", ledger, 1)]
-
-
 def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers(store):
     from scripts.inbox.store import InboxStore
 
@@ -1502,6 +1950,7 @@ def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers
     InboxStore(store.redis).send("operator", "master@sw", "operator replied on the ledger")
     runtime = FakeRuntime()
     actions = tick("sw", store, tasks(("t1", "eng"), ("t2", "ci")), runtime, 1)
+    assert actions[0] == "the operator wrote on the ledger, paused to start the master"
     assert "spawned master master@a1b2c3-0001" in actions
     assert [a.name for a in masters(store)] == ["master@a1b2c3-0001"] and workers(store) == []
     assert runtime.spawned == [] and store.config("sw").state == "paused"
@@ -1547,6 +1996,98 @@ def test_a_stopped_swarm_with_nothing_for_its_master_stays_down(store):
     runtime = FakeRuntime()
     assert tick("sw", store, tasks(("t1", "eng")), runtime, 1) == []
     assert runtime.masters == [] and store.config("sw").state == "stopped"
+
+
+@pytest.mark.parametrize("state", ["stopped", "paused", "running"])
+def test_only_reopened_swarms_run_normal_tick_passes(store, monkeypatch, state):
+    from scripts.swarm import tick as module
+
+    store.update("sw", state=state)
+    seen = []
+    monkeypatch.setattr(module.resume, "track_outages", lambda *args: seen.append("outages"))
+    monkeypatch.setattr(module, "_verify", lambda *args: seen.append("verify") or [])
+    monkeypatch.setattr(module.pane_evidence, "sweep", lambda *args: seen.append("panes") or [])
+    monkeypatch.setattr(store.execution_registry, "reconcile", lambda *args: seen.append("executions") or [])
+    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
+    assert seen == ([] if state == "stopped" else ["panes", "executions", "outages", "verify"])
+
+
+@pytest.mark.parametrize("wake", [False, True])
+def test_stopped_swarm_skips_outer_tick_work_but_consumes_control_commands(store, monkeypatch, wake):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import cli, command_runner
+
+    store.update("sw", state="stopped")
+    if wake:
+        InboxStore(store.redis).send("operator", "master@sw", "operator replied on the ledger")
+    consumed = []
+    monkeypatch.setattr(command_runner, "consume", lambda *args: consumed.append(args) or ["controls checked"])
+    monkeypatch.setattr(cli.outage, "providers", lambda *args: pytest.fail("stopped swarm probed providers"))
+    runtime = FakeRuntime()
+    actions = cli.run_tick(store, "sw", tasks(("t1", "eng")), runtime)
+    assert actions[:1] == ["controls checked"]
+    assert consumed == [(store, "sw")]
+    assert store.config("sw").state == ("paused" if wake else "stopped")
+    assert len(runtime.masters) == int(wake)
+    assert runtime.spawned == []
+
+
+def test_stopped_retired_swarm_wakes_only_when_a_new_task_arrives(store):
+    import json
+
+    store.update("sw", state="stopped")
+    store.redis.set(store.key("sw", "master-retired-tasks"), json.dumps(["t1"]))
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    assert tick("sw", store, ledger, runtime, 1) == []
+    assert store.config("sw").state == "stopped"
+    assert runtime.masters == []
+    ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open"}
+    tick("sw", store, ledger, runtime, 2)
+    assert store.config("sw").state == "paused"
+    assert len(runtime.masters) == 1
+    assert runtime.spawned == []
+    assert store.redis.get(store.key("sw", "master-retired-tasks")) is None
+
+
+def test_closed_doctor_stays_stopped_and_withdraws_its_wake_message(store, monkeypatch):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import tick as module
+
+    store.update("sw", state="stopped", template=module.priming.TEMPLATE)
+    ledger, runtime = tasks(), FakeRuntime()
+    monkeypatch.setattr(ledger, "closed", lambda slug: True)
+    inbox = InboxStore(store.redis)
+    inbox.send("operator", "master@sw", "operator wrote after closing")
+    assert tick("sw", store, ledger, runtime, 1) == []
+    assert store.config("sw").state == "stopped"
+    assert runtime.masters == []
+    assert inbox.pending_items("master@sw") == []
+
+
+def test_newly_open_phase_sends_its_planning_notice_on_the_same_tick(store, monkeypatch):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import cli
+
+    ledger = FakeLedger([{"id": "t1", "phase": "p1", "state": "done"}])
+    ledger.phases = [
+        {"id": "p1", "title": "First", "planning": "manual"},
+        {"id": "p2", "title": "Next", "planning": "auto", "depends_on": ["p1"]},
+    ]
+
+    def finish(*args):
+        ledger.phases[0]["done"] = True
+        return ["finished first phase"]
+
+    def add(slug, row, by):
+        ledger.rows[row["task"]] = {**row, "id": row["task"], "state": "open"}
+
+    ledger.add_task = add
+    monkeypatch.setattr(cli.phases, "phase_pass", finish)
+    inbox = InboxStore(store.redis)
+    actions = cli._phase_steps(inbox, store, "sw", ledger.state("sw"), ledger)
+    assert "queued plan-p2 for phase p2" in actions
+    assert ledger.rows["plan-p2"]["phase"] == "p2"
+    assert any("phase p2 Next needs a plan" in item.text for item in inbox.inbox("master@sw"))
 
 
 def test_a_dead_master_is_respawned(store):

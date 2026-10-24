@@ -957,6 +957,17 @@ def test_claude_render_mcp_and_shared_data(world, capsys):
         assert os.readlink(out / name) == str(home / ".claude" / name)
 
 
+def test_claude_render_creates_the_shared_folders_a_fresh_home_lacks(world):
+    from scripts.profiles import render
+
+    shared = world["home"] / ".claude"
+    shutil.rmtree(shared, ignore_errors=True)
+    out = render.render_claude("rb-role")
+    for name in ("projects", "sessions", "todos"):
+        assert (shared / name).is_dir()
+        assert (out / name).resolve() == (shared / name).resolve()
+
+
 @pytest.mark.parametrize("present", [True, False])
 def test_claude_render_links_operator_keybindings(world, present):
     from scripts.profiles import render
@@ -1750,9 +1761,11 @@ def test_isolated_codex_render_keeps_session_state_private(world):
 
     out = render.render_codex("rb-role", isolate=True)
 
-    for item in ("sessions", "history.jsonl", "session_index.jsonl"):
+    for item in ("history.jsonl", "session_index.jsonl"):
         assert not (out / item).exists()
         assert not (out / item).is_symlink()
+    for item in ("sessions", "archived_sessions"):
+        assert os.readlink(out / item) == str(render.rendered_root() / ".rollouts" / "rb-role" / "codex" / item)
     for item in ("auth.json", "hooks.json"):
         assert os.readlink(out / item) == str(home / ".codex" / item)
     doc = tomllib.loads((out / "config.toml").read_text())
@@ -1769,7 +1782,7 @@ def test_codex_render_refreshes_when_session_isolation_changes(world):
     assert isolated is not None
     assert isolated != shared
     assert (shared / "sessions").is_symlink()
-    assert not (isolated / "sessions").is_symlink()
+    assert os.readlink(isolated / "sessions") != os.readlink(shared / "sessions")
 
     restored = render.render_codex("rb-role")
 
@@ -1784,8 +1797,9 @@ def test_swarm_codex_preparation_renders_isolated_storage(world):
     env, _ = select_profile.prepare("rb-role", "codex", "", "", [], {"AGENTIHOOKS_SWARM": "crew"})
     out = Path(env["CODEX_HOME"])
 
-    for item in ("sessions", "history.jsonl", "session_index.jsonl"):
+    for item in ("history.jsonl", "session_index.jsonl"):
         assert not (out / item).is_symlink()
+    assert Path(os.readlink(out / "sessions")).parts[-4:] == (".rollouts", "rb-role", "codex", "sessions")
     assert (out / "hooks.json").is_symlink()
     assert tomllib.loads((out / "config.toml").read_text())["sqlite_home"] == str(out)
 
@@ -2252,6 +2266,8 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "chain": chain,
         "overlays": [],
         "enabled_plugins": {},
+        "mcp_urls": {},
+        "mcp_bearer_env": {},
         "corrections": "",
     }
     assert render._stamp(None, []) == {
@@ -2261,6 +2277,8 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "chain": [],
         "overlays": [],
         "enabled_plugins": {},
+        "mcp_urls": {},
+        "mcp_bearer_env": {},
         "corrections": "",
     }
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]

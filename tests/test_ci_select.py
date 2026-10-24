@@ -304,6 +304,85 @@ def test_the_changed_files_come_from_the_merge_base(repo):
     assert ci_select.changed_files(repo, base, head) == ["hooks/sample.py"]
 
 
+TREE_CHECK_FILES = {"tests/test_codeowners.py": "OWNERS = 1\n", "tests/test_ci_pull_request_api.py": "API = 1\n"}
+
+
+@pytest.fixture
+def tree(repo):
+    write(repo, TREE_CHECK_FILES)
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "tree checks")
+    return repo
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        ["mv", "scripts/lonely.py", "scripts/moved.py"],
+        ["rm", "scripts/lonely.py"],
+        ["add", "scripts/new.py"],
+    ],
+)
+def test_adding_removing_or_moving_a_file_reshapes_the_tree(tree, change):
+    if change[0] == "add":
+        write(tree, {change[1]: "VALUE = 3\n"})
+    git(tree, *change)
+    git(tree, "commit", "-m", "reshape")
+    assert ci_select.reshaped(tree, "HEAD~1", "HEAD") is True
+
+
+def test_editing_a_file_leaves_the_tree_shape(tree):
+    base = git(tree, "rev-parse", "HEAD")
+    git(tree, "switch", "-c", "change")
+    write(tree, {"hooks/sample.py": "VALUE = 3\n"})
+    git(tree, "commit", "-am", "change")
+    git(tree, "switch", "dev")
+    git(tree, "mv", "scripts/lonely.py", "scripts/moved.py")
+    git(tree, "commit", "-m", "dev moved")
+    assert ci_select.reshaped(tree, "dev", "change") is False
+    assert ci_select.reshaped(tree, base, "change") is False
+
+
+def test_a_reshape_check_on_an_unknown_revision_fails(tree):
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        ci_select.reshaped(tree, "not-a-revision", "HEAD")
+    assert error.value.returncode == 128
+    assert error.value.cmd == [
+        "git",
+        "diff",
+        "--quiet",
+        "--no-renames",
+        "--diff-filter=AD",
+        "not-a-revision...HEAD",
+    ]
+
+
+def test_a_reshaped_tree_selects_the_whole_tree_checks(tree):
+    assert ci_select.decide(tree, ["hooks/sample.py"], {}, 3, tree_reshaped=True) == (
+        "selected",
+        [sorted(["tests/test_sample.py", *TREE_CHECK_FILES])],
+    )
+
+
+def test_a_reshaped_doc_selects_the_whole_tree_checks(tree):
+    assert ci_select.decide(tree, ["docs/unnamed.md"], {}, 3, tree_reshaped=True) == (
+        "selected",
+        [sorted(TREE_CHECK_FILES)],
+    )
+
+
+def test_an_edited_file_leaves_the_whole_tree_checks_out(tree):
+    assert decide(tree, ["hooks/sample.py"]) == ("selected", [["tests/test_sample.py"]])
+
+
+def test_main_selects_the_whole_tree_checks_for_a_moved_file(tree, monkeypatch, tmp_path):
+    git(tree, "mv", "scripts/lonely.py", "scripts/moved.py")
+    git(tree, "commit", "-m", "move")
+    assert run_main(tree, monkeypatch, tmp_path, "pull_request") == (
+        "scope=selected\nlegs=[1]\ncount=1\nfiles_1=tests/test_ci_pull_request_api.py tests/test_codeowners.py\n"
+    )
+
+
 def test_the_workflow_keeps_a_one_file_change_selected_after_dev_moves(repo, monkeypatch, tmp_path):
     opened = git(repo, "rev-parse", "HEAD")
     git(repo, "switch", "-c", "change")
@@ -417,3 +496,49 @@ def test_main_budgets_on_the_given_durations_with_later_files_winning(heavy, mon
     arguments = ["--base", "HEAD~1", "--head", "HEAD", "--event", "pull_request", "--legs", "3", "--root", str(heavy)]
     assert ci_select.main([*arguments, "--durations", str(first), str(second)]) == 0
     assert output.read_text().splitlines()[:3] == ["scope=selected", "legs=[1, 2]", "count=2"]
+
+
+def jobs():
+    return yaml.safe_load(WORKFLOW.read_text())["jobs"]
+
+
+def workflow_legs():
+    step = next(s for s in jobs()["select"]["steps"] if s.get("id") == "select")
+    words = shlex.split(next(line for line in step["run"].splitlines() if "scripts.ci_select" in line))
+    return int(words[words.index("--legs") + 1])
+
+
+def test_the_workflow_selects_nine_legs_for_a_large_change(repo):
+    write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 10)})
+    durations = seconds(test_sample=15.0, **{f"test_tick{index}": 160.0 for index in range(1, 10)})
+    scope, legs = decide(repo, ["hooks/sample.py"], durations, workflow_legs())
+    assert scope == "selected"
+    assert len(legs) == 9
+
+
+def test_the_workflow_hands_every_leg_its_files(repo, monkeypatch, tmp_path, capsys):
+    write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 10)})
+    durations = seconds(test_sample=15.0, **{f"test_tick{index}": 160.0 for index in range(1, 10)})
+    write(repo, {"hooks/sample.py": "VALUE = 4\n", ".test_durations": json.dumps(durations)})
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "change")
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    arguments = ["--base", "HEAD~1", "--head", "HEAD", "--event", "pull_request", "--legs", str(workflow_legs())]
+    assert ci_select.main([*arguments, "--root", str(repo)]) == 0
+    printed = capsys.readouterr().out
+    (tmp_path / "selection").mkdir()
+    (tmp_path / "selection/selection.txt").write_text(printed)
+    upload = next(s for s in jobs()["select"]["steps"] if s.get("name") == "Upload the selected legs")
+    assert upload["with"]["path"] == "${{ runner.temp }}/selection/selection.txt"
+    assert (
+        'tee "$RUNNER_TEMP/selection/selection.txt"'
+        in next(s for s in jobs()["select"]["steps"] if s.get("id") == "select")["run"]
+    )
+    read = next(s for s in jobs()["unit-selected"]["steps"] if s.get("name") == "Read this leg's test paths")
+    expected = dict(line.split("=", 1) for line in printed.splitlines() if line.startswith("files_"))
+    assert len(expected) == 9
+    for leg in range(1, 10):
+        environment = tmp_path / f"env-{leg}"
+        given = {"PATH": os.environ["PATH"], "RUNNER_TEMP": str(tmp_path), "LEG": str(leg)}
+        subprocess.run(["bash", "-e", "-c", read["run"]], check=True, env=given | {"GITHUB_ENV": str(environment)})
+        assert environment.read_text() == f"FILES={expected[f'files_{leg}']}\n"

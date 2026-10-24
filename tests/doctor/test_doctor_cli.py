@@ -580,10 +580,12 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "master launch",
         "startup",
         "context overrun",
+        "master prompt",
         "ci",
         "dev workflow",
         "trace",
         "runtime storage",
+        "scheduled tick",
     }
     assert doctor.main([WATCHED, "start"]) == 0
     assert reads == [] and passes == [every - {"trace"}]
@@ -621,6 +623,7 @@ def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsy
     store, _, _ = env
     assert doctor.main([WATCHED, "start"]) == 0
     capsys.readouterr()
+    monkeypatch.setattr(FileLedger, "tasks", lambda self, slug: [{"id": "mu1"}])
     since, until = "2026-10-07T09:58:24Z", "2026-10-07T12:58:24Z"
     monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
 
@@ -677,7 +680,7 @@ def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsy
         (
             "health/f1",
             ["--since", "2026-10-07T09:00Z", "--until", "2026-10-07T12:00Z"],
-            "journal bounds are only supported for failed-spawn findings and master-launch-missed",
+            "journal bounds are only supported for failed-spawn and CI speed findings and master-launch-missed",
         ),
     ],
 )
@@ -777,6 +780,7 @@ def test_failed_spawn_measure_accepts_a_window_ending_now(env, monkeypatch, caps
     store, _, _ = env
     assert doctor.main([WATCHED, "start"]) == 0
     capsys.readouterr()
+    monkeypatch.setattr(FileLedger, "tasks", lambda self, slug: [{"id": "mu1"}])
     monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
     seen = []
     monkeypatch.setattr(
@@ -795,13 +799,13 @@ def test_other_measures_read_every_detector_at_one_instant(env, monkeypatch, cap
     monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
     calls = []
 
-    def readers(actual_store, ledger, slug, now):
-        calls.append((actual_store, type(ledger), slug, now))
+    def readers(actual_store, ledger, slug, now, telemetry):
+        calls.append((actual_store, type(ledger), slug, now, telemetry))
         return {"health": lambda: [STALE], "inbox": lambda: 1 / 0}
 
     monkeypatch.setattr(doctor.detect, "readers", readers)
     assert doctor.main([WATCHED, "measure", STALE.id]) == 0
-    assert calls == [(store, swarm_cli.LedgerClient, WATCHED, 1791388800000)]
+    assert calls == [(store, swarm_cli.LedgerClient, WATCHED, 1791388800000, doctor.traces_read.measured_client)]
     output = capsys.readouterr()
     assert output.out == f"{STALE.id} {STALE.measure}\n"
     assert output.err == "the inbox detector failed: ZeroDivisionError: division by zero\n"

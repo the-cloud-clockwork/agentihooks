@@ -309,6 +309,31 @@ def test_start_conditions_skip_a_target_that_cannot_inject_at_session_start(quie
     start_effect.assert_not_called()
 
 
+def test_pretool_blocks_handed_off_session(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+
+    from hooks import config, hook_manager
+
+    reason = "BLOCKED: This session already handed off to its successor."
+    policy = Mock(return_value=(reason, None))
+    monkeypatch.setattr(config, "QUOTA_POLICY_ENABLED", True)
+    monkeypatch.setattr("hooks.context.conditions.write_guard", Mock(return_value=None))
+    monkeypatch.setattr("hooks.context.conditions.pre_effect", Mock(return_value=None))
+    monkeypatch.setattr("hooks.context.quota_policy.pretool", policy)
+    payload = {
+        "session_id": "handed-off-session",
+        "tool_name": "Read",
+        "tool_input": {},
+        "cwd": str(tmp_path),
+    }
+
+    with pytest.raises(hook_manager.BlockAction) as exc:
+        hook_manager.on_pre_tool_use(payload)
+
+    assert str(exc.value) == reason
+    policy.assert_called_once_with("handed-off-session", "Read", str(tmp_path))
+
+
 @pytest.mark.parametrize(
     "enabled, count, claim", [(True, 7, True), (True, 7, False), (True, 0, True), (False, 7, True)]
 )

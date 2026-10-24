@@ -89,6 +89,7 @@ def test_every_page_shell_carries_the_enforced_policy_and_no_inline_code(base, p
     assert "<style" not in body
     assert not re.search(r"\sstyle=|\son[a-z]+=", body)
     assert "ledger-data" not in body
+    assert '<meta name="darkreader-lock">' in body
 
 
 def test_an_error_page_the_server_library_writes_carries_the_policy_too(base):

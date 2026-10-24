@@ -99,6 +99,106 @@ def test_block_records_the_pushed_branch_on_the_task(worktree, monkeypatch):
     assert ("t1", ["branch", "branch_repo", "repository_branches"], AGENT) in writers
 
 
+@pytest.fixture
+def hive_worktree(env, monkeypatch, tmp_path):
+    _, ledger, _ = env
+    origin, primary, top = _repository(tmp_path, "repo")
+    monkeypatch.setattr(publish, "pushed_branches", PUSHED)
+    monkeypatch.chdir(primary)
+    cli.main(["sw", "create", "--repo", str(tmp_path / "workstation" / "repo")])
+    cli.main(["sw", "start"])
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_REPO", str(primary))
+    return ledger, origin, primary, top
+
+
+def test_block_on_a_hive_reads_the_local_checkout_the_launch_named(hive_worktree, monkeypatch):
+    ledger, origin, primary, top = hive_worktree
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    _git(top, "commit", "--allow-empty", "-m", "Task work")
+    _git(top, "push", "-u", "origin", BRANCH)
+    assert block() == 0
+    row = ledger.rows["t1"]
+    assert (row["state"], row["branch"], row["branch_repo"]) == ("blocked", BRANCH, str(origin))
+    assert row["repository_branches"] == {str(primary): BRANCH}
+
+
+def test_block_on_a_hive_reads_the_launch_checkout_for_a_repository_missing_here(hive_worktree, monkeypatch, tmp_path):
+    ledger, origin, primary, top = hive_worktree
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    ledger.rows["t1"]["repositories"] = [str(tmp_path / "workstation" / "antoncore")]
+    _git(top, "commit", "--allow-empty", "-m", "Task work")
+    _git(top, "push", "-u", "origin", BRANCH)
+    monkeypatch.chdir(tmp_path)
+    assert block() == 0
+    row = ledger.rows["t1"]
+    assert (row["state"], row["branch"], row["branch_repo"]) == ("blocked", BRANCH, str(origin))
+    assert row["repository_branches"] == {str(primary): BRANCH}
+
+
+def test_block_on_a_hive_without_any_task_repository_here_blocks_without_a_branch(hive_worktree, monkeypatch, tmp_path):
+    ledger = hive_worktree[0]
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REPO")
+    ledger.rows["t1"]["repositories"] = [str(tmp_path / "workstation" / "antoncore")]
+    assert block() == 0
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert "branch" not in ledger.rows["t1"]
+
+
+def test_block_records_the_pushed_branch_of_a_repository_recorded_on_another_host(worktree, monkeypatch, tmp_path):
+    ledger = worktree[0]
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
+    other_origin, other, other_top = _repository(tmp_path, "antoncore")
+    ledger.rows["t1"]["repositories"] = ["/srv/workstation/dev/agentibrain-kernel", "/srv/workstation/dev/antoncore"]
+    _git(other_top, "commit", "--allow-empty", "-m", "Antoncore work")
+    _git(other_top, "push", "-u", "origin", BRANCH)
+    assert block() == 0
+    row = ledger.rows["t1"]
+    assert (row["state"], row["branch"], row["branch_repo"]) == ("blocked", BRANCH, str(other_origin))
+    assert row["repository_branches"] == {str(other): BRANCH}
+
+
+def test_block_skips_a_repository_with_two_checkouts_here_and_one_missing_here(worktree, monkeypatch, tmp_path):
+    ledger = worktree[0]
+    hive = tmp_path / "hive"
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(hive))
+    _, _, other_top = _repository(tmp_path, "antoncore")
+    _git(tmp_path, "clone", "-q", str(tmp_path / "antoncore.git"), str(hive / "antoncore"))
+    _git(other_top, "commit", "--allow-empty", "-m", "Antoncore work")
+    _git(other_top, "push", "-u", "origin", BRANCH)
+    ledger.rows["t1"]["repositories"] = ["/srv/workstation/dev/antoncore", "/srv/workstation/dev/agentibrain-kernel"]
+    assert block() == 0
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert "branch" not in ledger.rows["t1"]
+    assert "repository_branches" not in ledger.rows["t1"]
+
+
+@pytest.mark.parametrize("hive", [("sw", True, True), ("other", True, False), ("sw", False, False)])
+@pytest.mark.parametrize(
+    "command",
+    [
+        (["prepare"], publish, "prepare", 2),
+        (["publish", "-m", "Task work", "a.py"], publish, "publish", 2),
+        (["block", "waiting on a token"], publish, "pushed_branches", 0),
+        (["block", "--dev-red", "dev is red"], cli.dev_red, "failing_run", 0),
+    ],
+)
+def test_worker_commands_read_the_launch_checkout_only_for_their_own_swarm(
+    hive_worktree, monkeypatch, tmp_path, hive, command
+):
+    swarm, named, local = hive
+    argv, module, target, position = command
+    primary = hive_worktree[2]
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
+    if not named:
+        monkeypatch.delenv("AGENTIHOOKS_SWARM_REPO")
+    seen = []
+    monkeypatch.setattr(publish, "pushed_branches", lambda repo, task, agent: {})
+    monkeypatch.setattr(module, target, lambda *args, **kwargs: seen.append(args[position]))
+    cli.main(["sw", "--as", AGENT, *argv])
+    assert seen == [str(primary) if local else str(tmp_path / "workstation" / "repo")]
+
+
 @pytest.mark.parametrize("tracking", [True, False])
 @pytest.mark.parametrize("ahead", [True, False])
 def test_block_checks_the_published_continuation_branch(worktree, capsys, tracking, ahead):

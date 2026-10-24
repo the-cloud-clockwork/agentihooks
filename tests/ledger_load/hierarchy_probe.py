@@ -66,6 +66,18 @@ def observe(port, samples, state):
     return {"cpu_seconds": cpu, "outputs": outputs}
 
 
+def align(barrier):
+    if not barrier:
+        return
+    folder = Path(barrier)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / str(os.getpid())).touch()
+    deadline = time.monotonic() + 300
+    while len(list(folder.iterdir())) < 2:
+        assert time.monotonic() < deadline, "the paired hierarchy probe never became ready"
+        time.sleep(0.05)
+
+
 def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
     assert Path(server.__file__).resolve().is_relative_to(Path.cwd().resolve())
     corpus = Path(__file__).parents[1] / "swarm_ledger" / "operations_corpus.json.gz"
@@ -107,6 +119,7 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
         state = recorded["state"]
         repo.import_document(SLUG, state, token="hierarchy-proof")
         server.HUB.open(SLUG, lambda: {"ledger": server.ledger_view(state)})
+        align(os.environ.get("HIERARCHY_START_BARRIER"))
         observations.append(observe(port, samples, state))
         profiling.set()
         fetch(port, "hierarchy", samples)
