@@ -105,6 +105,13 @@ def test_a_turn_is_completed_once_a_stop_is_requested_or_a_second_prompt_is_seen
     assert registry.progress("sid", "claude")["stopped"] is stopped
 
 
+def test_a_stop_recorded_before_a_later_request_still_completes_the_turn(cursors):
+    _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1, buffered_turns=1)
+    path = trace_flush.request_path("sid")
+    path.write_text(json.dumps({**json.loads(path.read_text()), "reason": "compact", "stopped": True}))
+    assert registry.progress("sid", "claude")["stopped"] is True
+
+
 def test_accepted_observations_paged_out_of_the_cursor_still_count_as_accepted(cursors):
     accepted = {"a": "rev", "b": "legacy"}
     _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1, accepted=accepted, paged={"spans": 200, "turns": 9})

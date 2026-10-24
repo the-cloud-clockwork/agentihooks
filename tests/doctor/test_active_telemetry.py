@@ -406,7 +406,7 @@ def test_a_misattributed_finding_reads_in_full():
 @pytest.mark.parametrize(
     "binding",
     [
-        _binding(traces=[], remote=None, local=_local(accepted=0, stopped=True), started_at=NOW - 60_000),
+        _binding(traces=[], remote=None, local=None, started_at=NOW - 60_000),
         _binding(traces=[], remote=None, local=None, started_at=NOW - 3_600_000),
         _binding(local=_local(generated_bytes=5000, oldest_unaccepted=NOW - 60_000)),
         _binding(

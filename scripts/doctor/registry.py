@@ -16,7 +16,6 @@ TRACES_LIMIT = 5
 ATTEMPTS = 2
 WINDOW_BYTES = 1 << 20
 CORRELATION = "agentihooks.correlation."
-STOP_REASONS = ("stop", "end")
 wall = time.time
 REMOTE_FIELDS = {
     "life": "agent.life",
@@ -148,7 +147,9 @@ def progress(session_id: str, harness: str) -> dict | None:
         "accepted_at": _ms(cursor["accepted_at"]) if cursor.get("accepted_at") else 0,
         "exporter_alive": trace_flush.alive(owner),
         "requested_at": int(request["at"]) // 1_000_000 if request.get("at") else 0,
-        "stopped": request.get("reason") in STOP_REASONS or int(cursor.get("buffered_turns", 0)) > 1,
+        "stopped": bool(request.get("stopped"))
+        or request.get("reason") in trace_flush.STOP_REASONS
+        or int(cursor.get("buffered_turns", 0)) > 1,
     }
 
 

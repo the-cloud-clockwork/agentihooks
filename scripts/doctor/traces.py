@@ -374,7 +374,7 @@ def _never_exported(binding, record, limits):
     )
 
 
-def _exportable(binding, record, limits):
+def _fault_due(binding, record, limits):
     first_turn = record["now_ms"] - binding["started_at"] <= limits.first_turn_minutes * MINUTE_MS
     return _turn_completed(binding) or not first_turn
 
@@ -429,7 +429,7 @@ def _active_binding(binding, record, limits):
     if lag > limits.active_stale_seconds:
         found.append(_stale(binding, record, limits, lag))
     elif binding["read"] and not binding["remote"] and not wrong:
-        if _exportable(binding, record, limits):
+        if _fault_due(binding, record, limits):
             found.append(_never_exported(binding, record, limits))
     else:
         found += [f for f in (_unconfirmed(binding, record, limits),) if f]
