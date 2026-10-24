@@ -293,10 +293,11 @@ def test_priority_requeues_a_queued_target_ejected_before_a_dequeue_fails():
     queue = FakeQueue(queued=True)
 
     def run(command, **kwargs):
-        if "dequeuePullRequest" in " ".join(command) and "id=P3" in command:
+        dequeue = "dequeuePullRequest" in " ".join(command)
+        if dequeue and "id=P3" in command:
             return subprocess.CompletedProcess(command, 1, "", "dequeue refused")
         done = queue.run(command, **kwargs)
-        if "dequeuePullRequest" in " ".join(command) and "id=P4" in command:
+        if dequeue and "id=P4" in command:
             queue.entries = [e for e in queue.entries if e["pullRequest"]["id"] != "P9"]
         return done
 

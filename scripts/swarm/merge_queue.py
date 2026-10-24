@@ -224,7 +224,8 @@ def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=N
             displace(waiting, run, displaced, removed, steps)
         except SwarmError as exc:
             errors.append(str(exc))
-        if not errors or raw["mergeQueueEntry"] is not None:
+        target_queued = raw["mergeQueueEntry"] is not None
+        if not errors or target_queued:
             try:
                 current = graphql(STATE, {"url": url}, run)["resource"]
                 if current["mergeQueueEntry"] is None:
