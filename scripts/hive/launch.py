@@ -356,7 +356,13 @@ class HiveLaunch:
             f"claude:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
         ):
             self.end(admitted, "account reservation is full")
-            return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail="account reservation is full")
+            return Outcome(
+                "spawn",
+                Status.UNAVAILABLE,
+                HIVE,
+                {"harness": selected.account.harness},
+                detail="account reservation is full",
+            )
         prompt_ref = self.store.key(self.slug, f"launch-prompt:{admitted.execution_id}")
         order = LaunchOrder(
             self.slug,
