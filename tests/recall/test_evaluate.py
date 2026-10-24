@@ -5,6 +5,7 @@ import pytest
 
 from scripts.recall.cli import main
 from scripts.recall.evaluate import GoldenError, evaluate, load_golden
+from scripts.recall.models import RecallRecord
 from scripts.recall.store import SQLiteRecallStore
 from tests.swarm_ledger import legacy_page
 
@@ -55,6 +56,38 @@ def test_the_rate_is_rounded_to_four_places(environ):
         "hits": 1,
         "top5_hit_rate": 0.3333,
         "misses": [{"question": "nothing", "expect": ["tasks/t1"], "found": []}] * 2,
+    }
+
+
+def test_each_question_searches_its_own_scope_and_kinds_for_the_top_five(tmp_path):
+    def record(ref, ledger, kind):
+        return RecallRecord(
+            key=f"{ledger}/{ref}#0",
+            ledger_slug=ledger,
+            swarm_slug=ledger,
+            kind=kind,
+            ref=ref,
+            parent_ref="",
+            author="a",
+            time=0,
+            title="",
+            text="alpha",
+            chunk_index=0,
+        )
+
+    store = SQLiteRecallStore(tmp_path / "recall.sqlite3")
+    store.sync("ledger/other", [record(f"tasks/o{n}", "other", "task") for n in range(5)])
+    store.sync("ledger/demo", [record("chat/t", "demo", "chat")])
+    entries = [
+        {"question": "alpha", "expect": "chat/t"},
+        {"question": "alpha", "expect": "chat/t", "scope": "demo"},
+        {"question": "alpha", "expect": "chat/t", "kinds": ["chat"]},
+    ]
+    assert evaluate(store, entries) == {
+        "questions": 3,
+        "hits": 2,
+        "top5_hit_rate": 0.6667,
+        "misses": [{"question": "alpha", "expect": ["chat/t"], "found": [f"tasks/o{n}" for n in range(5)]}],
     }
 
 

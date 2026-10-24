@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__where__mutmut_42:1f16bf90acb9abe650188b7cc9ec8aa643fa03da411de01770d264a3d416379e": {
+    "reader": "standards_reader",
+    "reason": "Only the case of the AND keyword in the join clause changes, which SQLite treats as case-insensitive."
+  }
+}

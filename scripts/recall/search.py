@@ -191,13 +191,12 @@ def _ranked(connection: sqlite3.Connection, query: str, where: str, params: list
     return connection.execute(
         f"SELECT {COLUMNS}, bm25(recall_fts, ?, ?), snippet(recall_fts, -1, '[', ']', '…', 16)"
         f" FROM recall_fts JOIN records ON records.id = recall_fts.rowid"
-        f" WHERE recall_fts MATCH ? AND {where} ORDER BY bm25(recall_fts, ?, ?) LIMIT ?",
+        f" WHERE recall_fts MATCH ? AND {where} ORDER BY bm25(recall_fts, ?, ?), records.key LIMIT ?",
         [weights.title, weights.body, expression, *params, weights.title, weights.body, weights.candidates],
     ).fetchall()
 
 
-def _score(rank: float, best: float, row: _Row, weights: RankWeights, now: int) -> float:
-    relevance = rank / best if best < 0 else 0.0
+def _score(relevance: float, row: _Row, weights: RankWeights, now: int) -> float:
     recency = 0.5 ** (max(now - row.time, 0) / DAY / weights.half_life_days)
     return weights.relevance * relevance + weights.recency * recency + weights.kinds.get(row.kind, 0.0)
 
@@ -249,13 +248,12 @@ def search(
         chosen: dict[str, tuple[_Row, Hit]] = {}
         for row in _exact(connection, query, where, params):
             if row.item not in chosen:
-                chosen[row.item] = (row, _hit(row, True, _score(0.0, 0.0, row, weights, now), row.text[:200]))
+                chosen[row.item] = (row, _hit(row, True, _score(0.0, row, weights, now), row.text[:200]))
         ranked = _ranked(connection, query, where, params, weights)
-        best = min((found[-2] for found in ranked), default=0.0)
         scored: dict[str, tuple[_Row, Hit]] = {}
         for found in ranked:
             row = _Row(*found[:-2])
-            hit = _hit(row, False, _score(found[-2], best, row, weights, now), found[-1])
+            hit = _hit(row, False, _score(found[-2] / ranked[0][-2], row, weights, now), found[-1])
             if row.item not in chosen and (row.item not in scored or hit.score > scored[row.item][1].score):
                 scored[row.item] = (row, hit)
         order = list(chosen.values()) + sorted(scored.values(), key=lambda pair: (-pair[1].score, pair[0].key))

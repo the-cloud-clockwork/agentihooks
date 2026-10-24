@@ -1,3 +1,4 @@
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -9,6 +10,7 @@ from scripts.recall.search import (
     Filters,
     Parent,
     RankWeights,
+    now_ms,
     parse_time,
     search,
     timeline,
@@ -76,6 +78,21 @@ def test_parse_time_refuses_text_that_is_no_time():
         with pytest.raises(ValueError) as caught:
             parse_time(text, NOW)
         assert str(caught.value) == f"not an ISO time, epoch milliseconds or span such as 1d: {text}"
+
+
+def test_parse_time_reads_a_time_without_zone_as_utc_whatever_the_local_zone(monkeypatch):
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    time.tzset()
+    try:
+        assert parse_time("2026-10-08T12:00:00", NOW) == int(datetime(2026, 10, 8, 12, tzinfo=UTC).timestamp() * 1000)
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+def test_now_ms_is_the_wall_clock_in_milliseconds(monkeypatch):
+    monkeypatch.setattr("scripts.recall.search.time.time", lambda: 1.5)
+    assert now_ms() == 1500
 
 
 def test_scope_narrows_to_a_ledger_or_a_swarm_slug(store):
@@ -184,6 +201,39 @@ def test_exact_matches_still_respect_the_filters(store):
     assert refs(store, "rc5", kinds=("chat",)) == []
 
 
+def test_an_exact_hit_scores_recency_and_kind_and_snips_its_text(store):
+    put(store, record("tasks/rc5", "x" * 250, kind="task", time=NOW - 7 * DAY))
+    [hit] = search(store, "rc5", now=NOW)
+    assert hit.score == WEIGHTS.recency * 0.5 + WEIGHTS.kinds["task"]
+    assert hit.snippet == "x" * 200
+
+
+def test_an_id_and_a_pull_request_number_both_come_first(store):
+    put(
+        store,
+        record("tasks/rc5", "x", kind="task"),
+        record("tasks/a", "see https://github.com/o/r/pull/1738", kind="task"),
+    )
+    assert refs(store, "rc5 #1738") == ["tasks/rc5", "tasks/a"]
+
+
+def test_the_filters_combine(store):
+    put(
+        store,
+        record("seats/eng-1@s/learned/x", "alpha", kind="learned"),
+        record("seats/eng-1@s/recaps/y", "alpha", kind="recap"),
+        record("seats/eng-1@s/learned/z", "alpha", kind="learned", author="other"),
+        record("chat/a", "alpha", kind="learned"),
+    )
+    put(
+        store,
+        record("seats/eng-1@s/learned/w", "alpha", kind="learned", ledger_slug="other", swarm_slug="other"),
+        source="ledger/other",
+    )
+    found = refs(store, "alpha", scope="demo", kinds=("learned",), author="engineer@1", seat="eng-1@s")
+    assert found == ["seats/eng-1@s/learned/x"]
+
+
 def test_chunks_collapse_to_one_hit_per_item_with_the_best_chunk_snippet(store):
     put(
         store,
@@ -197,13 +247,30 @@ def test_chunks_collapse_to_one_hit_per_item_with_the_best_chunk_snippet(store):
     assert len(search(store, "alpha", now=NOW)) == 1
 
 
+def test_equal_chunks_keep_the_first_chunk_snippet(store):
+    put(
+        store,
+        record("tasks/t1", "alpha beta", index=0, kind="task"),
+        record("tasks/t1", "alpha gamma", index=1, kind="task"),
+    )
+    [hit] = search(store, "alpha", now=NOW)
+    assert hit.snippet == "[alpha] beta"
+
+
 def test_each_hit_carries_its_parent_chain_and_fields(store):
     put(
         store,
         record("ledger", "Demo ledger", kind="ledger", title="Demo"),
         record("phases/p1", "Phase", kind="phase", title="Memory", parent_ref="ledger"),
         record("tasks/t1", "Task", kind="task", title="Build recall", parent_ref="phases/p1"),
-        record("tasks/t1/comments/c1", "alpha comment", parent_ref="tasks/t1", author="worker", time=NOW - DAY),
+        record(
+            "tasks/t1/comments/c1",
+            "alpha comment",
+            parent_ref="tasks/t1",
+            author="worker",
+            time=NOW - DAY,
+            title="Note",
+        ),
         record("seats/eng-1@s/learned/x", "beta note", kind="learned", parent_ref="seats/eng-1@s"),
     )
     [hit] = search(store, "alpha", now=NOW)
@@ -212,10 +279,11 @@ def test_each_hit_carries_its_parent_chain_and_fields(store):
         Parent("phases/p1", "phase", "Memory"),
         Parent("ledger", "ledger", "Demo"),
     )
-    assert (hit.ledger_slug, hit.swarm_slug, hit.kind, hit.author, hit.time, hit.archived) == (
+    assert (hit.ledger_slug, hit.swarm_slug, hit.kind, hit.title, hit.author, hit.time, hit.archived) == (
         "demo",
         "swarm",
         "comment",
+        "Note",
         "worker",
         NOW - DAY,
         False,
@@ -258,6 +326,12 @@ def test_the_score_combines_relevance_recency_and_kind_weight(store):
     assert hit.score == pytest.approx(2.0 + 2**-0.5)
 
 
+def test_a_record_from_now_gets_the_full_recency_weight(store):
+    put(store, record("tasks/a", "alpha", kind="task", time=NOW))
+    [hit] = search(store, "alpha", now=NOW)
+    assert hit.score == WEIGHTS.relevance + WEIGHTS.recency + WEIGHTS.kinds["task"]
+
+
 def test_the_default_weights_favour_titles_and_name_every_kind():
     assert (WEIGHTS.title, WEIGHTS.body) == (4.0, 1.0)
     assert (WEIGHTS.relevance, WEIGHTS.recency, WEIGHTS.half_life_days) == (1.0, 0.3, 7.0)
@@ -277,6 +351,11 @@ def test_the_default_weights_favour_titles_and_name_every_kind():
 def test_limit_caps_the_hits_after_collapse(store):
     put(store, *(record(f"chat/{n}", "alpha", time=NOW - n * DAY) for n in range(5)))
     assert refs(store, "alpha", limit=2) == ["chat/0", "chat/1"]
+
+
+def test_search_returns_ten_hits_by_default(store):
+    put(store, *(record(f"chat/{n}", "alpha", time=NOW - n * DAY) for n in range(12)))
+    assert [hit.ref for hit in search(store, "alpha", now=NOW)] == [f"chat/{n}" for n in range(10)]
 
 
 def test_a_query_with_no_words_and_no_id_finds_nothing(store):
@@ -305,9 +384,13 @@ def test_timeline_lists_one_entry_per_item_in_time_order(store):
         ("chat/c", NOW),
         ("chat/d", NOW),
     ]
-    assert (entries[0].item, entries[0].kind, entries[0].title, entries[0].author) == (
+    assert (entries[0].item, entries[0].ledger_slug, entries[0].swarm_slug, entries[0].kind) == (
         "demo/tasks/a",
+        "demo",
+        "swarm",
         "task",
+    )
+    assert (entries[0].title, entries[0].author) == (
         "Task a",
         "engineer@1",
     )
@@ -325,3 +408,8 @@ def test_timeline_keeps_the_scope_window_and_kinds(store):
     assert [entry.ref for entry in timeline(store, window, now=NOW)] == ["tasks/a", "chat/b"]
     assert [entry.ref for entry in timeline(store, Filters(kinds=("chat",)), now=NOW)] == ["chat/b", "chat/c", "chat/z"]
     assert [entry.ref for entry in timeline(store, Filters(), limit=2, now=NOW)] == ["tasks/a", "chat/b"]
+
+
+def test_timeline_lists_two_hundred_entries_by_default(store):
+    put(store, *(record(f"chat/{n:03}", "x", time=n) for n in range(201)))
+    assert [entry.ref for entry in timeline(store, now=NOW)] == [f"chat/{n:03}" for n in range(200)]
