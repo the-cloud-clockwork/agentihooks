@@ -78,7 +78,7 @@ class Reports:
         hive = host(agent)
         if agent.state != "finished" or not hive:
             return False
-        since_key = f"{registry.key(hive)}:removed-since"
+        since_key = f"{registry.key(hive)}:removed-since:{agent.execution_id}:{agent.generation}"
         try:
             record = registry.show(self.redis, hive)
         except HiveError:

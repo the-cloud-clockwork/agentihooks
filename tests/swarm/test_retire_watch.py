@@ -106,7 +106,7 @@ def test_retire_findings_identify_the_original_hive_and_removed_host_count(store
 
     monkeypatch.setenv("SWARM_HIVE_ID", "controller")
     for index, name in enumerate((NAME, "other"), 1):
-        store.put_agent(
+        store.start_execution(
             "sw",
             AgentRecord(
                 name, "eng", "task", seat=f"eng-{index}@sw", state="finished", runtime_target={"host_id": "removed"}
