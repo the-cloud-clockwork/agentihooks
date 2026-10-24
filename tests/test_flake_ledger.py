@@ -106,6 +106,8 @@ def _pytest(tmp_path, ledger, targets, workers, reruns, extra):
 def test_a_test_that_passes_on_retry_passes_and_is_recorded_as_a_flake(tmp_path, workers):
     result, records = _run(tmp_path, "test_passes", "test_fails_once", workers=workers)
     assert result.returncode == 0, result.stdout + result.stderr
+    [traceback] = records[0].pop("tracebacks")
+    assert "first attempt fails" in traceback
     assert records == [
         {
             "test": "test_probes.py::test_fails_once",
