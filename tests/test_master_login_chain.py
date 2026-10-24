@@ -54,5 +54,5 @@ def test_pending_browser_never_falls_through_to_a_token():
     def token():
         pytest.fail("an unresolved browser request must wait")
 
-    with pytest.raises(ValueError, match="browser outcome"):
+    with pytest.raises(ValueError, match="^browser outcome must be success, captcha or failure$"):
         chain.run(lambda: None, lambda: "pending", token)
