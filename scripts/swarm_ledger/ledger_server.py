@@ -1567,7 +1567,7 @@ def serve():
     server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST)
     PIDFILE.write_text(str(os.getpid()))
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
-    drained = False
+    drained = True
     try:
         from scripts.hub import projector
         from scripts.swarm_ledger import outbox_host

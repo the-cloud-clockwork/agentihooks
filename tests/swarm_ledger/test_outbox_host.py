@@ -269,6 +269,33 @@ def test_server_gives_the_relay_and_the_projector_their_stores_and_stops_them_be
     ]
 
 
+def test_a_relay_that_fails_to_start_releases_the_lease_without_serving(monkeypatch, tmp_path, capsys):
+    from scripts.swarm_ledger import ledger_server, outbox_host
+
+    def broken(repository):
+        raise RuntimeError("relay refused")
+
+    monkeypatch.setattr(outbox_host, "running", broken)
+    monkeypatch.setattr(ledger_server, "PIDFILE", tmp_path / "server.pid")
+    monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(ledger_server.storage, "shared", lambda: None)
+    monkeypatch.setattr(ledger_server.ports, "swarm", Mock(return_value=Mock()))
+    monkeypatch.setattr(ledger_server.legacy, "adopt", Mock())
+    monkeypatch.setattr(ledger_server.threading, "Thread", Mock())
+    for name in ("adopt_unrelayed", "metrics_journal"):
+        monkeypatch.setattr(ledger_server, name, Mock())
+    monkeypatch.setattr(ledger_server.server_code, "record", Mock())
+    monkeypatch.setattr(ledger_server.server_lifetime, "watch", Mock())
+    server = Mock()
+    monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
+    with pytest.raises(RuntimeError, match="relay refused"):
+        ledger_server.serve()
+    server.serve_forever.assert_not_called()
+    server.server_close.assert_called_once_with()
+    ledger_server.ports.swarm.return_value.ledger_writer.WriterLease.return_value.release.assert_called_once_with()
+    assert "drain:" not in capsys.readouterr().err
+
+
 @pytest.mark.wall_clock
 def test_relay_publish_prunes_sent_rows_outside_the_dedupe_window_and_keeps_the_rest(tmp_path, monkeypatch):
     from scripts.swarm_ledger import outbox_host
