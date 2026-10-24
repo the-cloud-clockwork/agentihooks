@@ -533,3 +533,68 @@ def test_ready_refusal_names_the_shell_checkout(tree, tmp_path):
     decision = gate(target="codex").decide(bash(f"cd {tree} && gh pr ready 1", tmp_path), ME, state(tmp_path))
     assert not decision.allowed
     assert f"Checked worktree: {tree}" in decision.reason
+
+
+@pytest.fixture
+def other_repo(tmp_path):
+    work = tmp_path / "other"
+    git(tmp_path, "init", "-q", "-b", "task", str(work))
+    git(work, "remote", "add", "origin", "https://github.com/o/b.git")
+    return work
+
+
+def test_a_cross_repo_push_through_a_shell_variable_passes_while_the_other_repos_checks_run(
+    tree, other_repo, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("OTHER_REPO", str(other_repo))
+    for command in (
+        f'B={other_repo}; cd "$B" && git push origin task',
+        'cd "$OTHER_REPO" && git push origin task',
+        "git -C ${OTHER_REPO} push origin HEAD:task",
+    ):
+        assert gate(pull()).decide(bash(command, tree), ME, state(tmp_path)).allowed, command
+
+
+def test_a_push_through_a_shell_variable_into_the_pull_request_repo_is_still_refused(tree, other_repo, tmp_path):
+    decision = gate(pull()).decide(bash(f'A={tree}; cd "$A" && git push origin task', other_repo), ME, state(tmp_path))
+    assert (decision.allowed, decision.reason) == (False, push_refusal("demo", URL))
+    assert not gate(pull()).decide(bash("git push origin task", tree), ME, state(tmp_path)).allowed
+
+
+def test_a_push_from_a_folder_that_is_no_checkout_holds_nothing(tree, tmp_path):
+    command = f"cd {tmp_path / 'missing'} && git push origin task"
+    assert gate(pull()).decide(bash(command, tree), ME, state(tmp_path)).allowed
+
+
+def test_an_unset_variable_or_an_exported_one_still_finds_the_pull_request_checkout(tree, other_repo, tmp_path):
+    for command, cwd in (
+        ('cd "$NO_SUCH_REPO_FOLDER" && git push origin task', tree),
+        (f'export A={tree}; cd "$A" && git push origin task', other_repo),
+        (f'export ROOT={tree.parent} X=1; cd "${{ROOT}}/work" && git push origin task', other_repo),
+        (f'declare A={tree}; cd "$A" && git push origin task', other_repo),
+        (f"pushd {tree} && git push origin task", other_repo),
+        (f"cd -P -- {tree} && git push origin task", other_repo),
+        (f"cd {tree}; cd {other_repo}; cd - && git push origin task", other_repo),
+    ):
+        decision = gate(pull()).decide(bash(command, cwd), ME, state(tmp_path))
+        assert (decision.allowed, decision.reason) == (False, push_refusal("demo", URL)), command
+
+
+def test_a_folder_named_by_a_command_substitution_is_held_as_the_task_repo(tree, other_repo, tmp_path):
+    command = 'B=$(wt.sh path); cd "$B" && git push origin task'
+    assert not gate(pull()).decide(bash(command, other_repo), ME, state(tmp_path)).allowed
+
+
+def test_expand_puts_in_assigned_and_environment_names_and_empties_unset_ones(monkeypatch):
+    from scripts.gates.one_push import expand
+
+    monkeypatch.setenv("SET_NAME", "/env")
+    monkeypatch.delenv("UNSET_NAME", raising=False)
+    assert expand("$UNSET_NAME/x", {}) == "/x"
+    assert expand("${SET_NAME}/$A/$(c)", {"A": "a"}) == "/env/a/$(c)"
+
+
+def test_assignments_split_at_their_first_equals_and_read_earlier_ones():
+    command = 'R=/r; B=$R/b=c; cd "$B" && git push'
+    assert list(actions(command, "/x")) == [("push", Path("/r/b=c"), [])]
+    assert list(actions("cd - && git push", "/x")) == [("push", Path("/x/$OLDPWD"), [])]
