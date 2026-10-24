@@ -389,6 +389,7 @@ def test_the_published_map_drops_calls_on_receivers_that_hold_no_redis_client(pu
     )
     assert not {unit for unit in senders if unit.startswith(excluded)}
     assert published["worker"]["commands"] == {}
+    assert not {"APPEND", "TYPE"} & {command for consumer in published.values() for command in consumer["commands"]}
 
 
 def test_the_tick_reads_the_swarm_index_before_ticking_each_swarm(published):
