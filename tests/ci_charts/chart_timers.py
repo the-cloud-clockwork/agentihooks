@@ -42,12 +42,16 @@ def main() -> int:
         for values in values_files(chart):
             renders += 1
             source = values.relative_to(ROOT) if values else "default values"
-            offenders += [f"{chart.relative_to(ROOT)} with {source}: {obj}" for obj in timed_objects(render(chart, values))]
+            offenders += [
+                f"{chart.relative_to(ROOT)} with {source}: {obj}" for obj in timed_objects(render(chart, values))
+            ]
     for offender in offenders:
         print(offender)
     print(f"{len(offenders)} rendered CronJob objects across {renders} renders of {len(found)} charts.")
     if offenders:
-        print("A CronJob schedules work outside the agentihooks scheduler. Register the job with scripts.scheduler instead.")
+        print(
+            "A CronJob schedules work outside the agentihooks scheduler. Register the job with scripts.scheduler instead."
+        )
     return 1 if offenders else 0
 
 
