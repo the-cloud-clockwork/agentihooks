@@ -732,6 +732,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .stats-toggle:hover, .stats-toggle:focus-visible { background: var(--hover); }
   .notif:not([hidden]) ~ .stats-toggle, .chat-panel:not([hidden]) ~ .stats-toggle { display: none; }
   .chat-panel, .chat-panel.big { bottom: 88px; height: min(560px, calc(100dvh - 176px)); }
+  .chat-panel.big { top: 16px; height: auto; }
   .stats-toggle svg { width: 18px; height: 18px; transition: transform .25s cubic-bezier(.4, 0, .2, 1); }
   body.stats-open .stats-toggle { right: var(--drawer-w); }
   body.stats-open .stats-toggle svg { transform: rotate(180deg); }
@@ -832,7 +833,16 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .title-pen, .logo-link { min-width: 32px; min-height: 32px; place-content: center; }
   #jump-to { min-width: 216px; }
   #chat-to-pick, #stats-sync { min-height: 44px; min-width: 44px; }
-  .chat-send { display: flex; align-items: center; order: 3; min-height: 44px; margin: 8px 0 0 auto; }
+  .chat-compose { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; }
+  .chat-compose > .chat-to, .chat-compose > textarea { flex: 0 0 100%; }
+  .chat-compose > .attach-bar { flex: 1 1 auto; }
+  .chat-send { display: flex; align-items: center; min-height: 44px; margin: 6px 0 0 auto; }
   .sw-acts .sw-btn, #freeze-table .sw-btn, #architecture-table .sw-btn { min-height: 32px; }
   .hl-pick, .hl-note, #hives-table .hl-pick, #hives-table .hl-note { font-size: 16px; }
+}
+@media (pointer: coarse) and (max-width: 767px) and (max-height: 480px) {
+  .chat-compose > .chat-to { flex: 1 1 auto; }
+  .chat-compose > textarea { order: 2; }
+  .chat-send { margin-top: 0; }
+  #chat-log { min-height: 96px; }
 }
