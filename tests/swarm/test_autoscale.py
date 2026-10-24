@@ -160,8 +160,7 @@ def test_ready_work_cap_replaces_the_unused_tick_limit_reason():
         )
         assert decision["ceilings"] == {"eng": 10, "ci": 3, "plan": 0}
         assert decision["reason"] == (
-            "Quota seats 22 (claude 22); host room 22; ceiling 13 of 34"
-            "; capped by ready work eng 1, ci 0, plan 0."
+            "Quota seats 22 (claude 22); host room 22; ceiling 13 of 34; capped by ready work eng 1, ci 0, plan 0."
         )
         previous = decision
 
