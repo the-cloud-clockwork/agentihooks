@@ -245,6 +245,20 @@ def test_after_a_backend_master_retires_the_front_door_messages_a_claimant_in_it
     assert world.refusals() == 0
 
 
+def test_after_a_backend_master_retires_the_items_it_decided_belong_to_the_front_door(world):
+    table = masters.MasterSeats(world.redis)
+    table.set_count(SLUG, 3)
+    world.seat(world.store.names.next(SLUG, "master"), f"master-3@{SLUG}")
+    assert world.decide(SECOND_NAME)["accepted"]
+    world.down(SECOND_NAME)
+
+    table.retire(SLUG, SECOND)
+
+    assert world.decide(cases.FORMER, False, 1)["warnings"] == [
+        f"{cases.FOLLOWUP} belongs to {LEAD}, so {cases.FORMER} cannot decide it"
+    ]
+
+
 def racing_pipelines(world, monkeypatch, times):
     real, raced = world.redis.pipeline, []
 
