@@ -1,14 +1,17 @@
 import json
+import re
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
 from hooks.mcp import recall as recall_mcp
 from scripts.recall import tools
-from scripts.recall.cli import main
+from scripts.recall.cli import SCOPE, _parser, main
 from scripts.recall.models import RecallRecord
 from scripts.recall.search import DAY, Filters
-from scripts.recall.store import SQLiteRecallStore, default_path
+from scripts.recall.search import get as get_item
+from scripts.recall.store import SourceCount, SQLiteRecallStore, default_path
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-sdk")]
@@ -146,13 +149,23 @@ def test_get_returns_the_whole_item_with_parents_and_comments(environ):
     result = tools.get("alpha/tasks/t1", environ=environ)
     assert result["success"] is True
     item = result["item"]
-    assert item["item"] == "alpha/tasks/t1"
+    assert {key: value for key, value in item.items() if key not in ("text", "parents", "comments")} == {
+        "item": "alpha/tasks/t1",
+        "ledger_slug": "alpha",
+        "swarm_slug": "alpha",
+        "kind": "task",
+        "ref": "tasks/t1",
+        "title": "title of tasks/t1",
+        "author": "engineer@1",
+        "time": T0 - DAY,
+        "archived": False,
+    }
     assert item["text"] == "first part of shared words\n\nsecond part"
     assert [parent["ref"] for parent in item["parents"]] == ["phases/p1", "ledger"]
     comments = item["comments"]
-    assert [(c["ref"], c["kind"], c["author"], c["text"]) for c in comments] == [
-        ("tasks/t1/comments/c1", "comment", "operator", "a comment on it"),
-        ("tasks/t1/answers/a1", "answer", "engineer@1", "an answer"),
+    assert [(c["ref"], c["kind"], c["author"], c["time"], c["text"]) for c in comments] == [
+        ("tasks/t1/comments/c1", "comment", "operator", T0, "a comment on it"),
+        ("tasks/t1/answers/a1", "answer", "engineer@1", T0 + 2, "an answer"),
     ]
     assert [reply["text"] for reply in comments[0]["comments"]] == ["a reply"]
 
@@ -186,7 +199,9 @@ def test_reads_never_change_the_archive_schema(environ):
 def test_get_refuses_an_ambiguous_or_unknown_ref(environ):
     ambiguous = tools.get("tasks/t1", scope="all", environ=environ)
     assert ambiguous["success"] is False
-    assert "alpha/tasks/t1" in ambiguous["error"] and "beta/tasks/t1" in ambiguous["error"]
+    assert ambiguous["error"] == (
+        "tasks/t1 names 2 items: alpha/tasks/t1, beta/tasks/t1; pass one of them or a narrower scope"
+    )
     missing = tools.get("tasks/none", environ=environ)
     assert missing == {"success": False, "error": "no recall item tasks/none in scope all"}
 
@@ -264,3 +279,136 @@ def test_the_mcp_tools_answer_json_for_the_session_swarm(environ, monkeypatch):
     assert json.loads(served["recall_get"]("tasks/t1"))["item"]["item"] == "alpha/tasks/t1"
     assert json.loads(served["recall_timeline"](kinds="phase"))["entries"][0]["ref"] == "phases/p1"
     assert len(json.loads(served["recall_sources"]())["sources"]) == 2
+
+
+def test_get_marks_an_archived_item_and_defaults_to_every_source(environ):
+    path = default_path(environ)
+    assert get_item(SQLiteRecallStore(path, read_only=True), "beta/tasks/t1").item == "beta/tasks/t1"
+    SQLiteRecallStore(path).sync("ledger/alpha", ALPHA[:2])
+    assert tools.get("alpha/tasks/t1", environ=environ)["item"]["archived"] is True
+
+
+def clock(monkeypatch, seconds):
+    monkeypatch.setattr("scripts.recall.store.time", SimpleNamespace(time=lambda: seconds))
+
+
+def test_the_indexed_time_follows_every_changing_sync_and_removal(tmp_path, monkeypatch):
+    store = SQLiteRecallStore(tmp_path / "recall.sqlite3")
+
+    def indexed():
+        return {count.source: count.indexed_at for count in store.sources()}
+
+    steps = [
+        (lambda: store.sync("ledger/alpha", ALPHA[:3]), 1000),
+        (lambda: store.sync("ledger/alpha", ALPHA[:3]), 1000),
+        (lambda: store.sync("ledger/alpha", ALPHA[:4]), 3000),
+        (lambda: store.sync("ledger/alpha", ALPHA[:3]), 4000),
+        (lambda: store.sync("ledger/alpha", ALPHA[:2]), 5000),
+        (lambda: store.remove("ledger/alpha", ["tasks/t1"]), 6000),
+        (lambda: store.remove("ledger/alpha", ["tasks/none"]), 6000),
+    ]
+    for second, (step, expected) in enumerate(steps, start=1):
+        clock(monkeypatch, float(second))
+        step()
+        assert indexed() == {"ledger/alpha": expected}
+    clock(monkeypatch, 8.0)
+    store.remove("ledger/alpha", ["ledger", "phases/p1"])
+    assert store.sources() == [SourceCount("ledger/alpha", "", 0, 0, 0, 8000)]
+
+
+def test_a_read_only_store_refuses_writes(environ):
+    with pytest.raises(sqlite3.OperationalError):
+        SQLiteRecallStore(default_path(environ), read_only=True).sync("ledger/alpha", ALPHA[:1])
+
+
+def test_an_mcp_tool_failure_is_logged_and_answered(monkeypatch):
+    from hooks.mcp import build_server
+
+    logged = []
+    monkeypatch.setattr(recall_mcp, "log", lambda message, data: logged.append((message, data)))
+
+    def boom(*args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(tools, "search", boom)
+    served = {name: tool.fn for name, tool in build_server(["recall"])._tool_manager._tools.items()}
+    assert json.loads(served["recall_search"]("words")) == {"success": False, "error": "boom"}
+    assert logged == [("MCP recall_search failed", {"error": "boom"})]
+
+
+def test_the_cli_parses_every_query_option():
+    def parse(*argv):
+        return vars(_parser().parse_args(list(argv)))
+
+    unset = {"scope": "", "kind": [], "since": "", "until": "", "author": "", "seat": ""}
+    assert parse("search", "q") == {"command": "search", "query": "q", "limit": 10, **unset}
+    assert parse("timeline") == {"command": "timeline", "limit": 200, **unset}
+    full = ["--scope", "all", "--kind", "task", "--kind", "phase", "--since", "2d", "--until", "1d"]
+    full += ["--author", "operator", "--seat", "eng-1", "--limit", "3"]
+    assert parse("search", "q", *full) == {
+        "command": "search",
+        "query": "q",
+        "limit": 3,
+        "scope": "all",
+        "kind": ["task", "phase"],
+        "since": "2d",
+        "until": "1d",
+        "author": "operator",
+        "seat": "eng-1",
+    }
+    assert parse("get", "tasks/t1") == {"command": "get", "ref": "tasks/t1", "scope": ""}
+    assert parse("get", "tasks/t1", "--scope", "beta")["scope"] == "beta"
+    assert parse("sources") == {"command": "sources"}
+
+
+def test_the_cli_help_names_the_query_commands(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "200")
+
+    def shown(*argv):
+        with pytest.raises(SystemExit):
+            main([*argv, "--help"], {})
+        return capsys.readouterr().out
+
+    top = shown()
+    for name, text in (
+        ("search", "Ranked hits with parent chains and snippets"),
+        ("get", "One item in full with its parent chain and comments"),
+        ("timeline", "Items in time order"),
+        ("sources", "Indexed ledgers and swarms with counts, last indexed time and bin flag"),
+    ):
+        assert re.search(rf"\n +{name} +{re.escape(text)}\n", top)
+    item = shown("get")
+    assert re.search(r"\n  ref +Item key such as LEDGER/tasks/ID, or a ref inside the scope\n", item)
+    assert re.search(rf"\n  --scope SCOPE +{re.escape(SCOPE)}\n", item)
+    span = "ISO time, epoch milliseconds or a span such as 1d"
+    for command in ("search", "timeline"):
+        text = shown(command)
+        for flag, words in (
+            ("--scope SCOPE", SCOPE),
+            ("--kind KIND", "Record kind; repeat for several"),
+            ("--since SINCE", span),
+            ("--until UNTIL", span),
+            ("--author AUTHOR", "Only records by this author"),
+            ("--seat SEAT", "Only records of this seat"),
+        ):
+            assert re.search(rf"\n  {flag} +{re.escape(words)}\n", text)
+
+
+def test_the_cli_passes_every_filter(environ, capsys):
+    def run(*argv):
+        assert main(list(argv), in_swarm(environ)) == 0
+        return json.loads(capsys.readouterr().out)
+
+    assert len(run("search", "words", "--scope", "all", "--limit", "1")["hits"]) == 1
+    assert items(run("search", "comment", "--author", "operator")) == ["alpha/tasks/t1/comments/c1"]
+    assert items(run("search", "comment", "--author", "engineer@1")) == []
+    assert items(run("search", "shared", "--scope", "all", "--seat", "eng-1")) == []
+    assert run("get", "beta/tasks/t1", "--scope", "all")["item"]["item"] == "beta/tasks/t1"
+    cut = str(T0 - 2 * DAY)
+    assert [e["item"] for e in run("timeline", "--scope", "all", "--kind", "task", "--until", cut)["entries"]] == [
+        "beta/tasks/t1"
+    ]
+    assert [e["item"] for e in run("timeline", "--scope", "all", "--kind", "task", "--since", cut)["entries"]] == [
+        "alpha/tasks/t1"
+    ]
+    assert [e["item"] for e in run("timeline", "--author", "operator")["entries"]] == ["alpha/tasks/t1/comments/c1"]

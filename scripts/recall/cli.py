@@ -24,8 +24,6 @@ def _parser() -> argparse.ArgumentParser:
     grade.add_argument("golden", help="JSON list of question, expect and optional scope and kinds")
     find = commands.add_parser("search", help="Ranked hits with parent chains and snippets")
     find.add_argument("query")
-    find.add_argument("--author", default="")
-    find.add_argument("--seat", default="")
     find.add_argument("--limit", type=int, default=10)
     item = commands.add_parser("get", help="One item in full with its parent chain and comments")
     item.add_argument("ref", help="Item key such as LEDGER/tasks/ID, or a ref inside the scope")
@@ -37,6 +35,8 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--kind", action="append", default=[], help="Record kind; repeat for several")
         command.add_argument("--since", default="", help="ISO time, epoch milliseconds or a span such as 1d")
         command.add_argument("--until", default="", help="ISO time, epoch milliseconds or a span such as 1d")
+        command.add_argument("--author", default="", help="Only records by this author")
+        command.add_argument("--seat", default="", help="Only records of this seat")
     commands.add_parser("sources", help="Indexed ledgers and swarms with counts, last indexed time and bin flag")
     return parser
 
@@ -57,9 +57,7 @@ def _query(args: argparse.Namespace, environ: Mapping[str, str]) -> dict:
     if args.command == "sources":
         return tools.sources(environ)
     period = f"{args.since}..{args.until}"
-    chosen = tools.filters(
-        args.scope, ",".join(args.kind), getattr(args, "author", ""), getattr(args, "seat", ""), period
-    )
+    chosen = tools.filters(args.scope, ",".join(args.kind), args.author, args.seat, period)
     if args.command == "search":
         return tools.search(args.query, chosen, args.limit, environ)
     return tools.timeline(chosen, args.limit, environ)

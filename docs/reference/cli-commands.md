@@ -362,7 +362,7 @@ agentihooks recall reindex --all                                              # 
 agentihooks recall eval golden.json                                           # top five hit rate
 ```
 
-`--scope` defaults to your own swarm (every source outside a swarm); a ledger or swarm slug narrows it and `all` crosses swarms. `--since` and `--until` take an ISO time, epoch milliseconds or a span back from now such as `1d`. `search` also takes `--author`, `--seat` and `--limit`; `timeline` takes `--limit`. `--kind` repeats.
+`--scope` defaults to your own swarm (every source outside a swarm); a ledger or swarm slug narrows it and `all` crosses swarms. `--since` and `--until` take an ISO time, epoch milliseconds or a span back from now such as `1d`. `search` and `timeline` also take `--author`, `--seat` and `--limit`. `--kind` repeats.
 
 ---
 
