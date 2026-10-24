@@ -1170,13 +1170,17 @@ def test_a_reopen_leaves_a_task_the_ledger_already_moved_on(merging):
     assert merging.ledger.rows["t1"]["state"] == "done" and merging.ledger.rows["t1"]["claimed_by"] == AGENT
 
 
-@pytest.mark.parametrize("pull", [GREEN, RED], ids=["green-with-merge-group-failure", "red-checks"])
-def test_a_pull_request_that_leaves_the_queue_unmerged_reopens_the_task(merging, pull):
+@pytest.mark.parametrize(
+    ("pull", "what"),
+    [(GREEN, ready.OWN_RED), (RED, ready.HEAD_RED)],
+    ids=["green-with-merge-group-failure", "red-checks"],
+)
+def test_a_pull_request_that_leaves_the_queue_unmerged_reopens_the_task(merging, pull, what):
     queued_at_now(merging)
     merging.pulls[URL] = QUEUED
     merging.run(NOW + 60_000)
     merging.pulls[URL] = pull
-    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
+    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} {what}"
     assert merging.rows["t1"]["state"] == "open"
     assert merging.rows["t1"]["awaiting"] == "fix"
     assert merging.queued == [("queue", URL)]
@@ -1187,7 +1191,7 @@ def test_a_pull_request_that_leaves_the_queue_red_reopens_without_a_requeue(merg
     merging.pulls[URL] = QUEUED
     merging.run(NOW + 60_000)
     merging.pulls[URL] = RED
-    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
+    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue red"
     assert merging.exits.calls == [] and merging.queued == [("queue", URL)]
     assert merging.rows["t1"]["state"] == "open"
 
@@ -1233,7 +1237,9 @@ def test_a_first_requeue_is_allowed_under_a_cap_of_one(merging, monkeypatch):
 
 def test_an_own_merge_group_failure_reopens_the_task(merging):
     left_queue_green(merging)
-    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
+    assert (
+        merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue red in its own merge group run"
+    )
     assert merging.exits.calls == [(URL, NOW)]
     assert merging.queued == [("queue", URL)] and merging.rows["t1"]["state"] == "open"
 
@@ -1241,7 +1247,7 @@ def test_an_own_merge_group_failure_reopens_the_task(merging):
 def test_merge_group_runs_that_cannot_all_be_listed_reopen_the_task(merging):
     left_queue_green(merging)
     merging.exits.failures = None
-    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
+    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} {ready.UNREAD_EXIT}"
     assert merging.rows["t1"]["state"] == "open"
 
 
@@ -1259,7 +1265,9 @@ def test_a_pull_request_dropped_again_after_its_requeues_reopens_the_task(mergin
     merging.exits.failures = []
     found = ready.record(merging.store, "sw", "t1")
     ready.save(merging.store, "sw", "t1", {**found, "requeues": ready.QUEUE_TRIES})
-    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
+    assert merging.run(NOW + 120_000)[0] == (
+        f"task t1 reopened, {URL} left the merge queue green and was dropped again after {ready.QUEUE_TRIES} requeues"
+    )
     assert merging.queued == [("queue", URL)] and merging.rows["t1"]["state"] == "open"
 
 
@@ -1925,7 +1933,7 @@ def test_a_fresh_queue_entry_not_yet_listed_holds_until_its_grace_runs_out(mergi
     queued_at_now(merging)
     assert merging.run(NOW + waits.FRESH_MS - 1) == []
     assert merging.rows["t1"]["state"] == "pr"
-    assert merging.run(NOW + waits.FRESH_MS)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
+    assert merging.run(NOW + waits.FRESH_MS)[0] == f"task t1 reopened, {URL} {ready.OWN_RED}"
 
 
 def test_a_task_a_new_engineer_took_over_leaves_the_merge_pass(merging):
