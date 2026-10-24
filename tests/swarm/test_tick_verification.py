@@ -34,12 +34,13 @@ def test_a_released_verification_owner_frees_its_seat_without_reclaiming(store, 
 
 
 @pytest.mark.parametrize("generation", [1, 2])
-def test_a_verification_release_at_the_repair_write_frees_the_owner(store, monkeypatch, generation):  # noqa: F811
+@pytest.mark.parametrize("state", ["open", "claimed", "pr"])
+def test_a_verification_release_at_the_repair_write_frees_the_owner(store, monkeypatch, generation, state):  # noqa: F811
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     owner = workers(store)[0]
     store.put_handoff("sw", "t1", "Retained measurement handoff")
-    ledger.rows["t1"].update(state="open", claimed_by="")
+    ledger.rows["t1"].update(state=state, claimed_by="")
     update = ledger.update_task
 
     def released(slug, task_id, fields, by="swarm", if_state=(), if_match=None):
