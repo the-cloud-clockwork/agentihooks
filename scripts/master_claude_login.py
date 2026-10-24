@@ -451,6 +451,61 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
     return target, found
 
 
+def browser_home(environ: Mapping[str, str]) -> Path:
+    for number in numbers():
+        with _locked(root(number)) as folder:
+            if _private(home(number)) or holders(folder):
+                continue
+            _claim(folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, 0, True)
+            return _rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
+    raise LoginRefused(FULL.format(cap=MAX_SLOTS))
+
+
+def release(target: Path, environ: Mapping[str, str]) -> None:
+    name = environ["AGENTIHOOKS_AGENT_NAME"]
+    with _locked(target.parent) as folder:
+        held = _read(folder / OWNER)
+        held["holders"] = {
+            owner: pid for owner, pid in (held.get("holders") or {}).items() if (owner, pid) != (name, os.getpid())
+        }
+        if held.get("alone") == name:
+            held.pop("alone")
+        _write(folder / OWNER, held)
+
+
+def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | None:
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    target = None
+
+    def current():
+        nonlocal target
+        try:
+            target, found = prepare(environ, cwd)
+        except LoginRefused as exc:
+            if str(exc) == NO_LOGIN or str(exc).startswith("every stored master claude ai login is held"):
+                return None
+            raise
+        try:
+            native_login.check(child(environ, target), found)
+        except native_login.LoginError:
+            return None
+        return target, found
+
+    def browser():
+        nonlocal target
+        target = target or browser_home(environ)
+        return chain.authorize(environ, target)
+
+    def token():
+        if target is not None:
+            release(target, environ)
+        return None
+
+    return chain.run(current, browser, token)
+
+
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from scripts.claude_quota_balancer import RoutingError
     from scripts.hive.account_slots import execute

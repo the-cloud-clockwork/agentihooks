@@ -815,4 +815,4 @@ def test_launch_preparation_checks_live_login_then_waits_for_browser(
     else:
         assert prepared is None
         assert calls == ["current", "browser"]
-        assert login.holders(login.root()) == set()
+        assert login.holders(login.root()) == {}
