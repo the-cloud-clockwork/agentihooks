@@ -370,6 +370,26 @@ def test_a_live_agent_without_a_pid_or_owned_pane_is_refused(tmp_path, monkeypat
     assert ["pane", "close", "w1:p1"] not in calls
 
 
+@pytest.mark.parametrize(("pane_id", "socket"), [("w9:p9", "/owned/herdr.sock"), ("w1:p1", "/other/herdr.sock")])
+def test_unrecorded_retirement_refuses_a_named_process_on_another_pane_or_server(
+    tmp_path, monkeypatch, pane_id, socket
+):
+    from scripts import terminate_agent
+
+    pane = {"pane_id": "w1:p1", "name": NAME}
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/owned/herdr.sock")
+    session = terminate_agent.Session("", "claude", NAME, proc(), "", "alive")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(terminate_agent, "herdr_pane", lambda pid: (pane_id, socket))
+    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {PID: proc()})
+    assert not RuntimeRouter([local]).terminate(record(pid=None, start=None)).ok
+    assert ended == []
+    assert ["pane", "close", "w1:p1"] not in calls
+
+
 @pytest.mark.parametrize(
     ("recorded", "current", "expected"),
     [
