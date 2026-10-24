@@ -487,6 +487,16 @@ def test_a_fresh_spawn_keeps_its_handoff_without_the_original_run_options():
     assert profile_choice.transfer({**lost, "handoff_envelope": {"launch": complete}}) == complete
 
 
+def test_a_handoff_whose_launch_never_reported_its_model_and_effort_launches_fresh():
+    unreported = {"profile": "cicd", "harness": "claude", "model": "", "effort": "", "account": "a1"}
+    task = {"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": unreported}}
+    assert profile_choice.transfer(task) == {}
+    half = {**unreported, "model": "opus"}
+    with pytest.raises(tick.SpawnError) as error:
+        profile_choice.transfer({**task, "handoff_envelope": {"launch": half}})
+    assert error.value.status == "unsupported"
+
+
 class UnsupportedHandoffRuntime(LaterUnresolvedRuntime):
     def placement_refusal(self, lane, task):
         self.checked.append(task.get("id"))
