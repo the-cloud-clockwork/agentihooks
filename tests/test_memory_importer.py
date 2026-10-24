@@ -577,7 +577,7 @@ def cli_args(tmp_path, folder):
 def printed(capsys):
     out = capsys.readouterr().out
     report = json.loads(out)
-    assert out == json.dumps(report, indent=2, ensure_ascii=False) + "\n"
+    assert out == json.dumps(report, indent=2) + "\n"
     return report
 
 

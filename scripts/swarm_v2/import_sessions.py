@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
             imports.close()
     finally:
         catalog.close()
-    print(json.dumps(report, indent=2, ensure_ascii=False))
+    print(json.dumps(report, indent=2))
     return 0 if succeeded else 2
 
 
