@@ -9,13 +9,13 @@ from pathlib import Path
 SHARD = "unit"
 RERUN = "unit rerun"
 WORKFLOW = Path(".github/workflows/test.yml")
+UNREADABLE_LOG = "The job log could not be read"
 RUNNER_LOSS = re.compile(
     r"The runner has received a shutdown signal"
     r"|lost communication with the server"
     r"|The job was not acquired by Runner"
-    r"|The job log could not be read"
+    r"|" + re.escape(UNREADABLE_LOG)
 )
-UNREADABLE_LOG = "The job log could not be read"
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
 EXIT_POLLS = 60
 EXIT_POLL_SECONDS = 30
