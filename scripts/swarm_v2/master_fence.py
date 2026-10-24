@@ -162,7 +162,8 @@ class Seats:
 
     def owner(self, item: str, meta: dict) -> tuple[str, int]:
         record = meta.get(DECISIONS, {}).get(item)
-        known = [*masters.seats(self.slug, self.count), *self.live]
+        retired = self.table.retired(self.slug)
+        known = [seat for seat in (*masters.seats(self.slug, self.count), *self.live) if seat not in retired]
         if record and record["seat"] in known and current(record, item, meta["stamps"]):
             return record["seat"], record["rev"]
         owners = functools.partial(self.table.owners, self.slug, self.doc)
