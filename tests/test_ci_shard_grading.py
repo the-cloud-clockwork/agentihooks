@@ -57,6 +57,7 @@ def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data
         assert download["with"]["name"] == upload["with"]["name"]
         assert f"--collected {download['with']['path']}/collected.json" in check["run"]
     else:
+        assert "--collected collected-data/collected.json" in check["run"]
         assert download["with"] == {
             "pattern": "{durations,flakes,collected,reused-tests}-${{ matrix.python-version }}{,-*}",
             "path": "shard-durations",
