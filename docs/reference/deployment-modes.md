@@ -217,6 +217,11 @@ controller:
 - `controller.hostSwarms` becomes `AGENTIHOOKS_CONTROL_HOST_SWARMS`: swarms in the shared Redis that their own host
   ticks. The controller never ticks them and its liveness probe does not require their lease, so a sleeping
   workstation never hands its swarm to the controller. The chart refuses a `controller.api.swarm` on that list.
+- `controller.scratchSwarms` becomes `AGENTIHOOKS_CONTROL_SCRATCH_SWARMS`: a list of `{swarm, agent, task, repo}`
+  proof swarms the controller serves beside the live swarm. Each pass it creates a missing one with its ledger,
+  named from the agent and task (`proof-<code>-<task>-<n>`), as a scratch swarm with one engineer task, and removes
+  a proof swarm once it leaves the list. The chart refuses an entry missing a field, a name that is not a proof
+  swarm name, one on `controller.hostSwarms` or the served `controller.api.swarm` proof.
 - When the ledger is remote (`SWARM_URL`, an `AGENTIHOOKS_DEPLOYMENT` other than `local`, or `LEDGER_URL` with no
   mode set; see [Client mode resolution](#client-mode-resolution)), the controller needs
   `AGENTIHOOKS_CONTROLLER_CREDENTIAL` and refuses to start without it.

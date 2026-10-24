@@ -18,6 +18,9 @@ FRESH_REASON = "the controller owns this proof swarm, which keeps no checkpoints
 PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
 SWARM_ENV = "AGENTIHOOKS_CONTROL_SWARM"
 MALFORMED = f"{PROOF_ENV} must be a JSON object naming an agent and a task"
+SCRATCH_ENV = "AGENTIHOOKS_CONTROL_SCRATCH_SWARMS"
+SCRATCH_FIELDS = ("swarm", "agent", "task", "repo")
+SCRATCH_MALFORMED = f"{SCRATCH_ENV} must be a JSON list of objects naming a proof swarm, an agent, a task and a repo"
 CONTENT = {
     "title": "Anton launch proof",
     "overview": "One engineer Pod launches on Anton and registers with the controller.",
@@ -60,13 +63,40 @@ def reconcile(
     require: Callable[[], None] | None = None,
 ) -> list[str]:
     asked = _asked(environ)
-    stale = [other for other in store.slugs() if naming.PROOF_RE.fullmatch(other) and (asked is None or other != slug)]
+    listed = _scratch(environ)
+    if asked is not None and slug in listed:
+        raise SwarmError(f"{slug} is the served proof swarm and may not be listed as a scratch swarm")
+    kept = set(listed) | ({slug} if asked is not None else set())
+    stale = [other for other in store.slugs() if naming.PROOF_RE.fullmatch(other) and other not in kept]
     lines = [_remove(environ, store, other, ledger, require if other == slug else None) for other in stale]
     if asked is not None:
         if slug not in store.slugs():
             lines.append(_create(environ, store, slug, ledger, asked))
         _configured(environ, slug, ledger, asked, require)
+    for name, entry in listed.items():
+        if name not in store.slugs():
+            lines.append(_create(environ, store, name, ledger, entry, entry["repo"]))
     return lines
+
+
+def _scratch(environ: Mapping[str, str]) -> dict[str, dict]:
+    setting = environ.get(SCRATCH_ENV)
+    if not setting:
+        return {}
+    try:
+        entries = json.loads(setting)
+    except json.JSONDecodeError:
+        raise SwarmError(SCRATCH_MALFORMED) from None
+    if not isinstance(entries, list):
+        raise SwarmError(SCRATCH_MALFORMED)
+    for entry in entries:
+        if not isinstance(entry, dict) or not all(
+            isinstance(entry.get(key), str) and entry[key] for key in SCRATCH_FIELDS
+        ):
+            raise SwarmError(SCRATCH_MALFORMED)
+        if not naming.PROOF_RE.fullmatch(entry["swarm"]):
+            raise SwarmError(SCRATCH_MALFORMED)
+    return {entry["swarm"]: entry for entry in entries}
 
 
 def _configured(
@@ -120,10 +150,12 @@ def _asked(environ: Mapping[str, str]) -> dict | None:
     return asked
 
 
-def _create(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: ModuleType, asked: dict) -> str:
+def _create(
+    environ: Mapping[str, str], store: RedisStore, slug: str, ledger: ModuleType, asked: dict, repo: str = ""
+) -> str:
     if not naming.PROOF_RE.fullmatch(slug):
         raise SwarmError(f"the controller serves {slug!r}, which is not a proof swarm name")
-    repo = _repo(environ)
+    repo = repo or _repo(environ)
     found = _call(ledger.state, slug, environ)
     if found == "binned":
         raise SwarmError(f"the proof ledger {slug} is in the bin: name a new proof or restore it")

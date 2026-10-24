@@ -112,6 +112,8 @@ spec:
               value: {{ $root.Values.deployment | quote }}
             - name: HIVE_EXCLUDED
               value: {{ join "," $workers.excluded | quote }}
+            - name: HIVE_MASTER_SWARMS
+              value: {{ join "," ($workers.masterSwarms | default list) | quote }}
             - name: HIVE_MAX_AGENTS
               value: {{ $workers.maxAgents | quote }}
             - name: HIVE_REPOSITORIES
