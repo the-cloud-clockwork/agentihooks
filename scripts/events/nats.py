@@ -3,18 +3,19 @@ import base64
 import hashlib
 import re
 import threading
-from collections.abc import Coroutine, Iterator
+from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass
 
 import nats as nats_client
 from nats.aio.msg import Msg
+from nats.errors import NoRespondersError
 from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
 from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
 
 from . import nkey
 from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
-from .config import SHARED_SLOT_BUCKETS, BusConfig, QueuePolicy
+from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
 from .nats_legacy import legacy_filters, legacy_target, provision_events
@@ -427,13 +428,26 @@ class NatsBus:
             return queue
 
     def state(self, bucket: str) -> NatsStateStore:
-        if self._config.scoped and not self._config.provision and bucket not in SHARED_SLOT_BUCKETS:
+        if self._config.scoped and not self._config.provision:
             raise PermissionError("select a swarm before opening scoped state")
         with self._lock:
             store = self._buckets.get(bucket)
             if store is None:
                 store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket, self._config.provision)
             return store
+
+    def serve(self, subject: str, queue: str, handler: Callable[[str, bytes], bytes]) -> None:
+        async def respond(msg: Msg) -> None:
+            answer = await asyncio.get_running_loop().run_in_executor(None, handler, msg.subject, msg.data)
+            await msg.respond(answer)
+
+        self._loop.run(self._nc.subscribe(subject, queue=queue, cb=respond))
+
+    def request(self, subject: str, data: bytes, timeout_ms: int) -> bytes:
+        try:
+            return self._loop.run(self._nc.request(subject, data, timeout=_seconds(timeout_ms))).data
+        except (FetchTimeout, NoRespondersError):
+            raise TimeoutError(f"no responders for {subject!r}") from None
 
     def migrate_state(self, swarm: str, bucket: str, keys: list[str]) -> None:
         from .nats_migration import migrate_state

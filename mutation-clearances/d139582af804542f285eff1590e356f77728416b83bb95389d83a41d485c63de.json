@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1retire_pane__mutmut_70:fc0f29e9c83868b584bd2079e7d1f7a72bc741696d3140caa6915d63b868fb74": {
+    "reader": "Standards",
+    "reason": "The transient agent copy changes pane_id from an empty string to None. Both are false, skip pane closure identically, and leave every process retirement argument, outcome and refusal unchanged. The original agent record is retained."
+  }
+}
