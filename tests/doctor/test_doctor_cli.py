@@ -337,6 +337,18 @@ def test_an_engineer_cannot_scale_the_doctor_even_with_the_operator_words(env, m
     assert DOCTOR not in store.slugs()
 
 
+def test_an_engineer_cannot_stop_the_doctor_even_with_the_operator_words(env, monkeypatch, capsys):
+    store, _, _ = env
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    pin(monkeypatch, "engineer@323133-1244", "eng")
+    typed(ORDER, 60)
+    assert doctor.main([WATCHED, "stop", "--quote", ORDER]) == 1
+    assert "uses its swarm controls" in capsys.readouterr().err
+    assert not state(DOCTOR).get("closed_at") and store.config(DOCTOR).state != "stopped"
+
+
 def test_the_operator_shell_scales_the_doctor_without_a_quote(env, monkeypatch, capsys):
     store, _, _ = env
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
