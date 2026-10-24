@@ -15,6 +15,10 @@ class DispatchError(InboxError):
     pass
 
 
+class InboxContention(DispatchError):
+    pass
+
+
 @dataclass(frozen=True)
 class Delivery:
     id: str
@@ -43,7 +47,7 @@ def transact(redis, body, keys=()):
                 return result
             except WatchError:
                 continue
-    raise DispatchError("the inbox changed meanwhile; run it again")
+    raise InboxContention("the inbox changed meanwhile; run it again")
 
 
 def check_owner(pipe, recipient, owner, world):
@@ -127,8 +131,10 @@ class Receipts:
             return self._stage_close(pipe, delivery, "superseded", REASSIGNED)
         last = self.store.last_pending(pipe, item)
         pipe.multi()
-        delivered = replace(item, state="delivered", updated_at=now_ms(), reason="")
-        self.store.stage_move(pipe, item, delivered, delivery.recipient, last, indexed=False)
+        delivered = replace(
+            item, state="delivered", updated_at=now_ms(), reason="", delivery_session=self.store.session_id
+        )
+        self.store.stage_move(pipe, item, delivered, delivery.recipient, last, indexed=bool(self.store.session_id))
         if delivery.ref:
             pipe.sadd(SeenMarks.key(delivery.recipient), delivery.ref)
             pipe.expire(SeenMarks.key(delivery.recipient), TTL_S)

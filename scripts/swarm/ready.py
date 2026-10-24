@@ -7,6 +7,7 @@ reopen the task for the next engineer, who continues from the stored handoff.
 """
 
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
@@ -20,6 +21,7 @@ from scripts.swarm import (
     linked_issues,
     merge_queue,
     queue_exit,
+    queue_record,
     stack,
     staged_compatibility,
     waits,
@@ -43,6 +45,19 @@ REQUEUED = (
     "The swarm queued {url} again: it left the merge queue while green and no merge group run of its own failed, "
     "so the task keeps its claim."
 )
+BACKOFF_MS = 60_000
+RECOVER = "recover"
+ALERT_SOURCE = "requeue"
+TRANSIENT = "unmergeable without a conflict; the unchanged head is queued again once it reads mergeable and green"
+STUCK = "stayed unmergeable after leaving the merge queue"
+MOVED = "changed its head after leaving the merge queue"
+DEQUEUED = (
+    "The swarm took {url} out of the merge queue: GitHub marked it unmergeable without a conflict. It queues the "
+    "unchanged head again once it reads mergeable and green, so the task keeps its claim."
+)
+RECOVERED = "The swarm queued {url} again: its unmergeable state cleared on the unchanged green head."
+REQUEUE_FAILED = "The swarm could not queue {url} again for task {task} after a transient unmergeable state: {why}"
+GAVE_UP = "The swarm gave up queueing {url} again for task {task}: it stayed unmergeable or not green; reopened."
 PROOF = (
     "The swarm merged {url}. This {kind} task stays open for its proof; the next engineer continues it from the "
     "handoff its engineer left."
@@ -174,6 +189,7 @@ class Pass:
     now_ms: int
     queue: Callable = merge_queue.operate
     exits: Callable = queue_exit.own_failures
+    journal: Callable = queue_record.Journal
 
 
 def merge_pass(run, rows):
@@ -215,6 +231,8 @@ def _advance(run, rows, row, found):
         return []
     if pull.merge_problem:
         return _unmergeable(run, row, found, pull)
+    if held["kind"] == RECOVER:
+        return _recover(run, row, found)
     if held["kind"] == "checks":
         if pull.mergeable == "CONFLICTING":
             return _reopen(run, row, found, CONFLICT)
@@ -258,10 +276,14 @@ def _checks(run, row, found, pull):
     return _queue(run, row, found)
 
 
+def _journal(run, task_id, url):
+    return run.journal(url, context={"swarm": run.slug, "task": task_id, "timer": os.getpid(), "by": "merge watcher"})
+
+
 def _queue(run, row, found):
     task_id, url = row["id"], found["url"]
     try:
-        run.queue("queue", url)
+        run.queue("queue", url, journal=_journal(run, task_id, url))
     except SwarmError as exc:
         if str(exc).startswith(REFUSALS):
             found["refusals"] = found.get("refusals", 0) + 1
@@ -331,14 +353,66 @@ def _working_owner(run, row, pull):
 def _unmergeable(run, row, found, pull):
     if _working_owner(run, row, pull):
         return []
-    if pull.queued:
+    task_id, url = row["id"], found["url"]
+    fresh = run.reread(url)
+    if fresh is None or not fresh.merge_problem:
+        return []
+    if fresh.queued:
         try:
-            result = run.queue("dequeue", found["url"])
+            result = run.queue("dequeue", url, journal=_journal(run, task_id, url))
         except SwarmError as exc:
-            return [f"could not dequeue {found['url']} for task {row['id']}: {exc}"]
+            return [f"could not dequeue {url} for task {task_id}: {exc}"]
         if result.get("queued") or result.get("state") == "MERGED":
-            return [f"dequeue of {found['url']} for task {row['id']} awaits confirmation"]
-    return _reopen(run, row, found, pull.merge_problem)
+            return [f"dequeue of {url} for task {task_id} awaits confirmation"]
+    head = fresh.head or found.get("head")
+    if found.get("on") and head and fresh.mergeable != "CONFLICTING":
+        tries = found.get("recoveries", 0)
+        if tries >= QUEUE_TRIES:
+            run.ledger.raise_alert(run.slug, ALERT_SOURCE, GAVE_UP.format(url=url, task=task_id))
+            return _reopen(run, row, found, STUCK)
+        found["on"] = {"kind": RECOVER, "head": head}
+        found["retry_at"], found["recoveries"] = run.now_ms + BACKOFF_MS * 2**tries, tries
+        save(run.store, run.slug, task_id, found)
+        run.ledger.notice(run.slug, task_id, DEQUEUED.format(url=url))
+        return [f"dequeued {url} for task {task_id}: {TRANSIENT}"]
+    return _reopen(run, row, found, fresh.merge_problem)
+
+
+def _recover(run, row, found):
+    task_id, url = row["id"], found["url"]
+    if run.now_ms < found["retry_at"]:
+        return []
+    fresh = run.reread(url)
+    if fresh is None:
+        return []
+    if fresh.head and fresh.head != found["on"]["head"]:
+        return _reopen(run, row, found, MOVED)
+    if fresh.mergeable == "CONFLICTING":
+        return _reopen(run, row, found, fresh.merge_problem)
+    if fresh.red:
+        return _reopen(run, row, found, "has red checks")
+    if fresh.merge_problem or not fresh.resolved:
+        return _retry(run, row, found, f"{url} for task {task_id} is not yet mergeable and green; it retries later")
+    try:
+        run.queue("queue", url, journal=_journal(run, task_id, url))
+    except SwarmError as exc:
+        run.ledger.raise_alert(run.slug, ALERT_SOURCE, REQUEUE_FAILED.format(url=url, task=task_id, why=exc))
+        return _retry(run, row, found, f"could not requeue {url} for task {task_id}: {exc}")
+    found["on"], found["queued_at"] = {"kind": "merge", "target": url}, run.now_ms
+    found["recoveries"] += 1
+    save(run.store, run.slug, task_id, found)
+    run.ledger.notice(run.slug, task_id, RECOVERED.format(url=url))
+    return [f"queued {url} for task {task_id}"]
+
+
+def _retry(run, row, found, action):
+    tries = found["recoveries"] + 1
+    if tries >= QUEUE_TRIES:
+        run.ledger.raise_alert(run.slug, ALERT_SOURCE, GAVE_UP.format(url=found["url"], task=row["id"]))
+        return _reopen(run, row, found, STUCK)
+    found["recoveries"], found["retry_at"] = tries, run.now_ms + BACKOFF_MS * 2**tries
+    save(run.store, run.slug, row["id"], found)
+    return [action]
 
 
 def _reopen(run, row, found, what):

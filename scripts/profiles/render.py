@@ -21,7 +21,8 @@ from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_hook_trust import trusted_state
 from scripts.targets.codex_target import codex_home
 
-SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json", "keybindings.json")
+SHARED_DIRS = ("projects", "sessions", "todos")
+SHARED = (*SHARED_DIRS, "plugins", ".credentials.json", "keybindings.json")
 CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
 CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
 COPILOT_STATE = ("config.json", "settings.json", "agentihooks-hook.sh", "hooks", "session-state", "logs")
@@ -144,6 +145,8 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         "profiles": _profiles_digest(dirs),
         "chain": chain,
         "overlays": _overlays(dirs),
+        "mcp_urls": json.loads(os.environ.get("AGENTIHOOKS_MCP_URLS", "{}")),
+        "mcp_bearer_env": json.loads(os.environ.get("AGENTIHOOKS_MCP_BEARER_ENV", "{}")),
         "enabled_plugins": _plugins(chain, _settings("claude", bundle, dirs).get("enabledPlugins") or {}),
         **({"browser": browser.spec()} if browser.proxy_enabled(chain) else {}),
         "corrections": quarantine.digest(),
@@ -251,6 +254,21 @@ def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]])
         )
         if path:
             servers.update(_i._load_native_layer(path).get("mcpServers") or {})
+    urls = json.loads(os.environ.get("AGENTIHOOKS_MCP_URLS", "{}"))
+    servers = {
+        name: {**server, "url": urls[name]} if name in urls and "url" in server else server
+        for name, server in servers.items()
+    }
+    bearer_env = json.loads(os.environ.get("AGENTIHOOKS_MCP_BEARER_ENV", "{}"))
+    servers = {
+        name: {
+            **server,
+            "headers": {**server.get("headers", {}), "Authorization": "Bearer ${" + bearer_env[name] + "}"},
+        }
+        if name in bearer_env and "url" in server
+        else server
+        for name, server in servers.items()
+    }
     return browser.configure(servers, [name for name, _ in dirs])
 
 
@@ -398,6 +416,8 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
     _atomic_write(out / "CLAUDE.md", _persona(root, "claude", bundle, dirs, current["chain"]))
     _claude_json(out, servers)
     shared = claude_home(_global_env())
+    for item in SHARED_DIRS:
+        (shared / item).mkdir(parents=True, exist_ok=True)
     for item in SHARED:
         (out / item).symlink_to(shared / item)
     # Claude Code refuses plan file writes that resolve through a symlink.

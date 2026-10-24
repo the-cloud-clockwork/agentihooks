@@ -90,15 +90,21 @@ def test_a_host_without_proc_reaps_nothing(tmp_path, monkeypatch):
 
 def test_a_leftover_with_an_undecodable_environment_is_still_reaped(admit):
     left = subprocess.Popen(
-        [sys.executable, "-c", SLEEP, "swarm", "tick"], start_new_session=True, env={**os.environ, "T1151": b"\xff"}
+        [sys.executable, "-c", f"print('ready', flush=True); {SLEEP}", "swarm", "tick"],
+        start_new_session=True,
+        env={**os.environ, "T1151": b"\xff"},
+        stdout=subprocess.PIPE,
+        text=True,
     )
     admit(left.pid)
     try:
+        assert left.stdout.readline() == "ready\n"
         assert left.pid in [record.pid for record in tick_reaper.reap(grace_s=2)]
         assert left.wait(15) == -signal.SIGTERM
     finally:
         left.kill()
         left.wait()
+        left.stdout.close()
 
 
 def test_a_leftover_whose_name_holds_a_parenthesis_is_read_and_reaped(tmp_path, admit):

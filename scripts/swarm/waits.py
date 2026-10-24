@@ -19,6 +19,10 @@ from scripts.swarm.store import SwarmError
 KINDS = ("checks", "merge", "reply", "task", "mutation", "intent")
 BARE_MAX_MINUTES = 60
 CHECKED_MINUTES = 12 * 60
+FINISH_TURN = (
+    "finish the current turn now unless you have independent work; do not sleep or poll, "
+    "the swarm tick ends this wait and sends your next prompt"
+)
 FRESH_MS = 5 * 60_000
 TASK_ENDS = ("done", "blocked")
 SENDER = "swarm"
@@ -39,7 +43,7 @@ def dependency(held: dict, task: dict, rows: dict, github: Callable) -> bool:
 def on(kind, target, task=""):
     if kind not in KINDS:
         raise SwarmError(f"wait on one of: {', '.join(KINDS)}")
-    return {"kind": kind, "target": target, **({"task": task} if kind == "intent" else {})}
+    return {"kind": kind, "target": target, **({"task": task} if kind in ("intent", "mutation") else {})}
 
 
 def checks_resolution(held, github, reread=None):
@@ -169,11 +173,16 @@ def intent_resolution(held, record, github):
     return f"the intent verdict on {held['target']}, now {record['verdict']}: {record['reason']}"
 
 
+def stacked_branches(task, rows):
+    deps = (rows.get(task) or {}).get("depends_on") or []
+    return [rows[dep]["branch"] for dep in deps if rows[dep].get("state") != "done" and rows[dep].get("branch")]
+
+
 def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
     """What ended the wait, in plain words, or '' while it still holds."""
     kind, target = held["kind"], held["target"]
     if kind == "mutation":
-        return mutation_wait.resolution(held)
+        return mutation_wait.resolution(held, stacked_branches(held.get("task"), rows))
     if kind == "intent":
         return intent_resolution(held, verdicts.read(held["task"]), github)
     if kind == "checks" and mutation_wait.RUN_URL.fullmatch(target):
@@ -231,8 +240,9 @@ def notice_task(item):
 
 def settle_notices(inbox, agent, action):
     """Close the open wait ended notices for the agent's task, naming the action it recorded on that task."""
-    for address in dict.fromkeys(filter(None, (agent.seat, agent.name))):
-        for item in inbox.inbox(address):
-            if item.sender != SENDER or item.state in CLOSED or _pick_up(agent.task) not in item.text:
-                continue
-            inbox.close(item.id, SENDER, "done", f"{agent.name} recorded {action} on task {agent.task}")
+    for world in inbox.worlds():
+        for address in dict.fromkeys(filter(None, (agent.seat, agent.name))):
+            for item in world.inbox(address):
+                if item.sender != SENDER or item.state in CLOSED or _pick_up(agent.task) not in item.text:
+                    continue
+                world.close(item.id, SENDER, "done", f"{agent.name} recorded {action} on task {agent.task}")

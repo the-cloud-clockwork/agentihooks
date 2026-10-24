@@ -210,6 +210,10 @@ def refresh(
             listed = listed + ci_speed.read_runs(config.repo, since_s, run, event="push")
         except READ_ERRORS as exc:
             _skipped("reading dev push Tests runs", exc)
+        try:
+            listed = listed + ci_speed.read_runs(config.repo, since_s, run, event="merge_group")
+        except READ_ERRORS as exc:
+            _skipped("reading merge queue Tests runs", exc)
         runs = metrics_ci.metered(listed)
         actions += _meter(slug, redis, runs, now_ms, lambda job_id: _log(config.repo, job_id, run), jobs_of, environ)
     return actions

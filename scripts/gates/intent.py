@@ -44,6 +44,7 @@ REPO_FLAGS = ("-R", "--repo")
 VALUE_FLAGS = ("-A", "--author-email", "-b", "--body", "-F", "--body-file", "--match-head-commit", "-t", "--subject")
 SHORT = re.compile(r"(?<![\w./-])([A-Za-z0-9-]+)/([\w.-]+)#(\d+)\b")
 NAMED_LIMIT = 3
+LISTED = 4
 NON_PRODUCTION = ("tests/", "docs/")
 COMPARED = "[.status, [(.files // [])[].filename]]"
 COMPARE_FILES = 300
@@ -273,7 +274,7 @@ def pr_view(url, run=subprocess.run):
 def named_pulls(task, body):
     own = PULL.search(task["pr_url"])
     here = (own[1].lower(), own[2].lower()) if own else None
-    texts = [task.get("description"), body, *(c.get("text") for c in task.get("comments") or [])]
+    texts = [task.get("description"), SECTION.sub("", body), *(c.get("text") for c in task.get("comments") or [])]
     urls, seen = [], set()
     for text in filter(None, texts):
         short = (m.groups() for m in SHORT.finditer(text) if here and m[1].lower() == here[0])
@@ -434,17 +435,21 @@ def _named_state(pr):
         "pull_requests": pulls,
         "judged_pull_requests": [p["url"] for p in pulls],
         "unread_pull_requests": pr["unread_pull_requests"],
+        **({"unread_overflow": pr["unread_overflow"]} if "unread_overflow" in pr else {}),
     }
 
 
-def _listed(urls):
+def _listed(urls, more):
+    more += len(urls[LISTED:])
+    if more:
+        return f"{', '.join(urls[:LISTED])} and {more} more"
     return f"{', '.join(urls[:-1])} and {urls[-1]}" if len(urls) > 1 else urls[0]
 
 
 def _judged_on(state):
     judged, unread = state.get("judged_pull_requests") or [], state.get("unread_pull_requests") or []
-    text = f"; judged on {_listed(judged)}" if judged else ""
-    return text + (f"; could not read {_listed(unread)}" if unread else "")
+    text = f"; judged on {_listed(judged, 0)}" if judged else ""
+    return text + (f"; could not read {_listed(unread, state.get('unread_overflow', 0))}" if unread else "")
 
 
 def _pending(pr):
@@ -756,55 +761,75 @@ class Check:
             states = ("pr", "claimed") if self.mode == "coach" else ("pr",)
             if task.get("state") not in states or not task.get("pr_url"):
                 continue
-            _bind_pulls(verdicts, task, task["pr_url"], doc)
-            record = verdicts.read(task["id"])
-            judged = record and record["verdict"] != PENDING and not record.get("planned")
-            moved = (
-                self.mode != "coach"
-                and judged
-                and (record.get("inputs") != _fingerprint(doc, task) or self._named_moved(record))
-            )
-            if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
-                continue
-            tasks.append((task, record, moved))
-        for task, record, _ in tasks:
-            if _drafted(record):
-                verdicts.write(
-                    task["id"],
-                    PENDING,
-                    RUNNING,
-                    self.now_ms,
-                    phase=task.get("phase"),
-                    **_split_fields(task, task["pr_url"]),
-                )
+            actions += self._isolated(task, self._queue, doc, task, verdicts, tasks)
         with ThreadPoolExecutor(max_workers=2) as workers:
             pending = [
                 (task, record, moved, workers.submit(copy_context().run, self._judge, doc, task))
                 for task, record, moved in tasks
             ]
             for task, record, moved, future in pending:
-                if not record or not _same_phase(record, task) or moved:
-                    verdicts.write(
-                        task["id"],
-                        PENDING,
-                        RUNNING,
-                        self.now_ms,
-                        phase=task.get("phase"),
-                        **_split_fields(task, task["pr_url"]),
-                    )
-                judgment = future.result()
-                if judgment is None and _drafted(record):
-                    verdicts.write(
-                        task["id"],
-                        PENDING,
-                        DRAFT,
-                        record["at"],
-                        phase=record.get("phase"),
-                        **_split_fields(task, task["pr_url"]),
-                    )
-                if judgment is not None:
-                    actions += self._check(task, judgment, verdicts)
-                    timing.keep()
+                actions += self._isolated(task, self._settle, task, record, moved, future, verdicts)
+        return actions
+
+    def _queue(self, doc, task, verdicts, tasks):
+        _bind_pulls(verdicts, task, task["pr_url"], doc)
+        record = verdicts.read(task["id"])
+        judged = record and record["verdict"] != PENDING and not record.get("planned")
+        moved = (
+            self.mode != "coach"
+            and judged
+            and (record.get("inputs") != _fingerprint(doc, task) or self._named_moved(record))
+        )
+        if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
+            return []
+        if _drafted(record):
+            verdicts.write(
+                task["id"],
+                PENDING,
+                RUNNING,
+                self.now_ms,
+                phase=task.get("phase"),
+                **_split_fields(task, task["pr_url"]),
+            )
+        tasks.append((task, record, moved))
+        return []
+
+    def _isolated(self, task, step, *args):
+        from scripts.swarm.ledger_client import LedgerRefused
+
+        try:
+            return step(*args)
+        except LedgerRefused:
+            raise
+        except Exception as exc:  # one task's failure is logged and never ends the tick run
+            who = Who(name=task.get("claimed_by", ""), task=task["id"])
+            log.append(self.slug, log.Row.of(NAME, "fail-open", who, reason=f"{type(exc).__name__}: {exc}"), self.home)
+            return [f"task {task['id']} intent check failed: {type(exc).__name__}"]
+
+    def _settle(self, task, record, moved, future, verdicts):
+        if not record or not _same_phase(record, task) or moved:
+            verdicts.write(
+                task["id"],
+                PENDING,
+                RUNNING,
+                self.now_ms,
+                phase=task.get("phase"),
+                **_split_fields(task, task["pr_url"]),
+            )
+        judgment = future.result()
+        if judgment is None and _drafted(record):
+            verdicts.write(
+                task["id"],
+                PENDING,
+                DRAFT,
+                record["at"],
+                phase=record.get("phase"),
+                **_split_fields(task, task["pr_url"]),
+            )
+        if judgment is None:
+            return []
+        actions = self._check(task, judgment, verdicts)
+        timing.keep()
         return actions
 
     def _judge(self, doc, task):
@@ -843,10 +868,13 @@ class Check:
         pulls = [view for view in views.values() if view]
         failed = [url for url, view in views.items() if not view]
         opened = [p["url"] for p in pulls if p["url"] != task["pr_url"] and not p["merged"]]
+        unread = failed + others[NAMED_LIMIT:]
+        overflow = len(unread[intent_history.URL_COUNT :])
         return {
             **pr,
             "pull_requests": pulls,
-            "unread_pull_requests": failed + others[NAMED_LIMIT:],
+            "unread_pull_requests": unread[: intent_history.URL_COUNT],
+            **({"unread_overflow": overflow} if overflow else {}),
             "named_pending": failed + opened,
         }
 

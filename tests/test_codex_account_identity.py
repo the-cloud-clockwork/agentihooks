@@ -307,3 +307,75 @@ def test_the_balance_table_ends_with_the_duplicate_warning_and_the_default_verdi
         f"codex default login #{mark}: same ChatGPT account as alpha, ncgma",
     ]
     assert len(agents_quota._render_live([row], {}, NOW, fable=True).splitlines()) == 3
+
+
+def _jwt_with_email(account_id, email):
+    def part(data):
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    claims = {
+        codex_router.OPENAI_AUTH_CLAIM: {"chatgpt_account_id": account_id},
+        codex_router.OPENAI_PROFILE_CLAIM: {"email": email},
+    }
+    return ".".join([part(b'{"alg":"RS256"}'), part(json.dumps(claims).encode()), "c2ln"])
+
+
+def test_a_duplicate_routes_under_the_slug_of_its_email_not_the_first_name_in_sort_order(tmp_path):
+    token = _jwt_with_email("acct-1", "Nestor.Colt@gmail.com")
+    environ = {
+        "HOME": str(tmp_path),
+        "AH_CX_TOKEN_alpha": token,
+        "AH_CX_TOKEN_nestor_coltatgmail_com": token + "x",
+        "AH_CX_TOKEN_gamma": _jwt("acct-2"),
+    }
+    tokens = codex_router.token_accounts(environ)
+    assert codex_router.duplicates(tokens, environ) == {"alpha": "nestor_coltatgmail_com"}
+    pool = codex_router.CodexAccountSource(lambda *a, **k: None).pool(environ)
+    assert [account.name for account in pool] == ["gamma", "nestor_coltatgmail_com"]
+    assert codex_router.identity_warnings(environ) == [
+        "AH_CX_TOKEN_alpha is the same ChatGPT account as nestor_coltatgmail_com; it is not routed"
+    ]
+
+
+def test_without_an_email_claim_an_email_shaped_slug_is_kept_over_an_earlier_name(tmp_path):
+    environ = {
+        "HOME": str(tmp_path),
+        "AH_CX_TOKEN_aaa": _jwt("acct-1"),
+        "AH_CX_TOKEN_devatexample_com": _jwt("acct-1", "second login"),
+        "AH_CX_TOKEN_zed": _jwt("acct-1", "third login"),
+    }
+    tokens = codex_router.token_accounts(environ)
+    assert codex_router.duplicates(tokens, environ) == {"aaa": "devatexample_com", "zed": "devatexample_com"}
+
+
+def test_the_email_claim_decides_between_two_email_shaped_slugs(tmp_path):
+    token = _jwt_with_email("acct-1", "ops@example.com")
+    environ = {
+        "HOME": str(tmp_path),
+        "AH_CX_TOKEN_devatexample_com": token,
+        "AH_CX_TOKEN_opsatexample_com": token + "x",
+    }
+    tokens = codex_router.token_accounts(environ)
+    assert codex_router.duplicates(tokens, environ) == {"devatexample_com": "opsatexample_com"}
+
+
+@pytest.mark.parametrize(
+    ("name", "shaped"),
+    [
+        ("aatb_cc", True),
+        ("nestor_coltatgmail_com", True),
+        ("aat__cc", True),
+        ("atb_cc", False),
+        ("aat_cc", False),
+        ("aatb_c", False),
+        ("aatb_c1", False),
+        ("aatb_cC", False),
+        ("a-atb_cc", False),
+        ("aAtb_cc", False),
+        ("aatbcc", False),
+        ("aatb_", False),
+        ("aatabcdefghijklmnopqrstuvwxyz0123456789_x_abcdefghijklmnopqrstuvwxyz", True),
+    ],
+)
+def test_an_email_shaped_slug_is_user_at_domain_and_a_letter_suffix(name, shaped):
+    assert codex_router.email_shaped(name) is shaped

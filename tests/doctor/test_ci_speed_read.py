@@ -99,7 +99,7 @@ def test_api_requests_use_the_exact_repository_window_and_safe_subprocess_option
     monkeypatch.setattr(ci_speed_read.time, "monotonic", lambda: 100)
     run, calls = api()
     result = ci_speed_read.read(NOW - 60000, NOW, run=run, budget=(60, max_seconds))
-    assert result == {"complete": True, "runs": [], "api_calls": 6, "discovered_runs": 0}
+    assert result == {"complete": True, "runs": [], "api_calls": 6, "discovered_runs": 0, "unverified": 0}
     first_args, _ = calls[0]
     assert first_args[:2] == ["gh", "api"]
     assert urlsplit(first_args[2]).path == "repos/the-cloud-clockwork/agentihooks/actions/runs"
@@ -330,6 +330,67 @@ def test_the_default_time_budget_allows_work_until_its_deadline(monkeypatch, ela
     else:
         assert calls == []
         assert result["error"] == "Actions API read failed: RuntimeError: Actions API request or time budget exhausted"
+
+
+def test_one_run_attempt_reads_that_attempt_and_every_job_page():
+    from scripts.doctor import ci_speed_read
+
+    run, calls = api(jobs=[{"id": n} for n in range(150)])
+    record = ci_speed_read.attempt(42, 2, run=run)
+    assert record == {"id": 2, "status": "completed", "event": "push", "jobs": [{"id": n} for n in range(150)]}
+    root = "repos/the-cloud-clockwork/agentihooks/actions/runs/42/attempts/2"
+    assert [args[2] for args, _ in calls] == [
+        root,
+        f"{root}/jobs?per_page=100&page=1",
+        f"{root}/jobs?per_page=100&page=2",
+    ]
+
+
+def test_one_run_attempt_raises_when_the_api_fails():
+    from scripts.doctor import ci_speed_read
+
+    run, _ = api(fail=True)
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_speed_read.attempt(42, 1, run=run)
+
+
+@pytest.mark.parametrize("jobs, complete", [(1900, True), (1901, False)])
+def test_one_run_attempt_allows_twenty_requests_by_default(jobs, complete):
+    from scripts.doctor import ci_speed_read
+
+    run, calls = api(jobs=[{"id": n} for n in range(jobs)])
+    if complete:
+        assert len(ci_speed_read.attempt(42, 1, run=run)["jobs"]) == jobs
+    else:
+        with pytest.raises(RuntimeError, match="budget exhausted"):
+            ci_speed_read.attempt(42, 1, run=run)
+    assert len(calls) == 20
+
+
+def test_one_run_attempt_allows_sixty_seconds_by_default(monkeypatch):
+    from scripts.doctor import ci_speed_read
+
+    clock = iter([0, 59.5])
+    monkeypatch.setattr(ci_speed_read.time, "monotonic", lambda: next(clock, 60))
+    run, calls = api()
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        ci_speed_read.attempt(42, 1, run=run)
+    assert [kwargs["timeout"] for _, kwargs in calls] == [0.5]
+
+
+def test_one_run_attempt_reads_a_short_job_list_twice_without_settling():
+    from scripts.doctor import ci_speed_read
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args[2])
+        body = {"total_count": 5, "jobs": [{"id": 1}]} if "/jobs" in args[2] else {"id": 1}
+        return SimpleNamespace(stdout=json.dumps(body))
+
+    with pytest.raises(RuntimeError, match="pagination ended before the full count"):
+        ci_speed_read.attempt(42, 1, run=run)
+    assert len(calls) == 3
 
 
 def test_the_default_request_budget_stops_after_sixty_calls():

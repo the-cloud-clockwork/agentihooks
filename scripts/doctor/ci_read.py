@@ -6,7 +6,7 @@ import subprocess
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from scripts.doctor import ci
+from scripts.doctor import ci, ci_cache
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -73,9 +73,9 @@ def _job_tests(repo, job, run):
 
 def _attempt(repo, workflow, number, run, cache):
     key = f"{ROOT}:doctor:ci-attempt:{repo}:{workflow['id']}:{number}"
-    saved = cache.get(key) if cache is not None else None
+    saved = ci_cache.read(cache, key) if cache is not None else None
     if saved is not None:
-        return json.loads(saved)
+        return saved
     endpoint = f"repos/{repo}/actions/runs/{workflow['id']}/attempts/{number}/jobs?per_page=100"
     tests = []
     for job in _pages(endpoint, "jobs", run):
@@ -83,7 +83,7 @@ def _attempt(repo, workflow, number, run, cache):
             tests.extend(_job_tests(repo, job, run))
     attempt = {"run_id": workflow["id"], "attempt": number, "head_sha": workflow["head_sha"], "tests": tests}
     if cache is not None:
-        cache.set(key, json.dumps(attempt), ex=604800)
+        ci_cache.write(cache, key, attempt)
     return attempt
 
 

@@ -16,7 +16,7 @@ def fresh():
 
 
 def test_the_stats_order_round_trips_beside_panel_sizes_and_resets_with_them():
-    saved = layout.write({"health-box": {"height": 200}, "stats": ["tasks", "phases", "top-bottleneck"]})
+    saved = layout.write({"handoff-box": {"height": 200}, "stats": ["tasks", "phases", "top-bottleneck"]})
     assert saved["stats"] == ["tasks", "phases", "top-bottleneck"]
     assert layout.read() == saved
     assert layout.write({}) == {}
@@ -33,8 +33,8 @@ def test_a_bad_stats_order_is_refused(stats):
 
 def test_the_stats_order_holds_up_to_its_limit_beside_other_rows():
     order = [f"s{n}" for n in range(layout.MAX_STATS)]
-    saved = layout.write({"stats": order, "health-box": {"height": 200}})
-    assert saved == {"stats": order, "health-box": {"height": 200}}
+    saved = layout.write({"stats": order, "handoff-box": {"height": 200}})
+    assert saved == {"stats": order, "handoff-box": {"height": 200}}
 
 
 def test_each_stats_refusal_names_its_cause():

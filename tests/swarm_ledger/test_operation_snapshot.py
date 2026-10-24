@@ -68,6 +68,7 @@ def test_publication_of_a_newer_write_keeps_the_original_response(tmp_path, monk
 
     publishing = Publishing(stored, publish)
     result, rejected = publishing.apply_ops(SLUG, ops=[message("first")], copy_state=False)
+    publishing.drain(5)
     assert rejected == []
     assert [row["id"] for row in result["chat"]] == ["first"]
     assert [row["id"] for row in stored.current(SLUG).state["chat"]] == ["first", "second"]

@@ -113,12 +113,14 @@ class Scheduler:
         self.machine = machine or socket.gethostname()
 
     def key(self, suffix: str) -> str:
-        if os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local" and (
-            member := os.environ.get("AGENTIHOOKS_HIVE_ID")
-        ):
+        from scripts.swarm_ledger import ledger_link
+
+        if not ledger_link.local_mode(os.environ):
             from scripts.swarm.keyspace import ROOT
 
-            return f"{ROOT}:hive:{member}:scheduler:{self.machine}:{suffix}"
+            if member := os.environ.get("AGENTIHOOKS_HIVE_ID"):
+                return f"{ROOT}:hive:{member}:scheduler:{self.machine}:{suffix}"
+            return f"{ROOT}:scheduler:{self.machine}:{suffix}"
         return redis_key("scheduler", f"{self.machine}:{suffix}")
 
     def get(self, entry_id: str) -> Entry:
@@ -240,7 +242,11 @@ class Scheduler:
 
     def _deliver(self, entry_id: str, now: float, lease: "Lock") -> None:
         entry = self.get(entry_id).record
-        pending = entry["pending"]
+        pending = entry.get("pending")
+        if pending is None:
+            _log.warning("scheduler skipped stale pending entry %s: no pending details", entry_id)
+            self.update(entry_id, lambda current: None, lease=lease)
+            return
         event = {
             **entry,
             "scheduled_at": pending["scheduled_at"],

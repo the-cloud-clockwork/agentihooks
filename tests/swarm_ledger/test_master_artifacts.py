@@ -8,6 +8,7 @@ import ledger
 import ledger_core as core
 import pytest
 
+from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_artifacts as artifacts
 from scripts.swarm_ledger import ledger_server as server
 from tests.swarm_ledger import legacy_page  # noqa: E402
@@ -20,11 +21,16 @@ CONTENT = b"# Requested audit\n\nDesign and architecture findings.\n"
 
 @pytest.fixture
 def publication(ledger_dir, tmp_path, monkeypatch):
+    import fakeredis
+
     monkeypatch.setitem(sys.modules, "ledger_artifacts", artifacts)
     folder = tmp_path / "ledgers"
     folder.mkdir()
     monkeypatch.setattr(core, "LEDGER_DIR", folder)
     slug = "master-artifacts"
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(slug, str(tmp_path), 1, 0))
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
     html, _ = make_ledger(slug)
     token = legacy_page.stored_token(html)
     core.sync(slug, ops=[{"op": "join", "id": "join", "by": MASTER, "role": "orchestrator"}])

@@ -28,17 +28,17 @@ def test_download_checks_coverage_before_replacing_complete_durations(tmp_path, 
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     dev_durations.main(["3.12", str(restored)])
     if missing == 10:
-        assert json.loads((tmp_path / ".test_durations").read_text()) == candidate
+        assert json.loads((tmp_path / ".test_durations").read_text()) == complete
     else:
         assert (tmp_path / ".test_durations").read_text() == committed
         assert "11 of 100 tests have no stored duration" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("incomplete", ["3.11", "3.12", "*"])
+@pytest.mark.parametrize("incomplete", ["3.12", "*"])
 def test_publication_refuses_incomplete_maps_before_writing_any_file(tmp_path, monkeypatch, incomplete):
     complete = _suite(tmp_path)
     saved = {}
-    for version in ("", "-3.11", "-3.12"):
+    for version in ("", "-3.12"):
         path = tmp_path / f".test_durations{version}"
         path.write_text(json.dumps(complete))
         saved[path] = path.read_bytes()
@@ -70,7 +70,7 @@ def test_recorded_incomplete_durations_are_refused(tmp_path, monkeypatch, capsys
     assert sum(node not in incomplete for node in collected) == 1440
     complete = dict.fromkeys(collected, 1.0)
     saved = json.dumps(complete) + "\n"
-    for suffix in ("", "-3.11", "-3.12"):
+    for suffix in ("", "-3.12"):
         (tmp_path / f".test_durations{suffix}").write_text(saved)
     if seam == "publication":
         monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
@@ -91,7 +91,7 @@ def test_recorded_incomplete_durations_are_refused(tmp_path, monkeypatch, capsys
         monkeypatch.setattr(dev_durations, "collected_tests", lambda root: collected)
         dev_durations.main(["3.12", str(restored)])
         assert "1440 of 12891 tests have no stored duration" in capsys.readouterr().out
-    for suffix in ("", "-3.11", "-3.12"):
+    for suffix in ("", "-3.12"):
         assert (tmp_path / f".test_durations{suffix}").read_text() == saved
 
 

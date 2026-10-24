@@ -39,6 +39,17 @@ def test_status_report_carries_each_agents_transport_capabilities(saved):
     }
 
 
+def test_status_report_carries_only_the_latest_hundred_ended_lives(saved):
+    import json
+
+    store, _ = saved
+    lives = [json.dumps({"name": f"life-{n}", "task": "t1", "ended_at": n}) for n in range(105)]
+    store.redis.rpush(store.key("sw", "history"), *lives)
+
+    history = status.status_report(store, "sw", {"tasks": []})["history"]
+    assert [row["name"] for row in history] == [f"life-{n}" for n in range(5, 105)]
+
+
 def test_status_text_prints_push_inbox_and_native_terminal_per_agent(saved, capsys):
     store, names = saved
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))

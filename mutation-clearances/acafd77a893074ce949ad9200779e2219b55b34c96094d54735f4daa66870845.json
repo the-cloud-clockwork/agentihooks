@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_cache.py:scripts.doctor.ci_cache.x__trim__mutmut_10:4e81261d2938d4759093a87fad8587a01452d1ed76c05713a45659771adb05e4": {
+    "reader": "Standards",
+    "reason": "Omitting strict defaults to False. The mismatch strict=True guards against cannot occur because one STRLEN is queued per key and execute returns that many results or raises."
+  }
+}

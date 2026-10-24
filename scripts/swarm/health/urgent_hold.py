@@ -52,6 +52,7 @@ def findings(store, slug: str) -> list[Finding]:
                 ("it is claimable but remains unclaimed",),
                 "ten minutes",
                 minutes,
+                evidence_identity=(row["since"],),
             )
         )
     return found

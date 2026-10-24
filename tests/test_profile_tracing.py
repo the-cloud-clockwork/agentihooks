@@ -55,3 +55,15 @@ def test_settings_profile_can_disable_all_telemetry(tmp_path):
     (profile / "profile.yml").write_text("otel:\n  enabled: true\n  langfuse:\n    enabled: true\n")
     (overlay / "profile.yml").write_text("otel:\n  enabled: false\n")
     assert langfuse_env([("anton", profile)], overlay) == {"AGENTIHOOKS_LANGFUSE_ENABLED": "0"}
+
+
+def test_agentihooks_langfuse_keys_prefer_the_exporter_names(tmp_path, monkeypatch):
+    from scripts.profile_telemetry import agentihooks_langfuse_keys
+
+    (tmp_path / ".env").write_text("OTEL_LANGFUSE_PUBLIC_KEY=public-exporter\n")
+    (tmp_path / "langfuse.env").write_text("LANGFUSE_PUBLIC_KEY=public-plain\nLANGFUSE_SECRET_KEY=secret-plain\n")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    assert agentihooks_langfuse_keys() == {
+        "OTEL_LANGFUSE_PUBLIC_KEY": "public-exporter",
+        "OTEL_LANGFUSE_SECRET_KEY": "secret-plain",
+    }

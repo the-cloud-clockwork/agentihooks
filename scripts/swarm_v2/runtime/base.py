@@ -12,6 +12,7 @@ LOCAL = "local"
 BACKEND_VARIABLE = "AGENTIHOOKS_RUNTIME_BACKEND"
 DISABLED_VARIABLE = "AGENTIHOOKS_RUNTIME_DISABLED"
 LOCAL_PROFILES = frozenset(("frontend",))
+HIVE_LANES = frozenset(("eng", "ci", "plan", "dispatch"))
 
 
 class Capability(StrEnum):
@@ -30,6 +31,7 @@ class Status(StrEnum):
     UNAVAILABLE = "unavailable"
     UNSUPPORTED = "unsupported"
     REFUSED = "refused"
+    PENDING = "pending"
 
 
 class Unqualified(StrEnum):
@@ -63,7 +65,7 @@ class Placement:
         if lane == "master":
             return self.backend if task.get("id") in self.master_seats() else LOCAL
         profile = (task.get("profile_decision") or {}).get("profile") or task.get("profile")
-        placed = profile not in self.local_profiles and lane in self.lanes
+        placed = not task.get("workstation") and profile not in self.local_profiles and lane in self.lanes
         return self.backend if placed else LOCAL
 
 
@@ -95,6 +97,12 @@ class Runtime(Protocol):
     def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome: ...
 
     def recover(self, agent: AgentRecord, mode: Recovery, config: Any, text: str) -> Outcome: ...
+
+
+class NamedRuntime(Runtime, Protocol):
+    def find(self, name: str) -> Outcome: ...
+
+    def reap(self, name: str) -> Outcome: ...
 
 
 def foreign(runtime: Runtime, operation: str, agent: AgentRecord) -> Outcome | None:

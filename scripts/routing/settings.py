@@ -32,6 +32,7 @@ VALIDATORS = {
     "master-account-codex": _name,
     "master-tier-claude": _name,
     "master-tier-codex": _name,
+    **{f"master-account-claude-{slot}": _name for slot in range(2, 6)},
 }
 DEFAULTS = {"claude-api-weight": 0, "codex-api-weight": 0}
 

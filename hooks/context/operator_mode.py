@@ -17,8 +17,8 @@ WINDOW_SEC = 1800
 QUIET_EVERY = 2
 QUIET_WORDS = 20
 REMINDER = "Operator not present: replies stay within {words} words."
-SWITCH = re.compile(r"operator (on|off)\b")
-ON_NOTICE = "Operator on: the operator is present in this pane until the idle timer expires or he types operator off."
+SWITCH = re.compile(r"(?<![\w-])operator (on|off)(?![\w-])")
+ON_NOTICE = "Operator on: the operator is present in this pane until he types operator off or the session restarts."
 OFF_NOTICE = "Operator off: the operator is not present in this pane."
 TURN_NOTICE = "Operator present for this turn: reply without a word limit."
 QUESTION_TOOL = "AskUserQuestion"
@@ -65,8 +65,8 @@ def _on(state, now):
 
 
 def switch(prompt):
-    found = SWITCH.match(" ".join(str(prompt).lower().split()))
-    return found.group(1) if found else ""
+    words = SWITCH.findall(" ".join(str(prompt).lower().split()))
+    return "off" if "off" in words else "on" if words else ""
 
 
 def _turn(state, now):
@@ -85,13 +85,20 @@ def observe(session_id, prompt, typed, now=None):
         if word or (typed and _on(state, now)):
             state.update(on=word != "off", at=now)
         state["turn_at"] = now if typed and word != "off" else None
-        if word == "off":
-            operator_expiry.cancel(session_id, state)
-        elif typed and state.get("on"):
-            operator_expiry.start(session_id, state, now)
-        else:
-            _save(session_id, state)
+        operator_expiry.cancel(session_id, state)
     return word
+
+
+def reset(payload: dict) -> None:
+    from hooks.context import operator_expiry
+
+    session_id = payload.get("session_id")
+    if not session_id or payload.get("source") == "compact":
+        return
+    with operator_expiry.state_lock(session_id):
+        state = _load(session_id)
+        state.update(on=False, turn_at=None)
+        operator_expiry.cancel(session_id, state)
 
 
 def notice(payload, typed, now=None):

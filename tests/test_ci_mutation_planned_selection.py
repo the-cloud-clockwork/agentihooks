@@ -1,6 +1,7 @@
 import json
 import subprocess
 import time
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -124,6 +125,86 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
         assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {"scripts/core.py": tests}
 
 
+@pytest.mark.parametrize(
+    "failures, error",
+    [
+        (1, subprocess.CalledProcessError(1, ["gh"], stderr=b"gh: Server Error (HTTP 502)\n")),
+        (2, subprocess.CalledProcessError(1, ["gh"], stderr=b"gh: Server Error (HTTP 502)\n")),
+        (2, subprocess.TimeoutExpired(["gh"], 60)),
+        (2, zipfile.BadZipFile("File is not a zip file")),
+        (2, json.JSONDecodeError("Expecting value", "", 0)),
+        (2, KeyError("There is no item named 'manifest.json' in the archive")),
+    ],
+)
+def test_plan_retries_an_unreadable_record_once_then_selects_every_test(tmp_path, monkeypatch, capsys, failures, error):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests/nested").mkdir(parents=True)
+    (tmp_path / "scripts/core.py").write_text("def judge(value):\n    return value + 1\n")
+    (tmp_path / "tests/test_helper.py").write_text("import json\n")
+    (tmp_path / "tests/test_core.py").write_text("from scripts.core import judge\n")
+    (tmp_path / "tests/nested/test_deep.py").write_text("import os\n")
+    (tmp_path / "tests/helpers.py").write_text("import os\n")
+    (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
+    manifest = {
+        "units": ["scripts/core.py::judge"],
+        "tests": {"tests/test_helper.py::test_judge": {"units": [0]}},
+    }
+    calls, pauses = [], []
+
+    def record(repository, before):
+        calls.append((repository, before))
+        if len(calls) <= failures:
+            raise error
+        return {"id": 7}, manifest
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.setattr("sys.argv", ["plan", "--repository", "owner/repo"])
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/core.py": {2}})
+    monkeypatch.setattr(plan, "find_record", record)
+    monkeypatch.setattr(plan.time, "sleep", pauses.append)
+    assert plan.main() == 0
+    assert [repository for repository, _ in calls] == ["owner/repo", "owner/repo"]
+    assert calls[0][1] == calls[1][1]
+    assert pauses == [plan.RECORD_RETRY_SECONDS]
+    selected = json.loads((tmp_path / ".mutation-selection.json").read_text())["scripts/core.py"]
+    out = capsys.readouterr().out
+    reason = plan.record_failure(error)
+    assert f"Reading the recorded dev coverage failed on attempt 1: {reason}" in out
+    if failures == 1:
+        assert selected == ["tests/test_core.py", "tests/test_helper.py"]
+        assert "Recorded coverage from dev run 7 adds the tests that executed a changed function." in out
+        assert "selection fallback" not in out
+    else:
+        assert selected == ["tests/nested/test_deep.py", "tests/test_core.py", "tests/test_helper.py"]
+        assert f"Reading the recorded dev coverage failed on attempt 2: {reason}" in out
+        assert (
+            "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"
+            f" test module is selected for each changed file: {reason}"
+        ) in out.splitlines()
+
+
+def test_record_failure_names_the_gh_error_text():
+    error = subprocess.CalledProcessError(1, ["gh"], stderr=b"gh: Server Error (HTTP 502)\n")
+    assert plan.record_failure(error) == "CalledProcessError: gh: Server Error (HTTP 502)"
+    assert plan.record_failure(zipfile.BadZipFile("File is not a zip file")) == "BadZipFile: File is not a zip file"
+    assert plan.record_failure(KeyError("manifest.json")) == "KeyError: 'manifest.json'"
+    garbled = subprocess.CalledProcessError(1, ["gh"], stderr=b"gh: bad \xff byte\n")
+    assert plan.record_failure(garbled) == "CalledProcessError: gh: bad � byte"
+
+
+def test_every_test_selection_passes_the_planner_contracts_on_this_tree():
+    root = Path(__file__).resolve().parent.parent
+    everything = plan.every_test(root)
+    assert set(everything) >= {
+        path for source in ("scripts/ci_mutation/plan.py",) for path in plan.select_tests(root, Path(source))
+    }
+    assert all(Path(path).name.startswith("test_") for path in everything)
+    plan.validate_tests(root, everything)
+
+
 def test_refine_grades_the_planned_selection_without_selecting_again(tmp_path, monkeypatch):
     from scripts.ci_mutation import measured
 
@@ -208,6 +289,126 @@ def test_a_changed_line_selects_only_the_tests_whose_recorded_coverage_reaches_i
     _, _, tests = plan.estimate(tmp_path, {"scripts/core.py": {line}}, selection, manifest)
     assert selection == {"scripts/core.py": NARROWED}
     assert tests == NARROWED
+
+
+def _line_project(tmp_path, monkeypatch, mode):
+    from coverage import CoverageData
+
+    from tests.dep_manifest import build
+
+    _recorded_project(tmp_path, monkeypatch)
+    source = "def f(value):\n    if value:\n        return value + 1\n    return value - 1\n"
+    if mode == "repeated":
+        source = "def f(value):\n    if value:\n        value += 1\n" + "    pass\n" * 300
+    (tmp_path / "scripts/core.py").write_text(source)
+    (tmp_path / "scripts/helper.py").write_text("from scripts.core import f\n")
+    (tmp_path / "scripts/aaa.py").write_text("def other():\n    return 1\n")
+    (tmp_path / "scripts/settings.json").write_text("{}")
+    (tmp_path / "tests/test_helper.py").write_text("from scripts.helper import f\n\ndef test_helper():\n    pass\n")
+    commit = _commit(tmp_path, "shared function")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    for test, lines in (
+        ("tests/test_core.py::test_f", [2, 3]),
+        ("tests/test_core.py::test_g[1]", [2, 4]),
+        ("tests/test_core.py::test_other", [2, 3]),
+        ("tests/test_core.py::TestSpawn::test_child", [2, 3]),
+        ("tests/test_helper.py::test_helper", [2, 4]),
+    ):
+        if mode == "repeated":
+            lines = [2, *range(4, 304)]
+            if test.endswith(("test_f", "test_helper")):
+                lines.append(3)
+        data.set_context(f"{test}|run")
+        path = (
+            "scripts/aaa.py"
+            if mode in {"separate", "deleted", "dependency"} and test.endswith("test_other")
+            else "scripts/core.py"
+        )
+        data.add_lines({str(tmp_path / path): lines if path.endswith("core.py") else [2]})
+    data.write()
+    manifest = build(tmp_path / ".coverage", [], tmp_path, commit, "test")
+    return manifest, source
+
+
+def _line_contexts(tmp_path, manifest, mode):
+    if mode == "legacy":
+        del manifest["lines"]
+    elif mode == "missing":
+        del manifest["lines"]["tests/test_core.py::test_other"]
+    elif mode == "parameter":
+        manifest["tests"]["tests/test_core.py::test_g[2]"] = {"units": [], "files": [], "escapes": False}
+    if mode == "data":
+        manifest["tests"]["tests/test_core.py::test_other"]["files"] = ["scripts/settings.json"]
+        (tmp_path / "scripts/settings.json").write_text('{"changed": true}')
+    if mode == "separate":
+        del manifest["tests"]["tests/test_core.py::test_other"]["files"]
+    if mode == "new":
+        (tmp_path / "scripts/fresh.py").write_text("def fresh():\n    return 1\n")
+    elif mode == "deleted":
+        (tmp_path / "scripts/aaa.py").unlink()
+    elif mode == "dependency":
+        (tmp_path / "scripts/aaa.py").write_text("def other():\n    return 2\n")
+
+
+@pytest.mark.parametrize("shift", [0, 2])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "line",
+        "legacy",
+        "missing",
+        "inserted",
+        "header",
+        "parameter",
+        "drift",
+        "separate",
+        "data",
+        "module",
+        "new",
+        "deleted",
+        "trailing",
+        "dependency",
+        "repeated",
+    ],
+)
+def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, monkeypatch, shift, mode):
+    manifest, source = _line_project(tmp_path, monkeypatch, mode)
+    _line_contexts(tmp_path, manifest, mode)
+    new = source.replace("value - 1", "value - 2")
+    if mode == "drift":
+        new = source.replace("value + 1", "value + 2")
+    elif mode == "module":
+        new = source + "\nSETTING = 1\n"
+    elif mode == "trailing":
+        new = source + "\n"
+    elif mode == "repeated":
+        new = source.replace("value += 1", "value += 2")
+    if mode == "header":
+        new = new.replace("def f(value)", "def f(value=1)")
+    if mode == "inserted":
+        new = new.replace("    return value - 2", "    value += 1\n    return value - 2")
+    (tmp_path / "scripts/core.py").write_text("\n" * shift + new)
+    _commit(tmp_path, "edited branch")
+    selection = {}
+    line = 3 if mode == "repeated" else 4
+    plan.estimate(tmp_path, {"scripts/core.py": {line + shift}}, selection, manifest)
+    expected = ["tests/test_core.py::test_g"]
+    if mode in {"legacy", "inserted", "header", "drift", "module"}:
+        expected = [
+            f"tests/test_core.py::{name}" for name in ("TestSpawn::test_child", "test_f", "test_g", "test_other")
+        ]
+    elif mode in {"missing", "parameter"}:
+        expected = ["tests/test_core.py"]
+    elif mode in {"data", "deleted", "dependency"}:
+        expected.append("tests/test_core.py::test_other")
+    elif mode == "repeated":
+        expected = ["tests/test_core.py::test_f"]
+    assert selection["scripts/core.py"] == [
+        *expected,
+        "tests/test_edited.py",
+        "tests/test_fresh.py",
+        "tests/test_helper.py::test_helper",
+    ]
 
 
 def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monkeypatch):

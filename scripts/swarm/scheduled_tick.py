@@ -4,6 +4,7 @@ import fcntl
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -52,6 +53,12 @@ def _live(scheduler: Scheduler, entry_id: str) -> bool:
         return False
 
 
+def cancel(scheduler: Scheduler) -> None:
+    for entry in scheduler.owned(OWNER):
+        entry.cancel()
+    scheduler.redis.delete(scheduler.key("swarm-tick"))
+
+
 def fire(event: dict, delivery_id: str, redis: "Redis") -> None:
     directory = runtime_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -85,6 +92,13 @@ def undelivered(scheduler: Scheduler, installed: Path | str, now: float) -> str:
     if age > FRESH_S:
         return f"the last swarm tick was delivered {int(age)} seconds ago"
     return ""
+
+
+def delivered_at(scheduler: Scheduler) -> float:
+    try:
+        return float(json.loads(scheduler.redis.get(scheduler.key(DELIVERED)))["at"])
+    except (ValueError, KeyError, TypeError):
+        return 0.0
 
 
 def command(binary: str) -> list[str]:
@@ -158,6 +172,33 @@ def _delivered(at: float) -> None:
         record(Scheduler(redis_client()), ROOT, at)
     except RedisError as exc:
         print(f"the swarm tick delivery could not be recorded: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+
+def _held(name: str) -> bool:
+    try:
+        with machine_lock(name):
+            return False
+    except AlreadyRunning:
+        return True
+
+
+def restart(
+    kill: Callable[[int, int], None] = os.kill,
+    schedule: Callable[[], bool] | None = None,
+    wait: Callable[[float], None] = time.sleep,
+) -> str:
+    """The supervisor runs the code it started from, so a restart from the installed watcher replaces stale code."""
+    if _held("supervisor"):
+        kill(int((runtime_dir() / "supervisor.lock").read_text()), signal.SIGTERM)
+        for _ in range(STOP_S):
+            if not _held("supervisor"):
+                break
+            wait(1)
+    if schedule is None:
+        from scripts.swarm import timer
+
+        schedule = timer.schedule
+    return "restarted the scheduler tick" if schedule() else "restarted the scheduler, but the tick did not register"
 
 
 if __name__ == "__main__":

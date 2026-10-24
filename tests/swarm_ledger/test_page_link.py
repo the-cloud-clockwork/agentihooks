@@ -16,7 +16,7 @@ CONTENT = {"title": "Link", "overview": "o", "phases": [{"title": "p", "descript
 def up(monkeypatch):
     monkeypatch.setenv("LEDGER_HOST", "10.0.0.5")
     monkeypatch.setenv("LEDGER_PORT", "9911")
-    monkeypatch.setattr(ledger_link, "serving", lambda: str(ledger_link.folder()))
+    monkeypatch.setattr(ledger_link, "serving", lambda **kw: str(ledger_link.folder()))
 
 
 def test_the_link_comes_from_the_configured_host_port_and_slug(up):
@@ -27,7 +27,7 @@ def test_the_link_comes_from_the_configured_host_port_and_slug(up):
 
 
 def test_a_silent_server_is_named_with_the_command_that_starts_it(up, monkeypatch):
-    monkeypatch.setattr(ledger_link, "serving", lambda: None)
+    monkeypatch.setattr(ledger_link, "serving", lambda **kw: None)
     line = ledger_link.page_line("my-plan")
     assert line.startswith("Ledger page: http://10.0.0.5:9911/my-plan")
     assert "not answering" in line and ledger_link.START in line

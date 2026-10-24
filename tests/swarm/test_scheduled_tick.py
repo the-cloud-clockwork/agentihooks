@@ -311,3 +311,34 @@ def test_an_unreadable_delivery_record_counts_as_undelivered(raw):
     assert scheduled_tick.undelivered(here, "/installed", MINUTE_START) == (
         f"the swarm tick delivery record is unreadable: {raw}"
     )
+
+
+def test_the_delivery_time_reads_the_record_and_zero_without_one():
+    from scripts.scheduler.core import Scheduler
+
+    here = Scheduler(_scheduler().redis)
+    assert scheduled_tick.delivered_at(here) == 0.0
+    scheduled_tick.record(here, "/installed", MINUTE_START)
+    assert scheduled_tick.delivered_at(here) == MINUTE_START
+
+
+@pytest.mark.parametrize("raw", ["not json", '{"root": "/installed"}', '["/installed"]', '{"at": "x"}', '{"at": null}'])
+def test_an_unreadable_delivery_record_has_no_delivery_time(raw):
+    from scripts.scheduler.core import Scheduler
+
+    here = Scheduler(_scheduler().redis)
+    here.redis.set(here.key(scheduled_tick.DELIVERED), raw)
+    assert scheduled_tick.delivered_at(here) == 0.0
+
+
+def test_a_minute_due_while_the_supervisor_recycles_fires_once_on_the_restarted_runner(monkeypatch):
+    scheduler = _scheduler()
+    entry_id = scheduled_tick.ensure(scheduler)
+    due = scheduler.get(entry_id).record["due"]
+    fired = []
+    monkeypatch.setattr(scheduled_tick, "fire", lambda event, delivery_id, redis: fired.append(event["scheduled_at"]))
+    assert scheduler.run_due(now=due - 1) == 0
+    assert scheduler.run_due(now=due + 30) == 1
+    assert scheduler.run_due(now=due + 31) == 0
+    assert fired == [due]
+    assert scheduler.get(entry_id).record["due"] == due + 60

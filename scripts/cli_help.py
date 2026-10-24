@@ -33,6 +33,10 @@ Commands:
         AGENTIHOOKS_AICODE_TOKEN_REFRESH=true into the managed token block, and optionally
         store the token in OpenBao secret/agentihooks/codex-creds.
 
+    agentihooks codex logout <slug> [--openbao|--no-openbao]
+        Remove AH_CX_TOKEN_<slug> and AH_CX_REFRESH_<slug> from OpenBao, the account's Codex
+        folder, and its export from the managed token block.
+
     agentihooks codex refresh [--force SLUG] [--days N]
         Renew Codex access tokens on the refresh authority (AGENTIHOOKS_AICODE_TOKEN_REFRESH=true;
         store AGENTIHOOKS_AICODE_TOKEN_STORE=local|openbao).

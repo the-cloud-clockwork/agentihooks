@@ -1,4 +1,4 @@
-# Excluded paths beside /scripts/scheduler/ hold a timed job awaiting its move onto the scheduler, or a daemon loop paced by its own reconnect or event wait.
+# Excluded paths beside /scripts/scheduler/ hold a timed job awaiting its move onto the scheduler, a daemon loop paced by its own reconnect or event wait, or a bounded retry wrapper around one CI call.
 rules:
   - id: machine-timer-unit
     message: A systemd timer unit schedules work outside the agentihooks scheduler. Register the job with scripts.scheduler instead.
@@ -49,6 +49,7 @@ rules:
                   metavariable: $SLEEP
                   regex: (.*\.)?(sleep|wait)$
           - pattern: $EVENT.wait(..., timeout=$ARG, ...)
+      - pattern-not: scripts.scheduler.process_timer.wait(...)
       - pattern-not-inside: |
           try:
               ...
@@ -713,4 +714,4 @@ rules:
     pattern-regex: '\bwhile\s+sleep\b[^\n]*;\s*do\b|\b(?:while\s+(?:true|:|\[\[?\s*1\s*\]\]?)|until\s+false)\s*;?\s*do\b(?:(?!\bdone\b)[\s\S])*\bsleep\b(?:(?!\bdone\b)[\s\S])*\bdone\b'
     paths:
       include: ["*.sh", "*.bash", "Dockerfile*"]
-      exclude: [/scripts/scheduler/, /.github/coverage/sonar-retry.sh]
+      exclude: [/scripts/scheduler/, /.github/coverage/sonar-retry.sh, /.github/scripts/pypi-retry.sh]

@@ -21,7 +21,7 @@ def workflow():
 
 
 def steps(workflow):
-    return [step for job in workflow["jobs"].values() for step in job["steps"]]
+    return workflow["jobs"]["image"]["steps"]
 
 
 def named(workflow, name):

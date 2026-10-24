@@ -1,6 +1,7 @@
 import copy
 
 from scripts.doctor import handoffs
+from scripts.swarm.health.findings import Finding
 from tests.doctor.recorded import load
 
 
@@ -40,3 +41,42 @@ def test_planted_fault_a_successor_asking_what_the_handoff_answered_is_raised():
     assert found.id == f"reasked-handoff/{planted['to']}"
     assert found.measure == 1
     assert any(line.startswith("message q1 to master@x") for line in found.evidence)
+
+
+def _bare(**fields):
+    return {
+        "seat": "",
+        "task": "doc-79030d0c5613b0f2",
+        "from": "",
+        "to": "",
+        "at": 0,
+        "document": "",
+        "recaps": [],
+        "asked": [],
+        **fields,
+    }
+
+
+def test_a_handoff_without_seat_or_sender_is_reported_apart_naming_its_task():
+    assert handoffs.missing_recap([_bare()]) == [
+        Finding(
+            "unattributed handoff",
+            "doc-79030d0c5613b0f2",
+            "handoff record names no seat and no sender",
+            ("task doc-79030d0c5613b0f2 with no seat on record", "no sender on record", "successor not started yet"),
+            "every handoff names its seat or its sender",
+            1,
+        )
+    ]
+    [found] = handoffs.missing_recap([_bare(to="engineer@x-2")])
+    assert found.id == "unattributed-handoff/doc-79030d0c5613b0f2"
+    assert found.evidence[2] == "successor engineer@x-2"
+
+
+def test_a_handoff_with_only_its_seat_or_only_its_sender_stays_a_missing_recap():
+    found = handoffs.missing_recap([_bare(), _bare(seat="eng-1@x"), _bare(**{"from": "engineer@x-1"})])
+    assert [f.id for f in found] == [
+        "unattributed-handoff/doc-79030d0c5613b0f2",
+        "missing-recap/eng-1@x",
+        "missing-recap/engineer@x-1",
+    ]

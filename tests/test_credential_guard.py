@@ -8,7 +8,15 @@ import json
 
 import pytest
 
-from hooks.context.credential_guard import ENV_NAMES_SAFE, GREP_EXCLUDES, RG_EXCLUDES, decide, evaluate
+from hooks.context.credential_guard import (
+    ENV_NAMES_SAFE,
+    GREP_EXCLUDES,
+    KIND_ENVIRONMENT,
+    RG_EXCLUDES,
+    block,
+    decide,
+    evaluate,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -137,6 +145,94 @@ CASES = [
     ("kubectl secret yaml", {"tool_name": "Bash", "tool_input": {"command": "kubectl get secret db -o yaml"}}, True),
     ("kubectl secret list", {"tool_name": "Bash", "tool_input": {"command": "kubectl get secrets -n prod"}}, False),
     ("kubectl describe secret", {"tool_name": "Bash", "tool_input": {"command": "kubectl describe secret db"}}, False),
+    ("access env printed", {"tool_name": "Bash", "tool_input": {"command": "agentihooks access env"}}, True),
+    (
+        "access env module printed",
+        {"tool_name": "Bash", "tool_input": {"command": "/v/bin/python -m scripts.access_env env | cat"}},
+        True,
+    ),
+    (
+        "access env captured",
+        {"tool_name": "Bash", "tool_input": {"command": 'x="$(agentihooks access env)"; echo "$x"'}},
+        True,
+    ),
+    (
+        "access env evaluated",
+        {"tool_name": "Bash", "tool_input": {"command": 'eval "$(agentihooks access env)" && test -n "$A"'}},
+        False,
+    ),
+    (
+        "access env module evaluated",
+        {"tool_name": "Bash", "tool_input": {"command": 'eval "$(/v/bin/python -m scripts.access_env env)"'}},
+        False,
+    ),
+    (
+        "access env evaluated then printed",
+        {"tool_name": "Bash", "tool_input": {"command": 'eval "$(agentihooks access env)"; agentihooks access env'}},
+        True,
+    ),
+    ("access help", {"tool_name": "Bash", "tool_input": {"command": "agentihooks access envelope"}}, False),
+    (
+        "access env called from python",
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "python3 -c 'from scripts import access_env; access_env.main([\"env\"])'"},
+        },
+        True,
+    ),
+    (
+        "access env values from python",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c 'print(access_env.values (env))'"}},
+        True,
+    ),
+    (
+        "access env source linted",
+        {"tool_name": "Bash", "tool_input": {"command": "ruff check scripts/access_env.py"}},
+        False,
+    ),
+    (
+        "python calls env helper",
+        {"tool_name": "Bash", "tool_input": {"command": 'python3 -c "auth.env_text(record)"'}},
+        False,
+    ),
+    (
+        "python references env attribute",
+        {"tool_name": "Bash", "tool_input": {"command": 'python3 -c "print(auth.env_name)"'}},
+        False,
+    ),
+    (
+        "python references credential attribute",
+        {"tool_name": "Bash", "tool_input": {"command": 'python3 -c "print(auth.netrc_path)"'}},
+        False,
+    ),
+    (
+        "python reads member dotenv",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('auth.env').read())\""}},
+        True,
+    ),
+    (
+        "python reads dotenv beside helper call",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"auth.env_text(open('/app/auth.env').read())\""}},
+        True,
+    ),
+    (
+        "python reads named dotenv variant",
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "python3 -c \"print(open('/app/.env.production-local').read())\""},
+        },
+        True,
+    ),
+    (
+        "python reads shell config",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('/home/user/.bashrc').read())\""}},
+        True,
+    ),
+    (
+        "python reads credential file",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('/home/user/.netrc').read())\""}},
+        True,
+    ),
     (
         "python opens dotenv",
         {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('.env').read())\""}},
@@ -232,6 +328,19 @@ def test_guard_never_raises_on_garbage():
     for payload in ({}, {"tool_name": None}, {"tool_input": "notadict"}, {"tool_name": "Bash", "tool_input": None}):
         decide(payload)
         evaluate(payload, allow_rewrite=True)
+
+
+def test_access_env_block_names_the_token_and_the_eval_form():
+    reason = decide({"tool_name": "Bash", "tool_input": {"command": "agentihooks access env"}})
+
+    assert reason == (
+        block("printing the Cloudflare Access service token (agentihooks access env)", KIND_ENVIRONMENT)
+        + '\nEvaluate it instead:  eval "$(agentihooks access env)", then test each variable by name.'
+    )
+    assert reason.startswith("BLOCKED: printing the Cloudflare Access service token (agentihooks access env).\n")
+    assert reason != block("printing the Cloudflare Access service token (agentihooks access env)", None) + (
+        '\nEvaluate it instead:  eval "$(agentihooks access env)", then test each variable by name.'
+    )
 
 
 def _bash(command, cwd=""):
@@ -509,3 +618,97 @@ class TestRunsOnEveryTarget:
 
     def test_template_files_still_readable(self):
         assert decide({"tool_name": "Bash", "tool_input": {"command": "cat .env.example"}}) is None
+
+
+PROC_ENVIRON_READS = [
+    "tr '\\0' '\\n' < /proc/12345/environ | grep ^AGENTIHOOKS_SWARM",
+    "cat /proc/self/environ",
+    "cat /proc/$PID/environ",
+    "strings /proc/1/environ",
+    "grep -a REDIS /proc/1/environ",
+    "xargs -0 -n1 -a /proc/1/environ echo",
+    "ls /proc/*/environ | xargs cat",
+    "python3 -c \"print(open('/proc/1/environ').read())\"",
+    "python3 -c \"import os; print(open(os.path.join('/proc', '1', 'environ')).read())\"",
+    "cd /proc/1 && cat environ",
+    "while read -d '' l; do echo $l; done < /proc/thread-self/environ",
+    "python3 <<'EOF'\nprint(open(f'/proc/{1}/environ').read())\nEOF",
+    "cat /proc/1/envi*",
+    "cat /proc/1/envir?n",
+    "cat /proc/1/env''iron",
+    "cat /proc/1/env\\iron",
+    "f=environ; cat /proc/1/$f",
+    "cat /proc/1/*",
+    "cat /proc/1/env[i]ron",
+    "a=envi; b=ron; cat /proc/1/$a$b",
+    "cat /proc/1/$(printf envi)ron",
+    "cat /proc/1/`printf envi`ron",
+    "cd /proc/1 && cat e*",
+    "cd /proc/1; cat *",
+    "pushd /proc/self && cat env*",
+    "cd -- /proc/1 && cat e*",
+    "cd -L /proc/1 && cat e*",
+    "cd /p*/1 && cat e*",
+    "cd /p*c/1 && cat environ",
+    "cat /p*c/1/environ|head",
+    "cat /proc/1/envi*|tr '\\0' '\\n'",
+    "cat /proc/1/env[i]ron;echo",
+    "cat $(cat /pr?c/self/environ)",
+    "cat /p*c/1/environ",
+    "cat /pr?c/self/environ",
+    "cat /pr[o]c/1/environ",
+    "P=/pro; cat ${P}c/1/environ",
+]
+
+PROC_ALLOWED = [
+    "cat /proc/meminfo",
+    "python3 -c \"import os; print(os.listdir('/proc/1'))\"",
+    'test -n "${REDIS_URL:-}" && echo set || echo unset',
+    "ls /proc/1/status",
+    "cat /proc/*/status",
+    "test -d /proc/$pid && echo alive",
+    "cd /home/x/procs && cat e*",
+    "cd Xproc && cat environ",
+    "cat build/environ",
+]
+
+
+class TestProcEnvironReads:
+    @pytest.mark.parametrize("command", PROC_ENVIRON_READS)
+    def test_read_is_refused_with_the_leak_free_alternative(self, command):
+        verdict = decide(_bash(command))
+        assert verdict is not None
+        assert verdict.splitlines()[0] == "BLOCKED: reading a process environment file under /proc."
+        assert 'test -n "${VAR:-}"' in verdict
+        assert ENV_NAMES_SAFE in verdict
+
+    @pytest.mark.parametrize("command", PROC_ALLOWED)
+    def test_neighbouring_commands_still_pass(self, command):
+        assert decide(_bash(command)) is None
+
+    @pytest.mark.parametrize("command", ["cat environ", "cat envi*", "cat $f", "cat *"])
+    def test_read_from_a_proc_working_directory_is_refused(self, command):
+        verdict = decide(_bash(command, cwd="/proc/1"))
+        assert verdict is not None
+        assert ENV_NAMES_SAFE in verdict
+
+    def test_a_proc_working_directory_still_allows_other_files(self):
+        assert decide(_bash("cat status", cwd="/proc/1")) is None
+        assert decide(_bash("cat environ", cwd="/srv/procfiles")) is None
+
+    @pytest.mark.parametrize("path", ["/proc/1/environ", "//proc/1/environ"])
+    def test_read_tool_on_proc_environ_is_refused(self, path):
+        verdict = decide({"tool_name": "Read", "tool_input": {"file_path": path}})
+        assert verdict is not None
+        assert ENV_NAMES_SAFE in verdict
+
+    @pytest.mark.parametrize("path", ["docs/environ", "proc/1/environ", "/X/proc/1/environ"])
+    def test_read_tool_on_an_environ_file_elsewhere_passes(self, path):
+        assert decide({"tool_name": "Read", "tool_input": {"file_path": path}}) is None
+
+    def test_grep_tool_on_proc_environ_is_refused(self):
+        verdict = decide({"tool_name": "Grep", "tool_input": {"pattern": "REDIS", "path": "/proc/1/environ"}})
+        assert verdict is not None
+        assert verdict.splitlines()[0] == "BLOCKED: searching the contents of /proc/1/environ."
+        assert 'test -n "${VAR:-}"' in verdict
+        assert ENV_NAMES_SAFE in verdict

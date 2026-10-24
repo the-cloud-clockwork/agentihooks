@@ -185,6 +185,130 @@ def test_changed_pytest_selection_cannot_reuse_a_full_collection(tmp_path, monke
     assert (root / ".collection-runs").read_text() == "xx"
 
 
+def test_collection_splits_across_processes_and_matches_one_process(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(
+        tmp_path / "tree",
+        {
+            "test_a.py": SUITE,
+            "alpha/test_x.py": OTHER,
+            "helpers/__init__.py": "",
+            "test_m.py": OTHER.replace("test_c", "test_m"),
+            "zeta/inner/test_z.py": SUITE,
+            "conftest.py": "import os\nwith open('pids', 'a') as out:\n    out.write(f'{os.getpid()}\\n')\n",
+        },
+    )
+    single = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "tests/"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    expected = [line for line in single.stdout.splitlines() if "::" in line]
+    (root / "pids").unlink()
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 3)
+    assert count_floor.collect_all({"head": root}, "tests/") == {"head": expected}
+    assert len(expected) == 8
+    assert len(set((root / "pids").read_text().split())) == 3
+
+
+def test_collection_groups_are_contiguous_runs_weighted_by_test_files(tmp_path, monkeypatch):
+    from tests.count_floor import collection_groups
+
+    root = (
+        _tree(
+            tmp_path,
+            {
+                "__init__.py": "",
+                "conftest.py": "",
+                "alpha/test_x.py": OTHER,
+                "alpha/test_y.py": OTHER,
+                "beta/data.txt": "",
+                "notes.txt": "",
+                "test_a.py": SUITE,
+                "test_b.py": OTHER,
+                "test_data.json": "",
+            },
+        )
+        / "tests"
+    )
+    shared = ["__init__.py", "conftest.py"]
+    assert collection_groups(root, 2) == [
+        [*shared, "alpha", "beta", "notes.txt"],
+        [*shared, "test_a.py", "test_b.py", "test_data.json"],
+    ]
+    assert collection_groups(root, 3) == [
+        [*shared, "alpha", "beta", "notes.txt"],
+        [*shared, "test_a.py"],
+        [*shared, "test_b.py", "test_data.json"],
+    ]
+    assert collection_groups(root, 1) == [
+        [*shared, "alpha", "beta", "notes.txt", "test_a.py", "test_b.py", "test_data.json"]
+    ]
+    assert collection_groups(tmp_path / "missing", 4) == [shared]
+    listed = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda path: reversed(list(listed(path))))
+    assert collection_groups(root, 2)[0] == [*shared, "alpha", "beta", "notes.txt"]
+
+
+def test_each_collected_side_shares_the_processes(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    files = {
+        "alpha/test_x.py": OTHER,
+        "test_a.py": SUITE,
+        "test_m.py": OTHER.replace("test_c", "test_m"),
+        "zeta/test_z.py": SUITE,
+        "conftest.py": "import os\nwith open('pids', 'a') as out:\n    out.write(f'{os.getpid()}\\n')\n",
+    }
+    trees = {side: _tree(tmp_path / side, files) for side in ("base", "head")}
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 4)
+    collected = count_floor.collect_all(trees, "tests/")
+    assert len(collected["base"]) == len(collected["head"]) == 8
+    assert [len(set((tree / "pids").read_text().split())) for tree in trees.values()] == [2, 2]
+
+
+def test_one_failed_group_fails_the_whole_side(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(tmp_path, {"alpha/test_x.py": "raise RuntimeError('collection fails')\n", "test_a.py": SUITE})
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 2)
+    assert count_floor.collect_all({"head": root}, "tests/") == {"head": None}
+
+
+def test_groups_that_overlap_fail_the_side_instead_of_inflating_the_count(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(tmp_path, {"test_a.py": SUITE, "test_b.py": OTHER})
+    every = ["__init__.py", "conftest.py", "test_a.py", "test_b.py"]
+    monkeypatch.setattr(count_floor, "collection_groups", lambda root, count: [every, every])
+    assert count_floor.collect_all({"head": root}, "tests/") == {"head": None}
+
+
+def test_a_group_that_collects_no_tests_adds_nothing(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(tmp_path, {"test_a.py": SUITE, "test_empty.py": "x = 1\n"})
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 2)
+    assert count_floor.collection_groups(root / "tests", 2)[1][-1] == "test_empty.py"
+    assert count_floor.collect_all({"head": root}, "tests/") == {
+        "head": ["tests/test_a.py::test_a", "tests/test_a.py::test_b[1]", "tests/test_a.py::test_b[2]"]
+    }
+
+
+def test_collection_processes_follow_the_cpu_quota(monkeypatch):
+    import scripts.ci_cpu_quota as quota
+    from tests.count_floor import collection_processes
+
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(6)))
+    monkeypatch.setattr(quota, "quota_cpus", lambda: 2.5)
+    assert collection_processes() == 2
+    monkeypatch.setattr(quota, "quota_cpus", lambda: None)
+    assert collection_processes() == 6
+
+
 def _recorded_floor(tmp_path, base_files, head_files, recorded, environ=None):
     base = _collection_tree(tmp_path / "b")
     for name, text in base_files.items():

@@ -1,0 +1,6 @@
+{
+  "scripts/hive/launch.py:scripts.hive.launch.x\u01c1HiveLaunch\u01c1select__mutmut_36:20d4864b62bd6883b1928f2c5d21b38c2fbe5da9001050d4234eac0b7123a67e": {
+    "reader": "standards_reader",
+    "reason": "Equivalent. On a successful selection _record_wait receives a Selection, so reason is empty. placement_waits.observe reads lane only in its if reason branch and always runs the same hdel for the task. Passing None for lane changes neither Redis state nor the returned Selection."
+  }
+}

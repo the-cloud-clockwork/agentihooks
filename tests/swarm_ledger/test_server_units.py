@@ -123,7 +123,9 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
     monkeypatch.setattr(server.legacy, "adopt", adopted.append)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     server.serve()
-    assert threads == [{"target": server.watch_ledgers, "daemon": True}]
+    assert [thread["daemon"] for thread in threads] == [True, True]
+    assert threads[0]["target"] is server.adopt_disk_files
+    assert threads[1]["target"].__wrapped__ is server.watch_ledgers
     assert adopted == [server.stored]
 
 
@@ -178,10 +180,9 @@ def test_serve_follows_a_shared_database_on_its_own_daemon_thread(monkeypatch, t
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server.storage, "shared", lambda: "postgresql://ledger@db.test/ledger")
     server.serve()
-    assert threads == [
-        {"target": server.watch_ledgers, "daemon": True},
-        {"target": server.follow_shared, "daemon": True},
-    ]
+    assert [thread["daemon"] for thread in threads] == [True, True, True]
+    assert threads[0]["target"] is server.adopt_disk_files
+    assert [thread["target"].__wrapped__ for thread in threads[1:]] == [server.watch_ledgers, server.follow_shared]
 
 
 def test_the_shared_follow_reads_every_watched_ledger_each_quarter_second(monkeypatch, capsys):

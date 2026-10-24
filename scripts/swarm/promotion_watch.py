@@ -1,6 +1,8 @@
 """Dev promotion watch: the newest finished push run of Tests on dev files one urgent ci task per failed job and
-raises a ledger alert; the next green run closes those tasks and the alert. A run whose only failure is the Sonar job
-finding dev already moved past its commit is reported as superseded and files nothing.
+raises a ledger alert; the failed jobs that lost their runner, and the failed jobs whose own error is the missing
+output of a unit shard that lost its runner, share one runner outage task instead. The next green run closes those
+tasks and the alert. A run whose only failure is the Sonar job finding dev already moved past its commit is reported as superseded and files
+nothing.
 
 The minute tick calls it; CI runners cannot reach the ledger, so the fixer tasks are filed from the machine that can.
 """
@@ -25,12 +27,40 @@ if TYPE_CHECKING:
     from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm.store import RedisStore, SwarmConfig
 
-JOBS_JQ = ".jobs[] | {name, conclusion, check_run_url, steps} | @json"
+JOBS_JQ = ".jobs[] | {id, name, conclusion, check_run_url, steps} | @json"
 ANNOTATIONS_JQ = ".[] | {annotation_level, message} | @json"
 FAILED = ("failure", "timed_out")
 SUPERSEDED_STEP = "Check dev still points at this commit"
 SUPERSEDED = "Dev advanced before Sonar analysis; this unscanned revision cannot be promoted."
 STEP_EXIT = "Process completed with exit code 1."
+OUTAGE = "runner outage"
+OUTAGE_SIGNS = (
+    "Failed to resolve action download info",
+    "Failed to download action",
+    "Failed to download archive",
+    "lost communication with the server",
+    "The operation was canceled",
+)
+SETUP_STEP = "Set up job"
+TEST_STEP = "Run tests"
+SHARD_JOB = "unit"
+SHARD_CONSUMERS = (
+    "sonar",
+    "shard-check",
+    "coverage-ratchet",
+    "coverage-baseline",
+    "flake-budget",
+)
+MISSING_SHARD_SIGNS = (
+    "Missing coverage for shard ",
+    "No shard durations at ",
+    "collected tests did not run in exactly one of ",
+    "head shard coverage missing: ",
+    "baseline shard coverage missing: ",
+    "No flake reports under ",
+)
+REFRESH_JOB = "refresh-durations"
+LOST_SAMPLES_SIGN = "kept no samples from durations-"
 REFRESH_MS = 60_000
 SOURCE = "promotion"
 SENDER = "swarm"
@@ -46,6 +76,7 @@ MASTER_ITEM = (
     "promotion alert: {url}"
 )
 CLOSABLE = ("open", "blocked")
+WORKING = ("claimed", "pr")
 CLEARED = "A later dev push run of Tests passed, so the swarm closed this promotion task."
 REPLACED = "Dev push run {run_id} of Tests failed on a new cause, so the swarm raised a new promotion alert."
 
@@ -89,7 +120,103 @@ def cause(repo_dir: str, job: dict, run: Callable = subprocess.run) -> str:
     return f"{job['name']}: {'; '.join(detail)}"
 
 
+def runner_lost(job: dict, why: str) -> bool:
+    steps = {s["name"]: s.get("conclusion") for s in job.get("steps") or []}
+    return (
+        any(sign in why for sign in OUTAGE_SIGNS)
+        or steps.get(SETUP_STEP) in FAILED
+        or (
+            TEST_STEP in steps
+            and steps[TEST_STEP] not in ("success", *FAILED)
+            and not any(conclusion in FAILED for conclusion in steps.values())
+        )
+    )
+
+
+def starves(failed: tuple[str, str], shards_lost: bool) -> bool:
+    job = failed[0].split(" (")[0]
+    if job == REFRESH_JOB:
+        return LOST_SAMPLES_SIGN in failed[1]
+    return shards_lost and job in SHARD_CONSUMERS and any(sign in failed[1] for sign in MISSING_SHARD_SIGNS)
+
+
+def outages(causes: list[tuple[str, str]], named: dict[str, dict]) -> list[tuple[str, str]]:
+    gone = [(job, why) for job, why in causes if runner_lost(named[job], why)]
+    if not gone:
+        return causes
+    shards_lost = any(job.split(" (")[0] == SHARD_JOB for job, _ in gone)
+    starved = [c for c in causes if c not in gone and starves(c, shards_lost)]
+    signs = [sign for sign in OUTAGE_SIGNS if any(sign in why for _, why in gone)]
+    because = "; ".join(signs) or f"{SETUP_STEP} failed or {TEST_STEP} never ran"
+    names = ", ".join(job for job, _ in gone)
+    why = f"{OUTAGE}: the jobs {names} lost their runner infrastructure ({because})"
+    if starved:
+        why += f"; the jobs {', '.join(job for job, _ in starved)} failed for want of their unit shard output"
+    return [(OUTAGE, why), *[cause for cause in causes if cause not in gone and cause not in starved]]
+
+
+def failing_tests(repo: str, job: dict, run: Callable) -> set[str]:
+    if job["name"].split(" (")[0] != SHARD_JOB or not job.get("id"):
+        return set()
+    if not any(s["name"] == TEST_STEP and s.get("conclusion") in FAILED for s in job.get("steps") or []):
+        return set()
+    log = run(
+        ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job['id']}/logs"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    return set(re.findall(r"\b(?:FAILED|ERROR) (tests/.+?)(?: - |(?:\s*$))", log, re.MULTILINE))
+
+
+def test_causes(
+    causes: list[tuple[str, str]], named: dict[str, dict], repo: str, run: Callable
+) -> list[tuple[str, str]]:
+    groups: dict[str, list[str]] = {}
+    remaining = []
+    for job, why in causes:
+        tests = failing_tests(repo, named[job], run) if job in named else set()
+        if not tests or any(
+            s["name"] != TEST_STEP and s.get("conclusion") in FAILED for s in named[job].get("steps") or []
+        ):
+            remaining.append((job, why))
+        for test in sorted(tests):
+            groups.setdefault(test, []).append(job)
+    jobs = [job for jobs in groups.values() for job in jobs]
+    consequences = [(job, why) for job, why in remaining if coverage_consequence(job, why, jobs)]
+    grouped = []
+    for test, jobs in groups.items():
+        identity = f"unit test {test}"
+        detail = f"{identity}: failed in {', '.join(jobs)}"
+        if consequences:
+            detail += "; consequences: " + "; ".join(why for _, why in consequences)
+        grouped.append((identity, detail))
+    return [*grouped, *[cause for cause in remaining if cause not in consequences]]
+
+
+def coverage_consequence(job: str, why: str, jobs: list[str]) -> bool:
+    if job.split(" (")[0] != "sonar":
+        return False
+    missing = set(re.findall(r"Missing coverage for shard (\d+)", why))
+    shards = {match[1] for name in jobs if (match := re.fullmatch(r"unit \(3\.12, (\d+)\)", name))}
+    allowed = {"Wait for the coverage merge", "Hold the Delivery L2 conditions"}
+    details = why.removeprefix(f"{job}: ").split("; ")
+    return (
+        bool(missing)
+        and missing <= shards
+        and all(
+            part in allowed
+            or re.fullmatch(r"(?:Missing coverage for shard \d+|Process completed with exit code \d+\.)", part)
+            for part in details
+        )
+    )
+
+
 def normal(job: str, why: str) -> str:
+    if job.startswith("unit test "):
+        return job
     return job + NUMBER.sub("#", HASH.sub("#", why.removeprefix(job)))
 
 
@@ -130,14 +257,16 @@ def _red(slug, store, ledger, doc, last, causes, repo):
         if normal(job, why) in held or job in held or task_id in present:
             continue
         detail = why.removeprefix(job).removeprefix(": ").removesuffix(".")
+        where = "lost its runner infrastructure" if job == OUTAGE else f"failed in the job {job}"
         description = (
-            f"The dev push run {run_id} of Tests failed in the job {job} at commit {sha}: {url}. "
+            f"The dev push run {run_id} of Tests {where} at commit {sha}: {url}. "
             + (f"Its cause: {detail}. " if detail else "")
-            + "Fix it on dev; the swarm closes this task when a later dev push run passes."
+            + ("No code change is due" if job == OUTAGE else "Fix it on dev")
+            + "; the swarm closes this task when a later dev push run passes."
         )
         lane = lane or _lane(store, slug)
         fields = {"task": task_id, "title": title(job), "lane": lane, "kind": "ci", "rank": "urgent"}
-        redis.hset(key(slug, "jobs"), task_id, normal(job, why))
+        redis.hset(key(slug, "jobs"), task_id, OUTAGE if job == OUTAGE else normal(job, why))
         ledger.add_task(slug, {**fields, "description": description, "not_duplicate": NOT_DUPLICATE}, SENDER)
         actions.append(f"filed {task_id} for the failed dev job {job}")
         new.append((task_id, why))
@@ -188,9 +317,18 @@ def _green(slug, ledger, doc, last):
 
 def _recover(slug, redis, ledger, doc, last, repo):
     actions = _green(slug, ledger, doc, last)
+    _release(redis, slug, doc)
     for previous in promotion_owner.history(repo, redis) - {slug}:
-        actions.extend(_green(previous, ledger, ledger.state(previous), last))
+        state = ledger.state(previous)
+        actions.extend(_green(previous, ledger, state, last))
+        _release(redis, previous, state)
     return actions
+
+
+def _release(redis, slug, doc):
+    working = {t["id"] for t in _promotion_tasks(doc) if t.get("state") in WORKING}
+    if gone := [task_id for task_id in redis.hkeys(key(slug, "jobs")) if task_id not in working]:
+        redis.hdel(key(slug, "jobs"), *gone)
 
 
 def _refresh(
@@ -214,7 +352,8 @@ def _refresh(
         failed = failed_jobs(found)
         stale = bool(failed) and all(superseded(config.repo, j, run) for j in found if j["name"] in failed)
         named = {j["name"]: j for j in found}
-        causes = [] if stale else [(job, cause(config.repo, named[job], run)) for job in failed]
+        causes = [] if stale else outages([(job, cause(config.repo, named[job], run)) for job in failed], named)
+        causes = test_causes(causes, named, config.repo, run)
     except dev_red.READ_ERRORS as exc:
         error = getattr(exc, "stderr", None) or str(exc)
         print(f"promotion watch skipped, reading dev push runs failed: {error}", file=sys.stderr)

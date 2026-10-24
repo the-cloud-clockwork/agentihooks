@@ -15,6 +15,7 @@ from tests.doctor.test_ci_speed import NOW, job, record, stamp
 pytestmark = pytest.mark.unit
 DOCTOR = "speed-doctor"
 WATCHED = "speed-watched"
+QUEUED = 'ci-queue-age-unconfirmed/["anton-oss", "self-hosted"]'
 
 
 @pytest.fixture
@@ -33,18 +34,19 @@ def snapshot(records=(), **extra):
 
 
 def test_later_waiting_jobs_grow_one_finding_without_another_notice(store, monkeypatch):
-    jobs = [job(0, queued=True, created=-400, identity=11)]
+    jobs = [job(0, queued=True, created=-1000, identity=11)]
     monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot([record(jobs)]))
     cli.timer(store, DOCTOR, NOW, False)
-    jobs.append(job(0, queued=True, created=-301, identity=12))
+    jobs.append(job(0, queued=True, created=-901, identity=12))
     jobs[1]["labels"].reverse()
     cli.timer(store, DOCTOR, NOW + 60000, False)
     details = store.redis.hgetall(store.key(DOCTOR, "doctor-details"))
     assert len(details) == 1
     finding = json.loads(next(iter(details.values())))
-    assert "2 jobs" in finding["summary"]
-    assert "longest 460 seconds" in finding["evidence"][0]
-    assert "median 410.5 seconds" in finding["evidence"][0]
+    assert finding["summary"].endswith("in 1 run")
+    assert "2 jobs" in finding["evidence"][1]
+    assert "longest 1060 seconds" in finding["evidence"][1]
+    assert "median 1010.5 seconds" in finding["evidence"][1]
     for slug in (DOCTOR, WATCHED):
         assert len(InboxStore(store.redis).inbox(f"master@{slug}")) == 1
 
@@ -54,7 +56,7 @@ def test_every_timer_tick_reads_speed_and_sends_each_crossing_to_both_masters_on
 
     def read(since, now, pending=None, known=None, active=True):
         calls.append((since, now, pending))
-        return snapshot([record([job(0, queued=True, created=-301)])])
+        return snapshot([record([job(0, queued=True, created=-901)])])
 
     monkeypatch.setattr(ci_speed_read, "read", read)
     first = cli.timer(store, DOCTOR, NOW, False)
@@ -62,15 +64,13 @@ def test_every_timer_tick_reads_speed_and_sends_each_crossing_to_both_masters_on
     assert calls == [(NOW - 60000, NOW, None), (NOW, NOW + 60000, [7])]
     for slug in [DOCTOR, WATCHED]:
         [item] = InboxStore(store.redis).inbox(f"master@{slug}")
-        assert "run 7" in item.text and "anton-oss" in item.text and "301 seconds" in item.text
+        assert "run 7" in item.text and "anton-oss" in item.text and "901 seconds" in item.text
     assert any("1 runs" in action and "1 jobs" in action and "7 API calls" in action for action in first)
     assert any("CI speed" in action for action in second)
-    finding, _ = loop.judged(store, DOCTOR, 'ci-runner-wait/7-1-["anton-oss", "self-hosted"]')
-    assert finding["measure"] == 361
+    finding, _ = loop.judged(store, DOCTOR, QUEUED)
+    assert finding["measure"] == 961
     assert int(store.redis.hget(store.key(DOCTOR, "doctor-timer"), "last_new")) == NOW
-    seen = json.loads(
-        store.redis.hget(store.key(DOCTOR, "doctor-findings"), 'ci-runner-wait/7-1-["anton-oss", "self-hosted"]')
-    )
+    seen = json.loads(store.redis.hget(store.key(DOCTOR, "doctor-findings"), QUEUED))
     assert seen["seen_at"] == NOW
 
 
@@ -123,32 +123,37 @@ def test_a_complete_pass_records_full_counts_and_the_next_active_set(store, monk
 def test_the_timer_excludes_jobs_that_started_before_the_saved_window(store, monkeypatch):
     monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot([record([job(301, created=-601)])]))
     actions = cli.timer(store, DOCTOR, NOW, False)
-    assert "doctor CI speed: complete; 1 runs read of 1 discovered, 1 jobs, 0 crossings, 7 API calls" in actions
+    assert (
+        "doctor CI speed: complete; 1 runs read of 1 discovered, 1 jobs, 0 crossings, 7 API calls, 0 retracted, 0 queued jobs not reread"
+        in actions
+    )
     assert InboxStore(store.redis).inbox(f"master@{WATCHED}") == []
 
 
-def test_a_judged_speed_finding_returns_only_after_its_cooldown(store, monkeypatch):
+def test_a_judged_speed_finding_returns_only_after_its_cooldown_with_new_evidence(store, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES", "2")
-    monkeypatch.setattr(
-        ci_speed_read, "read", lambda *args, **kwargs: snapshot([record([job(0, queued=True, created=-301)])])
-    )
+    records = [record([job(0, queued=True, created=-901)])]
+    monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot(records))
     cli.timer(store, DOCTOR, NOW, False)
     judgments = loop.verdicts(store, DOCTOR)
-    judgments.judge('ci-runner-wait/7-1-["anton-oss", "self-hosted"]', "early-real", "runner delay", "reader", NOW)
+    judgments.judge(QUEUED, "early-real", "runner delay", "reader", NOW)
     cli.timer(store, DOCTOR, NOW + 60000, False)
-    first = json.loads(store.redis.hget(judgments.key, 'ci-runner-wait/7-1-["anton-oss", "self-hosted"]'))
+    first = json.loads(store.redis.hget(judgments.key, QUEUED))
     assert first["returned"] is False
     cli.timer(store, DOCTOR, NOW + 120000, False)
-    second = json.loads(store.redis.hget(judgments.key, 'ci-runner-wait/7-1-["anton-oss", "self-hosted"]'))
+    assert json.loads(store.redis.hget(judgments.key, QUEUED))["returned"] is False
+    records.append(record([job(0, queued=True, created=-901)], identity=8))
+    cli.timer(store, DOCTOR, NOW + 180000, False)
+    second = json.loads(store.redis.hget(judgments.key, QUEUED))
     assert second["returned"] is True
 
 
 def test_persisted_notifications_suppress_a_crossing_after_a_process_restart(store, monkeypatch):
-    identity = 'ci-runner-wait/7-1-["anton-oss", "self-hosted"]'
+    identity = QUEUED
     for slug in (DOCTOR, WATCHED):
         store.redis.sadd(store.key(DOCTOR, "ci-speed-notified", slug), identity)
     monkeypatch.setattr(
-        ci_speed_read, "read", lambda *args, **kwargs: snapshot([record([job(0, queued=True, created=-301)])])
+        ci_speed_read, "read", lambda *args, **kwargs: snapshot([record([job(0, queued=True, created=-901)])])
     )
     cli.timer(store, DOCTOR, NOW, False)
     for slug in (DOCTOR, WATCHED):
@@ -156,13 +161,13 @@ def test_persisted_notifications_suppress_a_crossing_after_a_process_restart(sto
 
 
 def test_a_new_speed_crossing_resets_quiet_time_between_regular_detector_passes(store, monkeypatch):
-    outcomes = [snapshot(), snapshot([record([job(0, queued=True, created=-301)])])]
+    outcomes = [snapshot(), snapshot([record([job(0, queued=True, created=-901)])])]
     monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: outcomes.pop(0))
     cli.timer(store, DOCTOR, NOW, False)
     cli.timer(store, DOCTOR, NOW + 60000, False)
     assert int(store.redis.hget(store.key(DOCTOR, "doctor-timer"), "last_new")) == NOW + 60000
     [item] = InboxStore(store.redis).inbox(f"master@{WATCHED}")
-    assert "361 seconds" in item.text
+    assert "961 seconds" in item.text
 
 
 def test_jobs_of_finished_runs_carry_over_so_a_window_beyond_the_call_budget_completes(store, monkeypatch):
@@ -190,14 +195,17 @@ def test_jobs_of_finished_runs_carry_over_so_a_window_beyond_the_call_budget_com
     assert saved()["known"][str(jobs[0])] == {
         "status": "completed",
         "run_attempt": 1,
-        "jobs": [job(0, created=-30, identity=jobs[0])],
+        "jobs": [{**job(0, created=-30, identity=jobs[0]), "runner_name": None, "conclusion": None}],
     }
     down.append(True)
     cli.timer(store, DOCTOR, NOW + 60000, False)
     assert len(saved()["known"]) == 54
     down.clear()
     third = cli.timer(store, DOCTOR, NOW + 120000, False)
-    assert "doctor CI speed: complete; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 52 API calls" in third
+    assert (
+        "doctor CI speed: complete; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 52 API calls, 0 retracted, 0 queued jobs not reread"
+        in third
+    )
     assert sorted(jobs) == list(range(100))
     assert saved()["known"] == {}
 

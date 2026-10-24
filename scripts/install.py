@@ -2281,7 +2281,7 @@ def _update_bashrc_block() -> None:
         f"}}\n"
         f"agentienv\n"
         f'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n'
-        f'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)"\n'
+        f'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)" && eval "$(agentihooks access env)"\n'
         f'alias agenti="agentihooks claude"\n'
         f"{_BLOCK_END}\n"
     )
@@ -3001,10 +3001,10 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         _remove_systemd_user_unit()
 
     from hooks.lifecycle.guard import enabled as _gc_enabled
-    from hooks.lifecycle.timer import install_timer, remove_timer
+    from hooks.lifecycle.timer import reconcile_units
 
     _gc_python, _gc_root = str(_resolve_hooks_python()), str(AGENTIHOOKS_ROOT)
-    _cprint("  " + (install_timer(_gc_python, _gc_root) if _gc_enabled() else remove_timer()))
+    _cprint("  " + reconcile_units(_gc_python, _gc_root, _gc_enabled()))
 
     # MCP layers, target-native. A layer that ships the target's own MCP file
     # (copilot: mcp-config.overrides.json, codex: mcp.overrides.toml) is used
@@ -5456,6 +5456,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         route_requires_fable,
         select_credential,
     )
+    from scripts.hive.account_slots import execute
 
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
@@ -5504,25 +5505,24 @@ def cmd_claude(extra_args: list[str]) -> None:
             _write_route_report(report, status="bare", error=str(exc))
             os.environ.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
             cmd = _claude_command(claude_bin, extra_args)
-            os.execvpe(claude_bin, cmd, os.environ)
+            execute("claude", "unrouted", os.environ, lambda env: os.execvpe(claude_bin, cmd, env))
         print(f"agentihooks: {exc}", file=sys.stderr)
         if exc.results:
             print(render_table(exc.results, include_fable=include_fable), file=sys.stderr)
         _write_route_report(report, status="failed", error=str(exc))
         raise SystemExit(3) from exc
-    _write_route_report(
-        report,
-        status="routed",
-        account=decision.account,
-        placement="forced" if route else "open",
-    )
+    _write_route_report(report, status="routed", account=decision.account, placement="forced" if route else "open")
     print(
         f"[agenti] account={decision.account} route=forced" if route else format_selection(decision, include_fable),
         flush=True,
     )
-    cmd = _claude_command(claude_bin, extra_args)
     # nosemgrep: python.lang.security.audit.dangerous-os-exec-tainted-env-args.dangerous-os-exec-tainted-env-args
-    os.execvpe(claude_bin, cmd, launch_environment(decision, os.environ))
+    execute(
+        "claude",
+        decision.account,
+        launch_environment(decision, os.environ),
+        lambda env: os.execvpe(claude_bin, _claude_command(claude_bin, extra_args), env),
+    )
 
 
 def cmd_balance(
@@ -6320,7 +6320,7 @@ def main() -> None:
         from scripts.profiles.scaffold import main as scaffold_main
 
         raise SystemExit(scaffold_main(_argv))
-    if _argv and _argv[0] in ("gc", "lease", "scratch", "name"):
+    if _argv and _argv[0] in ("gc", "lease", "scratch", "name", "host-guard"):
         from scripts.gc_cli import main as gc_main
 
         raise SystemExit(gc_main(_argv))

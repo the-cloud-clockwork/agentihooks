@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -42,7 +43,9 @@ def branch_only(head: str, root: Path, include_edits: bool = False) -> list[str]
     ]
 
 
-def lane_problem(block: object) -> str | None:
+def lane_problem(block: object, name: object = None) -> str | None:
+    if isinstance(block, dict) and called_lane(block, name):
+        block = {**block, "group": GROUP, "queue": "max"}
     if not isinstance(block, dict) or " ".join(str(block.get("group")).split()) != GROUP:
         return "has no shared hosted lane concurrency group"
     if block.get("queue") != "max":
@@ -50,6 +53,20 @@ def lane_problem(block: object) -> str | None:
     if block.get("cancel-in-progress") not in (None, False):
         return "may cancel other runs on the shared lane"
     return None
+
+
+def called_lane(block: dict, name: object) -> bool:
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9 ]+", name):
+        return False
+    own = re.fullmatch(
+        r"\$\{\{ github\.workflow == '"
+        + re.escape(name)
+        + r"' && "
+        + re.escape(LANE)
+        + r" \|\| format\('[a-z0-9-]+-\{0\}', github\.run_id\) \}\}",
+        " ".join(str(block.get("group")).split()),
+    )
+    return own is not None and block.get("queue") == f"${{{{ github.workflow == '{name}' && 'max' || 'single' }}}}"
 
 
 def events(workflow: dict) -> list:
@@ -97,7 +114,7 @@ def problems(workflow: object, baseline: object = None) -> list[str]:
             continue
         if trusted and (name in (trusted.get("jobs") or {}) or base_block is not None) and block == base_block:
             continue
-        problem = lane_problem(block)
+        problem = lane_problem(block, workflow.get("name"))
         if problem:
             found.append(f"job {name} {problem}")
     return found
@@ -110,12 +127,57 @@ def grade(text: str, baseline: str | None = None) -> list[str]:
         return ["does not parse as YAML"]
 
 
+def reusable_problems(head: str, root: Path, workflow: object, seen: tuple[str, ...] = ()) -> list[str]:
+    if not isinstance(workflow, dict) or not isinstance(workflow.get("jobs", {}), dict):
+        return []
+    found = []
+    for name, job in (workflow.get("jobs") or {}).items():
+        if not isinstance(job, dict):
+            continue
+        call = job.get("uses")
+        if not isinstance(call, str) or not call.startswith(f"./{WORKFLOWS}/"):
+            continue
+        if lane_problem(job.get("concurrency", workflow.get("concurrency")), workflow.get("name")) is None:
+            continue
+        path = call[2:]
+        if path in seen:
+            continue
+        try:
+            called = yaml.safe_load(git("show", f"{head}:{path}"))
+        except yaml.YAMLError:
+            found.append(f"job {name} calls {path}: does not parse as YAML")
+            continue
+        if isinstance(called, dict):
+            called = {**called, "name": workflow.get("name")}
+        issues = problems(called) if not (root / path).exists() else []
+        issues.extend(reusable_problems(head, root, called, (*seen, path)))
+        found.extend(f"job {name} calls {path}: {issue}" for issue in issues)
+    return found
+
+
 def refused(head: str, root: Path) -> dict[str, list[str]]:
     graded = {
         path: grade(git("show", f"{head}:{path}"), (root / path).read_text() if (root / path).exists() else None)
         for path in branch_only(head, root, include_edits=True)
     }
+    for path, found in graded.items():
+        if "does not parse as YAML" not in found:
+            found.extend(reusable_problems(head, root, yaml.safe_load(git("show", f"{head}:{path}")), (path,)))
     return {path: found for path, found in graded.items() if found}
+
+
+def fires_on_head(head: str, path: str) -> bool:
+    try:
+        workflow = yaml.safe_load(git("show", f"{head}:{path}"))
+    except yaml.YAMLError:
+        return True
+    if not isinstance(workflow, dict):
+        return True
+    for on in events(workflow):
+        names = on if isinstance(on, (list, dict)) else [on]
+        if any(name in ("push", "pull_request", "pull_request_target") for name in names):
+            return True
+    return False
 
 
 def cancel(repo: str, head: str, paths: set[str], wait: float, step: float = 5.0) -> set[int]:
@@ -148,8 +210,9 @@ def main(argv: list[str] | None = None) -> int:
     if not found:
         print("Every workflow that exists only on this head queues on a shared hosted lane.")
         return 0
-    if args.repo:
-        for run in sorted(cancel(args.repo, args.head, set(found), args.wait)):
+    fired = {path for path in found if fires_on_head(args.head, path)}
+    if args.repo and fired:
+        for run in sorted(cancel(args.repo, args.head, fired, args.wait)):
             print(f"Cancelled run {run}.")
     return 1
 

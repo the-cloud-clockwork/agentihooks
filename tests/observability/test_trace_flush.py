@@ -1030,7 +1030,7 @@ def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypa
     clock, state = Clock(), {"alive": True}
     clock.hooks.append((1, lambda: state.update(alive=False)))
     timer = MagicMock()
-    timer.return_value.__enter__.return_value.wait.side_effect = lambda: clock.sleep(trace_flush.POLL_SEC)
+    timer.return_value.__enter__.return_value.wait.side_effect = lambda timeout=None: clock.sleep(trace_flush.POLL_SEC)
     monkeypatch.setattr(process_timer, "Timer", timer)
     assert (
         trace_flush.supervise(
@@ -1043,4 +1043,177 @@ def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypa
         )
         == "owner exited"
     )
-    timer.assert_called_once_with(trace_flush.POLL_SEC)
+    timer.assert_called_once_with(trace_flush.POLL_SEC, redis=None)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "connection"])
+def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tmp_path, monkeypatch, failure):
+    from unittest.mock import Mock
+
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    from scripts.scheduler import process_timer
+
+    transcript = tmp_path / "transcript.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, state, accepted = Clock(), {"alive": True}, []
+    clock.hooks += [(1, lambda: _grow(transcript)), (20, lambda: _grow(transcript))]
+    clock.hooks += [(40, lambda: state.update(alive=False))]
+    clients = []
+
+    def connect():
+        client = Mock()
+        clients.append(client)
+
+        def pop(key, timeout):
+            assert key.startswith("wake:")
+            assert timeout == process_timer.RECHECK_S
+            clock.sleep(trace_flush.POLL_SEC)
+            if len(clients) == 1:
+                error = TimeoutError if failure == "timeout" else ConnectionError
+                raise error("scheduler did not answer")
+            return key, "delivered"
+
+        client.blpop.side_effect = pop
+        return client
+
+    scheduler = Mock()
+    scheduler.key.side_effect = lambda key: key
+    scheduler.timer.return_value.scheduler = scheduler
+    monkeypatch.setattr(process_timer, "blocking_client", connect)
+    monkeypatch.setattr(process_timer, "Scheduler", Mock(return_value=scheduler))
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+
+    def send(session, path, timeout, trigger):
+        assert session == "session"
+        assert path == str(transcript)
+        accepted.append(transcript.stat().st_size)
+        return True
+
+    assert (
+        trace_flush.supervise(
+            "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda owner: state["alive"]
+        )
+        == "owner exited"
+    )
+    assert len(clients) > 1
+    assert len(accepted) == 3
+    assert accepted[0] < accepted[1] < accepted[2] == transcript.stat().st_size
+    for client in clients:
+        client.close.assert_called_once_with()
+    assert scheduler.retire.call_count == len(clients)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "connection"])
+def test_scheduler_connection_failures_back_off_before_retrying(monkeypatch, failure):
+    from unittest.mock import Mock, call
+
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    clock = Clock()
+    error = TimeoutError if failure == "timeout" else ConnectionError
+    wait = Mock(side_effect=[error("offline"), error("offline"), None])
+    monkeypatch.setattr(trace_flush, "timer_wait", wait)
+    monkeypatch.setattr(trace_flush.time, "sleep", clock.sleep)
+    for _ in range(3):
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    assert clock.now == 2
+    assert wait.call_args_list == [call(trace_flush.POLL_SEC)] * 3
+
+
+def test_scheduler_wait_preserves_interruption(monkeypatch):
+    from unittest.mock import Mock
+
+    wait = Mock(side_effect=KeyboardInterrupt)
+    sleep = Mock()
+    monkeypatch.setattr(trace_flush, "timer_wait", wait)
+    monkeypatch.setattr(trace_flush.time, "sleep", sleep)
+    with pytest.raises(KeyboardInterrupt):
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    wait.assert_called_once_with(trace_flush.POLL_SEC)
+    sleep.assert_not_called()
+
+
+IDENTITY = {
+    "AGENTIHOOKS_SWARM": "watched",
+    "AGENTIHOOKS_AGENT_NAME": "engineer@owner",
+    "AGENTIHOOKS_SWARM_TASK": "t1",
+    "AGENTIHOOKS_SWARM_LANE": "eng",
+    "AGENTIHOOKS_PROFILE": "engineer",
+    "AGENTIHOOKS_PROFILE_REPORT": "/run/owner.json",
+    "AGENTIHOOKS_TARGET": "codex",
+    "AGENTIHOOKS_PREDECESSOR_SESSION": "before",
+}
+
+
+def _identity_seen(tmp_path, monkeypatch, session):
+    seen = tmp_path / "seen"
+    stub = tmp_path / "stub"
+    keys = " ".join(f'"{key}=${{{key}-unset}}"' for key in IDENTITY)
+    stub.write_text(f"#!/bin/sh\nprintf '%s\\n' {keys} > {seen}\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(trace_flush.sys, "executable", str(stub))
+    for key in IDENTITY:
+        monkeypatch.setenv(key, f"caller-{key}")
+    assert trace_flush.attempt(session, "/t", 5, "recovery") is True
+    return dict(line.split("=", 1) for line in seen.read_text().splitlines())
+
+
+def test_an_attempt_exports_with_the_identity_its_session_recorded(home, enabled, tmp_path, monkeypatch):
+    for key, value in IDENTITY.items():
+        monkeypatch.setenv(key, value)
+    trace_flush.request("owned", "/t", "stop", owner_pid=os.getpid(), spawn=lambda s: None)
+    assert _identity_seen(tmp_path, monkeypatch, "owned") == IDENTITY
+
+
+def test_an_attempt_drops_the_callers_identity_for_a_session_that_recorded_none(home, tmp_path, monkeypatch):
+    _request("legacy", "/t")
+    assert _identity_seen(tmp_path, monkeypatch, "legacy") == dict.fromkeys(IDENTITY, "unset")
+
+
+def _account_names_seen(tmp_path, monkeypatch, owner):
+    for name in [name for name in os.environ if name.startswith("AH_")]:
+        monkeypatch.delenv(name)
+    for name in owner:
+        monkeypatch.setenv(name, "owner-value")
+    trace_flush.request("owned", "/t", "stop", owner_pid=os.getpid(), spawn=lambda s: None)
+    for name in owner:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("AH_CC_TOKEN_caller", "caller-value")
+    monkeypatch.setenv("AH_ROUTE_INTERACTIVE_caller", "1")
+    seen = tmp_path / "seen"
+    stub = tmp_path / "stub"
+    stub.write_text(f"#!/bin/sh\nenv | cut -d= -f1 | grep '^AH_' | sort > {seen}\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(trace_flush.sys, "executable", str(stub))
+    trace_flush.attempt("owned", "/t", 5, "recovery")
+    return seen.read_text().split()
+
+
+@pytest.mark.parametrize(
+    ("owner", "seen"),
+    [
+        (["AH_CC_TOKEN_owner"], ["AH_ROUTE_INTERACTIVE_owner"]),
+        (["AH_ROUTE_API"], ["AH_ROUTE_API"]),
+        ([], []),
+    ],
+)
+def test_an_attempt_carries_the_sessions_account_never_the_callers(home, enabled, tmp_path, monkeypatch, owner, seen):
+    assert _account_names_seen(tmp_path, monkeypatch, owner) == seen
+    recorded = json.loads(trace_flush.request_path("owned").read_text())["identity"]
+    assert {name: value for name, value in recorded.items() if name.startswith("AH_")} == dict.fromkeys(seen, "1")
+
+
+def test_an_attempt_applies_only_identity_names_from_the_request(home, tmp_path, monkeypatch):
+    seen = tmp_path / "seen"
+    stub = tmp_path / "stub"
+    stub.write_text(f'#!/bin/sh\nprintf "%s|%s" "$AGENTIHOOKS_SWARM" "$PATH" > {seen}\n')
+    stub.chmod(0o755)
+    monkeypatch.setattr(trace_flush.sys, "executable", str(stub))
+    trace_flush._write(
+        trace_flush.request_path("tampered"),
+        {"identity": {"AGENTIHOOKS_SWARM": "watched", "PATH": "/nowhere"}},
+    )
+    trace_flush.attempt("tampered", "/t", 5, "recovery")
+    assert seen.read_text() == f"watched|{os.environ['PATH']}"

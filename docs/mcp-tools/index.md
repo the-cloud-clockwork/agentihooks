@@ -8,6 +8,11 @@ has_children: true
 
 The AgentiHooks MCP server (`agentihooks`) serves Claude Code and Codex and exposes tools across **4 categories**. The server runs `python -m hooks.mcp` and is registered automatically during `agentihooks init`.
 
+See [Server Startup](startup.md) for deferred stdio loading, first call behavior,
+configuration examples and troubleshooting.
+Its [measured idle memory](startup.md#measured-idle-memory) section records the
+before and after cohorts, read only inspection and limits of the comparison.
+
 ## Categories
 
 | Category | Tools |

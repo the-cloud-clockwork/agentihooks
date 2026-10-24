@@ -10,6 +10,7 @@ from scripts.swarm_v2.auth_context import GrantRefused, Registration
 from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
 from scripts.swarm_v2.hand import HANDED, Hand
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, PodApi, PreconditionFailed
+from scripts.swarm_v2.kubernetes.diagnostics import startup
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.spec import DOMAIN, LAUNCH_RECORD, launch_name, pod_name
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL, owner_for
@@ -97,10 +98,11 @@ class PodGrants:
         supervision: Supervision,
         terminal: Terminals | None = None,
         restores: Callable[[str], dict | None] = lambda execution_id: None,
+        retain: Callable[[dict, dict], None] | None = None,
     ) -> None:
         self.api, self.owner = api, owner_for(slug)
         self.verify, self.supervision, self.terminal = verify, supervision, terminal
-        self.restores = restores
+        self.restores, self.retain = restores, retain
 
     def hand(self, agent: AgentRecord, grant: str, opening: str = "") -> Hand:
         from redis.exceptions import RedisError
@@ -147,9 +149,21 @@ class PodGrants:
         return HANDED
 
     def _remove(self, pod: dict) -> bool:
+        from redis.exceptions import RedisError
+
         metadata = pod["metadata"]
         try:
+            current = self.api.read_pod(metadata["name"])
+            if current is None:
+                return True
+            if current["metadata"]["uid"] != metadata["uid"] or not _owned(current, metadata["labels"]):
+                return False
+            captured = startup(current, self.api)
+            if captured is not None:
+                if self.retain is None:
+                    return False
+                self.retain(current, captured)
             self.api.delete("pods", metadata["name"], metadata["uid"])
-        except (PreconditionFailed, ApiRefused, OSError):
+        except (PreconditionFailed, ApiRefused, OSError, RedisError):
             return False
         return True

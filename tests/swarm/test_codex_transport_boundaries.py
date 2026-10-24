@@ -67,6 +67,15 @@ def test_legacy_admission_replaces_the_predecessor_and_records_process_identity(
     assert retired == []
 
 
+def test_local_codex_legacy_admission_records_the_root_hive(storage, monkeypatch):
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation-root")
+    admitted = codex.admit_legacy(storage, "sw", legacy_agent(storage), SimpleNamespace(retire=lambda _: None))
+    assert admitted.hive == "workstation-root"
+    assert storage.execution_occupants("sw")[admitted.seat].hive == "workstation-root"
+
+
 def test_reopening_a_managed_viewer_records_its_new_pane_on_the_execution(storage, monkeypatch):
     from scripts.codex_session import attach
     from scripts.swarm import live_binding
