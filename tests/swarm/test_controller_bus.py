@@ -63,6 +63,15 @@ def test_controller_bus_without_credentials_signs_in_anonymously(capsys):
     assert capsys.readouterr().out == "controller: bus nats at nats://bus:4222 as anonymous\n"
 
 
+def test_controller_bus_lines_flush_so_the_pod_log_shows_them_at_once(monkeypatch):
+    printed = []
+    monkeypatch.setattr(controller, "print", lambda *args, **kwargs: printed.append(kwargs), raising=False)
+    environ = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://bus:4222"}
+    controller.open_controller_bus(environ, lambda config: "bus")
+    controller.open_controller_bus({**environ, "AGENTIHOOKS_BUS_CREDENTIALS": "-----BEGIN NATS USER JWT-----\n"}, None)
+    assert printed == [{"flush": True}, {"file": controller.sys.stderr, "flush": True}]
+
+
 class Bus:
     closed = 0
 
