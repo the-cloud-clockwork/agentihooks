@@ -533,7 +533,7 @@ def test_a_ledger_without_task_or_alert_lists_still_files_and_closes(store):
 def test_the_first_window_reads_once_the_refresh_interval_has_passed_since_zero(store):
     calls = []
     refresh(store, Ledger(), gh([GREEN], calls=calls), promotion_watch.REFRESH_MS)
-    assert len(calls) == 1
+    assert len([argv for argv, _ in calls if "/jobs" not in argv[2]]) == 1
 
 
 def test_a_run_numbered_one_is_handled_on_a_fresh_watch(store):
