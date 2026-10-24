@@ -1018,3 +1018,25 @@ def test_browser_success_rechecks_the_same_claimed_slot(ah, rendered, tmp_path, 
     assert checked == [str(login.home(1)), str(login.home(1))]
     assert login.holders(login.root(1)) == {"master@a-1": os.getpid()}
     assert login.holders(login.root(2)) == {}
+
+
+def test_incomplete_account_metadata_renews_the_already_claimed_slot(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    _seed(rendered)
+    login._write(login.home(1) / login.CONFIG, {})
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    seen = []
+
+    def browser(environ, target):
+        seen.append(target)
+        _login(target)
+        return "success"
+
+    monkeypatch.setattr(chain, "authorize", browser)
+    assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(1), "masteratexample_com")
+    assert seen == [login.home(1)]
+    assert login.holders(login.root(1)) == {"master@a-1": os.getpid()}
+    assert login.holders(login.root(2)) == {}

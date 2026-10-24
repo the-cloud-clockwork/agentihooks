@@ -473,6 +473,14 @@ def release(target: Path, environ: Mapping[str, str]) -> None:
         _write(folder / OWNER, held)
 
 
+def claimed_home(environ: Mapping[str, str]) -> Path | None:
+    name = environ["AGENTIHOOKS_AGENT_NAME"]
+    return next(
+        (home(number) for number in numbers() if holders(root(number)).get(name) == os.getpid()),
+        None,
+    )
+
+
 def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | None:
     from scripts import master_login_chain as chain
     from scripts.routing import native_login
@@ -493,6 +501,7 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
                 keep(openbao_kv.from_env(environ), target, epoch, number)
         except LoginRefused as exc:
             if str(exc) == NO_LOGIN or str(exc).startswith("every stored master claude ai login is held"):
+                target = target or claimed_home(environ)
                 return None
             raise
         try:

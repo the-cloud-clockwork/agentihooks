@@ -551,6 +551,16 @@ def test_empty_native_sessions_reach_front_door_recovery(setup, monkeypatch):
     runtime.spawn.assert_called_once()
 
 
+def test_empty_native_inventory_is_selected_as_private_recovery(setup):
+    task = {**master(setup), "seat": "master@fixture"}
+    master_login_hive(setup)
+    write_hive(setup, master_login={"claude": ""}, master_login_enabled="yes")
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert selected.route_kind == "master-login"
+    assert selected.account.name == ""
+    assert selected.account.cap is None
+
+
 def test_native_master_fallback_account_is_recorded_canonically(setup):
     from dataclasses import replace
 
