@@ -428,7 +428,8 @@ def _at_ms(text, flag="--at"):
 def cmd_verdict_log(store, args):
     now = swarm.now_ms()
     since, until = _at_ms(args.since, "--since"), _at_ms(args.until, "--until")
-    judgments = loop.verdicts(store, doctor_slug(args.slug))
+    _, doctor = _pair_of(store, args.slug)
+    judgments = loop.verdicts(store, doctor)
     events = judgments.events(since, until, now)
     records = [json.loads(raw) for raw in store.redis.hgetall(judgments.key).values()]
     latest = [

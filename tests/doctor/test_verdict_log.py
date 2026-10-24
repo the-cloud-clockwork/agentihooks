@@ -6,7 +6,7 @@ import pytest
 from scripts.doctor import cli, loop
 from scripts.swarm.health import verdicts
 from scripts.swarm.health.findings import Finding
-from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 
 DAY = 86400000
 START = int(datetime(2026, 10, 23, tzinfo=timezone.utc).timestamp() * 1000)
@@ -17,7 +17,10 @@ DOCTOR = "watched-doctor"
 def store():
     from fakeredis import FakeRedis
 
-    return RedisStore(FakeRedis(decode_responses=True))
+    result = RedisStore(FakeRedis(decode_responses=True))
+    result.create(SwarmConfig("watched", "/repo", 1, 1))
+    result.create(SwarmConfig(DOCTOR, "/repo", 1, 1, template=cli.TEMPLATE))
+    return result
 
 
 def finding(store, doctor=DOCTOR):
@@ -87,13 +90,14 @@ def test_event_reader_refuses_reversed_or_future_windows(store, since, until):
         judgments.events(since, until, START + 1)
 
 
-def test_verdict_log_counts_all_events_beside_latest_records_for_a_day(store, monkeypatch, capsys):
+@pytest.mark.parametrize("slug", ["watched", DOCTOR])
+def test_verdict_log_counts_all_events_beside_latest_records_for_a_day(store, monkeypatch, capsys, slug):
     judgments, found = finding(store)
     judgments.judge(found.id, "false-positive", "first", "judge", START + 1)
     judgments.judge(found.id, "false-positive", "again", "judge", START + 2)
     monkeypatch.setattr(cli.swarm, "connect", lambda: store)
     monkeypatch.setattr(cli.swarm, "now_ms", lambda: START + DAY)
-    assert cli.main(["watched", "verdict-log", "--since", "2026-10-23T00:00Z", "--until", "2026-10-24T00:00Z"]) == 0
+    assert cli.main([slug, "verdict-log", "--since", "2026-10-23T00:00Z", "--until", "2026-10-24T00:00Z"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["event_count"] == 2
     assert report["latest_count"] == 1
