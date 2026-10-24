@@ -132,7 +132,7 @@ def _row(piece, probability, off_intent, authorized=None):
 
 
 def _ruling(areas) -> bool:
-    return all(is_clearance(area) for area in areas)
+    return all(is_clearance(area) for area in areas) or (len(areas) == 1 and _changelog_fragment(areas[0]))
 
 
 def _kept(ruling, probability, off_intent) -> bool:
@@ -210,6 +210,11 @@ RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"verdict": (PASS, FAIL)
 def is_clearance(area: str) -> bool:
     path = PurePosixPath(area)
     return path == CLEARANCE or path == CLEARANCE_FOLDER or CLEARANCE_FOLDER in path.parents
+
+
+def _changelog_fragment(area: str) -> bool:
+    path = PurePosixPath(area)
+    return len(path.parts) == 2 and path.parts[0] == "changelog.d" and path.suffix == ".md" and path.name != "README.md"
 
 
 def _source_areas(areas: tuple) -> list[str]:
