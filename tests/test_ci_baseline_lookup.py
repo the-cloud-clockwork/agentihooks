@@ -165,7 +165,7 @@ def test_lookup_accepts_measured_publication_when_its_ratchet_failed(lookup, sel
 
 
 @pytest.mark.parametrize("selector", _SELECTORS)
-def test_lookup_reads_the_shard_count_from_the_base_run(lookup, selector):
+def test_lookup_accepts_the_twenty_shard_plan_of_a_dev_push_run(lookup, selector):
     result, output, _ = lookup(selector, fault="twenty-shards")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "id=222\n" in output
