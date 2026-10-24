@@ -11,6 +11,7 @@ import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
 import { quotaCount, renderHives } from "./hives.js";
 import { agentCellTips, joinCell } from "./agent_cells.js";
 import { capacityShown, liveAgents, renderRoles } from "./roles.js";
+import { renderHandoffs, renderRecovery } from "./recovery.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
@@ -72,26 +73,26 @@ export function label(text, tone) {
   return h("span", { class: `lbl ${tone || String(text).replace(/\s+/g, "-")}`, text });
 }
 
-function idCell(text) {
+export function idCell(text) {
   return h("span", { class: "sw-id", title: text, text });
 }
 
-function cells(...values) {
+export function cells(...values) {
   return h("tr", {}, ...values.map((v) => (v && v.nodeType ? h("td", {}, v) : h("td", { text: v == null || v === "" ? "—" : String(v) }))));
 }
 
-function moreRow(key, total, noun, columns, again) {
+export function moreRow(key, total, noun, columns, again) {
   const cell = moreButton(key, total, noun, again, "td");
   if (cell) cell.colSpan = columns;
   return cell && h("tr", { class: "page-more" }, cell);
 }
 
-function withId(row, id) {
+export function withId(row, id) {
   row.id = id;
   return row;
 }
 
-function emptyRow(columns, text) {
+export function emptyRow(columns, text) {
   return h("tr", { class: "sw-empty" }, h("td", { colspan: String(columns), text }));
 }
 
@@ -287,7 +288,7 @@ function renderDoctor(sw, now) {
   $("doctor-findings").textContent = `findings ${on ? doctor.findings : "—"}`;
 }
 
-function seatText(seat) {
+export function seatText(seat) {
   return seat.startsWith("master@") ? seat : seat.split("@")[0].replace(/-(\d+)$/, " $1");
 }
 
@@ -333,7 +334,8 @@ export function renderSwarm(sw) {
   renderQuota(sw, now);
   renderHives();
   renderDoctor(sw, now);
-  renderHandoffs(sw.handoffs || []);
+  renderHandoffs(sw.handoffs || [], sw);
+  renderRecovery(sw);
   renderStats();
 }
 
@@ -351,15 +353,6 @@ function renderAgents(sw, now = Date.now()) {
   terminalHead(remote);
   $("swarm-agents").replaceChildren(...(live.length ? live.map(row) : [emptyRow(columns, "No agents running. Start the swarm to work the open tasks.")]),
     ...firstPage("agents", finished, (a) => `agent-${a.name}`).map(row), moreRow("agents", finished.length, "more finished agents", columns, () => renderAgents(swarm)) || "");
-}
-
-function renderHandoffs(rows) {
-  $("handoff-count").textContent = `${rows.length} ${rows.length === 1 ? "seat" : "seats"}`;
-  $("swarm-handoffs").replaceChildren(...(rows.length ? firstPage("seats", rows, (r) => `seat-${r.seat}`).map((r) => withId(cells(idCell(seatText(r.seat)), clock(r.at), r.reason,
-    r.continuity ? label(r.continuity) : "—", r.binding ? h("span", {}, label(r.binding), r.bound_at && ` ${clock(r.bound_at)}`) : "—",
-    r.awaiting ? h("span", { class: "sw-ctl" }, ...(r.resume_available === false ? ["fresh"] : ["resume", "fresh"]).map((choice) => h("button", { class: "sw-btn", type: "button",
-      "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice === "resume" ? r.resume_label || choice : choice }))) : r.successor ? idCell(r.successor) : "—"), `seat-${r.seat}`))
-    : [emptyRow(6, "No seats yet. Seats appear when agents start.")]), moreRow("seats", rows.length, "more seats", 6, () => renderHandoffs(rows)) || "");
 }
 
 function freezeRow(r) {
