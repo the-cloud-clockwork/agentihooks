@@ -255,7 +255,7 @@ def main() -> int:
     parser.add_argument("--base", default="origin/dev")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--target", type=float, default=120)
-    parser.add_argument("--stats-target", type=float, default=30)
+    parser.add_argument("--stats-target", type=float, default=60)
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--repository")
     args = parser.parse_args()

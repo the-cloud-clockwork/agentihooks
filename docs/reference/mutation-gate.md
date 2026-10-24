@@ -759,7 +759,7 @@ variable can lower the planned workers but never raise them above four.
 | Planner call | Step | Effect of fewer workers |
 |---|---|---|
 | `shard_count` | **Size mutation shards from stored timings** (`plan`, target 120 s) and **Refine mutation shards from measured statistics** (`refine`, target 240 s) | Shards = `ceil(worker seconds / (workers * target))`, capped by the shard limit of ten and the mutant count, so more shards are planned for the same work |
-| `slowest_bucket` and `stats_part_count` | **Size mutation shards from stored timings** | Each statistics part forks one bucket per worker; the slowest bucket grows, so the step can choose more `Stats parts` to stay within the 30 s statistics target |
+| `slowest_bucket` and `stats_part_count` | **Size mutation shards from stored timings** | Each statistics part forks one bucket per worker; the slowest bucket grows, so the step can choose more `Stats parts` to stay within the 60 s statistics target |
 | `plan_shards` | **Refine mutation shards from measured statistics** | The measured plan records the count in its `workers` field |
 
 For example, a measured plan of 2880 worker seconds with the 240 second
