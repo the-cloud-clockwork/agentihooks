@@ -192,3 +192,15 @@ def test_failed_startup_ledger_checks_recover_in_the_same_agent_session(monkeypa
     hive_join.run(payload, "tool")
     assert ledger.join.call_count == 2
     assert ledger._call.call_count == 2
+
+
+def test_posttool_dispatch_rechecks_the_agent_hive_report(monkeypatch):
+    from hooks import hook_manager
+
+    events = []
+    monkeypatch.setattr(hook_manager, "_swarm_outcome", lambda payload: events.append(("outcome", payload)))
+    monkeypatch.setattr(hook_manager, "_hive_join", lambda payload, event: events.append((event, payload)))
+    monkeypatch.setattr(hook_manager, "_swarm_ledger", lambda payload: events.append(("ledger", payload)))
+    payload = {"session_id": "session"}
+    hook_manager._swarm_after_tool(payload)
+    assert events == [("outcome", payload), ("tool", payload), ("ledger", payload)]
