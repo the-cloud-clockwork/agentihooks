@@ -524,6 +524,7 @@ def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, ch
     base = _workflow()
     base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
     base["jobs"]["select"] = {"steps": ci_reuse.duration_provenance_steps()}
+    base["jobs"]["gate"]["needs"].append("select")
     head = copy.deepcopy(base)
     checkout = head["jobs"]["select"]["steps"][0]
     if bounded:
@@ -534,7 +535,9 @@ def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, ch
     for field, values in change.items():
         checkout[field] = checkout.get(field, {}) | values
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
-    assert bool(problems) == bool(change), problems
+    assert problems == (
+        ["The head skips reuse without protected durations provenance."] if change else []
+    )
 
 
 @pytest.mark.parametrize("weakened", [False, True])
