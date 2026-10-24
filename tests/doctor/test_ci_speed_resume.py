@@ -26,7 +26,9 @@ def test_budgeted_passes_resume_jobs_without_losing_active_run_coverage(store, m
         if "/jobs?" in endpoint:
             reads[endpoint] += 1
             identity = int(urlsplit(endpoint).path.split("/")[-2])
-            rows = [job(0, identity=identity * job_count + n) for n in range((page - 1) * 100, min(page * 100, job_count))]
+            rows = [
+                job(0, identity=identity * job_count + n) for n in range((page - 1) * 100, min(page * 100, job_count))
+            ]
             body = {"total_count": job_count, "jobs": rows}
         else:
             selected = runs if "created" in query else []
