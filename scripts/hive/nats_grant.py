@@ -12,6 +12,7 @@ from scripts import openbao_kv
 from scripts.events import nkey, subjects
 from scripts.events.dead import DEAD_STREAM
 from scripts.hive import auth, buckets
+from scripts.hub import slots
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -53,6 +54,7 @@ MEMBER_PUBLISH = (
 )
 CONTROLLER_BUCKETS = (
     *buckets.NAMES,
+    *slots.BUCKETS,
     "hub-versions",
     "hub-leases",
     "hub-hive-loss",
