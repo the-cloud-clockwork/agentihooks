@@ -4,7 +4,7 @@ from scripts.inbox import exits
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
