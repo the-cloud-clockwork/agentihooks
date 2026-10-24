@@ -45,7 +45,7 @@ UNKNOWN_EVENTS = "SELECT TOTAL(unknown_events) FROM session_import WHERE access_
 RETIRE = "DELETE FROM session_import WHERE access_domain = ?"
 ALL_ROWS = "SELECT * FROM session_import"
 BEGIN, COMMIT, ROLLBACK = "BEGIN IMMEDIATE", "COMMIT", "ROLLBACK"
-MISMATCH = "the written export does not match the current import projections; nothing was retired"
+MISMATCH = "the written export does not match the current import projections; it was kept and nothing was retired"
 EXISTS = "the export destination already exists; nothing was retired"
 
 
@@ -257,10 +257,10 @@ class ImportLedger:
         self.db.execute(BEGIN)
         try:
             result = self._retire(catalog, domain, destination)
+            self.db.execute(COMMIT)
         except BaseException:
             self.db.execute(ROLLBACK)
             raise
-        self.db.execute(COMMIT)
         return result
 
     def _retire(self, catalog: Catalog, domain: str, destination: Path) -> dict:

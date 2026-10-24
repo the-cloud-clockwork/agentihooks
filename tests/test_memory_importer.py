@@ -536,7 +536,7 @@ def test_retire_refuses_an_existing_destination_and_a_mismatched_written_export(
         "state": "rejected",
         "error": {
             "class": "export_mismatch",
-            "detail": "the written export does not match the current import projections; nothing was retired",
+            "detail": "the written export does not match the current import projections; it was kept and nothing was retired",
         },
     }
     monkeypatch.undo()
