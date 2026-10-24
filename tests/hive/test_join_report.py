@@ -111,7 +111,7 @@ def test_ledger_retry_does_not_overwrite_a_lifecycle_change_during_probe(monkeyp
     current = {**before, **(change or {})}
 
     def probe(report):
-        assert report == before
+        assert report == {**before, "ledger_checked_at": 500000}
         if change is None:
             redis.hdel(join_report.key("worker"), agent.execution_id)
         else:
@@ -131,11 +131,12 @@ def test_ledger_retry_preserves_a_concurrent_heartbeat_and_success(monkeypatch):
     current = {
         **before,
         "heartbeat_at": 400000,
+        "ledger_checked_at": 500000,
         "checks": {**before["checks"], "settings": False, "ledger_join": True},
     }
 
     def probe(report):
-        assert report == before
+        assert report == {**before, "ledger_checked_at": 500000}
         redis.hset(join_report.key("worker"), agent.execution_id, json.dumps(current))
         return {"ledger_join": False, "ledger_write": True}
 
@@ -145,6 +146,69 @@ def test_ledger_retry_preserves_a_concurrent_heartbeat_and_success(monkeypatch):
     assert after == join_report.graded(
         {**current, "checks": {**current["checks"], "ledger_write": True}, "ledger_checked_at": 500000}
     )
+
+
+def test_overlapping_ledger_retries_claim_one_probe_interval(monkeypatch):
+    from scripts.hive import join_checks, join_report
+
+    redis, agent, before = retry_report()
+    calls = []
+
+    def probe(report):
+        calls.append(report)
+        assert report["ledger_checked_at"] == 500000
+        join_report.retry_ledger(redis, agent, "session", 500001)
+        return {"ledger_join": True, "ledger_write": True}
+
+    monkeypatch.setattr(join_checks, "ledger_checks", probe)
+    join_report.retry_ledger(redis, agent, "session", 500000)
+    assert len(calls) == 1
+    assert join_report.read(redis, agent)["grade"] == "complete"
+    assert join_report.read(redis, agent)["started_at"] == before["started_at"]
+
+
+@pytest.mark.parametrize("failure", ["ledger_join", "ledger_write"])
+def test_one_remaining_ledger_failure_is_retried(monkeypatch, failure):
+    from unittest.mock import Mock
+
+    from scripts.hive import join_checks, join_report
+
+    redis, agent, before = retry_report()
+    checks = {**passing(), failure: False}
+    redis.hset(join_report.key("worker"), agent.execution_id, json.dumps({**before, "checks": checks}))
+    probe = Mock(return_value={"ledger_join": True, "ledger_write": True})
+    monkeypatch.setattr(join_checks, "ledger_checks", probe)
+    join_report.retry_ledger(redis, agent, "session", 500000)
+    probe.assert_called_once()
+    assert join_report.read(redis, agent)["grade"] == "complete"
+
+
+@pytest.mark.parametrize("conflict_on", [1, 2])
+def test_ledger_retry_yields_to_a_transaction_conflict(monkeypatch, conflict_on):
+    from unittest.mock import Mock
+
+    from redis.exceptions import WatchError
+
+    from scripts.hive import join_checks, join_report
+
+    redis, agent, before = retry_report()
+    original = redis.pipeline
+    calls = []
+
+    def pipeline():
+        pipe = original()
+        calls.append(pipe)
+        if len(calls) == conflict_on:
+            monkeypatch.setattr(pipe, "execute", Mock(side_effect=WatchError))
+        return pipe
+
+    probe = Mock(return_value={"ledger_join": True, "ledger_write": True})
+    monkeypatch.setattr(redis, "pipeline", pipeline)
+    monkeypatch.setattr(join_checks, "ledger_checks", probe)
+    join_report.retry_ledger(redis, agent, "session", 500000)
+    assert probe.call_count == conflict_on - 1
+    expected = before if conflict_on == 1 else {**before, "ledger_checked_at": 500000}
+    assert join_report.read(redis, agent) == expected
 
 
 @pytest.mark.parametrize(
