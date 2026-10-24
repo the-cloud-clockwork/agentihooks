@@ -223,7 +223,7 @@ def test_jobs_are_read_as_runner_labels():
 
 
 def searched(*pages, total=3):
-    return 0, "\n".join(json.dumps({"data": {"search": {"issueCount": total, "nodes": nodes}}}) for nodes in pages)
+    return 0, "".join(json.dumps({"issueCount": total, "nodes": nodes}) + "\n" for nodes in pages)
 
 
 def test_updated_pull_requests_past_the_search_cap_are_refused_not_undercounted():
@@ -246,8 +246,9 @@ def test_a_pull_request_with_exactly_the_queue_events_read_is_kept():
     ("out", "message"),
     [
         ("", "GitHub search answered nothing"),
-        ("  not json", "GitHub search answered unreadably: .*"),
-        ('{"data": {}}', "GitHub search answered unreadably: 'search'"),
+        ("not json\n", "GitHub search answered unreadably: Expecting value: line 1 column 1 \\(char 0\\)"),
+        ('{"issueCount": 1}\nnull\n', "GitHub search answered without a result count"),
+        ('{"nodes": []}\n', "GitHub search answered without a result count"),
     ],
 )
 def test_an_unreadable_or_empty_search_is_a_swarm_error(out, message):
@@ -265,7 +266,7 @@ def test_collect_reads_runs_jobs_and_searches_with_these_calls():
             (0, '["anton-oss-queue"]\n'),
             (0, ""),
             searched(PULLS[:2], [PULLS[2], {}]),
-            (0, json.dumps({"data": {"search": {"issueCount": 7}}})),
+            (0, json.dumps({"issueCount": 7}) + "\n"),
         ]
     )
     repo, found = merge_path.collect("/repo", WINDOW, gh)
@@ -276,6 +277,7 @@ def test_collect_reads_runs_jobs_and_searches_with_these_calls():
     labels = ["--paginate", "--jq", ".jobs[] | .labels | @json"]
     updated = f"q=repo:o/r is:pr base:dev updated:>={stamp(0)}"
     ready = "q=repo:o/r is:pr is:open draft:false base:dev"
+    search = ["--jq", ".data.search | @json"]
     assert gh.calls == [
         (["gh", "api", "repos/{owner}/{repo}", "--jq", ".full_name"], GH),
         (["gh", "api", runs_path("pull_request")], GH),
@@ -283,8 +285,8 @@ def test_collect_reads_runs_jobs_and_searches_with_these_calls():
         (["gh", "api", runs_path("push")], GH),
         (["gh", "api", jobs.replace("{}", "5"), *labels], GH),
         (["gh", "api", jobs.replace("{}", "6"), *labels], GH),
-        (["gh", "api", "graphql", "--paginate", "-f", f"query={merge_path.PULLS}", "-f", updated], GH),
-        (["gh", "api", "graphql", "-f", f"query={merge_path.OPEN_READY}", "-f", ready], GH),
+        (["gh", "api", "graphql", "--paginate", *search, "-f", f"query={merge_path.PULLS}", "-f", updated], GH),
+        (["gh", "api", "graphql", *search, "-f", f"query={merge_path.OPEN_READY}", "-f", ready], GH),
     ]
 
 

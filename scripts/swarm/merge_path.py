@@ -166,21 +166,26 @@ def read_jobs(repo_dir: str, run_id: int, run: Callable) -> list[list[str]]:
 
 
 def _search(repo_dir: str, query: str, variables: dict, run: Callable, paginate: bool = False) -> list[dict]:
-    args = ["api", "graphql", *(["--paginate"] if paginate else []), "-f", f"query={query}"]
+    args = [
+        "api",
+        "graphql",
+        *(["--paginate"] if paginate else []),
+        "--jq",
+        ".data.search | @json",
+        "-f",
+        f"query={query}",
+    ]
     for name, value in variables.items():
         args += ["-f", f"{name}={value}"]
-    out = _gh(args, repo_dir, run).strip()
-    decoder, pages, at = json.JSONDecoder(), [], 0
+    out = _gh(args, repo_dir, run)
     try:
-        while at < len(out):
-            page, at = decoder.raw_decode(out, at)
-            pages.append(page["data"]["search"])
-            while at < len(out) and out[at].isspace():
-                at += 1
-    except (ValueError, KeyError, TypeError) as exc:
+        pages = [json.loads(line) for line in out.splitlines()]
+    except ValueError as exc:
         raise SwarmError(f"GitHub search answered unreadably: {exc}") from exc
     if not pages:
         raise SwarmError("GitHub search answered nothing")
+    if not all(isinstance(page, dict) and "issueCount" in page for page in pages):
+        raise SwarmError("GitHub search answered without a result count")
     return pages
 
 
