@@ -81,12 +81,31 @@ def test_a_healthy_idle_binding_with_old_freshness_raises_nothing():
     assert traces.findings(_record(idle), LIMITS) == []
 
 
-def test_a_binding_with_no_trace_past_its_grace_is_never_exported_and_names_seat_and_task():
-    [found] = traces.findings(_record(_binding(traces=[], remote=None, local=None, session_id="")), LIMITS)
+def test_a_working_agent_in_its_first_turn_with_no_stop_is_not_never_exported():
+    first = _binding(traces=[], remote=None, local=_local(accepted=0, stopped=False))
+    assert traces.findings(_record(first), LIMITS) == []
+
+
+def test_an_agent_without_local_progress_inside_its_first_turn_bound_is_not_never_exported():
+    assert traces.findings(_record(_binding(traces=[], remote=None, local=None)), LIMITS) == []
+
+
+def test_an_agent_without_local_progress_past_its_first_turn_bound_is_never_exported():
+    old = _binding(traces=[], remote=None, local=None, started_at=NOW - 3_601_000)
+    [found] = traces.findings(_record(old), LIMITS)
+    assert found.kind == "telemetry never exported"
+    assert "no completed turn recorded, working past the 60 minute first turn bound" in found.evidence
+    assert found.measure == 3601
+
+
+def test_a_binding_with_no_trace_after_a_completed_turn_is_never_exported_and_names_seat_and_task():
+    stopped = _binding(traces=[], remote=None, local=_local(accepted=0, stopped=True), session_id="")
+    [found] = traces.findings(_record(stopped), LIMITS)
     assert found.kind == "telemetry never exported"
     assert found.id == f"telemetry-never-exported/{AGENT}.{STARTED}"
     assert "seat eng-1@s" in found.evidence and "task t1" in found.evidence
     assert f"no trace tagged swarm:s and agent:{AGENT}" in found.evidence
+    assert "a turn completed" in found.evidence
     assert found.measure == 600
 
 
@@ -231,8 +250,13 @@ def test_thresholds_read_from_the_environment():
     assert (limits.active_stale_seconds, limits.active_grace_seconds, limits.interval_minutes) == (30, 60, 2)
 
 
+def test_the_first_turn_bound_reads_from_the_environment():
+    assert traces.Limits.from_env({"AGENTIHOOKS_DOCTOR_FIRST_TURN_MINUTES": "5"}).first_turn_minutes == 5
+    assert traces.Limits().first_turn_minutes == 60
+
+
 def test_a_known_session_missing_under_its_agent_is_never_exported_even_beside_other_traces():
-    other = _binding(session_id="sid-2", remote=None, local=None)
+    other = _binding(session_id="sid-2", remote=None, local=_local(accepted=0, stopped=True))
     [found] = traces.findings(_record(other), LIMITS)
     assert found.kind == "telemetry never exported"
     assert "session sid-2" in found.evidence
@@ -291,14 +315,14 @@ UNKNOWN = (f"agent {AGENT}", "seat unknown", "task unknown", "session unknown")
 
 
 def test_a_never_exported_finding_reads_in_full():
-    blank = _binding(seat="", task="", session_id="", traces=[], remote=None, local=None)
+    blank = _binding(seat="", task="", session_id="", traces=[], remote=None, local=_local(accepted=0, stopped=True))
     assert traces.findings(_record(blank), LIMITS) == [
         traces.Finding(
             "telemetry never exported",
             f"{AGENT}.{STARTED}",
             "working agent with no Langfuse trace after 600 seconds",
-            (*UNKNOWN, f"no trace tagged swarm:s and agent:{AGENT}"),
-            f"no trace after a 60 second grace, {CADENCE}",
+            (*UNKNOWN, f"no trace tagged swarm:s and agent:{AGENT}", "a turn completed"),
+            f"no trace after a completed turn or past a 60 minute first turn, {CADENCE}",
             600,
         )
     ]
@@ -382,14 +406,15 @@ def test_a_misattributed_finding_reads_in_full():
 @pytest.mark.parametrize(
     "binding",
     [
-        _binding(traces=[], remote=None, local=None, started_at=NOW - 60_000),
+        _binding(traces=[], remote=None, local=_local(accepted=0, stopped=True), started_at=NOW - 60_000),
+        _binding(traces=[], remote=None, local=None, started_at=NOW - 3_600_000),
         _binding(local=_local(generated_bytes=5000, oldest_unaccepted=NOW - 60_000)),
         _binding(
             remote={"trace": "tr-1", "fresh_ms": NOW - 400_000, "observations": 30},
             local=_local(accepted_at=NOW - 60_000),
         ),
     ],
-    ids=["grace", "stale", "acknowledgement"],
+    ids=["grace", "first turn", "stale", "acknowledgement"],
 )
 def test_exactly_at_a_threshold_nothing_is_raised(binding):
     assert traces.findings(_record(binding), LIMITS) == []

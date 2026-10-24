@@ -89,8 +89,20 @@ def test_progress_reads_generated_and_accepted_progress_and_the_oldest_unaccepte
         "accepted_at": 1791360010000,
         "exporter_alive": False,
         "requested_at": T0 + 3_000,
+        "stopped": False,
     }
     assert 0 < found["accepted_bytes"] < size
+
+
+@pytest.mark.parametrize(
+    ("reason", "turns", "stopped"),
+    [("start", 1, False), ("compact", 1, False), ("stop", 1, True), ("end", 0, True), ("start", 2, True)],
+)
+def test_a_turn_is_completed_once_a_stop_is_requested_or_a_second_prompt_is_seen(cursors, reason, turns, stopped):
+    _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1, buffered_turns=turns)
+    path = trace_flush.request_path("sid")
+    path.write_text(json.dumps({**json.loads(path.read_text()), "reason": reason}))
+    assert registry.progress("sid", "claude")["stopped"] is stopped
 
 
 def test_accepted_observations_paged_out_of_the_cursor_still_count_as_accepted(cursors):
