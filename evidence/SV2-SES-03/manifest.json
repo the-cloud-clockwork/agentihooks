@@ -1,10 +1,16 @@
 {
   "package": "SV2-SES-03",
-  "cases": ["T-SV2-SES-03-A", "T-SV2-SES-03-B", "T-SV2-SES-03-C"],
+  "cases": [
+    "T-SV2-SES-03-A",
+    "T-SV2-SES-03-B",
+    "T-SV2-SES-03-C"
+  ],
   "evidence_class": "mocked: a local transcript file and an in-process destination stand in for the provider and central ingestion; no network, Pod or hive collector runs",
   "inputs": {
     "tests/fixtures/swarm_v2/spool-outage.json": "3bec0d07f5174291b15e1aa49fb80f12039bee302153d213499ab409f1f25406"
   },
   "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40086742833",
-  "tested_commit": "pending"
+  "tested_commit": "b9cfe2b16",
+  "records_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40087708695",
+  "records_note": "each record was printed by the committed evidence assertion failing on absent records in the records run; that run is not cited as green"
 }
