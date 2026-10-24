@@ -259,7 +259,7 @@ host tick will apply the settings`, and the helm kind smoke timed out at its hos
 smoke dispatched on the fix branch, [run 39331201531](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39331201531),
 where the controller recorded the host pressure off reason 1.7 seconds after the simulated pressure, and the
 `helm-kind / kind` job of dev push [run 39337452296](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39337452296)
-at the merge commit. The regression test
+at the merge commit; that run failed only in its `swarm-image / smoke` job. The regression test
 `test_a_controller_deployment_ticks_its_swarm_on_its_own_ledger_link` runs a scheduled tick in `distributed` and
 `compose` mode with `api_url` set and asserts that the tick reaches `LEDGER_URL` and ignores the stored address.
 
