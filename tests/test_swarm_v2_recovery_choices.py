@@ -216,3 +216,9 @@ def test_an_automatic_replacement_records_when_it_was_decided(world):
         world.old.execution_id, world.old.generation, "node_lost", "resume", "ckpt-native", decision.replacement
     )
     assert _published(world)["decided_at_ms"] == world.clock[0]
+
+
+def test_published_material_is_stored_with_sorted_keys(world):
+    recovery = _pending(world, [_entry(world, "ckpt-context", 1, continuation="context")])
+    raw = world.store.redis.hget(world.store.key(cases.SLUG, failures.MATERIAL), world.old.execution_id)
+    assert raw == json.dumps(recovery.material(world.old.execution_id), sort_keys=True)

@@ -191,3 +191,12 @@ def test_only_a_pod_attempt_takes_the_controller_path(changes):
     with pytest.raises(AssertionError, match="local restore list"):
         resume.decide(pods, "sw", "sw-eng-1", "fresh", ResumingRuntime(), 5000, FakeLedger([]))
     assert (resume.KUBERNETES, resume.RECOVERY_REQUESTS) == ("kubernetes", "recovery-requests")
+
+
+def test_native_is_not_refused_for_an_account_out_of_quota(store, tmp_path, monkeypatch):
+    saved(store, tmp_path)
+    restore(store, ResumingRuntime(fail="unavailable"))
+    monkeypatch.setattr(resume.agent_choice, "account_has_quota", lambda *_: False)
+    assert resume.quota_ignored("claude", "a1") is True
+    outcome = resume.decide(store, "sw", "sw-eng-1", "native", ResumingRuntime(), 2000, FakeLedger([]))
+    assert outcome.name == "sw-eng-1"

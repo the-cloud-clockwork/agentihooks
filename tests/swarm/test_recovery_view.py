@@ -242,3 +242,49 @@ def test_the_recovery_modules_import_first_in_a_fresh_interpreter(module):
     root = Path(__file__).parents[2]
     result = subprocess.run([sys.executable, "-c", f"import {module}"], cwd=root, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_wait_seconds_round_down_and_never_go_negative():
+    assert [rv._seconds(0, 1_999), rv._seconds(5, 5), rv._seconds(10, 5)] == [1, 0, 0]
+
+
+def test_a_card_without_a_decision_record_is_still_pending():
+    card = rv.pod_card(material(decision=None), NOW)
+    assert (card["accepted"], card["choices"][0]["unavailable"], card["wait_seconds"]) == (None, "", 61)
+
+
+def test_a_local_card_names_its_agent_task_and_reason_and_never_a_request(store):
+    _local(store)
+    _restored(store)
+    [card] = rv.view(store, SLUG, NOW)["cards"]
+    shown = {key: card[key] for key in ("seat", "agent", "task", "reason", "requested", "requested_text")}
+    assert shown == {
+        "seat": f"eng-5@{SLUG}",
+        "agent": "eng-local",
+        "task": "t9",
+        "reason": "worktree gone",
+        "requested": "",
+        "requested_text": "",
+    }
+
+
+def test_local_cards_are_ordered_by_seat(store):
+    for name, seat in (("eng-b", "eng-9"), ("eng-a", "eng-2")):
+        agent = AgentRecord(name, "eng", "t9", seat=f"{seat}@{SLUG}", conversation_id="c", state=resume.AWAITING)
+        store.put_agent(SLUG, agent)
+    names = ("eng-b", "eng-a")
+    store.put_restored(
+        SLUG, [asdict(resume.Outcome(n, "eng", "t9", resume.AWAITING, "worktree gone", at=NOW)) for n in names]
+    )
+    assert [card["seat"] for card in rv.view(store, SLUG, NOW)["cards"]] == [f"eng-2@{SLUG}", f"eng-9@{SLUG}"]
+
+
+def test_the_swarm_view_carries_the_recovery_projection_at_the_current_time(store, monkeypatch):
+    from scripts.swarm import commands
+
+    _local(store)
+    _restored(store)
+    monkeypatch.setattr(commands.time, "time_ns", lambda: NOW * 1_000_000)
+    shown = commands.view(store, SLUG)["recovery"]
+    assert shown == rv.view(store, SLUG, NOW)
+    assert shown[rv.METRIC] == {f"eng-5@{SLUG}": 30}

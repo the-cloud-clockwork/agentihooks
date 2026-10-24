@@ -41,7 +41,7 @@ def _badge(unavailable: dict[str, str]) -> str:
 
 
 def _seconds(start_ms: int, end_ms: int) -> int:
-    return max(0, end_ms - start_ms) // 1000
+    return max(0, (end_ms - start_ms) // 1000)
 
 
 def _accepted(choice: str, replacement: str) -> dict:
@@ -50,7 +50,7 @@ def _accepted(choice: str, replacement: str) -> dict:
 
 def _current(store: RedisStore, slug: str, material: dict) -> bool:
     occupant = store.execution_occupants(slug).get(material["seat"])
-    replacement = (material["decision"] or {}).get("replacement", "")
+    replacement = (material["decision"] or {}).get("replacement")
     return occupant is not None and occupant.execution_id in (material["execution_id"], replacement)
 
 
@@ -69,7 +69,7 @@ def _pod_diagnosis(material: dict) -> list[str]:
     if unavailable["native"] and not unavailable["context"]:
         found += list(model.CONTEXT_LIMITS)
     if refused:
-        found.append(f"refused {LABELS.get(refused['choice'], refused['choice'])}: {refused['reason']}")
+        found.append(f"refused {LABELS[refused['choice']]}: {refused['reason']}")
     return found
 
 
@@ -90,7 +90,7 @@ def pod_card(material: dict, now_ms: int) -> dict:
         "diagnosis": _pod_diagnosis(material),
         "choices": _choices(material["choices"], held, {choice: choice for choice in CHOICES}),
         "requested": requested,
-        "requested_text": f"requested: {LABELS.get(requested, requested)}" if requested else "",
+        "requested_text": f"requested: {LABELS[requested]}" if requested else "",
         "accepted": _accepted(decision["mode"], decision["replacement"]) if decided else None,
         "wait_seconds": _seconds(material["fenced_at_ms"], end),
     }

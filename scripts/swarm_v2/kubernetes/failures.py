@@ -278,8 +278,8 @@ class Recovery:
         }
 
     def _passed_over(self, execution_id: str, latest: dict) -> list[dict]:
-        floor = latest.get("sequence", -1)
-        newer = [entry for entry in self.checkpoints.list(execution_id) if entry["sequence"] > floor]
+        entries = self.checkpoints.list(execution_id)
+        newer = [entry for entry in entries if not latest or entry["sequence"] > latest["sequence"]]
         return sorted(newer, key=lambda entry: entry["sequence"], reverse=True)
 
     def _publish(self, execution_id: str) -> None:

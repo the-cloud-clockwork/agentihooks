@@ -50,6 +50,10 @@ def account_quota(harness, account):
     return agent_choice.account_has_quota(harness, account, dict(os.environ))
 
 
+def quota_ignored(harness, account):
+    return True
+
+
 def blocker(agent, worktree, exists=os.path.isdir, has_quota=account_quota):
     """Why the agent cannot reopen its own conversation; empty when it can."""
     if not agent.conversation_id:
@@ -167,7 +171,7 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
 
         worktrees = json.loads(store.redis.get(store.key(slug, "restore-worktrees")) or "{}")
         worktree = store.config(slug).repo if agent.lane == MASTER else worktrees.get(name, "")
-        lost = blocker(agent, worktree, has_quota=lambda harness, account: True)
+        lost = blocker(agent, worktree, has_quota=quota_ignored)
         if choice == NATIVE and lost:
             raise SwarmError(lost)
         outcome = _attempt(
