@@ -266,6 +266,7 @@ def test_after_a_backend_master_retires_the_items_it_decided_belong_to_the_front
 
     table.retire(SLUG, SECOND, decided_at)
 
+    assert (table.retired_at(SLUG, SECOND), table.retired_at(SLUG, f"master-3@{SLUG}")) == (decided_at, 0)
     refused = [f"followups/targeted belongs to {LEAD}, so {cases.FORMER} cannot decide it"]
     assert decide(cases.FORMER, 1)["warnings"] == refused
     assert table.hive_owners(SLUG) == {f"{masters.HIVES}/anton": LEAD}

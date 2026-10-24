@@ -223,7 +223,7 @@ class MasterSeats:
                         key,
                         mapping={
                             "owners": json.dumps(_handed(saved, address, front)),
-                            HIVES: json.dumps(_handed(hives, address, front), sort_keys=True),
+                            HIVES: json.dumps(_handed(hives, address, front)),
                             RETIRED: json.dumps(_added(held, address)),
                             f"{RETIRED_AT}{address}": at,
                         },
