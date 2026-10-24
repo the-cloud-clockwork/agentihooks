@@ -231,7 +231,6 @@ def test_size_of_a_vanished_entry_is_zero(tmp_path):
     assert sampling._size(tmp_path / "gone") == 0
 
 
-# A mutation stats worker runs many tests in one process: their threads drop garbage the audit's collection finalizes.
 def allocated_here(source) -> bool:
     if source is None:
         return True
@@ -242,9 +241,9 @@ def allocated_here(source) -> bool:
 def test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd):
     command = [sys.executable, str(WORKLOADS / "memory.py"), "--children", "2", "--mib", "48", "--hold", "1.5"]
     gc.collect()
-    tracing = tracemalloc.is_tracing()
-    if not tracing:
-        tracemalloc.start(TRACE_FRAMES)
+    limit = tracemalloc.get_traceback_limit() if tracemalloc.is_tracing() else 0
+    tracemalloc.stop()
+    tracemalloc.start(TRACE_FRAMES)
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -256,8 +255,9 @@ def test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd):
             if issubclass(w.category, ResourceWarning) and allocated_here(w.source)
         ]
     finally:
-        if not tracing:
-            tracemalloc.stop()
+        tracemalloc.stop()
+        if limit:
+            tracemalloc.start(limit)
     assert leaks == [], " | ".join(leaks)
     assert result["exit_code"] == 0 and not result["timed_out"]
     assert 3 <= result["peak_processes"] < 10
