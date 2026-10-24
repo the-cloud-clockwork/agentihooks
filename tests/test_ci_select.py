@@ -252,6 +252,35 @@ def test_a_selection_uses_one_leg_per_leg_budget_of_stored_time(heavy, total, co
     assert len(legs) == count
 
 
+def workflow_legs():
+    jobs = yaml.safe_load(WORKFLOW.read_text())["jobs"]
+    step = next(s for s in jobs["select"]["steps"] if s.get("id") == "select")
+    line = next(line for line in step["run"].splitlines() if "scripts.ci_select" in line)
+    return jobs, int(shlex.split(line)[shlex.split(line).index("--legs") + 1])
+
+
+def test_the_workflow_passes_every_selected_leg_its_own_files():
+    jobs, limit = workflow_legs()
+    outputs = jobs["select"]["outputs"]
+    assert [name for name in outputs if name.startswith("files_")] == [f"files_{leg}" for leg in range(1, limit + 1)]
+    assert all(outputs[f"files_{leg}"] == f"${{{{ steps.select.outputs.files_{leg} }}}}" for leg in range(1, limit + 1))
+    assert jobs["unit-selected"]["env"]["FILES"] == "${{ needs.select.outputs[format('files_{0}', matrix.leg)] }}"
+
+
+def test_a_pull_request_selecting_half_the_suite_runs_only_those_tests(heavy):
+    _, limit = workflow_legs()
+    third = 1800.0 / 3
+    durations = seconds(test_sample=0.5, test_heavy1=third, test_heavy2=third, test_heavy3=third - 0.5)
+    scope, legs = decide(heavy, ["hooks/sample.py"], durations, limit)
+    assert scope == "selected"
+    assert sorted(file for leg in legs for file in leg) == [
+        "tests/test_heavy1.py",
+        "tests/test_heavy2.py",
+        "tests/test_heavy3.py",
+        "tests/test_sample.py",
+    ]
+
+
 def test_a_test_file_sums_the_stored_time_of_all_its_tests(heavy):
     durations = {"tests/test_heavy1.py::Case::test_a": 100.0, "tests/test_heavy1.py::Case::test_b": 100.0}
     _, legs = decide(heavy, ["hooks/sample.py"], durations)
