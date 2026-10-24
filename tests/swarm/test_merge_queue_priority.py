@@ -290,9 +290,10 @@ def test_priority_attempts_every_restoration_after_one_is_refused():
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9", "P3"]
 
 
-def test_priority_preserves_order_across_queue_pages():
+@pytest.mark.parametrize("queued, split", [(False, 2), (True, 4)])
+def test_priority_preserves_order_across_queue_pages(queued, split):
     queue = FakeQueue()
-    queue.entries += [queue.entry(4), queue.entry(5)]
+    queue.entries += [queue.entry(9)] * queued + [queue.entry(4), queue.entry(5)]
     pages = []
 
     def run(command, **kwargs):
@@ -302,11 +303,11 @@ def test_priority_preserves_order_across_queue_pages():
             args.pop("query")
             if not pages:
                 assert args == {}
-                nodes = queue.entries[:2]
+                nodes = queue.entries[:split]
                 info = {"hasNextPage": True, "endCursor": "cursor"}
             else:
                 assert args == {"after": "cursor"}
-                nodes = queue.entries[2:]
+                nodes = queue.entries[split:]
                 info = {"hasNextPage": False, "endCursor": None}
             pages.append(nodes.copy())
             data = {
