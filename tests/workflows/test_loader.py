@@ -65,6 +65,20 @@ def test_a_broken_file_is_reported_and_skipped(tmp_path):
     assert "stages.build: unknown key persona" in errors[0]
 
 
+def test_an_unreadable_file_is_reported_and_the_other_layers_still_load(tmp_path):
+    broken = tmp_path / "profile"
+    write(broken, "bad.yaml", "")
+    (broken / "bad.yaml").write_bytes(b"\xff\xfe\x00")
+    good = tmp_path / "project"
+    write(good, "good.yaml", workflow_text("good", "fine"))
+
+    found, errors = loader.load([("profile:engineer", broken), ("project", good)])
+
+    assert list(found) == ["good"]
+    assert len(errors) == 1
+    assert errors[0].startswith(f"{broken / 'bad.yaml'}: unreadable: ")
+
+
 def test_layer_dirs_list_package_bundle_profiles_then_project_in_order(tmp_path, monkeypatch):
     bundle = tmp_path / "bundle"
     role = tmp_path / "roles" / "engineer"

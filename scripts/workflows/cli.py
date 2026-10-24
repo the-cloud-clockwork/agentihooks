@@ -43,7 +43,8 @@ def list_workflows(args: argparse.Namespace) -> int:
 
 
 def show(args: argparse.Namespace) -> int:
-    found, _ = loader.resolve(Path.cwd())
+    found, errors = loader.resolve(Path.cwd())
+    report(errors)
     if args.name not in found:
         return refuse(f"no workflow named {args.name}")
     entry = found[args.name]
@@ -56,16 +57,17 @@ def validate(args: argparse.Namespace) -> int:
     path = Path(args.target)
     if path.is_file():
         try:
-            workflow = schema.parse(path.read_text())
+            workflow = loader.read(path)
         except schema.WorkflowError as exc:
             return report([f"{path}: {error}" for error in exc.errors])
         print(f"valid: {workflow.name} ({path})")
         return 0
-    found, _ = loader.resolve(Path.cwd())
+    found, errors = loader.resolve(Path.cwd())
     if args.target not in found:
+        report(errors)
         return refuse(f"no workflow named {args.target}")
     print(f"valid: {args.target} ({found[args.target].path})")
-    return 0
+    return report(errors)
 
 
 ACTIONS = {"list": list_workflows, "show": show, "validate": validate}

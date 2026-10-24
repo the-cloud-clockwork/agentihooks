@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 import yaml
-from scripts.workflows import cli, loader, schema
 
 from scripts import cli_delegates
+from scripts.workflows import cli, loader, schema
 
 TEXT = (
     "workflow:\n"
@@ -71,6 +71,8 @@ def test_show_prints_the_workflow_with_defaults_filled_in(resolved, capsys):
 
 
 def test_show_refuses_an_unknown_name(resolved, capsys):
+    resolved["errors"].clear()
+
     assert cli.main(["show", "nope"]) == 1
     assert capsys.readouterr().err == "agentihooks workflow: no workflow named nope\n"
 
@@ -92,13 +94,33 @@ def test_validate_refuses_a_stage_that_breaks_the_primitive(tmp_path, capsys):
 
 
 def test_validate_accepts_a_name_that_loads(resolved, capsys):
+    resolved["errors"].clear()
+
     assert cli.main(["validate", "tiny"]) == 0
     assert capsys.readouterr().out == f"valid: tiny ({resolved['path']})\n"
 
 
+def test_validate_by_name_fails_while_any_layer_file_is_broken(resolved, capsys):
+    assert cli.main(["validate", "tiny"]) == 1
+    assert capsys.readouterr().err == f"{resolved['errors'][0]}\n"
+
+
+def test_show_reports_broken_layer_files_beside_the_workflow(resolved, capsys):
+    assert cli.main(["show", "tiny"]) == 0
+    assert capsys.readouterr().err == f"{resolved['errors'][0]}\n"
+
+
 def test_validate_refuses_a_name_that_is_not_a_file_or_a_workflow(resolved, capsys):
     assert cli.main(["validate", "nope"]) == 1
-    assert capsys.readouterr().err == "agentihooks workflow: no workflow named nope\n"
+    assert capsys.readouterr().err == f"{resolved['errors'][0]}\nagentihooks workflow: no workflow named nope\n"
+
+
+def test_validate_refuses_an_unreadable_file(tmp_path, capsys):
+    path = tmp_path / "w.yaml"
+    path.write_bytes(b"\xff\xfe\x00")
+
+    assert cli.main(["validate", str(path)]) == 1
+    assert capsys.readouterr().err.startswith(f"{path}: unreadable: ")
 
 
 def test_an_unknown_action_is_a_usage_error():

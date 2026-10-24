@@ -2,6 +2,7 @@ import copy
 
 import pytest
 import yaml
+
 from scripts.workflows import schema
 from scripts.workflows.schema import WorkflowError
 
@@ -121,6 +122,18 @@ def test_a_missing_required_key_is_refused(path, message):
     del target[last]
 
     assert message in refused(block(doc))
+
+
+@pytest.mark.parametrize(
+    ("path", "message"),
+    [
+        ("workflow__head", "workflow: head must not be empty"),
+        ("workflow__exit", "workflow: exit must not be empty"),
+        ("stages__build__profile", "stages.build: profile must not be empty"),
+    ],
+)
+def test_a_required_key_set_to_null_is_refused(path, message):
+    assert message in refused(block(document(**{path: None})))
 
 
 def test_a_next_target_naming_a_missing_stage_is_refused():

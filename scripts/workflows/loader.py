@@ -43,13 +43,21 @@ def workflow_files(directory: Path) -> list[Path]:
     return sorted(path for path in directory.iterdir() if path.suffix in SUFFIXES and path.is_file())
 
 
+def read(path: Path) -> schema.Workflow:
+    try:
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise schema.WorkflowError([f"unreadable: {exc}"]) from exc
+    return schema.parse(text)
+
+
 def load(layers: list[tuple[str, Path]]) -> tuple[dict[str, Found], list[str]]:
     found: dict[str, Found] = {}
     errors: list[str] = []
     for layer, directory in layers:
         for path in workflow_files(directory):
             try:
-                workflow = schema.parse(path.read_text())
+                workflow = read(path)
             except schema.WorkflowError as exc:
                 errors.extend(f"{path}: {error}" for error in exc.errors)
                 continue

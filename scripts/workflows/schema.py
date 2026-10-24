@@ -143,6 +143,7 @@ def mapping(document: dict, key: str, errors: list[str]) -> dict:
 def filled(body: dict, required: tuple[str, ...], defaults: dict, where: str, errors: list[str]) -> dict:
     errors.extend(unknown_keys(body, (*required, *defaults), where))
     errors.extend(f"{where}: missing required key {key}" for key in required if key not in body)
+    errors.extend(f"{where}: {key} must not be empty" for key in required if key in body and body[key] is None)
     out = copy.deepcopy(defaults)
     out.update({key: None for key in required})
     out.update(body)
