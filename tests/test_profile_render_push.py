@@ -1,3 +1,5 @@
+import json
+
 from scripts.profiles import codex_master, render
 from tests.test_profile_render import _commit, _write
 from tests.test_profile_render import world as world
@@ -14,6 +16,7 @@ def test_a_push_codex_master_renders_its_persona_without_the_wait_inbox_loop(wor
     assert persona.endswith("\n" + codex_master.waiting("<slug>", push=True) + "\n")
     assert "- Read agentihooks msg inbox.\n" in persona
     assert "Monitor" not in persona
+    assert json.loads((out / render.STAMP).read_text())["push"] is True
     assert render.render_codex("master", push=True) is None
     legacy = render.render_codex("master")
     assert legacy is not None
