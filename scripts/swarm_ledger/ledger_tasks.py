@@ -51,9 +51,9 @@ UPDATABLE = (
     "after_release",
     "applied_at",
     "workstation",
-    "recovery",
     "doc_items",
     "watchdog",
+    "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up", "workstation")
 DIFFICULTIES = ("S", "M", "L")
