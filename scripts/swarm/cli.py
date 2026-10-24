@@ -2177,7 +2177,7 @@ def build_parser():
     path = sub.add_parser("merge-path")
     path.add_argument("--hours", type=float, default=24.0)
     path.add_argument("--json", action="store_true")
-    path.add_argument("--post", default="", metavar="ITEM")
+    path.add_argument("--post")
     verdict = sub.add_parser("verdict")
     verdict.add_argument("finding")
     verdict.add_argument("verdict")

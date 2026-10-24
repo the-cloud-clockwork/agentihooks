@@ -323,6 +323,11 @@ def test_the_command_line_prints_the_line_and_posts_nothing_by_default(monkeypat
     assert calls.windows == [("/repo", (UNTIL - 1800, UNTIL))] and calls.posts == []
 
 
+def test_the_command_line_reads_the_last_day_by_default(monkeypatch, capsys):
+    calls = command(monkeypatch, merge_path.count([], [], {}, 0, WINDOW), [])
+    assert calls.windows == [("/repo", (UNTIL - 86400, UNTIL))] and calls.posts == []
+
+
 @pytest.mark.parametrize("hours", ["0", "-2"])
 def test_the_command_line_refuses_an_empty_or_inverted_window(monkeypatch, hours):
     with pytest.raises(SwarmError, match="^merge-path takes hours above zero$"):
