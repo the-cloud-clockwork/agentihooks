@@ -84,7 +84,7 @@ def decode_claude(entry: dict, state: TurnState) -> Iterator[TranscriptRecord]:
     if isinstance(message, str):
         yield {"kind": kind, "text": message, "raw": entry}
         return
-    content = message.get("content", []) if isinstance(message, dict) else []
+    content = message.get("content") if isinstance(message, dict) else None
     if isinstance(content, str):
         yield {"kind": kind, "text": content, "raw": entry}
         return
@@ -117,7 +117,7 @@ def decode_claude(entry: dict, state: TurnState) -> Iterator[TranscriptRecord]:
 def _codex_response_item(payload: dict, entry: dict, state: TurnState) -> Iterator[TranscriptRecord]:
     ptype = payload.get("type")
     if ptype == "message":
-        role = payload.get("role", "")
+        role = payload.get("role")
         kind = {
             "assistant": "assistant_text",
             "user": "user_text",
@@ -187,14 +187,14 @@ def _copilot_result_text(result: object) -> object:
             return value
     blocks = result.get("contents")
     if isinstance(blocks, list):
-        texts = [b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("text")]
+        texts = [b["text"] for b in blocks if isinstance(b, dict) and b.get("text")]
         if texts:
             return "\n".join(texts)
     return result
 
 
 def _copilot_message(etype: str, data: dict, entry: dict, state: TurnState) -> Iterator[TranscriptRecord]:
-    text = data.get("content", "")
+    text = data.get("content")
     if etype == "user.message":
         # Hook-injected context rides in as a user.message with
         # source="system" (observed live, v1.0.80) — counting it as a
