@@ -750,9 +750,7 @@ def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, m
     assert calls == [("discover", tmp_path, ["base"], "HEAD"), *[("record", "owner/repo")] * bool(changed)]
     assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
     if not changed:
-        assert (
-            "No hook or script module changed, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
-        )
+        assert "No change remains to mutate, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])

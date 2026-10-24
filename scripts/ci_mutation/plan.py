@@ -264,7 +264,7 @@ def main() -> int:
     changes = discover_changes(root, bases, args.head)
     manifest, failure = None, ""
     if args.repository and not changes:
-        print("No hook or script module changed, so the recorded dev coverage is not read.")
+        print("No change remains to mutate, so the recorded dev coverage is not read.")
     elif args.repository:
         found, failure = read_record(args.repository)
         if failure:
