@@ -109,7 +109,13 @@ link and uses the operator browser connector's already signed in claude.ai
 session. It must never sign in, sign out or switch accounts. It replies to that
 request with exactly `success`, `captcha` or `failure`. Preparation waits for
 the matching reply; success also requires the native login process to finish
-and the renewed session to pass the live check.
+and the renewed session to pass the live check. If the browser displays a manual
+authorization code, the master clicks that page's Copy button immediately before
+replying `success`. Only that matching reply permits private Windows clipboard
+capture and immediate clearing. The code must match the native request state
+before it reaches native stdin, once. Native output is drained in memory; only
+the authorization URL is retained. Codes never enter snapshots, messages or logs.
+A missing clipboard command or invalid callback ends the browser attempt.
 
 CAPTCHA, browser failure or a timeout ends the native login attempt and releases
 only the launching process's slot claim. The master then takes normal

@@ -52,6 +52,7 @@ def test_authorization_url_rejects_non_authorization_output(text):
 def test_native_callback_goes_directly_to_stdin_once_without_logs(tmp_path, monkeypatch, capsys):
     from scripts import master_claude_login as login
 
+    existing = set(tmp_path.iterdir())
     url = "https://claude.com/cai/oauth/authorize?state=proof"
     process, spawned = _process(monkeypatch, f"Open {url}\nprivate output\n")
     capture = _clipboard(monkeypatch, "code#proof\r\n")
@@ -80,7 +81,7 @@ def test_native_callback_goes_directly_to_stdin_once_without_logs(tmp_path, monk
     assert "Get-Clipboard -Raw" in args[0][4] and "Set-Clipboard -Value ''" in args[0][4]
     assert options == {"capture_output": True, "text": True, "timeout": 15}
     assert process.stdin.closed and process.stdout.closed and not attempt.reader.is_alive()
-    assert list(tmp_path.iterdir()) == []
+    assert set(tmp_path.iterdir()) == existing
     assert capsys.readouterr() == ("", "")
 
 
