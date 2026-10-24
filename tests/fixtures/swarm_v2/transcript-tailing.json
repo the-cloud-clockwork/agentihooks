@@ -1,0 +1,9 @@
+{
+  "source": "session.jsonl",
+  "first": {"type": "user", "message": {"role": "user", "content": "café first prompt ✓"}},
+  "appended": {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "日本 answer"}]}},
+  "partial": {"type": "user", "message": {"role": "user", "content": "partial über record ☃"}},
+  "rotated": {"type": "user", "message": {"role": "user", "content": "after rotation"}},
+  "truncated": {"type": "user", "message": {"role": "user", "content": "after truncation"}},
+  "regrown": {"type": "user", "message": {"role": "user", "content": "regrown after truncation with a longer record than before"}}
+}
