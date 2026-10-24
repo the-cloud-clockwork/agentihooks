@@ -79,6 +79,7 @@ def test_help_names_every_action(monkeypatch):
 
     text = cli.parser().format_help()
 
+    assert text.startswith("usage: agentihooks workflow [-h] ")
     assert cli.DESCRIPTION in text
     for action, (help_text, _) in cli.COMMANDS.items():
         assert action in text
