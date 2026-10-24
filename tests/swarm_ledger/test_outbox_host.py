@@ -254,6 +254,7 @@ def test_server_gives_the_relay_and_the_projector_their_stores_and_stops_them_be
     server = Mock()
     server.serve_forever.side_effect = serving
     server.server_close.side_effect = lambda: lifecycle.append("server closed")
+    server.drained.side_effect = lambda timeout: lifecycle.append(("drained", timeout)) or True
     monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
     with pytest.raises(ValueError, match="serving failed"):
         ledger_server.serve()
@@ -261,6 +262,7 @@ def test_server_gives_the_relay_and_the_projector_their_stores_and_stops_them_be
         "relay started",
         "projector started",
         "serving",
+        ("drained", ledger_server.DRAIN_S),
         "projector stopped",
         "relay stopped",
         "server closed",

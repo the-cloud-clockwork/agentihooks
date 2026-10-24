@@ -1557,16 +1557,20 @@ def serve():
     server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST)
     PIDFILE.write_text(str(os.getpid()))
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
+    drained = False
     try:
         from scripts.hub import projector
         from scripts.swarm_ledger import outbox_host
 
         with outbox_host.running(stored), projector.running(repository, HUB):
-            server.serve_forever(POLL_S)
+            try:
+                server.serve_forever(POLL_S)
+            finally:
+                stopped.set()
+                HUB.drain()
+                drained = server.drained(DRAIN_S)
     finally:
         stopped.set()
-        HUB.drain()
-        drained = server.drained(DRAIN_S)
         server.server_close()
         with WATCH_PASS:
             watching.set()
