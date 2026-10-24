@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from hooks import config
 from hooks.classifier import Answer, ClassifierError, DecisionResult
 from hooks.context import conditions, profile_chain
 from hooks.filters import extract, runner, schema
@@ -228,8 +229,10 @@ def test_fields_must_be_a_list_of_names():
     assert schema.parse({"fields": ["evidence"]}).fields == ("evidence",)
     with pytest.raises(schema.FilterSchemaError, match="fields"):
         schema.parse({"fields": "evidence"})
-    with pytest.raises(schema.FilterSchemaError, match="got evidnce"):
-        schema.parse({"fields": ["case", "evidnce"]})
+    known = "text, evidence, case, content, new_string, new_source, edits"
+    with pytest.raises(schema.FilterSchemaError) as refused:
+        schema.parse({"fields": ["case", "evidnce", "cas"]})
+    assert str(refused.value) == f"fields must name input keys from {known}, got cas, evidnce"
 
 
 @pytest.mark.parametrize(
@@ -247,17 +250,22 @@ def test_filters_that_rewrite_one_key_run_in_turn(filters_dir, monkeypatch):
     (filters_dir / "pre-judge-b.filter.yaml").write_text("mode: finders\naction: strip\nfinders:\n  - regex: 'bb'\n")
     (filters_dir / "pre-judge-c.sh").write_text('#!/usr/bin/env bash\necho \'{"context": "seen"}\'\n')
     (filters_dir / "pre-judge-c.sh").chmod(0o755)
+    ran = []
+    real = conditions.execute
+    monkeypatch.setattr(conditions, "execute", lambda entry, *args: ran.append(entry["file"]) or real(entry, *args))
     outcome = check("judge", _input("aa one bb two"))
     assert outcome.decision == "rewrite"
     assert outcome.tool_input["evidence"]["items"][0]["claim"] == " one  two"
+    assert sorted(ran) == ["pre-judge-a.filter.yaml", "pre-judge-b.filter.yaml", "pre-judge-c.sh"]
 
 
 def test_a_failed_filter_does_not_feed_the_next(filters_dir, monkeypatch):
-    seen = []
+    seen, timeouts = [], []
     real = conditions.execute
 
     def spy(entry, step, payload, timeout):
         seen.append(json.loads(json.dumps(payload["tool_input"])))
+        timeouts.append(timeout)
         if entry["file"].startswith("pre-judge-a"):
             return {"returncode": 2, "stdout": json.dumps({"tool_input": {"case": "dropped"}}), "stderr": "no"}
         return real(entry, step, payload, timeout)
@@ -267,6 +275,7 @@ def test_a_failed_filter_does_not_feed_the_next(filters_dir, monkeypatch):
     (filters_dir / "pre-judge-b.filter.yaml").write_text("mode: finders\n")
     check("judge", _input("a"))
     assert seen == [_input("a"), _input("a")]
+    assert timeouts == [config.CONDITIONS_TIMEOUT_SEC] * 2
 
 
 def test_a_single_filter_keeps_the_shared_runner(filters_dir, monkeypatch):

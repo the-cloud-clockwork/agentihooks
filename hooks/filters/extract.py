@@ -98,6 +98,6 @@ def rewrite(tool_input: dict, replaced: dict[tuple, str], dropped: list | tuple 
     patch = {}
     for where, value in replaced.items():
         _set(patch, tool_input, where, value)
-    for where in sorted((w for w in dropped if len(w) > 1 and isinstance(w[-1], int)), reverse=True):
+    for where in sorted((w for w in dropped if isinstance(w[-1], int)), reverse=True):
         del _node(patch, tool_input, where)[where[-1]]
     return patch

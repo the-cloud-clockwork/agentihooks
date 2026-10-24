@@ -423,7 +423,7 @@ def _run_chained(entries: list[dict], step: str, payload: dict) -> list[dict]:
     for entry in entries:
         current = {**payload, "tool_input": {**payload["tool_input"], **patch}} if patch else payload
         run = execute(entry, step, current, CONDITIONS_TIMEOUT_SEC)
-        rewritten = _parse_stdout(run.get("stdout", "")).get("tool_input") if run.get("returncode") == 0 else None
+        rewritten = _parse_stdout(run["stdout"]).get("tool_input") if run.get("returncode") == 0 else None
         if isinstance(rewritten, dict):
             patch.update(rewritten)
         runs.append(run)
