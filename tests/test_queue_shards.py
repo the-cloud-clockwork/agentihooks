@@ -208,7 +208,7 @@ def test_queue_sizing_uses_idle_runners_to_finish_serial_work_within_four_minute
 
     assert len(plan) == 24
     assert {leg["total"] for leg in plan} == {24}
-    assert {leg["predicted_seconds"] for leg in plan} == {237.0}
+    assert all(leg["predicted_seconds"] == pytest.approx(237.0, abs=0.001) for leg in plan)
 
 
 def test_unknown_cases_use_module_maxima_and_the_global_tail_for_new_modules(tmp_path):
