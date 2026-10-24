@@ -88,6 +88,31 @@ def test_a_rerun_classifier_or_judge_failure_is_named_even_when_lost(name):
         ("##[error]Process completed with exit code 137.", True),
         ("##[error]Process completed with exit code 143.", True),
         ("E   AssertionError: Process completed with exit code 1", True),
+        pytest.param(
+            (_ROOT / "tests/fixtures/queue_retry/failure_quoting_a_loss.txt").read_text(),
+            False,
+            id="failure-quoting-a-loss",
+        ),
+        pytest.param(
+            "== 1 failed, 3 passed in 4.10s ==\n##[error]The runner has received a shutdown signal.",
+            False,
+            id="failed-result-then-loss",
+        ),
+        pytest.param(
+            "##[error]The runner has received a shutdown signal.\n== 1 failed, 3 passed in 4.10s ==",
+            False,
+            id="loss-then-failed-result",
+        ),
+        pytest.param(
+            "== 3 passed in 4.10s ==\n##[error]The runner has received a shutdown signal.",
+            True,
+            id="passed-result-then-loss",
+        ),
+        pytest.param(
+            "== 3 passed, 0 failed in 4.10s ==\n##[error]The runner has received a shutdown signal.",
+            True,
+            id="zero-failed-result-then-loss",
+        ),
     ],
 )
 def test_only_a_nonzero_step_exit_without_a_loss_signature_is_a_real_failure(monkeypatch, log, lost):
