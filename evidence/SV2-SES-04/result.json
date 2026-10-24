@@ -1,0 +1,50 @@
+{
+  "package": "SV2-SES-04",
+  "dependency": "SV2-SES-03",
+  "integration_gate": "G4",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/6731",
+  "pull_request": "pending",
+  "tested_commit": "pending",
+  "package_complete": false,
+  "evidence_class": "mocked: an in-process caller and a SQLite catalog file stand in for the collector, the network and the central database; no HTTP server, Pod or hive collector runs",
+  "interfaces": [
+    "hooks.memory.api.ingest.ingest(catalog, grant, request) is the POST /v2/sessions/ingest contract as a function: it checks schema major version 2, the envelope and every event's sequence, byte range and project before authorization, rejects the whole batch with forbidden_scope when the corpus or any event project is outside the Grant, and returns a response only after Catalog.commit returns",
+    "hooks.memory.api.ingest.event_identity(session_uid, source_generation, event) is the sha256 of the session, source generation, sequence and byte range, so any worker or connection derives the same event_id for the same source event",
+    "hooks.memory.catalog.Catalog(path).commit(batch) runs one BEGIN IMMEDIATE SQLite transaction in WAL mode with synchronous FULL: a known batch_id with the same payload digest returns its stored result as replayed with the current watermark, a different digest is a revision_conflict; otherwise events are inserted once per sequence, an identical event is counted as a duplicate, a different event at a committed sequence is a revision_conflict that rolls the batch back, unsupported records are quarantined with sequence and reason, and the batch result and the contiguous durable watermark are written in the same transaction",
+    "hooks.memory.catalog.Catalog.duplicate_events_total(access_domain) reads the durable ingest_duplicate_events_total counter, incremented in the committing transaction by each duplicate event and by every event of a replayed batch"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "schema_version": "2.x; any other major version is invalid_request",
+    "records": "SV2-SES-01 TranscriptRecord kinds as the SV2-SES-02 collector and SV2-SES-03 spool carry them",
+    "storage": "SQLite with WAL journal and synchronous FULL on a local or mounted disk"
+  },
+  "states": {
+    "observed": "Cases A, B and C each ran twice from independent temporary catalogs with identical records.",
+    "accepted": "A batch is accepted when its envelope, events and grant pass; an accepted batch can still be refused as a revision_conflict inside the transaction.",
+    "committed": "A response with state committed or replayed is returned only after the SQLite commit; durable_through is the highest contiguous sequence committed or quarantined for the session and source generation.",
+    "externally_verified": "None: no central database server, network transport or deployed collector was exercised."
+  },
+  "metrics": {
+    "ingest_duplicate_events_total": "Catalog.duplicate_events_total(access_domain), durable in the catalog per access domain"
+  },
+  "atomicity_rule": "One event outside the grant, a malformed event envelope or a conflicting event rejects the whole batch and changes nothing; an authorized event whose record is not a supported normalized record is quarantined with its sequence and reason while the rest of the batch commits.",
+  "cases": {
+    "a": "evidence/SV2-SES-04/a-result.json",
+    "b": "evidence/SV2-SES-04/b-result.json",
+    "c": "evidence/SV2-SES-04/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Stop calling ingest from any producer; the catalog file keeps committed events, quarantine rows, batch results and watermarks, and a later retry of any batch replays its committed result.",
+    "authoritative_objects": "session_event, session_quarantine, session_ingest_batch and session_watermark rows; none is a cache and none is deleted by rollback.",
+    "proof": "Case C loses the response after commit, opens a new catalog on the same file, finds the three committed events, retries the batch and receives the committed watermark as replayed with no second copy, then a later stale retry of the same batch returns the newer watermark without lowering it."
+  },
+  "remaining_limitations": [
+    "No HTTP server exposes POST /v2/sessions/ingest yet; callers use the function directly.",
+    "The SV2-SES-03 spool flusher is still not wired to ingest: a spool Entry carries records without the session, generation and byte ranges that ingest requires.",
+    "The catalog is SQLite; the Postgres session schema of the plan and its migration framework are not implemented.",
+    "Grants are passed in by the caller; no principal is authenticated here."
+  ],
+  "compatibility": "Explicitly local compatibility path: ingest accepts the SV2-SES-01 TranscriptRecord kinds unchanged and stores each record exactly as submitted; the collector, spool, whole-file reader and memory store are untouched.",
+  "authority": "The corpus and every event project come from the caller's Grant; a project label inside a record is never read as permission, and an unattributed event stays unattributed."
+}
