@@ -450,6 +450,12 @@ def test_a_green_run_whose_promote_did_not_succeed_keeps_the_promotion_red_open(
     assert filed(store) == {}
 
 
+def test_only_the_promote_job_and_its_called_jobs_decide_whether_a_green_run_clears(store):
+    ledger = Ledger([{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"}])
+    refresh(store, ledger, gh([GREEN], [*PROMOTED, {"name": "promote smoke", "conclusion": "skipped"}]))
+    assert ledger.tasks[0]["state"] == "done"
+
+
 def test_a_task_claimed_before_the_close_lands_is_not_reported_closed(store):
     ledger = Ledger([{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"}])
     ledger.update_task = lambda slug, task_id, fields, by="swarm", if_state=(): {"id": task_id, "state": "claimed"}
