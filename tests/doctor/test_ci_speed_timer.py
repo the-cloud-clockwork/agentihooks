@@ -55,7 +55,7 @@ def test_every_timer_tick_reads_speed_and_sends_each_crossing_to_both_masters_on
     calls = []
 
     def read(since, now, pending=None, known=None, active=True):
-        calls.append((since, now, pending))
+        calls.append((since, now, pending.pending))
         return snapshot([record([job(0, queued=True, created=-901)])])
 
     monkeypatch.setattr(ci_speed_read, "read", read)
@@ -79,7 +79,7 @@ def test_an_api_failure_reports_incomplete_counts_and_preserves_the_window_for_r
     outcomes = [snapshot(), snapshot(complete=False, error="API unavailable"), snapshot()]
 
     def read(since, now, pending=None, known=None, active=True):
-        calls.append((since, pending))
+        calls.append((since, pending.pending))
         return outcomes.pop(0)
 
     monkeypatch.setattr(ci_speed_read, "read", read)

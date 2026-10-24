@@ -168,11 +168,12 @@ def _hold(mail, watched, doctor, held):
 def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str]:
     key = store.key(doctor, "ci-speed")
     state = json.loads(store.redis.get(key) or "{}")
-    since = state.get("last", now_ms - MINUTE_MS)
-    end = min(now_ms, since + SPEED_SLICE_MINUTES * MINUTE_MS)
-    snapshot = ci_speed_read.read(
-        since, end, pending=state.get("pending"), known=state.get("known"), active=end == now_ms
-    )
+    since = state.setdefault("last", now_ms - MINUTE_MS)
+    continuation = state.get("continuation", {})
+    end = continuation.get("end", min(now_ms, since + SPEED_SLICE_MINUTES * MINUTE_MS))
+    active = continuation.get("active", end == now_ms)
+    progress = ci_speed_read.Progress(state.get("pending"), continuation.get("responses", {}))
+    snapshot = ci_speed_read.read(since, end, pending=progress, known=state.get("known"), active=active)
     incidents, held = _incidents(state, now_ms)
     found, gone = _crossings(state, snapshot["runs"], (since, now_ms), incidents, held)
     report = {
@@ -185,7 +186,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
     }
     if not snapshot["complete"]:
         report["error"] = snapshot["error"]
-    if not snapshot["complete"] and not held:
+    if not snapshot["complete"] and not snapshot.get("paused") and not held:
         found.append(
             Finding(
                 "ci speed read",
@@ -230,6 +231,9 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
             store.redis.hset(_timer_key(store, doctor), "last_new", now_ms)
     if snapshot["complete"]:
         state.update(last=end, pending=[run["id"] for run in snapshot["runs"] if run["status"] != "completed"])
+        state.pop("continuation", None)
+    else:
+        state["continuation"] = {"end": end, "active": active, "responses": progress.responses}
     finished = {
         str(run["id"]): {
             "status": run["status"],
@@ -246,7 +250,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
         "complete"
         if report["complete"]
         else "catching up"
-        if snapshot["complete"]
+        if snapshot["complete"] or snapshot.get("paused")
         else f"incomplete: {report['error']}"
     )
     paused = "".join(f"; findings held during GitHub incident {incident['name']}" for incident in held)
