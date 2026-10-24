@@ -14,10 +14,10 @@ def charts(root: Path) -> list[Path]:
 
 
 def values_files(chart: Path) -> list[Path | None]:
-    skipped = {"Chart.yaml", "Chart.lock", "values.yaml"}
+    skipped = {chart / name for name in ("Chart.yaml", "Chart.lock", "values.yaml")}
     found = [p for pattern in ("*.yaml", "*.yml") for p in chart.rglob(pattern)]
     return [None] + sorted(
-        p for p in found if p.name not in skipped and not {"templates", "charts"} & set(p.relative_to(chart).parts)
+        p for p in found if p not in skipped and not {"templates", "charts"} & set(p.relative_to(chart).parts)
     )
 
 
