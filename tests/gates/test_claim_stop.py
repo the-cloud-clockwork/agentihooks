@@ -245,6 +245,39 @@ def test_a_stop_after_the_merge_is_blocked(rig):
     assert not decision.allowed and "merged: close the task now" in decision.reason
 
 
+@pytest.mark.parametrize("offset", [1, 60_000])
+def test_future_verification_stop_passes_and_releases_its_claim(rig, offset):
+    rig.task.update(
+        state="pr",
+        pr_url=URL,
+        kind="ops",
+        awaiting="verify",
+        contract={"after": "yes", "after_at": str(rig.clock[0] + offset)},
+    )
+    rig.pulls[URL] = MERGED
+    assert rig.stop().allowed
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.task["awaiting"] == "verify"
+    assert rig.task["state"] == "pr"
+    assert rig.rows() == []
+
+
+@pytest.mark.parametrize("after_at", ["", "999999", "1000000"])
+def test_due_or_unscheduled_verification_stop_still_owes_contract(rig, after_at):
+    rig.task.update(
+        state="pr",
+        pr_url=URL,
+        kind="ops",
+        awaiting="verify",
+        contract={"after": "yes", "after_at": after_at},
+    )
+    rig.pulls[URL] = MERGED
+    decision = rig.stop()
+    assert not decision.allowed
+    assert "contract" in decision.reason
+    assert rig.store.claimant(SLUG, "t1") == ME
+
+
 def test_a_merged_first_half_clears_the_active_pull_request_and_the_second_half_stops_on_a_wait(rig):
     rig.task.update(state="pr", pr_url=URL, split=["1-10", "11-20"], split_pulls=[URL])
     rig.pulls[URL] = MERGED
