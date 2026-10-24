@@ -21,7 +21,17 @@ def _run(cmd, **kwargs):
 def _tagged_wheel(tmp_path):
     src = tmp_path / "src"
     ignore = shutil.ignore_patterns(
-        ".git", ".venv", "mutants", ".mutation-gate", "__pycache__", ".pytest_cache", "dist", "build", "*.egg-info"
+        ".git",
+        ".venv",
+        "mutants",
+        ".mutation-gate",
+        "__pycache__",
+        ".pytest_cache",
+        "dist",
+        "build",
+        "*.egg-info",
+        ".coverage",
+        ".coverage.*",
     )
     shutil.copytree(REPO, src, ignore=ignore)
     pyproject = src / "pyproject.toml"
@@ -93,11 +103,18 @@ def test_copied_package_build_accepts_tag_derived_metadata(tmp_path, monkeypatch
         'build-backend = "setuptools.build_meta"\n'
         "[tool.setuptools_scm]\n"
     )
+    (source / ".coverage").symlink_to(source / "removed-coverage")
+    (source / ".coverage.worker").symlink_to(source / "removed-worker-coverage")
+    (source / ".coveragerc").write_text("[run]\nbranch = True\n")
     monkeypatch.setattr(sys.modules[__name__], "REPO", source)
 
     wheel = _tagged_wheel(tmp_path / "build")
 
     assert wheel.name == f"agentihooks-{WHEEL_VERSION}-py3-none-any.whl"
+    copied = tmp_path / "build" / "src"
+    assert not (copied / ".coverage").exists()
+    assert not (copied / ".coverage.worker").exists()
+    assert (copied / ".coveragerc").read_bytes() == (source / ".coveragerc").read_bytes()
 
 
 def test_version_is_unknown_without_package_metadata(monkeypatch):
