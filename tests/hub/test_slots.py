@@ -100,6 +100,14 @@ def test_a_member_asks_on_the_slot_subject_of_its_own_hive():
     bus.request.assert_called_once_with("slots.rig.one", b'{"op": "take", "hive": "one"}', 7)
 
 
+def test_a_hive_name_that_cannot_be_a_subject_token_is_unavailable():
+    with pytest.raises(
+        account_slots.Unavailable,
+        match=r"^hive 'host\.example' cannot ask for account slots \(invalid event subject token 'host\.example'\)$",
+    ):
+        account_slots.asker(None, "rig", "host.example")
+
+
 @pytest.mark.parametrize(
     "request_body",
     [

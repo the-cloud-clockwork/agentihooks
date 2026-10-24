@@ -107,6 +107,13 @@ def test_a_member_credential_publishes_only_the_slot_subject_of_its_own_hive(swa
     assert [value for value in claims["pub"]["allow"] if "slots" in value] == slots
 
 
+def test_scoped_claims_refuse_to_grant_every_hive_slot_subject():
+    from scripts.hive.nats_grant import member_claims
+
+    with pytest.raises(ValueError, match=r"^invalid event subject token '\*'$"):
+        member_claims("member", ("rig",))
+
+
 @pytest.mark.parametrize("kind", ["EVENTS", "DEAD", "QUEUE_eng", "STATE_spoke-work"])
 def test_scoped_credentials_use_their_own_stream_and_consumer(signer, kind):
 

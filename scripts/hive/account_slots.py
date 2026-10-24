@@ -151,8 +151,13 @@ def request_subject(swarm: str, hive: str) -> str:
 
 
 def asker(bus: Any, swarm: str, hive: str, timeout_ms: int = REQUEST_TIMEOUT_MS) -> Callable[[dict], Any]:
+    try:
+        subject = request_subject(swarm, hive)
+    except ValueError as exc:
+        raise Unavailable(f"hive {hive!r} cannot ask for account slots ({exc})") from None
+
     def ask(request: dict) -> Any:
-        answer = json.loads(bus.request(request_subject(swarm, hive), json.dumps(request).encode(), timeout_ms))
+        answer = json.loads(bus.request(subject, json.dumps(request).encode(), timeout_ms))
         if not answer["ok"]:
             raise Unavailable(answer["error"])
         return answer["result"]

@@ -167,7 +167,7 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str 
             "pub": {"allow": [*MEMBER_PUBLISH, f"{subjects.SLOTS}.*.{member}"]},
             "sub": {"allow": [f"{subjects.inbox(user)}.>"]},
         }
-    publish = [subject for swarm in swarms for subject in (*swarm_publish(swarm), f"{subjects.SLOTS}.{swarm}.{member}")]
+    publish = [subject for swarm in swarms for subject in (*swarm_publish(swarm), subjects.slot_request(swarm, member))]
     return {
         **user_claims(),
         "pub": {"allow": publish} if publish else {"deny": [">"]},
