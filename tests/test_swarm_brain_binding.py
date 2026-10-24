@@ -335,7 +335,7 @@ def test_the_credential_goes_only_to_the_bound_api_origin(tmp_path):
 def hook_env(tmp_path, monkeypatch):
     from hooks import config
 
-    _absent(monkeypatch, *BRAIN_KEYS)
+    _absent(monkeypatch, *BRAIN_KEYS, "KUBERNETES_SERVICE_HOST")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / ".agentihooks"))
     monkeypatch.setenv("AGENTIBRAIN_HOME", str(tmp_path / ".agentibrain"))
@@ -488,7 +488,7 @@ def launch(monkeypatch, tmp_path):
             mode
         ]
         assert init_agent.main(argv, environ) == 0
-        launcher = max((runtime / f"agentihooks-{harness}-terminal").glob("*.sh"), key=lambda p: p.stat().st_mtime_ns)
+        launcher = max(runtime.glob("*/*.sh"), key=lambda p: p.stat().st_mtime_ns)
         return launcher.read_text(), seen[-1]
 
     return run
