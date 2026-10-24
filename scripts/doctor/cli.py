@@ -34,7 +34,8 @@ agentihooks doctor <slug> intervene ACTION [--to ADDRESS] [--text TEXT] [--file 
                                                refresh-rules, culture, handoff-at-stop or message; logged on both ledgers
 <slug> names the watched ledger or its Doctor ledger. Start refuses without a linked bundle.
 Every swarm tick runs the detectors once per AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES (10) and closes the Doctor after
-AGENTIHOOKS_DOCTOR_QUIET_MINUTES (120) with no new finding.
+AGENTIHOOKS_DOCTOR_QUIET_MINUTES (120) with no new finding. The CI speed read runs once per
+AGENTIHOOKS_DOCTOR_SPEED_MINUTES (5).
 """
 
 import argparse
@@ -242,7 +243,9 @@ def timer(store, doctor, now_ms, telemetry):
         now_ms,
         lambda watched: detect.collect(detect.readers(store, ledger, watched, now_ms, telemetry=telemetry)),
         lambda: _close(store, store.peer(doctor), doctor, QUIET),
-        speed=lambda watched: loop.speed(store, doctor, watched, now_ms),
+        speed=lambda watched: (
+            loop.speed(store, doctor, watched, now_ms) if loop.speed_due(store, doctor, now_ms) else []
+        ),
     )
 
 
