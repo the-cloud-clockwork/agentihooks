@@ -18,8 +18,8 @@ AWAITING = "awaiting-decision"
 RESUMED, FRESH = "resumed", "fresh"
 KUBERNETES = "kubernetes"
 RECOVERY_REQUESTS = "recovery-requests"
-NATIVE, CONTEXT = "native", "context"
-CHOICES = ("resume", NATIVE, CONTEXT, FRESH)
+RESUME, NATIVE, CONTEXT = "resume", "native", "context"
+CHOICES = (RESUME, NATIVE, CONTEXT, FRESH)
 UNCHOSEN = "Choose native, context, fresh or resume"
 LOCAL_CONTEXT = (
     "a local swarm keeps no checkpoint to continue from; a fresh start primes the successor with the seat handoff"
@@ -166,7 +166,7 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
             at=now_ms,
             transfer=previous["transfer"],
         )
-    elif choice in ("resume", NATIVE):
+    elif choice in (RESUME, NATIVE):
         from scripts.swarm.snapshot import ledger_source
 
         worktrees = json.loads(store.redis.get(store.key(slug, "restore-worktrees")) or "{}")

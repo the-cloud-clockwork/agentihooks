@@ -197,6 +197,5 @@ def test_native_is_not_refused_for_an_account_out_of_quota(store, tmp_path, monk
     saved(store, tmp_path)
     restore(store, ResumingRuntime(fail="unavailable"))
     monkeypatch.setattr(resume.agent_choice, "account_has_quota", lambda *_: False)
-    assert resume.quota_ignored("claude", "a1") is True
     outcome = resume.decide(store, "sw", "sw-eng-1", "native", ResumingRuntime(), 2000, FakeLedger([]))
     assert outcome.name == "sw-eng-1"

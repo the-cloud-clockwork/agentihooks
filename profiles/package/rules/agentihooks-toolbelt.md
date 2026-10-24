@@ -180,8 +180,9 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
 - Only four things on the ledger page fold, each remembering its choice per
   viewer across reloads: the Ledger tab's own sections below Overview; the
   Swarm tab panels below Capacity (Quota, Hives, Overlays, Agents, Handoff
-  outcomes, Recovery, Freezes, Architecture); the outline categories, with one toggle on
-  top flipping between Expand all and Collapse all; and comment dropdowns,
+  outcomes, Recovery, Freezes, Architecture); the outline categories, with
+  one toggle on top flipping between Expand all and Collapse all; and comment
+  dropdowns,
   each section with one toggle for its own items flipping between Show all
   comments and Hide all comments. Nothing else folds: the chat, artifacts,
   alerts and notifications windows, Stats, Overview, the Swarm control bar and

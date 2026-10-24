@@ -183,7 +183,7 @@ def open_page(browser):
         page.context.close()
 
 
-def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_with_no_health_panel():
+def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_recovery_with_no_health_panel():
     page = page_source()
     box = page.split('<div id="swarm-box">', 1)[1].split('<aside id="stats-column"', 1)[0]
     positions = [box.index(f'id="{row}"') for row in ROWS]
