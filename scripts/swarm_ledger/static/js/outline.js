@@ -78,7 +78,6 @@ function outlineEntry(list) {
 }
 
 function outlineOf(doc, heads) {
-  const entry = outlineEntry;
   return heads.map((head) => {
     const all = (head.list ? doc[head.list] || [] : []).filter((i) => !i.deleted);
     const list = viewItems(head.list, all);
@@ -87,7 +86,7 @@ function outlineOf(doc, heads) {
     const counts = grouped ? [...new Set([...list.map((i) => i.state || (i.done ? "done" : "open")), ...(hidden ? ["done"] : [])])]
       .map((state) => `${list.filter((i) => (i.state || (i.done ? "done" : "open")) === state).length + (state === "done" ? hidden : 0)} ${state}`).join(" · ") : "";
     return { id: head.id, title: head.title + (counts ? ` · ${counts}` : "") + viewCount(head.list, all),
-      items: head.list === "followups" ? [] : list.map(entry(head.list)) };
+      items: head.list === "followups" ? [] : list.map(outlineEntry(head.list)) };
   });
 }
 
@@ -103,6 +102,7 @@ function outlineAgain() {
 const SEARCHED = ["phases", "tasks", "questions"];
 const filter = { text: "", state: "" };
 const remote = {};
+const remoteTotal = {};
 let searchTurn = 0;
 let searchTimer = 0;
 
@@ -127,9 +127,13 @@ export function completeList(list) {
 function byPhase(items) {
   if (!items.some((i) => i.phase)) return items;
   const order = doc.phases.map((p) => p.id);
-  const titles = Object.fromEntries(doc.phases.map((p) => [p.id, p.title || p.id]));
   const rank = (i) => (order.includes(i.phase) ? order.indexOf(i.phase) : order.length);
-  const sorted = [...items].sort((a, b) => rank(a) - rank(b) || (rank(a) === order.length ? a.phase.localeCompare(b.phase) : 0));
+  return [...items].sort((a, b) => rank(a) - rank(b) || (rank(a) === order.length ? a.phase.localeCompare(b.phase) : 0));
+}
+
+function phaseRows(sorted) {
+  if (!sorted.some((i) => i.phase)) return sorted;
+  const titles = Object.fromEntries(doc.phases.map((p) => [p.id, p.title || p.id]));
   const grouped = [];
   for (const [n, i] of sorted.entries()) {
     if (!n || sorted[n - 1].phase !== i.phase) grouped.push({ id: `ol-group-${i.phase || "none"}`, group: i.phase ? titles[i.phase] || i.phase : "No phase" });
@@ -150,13 +154,17 @@ function shapeOutline(tree) {
 
 async function searchRemote() {
   const turn = ++searchTurn;
-  for (const list of SEARCHED) delete remote[list];
+  for (const list of SEARCHED) delete remote[list], delete remoteTotal[list];
   if (filter.text && ["", "done"].includes(filter.state)) {
     for (const list of SEARCHED.filter((name) => closedLeft(name))) {
       try {
         const resp = await searchClosed(list, filter.text);
         if (turn !== searchTurn) return;
-        if (resp.ok) remote[list] = (await resp.json()).data;
+        if (resp.ok) {
+          const { data, total } = await resp.json();
+          remote[list] = data;
+          remoteTotal[list] = total;
+        }
       } catch (e) { /* offline: the loaded rows still filter */ }
     }
   }
@@ -184,6 +192,12 @@ function outlineTools() {
   return h("div", { class: "ol-tools" }, input, pick, h("button", { class: "link", type: "button", id: "outline-all", on: { click: foldAll } }));
 }
 
+function remoteMore(s) {
+  const list = s.id.replace(/^sec-/, "");
+  const left = filtering() ? (remoteTotal[list] || 0) - (remote[list] || []).length : 0;
+  return left > 0 ? h("li", { class: "ol-group ol-more", text: `${left} older matches` }) : "";
+}
+
 function outlineRow(i) {
   return i.group ? h("li", { class: "ol-group", text: i.group }) : h("li", {}, outlineLink(i));
 }
@@ -194,7 +208,7 @@ function outlineGroup(s) {
   if (!filtering()) collapsible(box);
   const key = `ol-${s.id}`;
   return h("li", { class: "ol-sec" }, lazy(box, () => h("ul", { class: "ol-items" },
-    ...firstPage(key, s.items, (i) => i.id).map(outlineRow), moreButton(key, s.items.length, "more items", outlineAgain) || "",
+    ...phaseRows(firstPage(key, s.items, (i) => i.id)).map(outlineRow), remoteMore(s), moreButton(key, s.items.length, "more items", outlineAgain) || "",
     (s.items.length && !filtering() && closedMore(s.id.replace(/^sec-/, ""), "done", () => render())) || "")));
 }
 

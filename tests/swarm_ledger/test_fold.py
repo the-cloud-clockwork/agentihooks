@@ -306,7 +306,7 @@ class OutlineFolds(unittest.TestCase):
             + "const PAGE_SIZE = 50;"
             + "const FULL_PAGE"
             + page().split("  const FULL_PAGE", 1)[1].split("\n", 1)[0]
-            + "const shown = {}; const wanted = { id: null }; const filter = { text: '', state: '' };"
+            + "const shown = {}; const wanted = { id: null }; const filter = { text: '', state: '' }; const remote = {}; const remoteTotal = {};"
             + "".join(
                 function_source(n) + "\n"
                 for n in (
@@ -316,6 +316,8 @@ class OutlineFolds(unittest.TestCase):
                     "outlineOf",
                     "outlineLink",
                     "outlineRow",
+                    "phaseRows",
+                    "remoteMore",
                     "filtering",
                     "outlineAgain",
                     "limit",

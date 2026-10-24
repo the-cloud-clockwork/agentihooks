@@ -36,7 +36,7 @@ export function readClosed(name, offset) {
 }
 
 export function searchClosed(name, text) {
-  return fetch(`${API_V1}/${name}?state=done&q=${encodeURIComponent(text)}&offset=0&limit=20`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+  return fetch(`${API_V1}/${name}?state=done&q=${encodeURIComponent(text)}&offset=0&limit=50`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
 }
 
 export function readArchitecture() {

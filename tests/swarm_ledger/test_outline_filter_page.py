@@ -118,7 +118,7 @@ def test_type_ahead_finds_a_done_task_not_yet_loaded_and_reveals_it(ledger):
     page.fill("#outline-filter", "quota router")
     link = page.locator('#ol-sec-tasks a[data-target="item-tasks-t5"]')
     link.wait_for()
-    assert {"state": "done", "q": "quota router", "offset": "0", "limit": "20"} in reads
+    assert {"state": "done", "q": "quota router", "offset": "0", "limit": "50"} in reads
     assert link.evaluate("a => a.classList.contains('st-done')")
     link.click()
     page.wait_for_function(
@@ -152,6 +152,7 @@ def test_a_fresh_viewer_sees_the_answered_questions_closed_and_a_saved_choice_wi
         }"""
     )
     assert "ol-sec-questions" not in stored and "questions-box" not in stored
+    page.locator("#ol-sec-phases").evaluate("box => { box.open = false; }")
     page.locator("#ol-sec-questions").evaluate("box => { box.open = true; }")
     page.click("#questions-box > summary")
     page.wait_for_function(
@@ -159,13 +160,14 @@ def test_a_fresh_viewer_sees_the_answered_questions_closed_and_a_saved_choice_wi
           const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
           const {FOLD_KEY} = await import(new URL("config.js", main));
           const saved = JSON.parse(localStorage.getItem(FOLD_KEY) || "{}");
-          return saved["ol-sec-questions"] === true && saved["questions-box"] === true;
+          return saved["ol-sec-questions"] === true && saved["questions-box"] === true && saved["ol-sec-phases"] === false;
         }"""
     )
     page.reload()
     loaded(page)
     assert page.locator("#ol-sec-questions").evaluate("box => box.open")
     assert page.locator("#questions-box").evaluate("box => box.open")
+    assert not page.locator("#ol-sec-phases").evaluate("box => box.open")
 
 
 def test_arrows_and_j_k_walk_the_visible_outline_links_and_enter_reveals(ledger):
