@@ -355,6 +355,26 @@ def test_pull_requests_and_merge_groups_read_the_dev_count_record(event_name):
     assert _evaluate("${{ " + condition + " }}", event_name=event_name) is True
 
 
+def test_a_merge_group_records_its_head_count_for_the_next_group_after_its_early_collection():
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    recorder = yaml.safe_load((_ROOT / ".github/workflows/count-record.yml").read_text())["jobs"]["count-record"]
+    recorded = next(step for step in recorder["steps"] if step.get("name") == "Upload the suite count record")
+    count = _workflow()["jobs"]["test-count"]["steps"]
+    names = [step.get("name") for step in count]
+    record = count[names.index("Record the head count for the next queue group")]
+    upload = count[names.index("Upload the head count for the next queue group")]
+    assert names.index("Upload the early collection") < names.index(record["name"]) < names.index(upload["name"])
+    for step in (record, upload):
+        assert _evaluate("${{ " + step["if"] + " }}", event_name="merge_group") is True
+        assert _evaluate("${{ " + step["if"] + " }}", event_name="pull_request") is False
+    assert record["continue-on-error"] is True
+    assert 'cmp -s "$RUNNER_TEMP/base/tests/count_floor.py" tests/count_floor.py' in record["run"]
+    assert '--collected "$RUNNER_TEMP/collected.json"' in record["run"]
+    assert upload["with"]["name"] == recorded["with"]["name"]
+    assert upload["with"]["if-no-files-found"] == "ignore"
+
+
 def test_every_dev_head_records_its_count_outside_the_promotion_queue():
     from scripts.ci_branch_lanes import problems
 
