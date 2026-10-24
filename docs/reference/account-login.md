@@ -107,7 +107,10 @@ renews the slot it already holds. Native `claude auth login` runs in that
 isolated home. The master seat receives an inbox directive with its authorization
 link and uses the operator browser connector's already signed in claude.ai
 session. It must never sign in, sign out or switch accounts. It replies to that
-request with exactly `success`, `captcha` or `failure`. Preparation waits for
+request with exactly `success`, `captcha` or `failure`. Set
+`AGENTIHOOKS_MASTER_LOGIN_AUTHORIZER` to the exact browser owner's inbox address
+when authorization must stay with that master rather than the master pool.
+The reply must come from that same authorizer. Preparation waits for
 the matching reply; success also requires the native login process to finish
 and the renewed session to pass the live check. If the browser displays a manual
 authorization code, the master clicks that page's Copy button immediately before

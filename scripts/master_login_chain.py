@@ -106,7 +106,7 @@ def _request(store, environ, target, output):
         "Never send authorization codes or credentials."
     )
     sender = environ["AGENTIHOOKS_AGENT_NAME"]
-    recipient = f"master@{environ['AGENTIHOOKS_SWARM']}"
+    recipient = environ.get("AGENTIHOOKS_MASTER_LOGIN_AUTHORIZER") or f"master@{environ['AGENTIHOOKS_SWARM']}"
     item = new_item_id()
     try:
         request = store.send(sender, recipient, text, task=environ.get("AGENTIHOOKS_SWARM_TASK", ""), item_id=item)
@@ -121,7 +121,7 @@ def _wait_for_browser(
     process, store, environ: Mapping[str, str], target: Path, output, timeout: float, complete=lambda: True
 ) -> str:
     sender = environ["AGENTIHOOKS_AGENT_NAME"]
-    recipient = f"master@{environ['AGENTIHOOKS_SWARM']}"
+    recipient = environ.get("AGENTIHOOKS_MASTER_LOGIN_AUTHORIZER") or f"master@{environ['AGENTIHOOKS_SWARM']}"
     deadline = time.monotonic() + timeout
     request, reported = None, None
     try:
