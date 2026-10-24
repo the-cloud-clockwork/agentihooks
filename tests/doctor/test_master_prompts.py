@@ -1,4 +1,3 @@
-import fakeredis
 import pytest
 
 from scripts.doctor import detect, master_prompts
@@ -77,6 +76,8 @@ def test_skipped_rows_before_a_waiting_master_do_not_hide_it():
 
 
 def test_a_judged_wait_returns_only_when_it_grows_by_another_fifteen_minutes():
+    import fakeredis
+
     verdicts = VerdictStore(fakeredis.FakeRedis(decode_responses=True), "doctor-findings")
 
     def shown(minutes):
@@ -90,6 +91,8 @@ def test_a_judged_wait_returns_only_when_it_grows_by_another_fifteen_minutes():
 
 
 def watched():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0))
     master = AgentRecord("master", "master", "", seat="master@sw")
