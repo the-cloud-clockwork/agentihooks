@@ -20,7 +20,7 @@ def _validator(kind: str) -> Draft202012Validator:
     return Draft202012Validator(json.loads((SCHEMAS / f"{kind}.schema.json").read_text()))
 
 
-def validate(kind: str, doc: object) -> dict:
+def validate(kind: str, doc: object) -> object:
     error = best_match(_validator(kind).iter_errors(doc))
     if error is not None:
         where = "/".join(str(part) for part in error.absolute_path) or "document"
@@ -29,7 +29,6 @@ def validate(kind: str, doc: object) -> dict:
 
 
 def _load(kind: str, path: Path) -> dict:
-    path = Path(path)
     try:
         doc = json.loads(path.read_text())
     except json.JSONDecodeError as error:
