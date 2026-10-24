@@ -242,6 +242,9 @@ jobs:
           path: provenance-grader
           fetch-depth: 0
           persist-credentials: false
+        env:
+          GIT_HTTP_LOW_SPEED_LIMIT: "1000"
+          GIT_HTTP_LOW_SPEED_TIME: "60"
 
       - uses: actions/setup-python@v5
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
