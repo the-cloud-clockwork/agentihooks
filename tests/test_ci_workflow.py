@@ -363,6 +363,17 @@ def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs()
         assert "${{ hashFiles('.github/test-constraints.txt') }}" in cache["with"]["key"]
 
 
+def test_every_job_sharing_the_test_environment_installs_the_baked_browser_version():
+    sharing = []
+    for path in sorted((_ROOT / ".github/workflows").glob("*.yml")):
+        for name, job in (yaml.safe_load(path.read_text())["jobs"] or {}).items():
+            keys = [str(step.get("with", {}).get("key", "")) for step in job.get("steps", [])]
+            if any(key.startswith("venv-") for key in keys):
+                sharing.append((path.name, name, (job.get("env") or {}).get("UV_CONSTRAINT")))
+    assert ("count-record.yml", "count-record") in [(workflow, name) for workflow, name, _ in sharing]
+    assert [entry for entry in sharing if entry[2] != "${{ github.workspace }}/.github/test-constraints.txt"] == []
+
+
 def test_queue_browser_setup_cannot_enter_the_downloading_action():
     steps = _workflow()["jobs"]["unit"]["steps"]
     install = next(step for step in steps if step.get("uses") == "./.github/actions/browser-cache")
