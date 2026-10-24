@@ -106,7 +106,9 @@ def test_main_writes_the_matrix_and_fails_without_a_rerun(monkeypatch, tmp_path,
         ("", [PLAN[1]]),
     ],
 )
-def test_recovery_uses_step_results_to_distinguish_timeout_from_runner_loss(monkeypatch, tmp_path, capsys, log, expected):
+def test_recovery_uses_step_results_to_distinguish_timeout_from_runner_loss(
+    monkeypatch, tmp_path, capsys, log, expected
+):
     from scripts import ci_queue_retry
 
     monkeypatch.setattr(ci_queue_retry, "_api", lambda *args: log)
