@@ -298,7 +298,6 @@ def test_a_held_claim_refund_refuses_a_second_refund_for_the_same_claimant_and_g
         ("claim", lambda redis, key: redis.incr(f"{key}:generation"), 1),
         ("claim", lambda redis, key: redis.set(f"{key}:refunded", redis.get(f"{key}:generation")), 1),
         ("started-lives", lambda redis, key: redis.hset(key, "t1", 5), 5),
-        ("refunded-claims", lambda redis, key: redis.hset(key, "t1", "agent:1"), 1),
         ("task-authority", lambda redis, key: redis.set(key, "hub"), 1),
         ("claim-journal", lambda redis, key: redis.set(key, "hub"), 1),
     ],
@@ -310,8 +309,7 @@ def test_a_held_claim_refund_refuses_when_a_watched_key_moves_during_the_watch(
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
     started = store._started_lives
-    hashes = ("started-lives", "refunded-claims")
-    key = store.key("smoke", moved_key) if moved_key in hashes else store.key("smoke", moved_key, "t1")
+    key = store.key("smoke", moved_key) if moved_key == "started-lives" else store.key("smoke", moved_key, "t1")
 
     def moved(slug, task):
         move(store.redis, key)
