@@ -216,6 +216,10 @@ def test_verified_historical_starts_keep_their_life_budget(store):
     assert store.claims("smoke", "t1") == 0
 
 
+def test_the_store_offers_no_unconditional_claim_refund(store):
+    assert not hasattr(store, "refund_claim")
+
+
 def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generation_match(store):
     store.record_launch("smoke", AgentRecord("first", "eng", "t1"), "started")
     store.record_launch("smoke", AgentRecord("second", "eng", "t1"), "started")
