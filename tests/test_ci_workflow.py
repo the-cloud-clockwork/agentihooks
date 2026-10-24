@@ -772,7 +772,8 @@ def test_the_collection_wait_outlasts_the_count_job_timeout(tmp_path):
             check=True,
         )
     slept = sum(int(line) for line in (tmp_path / "slept").read_text().split())
-    assert slept >= _workflow()["jobs"]["test-count"]["timeout-minutes"] * 60
+    jobs = _workflow()["jobs"]
+    assert jobs["test-count"]["timeout-minutes"] * 60 <= slept <= (jobs["split"]["timeout-minutes"] - 5) * 60
 
 
 @pytest.mark.parametrize("ready", [0, 25, 400, None])
@@ -799,6 +800,7 @@ def test_the_collection_wait_downloads_once_the_artifact_lands_and_stays_red_whe
         else:
             final = done
     if ready is None:
+        assert len(tried) == len([step for step in _await_steps() if step.get("uses")])
         assert final.returncode == 1
         assert "::error" in final.stdout
     else:
