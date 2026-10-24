@@ -21,7 +21,17 @@ def _run(cmd, **kwargs):
 def _tagged_wheel(tmp_path):
     src = tmp_path / "src"
     ignore = shutil.ignore_patterns(
-        ".git", ".venv", "mutants", ".mutation-gate", "__pycache__", ".pytest_cache", "dist", "build", "*.egg-info"
+        ".git",
+        ".venv",
+        "mutants",
+        ".mutation-gate",
+        "__pycache__",
+        ".pytest_cache",
+        "dist",
+        "build",
+        "*.egg-info",
+        ".coverage",
+        ".coverage.*",
     )
     shutil.copytree(REPO, src, ignore=ignore)
     pyproject = src / "pyproject.toml"
