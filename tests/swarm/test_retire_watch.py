@@ -105,10 +105,12 @@ def test_retire_findings_identify_the_original_hive_and_removed_host_count(store
     from scripts.swarm.store import AgentRecord
 
     monkeypatch.setenv("SWARM_HIVE_ID", "controller")
-    for name in (NAME, "other"):
+    for index, name in enumerate((NAME, "other"), 1):
         store.put_agent(
             "sw",
-            AgentRecord(name, "eng", "task", state="finished", runtime_target={"host_id": "removed"}),
+            AgentRecord(
+                name, "eng", "task", seat=f"eng-{index}@sw", state="finished", runtime_target={"host_id": "removed"}
+            ),
         )
         for at in (1, 2, 3):
             retire_watch.failed(store, "sw", name, {"process": 0, "refusal": "waiting for acknowledgement"}, at)

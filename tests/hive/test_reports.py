@@ -911,7 +911,7 @@ def test_finished_removed_hive_workers_settle_after_an_absence_lease(remote, han
     assert remote.store.agents("fixture") == []
     assert retire_watch.rows(remote.store, "fixture") == []
     assert remote.store.claimant("fixture", "task") is None
-    assert remote.store.execution_registry.occupants("fixture")[remote.agent.seat].state == "ended"
+    assert remote.store.execution_registry.occupants("fixture")[remote.agent.seat].state == "finished"
     exit_record = InboxStore(remote.redis).seats.exit_of(remote.agent.name)
     assert exit_record["reason"] == "exited"
     assert exit_record["seat"] == (remote.agent.seat if handoff else "")
@@ -919,7 +919,7 @@ def test_finished_removed_hive_workers_settle_after_an_absence_lease(remote, han
 
 
 @pytest.mark.parametrize("protection", ["indexed", "heartbeat", "report", "working", "local", "unreadable"])
-def test_removed_hive_retirement_requires_expired_host_evidence(remote, protection):
+def test_removed_hive_retirement_requires_expired_host_evidence(remote, protection, monkeypatch):
     from scripts.hive import registry
     from scripts.swarm import tick
 
@@ -940,8 +940,7 @@ def test_removed_hive_retirement_requires_expired_host_evidence(remote, protecti
         remote.store.put_agent("fixture", remote.agent)
         rows["task"] = {"state": "claimed", "claimed_by": remote.agent.name}
     elif protection == "local":
-        remote.agent = replace(remote.agent, runtime_target={**remote.agent.runtime_target, "host_id": "controller"})
-        remote.store.put_agent("fixture", remote.agent)
+        monkeypatch.setenv("SWARM_HIVE_ID", HIVE)
     else:
         remote.redis.hset(registry.key(HIVE), "heartbeat_at", "unknown")
 
