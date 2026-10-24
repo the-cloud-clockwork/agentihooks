@@ -68,7 +68,9 @@ def test_codex_assignment_waits_for_its_own_placement_chain(setup):
     from scripts.hive.placement import Wait
 
     config = replace(setup.config, lanes={"eng": {"agent": "codex"}})
-    assert setup.launcher.select(config, "eng", {"id": "task"}) == Wait("Codex hive placement is not enabled")
+    assert setup.launcher.select(config, "eng", {"id": "task"}) == Wait(
+        "no Codex account has room after hive sessions: "
+    )
 
 
 def test_no_advertised_slot_does_not_probe_controller_credentials(setup):
@@ -1218,7 +1220,11 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
 
     from scripts.hive import launch
     from scripts.hive.placement import Wait
+    from scripts.swarm.capacity import Account
 
+    if harness == "codex":
+        setup.herdr._quota_accounts.append(Account("codex", "account", "room", 0, None, 80, 6))
+        write_hive(setup, slots=[{"harness": "codex", "account": "account", "kind": "subscription"}])
     saved = {"profile": "engineer", "harness": harness, "account": "account"}
     task = {"id": "task", "launch_assignment": saved}
     config = replace(setup.config, lanes={"eng": {"agent": "codex", "profile": "engineer"}})
@@ -1230,27 +1236,17 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
     )
     assert not isinstance(selected, Wait)
     assert (selected.hive, selected.account.name) == ("remote", "account")
-    assert selected.fallback == ("no hive places the saved codex harness" if harness == "codex" else "")
+    assert selected.account.harness == ("claude" if harness == "auto" else harness)
+    assert selected.fallback == ""
 
 
-def test_a_saved_codex_task_with_no_codex_placement_launches_on_claude(setup):
-    from scripts.swarm.capacity import Account
+def test_a_saved_codex_task_with_no_codex_placement_waits_for_codex(setup):
+    from scripts.hive.placement import Wait
 
     saved = {"profile": "engineer", "harness": "codex", "account": "a-codex-account"}
-    setup.herdr._quota_accounts.append(Account("claude", "a-codex-account", "room", 0, 80, 80, 6))
-    setup.herdr.planned_account.return_value = "account"
-    write_hive(
-        setup,
-        slots=[*setup.hive["slots"], {"harness": "claude", "account": "a-codex-account", "kind": "subscription"}],
-    )
-    request = request_for(setup)
-    request = replace(request, task={**request.task, "launch_assignment": saved})
-    setup.launcher.wait = Mock(return_value="pending")
-    assert setup.launcher.spawn(request) == "pending"
-    order = setup.launcher.orders_for("task")
-    assert (order.harness, order.slot, order.hive) == ("claude", "account", "remote")
-    agent = setup.store.execution_occupants("fixture")[request.task["seat"]]
-    assert agent.profile_decision["placement_fallback"] == "no hive places the saved codex harness"
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task", "launch_assignment": saved})
+    assert selected == Wait("no Codex account has room after hive sessions: ; pinned to a-codex-account")
+    assert setup.store.execution_registry.records("fixture") == []
 
 
 def test_handoff_assignment_is_forwarded_to_profile_resolution(setup):
@@ -1881,7 +1877,7 @@ def test_controller_ci_lane_cannot_replace_a_pinned_codex_harness_with_claude(se
     setup.store.redis.hset(setup.store.key("fixture", "config"), "lanes", json.dumps(config.lanes))
     setup.herdr._profile_decision.return_value = ProfileDecision("cicd", "lane", "ci")
     fenced = FencedRuntime(setup.store, "fixture", setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose")
-    assert fenced.placement_refusal("ci", {"id": "task"}) == "Codex hive placement is not enabled"
+    assert fenced.placement_refusal("ci", {"id": "task"}) == "no Codex account has room after hive sessions: "
 
 
 def test_spawn_honors_the_ci_lane_harness_before_admission(setup):
@@ -1893,7 +1889,7 @@ def test_spawn_honors_the_ci_lane_harness_before_admission(setup):
     setup.herdr._profile_decision.return_value = ProfileDecision("cicd", "lane", "ci")
     setup.launcher.sleep = Mock(side_effect=AssertionError("a rejected harness must not launch"))
     assert setup.launcher.spawn(request) == Outcome(
-        "spawn", Status.UNAVAILABLE, "hive", detail="Codex hive placement is not enabled"
+        "spawn", Status.UNAVAILABLE, "hive", detail="no Codex account has room after hive sessions: "
     )
     assert setup.store.execution_registry.records("fixture") == []
 
@@ -2175,8 +2171,10 @@ def test_unsupported_harness_wait_records_its_lane(setup):
     from scripts.hive import placement_waits
     from scripts.hive.placement import Wait
 
-    config = replace(setup.config, lanes={"ci": {"agent": "codex"}})
-    assert setup.launcher.select(config, "ci", {"id": "task"}) == Wait("Codex hive placement is not enabled")
+    config = replace(setup.config, lanes={"ci": {"agent": "unsupported"}})
+    selected = setup.launcher.select(config, "ci", {"id": "task"})
+    assert selected == Wait("unsupported hive harness: unsupported")
+    assert selected.role == "eng"
     assert placement_waits.read(setup.store, setup.config.slug)["task"]["lane"] == "ci"
 
 

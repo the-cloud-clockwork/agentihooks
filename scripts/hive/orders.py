@@ -77,7 +77,7 @@ POD_SECONDS = 45
 
 def build_opening(request: SpawnRequest) -> str:
     """Built where the ledger is, naming the work folder below whichever home the hive runs it in."""
-    config, task = request.config, {**request.task, "harness": "claude"}
+    config, task = request.config, {"harness": "claude", **request.task}
     if task.get("workspace"):
         task["workspace"] = ledger_workspace.portable(config.slug, task["id"])
     role = config.lanes.get(request.lane, {}).get("role")
