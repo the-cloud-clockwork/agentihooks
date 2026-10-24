@@ -11,7 +11,7 @@ from tests.hive.test_controller_launch import setup as setup
 
 @pytest.mark.parametrize("lane", ["eng", "ci"])
 def test_quota_allocated_codex_launch_keeps_its_harness_through_receipt(setup, monkeypatch, lane):
-    from scripts.hive import launch
+    from scripts.hive import launch, orders
     from scripts.hive.orders import Consumer
     from scripts.swarm.capacity import Account
     from scripts.swarm.tick import Placed
@@ -36,6 +36,8 @@ def test_quota_allocated_codex_launch_keeps_its_harness_through_receipt(setup, m
     runtime.namespace.return_value = "namespace"
     runtime.table.return_value = {12: SimpleNamespace(start_time=34)}
     consumer = Consumer(setup.store.redis, "remote", runtime)
+    monkeypatch.setattr(orders.prompt, "build", lambda *args, **kwargs: args[4]["harness"])
+    setup.launcher.opening = orders.build_opening
     setup.launcher.sleep = lambda _: consumer.poll()
 
     outcome = setup.launcher.spawn(request)
@@ -55,7 +57,33 @@ def test_quota_allocated_codex_launch_keeps_its_harness_through_receipt(setup, m
     assert launched.task["launch_assignment"]["harness"] == "codex"
     assert launched.task["launch_assignment"]["account"] == "codex-account"
     assert launched.config.lanes[lane]["agent"] == "codex"
-    assert json.loads(setup.store.redis.get(order.prompt_ref))["hive_opening"] == f"opening for {request.name}"
+    assert json.loads(setup.store.redis.get(order.prompt_ref))["hive_opening"] == "codex"
     assert setup.launcher.slots.counts() == {"codex:codex-account": 1}
     launch.release(setup.store, "fixture", agent)
     assert setup.launcher.slots.counts() == {}
+
+
+@pytest.mark.parametrize("pin", ["lane", "saved", "planned"])
+def test_codex_selection_keeps_harness_and_host_pins(setup, pin):
+    from scripts.hive.placement import Wait
+    from scripts.swarm.capacity import Account
+
+    setup.herdr._quota_accounts.append(Account("codex", "codex-account", "room", 0, None, 80, 6))
+    write_hive(
+        setup, slots=[*setup.hive["slots"], {"harness": "codex", "account": "codex-account", "kind": "subscription"}]
+    )
+    task = {"id": "task", "hive": "remote"}
+    config = setup.config
+    if pin == "lane":
+        config = replace(config, lanes={"eng": {"agent": "codex"}})
+    elif pin == "saved":
+        task["launch_assignment"] = {"harness": "codex", "account": "codex-account"}
+    else:
+        setup.herdr._quota_tasks = {"task": "codex"}
+    selected = setup.launcher.select(config, "eng", task)
+    assert (selected.account.harness, selected.account.name, selected.hive) == ("codex", "codex-account", "remote")
+    write_hive(setup, max_agents=0)
+    unavailable = setup.launcher.select(config, "eng", task)
+    assert isinstance(unavailable, Wait)
+    assert "room" in unavailable.reason
+    assert setup.store.execution_registry.records("fixture") == []
