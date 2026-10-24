@@ -90,6 +90,44 @@ def test_inputs(
     return inputs
 
 
+def current_input(root: Path, changes: dict, digests: dict[str, str | None], name: str) -> list:
+    if name not in digests:
+        file = root / name
+        digests[name] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else None
+    return [digests[name], changes.get(name)]
+
+
+def reusable_entry(file: Path, opened: bool, check: Callable[[str], list]) -> dict | None:
+    entry = json.loads(file.read_text()) if file.is_file() else None
+    if (
+        entry is None
+        or opened
+        and ("loaded" not in entry or any(check(name) != value for name, value in entry["loaded"].items()))
+    ):
+        return None
+    return entry
+
+
+def loaded_inputs(
+    root: Path,
+    static: dict[str, str],
+    path: str,
+    fresh: list[dict],
+    graph: tuple[dict, dict, dict],
+    check: Callable[[str], list],
+) -> dict[str, list]:
+    modules, records, resources = graph
+    chosen = [result for result in fresh if path in result.get("files", ())] or fresh
+    names = set(modules.values())
+    if all("modules" in result for result in chosen):
+        collected = {test_file(item) for result in chosen for item in result.get("files", ())} - static.keys()
+        names &= {name for result in chosen for name in result["modules"]} - collected
+    closure = {}
+    for name in names:
+        closure.update(test_inputs(root, name, modules, records, resources))
+    return {name: check(name) for name in closure}
+
+
 def collect_cached_stats(
     root: Path,
     folder: Path,
@@ -137,35 +175,13 @@ def collect_cached_stats(
     }
     # A dynamic import may load any module, so those files are checked against the modules the collection loaded.
     opened = {path for path, dependencies in inputs.items() if any(records[name][2] for name in dependencies)}
-    digests = {}
-
-    def current(name: str) -> list:
-        if name not in digests:
-            file = root / name
-            digests[name] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else None
-        return [digests[name], changes.get(name)]
-
-    def loaded_inputs(path: str, fresh: list[dict]) -> dict[str, list]:
-        chosen = [result for result in fresh if path in result.get("files", ())] or fresh
-        names = set(modules.values())
-        if all("modules" in result for result in chosen):
-            collected = {test_file(item) for result in chosen for item in result.get("files", ())} - inputs[path].keys()
-            names &= {name for result in chosen for name in result["modules"]} - collected
-        closure = {}
-        for name in names:
-            closure.update(test_inputs(root, name, modules, records, resources))
-        return {name: current(name) for name in closure}
-
-    stored = {}
-    for path, key in keys.items():
-        file = folder / f"{key}.json"
-        entry = json.loads(file.read_text()) if file.is_file() else None
-        if entry and (
-            path not in opened
-            or "loaded" in entry
-            and all(current(name) == value for name, value in entry["loaded"].items())
-        ):
-            stored[path] = entry
+    check = functools.partial(current_input, root, changes, {})
+    graph = (modules, records, resources)
+    stored = {
+        path: entry
+        for path, key in keys.items()
+        if (entry := reusable_entry(folder / f"{key}.json", path in opened, check)) is not None
+    }
     reused = [{field: value for field, value in entry.items() if field != "loaded"} for entry in stored.values()]
     missing = [path for path in keys if path not in stored]
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
@@ -189,7 +205,7 @@ def collect_cached_stats(
             "cpu": sum(result["cpu"] for result in fresh) / len(missing),
         }
         if path in opened:
-            entry["loaded"] = loaded_inputs(path, fresh)
+            entry["loaded"] = loaded_inputs(root, inputs[path], path, fresh, graph, check)
         (folder / f"{keys[path]}.json").write_text(json.dumps(entry))
     return reused + [
         {field: value for field, value in result.items() if field not in ("files", "modules")} for result in fresh
