@@ -110,7 +110,9 @@ def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatc
         assert slug == "sw"
         return []
 
-    store = SimpleNamespace(redis=redis, agents=rows)
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(redis)
     ledger = SimpleNamespace(tasks=rows)
     idle.declare_wait(redis, "sw", "engineer", until, "proof", 60_000)
     idle.end_wait(redis, "sw", "engineer", until)
@@ -135,7 +137,9 @@ def test_doctor_reads_wait_history_only_for_agents_with_a_long_turn_gap(redis, m
     monkeypatch.setattr(traces_read, "record", lambda *args: record)
     asked = []
     monkeypatch.setattr(idle, "wait_history", lambda r, slug, name: asked.append((slug, name)) or [])
-    store = SimpleNamespace(redis=redis, agents=lambda slug: [])
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(redis)
     found = detect.readers(store, SimpleNamespace(tasks=lambda slug: []), "sw", 4_000_000, environ={})["trace"]()
     assert asked == [("sw", "engineer")]
     assert [f.id for f in found if f.kind == "turn gap"] == ["turn-gap/engineer-session"]

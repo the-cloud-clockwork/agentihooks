@@ -53,6 +53,13 @@ def _inbox(store, mail, slug, now_ms, env, items):
 
 def _traces(store, tasks, slug, now_ms, env, trace_client=None):
     started = time.monotonic()
+    key = store.key(slug, "doctor-task-cost")
+    previous = store.redis.get(key)
+    merged = traces_read.merged(tasks)
+    if previous is None:
+        previous = json.dumps(merged)
+        store.redis.set(key, previous)
+    judged = set(json.loads(previous))
     limits = traces.Limits.from_env(env)
     get = (trace_client or traces_read.client)(env)
     record = traces_read.record(slug, tasks, [asdict(a) for a in store.agents(slug)], now_ms, get)
@@ -62,7 +69,12 @@ def _traces(store, tasks, slug, now_ms, env, trace_client=None):
         started,
         traces_read.Budget(),
     )
-    return traces.findings(record, limits)
+    candidates = traces.task_cost_candidates(record) - judged
+    record["task_cost_candidates"] = candidates
+    found = traces.findings(record, limits)
+    if candidates:
+        store.redis.set(key, json.dumps(sorted(judged | candidates)))
+    return found
 
 
 def _overruns(store, slug):

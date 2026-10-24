@@ -110,11 +110,26 @@ def _finished(record, task):
     return max(o.get("end", 0) for t in traced for o in _turns(t))
 
 
+def task_cost_candidates(record: dict) -> set[str]:
+    reader = record.get("reader", {})
+    historical = reader.get("historical", {})
+    if (
+        not historical.get("listed", False)
+        or not historical.get("complete", False)
+        or historical.get("capped")
+        or reader.get("failures")
+    ):
+        return set()
+    return {cost["task"] for cost in _task_costs(record) if cost["sessions"]}
+
+
 def task_cost(record: dict, limits: Limits) -> list[Finding]:
     costs = [c for c in _task_costs(record) if c["tokens"]]
     finished = {c["task"]: _finished(record, c["task"]) for c in costs}
     found = []
     for cost in costs:
+        if cost["task"] not in record.get("task_cost_candidates", record["merged"]):
+            continue
         others = [c["tokens"] for c in costs if c is not cost and finished[c["task"]] <= finished[cost["task"]]]
         if not others or cost["tokens"] <= limits.task_cost_ratio * median(others):
             continue
