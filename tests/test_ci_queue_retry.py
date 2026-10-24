@@ -16,6 +16,7 @@ RUN = {"event": "merge_group", "conclusion": "failure", "run_attempt": 1}
 SHUTDOWN = (FIXTURES / "shutdown_signal.txt").read_text()
 LOST = (FIXTURES / "lost_communication.txt").read_text()
 RED = (FIXTURES / "test_failure.txt").read_text()
+QUOTED_LOSS = (FIXTURES / "failure_quoting_a_loss.txt").read_text()
 QUEUE_BRANCH = "gh-readonly-queue/dev/pr-3259-810e2717650390eb596adff102841b05c86eff69"
 REMOVED = {"createdAt": "2026-10-15T05:40:23Z", "reason": "failed_checks"}
 HEAD = "810e2717650390eb596adff102841b05c86eff69"
@@ -198,6 +199,22 @@ def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
     failed = ci_queue_retry.failed_jobs("o/r", 9)
     assert failed == [{"name": "unit (3.11, 2)", "text": "##[error]Process completed with exit code 1."}]
     assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
+
+
+def test_a_shard_whose_tests_reported_failures_is_not_lost_whatever_its_output_quotes(monkeypatch):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.12, 13)", "conclusion": "failure"}]}
+    quoted = "Process completed with exit code 1.\\n##[error]The runner has received a shutdown signal.-True]"
+    pages = {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": json.dumps([{"message": quoted}, {"message": "Process completed with exit code 1."}]),
+        "repos/o/r/actions/jobs/1/logs": QUOTED_LOSS,
+    }
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (
+        False,
+        "failed without a runner loss signature: unit (3.12, 13)",
+    )
 
 
 def test_colour_codes_in_the_shard_log_keep_the_runner_loss(monkeypatch):
