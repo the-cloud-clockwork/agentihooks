@@ -35,6 +35,7 @@ def unseated(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path / "ledgers"))
     return tmp_path
 
 
@@ -307,14 +308,14 @@ def test_the_question_and_plan_prompts_reach_the_operator_only_after_operator_on
     assert "swarm sessions and subagents cannot wait for permission" in _permission(capsys, "Bash", SID)["message"]
 
 
-def test_a_standalone_plan_prompt_is_denied_until_operator_on(unseated, capsys):
-    assert _permission(capsys, "ExitPlanMode", "solo") == {
-        "behavior": "deny",
-        "message": PROMPT_REFUSAL.format(tool="ExitPlanMode"),
-    }
-    assert _permission(capsys, "Bash", "solo") is None
-    operator_mode.observe("solo", "operator on", True, now=100)
-    assert _permission(capsys, "ExitPlanMode", "solo") is None
+def test_a_standalone_session_gets_every_permission_prompt_without_operator_on(unseated, capsys):
+    for prompt in ("plan it", "operator off"):
+        operator_mode.observe("solo", prompt, True, now=100)
+        for tool in ("AskUserQuestion", "ExitPlanMode", "Bash"):
+            assert _permission(capsys, tool, "solo") is None
+    assert master_coding.asks_operator("ExitPlanMode", "solo")
+    assert master_coding.asks_operator("AskUserQuestion", "")
+    assert not master_coding.asks_operator("Bash", "solo")
 
 
 @pytest.mark.parametrize(

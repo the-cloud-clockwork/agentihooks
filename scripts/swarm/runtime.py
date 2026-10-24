@@ -19,6 +19,7 @@ from scripts.profiles import binding, plugins
 from scripts.routing import native_login
 from scripts.swarm import (
     affinity,
+    brain_binding,
     capacity,
     default_models,
     effort_range,
@@ -269,6 +270,16 @@ def _named_process(agent):
     return session.process
 
 
+def _launch_timeouts(agent: str, passed: list[str], argv: list[str]) -> tuple[list[str], float]:
+    from scripts.master_login_chain import BUDGET
+
+    if agent != "claude" or passed[:2] != ["--route", "master-login"]:
+        return argv, SPAWN_TIMEOUT_S
+    routed = list(argv)
+    routed[routed.index("--route-timeout") + 1] = str(BUDGET.route)
+    return routed, BUDGET.spawn
+
+
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
 
@@ -490,6 +501,9 @@ class HerdrRuntime:
     def _quota_transfer(self, saved, profile, environ, lane, want, planned=None):
         from scripts.swarm import capacity, quota_handoff
 
+        if not hasattr(self, "_quota_accounts"):
+            read = self.quota_accounts or capacity.accounts
+            self._quota_accounts = read(environ, time.time(), refresh=False)
         thresholds = quota_handoff.Thresholds.from_env(environ)
         allocation = getattr(self, "_quota_allocations", {}).get(lane)
         predecessor = (saved["harness"], saved.get("account"))
@@ -659,7 +673,7 @@ class HerdrRuntime:
         if saved.get("model"):
             picked = model_pick.ModelPick(
                 saved["model"],
-                saved["effort"],
+                chosen.get("effort"),
                 source=saved.get("model_source", "handoff"),
                 confidence=saved.get("model_confidence"),
             )
@@ -676,7 +690,7 @@ class HerdrRuntime:
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen, config)
         picked = replace(picked, model=_set(picked.model) or default_models.model(config, agent))
-        picked = replace(picked, effort=saved["effort"]) if saved else picked
+        picked = replace(picked, effort=saved["effort"]) if saved.get("effort") else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
         login = master_claude_login.enabled(config.slug, task.get("seat", ""), lane, agent)
@@ -740,6 +754,12 @@ class HerdrRuntime:
             raise SpawnError("unsupported resume: original profile is missing", "unsupported")
         if agent.harness not in effort_range.EFFORTS:
             raise SpawnError(f"unsupported resume harness: {agent.harness}", "unsupported")
+        from scripts.profiles import render
+
+        if agent.harness == "codex" and not render.has_codex_rollout(
+            agent.profile, agent.overlays, agent.conversation_id
+        ):
+            raise SpawnError(f"Codex has no saved rollout for conversation {agent.conversation_id}", "unsupported")
         argv = self._argv(
             config,
             agent.name,
@@ -872,6 +892,7 @@ class HerdrRuntime:
         agent = argv[argv.index("--agent") + 1]
         proof = None
         passed = argv[argv.index("--") + 1 :] if "--" in argv else []
+        argv, timeout = _launch_timeouts(agent, passed, argv)
         if agent == "claude" and passed[:2] == ["--route", "interactive"]:
             try:
                 proof = native_login.check(os.environ, "native", self.run)
@@ -884,7 +905,7 @@ class HerdrRuntime:
                 argv,
                 capture_output=True,
                 text=True,
-                timeout=SPAWN_TIMEOUT_S,
+                timeout=timeout,
                 env={
                     **{key: value for key, value in os.environ.items() if key not in (PREDECESSOR, *TICK_ONLY)},
                     **({PREDECESSOR: predecessor} if predecessor else {}),
@@ -933,7 +954,7 @@ class HerdrRuntime:
             fields.get("effort", ""),
             fields.get("placement", ""),
             validated["profile"],
-            profile_decision={"validation": validated},
+            profile_decision={"validation": validated, **brain_binding.record(fields)},
             launched_at=launched_at,
             launch_timings=timings,
             conversation_id=(self.conversations() or {}).get(fields.get("pane_id"), ""),

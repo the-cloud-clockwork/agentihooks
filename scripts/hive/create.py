@@ -161,10 +161,7 @@ def _files(tools: Tools, options: Options) -> dict[str, str]:
     state = tools.state
     hive = create_render.Hive(state["name"], state["record"], state["ssh_port"], state["node"], state["lan_ip"])
     template = create_github.read(tools.run, options.repo, create_render.TEMPLATE_PATH, options.base)
-    homes = create_github.read(tools.run, options.repo, create_render.NFS_HOMES_PATH, options.base)
-    files = create_render.render(template, hive)
-    files[create_render.NFS_HOMES_PATH] = create_render.with_home(homes, state["name"])
-    return files
+    return create_render.render(template, hive)
 
 
 def _manifests(tools: Tools, options: Options) -> str:
@@ -191,7 +188,10 @@ def _merged(tools: Tools, options: Options) -> str:
         _save(tools)
         raise auth.HiveError(f"pull request {url} was closed without merging; rerun hive create to open a new one")
     if found != "MERGED":
-        create_github.merge(tools.run, url)
+        if not create_github.merge(tools.run, url):
+            checks = f"pull request {url} checks to pass"
+            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url))
+            create_github.squash(tools.run, url)
         _wait(
             tools, options, f"pull request {url} to merge", lambda: create_github.pr_state(tools.run, url) == "MERGED"
         )

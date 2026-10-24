@@ -243,7 +243,7 @@ def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_dur
     assert f"permissions violation for publish to {durable}" in refused
 
 
-def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin, signer):
+def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin, signer, capfd):
     from scripts.events import nats
     from scripts.hive import account_slots, buckets
     from scripts.hub import slots
@@ -259,9 +259,17 @@ def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin,
         buckets.provision(hub)
         slots.serve(hub, clock=lambda: 1000)
         report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
-        first = account_slots.Remote(account_slots.asker(members[0], "rig"), "m1", lambda: report)
-        second = account_slots.Remote(account_slots.asker(members[1], "other"), "m2", lambda: report)
+        first = account_slots.Remote(account_slots.asker(members[0], "rig", "m1"), "m1", lambda: report)
+        second = account_slots.Remote(account_slots.asker(members[1], "other", "m2"), "m2", lambda: report)
         assert first.take("one", "claude") == "a"
+        assert second.take("two", "claude") is None
+        posing = account_slots.Remote(account_slots.asker(members[1], "rig", "m1", 500), "m1")
+        with pytest.raises(TimeoutError, match="^no responders for 'slots.rig.m1'$"):
+            posing.release("one", "claude", "a")
+        refusal = "slot request names hive 'm2' but the sending credential is bound to hive 'm1'"
+        with pytest.raises(account_slots.Unavailable, match=f"^{refusal}$"):
+            account_slots.Remote(account_slots.asker(members[0], "rig", "m1"), "m2").release("one", "claude", "a")
+        assert f"hub: refused a release in swarm rig: {refusal}\n" in capfd.readouterr().err
         assert second.take("two", "claude") is None
         first.release("one", "claude", "a")
         assert second.take("two", "claude") == "a"
@@ -308,7 +316,8 @@ def test_a_claims_update_the_server_refuses_raises(signer):
         nats_grant.push(signer, "not.a.jwt")
 
 
-def test_a_failed_push_keeps_the_revocation_for_the_next_push(admin, signer):
+def test_a_failed_push_keeps_the_revocation_for_the_next_push(admin, signer, monkeypatch):
+    monkeypatch.setattr(nats_grant, "PUSH_TIMEOUT_S", 0.05)
     unreachable = nats_grant.Signer(
         signer.operator,
         signer.account,
@@ -316,7 +325,7 @@ def test_a_failed_push_keeps_the_revocation_for_the_next_push(admin, signer):
         f"nats://127.0.0.1:{nats_server.free_port()}",
         signer.trusted_operator,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(TimeoutError):
         nats_grant.revoke(admin, unreachable, "m1")
     assert set(admin.hgetall(nats_grant.REVOKED)) == {nats_grant.member_user(signer, "m1").public}
 
@@ -650,7 +659,6 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
     )
     publish = [
         "swarm.*.execution.>",
-        "swarm.*.slots",
         "dead.*",
         "dead.*.*",
         "$JS.API.INFO",
@@ -661,6 +669,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         *(f"$KV.{bucket}.>" for bucket in buckets),
         *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets),
         *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets),
+        "slots.*.m1",
     ]
     assert claims["nats"] == {
         "type": "user",
@@ -738,3 +747,21 @@ def test_a_push_connects_once_without_reconnecting_and_bounds_both_waits(monkeyp
         "request": ("$SYS.REQ.CLAIMS.UPDATE", b"a.b.c", {"timeout": 10}),
         "closed": True,
     }
+
+
+def test_a_push_cancels_the_initial_connection_retry_loop(monkeypatch):
+    import asyncio
+
+    import nats as nats_client
+
+    from scripts.events import nats
+
+    async def connect(*args, **kwargs):
+        await asyncio.sleep(0.1)
+        raise AssertionError("connection retry outlived the push deadline")
+
+    monkeypatch.setattr(nats_client, "connect", connect)
+    monkeypatch.setattr(nats, "auth_options", lambda credentials: {})
+    monkeypatch.setattr(nats_grant, "PUSH_TIMEOUT_S", 0.01)
+    with pytest.raises(TimeoutError):
+        nats_grant.push(_offline_signer(), "a.b.c")

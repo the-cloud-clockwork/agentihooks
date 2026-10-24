@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/cli.py:scripts.doctor.cli.x_cmd_stop__mutmut_26:e5e5c343ff82ce390cad2442657a365fa981ca80d1dc4f0c38f2b7fc25d6f1cb": {
+    "reader": "standards_reader",
+    "reason": "Changes announce from False to None in the stop call. _close reads announce only in one truthiness test; None and False are both falsy, so the closed notice is skipped in both cases and nothing else reads the value."
+  }
+}

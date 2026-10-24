@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.xǁSQLiteRecallStoreǁsources__mutmut_11:f2e326bf00f4c48e37079f802792791ac0fd8989670029c56dac779fcd3a2481": {
+    "reader": "standards_reader",
+    "reason": "Uppercasing SOURCE, AT FROM INDEXED is a no-op under case-insensitive identifiers, and the result is still unpacked positionally into dict."
+  }
+}

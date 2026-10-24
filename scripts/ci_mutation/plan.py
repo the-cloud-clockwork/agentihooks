@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
@@ -254,17 +255,19 @@ def main() -> int:
     parser.add_argument("--base", default="origin/dev")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--target", type=float, default=120)
-    parser.add_argument("--stats-target", type=float, default=30)
+    parser.add_argument("--stats-target", type=float, default=60)
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--repository")
     args = parser.parse_args()
     root = Path.cwd()
-    bases = own_bases(root, args.base, args.head, graded_green)
-    print(f"Mutation bases: {' '.join(bases)}")
-    changes = discover_changes(root, bases, args.head)
+    with ThreadPoolExecutor() as pool:
+        record = pool.submit(read_record, args.repository) if args.repository else None
+        bases = own_bases(root, args.base, args.head, graded_green)
+        print(f"Mutation bases: {' '.join(bases)}")
+        changes = discover_changes(root, bases, args.head)
     manifest, failure = None, ""
-    if args.repository:
-        found, failure = read_record(args.repository)
+    if record is not None:
+        found, failure = record.result()
         if failure:
             print(
                 "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"

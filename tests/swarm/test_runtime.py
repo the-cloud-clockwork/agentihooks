@@ -33,6 +33,28 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
     assert seen["env"]["AGENTIHOOKS_SWARM_TASK"] == "t4"
 
 
+def test_native_master_browser_budget_is_carried_to_the_real_launcher(tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, timeout=kwargs["timeout"])
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run)
+    monkeypatch.setattr(runtime, "conversations", lambda: {})
+    config = SimpleNamespace(
+        slug="fixture", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    argv = runtime._argv(config, "master@fixture", "claude", "opening", "master", "master")
+    runtime._launch(
+        config, "master", "master", "master@fixture", [*argv, "--", "--route", "master-login", "--model", "opus"]
+    )
+    assert float(seen["argv"][seen["argv"].index("--route-timeout") + 1]) >= chain.BUDGET.route
+    assert seen["timeout"] >= chain.BUDGET.spawn
+
+
 def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypatch):
     clock = iter([5_000.0, 9_000.0])
     monkeypatch.setattr("scripts.swarm.runtime.time", SimpleNamespace(time=lambda: next(clock), sleep=lambda _: None))
@@ -684,6 +706,30 @@ def _resuming(tmp_path, reported, harness="claude"):
         conversation_id="c0ffee",
     )
     return runtime, config, agent, seen
+
+
+@pytest.mark.codex_rollouts
+def test_a_codex_resume_without_its_saved_rollout_fails_before_any_launch(tmp_path):
+    from scripts.swarm.tick import SpawnError
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness="codex")
+    with pytest.raises(SpawnError, match="no saved rollout for conversation c0ffee") as error:
+        runtime.resume(config, agent, "you were restored")
+    assert error.value.status == "unsupported"
+    assert seen["runs"] == []
+
+
+@pytest.mark.codex_rollouts
+def test_a_codex_resume_finds_its_rollout_in_an_earlier_rendered_home(tmp_path):
+    from scripts.profiles import homes, render
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness="codex")
+    earlier = render.rendered_root() / homes.HOMES / "engineer" / "9e1049fb7b28-old" / "codex" / "sessions" / "2026"
+    earlier.mkdir(parents=True)
+    (earlier / "rollout-2026-10-18T16-13-16-c0ffee.jsonl").write_text("{}\n")
+    placed = runtime.resume(config, agent, "you were restored")
+    assert placed.conversation_id == "c0ffee"
+    assert "--resume" in seen["runs"][0]
 
 
 def test_resume_relaunches_the_same_harness_name_task_and_account_into_its_conversation(tmp_path):

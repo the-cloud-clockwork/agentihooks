@@ -94,3 +94,4 @@ jobs:
         with:
           name: startup-stages
           path: ${{ env.EVIDENCE }}
+          retention-days: 7

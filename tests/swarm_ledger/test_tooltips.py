@@ -81,7 +81,7 @@ COLLECTIONS = {
 
 
 def home_html(view):
-    return server.index_page(view)
+    return server.index_page()
 
 
 def route(r, html):
@@ -274,7 +274,7 @@ ROW_BUTTONS = {
     "home": (
         ".act.del",
         f"Move {ROW_TITLE} to the bin",
-        "Move this ledger to the bin. Its swarm stops; the bin keeps it thirty days.",
+        "Move this ledger to the bin. Its swarm stops; the bin keeps it 30 days.",
     ),
     "bin": (".act.restore", f"Restore {ROW_TITLE} to HOME", "Restore this ledger from the bin to HOME."),
 }

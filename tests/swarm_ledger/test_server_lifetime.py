@@ -322,7 +322,7 @@ def test_server_closes_its_socket_and_cancels_the_watch_on_exit(tmp_path, monkey
     )
     watch.assert_called_once_with(httpd, tmp_path, ledger_server.PORT)
     assert (tmp_path / ".server.pid").read_text() == str(os.getpid())
-    httpd.serve_forever.assert_called_once_with()
+    httpd.serve_forever.assert_called_once_with(ledger_server.POLL_S)
     stopped.set.assert_called_once_with()
     httpd.server_close.assert_called_once_with()
 

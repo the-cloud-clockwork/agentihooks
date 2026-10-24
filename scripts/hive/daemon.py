@@ -41,7 +41,6 @@ REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
 def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive import reports
     from scripts.hive.orders import Consumer, alive
-    from scripts.routing.reservation import LaunchSlots
 
     alive(redis, local_id)
     consumer = Consumer.local(redis, local_id)
@@ -53,18 +52,21 @@ def beat(redis: "Redis", local_id: str) -> None:
     if executions:
         report["sessions"]["_executions"] = executions
     key = registry.key(local_id)
-    # The member Redis user cannot write the hive index or launch slots; join, revoke and the controller maintain them.
+    # The member Redis user cannot write the hive index or launch slots; join, revoke and the controller maintain
+    # them. A member misdetected as the controller gets ACL's NoPermissionError on that write; it is never fatal,
+    # since the hub already indexes the member at join, refresh and revoke.
     member = local_id == os.environ.get("AGENTIHOOKS_HIVE_ID")
     registry.migrate(redis, local_id)
+    if not member:
+        _index_hive(redis, local_id)
     with redis.pipeline() as pipe:
         registry.seed(pipe, local_id)
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
         fields["master_login"] = json.dumps({"claude": master_claude_login.signed_in()})
+        fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
         beat_ms = int(time.time() * 1000)
         fields["heartbeat_at"] = str(beat_ms)
         pipe.hset(key, mapping=fields)
-        if not member:
-            pipe.sadd(registry.INDEX, local_id)
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
         pipe.execute()
@@ -72,7 +74,7 @@ def beat(redis: "Redis", local_id: str) -> None:
 
     headroom.publish(redis, local_id, beat_ms)
     if not member:
-        LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
+        _refresh_launch_slots(redis, executions)
     if not fenced:
         consumer.poll()
     consumer.poll_commands()
@@ -91,6 +93,26 @@ def beat(redis: "Redis", local_id: str) -> None:
         print(f"hive account slot heartbeat failed ({type(exc).__name__}: {exc}); retrying next beat", file=sys.stderr)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
+
+
+def _index_hive(redis: "Redis", local_id: str) -> None:
+    from redis.exceptions import NoPermissionError
+
+    try:
+        redis.sadd(registry.INDEX, local_id)
+    except NoPermissionError:
+        pass
+
+
+def _refresh_launch_slots(redis: "Redis", executions: dict) -> None:
+    from redis.exceptions import NoPermissionError
+
+    from scripts.routing.reservation import LaunchSlots
+
+    try:
+        LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
+    except NoPermissionError:
+        pass
 
 
 def _slot_errors() -> tuple[type[Exception], ...]:
@@ -462,10 +484,13 @@ def observe(processes: dict[str, dict[int, str]] | None = None) -> dict:
 
 
 def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, str]]) -> dict[str, list[str]]:
+    from scripts.swarm import live_binding
     from scripts.swarm.store import RedisStore
     from scripts.swarm_v2.registry import CLOSED, decode
+    from scripts.terminate_agent import sessions
 
     store = RedisStore(redis)
+    local = sessions()
     found: dict[str, list[str]] = {}
     counted: set[tuple[str, int]] = set()
     for swarm in store.slugs():
@@ -482,6 +507,17 @@ def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, st
                 continue
             counted.add(identity)
             found.setdefault(f"{record.harness}:{agent.account}", []).append(record.execution_id)
+        for agent in agents.values():
+            if not agent.execution_id or (agent.hive or agent.runtime_target.get("host_id")) != local_id:
+                continue
+            session = live_binding.bound_session(agent, local)
+            if session is None or session.target != agent.harness:
+                continue
+            identity = session.target, session.process.pid
+            if identity in counted or processes.get(session.target, {}).get(session.process.pid) != agent.account:
+                continue
+            counted.add(identity)
+            found.setdefault(f"{agent.harness}:{agent.account}", []).append(agent.execution_id)
     return found
 
 

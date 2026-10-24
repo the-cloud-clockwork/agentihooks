@@ -111,7 +111,8 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
     slug, lane, task, name = (environ[name] for name in IDENTITY_ENV)
     route, agent_args = take_route(agent_args)
     environ = {**environ, select_profile.BUNDLE_REVISION: args.bundle_revision}
-    profile_env, flags = select_profile.prepare(args.profile, "codex", "", "", agent_args, environ, args.overlay)
+    pushed = {**environ, select_profile.PUSH: "1"}
+    profile_env, flags = select_profile.prepare(args.profile, "codex", "", "", agent_args, pushed, args.overlay)
     model, effort, server_args = server_options(flags)
     environ.update(profile_env)
     account, placement, child = route_account(environ, route, args.exclude)

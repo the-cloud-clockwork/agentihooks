@@ -7,11 +7,13 @@ import { editOverview, editTitle, saveOverview, saveTitle } from "./edits.js";
 import { clearNotification, clearPriority, showAlerts, showNotifications } from "./notices.js";
 import { foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutline, wireOutline } from "./outline.js";
 import { collapsible, commentBoxes, groupOpen, markToggles, rememberGroup, rememberUnanimous, setAllComments } from "./folds.js";
-import { openHash, startLayout, wireRail, wireTabs } from "./layout.js";
+import { openHash, startLayout, wireRail, wireStatsDrawer, wireTabs } from "./layout.js";
 import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
 import { connectEvents } from "./events.js";
 import { loadArchitecture } from "./architecture.js";
+import { loadTips } from "./api.js";
+import { tips } from "./state.js";
 import { toggleFrozenView } from "./frozen_view.js";
 
 function start() {
@@ -86,8 +88,10 @@ function start() {
   render();
   wireTabs();
   wireRail();
+  wireStatsDrawer();
   $("main-content").addEventListener("scroll", markOutline, { passive: true });
   loadMetadata();
+  loadTips().then((values) => { if (values) { Object.assign(tips, values); render(); } });
   connectEvents();
   loaded.then(() => { if (location.hash.length > 1) openHash(); });
   setInterval(refreshQuota, QUOTA_REFRESH_MS);

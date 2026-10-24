@@ -16,7 +16,11 @@ RUNNER_LOSS = re.compile(
     r"|The job was not acquired by Runner"
     r"|" + re.escape(UNREADABLE_LOG)
 )
-STEP_EXITED = re.compile(r"Process completed with exit code (?:[1-9]|[1-9]\d|1[01]\d|12[0-7])\.")
+FAILED_RESULT = re.compile(r"^(?:\S+Z )?(?:\x1b\[[\d;]*m)*=+ .*?\b[1-9]\d* (?:failed|errors?)\b.*? in [\d.]+s\b", re.M)
+STEP_TIMED_OUT = re.compile(r"The action '.+' has timed out after ")
+STEP_EXITED = re.compile(
+    r"(?:Process completed with exit code (?:[1-9]|[1-9]\d|1[01]\d|12[0-7])\.|" + STEP_TIMED_OUT.pattern + ")"
+)
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
 EXIT_POLLS = 60
 EXIT_POLL_SECONDS = 30
@@ -24,6 +28,10 @@ EXIT_POLL_SECONDS = 30
 
 def base_name(job_name: str) -> str:
     return job_name.split(" (")[0].strip()
+
+
+def runner_lost(text: str) -> bool:
+    return bool(RUNNER_LOSS.search(text)) and not (FAILED_RESULT.search(text) or STEP_TIMED_OUT.search(text))
 
 
 def dependents(workflow: dict, root: str = SHARD) -> set[str]:
@@ -53,7 +61,7 @@ def decide(run: dict, failed: list[dict], workflow: dict) -> tuple[bool, str]:
         return False, f"failed outside the unit shards: {', '.join(others)}"
     if not shards:
         return False, "no unit shard failed"
-    kept = [job["name"] for job in shards if not RUNNER_LOSS.search(job["text"])]
+    kept = [job["name"] for job in shards if not runner_lost(job["text"])]
     if kept:
         return False, f"failed without a runner loss signature: {', '.join(kept)}"
     return True, f"runner lost on {', '.join(job['name'] for job in shards)}"
@@ -65,7 +73,7 @@ def _api(*args: str) -> str:
 
 def log_errors(repo: str, job_id: int) -> list[str]:
     text = _api(f"repos/{repo}/actions/jobs/{job_id}/logs", "--allow-escape-sequences")
-    return [line for line in text.splitlines() if "##[error]" in line]
+    return [line for line in text.splitlines() if "##[error]" in line or FAILED_RESULT.search(line)]
 
 
 def job_text(repo: str, job_id: int, log: bool) -> str:
@@ -87,7 +95,7 @@ def failed_jobs(repo: str, run_id: int) -> list[dict]:
         if job["conclusion"] not in ("failure", "timed_out") and not (shard and job["conclusion"] == "cancelled"):
             continue
         text = job_text(repo, job["id"], shard)
-        if job["conclusion"] == "cancelled" and not RUNNER_LOSS.search(text):
+        if job["conclusion"] == "cancelled" and not (runner_lost(text) or FAILED_RESULT.search(text)):
             continue
         failed.append({"name": job["name"], "text": text})
     unlisted = jobs["total_count"] - len(jobs["jobs"])

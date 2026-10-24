@@ -43,6 +43,7 @@ from scripts.swarm import (
     failed_panes,
     freeze,
     grouping,
+    input_wait,
     lane_split,
     launch_check,
     ledger_events,
@@ -451,7 +452,11 @@ def _rebind(slug, store, runtime, agent, pid):
 
 def _ended(agent, rows):
     task = rows.get(agent.task, {})
-    ended = agent.lane != MASTER and (task.get("done") or task.get("state") in {"done", "blocked", "handoff"})
+    ended = agent.lane != MASTER and (
+        task.get("done")
+        or task.get("state") in {"done", "blocked", "handoff"}
+        or (task.get("awaiting") == "verify" and not task.get("claimed_by"))
+    )
     return agent.state == "finished" or bool(ended)
 
 
@@ -556,14 +561,18 @@ def _current_owner(agent, row):
 
 def _restore_owner(slug, store, ledger, rows, agent):
     row = rows.get(agent.task, {})
-    if not _current_owner(agent, row) or not store.ensure_claim(slug, agent, LEASE_MS):
+    if _ended(agent, rows) or not _current_owner(agent, row) or not store.ensure_claim(slug, agent, LEASE_MS):
         return
     if row.get("out_of_scope") or row.get("state") not in ("open", "claimed", "pr"):
         return
     owner = row.get("claimed_by", "")
     if owner == agent.name and row["state"] != "open":
         return
-    expected = {"claimed_by": owner, "claim_generation": row.get("claim_generation", 0)}
+    expected = {
+        "claimed_by": owner,
+        "claim_generation": row.get("claim_generation", 0),
+        "awaiting": row.get("awaiting", ""),
+    }
     fields = {"claimed_by": agent.name}
     if row["state"] == "open":
         fields["state"] = "pr" if row.get("pr_url") else "claimed"
@@ -595,7 +604,8 @@ def _hive_lost(slug, store, agent, now_ms):
 
 def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
     master_retire.forget(store, slug, agent.name)
-    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+    removed = reports.Reports(store.redis).removed(agent, now_ms)
+    if not removed and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
         retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
         return [f"could not retire {agent.name}, retrying next tick"]
     _refund_parked(slug, store, rows, agent)
@@ -635,7 +645,10 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live:
             _restore_owner(slug, store, ledger, rows, agent)
-            actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
+            if _ended(agent, rows):
+                actions += _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms)
+            else:
+                actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif resume.recovery_pending(store, slug, agent):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
@@ -724,9 +737,13 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         observed = replace(observed, state=idle_state.IDLE)
     if observed.state == idle_state.WAITING:
         title = observed.prompt_title or "Waiting on input"
-        ticks = agent.input_ticks + 1 if agent.input_prompt == title else 1
+        same = agent.input_prompt == title
+        ticks = agent.input_ticks + 1 if same else 1
+        input_wait.mark(store, slug, agent.name, now_ms, same)
         store.put_agent(slug, replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0))
         return []
+    if agent.input_prompt:
+        input_wait.clear(store, slug, agent.name)
     agent = replace(agent, input_prompt="", input_ticks=0)
     held = outage.held(store, slug, agent.name)
     exhausted = resume.recovery_exhausted(store, slug, agent)
@@ -1177,9 +1194,16 @@ def _not_launched(slug, store, ledger, runtime, rows, failed, now_ms):
     if _acknowledging_error(failed.error):
         store.record_launch(slug, record, ACKNOWLEDGING)
         return [f"{record.name} waits for the hive acknowledgement of {task['id']}"]
-    if refused := _room_wait(runtime, record.lane, task):
+    if refused := _failed_room_wait(runtime, record.lane, task):
         return [_room_refused(slug, store, ledger, runtime, rows, failed, refused)]
     return _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms)
+
+
+def _failed_room_wait(runtime, lane, task):
+    try:
+        return _room_wait(runtime, lane, task)
+    except SpawnError:
+        return False
 
 
 def _room_refused(slug, store, ledger, runtime, rows, failed, refused):

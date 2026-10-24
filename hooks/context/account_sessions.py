@@ -358,20 +358,16 @@ def fleet_held(environ: Mapping[str, str] | None = None) -> dict[str, int]:
 
 def hive_held(harness: str) -> dict[str, int]:
     """Other live hives' sessions and unreported launches per account, as the launch reservation counts them."""
-    from hooks._redis import get_redis
-
-    redis = get_redis()
-    if redis is None:
-        return {}
     import time
 
     from redis.exceptions import RedisError
 
     from scripts.routing import aggregate
     from scripts.swarm.commands import hive_id
+    from scripts.swarm.store import redis_client
 
     try:
-        return aggregate.elsewhere(redis, harness, time.time(), hive_id())
+        return aggregate.elsewhere(redis_client(), harness, time.time(), hive_id())
     except RedisError:
         return {}
 

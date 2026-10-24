@@ -104,7 +104,7 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
 | Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full effort-min=E effort-max=E`; the ledger page swarm panel writes the same ops. Codex is one more account in the session rotation, judged on its week alone with the top band. Every lane agent starts inside the effort range (default medium to xhigh) |
 | Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, act on every OPERATOR line, then `ack`. In a swarm each operator write arrives as an inbox message at the next tool call and the tick wakes an idle pane, so no Monitor is needed; a ledger without a swarm wakes an idle session only through a `Monitor` on `agentihooks ledger watch <slug> --as <name>` |
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
-| A question while the operator is away (the question tool and the plan prompt stay refused in every session until he types `operator on` in that pane) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
+| A question while the operator is away (in a swarm bound session the question tool and the plan prompt stay refused until he types `operator on` in that pane; a standalone session always has them) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
 | Publish an artifact only when the operator asked for that file: a plan, an image, a logo, an SVG, markdown or JSON he wants to review | `agentihooks ledger --slug <slug> --as <name> artifact <file> "<title in plain words>"` from a task marked artifact requested (`task add --artifact`, `task set <id> artifact=yes`) or with `--request <id of his message>`; anything else is refused. Never publish test runs, logs, review notes or proofs: proofs go on the task proof and the pull request |
 | A planner or the master has an accepted plan | `agentihooks ledger --slug <slug> --as <name> publish-plan <plan file> --phase <phase ids>` before adding its tasks: a GitHub issue where the repo has issues, else a ledger artifact (a plan counts as artifact requested); it links and comments each phase, every task added there carries the link, and a planner's slice is refused while a task lacks it |
 | A swarm agent's task moves | `agentihooks swarm <slug> issue <url>`, `pr <url>`, `block "<why>"`; `ledger leave`, then `swarm <slug> ready <doc>` (the tick merges and closes the task) or `swarm <slug> done --pr <url>` |
@@ -145,7 +145,7 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
   `progress.md` and `proof.md`, where the agent appends a line per step and per
   piece of evidence. A reclaim reuses it, so a successor reads it cold.
   `ledger task add --scaffold` creates it with the task. The ledger page shows
-  its latest lines in the task's Contract and proof fold.
+  its latest lines in the task's Contract and proof block.
 - Every Claude and Codex session whose profile sets `otel.langfuse.enabled`
   is one Langfuse trace in the project its keys belong to, extended at each
   Stop with the new turns and tagged with swarm, agent, lane, task and account
@@ -180,8 +180,9 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
 - Only four things on the ledger page fold, each remembering its choice per
   viewer across reloads: the Ledger tab's own sections below Overview; the
   Swarm tab panels below Capacity (Quota, Hives, Overlays, Agents, Handoff
-  outcomes, Freezes, Architecture); the outline categories, with one toggle on
-  top flipping between Expand all and Collapse all; and comment dropdowns,
+  outcomes, Recovery, Freezes, Architecture); the outline categories, with
+  one toggle on top flipping between Expand all and Collapse all; and comment
+  dropdowns,
   each section with one toggle for its own items flipping between Show all
   comments and Hide all comments. Nothing else folds: the chat, artifacts,
   alerts and notifications windows, Stats, Overview, the Swarm control bar and

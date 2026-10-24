@@ -5481,12 +5481,12 @@ def cmd_claude(extra_args: list[str]) -> None:
         print(f"[agentihooks] deps: preflight skipped: {exc}", file=sys.stderr)
     route_lock_path = _cache_path(os.environ).with_name("claude-route.lock")
     route_lock_path.parent.mkdir(parents=True, exist_ok=True)
-    # Held until exec: the descriptor is close-on-exec, so the next launch counts this
-    # process only once it already runs as claude.
     route_lock = route_lock_path.open("a+", encoding="utf-8")
     fcntl.flock(route_lock, fcntl.LOCK_EX)
     try:
         if route in ROUTE_LAUNCHERS:
+            if route == "master-login":
+                route_lock.close()
             return import_module(ROUTE_LAUNCHERS[route]).launch_claude(claude_bin, extra_args, os.environ, report)
         decision = (
             forced(os.environ, route)
@@ -6464,7 +6464,7 @@ def main() -> None:
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
     )
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
-    sub.add_parser("recall", help="Recall archive of ledgers and swarms: reindex")
+    sub.add_parser("recall", help="Recall archive of ledgers and swarms: search|get|timeline|sources, reindex, eval")
     sub.add_parser("plan", help="Read only your task's plan chunk: read [--task ID] [--phase ID]")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"

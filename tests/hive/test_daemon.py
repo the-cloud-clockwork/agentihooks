@@ -194,13 +194,16 @@ def test_three_missed_beats_expire_both_keys(redis, monkeypatch):
 
 
 @pytest.mark.parametrize("account", ["login", ""])
-def test_beat_publishes_the_master_login_account(redis, monkeypatch, account):
+@pytest.mark.parametrize("enabled", [True, False])
+def test_beat_publishes_the_master_login_account(redis, monkeypatch, account, enabled):
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
     monkeypatch.setattr(daemon.master_claude_login, "signed_in", lambda: account)
+    monkeypatch.setattr(daemon.master_claude_login, "unusable", lambda: "" if enabled else "off")
     daemon.beat(redis, "machine")
     assert registry.show(redis, "machine")["master_login"] == {"claude": account}
+    assert registry.show(redis, "machine")["master_login_enabled"] == ("yes" if enabled else "no")
 
 
 @pytest.mark.parametrize(("member", "indexed", "ttl"), [("machine", set(), 10), ("other", {"machine"}, 45)])
@@ -226,6 +229,24 @@ def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis
 
     assert redis.smembers(registry.INDEX) == indexed
     assert ttl - 5 < redis.pttl(f"{ROOT}:launch-slot:first") / 1000 <= ttl
+
+
+def test_a_beat_refused_the_index_write_still_reports_the_heartbeat(redis, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "other")
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+
+    def refuse(key, *members):
+        raise NoPermissionError("No permissions to access a key")
+
+    monkeypatch.setattr(redis, "sadd", refuse)
+
+    daemon.beat(redis, "machine")
+
+    assert registry.show(redis, "machine")["heartbeat_at"] > 0
 
 
 def _once(connection):
@@ -670,6 +691,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
         "master_login": {"claude": ""},
+        "master_login_enabled": "no",
         "repos": [],
         "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
         "version": "",
@@ -1366,6 +1388,112 @@ def test_execution_report_deduplicates_processes_and_skips_stale_records(redis, 
     assert daemon._executions(redis, "hive", processes) == {
         "claude:one": [agents[0].execution_id, agents[2].execution_id, agents[6].execution_id]
     }
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_beat_counts_a_named_live_execution_once_without_fleet_registration(redis, monkeypatch, harness):
+    from hooks.proc import Process
+    from scripts import terminate_agent
+    from scripts.routing import aggregate, reservation
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    monkeypatch.setattr("time.time", lambda: 100)
+    store = RedisStore(redis)
+    store.create(SwarmConfig("swarm", "repo", 8, 0))
+    agent = store.start_execution(
+        "swarm",
+        AgentRecord(
+            store.next_name("swarm", "eng"),
+            "eng",
+            "task",
+            hive="hive",
+            harness=harness,
+            account="one",
+            seat="eng-1@swarm",
+        ),
+    )
+    store.put_agent("swarm", agent)
+    session = terminate_agent.Session(
+        "session", harness, agent.name, Process(10, 1, 10, 10, 7, "S", harness, (harness,)), "", "alive"
+    )
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(daemon.account_sessions, "local_processes", lambda: {harness: {10: "one"}})
+    slot = f"{harness}:one"
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda **kwargs: {
+            "slots": [{"harness": harness, "account": "one", "kind": "subscription", "cap": 3}],
+            "interactive": {},
+            "repos": [],
+            "quota": {},
+            "sessions": {slot: 1},
+        },
+    )
+    slots = reservation.LaunchSlots(redis)
+    assert slots.reserve(slot, agent.execution_id, 3, 1000)
+    assert slots.acknowledge(agent.execution_id)
+    assert slots.reserve(slot, "unreported", 3, 1000)
+    daemon.beat(redis, "hive")
+    assert json.loads(redis.get(f"{registry.key('hive')}:sessions"))["_executions"] == {slot: [agent.execution_id]}
+    assert aggregate.read(redis, 100)[slot]["sessions"] == 2
+    assert slots.reserve(slot, "next", 3, 1000)
+    assert not slots.reserve(slot, "full", 3, 1000)
+
+
+@pytest.mark.parametrize(
+    "mismatch", ["none", "hive", "harness", "account", "pid", "name", "host_id", "missing_harness", "duplicate"]
+)
+def test_named_execution_discovery_requires_a_local_matching_process(redis, monkeypatch, mismatch):
+    from dataclasses import replace
+
+    from hooks.proc import Process
+    from scripts import terminate_agent
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(redis)
+    store.create(SwarmConfig("swarm", "repo", 8, 0))
+    agents, sessions = [], []
+    for index in range(2):
+        agent = AgentRecord(
+            store.next_name("swarm", "eng"),
+            "eng",
+            "task",
+            hive="hive",
+            harness="claude",
+            account="one",
+            seat=f"eng-{index + 1}@swarm",
+        )
+        if index == 0 and mismatch in {"hive", "harness", "account"}:
+            agent = replace(agent, **{mismatch: "other"})
+        if index == 0 and mismatch == "host_id":
+            agent = replace(agent, hive="", runtime_target={"host_id": "hive"})
+        agent = store.start_execution("swarm", agent)
+        store.put_agent("swarm", agent)
+        agents.append(agent)
+        pid = 10 if mismatch == "duplicate" else 10 + index
+        if index == 0 and mismatch == "pid":
+            pid = 20
+        sessions.append(
+            terminate_agent.Session(
+                "",
+                "claude",
+                "stray" if index == 0 and mismatch == "name" else agent.name,
+                Process(pid, 1, pid, pid, 7, "S", "claude", ("claude",)),
+                "",
+                "unregistered",
+            )
+        )
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: sessions)
+    processes = {} if mismatch == "missing_harness" else {"claude": {10: "one", 11: "one"}}
+    expected = [agents[1].execution_id]
+    if mismatch in {"none", "host_id"}:
+        expected.insert(0, agents[0].execution_id)
+    elif mismatch == "duplicate":
+        expected = [agents[0].execution_id]
+    elif mismatch == "missing_harness":
+        expected = []
+    assert daemon._executions(redis, "hive", processes) == ({"claude:one": expected} if expected else {})
 
 
 def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeypatch):

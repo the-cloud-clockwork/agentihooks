@@ -762,6 +762,48 @@ def test_documentation_aggregation_accepts_only_the_canonical_transition(docs):
     assert _grade({"test.yml": head}, base={"test.yml": base})
 
 
+@pytest.mark.parametrize("postgres", [False, True])
+def test_postgres_aggregation_accepts_only_the_canonical_transition(postgres):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.postgres_required(steps) if postgres else steps
+    head["jobs"]["docs"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate-required"]["needs"].append("docs")
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+    head["jobs"]["gate-required"]["steps"][0]["run"] = head["jobs"]["gate-required"]["steps"][0]["run"].replace(
+        '"sonar"', '"semgrep"'
+    )
+    assert _grade({"test.yml": head}, base={"test.yml": base})
+
+
+def test_a_base_requiring_the_postgres_scenario_refuses_a_head_that_drops_it():
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.postgres_required(steps)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.postgres_required(steps)
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+    head["jobs"]["gate-required"]["steps"] = steps
+    problems = _grade({"test.yml": head}, base={"test.yml": base})
+    assert any("changes its steps" in problem for problem in problems), problems
+
+
+def test_the_tests_gate_may_start_requiring_the_postgres_scenario_on_pull_requests():
+    from scripts import ci_reuse
+
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    head = copy.deepcopy(base)
+    gate = head["test.yml"]["jobs"]["gate-required"]
+    gate["steps"] = ci_reuse.postgres_required(gate["steps"])
+    assert '"sonar", "writer-lock"]' in gate["steps"][0]["run"]
+    config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, head, config, _TODAY, policy) == []
+
+
 @pytest.mark.parametrize("existing", [False, True])
 def test_a_declared_documentation_check_cannot_switch_to_legacy_aggregation(existing):
     from scripts import ci_reuse

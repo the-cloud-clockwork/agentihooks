@@ -1646,7 +1646,7 @@ def test_a_repeated_restore_request_reuses_the_accepted_decision_without_a_secon
     assert recovery.restore(first.replacement) == restored
     with pytest.raises(SwarmError, match="^no recovery decision is pending for this attempt$"):
         recovery.request(world.old.execution_id, "fresh")
-    with pytest.raises(SwarmError, match="^a recovery decision is fresh or resume$"):
+    with pytest.raises(SwarmError, match="^a recovery decision is native, context, fresh or resume$"):
         recovery.request(world.old.execution_id, "recovery_pending")
     assert world.attempts() == attempts
 

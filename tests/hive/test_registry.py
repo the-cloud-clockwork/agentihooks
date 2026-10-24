@@ -22,6 +22,7 @@ DEFAULT = {
     "slots": [],
     "interactive": {"claude": "", "codex": ""},
     "master_login": {"claude": ""},
+    "master_login_enabled": "no",
     "repos": [],
     "heartbeat_at": 0,
     "version": "",
@@ -58,6 +59,18 @@ def test_a_member_updates_its_settings_without_writing_the_controller_index(redi
     }
     assert registry.show(redis, "box")["excluded"] == ["master", "qa"]
     assert not redis.exists(registry.INDEX)
+
+
+def test_hive_set_refused_the_index_write_still_settles_the_record(redis, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    def refuse(key, *members):
+        raise NoPermissionError("No permissions to access a key")
+
+    monkeypatch.setattr(redis, "sadd", refuse)
+
+    assert registry.update(redis, "box", ["max-agents=3"]) == {**DEFAULT, "max_agents": 3}
+    assert registry.show(redis, "box") == {**DEFAULT, "max_agents": 3}
 
 
 def test_settings_merge_onto_the_stored_record_and_keep_reported_fields(redis):

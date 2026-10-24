@@ -1,0 +1,6 @@
+{
+  "scripts/master_login_native.py:scripts.master_login_native.x\u01c1NativeAttempt\u01c1complete__mutmut_24:5b340e14ff815cf745f670ee52934d02aeb2fce9d517e5f679bcd8118ae0b707": {
+    "reader": "Standards",
+    "reason": "PowerShell resolves variables, cmdlets, parameters and ErrorActionPreference enum names case insensitively; lowercase stop retains the same terminating error behavior and clipboard capture and clearing output."
+  }
+}

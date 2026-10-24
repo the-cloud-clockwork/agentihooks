@@ -107,7 +107,7 @@ def signed_in() -> str:
 def unusable() -> str:
     if hooks_config.MASTER_CLAUDE_LOGIN is not True:
         return OFF
-    return "" if any(logins().values()) else NO_LOGIN
+    return ""
 
 
 def slot() -> int:
@@ -451,15 +451,162 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
     return target, found
 
 
+def browser_home(environ: Mapping[str, str]) -> Path:
+    for number in numbers():
+        with _locked(root(number)) as folder:
+            if _private(home(number)) or holders(folder):
+                continue
+            _claim(folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, 0, True)
+            return _rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
+    raise LoginRefused(FULL.format(cap=MAX_SLOTS))
+
+
+def release(target: Path, environ: Mapping[str, str]) -> None:
+    name = environ["AGENTIHOOKS_AGENT_NAME"]
+    with _locked(target.parent) as folder:
+        held = _read(folder / OWNER)
+        held["holders"] = {
+            owner: pid for owner, pid in (held.get("holders") or {}).items() if (owner, pid) != (name, os.getpid())
+        }
+        if held.get("alone") == name and name not in held["holders"]:
+            held.pop("alone")
+        _write(folder / OWNER, held)
+
+
+def claimed_home(environ: Mapping[str, str]) -> Path | None:
+    name = environ["AGENTIHOOKS_AGENT_NAME"]
+    return next(
+        (home(number) for number in numbers() if holders(root(number)).get(name) == os.getpid()),
+        None,
+    )
+
+
+def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | None:
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    target = None
+
+    def current():
+        nonlocal target
+        try:
+            if target is None:
+                target, found = prepare(environ, cwd)
+            else:
+                number = next(number for number in numbers() if home(number) == target)
+                found = account(target, environ, number=number)
+                if environ.get(binding.REPORT):
+                    binding.rehome(Path(environ[binding.REPORT]), target)
+                epoch = int(_read(target.parent / OWNER)["epoch"])
+                keep(openbao_kv.from_env(environ), target, epoch, number)
+        except LoginRefused as exc:
+            if str(exc) == NO_LOGIN or str(exc).startswith("every stored master claude ai login is held"):
+                target = target or claimed_home(environ)
+                return None
+            raise
+        try:
+            native_login.check(child(environ, target), found)
+        except native_login.LoginError:
+            return None
+        chain.notification(target, "current", "success")
+        return target, found
+
+    def browser():
+        nonlocal target
+        try:
+            target = target or browser_home(environ)
+        except LoginRefused:
+            return "failure"
+        chain.notification(target, "current", "unavailable")
+        return chain.authorize(environ, target)
+
+    def token():
+        if target is not None:
+            release(target, environ)
+        return None
+
+    return chain.run(current, browser, token)
+
+
+def token_home(environ: Mapping[str, str]) -> Path:
+    name = aicode_tokens.slug(environ["AGENTIHOOKS_AGENT_NAME"])
+    folder = Path(hooks_config.AGENTIHOOKS_HOME) / "master-token" / name
+    with _locked(folder):
+        target = _rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
+        (target / CREDENTIALS).unlink(missing_ok=True)
+        path = target / "settings.json"
+        settings = _read(path)
+        settings.pop("forceLoginMethod", None)
+        path.unlink(missing_ok=True)
+        _write(path, settings)
+    if environ.get(binding.REPORT):
+        binding.rehome(Path(environ[binding.REPORT]), target)
+    return target
+
+
+def _token_args(args: list[str]) -> list[str]:
+    result = []
+    index = 0
+    flags = ("--remote-control", "--remote-control-session-name-prefix")
+    while index < len(args):
+        argument = args[index]
+        index += 1
+        if argument.split("=", 1)[0] in flags:
+            if "=" not in argument and index < len(args) and not args[index].startswith("--"):
+                index += 1
+        else:
+            result.append(argument)
+    return result
+
+
+def _token_lock(environ: Mapping[str, str]):
+    import fcntl
+
+    from scripts.claude_quota_balancer import _cache_path
+
+    path = _cache_path(environ).with_name("claude-route.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = path.open("a+", encoding="utf-8")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    return lock
+
+
+def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
+    from hooks.context.account_sessions import sessions_by_account
+    from scripts import master_login_chain as chain
+    from scripts.claude_quota_balancer import API_ACCOUNT, launch_environment, select_credential
+    from scripts.hive.account_slots import execute
+    from scripts.install import _claude_command, _write_route_report
+
+    with _token_lock(environ):
+        decision = select_credential(environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,))
+        target = token_home(environ)
+        child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}
+        chain.notification(target, "token", "routed")
+        _write_route_report(
+            report, status="routed", account=decision.account, placement="fallback", remote_control="off"
+        )
+        print(f"[agenti] account={decision.account} route=token-fallback remote-control=off", flush=True)
+        execute(
+            "claude",
+            decision.account,
+            child_env,
+            lambda env: os.execvpe(binary, _claude_command(binary, _token_args(args)), env),
+        )
+
+
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from scripts.claude_quota_balancer import RoutingError
     from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
     try:
-        target, found = prepare(environ, Path.cwd())
+        prepared = prepare_launch(environ, Path.cwd())
     except LoginRefused as exc:
         raise RoutingError(str(exc)) from exc
+    if prepared is None:
+        return launch_token(binary, args, environ, report)
+    target, found = prepared
     _write_route_report(report, status="routed", account=found, placement="forced")
     print(f"[agenti] account={found} route={ROUTE}", flush=True)
     execute(

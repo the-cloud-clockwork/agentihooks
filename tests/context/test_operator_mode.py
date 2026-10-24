@@ -31,6 +31,11 @@ def ledgers(tmp_path, monkeypatch):
     return path
 
 
+@pytest.fixture
+def bound(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+
+
 def test_an_unbound_session_always_has_the_operator_present(ledgers):
     env = {"LEDGER_DIR": str(ledgers)}
     assert operator_mode.present("s1", env, now=100)
@@ -68,6 +73,7 @@ def test_presence_commands_match_sentences_with_command_boundaries():
         assert operator_mode.switch(text) == ""
 
 
+@pytest.mark.usefixtures("bound")
 @pytest.mark.parametrize("word", ["on", "off"])
 def test_typed_sentence_switches_only_its_session(word):
     operator_mode.observe("other", "operator on", True, now=100)
@@ -77,6 +83,7 @@ def test_typed_sentence_switches_only_its_session(word):
     assert operator_mode._heard("other")
 
 
+@pytest.mark.usefixtures("bound")
 @pytest.mark.parametrize("word", ["on", "off"])
 def test_relayed_sentence_does_not_switch_presence(word):
     operator_mode.observe("pane", "operator on", True, now=100)
@@ -84,6 +91,7 @@ def test_relayed_sentence_does_not_switch_presence(word):
     assert operator_mode._heard("pane")
 
 
+@pytest.mark.usefixtures("bound")
 def test_idle_scheduler_does_not_end_explicit_presence():
     from scripts.inbox.store import InboxStore
     from scripts.scheduler import Scheduler
@@ -99,6 +107,7 @@ def test_idle_scheduler_does_not_end_explicit_presence():
     assert not operator_mode._heard("pane")
 
 
+@pytest.mark.usefixtures("bound")
 @pytest.mark.parametrize("source", ["startup", "resume", "compact"])
 def test_session_restart_clears_presence_but_compaction_preserves_it(monkeypatch, source):
     from unittest.mock import Mock
@@ -115,6 +124,7 @@ def test_session_restart_clears_presence_but_compaction_preserves_it(monkeypatch
     assert operator_mode._heard("other")
 
 
+@pytest.mark.usefixtures("bound")
 def test_restart_without_a_session_does_not_change_presence():
     operator_mode.observe("pane", "operator on", True, now=100)
     operator_mode.reset({})
@@ -287,10 +297,6 @@ MASTER_ASK = (
     "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
     'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
 )
-STANDALONE_ASK = (
-    "The operator is not present in this pane, so the question tool is off until he types operator on. "
-    "State the open question in one short line, take the most reasonable choice and keep working."
-)
 PROMPT_REFUSAL = (
     "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
     "Keep working without it."
@@ -329,13 +335,14 @@ def test_the_binding_is_read_from_the_home_ledger_folder_by_default():
     assert operator_mode.question_block("AskUserQuestion", "s5", {}) == ASK.format(slug="<slug>", name="eng-2@work")
 
 
-def test_the_question_tool_passes_only_after_typed_operator_on_and_other_tools_always_pass(ledgers):
+def test_the_question_tool_passes_a_bound_session_only_after_typed_operator_on_and_a_standalone_one_always(ledgers):
     standalone = {"LEDGER_DIR": str(ledgers)}
-    assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == STANDALONE_ASK
-    assert operator_mode.question_block("AskUserQuestion", "", standalone) == STANDALONE_ASK
+    assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == ""
+    assert operator_mode.question_block("AskUserQuestion", "", standalone) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) != ""
     operator_mode.observe("s1", "operator on", True, now=100)
-    operator_mode.observe("s3", "operator on", True, now=100)
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ""
+    operator_mode.observe("s3", "operator off", True, now=100)
     assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == ""
     assert operator_mode.question_block("Bash", "s4", SWARM) == ""
     assert operator_mode.question_block("Bash", "s4", standalone) == ""
@@ -364,7 +371,7 @@ def test_the_pre_tool_hook_blocks_the_codex_question_tool_in_plan_and_default_mo
     assert str(blocked.value) == MASTER_ASK.format(slug="demo", name="master@a1-1")
 
 
-def test_a_standalone_codex_question_is_refused_until_its_operator_types_operator_on(monkeypatch):
+def test_a_standalone_codex_question_passes_without_operator_on(monkeypatch):
     from hooks.targets.normalizer import normalize_payload
 
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
@@ -372,26 +379,18 @@ def test_a_standalone_codex_question_is_refused_until_its_operator_types_operato
     payload = normalize_payload(
         {"session_id": "s8", "tool_name": "request_user_input", "tool_input": {"questions": [question]}}
     )
+    hook_manager.on_pre_tool_use(payload)
     for prompt in ("Explain the plan", "operator off"):
         operator_mode.observe("s8", prompt, True, now=100)
-        with pytest.raises(hook_manager.BlockAction) as blocked:
-            hook_manager.on_pre_tool_use(payload)
-        assert str(blocked.value) == STANDALONE_ASK
-    operator_mode.observe("s8", "operator on", True, now=101)
-    hook_manager.on_pre_tool_use(payload)
+        hook_manager.on_pre_tool_use(payload)
 
 
-def test_a_standalone_claude_question_is_refused_until_its_operator_types_operator_on():
+def test_a_standalone_claude_question_passes_without_operator_on():
     payload = {"session_id": "s7", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
-    with pytest.raises(hook_manager.BlockAction) as blocked:
-        hook_manager.on_pre_tool_use(payload)
-    assert str(blocked.value) == STANDALONE_ASK
-    operator_mode.observe("s7", "Explain the plan", True, now=100)
-    with pytest.raises(hook_manager.BlockAction) as blocked:
-        hook_manager.on_pre_tool_use(payload)
-    assert str(blocked.value) == STANDALONE_ASK
-    operator_mode.observe("s7", "operator on", True, now=101)
     hook_manager.on_pre_tool_use(payload)
+    for prompt in ("Explain the plan", "operator off"):
+        operator_mode.observe("s7", prompt, True, now=100)
+        hook_manager.on_pre_tool_use(payload)
 
 
 def test_a_failing_question_check_is_logged_and_refuses_only_the_question_tool(monkeypatch):

@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__where__mutmut_8:cb0ad0c177e711806989e3878b0d6e46bbd0279bcbd3fa45d323937b355f418d": {
+    "reader": "standards_reader",
+    "reason": "Only the case of the OR keyword changes, which SQLite treats as case-insensitive."
+  }
+}

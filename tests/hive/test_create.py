@@ -19,7 +19,6 @@ PR = "https://github.com/the-cloud-clockwork/antoncore/pull/2000"
 TEMPLATE = (
     "#@ file: k8s/manifests/${name}/ssh-lan.yaml\nport: ${ssh_port}\nnode: ${node}\nkey: ${record}\nip: ${lan_ip}\n"
 )
-NFS = "        - name: HIVES\n          value: agentihooks-hive\n"
 SERVICES = {
     "items": [
         {
@@ -42,10 +41,15 @@ class Run:
         self.state = "OPEN"
         self.prs = []
         self.on_merge = lambda: None
+        self.merge_error = ""
+        self.checks = []
 
     def __call__(self, argv, **kwargs):
         self.calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, self._answer(argv, kwargs.get("input")), "")
+        answer = self._answer(argv, kwargs.get("input"))
+        if isinstance(answer, subprocess.CompletedProcess):
+            return answer
+        return subprocess.CompletedProcess(argv, 0, answer, "")
 
     def _answer(self, argv, stdin):
         if argv[:3] == ["kubectl", "get", "service"]:
@@ -63,14 +67,19 @@ class Run:
 
     def _gh(self, argv, stdin):
         if argv[:2] == ["api", "-H"]:
-            return TEMPLATE if create_render.TEMPLATE_PATH in argv[3] else NFS
+            assert f"contents/{create_render.TEMPLATE_PATH}?" in argv[3]
+            return TEMPLATE
         if argv[:2] == ["pr", "list"]:
             return self.prs[0] if self.prs else ""
         if argv[:2] == ["pr", "create"]:
             self.prs.append(PR)
             return PR
+        if argv[:2] == ["pr", "view"] and "statusCheckRollup" in argv:
+            return json.dumps({"statusCheckRollup": self.checks.pop(0)})
         if argv[:2] == ["pr", "view"]:
             return self.state
+        if argv[:2] == ["pr", "merge"] and "--auto" in argv and self.merge_error:
+            return subprocess.CompletedProcess(argv, 1, "", self.merge_error)
         if argv[:2] == ["pr", "merge"]:
             self.state = "MERGED"
             self.on_merge()
@@ -158,7 +167,6 @@ def test_create_brings_a_named_hive_from_nothing_to_an_engineer_in_herdr(world):
     tree = dict(world.run.posted)[f"repos/{REPO}/git/trees"]["tree"]
     assert {entry["path"]: entry["content"] for entry in tree} == {
         f"k8s/manifests/{NAME}/ssh-lan.yaml": f"port: 2225\nnode: worker-001\nkey: {RECORD}\nip: 10.10.30.207\n",
-        create_render.NFS_HOMES_PATH: f"        - name: HIVES\n          value: agentihooks-hive {NAME}\n",
     }
     assert dict(world.run.posted)[f"repos/{REPO}/git/refs"]["ref"] == f"refs/heads/{NAME}"
     assert world.run.named("gh", "pr", "merge") == [["gh", "pr", "merge", PR, "--squash", "--auto"]]
@@ -218,9 +226,9 @@ def test_the_dry_run_prints_every_step_and_file_and_writes_nothing(world):
         f"--- k8s/manifests/{NAME}/ssh-lan.yaml\nport: 2225\nnode: worker-001\nkey: {RECORD}\nip: 10.10.30.207\n"
         in world.lines
     )
-    assert f"--- {create_render.NFS_HOMES_PATH}\n        - name: HIVES\n          value: agentihooks-hive {NAME}\n" in (
-        world.lines
-    )
+    assert [line for line in world.lines if line.startswith("--- ")] == [
+        f"--- k8s/manifests/{NAME}/ssh-lan.yaml\nport: 2225\nnode: worker-001\nkey: {RECORD}\nip: 10.10.30.207\n"
+    ]
     steps = [line for line in world.lines if line.startswith(f"hive create {NAME}: ")]
     assert [line.split(": ")[1] for line in steps] == [title for title, _ in create.STEPS]
     assert all(": would " in line for line in steps if ": settings: " not in line)

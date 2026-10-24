@@ -85,7 +85,7 @@
       "resume_without_checkpoint": "no complete compatible checkpoint to resume from",
       "revoked_grant": "a scoped controller grant is required",
       "stale_controller": "the controller lease is stale",
-      "unknown_choice": "a recovery decision is fresh or resume",
+      "unknown_choice": "a recovery decision is native, context, fresh or resume",
       "unsupported_reason": "unsupported failure reason"
     },
     "repeated_decision": "no recovery decision is pending for this attempt",

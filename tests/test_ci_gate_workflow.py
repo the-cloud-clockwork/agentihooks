@@ -346,6 +346,15 @@ def test_dev_records_the_suite_count_and_the_count_floor_reads_it_only_through_t
     assert jobs["test-count"]["permissions"] == {"contents": "read"}
 
 
+@pytest.mark.parametrize("event_name", ["pull_request", "merge_group"])
+def test_pull_requests_and_merge_groups_read_the_dev_count_record(event_name):
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    fetch = _step("test-count", "Fetch the base suite count recorded on dev")
+    condition = fetch["if"].replace("steps.app-token.outcome", "'success'")
+    assert _evaluate("${{ " + condition + " }}", event_name=event_name) is True
+
+
 def test_every_dev_head_records_its_count_outside_the_promotion_queue():
     from scripts.ci_branch_lanes import problems
 

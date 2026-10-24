@@ -54,6 +54,7 @@ def _default(hive_id: str, ui: str = "no") -> dict:
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
         "master_login": {"claude": ""},
+        "master_login_enabled": "no",
         "repos": [],
         "heartbeat_at": 0,
         "version": "",
@@ -194,11 +195,21 @@ def update(redis: "Redis", hive_id: str, pairs: list[str], keep: bool = False) -
         seed(pipe, hive_id)
         if fields:
             pipe.hset(key(hive_id), mapping={field: _encode(field, value) for field, value in fields.items()})
-        if hive_id != scope.member():
-            pipe.sadd(INDEX, hive_id)
         return record
 
-    return redis.transaction(write, key(hive_id), value_from_callable=True)
+    record = redis.transaction(write, key(hive_id), value_from_callable=True)
+    if hive_id != scope.member():
+        _index(redis, hive_id)
+    return record
+
+
+def _index(redis: "Redis", hive_id: str) -> None:
+    from redis.exceptions import NoPermissionError
+
+    try:
+        redis.sadd(INDEX, hive_id)
+    except NoPermissionError:
+        pass
 
 
 def hives(redis: "Redis") -> list[dict]:

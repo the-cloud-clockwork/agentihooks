@@ -74,6 +74,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(doctor, "linked_bundle", lambda: tmp_path / "bundle")
     monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {})
     monkeypatch.setattr(doctor.loop, "speed", lambda *args: [])
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
     assert swarm_cli.main([WATCHED, "create", "--repo", "/repo"]) == 0
     return store, rt, tmp_path
 
@@ -180,13 +181,25 @@ def pin(monkeypatch, name=MASTER, lane="master"):
 
 
 @pytest.fixture
-def pinned_master(monkeypatch):
+def pinned_master(env, monkeypatch):
+    seat(monkeypatch, env[0])
+    typed(ORDER, 60)
+
+
+ORDER = "restart the doctor crew with two engineers"
+QUOTED = ["--quote", ORDER]
+
+
+def seat(monkeypatch, store):
+    from scripts.swarm.store import AgentRecord
+
+    store.put_agent(WATCHED, AgentRecord(MASTER, "master", "master", seat=f"master@{WATCHED}"))
     pin(monkeypatch)
 
 
 def test_the_watched_master_starts_its_doctor_and_authors_the_links_as_itself(env, pinned_master, capsys):
     store, _, _ = env
-    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert doctor.main([WATCHED, "start", *QUOTED]) == 0, capsys.readouterr().err
     assert state(DOCTOR)["sources"] == [ledger_link.page_url(WATCHED)]
     assert state(WATCHED)["sources"] == [ledger_link.page_url(DOCTOR)]
     assert state(DOCTOR)["_meta"]["stamps"]["sources"]["by"] == MASTER
@@ -200,20 +213,37 @@ def test_the_watched_master_reopens_its_closed_doctor_as_itself(env, monkeypatch
     assert doctor.main([WATCHED, "start"]) == 0
     assert doctor.main([WATCHED, "stop"]) == 0
     assert state(DOCTOR)["closed_at"]
-    pin(monkeypatch)
-    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    seat(monkeypatch, store)
+    typed(ORDER, 60)
+    assert doctor.main([WATCHED, "start", *QUOTED]) == 0, capsys.readouterr().err
     assert not state(DOCTOR)["closed_at"]
     assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == MASTER
 
 
 def test_the_watched_master_stops_its_doctor_as_itself(env, pinned_master, capsys):
     store, _, _ = env
-    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
-    assert doctor.main([WATCHED, "stop"]) == 0, capsys.readouterr().err
+    assert doctor.main([WATCHED, "start", *QUOTED]) == 0, capsys.readouterr().err
+    assert doctor.main([WATCHED, "stop", *QUOTED]) == 0, capsys.readouterr().err
     assert state(DOCTOR)["closed_at"]
     assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == MASTER
     assert state(DOCTOR)["_meta"]["stamps"]["overview"]["by"] == MASTER
     assert store.config(DOCTOR).state == "stopped"
+
+
+@pytest.mark.parametrize("argv", [["start"], ["stop"]], ids=str)
+def test_the_watched_master_cannot_start_or_stop_its_doctor_without_a_quote(env, monkeypatch, capsys, argv):
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0
+    assert doctor.main([WATCHED, "stop"]) == 0
+    reopened = argv == ["stop"]
+    if reopened:
+        assert doctor.main([WATCHED, "start"]) == 0
+    seat(monkeypatch, store)
+    typed(ORDER, 60)
+    capsys.readouterr()
+    assert doctor.main([WATCHED, *argv]) == 1
+    assert capsys.readouterr().err.strip() == f"doctor: {doctor.UNORDERED}"
+    assert bool(state(DOCTOR)["closed_at"]) is not reopened
 
 
 def test_the_operator_shell_still_starts_the_doctor_as_doctor(env, monkeypatch, capsys):
@@ -239,6 +269,135 @@ def test_a_pinned_agent_still_cannot_write_the_doctor_ledger_as_doctor(env, monk
         swarm_cli.LedgerClient().add_source(WATCHED, ledger_link.page_url(DOCTOR), doctor.BY)
     assert str(refused.value) == f"ledger {WATCHED} refused: {name} cannot write as {doctor.BY}"
     assert state(WATCHED)["sources"] == []
+
+
+@pytest.fixture
+def seated_master(env, monkeypatch):
+    seat(monkeypatch, env[0])
+    return env[0]
+
+
+def typed(words, ago):
+    import time
+
+    from hooks.context import operator_words
+
+    operator_words.record(MASTER, words, now=time.time() - ago)
+
+
+def relays(slug):
+    return [n["text"] for n in state(slug)["notifications"] if ORDER in n["text"]]
+
+
+def test_the_master_relaying_a_fresh_operator_order_starts_the_doctor_with_its_caps(seated_master, capsys):
+    store = seated_master
+    typed(ORDER, 1790)
+    argv = [WATCHED, "start", "--max-eng-agents", "2", "--max-ci-agents", "1", "--quote", ORDER]
+    assert doctor.main(argv) == 0, capsys.readouterr().err
+    config = store.config(DOCTOR)
+    assert (config.max_eng, config.max_ci, config.caps_pinned) == (2, 1, True)
+    assert config.state in ("running", "drained")
+    assert (
+        relays(WATCHED)
+        == relays(DOCTOR)
+        == [doctor.RELAYED.format(name="master 323133 0106", action="start", words=ORDER)]
+    )
+
+
+def test_the_master_relaying_a_fresh_order_rescales_a_running_doctor(seated_master, capsys):
+    store = seated_master
+    typed(ORDER, 60)
+    assert doctor.main([WATCHED, "start", *QUOTED]) == 0, capsys.readouterr().err
+    assert store.config(DOCTOR).max_eng == 1
+    assert doctor.main([WATCHED, "start", "--max-eng-agents", "2", "--quote", ORDER]) == 0, capsys.readouterr().err
+    assert (store.config(DOCTOR).max_eng, store.config(DOCTOR).max_ci) == (2, 0)
+
+
+@pytest.mark.parametrize(
+    "ago, quote", [(None, None), (1810, ORDER), (None, ORDER), (60, "two engineers please")], ids=str
+)
+def test_the_master_without_a_fresh_operator_order_cannot_start_or_scale_the_doctor(seated_master, capsys, ago, quote):
+    store = seated_master
+    if ago is not None:
+        typed(ORDER, ago)
+    argv = [WATCHED, "start", "--max-eng-agents", "2"] + (["--quote", quote] if quote else [])
+    assert doctor.main(argv) == 1
+    assert capsys.readouterr().err.strip() == f"doctor: {doctor.UNORDERED}"
+    assert DOCTOR not in store.slugs()
+    assert state(WATCHED)["sources"] == [] and not relays(WATCHED)
+
+
+def test_an_engineer_cannot_scale_the_doctor_even_with_the_operator_words(env, monkeypatch, capsys):
+    store, _, _ = env
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
+    pin(monkeypatch, "engineer@323133-1244", "eng")
+    typed(ORDER, 60)
+    assert doctor.main([WATCHED, "start", "--max-eng-agents", "2", "--quote", ORDER]) == 1
+    assert "uses its swarm controls" in capsys.readouterr().err
+    assert DOCTOR not in store.slugs()
+
+
+def test_an_engineer_cannot_stop_the_doctor_even_with_the_operator_words(env, monkeypatch, capsys):
+    store, _, _ = env
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    pin(monkeypatch, "engineer@323133-1244", "eng")
+    typed(ORDER, 60)
+    assert doctor.main([WATCHED, "stop", "--quote", ORDER]) == 1
+    assert "uses its swarm controls" in capsys.readouterr().err
+    assert not state(DOCTOR).get("closed_at") and store.config(DOCTOR).state != "stopped"
+
+
+def test_the_operator_shell_scales_the_doctor_without_a_quote(env, monkeypatch, capsys):
+    store, _, _ = env
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
+    assert doctor.main([WATCHED, "start", "--max-eng-agents", "3"]) == 0, capsys.readouterr().err
+    assert store.config(DOCTOR).max_eng == 3
+    assert not relays(WATCHED) and not relays(DOCTOR)
+    assert doctor._order(store, WATCHED, "", "start") == ""
+
+
+def test_closing_the_doctor_by_default_tells_the_watched_master_it_is_closed(env, monkeypatch, capsys):
+    store, _, _ = env
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    doctor._close(store, WATCHED, DOCTOR)
+    closed = doctor.CLOSED_NOTICE.format(doctor=DOCTOR)
+    assert [i.text for i in InboxStore(store.redis).pending_items(f"master@{WATCHED}") if i.text == closed] == [closed]
+
+
+def test_start_and_stop_default_to_no_repo_and_no_quote_and_take_whole_number_caps():
+    parser = doctor.build_parser()
+    start = parser.parse_args([WATCHED, "start", "--max-eng-agents", "2", "--max-ci-agents", "1"])
+    assert (start.repo, start.quote, start.max_eng_agents, start.max_ci_agents) == ("", "", 2, 1)
+    assert parser.parse_args([WATCHED, "stop"]).quote == ""
+    for flag in ("--max-eng-agents", "--max-ci-agents"):
+        with pytest.raises(SystemExit):
+            parser.parse_args([WATCHED, "start", flag, "two"])
+
+
+def test_the_master_relaying_a_fresh_operator_order_stops_the_doctor_and_records_it(seated_master, capsys):
+    store = seated_master
+    typed("start the doctor crew now", 60)
+    assert doctor.main([WATCHED, "start", "--quote", "start the doctor crew now"]) == 0, capsys.readouterr().err
+    typed(ORDER, 1810)
+    capsys.readouterr()
+    assert doctor.main([WATCHED, "stop", "--quote", ORDER]) == 1
+    assert capsys.readouterr().err.strip() == f"doctor: {doctor.UNORDERED}"
+    assert not state(DOCTOR).get("closed_at") and store.config(DOCTOR).state != "stopped"
+    typed(ORDER, 60)
+    assert doctor.main([WATCHED, "stop", "--quote", ORDER]) == 0, capsys.readouterr().err
+    assert state(DOCTOR)["closed_at"] and store.config(DOCTOR).state == "stopped"
+    closed = doctor.CLOSED_NOTICE.format(doctor=DOCTOR)
+    assert not [i for i in InboxStore(store.redis).pending_items(f"master@{WATCHED}") if i.text == closed]
+    assert (
+        relays(WATCHED)
+        == relays(DOCTOR)
+        == [doctor.RELAYED.format(name="master 323133 0106", action="stop", words=ORDER)]
+    )
 
 
 LONG = "a" * 40 + "-2026-10"
@@ -580,6 +739,7 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "master launch",
         "startup",
         "context overrun",
+        "master prompt",
         "ci",
         "dev workflow",
         "trace",

@@ -133,3 +133,4 @@ jobs:
             base-page.json
             head-page.json
             fault-page.json
+          retention-days: 7

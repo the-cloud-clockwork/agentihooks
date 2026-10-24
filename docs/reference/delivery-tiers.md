@@ -197,8 +197,8 @@ On a pull request, the `select` job in `.github/workflows/test.yml` runs `script
 
 | Scope | When | What runs |
 |---|---|---|
-| `full` | The change touches a harness file or a `conftest.py`, the selected tests would need more than three legs, or no test was selected and the change is not documentation only | `split`, `unit` and `shard-check`, the whole suite |
-| `selected` | One or more tests were selected and fit in three legs | `unit-selected`, one job per leg, on the files listed in `files_1`, `files_2` and `files_3` |
+| `full` | The change touches a harness file or a `conftest.py`, the selected tests would need more than twelve legs, or no test was selected and the change is not documentation only | `split`, `unit` and `shard-check`, the whole suite |
+| `selected` | One or more tests were selected and fit in twelve legs | `unit-selected`, one job per leg of about 180 stored seconds, on the `files_<leg>` line of the `selection` artifact the `select` job uploads |
 | `none` | Every changed file is documentation (`docs/` or a `.md` file) | no unit tests |
 
 The merge queue always runs the whole suite. `tests/test_suite_speed.py` holds two whole suite checks that read every test module mentioning `fakeredis`:
@@ -343,41 +343,41 @@ A merge group runs its unit suite as one wave of shards on the `anton-oss-queue`
 
 ### How the plan is built
 
-The `split` job's `Size queue shards from conservative durations` step runs only on `merge_group` events, once per Python version in the matrix (3.12 today):
+The `split` job's `Size queue shards from median durations` step runs only on `merge_group` events, once per Python version in the matrix (3.12 today):
 
 ```bash
 python -m tests.queue_shards --root . --collection collected.json --version "$PYTHON_VERSION" --reused reused.json --output queue-plan.txt
 python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
 ```
 
-1. The first command prices every collected test from the slowest recent dev durations, drops tests the queue reuses, and starts at 12 shards. It adds one shard at a time until the predicted slowest shard is under half the step timeout, or until it reaches `MAX_SHARDS`. It writes `queue_312=<legs>` to `queue-plan.txt` and prints `Python 3.12: <n> queue shards, predicted slowest <s>s of <half>s`.
+1. The first command prices every collected test from the median of the recent dev durations, drops tests the queue reuses, and starts at 12 shards. It adds one shard at a time until the predicted slowest shard is under half the step timeout, or until it reaches `MAX_SHARDS`. It writes `queue_312=<legs>` to `queue-plan.txt` and prints `Python 3.12: <n> queue shards, predicted slowest <s>s of <half>s`.
 2. `combine` reads the plan back and grades it against the pool. The `unit` matrix takes its `include` list from that output.
 
 | Setting | Value | Where it comes from |
 |---|---|---|
-| `MAX_SHARDS` | 30 | The `maxRunners` of the antoncore `anton-oss-queue` scale set, less the queue tier jobs that run during the unit stage (none today) |
+| `MAX_SHARDS` | 24 | The `maxRunners` of the antoncore `anton-oss-queue` scale set, less the queue tier jobs that run during the unit stage (none today) |
 | `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import; see [Step timeout limits](#step-timeout-limits) |
 | Half step timeout | 360 s | The target a plan must predict under |
-| `SLOWDOWN` | 1.15 | Factor applied to the predicted slowest shard, calibrated from recorded queue runs |
+| `SLOWDOWN` | 1.85 | The one margin: factor applied to the predicted slowest shard from median durations, calibrated so the prediction lands within 15 % of the slowest `Run tests` step of ten recorded merge groups |
 | `STARTUP_SECONDS` | 30 | Added to every shard's prediction |
 
 ### What combine decides
 
-Every plan that is not refused ends with the line `<n> queue jobs fit one wave of 30 runners; predicted slowest test step <s>s`; a capped plan prints its warnings before it.
+Every plan that is not refused ends with the line `<n> queue jobs fit one wave of 24 runners; predicted slowest test step <s>s`; a capped plan prints its warnings before it.
 
 | Plan | Outcome | Log line |
 |---|---|---|
-| At most 30 jobs, slowest under 360 s | Runs as one wave | `<n> queue jobs fit one wave of 30 runners; predicted slowest test step <s>s` |
-| At most 30 jobs, slowest at or over 360 s | The step fails and the merge group goes red | `Queue plan exceeds 360s of the step timeout: <s>s` |
-| More than 30 jobs, from `--from-output` with `--root` and `--inputs` | Replanned at 30 shards for every version and written back to `queue-plan.txt` | `::warning::<n> queue jobs exceed the pool of 30; capped at 30 shards` |
-| Capped plan whose slowest shard reaches 720 s | Still runs at 30 shards, with a warning | `::warning::The capped queue plan predicts <s>s, over 720s of the step timeout` |
-| More than 30 jobs from `--plans` | Refused | `<n> queue jobs exceed the pool of 30` |
+| At most 24 jobs, slowest under 360 s | Runs as one wave | `<n> queue jobs fit one wave of 24 runners; predicted slowest test step <s>s` |
+| At most 24 jobs, slowest at or over 360 s | The step fails and the merge group goes red | `Queue plan exceeds 360s of the step timeout: <s>s` |
+| More than 24 jobs, from `--from-output` with `--root` and `--inputs` | Replanned at 24 shards for every version and written back to `queue-plan.txt` | `::warning::<n> queue jobs exceed the pool of 24; capped at 24 shards` |
+| Capped plan whose slowest shard reaches 720 s | Still runs at 24 shards, with a warning | `::warning::The capped queue plan predicts <s>s, over 720s of the step timeout` |
+| More than 24 jobs from `--plans` | Refused | `<n> queue jobs exceed the pool of 24` |
 
-The capped path caps the total across Python versions, not each version, so two versions share the 30 runners. With 3.12 alone the first command already stops at 30, so a plan that cannot reach 360 s at 30 shards is refused rather than capped. A single test too slow to fit any shard produces that refusal.
+The capped path caps the total across Python versions, not each version, so two versions share the 24 runners. With 3.12 alone the first command already stops at 24, so a plan that cannot reach 360 s at 24 shards is refused rather than capped. A single test too slow to fit any shard produces that refusal.
 
 ### Changing the pool
 
-`MAX_SHARDS` must equal the queue pool `maxRunners` less any queue pool job that runs at the same time as the unit stage. When the antoncore scale set changes, change `MAX_SHARDS` in `tests/queue_shards.py` by pull request in the same window. Raising the pool is an antoncore change and stays with the operator. `tests/test_queue_shards.py` pins the cap: `test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool` plants a 40 job plan and expects `40 queue jobs exceed the pool of 30; capped at 30 shards`.
+`MAX_SHARDS` must equal the queue pool `maxRunners` less any queue pool job that runs at the same time as the unit stage. When the antoncore scale set changes, change `MAX_SHARDS` in `tests/queue_shards.py` by pull request in the same window. Raising the pool is an antoncore change and stays with the operator. `tests/test_queue_shards.py` pins the cap: `test_a_forty_job_queue_plan_is_capped_to_the_twenty_four_runner_queue_pool` plants a 40 job plan and expects `40 queue jobs exceed the pool of 24; capped at 24 shards`.
 
 ### Checking a queue shard run
 
@@ -389,7 +389,7 @@ gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/attempts/1/jobs"
   --jq '.jobs[] | select(.name | startswith("unit (")) | [.name, .created_at, .started_at, .completed_at] | @tsv'
 ```
 
-A shard's runner wait is `started_at` minus `created_at`. Count the shards: more than 30, or start times that fall into two groups minutes apart, means a second wave. The Doctor measure prints the run attempt's queue tier wall time in seconds:
+A shard's runner wait is `started_at` minus `created_at`. Count the shards: more than 24, or start times that fall into two groups minutes apart, means a second wave. The Doctor measure prints the run attempt's queue tier wall time in seconds:
 
 ```bash
 agentihooks doctor rig-grade-swarm measure "ci-tier-wall-time/<run id>-<attempt>"
@@ -399,7 +399,7 @@ It prints `<finding> <seconds>`, for example `ci-tier-wall-time/39269601765-1 57
 
 ### Concurrent merge groups on one pool
 
-The shard cap keeps one merge group inside one wave, but the queue builds up to three entries at a time (`max_entries_to_build` 3 in `.github/rulesets/dev-no-delete.json`) and every group sends its shards to the same `anton-oss-queue` pool. Two groups that reach their unit stage together ask for up to 60 runners, so the later group's shards wait for the earlier group's shards to finish. That wait, not the shard plan, is what pushed merge group tiers over 15 minutes on the night of 19 to 20 October.
+The shard cap keeps one merge group inside one wave, but the queue then built up to three entries at a time (`max_entries_to_build` 3; `.github/rulesets/dev-no-delete.json` now sets 1) and every group sent its shards to the same `anton-oss-queue` pool. Two groups that reach their unit stage together ask for up to 60 runners, so the later group's shards wait for the earlier group's shards to finish. That wait, not the shard plan, is what pushed merge group tiers over 15 minutes on the night of 19 to 20 October.
 
 Doctor finding `ci-tier-wall-time/39346819295-1` fired on merge group run [39346819295](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39346819295), which took 911 s: 201 s before the unit stage, 599 s in it and 111 s after it. Its 30 shards were created while 27 shards of merge group run 39346300411 were still waiting or running, a demand of 57 on the 30 runners the pool held then. Its shards waited a median 128 s and up to 293 s for a runner.
 
@@ -447,15 +447,15 @@ That night's groups still ran Python 3.11 and 3.12 legs inside the same 30 shard
 
 A group's other shards in flight at its unit start is the number of other groups' unit shards whose `created_at` is before that group's first shard `created_at` and whose `completed_at` is after it. A group whose shards wait over a minute with that number over 10 is sharing the pool with another group; a wait with that number under 10 does not come from another merge group.
 
-The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`, while `MAX_SHARDS` in `tests/queue_shards.py` is still 30. Compare the two before reading a shard wait against the numbers above.
+The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`; the scale set has since moved to `maxRunners` 24, which `MAX_SHARDS` matches. Compare the two before reading a shard wait against the numbers above.
 
 ### Troubleshooting queue shard sizing
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `Queue plan exceeds 360s of the step timeout` | 30 shards cannot bring the slowest shard under half the step timeout, often one slow test or a slow serial group | Split or speed up the slow test file; the planner log names the predicted seconds |
-| Shards wait minutes for a runner while each group plans 30 or fewer | Several merge groups build at once and share the 30 runners; the queue builds up to three entries at a time | Read the runner waits of every group running in the same minutes before changing the plan; see [Concurrent merge groups on one pool](#concurrent-merge-groups-on-one-pool) |
-| More than 30 `unit` jobs in one run | `MAX_SHARDS` no longer matches the pool, or a second Python version was added without the capped path | Compare `MAX_SHARDS` with the antoncore scale set `maxRunners` |
+| `Queue plan exceeds 360s of the step timeout` | 24 shards cannot bring the slowest shard under half the step timeout, often one slow test or a slow serial group | Split or speed up the slow test file; the planner log names the predicted seconds |
+| Shards wait minutes for a runner while each group plans 24 or fewer | Several merge groups build at once and share the 24 runners; the queue builds up to three entries at a time | Read the runner waits of every group running in the same minutes before changing the plan; see [Concurrent merge groups on one pool](#concurrent-merge-groups-on-one-pool) |
+| More than 24 `unit` jobs in one run | `MAX_SHARDS` no longer matches the pool, or a second Python version was added without the capped path | Compare `MAX_SHARDS` with the antoncore scale set `maxRunners` |
 
 ### Delivery evidence
 
@@ -467,7 +467,7 @@ The queue shard planner and the shard budget grade shards against the time their
 
 | Reader | Job | Step | Timeout today | Limit it sets |
 |---|---|---|---|---|
-| `tests.queue_shards` (`STEP_SECONDS`) | `unit` | `Run tests` | 12 minutes | 720 s; a queue plan must predict its slowest shard under half of it, 360 s |
+| `tests.queue_shards` (`STEP_SECONDS`) | `unit` | `Run tests` | 12 minutes | 720 s; the planner grows shards toward a third of it, 240 s, and a queue plan must predict its slowest shard under half of it, 360 s |
 | `tests.shard_budget`, a unit shard | `unit` | `Run tests` | 12 minutes | 720 s of elapsed test step time |
 | `tests.shard_budget`, a selected leg | `unit-selected` | `Run the selected tests` | 7 minutes | 420 s of elapsed test step time |
 
@@ -548,7 +548,7 @@ When shards over budget have different limits, the last line joins them, for exa
 |---|---|---|
 | `split` fails with `IndexError: list index out of range` from `step_seconds` | The `unit` job or its `Run tests` step was renamed | Update `STEPS` in `tests/shard_budget.py` with the new name |
 | `TypeError: 'NoneType' object is not subscriptable` from `step_seconds` | The step's `timeout-minutes` was removed or written as an expression | Keep a plain integer `timeout-minutes` on the step |
-| The queue plans more shards than the step timeout needs | An older planner with a fixed timeout; before pull request 5043 it assumed 420 s while the step allowed 720 s | Merge `origin/dev`; the `split` log prints `of 360s` while the timeout is 12 minutes |
+| The queue plans more shards than the step timeout needs | An older planner with a fixed timeout; before pull request 5043 it assumed 420 s while the step allowed 720 s | Merge `origin/dev`; the `split` log prints `of 240s` while the timeout is 12 minutes |
 | A selected leg passes 420 s and nothing turns red | `shard-check` never runs beside `unit-selected` | Grade the leg's artifact by hand as above |
 | `KeyError` from `tests.shard_budget` | An `elapsed.json` names a job other than `unit` or `unit-selected` | Add the job and its step to `STEPS` |
 
@@ -556,7 +556,7 @@ When shards over budget have different limits, the last line joins them, for exa
 
 Delivered by pull request [5043](https://github.com/the-cloud-clockwork/agentihooks/pull/5043) for issue [5041](https://github.com/the-cloud-clockwork/agentihooks/issues/5041). Before it, the planner held a fixed 420 s timeout while `Run tests` stopped at 720 s, and the budget graded every shard, selected legs included, against a fixed twelve minutes of summed test time, though `Run the selected tests` stops at seven minutes and recorded no elapsed time. Red: Tests run [39357706899](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39357706899), on the test only commit, failed exactly the six new or changed tests. Green: Tests run [39358460209](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39358460209).
 
-Measured over completed merge group Tests runs, counting Python 3.12 unit shards per group and the slowest `Run tests` step: the last ten groups before the merge ran 20 shards each, slowest 388 s; the ten groups after 06:01 UTC on 20 October ran a mean of 13.3 shards (13 or 14), slowest 305 s, and no shard reached 720 s. Calibrating `SLOWDOWN` from 1.5 to 1.15 in pull request [5659](https://github.com/the-cloud-clockwork/agentihooks/pull/5659) later changed the plan again.
+Measured over completed merge group Tests runs, counting Python 3.12 unit shards per group and the slowest `Run tests` step: the last ten groups before the merge ran 20 shards each, slowest 388 s; the ten groups after 06:01 UTC on 20 October ran a mean of 13.3 shards (13 or 14), slowest 305 s, and no shard reached 720 s. Calibrating `SLOWDOWN` from 1.5 to 1.15 in pull request [5659](https://github.com/the-cloud-clockwork/agentihooks/pull/5659) later changed the plan again. Pull request [6707](https://github.com/the-cloud-clockwork/agentihooks/pull/6707) for issue [6703](https://github.com/the-cloud-clockwork/agentihooks/issues/6703) dropped the slowest of five durations and set `SLOWDOWN` to 1.85 on median durations, calibrated on merge group runs [40084693315](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40084693315), [40085105981](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40085105981), [40085828452](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40085828452), [40086486432](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40086486432), [40087075078](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40087075078), [40087870160](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40087870160), [40088540093](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40088540093), [40089176680](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40089176680), [40089783935](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40089783935), [40090459054](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40090459054): at 17 shards they predicted 346 to 353 s against a measured slowest `Run tests` step of 299 to 378 s, 8 of 10 within 15 %; on median durations the same groups predict 331 to 338 s, all 10 within 15 %.
 
 ## Grouped test files in the unit shard planner
 
@@ -671,8 +671,8 @@ Every test the unit shard planner sees has a stored duration. Two writers fill t
 
 | Writer | Runs in | Fills |
 |---|---|---|
-| `tests.refresh_durations` | The `Refresh measured durations` step of the dev push refresh job: `python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5` | Each map it writes (`.test_durations`, `.test_durations-<version>`, `.test_durations-slowest` and `.test_durations-slowest-<version>`) gets every collected test it lacks, priced at that map's own median. The maps go out as the `durations-merged` artifact and the `durations-merged-<sha>` cache |
-| `tests.dev_durations` | The split job's `Adopt latest dev durations` step, and the `Size queue shards from conservative durations` step on merge groups | After choosing which durations to use, every collected test still missing from `.test_durations` gets the median of that file. The completed file goes out as the `split-<version>` artifact, and the unit shards plan from it |
+| `tests.refresh_durations` | The `Refresh measured durations` step of the dev push refresh job: `python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5` | Each map it writes (`.test_durations` and `.test_durations-<version>`) gets every collected test it lacks, priced at that map's own median. The maps go out as the `durations-merged` artifact and the `durations-merged-<sha>` cache |
+| `tests.dev_durations` | The split job's `Adopt latest dev durations` step, and the `Size queue shards from median durations` step on merge groups | After choosing which durations to use, every collected test still missing from `.test_durations` gets the median of that file. The completed file goes out as the `split-<version>` artifact, and the unit shards plan from it |
 
 ### How a push picks and completes its durations
 
@@ -683,7 +683,7 @@ Every test the unit shard planner sees has a stored duration. Two writers fill t
 
 On the dev push refresh the same one in ten check runs first, and the step fails with `::error::refresh durations: <n> of <m> tests have no stored duration` when a written map would lack more than that. When the run's own shard samples are incomplete, the line ends `; run <id> kept no samples from durations-3.12-<shard>`. Within that limit the fill gives a new test the median until a later dev push times it; `ci_medians` then replaces the estimate with a measured value.
 
-The median is small. On the dev push Tests run [39992377126](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39992377126) at `94dcb486bf`, each `durations-merged` map held 43558 tests; the median was 0.0529 s in `.test_durations` and `.test_durations-3.12`, and 0.1013 s in both slowest maps.
+The median is small. On the dev push Tests run [39992377126](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39992377126) at `94dcb486bf`, each `durations-merged` map held 43558 tests; the median was 0.0529 s in `.test_durations` and `.test_durations-3.12`.
 
 ### Measured effect
 
@@ -1169,7 +1169,7 @@ On 20 October one pull request took 109 minutes from enqueue to merge while its 
 
 ### Window and queue settings
 
-The window ran from 2026-10-20T02:00Z to 2026-10-21T02:00Z. It held 301 merge group Tests runs: 170 `success`, 126 `cancelled`, 5 still queued and none `failure`. The `dev` merge queue then built up to five entries at once (`max_entries_to_build` 5), merged up to five, grouped `ALLGREEN`, waited one minute for entries and timed checks out after 45 minutes. `.github/rulesets/dev-no-delete.json` now sets `max_entries_to_build` to 3; the other values are unchanged.
+The window ran from 2026-10-20T02:00Z to 2026-10-21T02:00Z. It held 301 merge group Tests runs: 170 `success`, 126 `cancelled`, 5 still queued and none `failure`. The `dev` merge queue then built up to five entries at once (`max_entries_to_build` 5), merged up to five, grouped `ALLGREEN`, waited one minute for entries and timed checks out after 45 minutes. `.github/rulesets/dev-no-delete.json` now sets `max_entries_to_build` to 1; the other values are unchanged.
 
 ### How each cancelled run was attributed
 
@@ -1301,5 +1301,45 @@ The disabled `queue-baseline` job is gone: pull request [3517](https://github.co
 | `No measured Tests run on base <sha> kept a live coverage-baseline artifact with successful measuring and publishing jobs.` | No cache entry fit and no dev push run of the base kept a live artifact with passed unit shards and publishing steps. | Rerun the failed jobs once the next dev push publishes a baseline, or dispatch the Tests workflow against a measured base. |
 | `Base <sha> is outside dev history.` | The base commit is not on `dev`. | Dispatch the Tests workflow with a `base` on `dev`. |
 | `The base carries no tests/coverage_ratchet.py, so nothing trusted can grade.` | The base predates the ratchet. | Dispatch the Tests workflow with a newer `base` input. |
-| `<n> lines the base ran are no longer run by any head test; see the coverage-ratchet report.` | A merged change removed or rerouted the only test reaching those lines, listed by file and line in `report.txt`, so promotion is red while the queue keeps merging. | Add or restore a test that reaches each line through a normal pull request; never lower the ratchet or exclude the line. |
+| `<n> lines the base ran are no longer run by any head test; see the coverage-ratchet report.` | A merged change removed or rerouted the only test reaching those lines, listed by file and line in `report.txt`, so promotion is red while the queue keeps merging. | Follow [Clearing a lost line](#clearing-a-lost-line); never lower the ratchet or exclude the line. |
 | A coverage job ran in a merge group and `Gate — Required` failed with `Every gate required for this event must succeed and other gates must be skipped.` | A workflow change gave a coverage job a `merge_group` condition. | Restore the event conditions in the table above. |
+
+### Clearing a lost line
+
+The ratchet grades a base line only through its place in the head file. `tests/coverage_grade.py` maps each line the base ran onto the head source with a line diff. A renamed file is mapped line by line, and a file whose definitions moved into several files is mapped definition by definition. A base line with no unchanged match in the head, because the change deleted or rewrote it or deleted its file, is not graded. A base line that still exists in the head is graded whether its callers changed or not.
+
+Read `report.txt` first. Each lost line has its own line:
+
+```text
+scripts/swarm/ledger_probe.py:42 ran on base dff4aa25a502d1b98bb625828cc77c96d47ec8a1 and no head test runs it
+```
+
+```bash
+gh run download <run id> --repo the-cloud-clockwork/agentihooks \
+  --name coverage-ratchet --dir coverage-ratchet
+grep "no head test runs it" coverage-ratchet/report.txt
+```
+
+Then decide per line:
+
+| What the line is now | Fix |
+|---|---|
+| Code the change left without callers | Delete it. Confirm first that nothing calls it, for example `git grep "\.took()" origin/dev -- scripts tests hooks` returns nothing. The deleted line drops out of grading. |
+| Code still reached in production, which the base's tests only reached indirectly | Add a unit test that calls it directly and asserts what it does. |
+| Code the change's own tests stopped reaching | Restore or add the test that reaches it. |
+
+Every fix goes through a normal pull request into `dev`. The promotion fixer task is closed by the next green dev push run, which passes `coverage-ratchet`.
+
+#### The 18 October ledger probe loss
+
+Pull request [4266](https://github.com/the-cloud-clockwork/agentihooks/pull/4266) moved the ledger probe notices onto the retained pass summaries. Its dev push, commit `740ce511`, failed `coverage-ratchet` in [run 39091332968](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39091332968), graded against base `dff4aa25`. `report.txt` listed three lines:
+
+- `scripts/swarm/ledger_probe.py:42` and `:43`, the body of `Sample.took`. Pull request 4266 had replaced every caller, so the method was left with none.
+- `scripts/swarm_ledger/ledger_server.py:875`, the `return None` in `Handler.put_swarm` when `refused(slug)` is true. Neither the server nor its tests changed in that range; the base reached the line only indirectly.
+
+Pull request [4374](https://github.com/the-cloud-clockwork/agentihooks/pull/4374), merged on 18 October 2026, applied the first two rows of the table above:
+
+- It deleted `Sample.took`.
+- It added `test_the_swarm_route_stops_at_a_refused_request` in `tests/test_swarm_lifecycle.py`. The test calls `Handler.put_swarm` with `refused` returning true and asserts it returns `None`, sends no reply and never calls `lifecycle_control`.
+
+The dev push of its merge, commit `75b9649d`, in [run 39099281007](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099281007), no longer listed any of the three lines. That run still failed the ratchet on one other line, `scripts/inbox/store.py:714`, which pull request 4374 did not touch. The dev push run on commit `96fa76fe`, [run 39101112212](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39101112212), passed `coverage-ratchet` against the same base.

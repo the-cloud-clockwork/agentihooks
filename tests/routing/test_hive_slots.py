@@ -21,7 +21,7 @@ def test_hive_admission_happens_after_the_route_resolves_and_before_exec(tmp_pat
     monkeypatch.setattr(account_slots, "execute", admitted)
     monkeypatch.setattr(install.os, "execvpe", lambda *args: calls.append("exec"))
     monkeypatch.setattr(install, "_claude_command", lambda binary, args: [binary, *args])
-    monkeypatch.setattr(master_claude_login, "prepare", lambda *args: (tmp_path, "resolved"))
+    monkeypatch.setattr(master_claude_login, "prepare_launch", lambda *args: (tmp_path, "resolved"))
     monkeypatch.setattr(master_claude_login, "child", lambda *args: {})
     monkeypatch.setattr(interactive, "account", lambda *args: SimpleNamespace(slug="resolved"))
     if route == "master-login":

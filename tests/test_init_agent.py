@@ -87,6 +87,56 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     assert "host=linux" in capsys.readouterr().out
 
 
+def test_private_master_login_gets_its_coordinated_launch_deadline(monkeypatch, tmp_path):
+    from scripts import master_login_chain as chain
+
+    _, profile_env = _profile(monkeypatch, tmp_path)
+    original, seen = init_agent.LaunchDeadline, []
+
+    def deadline(seconds):
+        seen.append(seconds)
+        return original(seconds)
+
+    monkeypatch.setattr(init_agent, "LaunchDeadline", deadline)
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    argv = [
+        "--dir",
+        str(tmp_path),
+        "--name",
+        "master-proof",
+        "--agent",
+        "claude",
+        "--dry-run",
+        "--",
+        "--route",
+        "master-login",
+    ]
+    assert (
+        init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), **profile_env}) == 0
+    )
+    assert seen[0] >= chain.BUDGET.launch
+
+
+@pytest.mark.parametrize(
+    "agent,route",
+    [
+        ("", "master-login"),
+        ("claude", "master-login"),
+        ("codex", "master-login"),
+        ("claude", "worker"),
+    ],
+)
+def test_launch_budget_changes_only_for_a_native_claude_master(agent, route):
+    from types import SimpleNamespace
+
+    from scripts import master_login_chain as chain
+
+    args = SimpleNamespace(agent=agent, claude_args=["--route", route], route_timeout=10)
+    native = agent in ("", "claude") and route == "master-login"
+    assert init_agent._launch_seconds(args) == (chain.BUDGET.launch if native else init_agent.LAUNCH_DEADLINE_S)
+    assert args.route_timeout == (chain.BUDGET.route if native else 10)
+
+
 def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeypatch, tmp_path):
     monkeypatch.setattr(init_agent.platform, "system", lambda: "Linux")
     monkeypatch.setattr(
@@ -121,7 +171,18 @@ def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeyp
     assert not any(argument.startswith("/mnt/") for argument in command[1:])
 
 
+def _ordinary_launch_budget(monkeypatch):
+    original = init_agent.LaunchDeadline
+
+    def deadline(seconds):
+        assert seconds == init_agent.LAUNCH_DEADLINE_S
+        return original(seconds)
+
+    monkeypatch.setattr(init_agent, "LaunchDeadline", deadline)
+
+
 def _launch(monkeypatch, tmp_path, popen):
+    _ordinary_launch_budget(monkeypatch)
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: None)
     monkeypatch.setattr(
@@ -907,6 +968,7 @@ def test_report_names_the_model_and_effort(monkeypatch, tmp_path, capsys):
 
 
 def _trust_launch(monkeypatch, tmp_path, project, env_extra=None):
+    _ordinary_launch_budget(monkeypatch)
     seen = {}
 
     def popen(command, **kwargs):
@@ -1280,6 +1342,33 @@ def test_an_undetected_codex_agent_without_a_prompt_waits_for_nothing(monkeypatc
     assert init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "", init_agent.Launch(0.0)) == [
         "agent_name=unset"
     ]
+
+
+@pytest.mark.parametrize(("resume", "held"), [("c0ffee", False), ("", True)])
+def test_a_codex_resume_passes_its_prompt_to_codex_instead_of_typing_it(tmp_path, monkeypatch, resume, held):
+    from types import SimpleNamespace
+
+    launcher = tmp_path / "eng.sh"
+    launcher.with_suffix(".prompt").write_text("Continue.", encoding="utf-8")
+    opened = {}
+    placed = SimpleNamespace(workspace_id="w1", tab_id="t1", pane_id="w1:p2")
+    monkeypatch.setattr(init_agent.herdr_host, "ensure_server", lambda environ: False)
+    monkeypatch.setattr(init_agent.herdr_host, "open_pane", lambda d, t, env, *rest: opened.update(env) or placed)
+    monkeypatch.setattr(init_agent.herdr_host, "run", lambda *args: None)
+    monkeypatch.setattr(init_agent.herdr_panes, "record", lambda *args: None)
+    args = SimpleNamespace(title="", placement=None, workspace=None, resume=resume)
+    init_agent._start_herdr(launcher, tmp_path, "eng-a", args, "codex", {})
+    assert (init_agent.PROMPT_AFTER_START in opened) is held
+
+
+@pytest.mark.parametrize(
+    ("transport", "resume", "served"),
+    [(init_agent.APP_SERVER, "", True), ("", "c0ffee", True), ("", "", False), ("legacy", "", False)],
+)
+def test_a_resumed_or_served_session_is_named_without_typing(transport, resume, served):
+    from types import SimpleNamespace
+
+    assert init_agent._served(SimpleNamespace(codex_transport=transport, resume=resume)) is served
 
 
 @pytest.mark.parametrize(("held", "argv"), [("1", "<a b>\n"), ("", "<a b><Start the task.>\n")])
