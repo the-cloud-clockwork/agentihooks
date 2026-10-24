@@ -1,0 +1,89 @@
+workflow:
+  name: simple-workflow
+  intent: Build the change the case asks for, backed by scouted evidence and a blind verdict.
+  head: build
+  max_iterations: 3
+  exit: build-verdict.pass
+  on_exhausted: block
+
+stages:
+  scout:
+    profile: scouter
+    tier: high
+    effort: medium
+    count: 3
+    input:
+      - case
+    filters: []
+    iterations: 2
+    exit: every point of the case has cited evidence
+    next:
+      pass: evidence-verdict
+      retry: null
+      enhance: null
+  evidence-verdict:
+    profile: judge
+    tier: high
+    effort: medium
+    count: 1
+    input:
+      - case
+      - scout
+    filters:
+      - judge-blind
+      - judge-relevance
+      - judge-bias
+    iterations: 1
+    exit: null
+    next:
+      pass: plan
+      retry: scout
+      enhance: scout
+  plan:
+    profile: planner
+    tier: high
+    effort: medium
+    count: 1
+    input:
+      - case
+      - scout
+    filters: []
+    iterations: 1
+    exit: null
+    next:
+      pass: build
+      retry: null
+      enhance: null
+  build:
+    profile: engineer
+    tier: high
+    effort: medium
+    count: 1
+    input:
+      - case
+      - plan
+    filters: []
+    iterations: 3
+    exit: null
+    next:
+      pass: build-verdict
+      retry: null
+      enhance: null
+  build-verdict:
+    profile: judge
+    tier: high
+    effort: medium
+    count: 1
+    input:
+      - case
+      - build
+    filters:
+      - judge-blind
+      - judge-relevance
+      - judge-bias
+    iterations: 1
+    exit: null
+    next:
+      pass: exit
+      retry: build
+      enhance: build
