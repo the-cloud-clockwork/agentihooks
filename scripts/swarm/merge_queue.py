@@ -172,6 +172,36 @@ class Untracked:
         pass
 
 
+def displace(waiting: list[dict], run, displaced, removed: list[dict], steps: list) -> None:
+    for pull in waiting:
+        displaced.add(pull)
+    for pull in reversed(waiting):
+        current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
+        if current["mergeQueueEntry"] is not None and current["mergeQueueEntry"]["state"] == "QUEUED":
+            removed.append(pull)
+            steps.append(["dequeue", pull["url"]])
+            graphql(DEQUEUE, {"id": pull["id"]}, run)
+        else:
+            displaced.discard(pull["url"])
+
+
+def restore(removed: list[dict], run, displaced, steps: list, errors: list) -> list[str]:
+    restored = []
+    for pull in reversed(removed):
+        try:
+            current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
+            if current["mergeQueueEntry"] is None:
+                staged_compatibility.require(pull["url"], pull["headRefOid"], current.get("body") or "", run)
+                steps.append(["restore", pull["url"]])
+                graphql(QUEUE, {"id": pull["id"], "head": pull["headRefOid"]}, run)
+                restored.append(pull["url"])
+            displaced.discard(pull["url"])
+        except SwarmError as exc:
+            errors.append(f"could not restore {pull['url']}: {exc}")
+            break
+    return restored
+
+
 def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=None) -> dict:
     displaced = displaced or Untracked()
     raw = graphql(STATE, {"url": url}, run)["resource"]
@@ -190,17 +220,8 @@ def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=N
     steps = []
     try:
         removed = []
-        for pull in waiting:
-            displaced.add(pull)
         try:
-            for pull in reversed(waiting):
-                current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
-                if current["mergeQueueEntry"] is not None and current["mergeQueueEntry"]["state"] == "QUEUED":
-                    removed.append(pull)
-                    steps.append(["dequeue", pull["url"]])
-                    graphql(DEQUEUE, {"id": pull["id"]}, run)
-                else:
-                    displaced.discard(pull["url"])
+            displace(waiting, run, displaced, removed, steps)
         except SwarmError as exc:
             errors.append(str(exc))
         if not errors or raw["mergeQueueEntry"] is not None:
@@ -211,20 +232,7 @@ def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=N
                     graphql(QUEUE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
             except SwarmError as exc:
                 errors.append(str(exc))
-        restored = []
-        for pull in reversed(removed):
-            try:
-                current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
-                if current["mergeQueueEntry"] is None:
-                    staged_compatibility.require(pull["url"], pull["headRefOid"], current.get("body") or "", run)
-                    steps.append(["restore", pull["url"]])
-                    graphql(QUEUE, {"id": pull["id"], "head": pull["headRefOid"]}, run)
-                    restored.append(pull["url"])
-                displaced.discard(pull["url"])
-            except SwarmError as exc:
-                errors.append(f"could not restore {pull['url']}: {exc}")
-                break
-        return {"url": url, "displaced": restored, "errors": errors}
+        return {"url": url, "displaced": restore(removed, run, displaced, steps, errors), "errors": errors}
     finally:
         if journal is not None:
             journal.write("priority", url, raw["headRefOid"], before, journal.groups(), errors, steps=steps)
