@@ -183,7 +183,7 @@ def test_non_text_metadata_values_are_ignored():
 
 
 def test_an_import_commits_each_source_with_full_provenance_and_explicit_unknowns(stores, tmp_path):
-    data = claude("hello", version="2.1", timestamp="t1") + claude("bye", cwd="/work/app/sub", timestamp="t2")
+    data = claude("hello", timestamp="t1") + claude("bye", cwd="/work/app/sub", timestamp="t2")
     source = only(run(stores, root(tmp_path, files={"proj/s-1.jsonl": data})))
     digest = hashlib.sha256(data).hexdigest()
     assert source == {
