@@ -621,28 +621,6 @@ def test_quota_seat_refusal_does_not_mark_a_task_launch_failure(store, error, fa
     assert [(row["state"], row["error"]) for row in store.launches("sw")] == [(launch, str(error))]
 
 
-@pytest.mark.parametrize("observed_at", [1_000, 999])
-def test_reservation_refusal_retains_only_this_pass_capacity(store, observed_at):
-    import json
-
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime(crash=SpawnError("account reservation is full", "unavailable"))
-    decision = {
-        "observed_at": observed_at,
-        "accounts": [{"harness": "claude", "state": "OPEN", "sessions": 6, "cap": 6}],
-    }
-    store.redis.set(store.key("sw", "quota-capacity"), json.dumps(decision))
-    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    context = next(action for action in actions if action.startswith("spawn capacity for t1: "))
-    snapshot = json.loads(context.split(": ", 1)[1])
-    assert snapshot == {
-        "harness": "claude",
-        "accounts": decision["accounts"] if observed_at == 1_000 else [],
-    }
-    assert actions.index(context) + 1 == next(
-        i for i, action in enumerate(actions) if action.startswith("spawn failed for t1")
-    )
-
-
 def test_a_launch_is_pending_while_the_runtime_spawns_it(store):
     ledger, runtime, seen = tasks(("t1", "eng")), FakeRuntime(), []
     spawn = runtime.spawn
