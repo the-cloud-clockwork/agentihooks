@@ -591,6 +591,18 @@ def quiet_watch(stalled):
         pass
 
 
+@pytest.mark.parametrize("reason", ["Codex hive placement is not enabled", CPU_WAIT])
+def test_current_placement_holds_explain_the_spawn_wait(stalled, reason):
+    store, ledger, _, clock, _ = stalled
+    for _ in range(2):
+        for task in ledger.rows.values():
+            placement_waits.observe(store, "sw", task["lane"], task["id"], reason, clock[0])
+        quiet_watch(stalled)
+        clock[0] += 600_000
+    assert spawn_stall.findings(store, "sw") == []
+    assert InboxStore(store.redis).pending_mail("master@sw") == []
+
+
 def capped_watch(stalled, refused=True):
     store, ledger, runtime, clock, _ = stalled
     with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
