@@ -155,3 +155,28 @@ def test_completion_resets_state_for_the_next_turn():
 def test_from_dict_defaults_when_state_is_missing():
     assert TurnState.from_dict({}) == TurnState(assistant_seen=False)
     assert TurnState.from_dict({"assistant_seen": 1}) == TurnState(assistant_seen=True)
+
+
+def test_inbox_channel_delivery_stays_a_prompt():
+    entry = {
+        "type": "user",
+        "isMeta": True,
+        "origin": {"kind": "channel", "server": "inbox"},
+        "message": {"content": "review the branch"},
+    }
+    assert [r["kind"] for r in normalize_entries("claude", [entry])] == ["user_text"]
+    other = dict(entry, origin={"kind": "channel", "server": "brain"})
+    assert [r["kind"] for r in normalize_entries("claude", [other])] == ["system_text"]
+
+
+def test_records_match_the_prior_reader_golden():
+    recs = list(iter_transcript_records(SAMPLES["codex"]))
+    assert [(r["kind"], r.get("text", r.get("tool_use_id"))) for r in recs] == [
+        ("meta", None),
+        ("system_text", "=== CONTEXT INJECTION ===\ninjected banner"),
+        ("user_text", "fix the bug"),
+        ("tool_call", "c1"),
+        ("tool_result", "c1"),
+        ("assistant_text", "Done.\n<!-- @lesson -->\ncodex rollouts use response_item records\n<!-- @/lesson -->"),
+        ("token_usage", None),
+    ]
