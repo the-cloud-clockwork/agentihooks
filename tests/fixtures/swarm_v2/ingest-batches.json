@@ -1,0 +1,41 @@
+{
+  "grant": {"principal": "collector-fixture", "corpus": "swarm-fixture", "projects": ["agentihooks"]},
+  "session_uid": "swarm-fixture:claude:collector-a:session-1",
+  "source_generation": "device-1:inode-7:anchor-0",
+  "valid": {
+    "batch_id": "valid-1-3",
+    "events": [
+      {"sequence": 1, "byte_start": 0, "byte_end": 61, "project_id": "agentihooks", "record": {"kind": "user_text", "text": "café ingest prompt one"}},
+      {"sequence": 2, "byte_start": 61, "byte_end": 140, "project_id": "agentihooks", "record": {"kind": "assistant_text", "text": "日本 ingest reply two"}},
+      {"sequence": 3, "byte_start": 61, "byte_end": 140, "project_id": null, "record": {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_use_id": "toolu_1"}}
+    ]
+  },
+  "duplicate": {
+    "batch_id": "overlap-2-5",
+    "events": [
+      {"sequence": 2, "byte_start": 61, "byte_end": 140, "project_id": "agentihooks", "record": {"kind": "assistant_text", "text": "日本 ingest reply two"}},
+      {"sequence": 3, "byte_start": 61, "byte_end": 140, "project_id": null, "record": {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_use_id": "toolu_1"}},
+      {"sequence": 4, "byte_start": 140, "byte_end": 199, "project_id": "agentihooks", "record": {"kind": "tool_result", "tool_result": "ingest ✓", "tool_use_id": "toolu_1", "is_error": false}},
+      {"sequence": 5, "byte_start": 199, "byte_end": 230, "project_id": "agentihooks", "record": {"kind": "provider_noise", "text": "unsupported kind"}}
+    ]
+  },
+  "mixed_scope": {
+    "batch_id": "mixed-4-5",
+    "events": [
+      {"sequence": 4, "byte_start": 140, "byte_end": 199, "project_id": "agentihooks", "record": {"kind": "tool_result", "tool_result": "ingest ✓", "tool_use_id": "toolu_1", "is_error": false}},
+      {"sequence": 5, "byte_start": 199, "byte_end": 260, "project_id": "personal-notes", "record": {"kind": "user_text", "text": "private personal prompt"}}
+    ]
+  },
+  "next": {
+    "batch_id": "next-4",
+    "events": [
+      {"sequence": 4, "byte_start": 140, "byte_end": 199, "project_id": "agentihooks", "record": {"kind": "tool_result", "tool_result": "ingest ✓", "tool_use_id": "toolu_1", "is_error": false}}
+    ]
+  },
+  "rewritten": {
+    "batch_id": "rewrite-2",
+    "events": [
+      {"sequence": 2, "byte_start": 61, "byte_end": 140, "project_id": "agentihooks", "record": {"kind": "assistant_text", "text": "rewritten reply two"}}
+    ]
+  }
+}

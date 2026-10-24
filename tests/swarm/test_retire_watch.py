@@ -97,3 +97,36 @@ def test_swarm_status_lists_the_retire_finding(store, monkeypatch):
         retire_watch.failed(store, "sw", NAME, REFUSED, at)
     found = status.findings(store, "sw", store.config("sw"), [], [])
     assert [f["id"] for f in found] == [f"retire-failed/{NAME}"]
+
+
+@pytest.mark.parametrize("indexed", [False, True])
+def test_retire_findings_identify_the_original_hive_and_removed_host_count(store, monkeypatch, indexed):
+    from scripts.hive import registry
+    from scripts.swarm.store import AgentRecord
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
+    names = [store.next_name("sw", "eng") for _ in range(2)]
+    for index, name in enumerate(names, 1):
+        store.start_execution(
+            "sw",
+            AgentRecord(
+                name, "eng", "task", seat=f"eng-{index}@sw", state="finished", runtime_target={"host_id": "removed"}
+            ),
+        )
+        for at in (1, 2, 3):
+            retire_watch.failed(store, "sw", name, {"process": 0, "refusal": "waiting for acknowledgement"}, at)
+    if indexed:
+        store.redis.sadd(registry.INDEX, "removed")
+
+    found = retire_watch.findings(store, "sw")
+
+    assert len(found) == 2
+    for finding in found:
+        assert finding.evidence == (
+            "process 0",
+            "refusal: waiting for acknowledgement",
+            "hive removed",
+            "hive indexed" if indexed else "hive absent from index",
+            f"retire waits on absent hives {0 if indexed else 2}",
+        )
+        assert finding.measure == 3
