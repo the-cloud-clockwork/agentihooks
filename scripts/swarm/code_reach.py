@@ -172,6 +172,13 @@ class Program:
             named.setdefault(re.split(r"[:.]", key)[-1], []).append(key)
         self.unique = {name: keys[0] for name, keys in named.items() if len(keys) == 1}
         self.scoped: dict[int, dict] = {id(unit): self._nested(unit) for unit in self.units.values()}
+        self.called = {
+            id(node.func): self._callees(node.func, unit)
+            for unit in self.units.values()
+            for node in unit.nodes
+            if isinstance(node, ast.Call)
+        }
+        self.shapes = {id(unit): self._shape(unit) for unit in self.units.values()}
         self.clients: set[str] = set()
         self.factories: set[str] = set()
         self._receivers()
@@ -324,7 +331,7 @@ class Program:
             return _tail(func.value) in CLIENT_TYPES | {"redis"}
         if _tail(func) in CLIENT_TYPES:
             return True
-        return any(key in self.factories for key in self._callees(func, unit) or [])
+        return any(key in self.factories for key in self.called[id(func)] or [])
 
     def _callees(self, func: ast.expr, unit: Unit) -> list[str] | None:
         """The functions here a call may run, found through the unit's names and imports, its own class, or a name
@@ -365,19 +372,34 @@ class Program:
         chained = isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute)
         return chained and expr.func.attr in methods(redis.Redis) and self._receiver(expr.func.value, unit, local)
 
-    def _typed(self, unit: Unit) -> dict[str, bool]:
-        """The names a unit binds, each true when a binding holds a Redis client or pipeline. Bindings are read in
-        source order once per binding, so a name bound later in a loop still reaches an alias read earlier. A name bound only to a call whose callee cannot be found here, or
-        only as a loop target, gets no entry, so it falls back by name."""
-        local = {name: held for node in unit.nodes for name, held in _annotated(node).items()}
+    def _shape(self, unit: Unit) -> tuple[dict, list, list, list, list]:
+        """What typing reads from a unit, taken once: annotated parameters, name bindings in source order with
+        whether their callee is unknown, attribute and keyword bindings, and returned values."""
+        annotated = {name: held for node in unit.nodes for name, held in _annotated(node).items()}
         bindings = sorted(
             (found for found in map(_bindings, unit.nodes) if found[0]),
             key=lambda found: (found[0][0].lineno, found[0][0].col_offset),
         )
-        pairs = [pair for targets, value in bindings for t in targets for pair in _pairs(t, value)]
+        pairs = [
+            (target, value, isinstance(value, ast.Call) and self.called[id(value.func)] is None)
+            for targets, value in bindings
+            for t in targets
+            for target, value in _pairs(t, value)
+        ]
+        attributes = [(t.attr, value) for targets, value in bindings for t in targets if isinstance(t, ast.Attribute)]
+        keywords = [(node.arg, node.value) for node in unit.nodes if isinstance(node, ast.keyword) and node.arg]
+        returns = [node.value for node in unit.nodes if isinstance(node, ast.Return) and node.value is not None]
+        return annotated, pairs, attributes, keywords, returns
+
+    def _typed(self, unit: Unit) -> dict[str, bool]:
+        """The names a unit binds, each true when a binding holds a Redis client or pipeline. Bindings are read in
+        source order once per binding, so a name bound later in a loop still reaches an alias read earlier. A name
+        bound only to a call whose callee cannot be found here, or only as a loop target, gets no entry, so it
+        falls back by name."""
+        annotated, pairs, _, _, _ = self.shapes[id(unit)]
+        local = dict(annotated)
         for _ in pairs:
-            for target, value in pairs:
-                unresolved = isinstance(value, ast.Call) and self._callees(value.func, unit) is None
+            for target, value, unresolved in pairs:
                 if self._held(value, unit, local):
                     local[target] = True
                 elif not unresolved:
@@ -386,15 +408,12 @@ class Program:
 
     def _spread(self, key: str, unit: Unit) -> None:
         local = self._typed(unit)
+        _, _, attributes, keywords, returns = self.shapes[id(unit)]
         self.clients |= {name for name, held in local.items() if held}
-        for node in unit.nodes:
-            targets, value = _bindings(node)
-            if value is not None and self._held(value, unit, local):
-                self.clients |= {target.attr for target in targets if isinstance(target, ast.Attribute)}
-            if isinstance(node, ast.keyword) and node.arg and self._held(node.value, unit, local):
-                self.clients.add(node.arg)
-            if isinstance(node, ast.Return) and node.value is not None and self._held(node.value, unit, local):
-                self.factories.add(key)
+        self.clients |= {attr for attr, value in attributes if self._held(value, unit, local)}
+        self.clients |= {arg for arg, value in keywords if self._held(value, unit, local)}
+        if any(self._held(value, unit, local) for value in returns):
+            self.factories.add(key)
 
     def _receivers(self) -> None:
         """Grow the names holding a Redis client and the functions returning one, typed from the client and
