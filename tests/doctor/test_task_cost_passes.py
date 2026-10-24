@@ -11,6 +11,7 @@ from scripts.swarm.store import RedisStore
 def _trace(task, tokens, end):
     return {
         "id": task,
+        "name": task,
         "session_id": task,
         "tags": [f"task:{task}"],
         "complete": True,
