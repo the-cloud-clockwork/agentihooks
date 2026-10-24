@@ -1,6 +1,9 @@
+import builtins
 import signal
 
 import pytest
+
+_setitimer = signal.setitimer
 
 
 @pytest.fixture
@@ -20,12 +23,23 @@ def mcp_sdk():
 
 
 @pytest.fixture
-def recovery_deadline(mcp_sdk):
+def recovery_deadline(mcp_sdk, monkeypatch):
     def expired(signum, frame):
         raise AssertionError("recovery loop exceeded its deadline")
 
+    def paused(*args, **kwargs):
+        # A cold import is not recovery work, and an alarm inside one leaves a module half loaded.
+        left = _setitimer(signal.ITIMER_REAL, 0)[0]
+        try:
+            return real_import(*args, **kwargs)
+        finally:
+            if left:
+                _setitimer(signal.ITIMER_REAL, left)
+
+    real_import = builtins.__import__
     previous = signal.signal(signal.SIGALRM, expired)
     signal.setitimer(signal.ITIMER_REAL, 5)
+    monkeypatch.setattr(builtins, "__import__", paused)
     try:
         yield
     finally:
