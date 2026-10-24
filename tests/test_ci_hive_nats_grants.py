@@ -154,14 +154,12 @@ def test_in_operator_mode_a_differing_hive_user_is_red(tmp_path, capsys):
     ]
 
 
-def test_in_operator_mode_a_missing_hive_user_is_red(tmp_path, capsys):
+def test_in_operator_mode_a_retired_hive_user_passes(tmp_path, capsys):
     agentihooks, _ = _matching(tmp_path)
     antoncore = _operator_antoncore(tmp_path, {}, user="swarm-ledger")
     status, lines = _run(capsys, agentihooks, antoncore)
-    assert status == 1
-    assert lines == [
-        "::error::The hive member NATS grants cannot be read (ValueError: the SWARM account has no swarm-hive user)."
-    ]
+    assert status == 0
+    assert lines == ["The antoncore swarm-hive user is retired, so hives connect only with minted member credentials."]
 
 
 def test_a_member_source_that_cannot_render_its_claims_is_red(tmp_path, capsys):
