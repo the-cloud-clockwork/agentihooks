@@ -101,7 +101,7 @@ def release_verification(task, store, ledger, who, now):
     if (
         released.get("state") != "open"
         or released.get("claimed_by")
-        or released.get("claim_generation", 0) != expected["claim_generation"] + 1
+        or released.get("claim_generation") != expected["claim_generation"] + 1
     ):
         return False
     store.release(who.swarm, who.task, who.name)
