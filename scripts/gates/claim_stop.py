@@ -35,7 +35,7 @@ def ruling(task, pull, waiting, dependency=False):
     if url and pull is None:
         return "", ""
     if pull is not None and pull.state == "MERGED":
-        if ledger_kinds.kind(task) not in CONTRACT_PROOF:
+        if ledger_kinds.kind(task) not in CONTRACT_PROOF and not ledger_kinds.after(task):
             return "merged", ""
         if not waiting or waiting.get("on") == {"kind": "checks", "target": url}:
             return "contract", ""
@@ -82,12 +82,17 @@ def parked_by(store, who, task):
 
 
 def release_verification(task, store, who, now):
+    from dataclasses import replace
+
     if task.get("awaiting") != "verify":
         return False
     at = (task.get("contract") or {}).get("after_at")
     if not at or int(at) <= now:
         return False
     store.release(who.swarm, who.task, who.name)
+    for agent in store.agents(who.swarm):
+        if agent.name == who.name:
+            store.put_agent(who.swarm, replace(agent, state="finished"))
     return True
 
 

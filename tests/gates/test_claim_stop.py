@@ -255,9 +255,12 @@ def test_future_verification_stop_passes_and_releases_its_claim(rig, offset):
         contract={"after": "yes", "after_at": str(rig.clock[0] + offset)},
     )
     rig.pulls[URL] = MERGED
+    other = AgentRecord(name="other", lane="eng", task="t2", state="working")
+    rig.store.put_agent(SLUG, other)
     assert rig.stop().allowed
     assert rig.store.claimant(SLUG, "t1") is None
-    assert rig.store.agents(SLUG)[0].state == "finished"
+    assert next(a for a in rig.store.agents(SLUG) if a.name == "other") == other
+    assert next(a for a in rig.store.agents(SLUG) if a.name == ME).state == "finished"
     assert rig.task["awaiting"] == "verify"
     assert rig.task["state"] == "pr"
     assert rig.rows() == []
