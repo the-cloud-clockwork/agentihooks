@@ -9,7 +9,7 @@ nav_order: 50
 A hive member's NATS credential reaches the event, work queue, dead letter and state resources of the swarms it
 belongs to and nothing of any other swarm. Every subject a scoped member publishes or reads sits under
 `swarm.<swarm>.`. The JetStream API subjects that cannot carry that prefix are granted only for stream and consumer
-names that carry the swarm id. A member credential of one swarm is refused by the NATS server on another swarm's
+names that carry the swarm id. The two shared slot buckets below are the only resources outside both. A member credential of one swarm is refused by the NATS server on another swarm's
 queue, dead letter, state and stream subjects, even when those resources exist.
 
 ## When a credential is scoped
@@ -20,7 +20,7 @@ changed list applies without restarting `hive serve`:
 
 | Signer record | Credential | `hive.env` |
 |---|---|---|
-| No `member_swarms` field | The unscoped member grant: legacy execution subjects, the shared dead letter stream and every hive state bucket of every swarm | No `AGENTIHOOKS_BUS_SCOPED` line |
+| No `member_swarms` field | The unscoped member grant: legacy execution subjects, the shared dead letter stream and the shared `KV_<bucket>` store of every hive state bucket | No `AGENTIHOOKS_BUS_SCOPED` line |
 | `member_swarms` maps the member id to a list of swarms | Publish and subscribe only under each listed swarm's prefix, plus the two shared slot buckets | `AGENTIHOOKS_BUS_SCOPED=1` |
 | `member_swarms` maps the member id to an empty list | Publish denied on `>`; subscribe only on the member's own `_INBOX.<user>.>` | `AGENTIHOOKS_BUS_SCOPED=1` |
 | `member_swarms` present, member id absent | None. The endpoint answers 403 `the hub record lists no member swarms for hive member <id>; it mints no unscoped bus credential`, checked before it rotates the member's Redis password | Unchanged |
@@ -38,7 +38,7 @@ The signer record field is one JSON object:
 
 A `file:` signer reads the same object from a `member_swarms` file in its folder. `hive serve` refuses a record whose
 `member_swarms` is not an object of lists with `member_swarms must map member ids to lists of swarm names`, and one
-that names a swarm that is not a valid subject token with `member_swarms contains an invalid swarm name`. A member
+that names a swarm that is not a valid subject token with `member_swarms contains an invalid swarm name (<reason>)`. A member
 picks up a changed list at its next `agentihooks hive refresh` or `hive join`, which mints a new credential.
 
 The field is written by two commands, both with `AGENTIHOOKS_NATS_SIGNER` naming an OpenBao record under
@@ -51,7 +51,9 @@ The field is written by two commands, both with `AGENTIHOOKS_NATS_SIGNER` naming
   `file:` signer is never written.
 
 `hive join` with an invite marked `AGENTIHOOKS_BUS_SCOPED=1` refuses an unscoped credential with `the hive offered an
-unscoped bus credential; ask its hub to list this member's swarms` and keeps its current membership. That refusal
+unscoped bus credential; ask its hub to list this member's swarms` and writes no `hive.env`. The refresh behind it
+has already rotated the member's Redis password, so the Redis URL saved earlier stops authenticating; run
+`agentihooks hive scope` on the hub, then `hive join` again with the same invite. That refusal
 guards a scoped member against a downgrade; the hub's 403 is the enforcement, since anyone holding the invite file can
 edit its marker.
 
@@ -62,7 +64,7 @@ edit its marker.
 | `AGENTIHOOKS_BUS=nats` | operator or `hive.env` | Selects the NATS backend |
 | `AGENTIHOOKS_BUS_URL` | invite (`hive invite --bus-url`) | NATS address the member reaches |
 | `AGENTIHOOKS_BUS_CREDENTIALS` | `hive join` | The minted credential, or an `openbao:` reference to it |
-| `AGENTIHOOKS_BUS_SCOPED=1` | `hive invite` and `hive join`, when the grant is scoped | Routes every queue, dead letter, state and event call to the swarm's own streams |
+| `AGENTIHOOKS_BUS_SCOPED=1` | `hive invite` and `hive join`, when the grant is scoped | Routes every queue, dead letter and event call, and every state bucket except the two shared slot buckets, to the swarm's own streams |
 | `AGENTIHOOKS_BUS_BIND=1` | hive members | Binds existing streams and consumers instead of creating them; members hold no stream create grant |
 
 The hub reads the same variables. Set `AGENTIHOOKS_BUS_SCOPED=1` on the hub, without `AGENTIHOOKS_BUS_BIND`, once
@@ -101,7 +103,8 @@ For each listed swarm the credential allows publishing to:
 and subscribing to `swarm.<swarm>.>` and its own `_INBOX.<user>.>`.
 
 Two buckets stay shared across swarms because account slot accounting spans every swarm on a hive:
-`account-slots` and `hive-slot-accounts`. Every scoped credential also carries `$KV.<bucket>.>`,
+`account-slots` and `hive-slot-accounts`. A member's root bus opens them as the shared `KV_<bucket>` store, and every
+credential listing at least one swarm carries `$KV.<bucket>.>`,
 `$JS.API.STREAM.INFO.KV_<bucket>` and `$JS.API.STREAM.MSG.GET.KV_<bucket>` for those two. A scoped member that opens
 any other bucket through the root bus without selecting a swarm gets `PermissionError: select a swarm before opening
 scoped state`.
@@ -132,8 +135,12 @@ The hub's root bus, opened with `scoped=True` and provisioning on, moves one swa
 that swarm's legacy writers and consumers first.
 
 ```python
+import os
+
 from scripts.events import nats
-from scripts.events.config import BusConfig, QueuePolicy
+from scripts.events.config import BusConfig, QueuePolicy, credentials_from
+
+hub_creds = credentials_from(os.environ)
 
 bus = nats.open_bus(BusConfig(backend="nats", url="nats://hub:4222", scoped=True, credentials=hub_creds))
 bus.migrate_state("rig", "spoke-work", ["claim-1", "claim-2"])
@@ -149,7 +156,7 @@ bus.close()
 | `migrate_dead(swarm)` | Every letter of that swarm from `AGENTIHOOKS_DEAD` into its own dead stream | a retained copy that differs from its source |
 
 Each call is safe to repeat: a copy already present is skipped, and the pending mark clears only when the copy
-completes. Both calls refuse a bus without provisioning (`migration requires privileged provisioning`) or without
+completes. All three calls refuse a bus without provisioning (`migration requires privileged provisioning`) or without
 scoping (`scoped migration is not enabled`).
 
 ## Check a member's scope
