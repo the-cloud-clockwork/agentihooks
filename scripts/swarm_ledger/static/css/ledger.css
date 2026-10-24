@@ -805,7 +805,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .sw-btn.sw-step { min-width: 32px; }
   .title-pen, .logo-link, .prio-link { position: relative; }
   .title-pen::after, .logo-link::after { content: ""; position: absolute; inset: -10px; }
-  .prio-link::after { content: ""; position: absolute; inset: -10px -4px; }
+  .prio-link::after { content: ""; position: absolute; inset: -12px -4px; }
   .prio-title { position: relative; }
   .prio-title::after { content: ""; position: absolute; inset: -12px -4px; }
   .jump-menu select { min-height: 44px; }
@@ -826,7 +826,9 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .sw-fold > summary.sw-blockhead { align-items: center; }
   input[type=checkbox] { width: 24px; height: 24px; }
   .outline a { padding-block: 13px; }
-  #agents-table a, #swarm-agents a { display: inline-block; padding-block: 8px; }
+  #agents-table a, #swarm-agents a { display: inline-block; padding-block: 13px; }
+  #icon-strip .sync, #chat-fab { width: 44px; height: 44px; }
+  #chat-input { min-height: 44px; }
   .title-pen, .logo-link { min-width: 32px; min-height: 32px; place-content: center; }
   #jump-to { min-width: 216px; }
   #chat-to-pick, #stats-sync { min-height: 44px; min-width: 44px; }
