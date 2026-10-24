@@ -227,6 +227,22 @@ def test_owners_engineers_and_messages_to_agents_without_a_task_pass(world, send
     assert world.refusals() == 0
 
 
+def test_after_a_backend_master_retires_the_front_door_messages_a_claimant_in_its_phase(world):
+    third = f"master-3@{SLUG}"
+    table = masters.MasterSeats(world.redis)
+    table.set_count(SLUG, 3)
+    world.seat(world.store.names.next(SLUG, "master"), third)
+    [phase] = [p for p, owner in table.owners(SLUG, world.doc()).items() if owner == SECOND]
+    world.down(SECOND_NAME)
+
+    table.retire(SLUG, SECOND)
+
+    assert table.owners(SLUG, world.doc())[phase] == LEAD
+    assert table.retired(SLUG) == [SECOND]
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+    assert world.refusals() == 0
+
+
 def test_a_single_live_master_messages_without_reading_the_ledger(world, monkeypatch):
     world.down(SECOND_NAME)
     monkeypatch.setattr(master_fence, "_ledger_state", lambda slug: pytest.fail("read the ledger"))
