@@ -121,7 +121,7 @@ def test_spawn_reader_keeps_capacity_beside_its_refusal():
         return subprocess.CompletedProcess(
             argv,
             0,
-            "\\n".join(
+            "\n".join(
                 [
                     "other: spawn capacity for mu1: {}",
                     context,
