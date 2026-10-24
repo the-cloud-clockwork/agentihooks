@@ -892,6 +892,17 @@ address reachable by the member. A `--like` invite copies that address. Bus and
 ledger addresses survive later credential refreshes. A private hub CA must be
 trusted before joining, for example through `SSL_CERT_FILE`.
 
+Bus credentials become scoped once the hub signer record carries `member_swarms`.
+`agentihooks hive scope`, run with `AGENTIHOOKS_NATS_SIGNER` naming that record,
+creates the entry and lists every existing member with each `--swarm`, or every
+swarm when none is given. From then on the hive endpoint rereads the record on
+each refresh and refuses a member it does not list before rotating its Redis
+password, and `hive invite` lists each new member and marks its invite
+`AGENTIHOOKS_BUS_SCOPED=1`. `hive join` with such an invite refuses an unscoped
+bus credential. Before the backfill, invites and refreshes stay unscoped. The
+join refusal guards a scoped member against a downgrade; the hub refusal is the
+enforcement, since anyone holding the invite file can edit its marker.
+
 The hive only Helm example uses the same invite: create a Secret with
 `kubectl create secret generic hive-invite --from-file=invite=/path/to/invite`,
 then install the chart with `-f deploy/helm/agentihooks-swarm/examples/hive-only.yaml`.
