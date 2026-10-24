@@ -3,8 +3,8 @@
   "dependency": "SV2-SES-03",
   "integration_gate": "G4",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/6731",
-  "pull_request": "pending",
-  "tested_commit": "a1c9cac00",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/6751",
+  "tested_commit": "d2451c441",
   "package_complete": false,
   "evidence_class": "mocked: an in-process caller and a SQLite catalog file stand in for the collector, the network and the central database; no HTTP server, Pod or hive collector runs",
   "interfaces": [
