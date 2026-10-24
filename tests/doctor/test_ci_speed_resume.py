@@ -102,3 +102,30 @@ def test_a_transient_request_retries_within_the_same_sixty_call_budget(store, mo
     assert len(calls) == 7
     assert calls[0] == calls[1]
     assert json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))["last"] == NOW
+
+
+def test_resuming_a_cached_queue_observation_does_not_invent_elapsed_wait(store, monkeypatch):
+    current = [NOW]
+
+    def api(args, **kwargs):
+        query = parse_qs(urlsplit(args[2]).query)
+        if "/jobs?" in args[2]:
+            identity = int(urlsplit(args[2]).path.split("/")[-2])
+            row = job(1, queued=current[0] == NOW, created=-60, identity=identity)
+            body = {"total_count": 1, "jobs": [row]}
+        else:
+            selected = (
+                [{"id": n, "status": "in_progress", "event": "push"} for n in (1, 2)] if "created" in query else []
+            )
+            body = {"total_count": len(selected), "workflow_runs": selected}
+        return SimpleNamespace(stdout=json.dumps(body))
+
+    monkeypatch.setattr(ci_speed_read, "read", functools.partial(ci_speed_read.read, run=api, budget=(7, 25)))
+    loop.speed(store, DOCTOR, WATCHED, NOW)
+    current[0] += 20 * 60000
+    loop.speed(store, DOCTOR, WATCHED, current[0])
+    state = json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))
+    assert state["last"] == NOW
+    assert state["report"]["runs"] == 2
+    assert state["report"]["crossings"] == 0
+    assert store.redis.hlen(store.key(DOCTOR, "doctor-findings")) == 0
