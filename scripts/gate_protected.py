@@ -111,7 +111,11 @@ def _aggregator_problems(
                 )
                 for summary in (False, True)
                 for watcher_loss in (False, True)
-                for required in (list, ci_reuse.postgres_required)
+                for required in (
+                    (ci_reuse.postgres_required,)
+                    if ci_reuse.POSTGRES_REQUIRED[1] in str(base_job.get("steps"))
+                    else (list, ci_reuse.postgres_required)
+                )
                 for rerun in (list, ci_reuse.lost_rerun)
                 for shape in (list, ci_reuse.inline_mutation)
                 for finish in (list, ci_reuse.pipefail_summary)

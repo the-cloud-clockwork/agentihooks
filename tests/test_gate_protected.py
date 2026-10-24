@@ -778,6 +778,19 @@ def test_postgres_aggregation_accepts_only_the_canonical_transition(postgres):
     assert _grade({"test.yml": head}, base={"test.yml": base})
 
 
+def test_a_base_requiring_the_postgres_scenario_refuses_a_head_that_drops_it():
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.postgres_required(steps)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.postgres_required(steps)
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+    head["jobs"]["gate-required"]["steps"] = steps
+    problems = _grade({"test.yml": head}, base={"test.yml": base})
+    assert any("changes its steps" in problem for problem in problems), problems
+
+
 def test_the_tests_gate_may_start_requiring_the_postgres_scenario_on_pull_requests():
     from scripts import ci_reuse
 
