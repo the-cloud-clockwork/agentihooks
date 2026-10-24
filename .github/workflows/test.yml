@@ -704,7 +704,7 @@ jobs:
           permission-actions: read
 
       - name: Fetch the base suite count recorded on dev
-        if: steps.app-token.outcome == 'success' && github.event_name == 'pull_request'
+        if: steps.app-token.outcome == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RECORD: count-record-${{ matrix.python-version }}

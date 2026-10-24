@@ -84,6 +84,7 @@
     ["#bell", "Open your notifications: comments, replies and answers from agents."],
     ["#chat-fab", "Open the chat with the master or any agent of this swarm."],
     ["#stats-toggle", "Show or hide the Stats panel. A left swipe from the right side opens it, a right swipe closes it."],
+    ["#chat-send", "Send this message to the chosen recipient."],
     ["#art-fab", "Open the artifacts agents published for you to review."],
     ["#art-close", "Close the artifacts panel."],
     ["#chat-clear", "Clear the chat history on this page."],
