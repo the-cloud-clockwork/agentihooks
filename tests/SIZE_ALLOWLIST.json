@@ -107,14 +107,6 @@
  "hooks/mcp/enforcement.py::register.enforcement_set": {
   "PLR0913": 8
  },
- "hooks/memory/transcript_reader.py::_iter_codex_records": {
-  "C901": 15,
-  "PLR0912": 14
- },
- "hooks/memory/transcript_reader.py::_iter_copilot_records": {
-  "C901": 19,
-  "PLR0912": 18
- },
  "hooks/quota.py::fmt_quota": {
   "C901": 15,
   "PLR0912": 14
