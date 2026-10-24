@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁretire_pane__mutmut_14:a3bf3c9f315f198d13ccc76ee833607db9572390b89642dbd609daeae7995dba": {
+    "reader": "standards_reader",
+    "reason": "retire_process reads agent.pane_id only through a truth test, where None and the empty string are both falsy; the managed comparison never matches either against a non empty herdr pane id, and end, refusals and live_binding.managed never read it, so pane_id None retires and refuses exactly like pane_id empty."
+  }
+}
