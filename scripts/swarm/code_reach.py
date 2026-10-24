@@ -1,6 +1,7 @@
 """Which functions and methods under the packages an entry point reaches, and the Redis commands those send."""
 
 import ast
+import builtins
 import json
 import os
 import re
@@ -316,27 +317,35 @@ class Program:
 
     def _factory(self, func: ast.expr, unit: Unit, local: dict[str, bool]) -> bool:
         """Whether a call makes a Redis client or pipeline: a redis-py constructor, or a function here that returns
-        one, found through the unit's names and imports, its own class, or a name only one function defines."""
+        one."""
         if isinstance(func, ast.Attribute) and func.attr == "pipeline":
             return self._receiver(func.value, unit, local)
         if isinstance(func, ast.Attribute) and func.attr == "from_url":
             return _tail(func.value) in CLIENT_TYPES | {"redis"}
         if _tail(func) in CLIENT_TYPES:
             return True
+        return any(key in self.factories for key in self._callees(func, unit) or [])
+
+    def _callees(self, func: ast.expr, unit: Unit) -> list[str] | None:
+        """The functions here a call may run, found through the unit's names and imports, its own class, or a name
+        only one function defines; None when the callee cannot be found here."""
         if id(unit) not in self.scoped:
             self.scoped[id(unit)] = self._nested(unit)
         scope = self.scoped[id(unit)]
         if isinstance(func, ast.Name):
-            return any(key in self.factories for key in self.resolve(unit.module, func.id, scope))
+            bound = func.id in scope or func.id in self.scopes[unit.module] or func.id in dir(builtins)
+            return self.resolve(unit.module, func.id, scope) if bound else None
         if not isinstance(func, ast.Attribute):
-            return False
+            return None
         if unit.owner and _tail(func.value) in OWN:
-            return self.members[unit.owner].get(func.attr) in self.factories
+            found = self.members[unit.owner].get(func.attr)
+            return [found] if found else None
         head, _, rest = _dotted(func).partition(".")
         targets = [t[1:] for t in scope.get(head) or self.scopes[unit.module].get(head, []) if t.startswith("@")]
         if targets:
-            return any(key in self.factories for target in targets for key in self._import(f"{target}.{rest}"))
-        return self.unique.get(func.attr) in self.factories
+            return [key for target in targets for key in self._import(f"{target}.{rest}")]
+        found = self.unique.get(func.attr)
+        return [found] if found else None
 
     def _held(self, expr: ast.expr, unit: Unit, local: dict[str, bool], loose: bool = False) -> bool:
         """Whether an expression holds a Redis client or pipeline: a constructor or factory call, a name the unit
@@ -365,7 +374,9 @@ class Program:
         while True:
             before = dict(local)
             for target, value in pairs:
-                local[target] = local.get(target, False) or (value is not None and self._held(value, unit, local))
+                held = value is not None and self._held(value, unit, local)
+                if held or not isinstance(value, ast.Call) or self._callees(value.func, unit) is not None:
+                    local[target] = local.get(target, False) or held
             if local == before:
                 return local
 

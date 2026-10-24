@@ -66,9 +66,11 @@ uses it to find the Redis user that consumer connects as.
    `StrictRedis` or `Pipeline`, or a chained call on a pipeline. A name a
    function binds is typed from that binding in that function only, so
    `items = []` keeps `items.append` out of the map even where another
-   function holds a client named `items`. An attribute, or a parameter the
-   function does not rebind, counts when the same name holds a client
-   elsewhere. Loop targets, `*args` and `**kwargs` never count.
+   function holds a client named `items`. An attribute, a parameter the
+   function does not rebind, or a name bound to a call whose callee the map
+   cannot find (such as a function held in a variable) counts when the same
+   name holds a client elsewhere. Loop targets, `*args` and `**kwargs` never
+   count.
 
 ### Scheduler keys
 

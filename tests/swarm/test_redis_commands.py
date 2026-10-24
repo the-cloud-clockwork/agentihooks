@@ -380,6 +380,12 @@ def test_every_consumer_but_the_worker_reaches_redis(published):
     assert all(consumer["commands"] for name, consumer in published.items() if name != "worker")
 
 
+def test_known_real_senders_stay_in_the_published_map(published):
+    commands = published["controller"]["commands"]
+    assert "scripts.swarm.lease:acquire" in commands["GET"]
+    assert "scripts.swarm.execution:ExecutionRegistry.records" in commands["HVALS"]
+
+
 def test_the_published_map_drops_calls_on_receivers_that_hold_no_redis_client(published):
     senders = {unit for consumer in published.values() for units in consumer["commands"].values() for unit in units}
     excluded = (
