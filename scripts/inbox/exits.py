@@ -93,6 +93,8 @@ def _life_notice_end(item, name: str, exit_text: str) -> str:
         return push_stop.left(name, exit_text)
     if quota_notice.is_notice(item):
         return f"{name} {exit_text}; its quota notice ended with it"
+    if item.sender == BY and ":overrun:" in item.ref:
+        return f"{name} {exit_text}; its overrun request ended with it"
     return ""
 
 
@@ -246,7 +248,7 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
             if item.state in CLOSED:
                 continue
             task = notice_task(item)
-            if not (task or push_stop.is_notice(item)):
+            if not (task or push_stop.is_notice(item) or _life_notice_end(item, "", "")):
                 if item.state != "pending":
                     _settle_left_behind(inbox, item, seat, active)
                 continue
@@ -258,7 +260,8 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
             elif task:
                 reason = f"{owner} left its seat before picking task {task} back up"
             else:
-                reason = push_stop.left(owner, "left its seat")
+                outcome = inbox.seats.exit_of(owner)
+                reason = _life_notice_end(item, owner, outcome.get("reason", "left its seat"))
             inbox.close(item.id, BY, "done", reason)
 
 
