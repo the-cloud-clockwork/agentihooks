@@ -35,6 +35,9 @@ ROWS = [
     "overlays-box",
     "agents-box",
     "handoff-box",
+    "recovery-box",
+    "freeze-box",
+    "architecture-box",
 ]
 
 
@@ -180,7 +183,7 @@ def open_page(browser):
         page.context.close()
 
 
-def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_with_no_health_panel():
+def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_recovery_with_no_health_panel():
     page = page_source()
     box = page.split('<div id="swarm-box">', 1)[1].split('<aside id="stats-column"', 1)[0]
     positions = [box.index(f'id="{row}"') for row in ROWS]
@@ -188,6 +191,7 @@ def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_with_no_h
     assert 'id="command-log"' not in box
     assert '<details class="fold sw-fold" id="overlays-fold" open>' in box
     assert '<details class="fold sw-fold" id="quota-fold" open>' in box
+    assert '<details class="fold sw-fold" id="recovery-fold" open>' in box
     for gone in (
         "crew",
         "needs-you",

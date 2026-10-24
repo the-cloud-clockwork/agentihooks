@@ -19,6 +19,7 @@ from scripts.doctor import (
     health,
     inbox,
     master_launches,
+    master_prompts,
     read,
     runtime,
     spawn_read,
@@ -29,7 +30,7 @@ from scripts.doctor import (
 )
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
-from scripts.swarm import idle, status, timing
+from scripts.swarm import idle, input_wait, status, timing
 from scripts.swarm.health import activity
 from scripts.swarm.runtime import SWARM_HOME
 
@@ -85,6 +86,12 @@ def _overruns(store, slug):
     )
 
 
+def _master_prompts(store, slug, now_ms):
+    masters = [asdict(a) for a in store.agents(slug) if a.lane == "master"]
+    since = {a["name"]: input_wait.since(store, slug, a["name"]) for a in masters}
+    return master_prompts.findings(masters, since, now_ms)
+
+
 def _starts(store, slug, now_ms):
     from scripts.swarm.tick import ACKNOWLEDGING
 
@@ -134,6 +141,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         "master launch": lambda: master_launches.findings(spawn_read.master_records(store, slug)),
         "startup": lambda: _starts(store, slug, now_ms),
         "context overrun": lambda: _overruns(store, slug),
+        "master prompt": lambda: _master_prompts(store, slug, now_ms),
         "ci": lambda: _ci(store, tasks(), now_ms),
         "dev workflow": lambda: ci.red_dev_workflows(ci_read.dev_pushes(store.config(slug).repo)),
         "trace": lambda: _traces(store, tasks(), slug, now_ms, env, None if telemetry is True else telemetry),

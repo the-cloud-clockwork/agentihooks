@@ -24,6 +24,7 @@ class Limits:
     active_stale_seconds: int = 60
     active_grace_seconds: int = 60
     interval_minutes: int = 10
+    first_turn_minutes: int = 60
 
     @classmethod
     def from_env(cls, environ):
@@ -352,16 +353,30 @@ def _unconfirmed(binding, record, limits):
     )
 
 
+def _turn_completed(binding):
+    return bool((binding["local"] or {}).get("stopped"))
+
+
 def _never_exported(binding, record, limits):
     age = _ago(record["now_ms"], binding["started_at"])
+    turn = (
+        "a turn completed"
+        if _turn_completed(binding)
+        else f"no completed turn recorded, working past the {limits.first_turn_minutes} minute first turn bound"
+    )
     return Finding(
         "telemetry never exported",
         f"{binding['agent']}.{binding['started_at']}",
         f"working agent with no Langfuse trace after {age} seconds",
-        (*_who(binding), f"no trace tagged swarm:{record['slug']} and agent:{binding['agent']}"),
-        f"no trace after a {limits.active_grace_seconds} second grace, {_cadence(limits)}",
+        (*_who(binding), f"no trace tagged swarm:{record['slug']} and agent:{binding['agent']}", turn),
+        f"no trace after a completed turn or past a {limits.first_turn_minutes} minute first turn, {_cadence(limits)}",
         age,
     )
+
+
+def _fault_due(binding, record, limits):
+    first_turn = record["now_ms"] - binding["started_at"] <= limits.first_turn_minutes * MINUTE_MS
+    return _turn_completed(binding) or not first_turn
 
 
 def _misattributed(binding):
@@ -414,7 +429,8 @@ def _active_binding(binding, record, limits):
     if lag > limits.active_stale_seconds:
         found.append(_stale(binding, record, limits, lag))
     elif binding["read"] and not binding["remote"] and not wrong:
-        found.append(_never_exported(binding, record, limits))
+        if _fault_due(binding, record, limits):
+            found.append(_never_exported(binding, record, limits))
     else:
         found += [f for f in (_unconfirmed(binding, record, limits),) if f]
     return found

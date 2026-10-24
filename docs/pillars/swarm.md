@@ -2026,9 +2026,11 @@ read JSON quoted keys and added the checked worktree to readiness refusals.
 The minute tick runs the promotion watch for every swarm. The watch reads the newest finished push run of Tests on
 `dev`. For a red run it files one urgent `ci` task per failed job with a new cause. When it files, or no promotion
 alert is live, it raises a promotion alert on the ledger, and it sends the master an inbox item for the new tasks. The
-tasks are named `promo-<run id>-<n>`. For a later green run it closes those tasks and the alert. Several swarms can
-watch one repository, a watched swarm and its Doctor most often. Only one of them, the intake owner, files and closes
-promotion fixer tasks for that repository. A failed check of one run is filed once, in the owner's ledger.
+tasks are named `promo-<run id>-<n>`. For a later green run whose `promote` job concluded success it closes
+those tasks and the alert; a green run whose `promote` job was skipped, cancelled or missing leaves them open.
+Several swarms can watch one repository, a watched swarm and its Doctor most often. Only one of them, the intake
+owner, files and closes promotion fixer tasks for that repository. A failed check of one run is filed once, in the
+owner's ledger.
 
 ### Choosing the owner
 
@@ -2982,6 +2984,16 @@ The command prints 0 once the finding is gone.
 
 [Pull request #4024](https://github.com/the-cloud-clockwork/agentihooks/pull/4024) delivered the pin and the
 detector; its red Proofs run reproduced a stripped identity master whose directive returned nothing.
+
+### Doctor master prompt detector
+
+The tick records when each agent entered the input prompt its pane waits on, kept while the same prompt holds and
+cleared once the pane leaves it. The Doctor's `master prompt` detector reads every watched master row with an input
+prompt and that time, and raises a finding once the wait reaches fifteen minutes. The finding id is
+`master-waiting-on-input/<seat>`; its evidence names the seat, the prompt, the minutes waited with the time the wait
+began, and the agent. Its number is the minutes waited rounded down to fifteen minute steps, so a judged finding
+returns only when the wait grows by another fifteen minutes. The Doctor never types into the master pane; the
+operator answers the prompt.
 
 ### Doctor handoff detectors
 
@@ -4514,8 +4526,9 @@ A detection pass reads:
 - **The watched tasks, once.** The CI detector and the trace detector share one read of the watched ledger's tasks.
 - **Every detector side by side.** Each detector runs in its own thread and is still timed as its own
   `doctor.<name>` step: `runtime storage`, `scheduled tick`, `health`, `inbox`, `handoff`, `spawn`,
-  `master launch`, `startup`, `context overrun`, `ci`, `dev workflow` and, with telemetry on, `trace`. A detector
-  that raises is reported as `the <name> detector failed: <error type>: <message>` while the others still report.
+  `master launch`, `startup`, `context overrun`, `master prompt`, `ci`, `dev workflow` and, with telemetry on,
+  `trace`. A detector that raises is reported as `the <name> detector failed: <error type>: <message>` while the
+  others still report.
 - **Pull requests side by side.** The CI detector reads each open pull request of the watched tasks in a thread pool.
 - **Traces inside their budgets.** The trace detector reads active bindings and the historical backfill side by side,
   each inside its own existing budget (15 seconds for active bindings, 45 seconds for the backfill, 55 seconds for

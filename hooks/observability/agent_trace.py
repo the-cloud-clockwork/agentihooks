@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME
+from hooks.memory.records import is_inbox_delivery
 
 CURSOR_DIR = AGENTIHOOKS_HOME / "agent_trace"
 SYSTEM = "anthropic"
@@ -123,8 +124,7 @@ def _is_prompt(entry: dict) -> bool:
     if entry.get("type") != "user":
         return False
     if entry.get("isMeta"):
-        origin = entry.get("origin")
-        return isinstance(origin, dict) and origin.get("kind") == "channel" and origin.get("server") == "inbox"
+        return is_inbox_delivery(entry)
     text = _text(_blocks(entry))
     if (
         entry.get("uuid", "").startswith("codex-")

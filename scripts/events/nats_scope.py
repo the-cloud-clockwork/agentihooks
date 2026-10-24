@@ -9,7 +9,7 @@ from .config import SCOPED_STATE_BUCKETS, QueuePolicy
 from .nats import NatsEventLog, NatsWorkQueue, _seconds
 from .nats_state import ScopedStateStore
 from .scope import ScopedLog, queue_lane
-from .subjects import PREFIX, stream_name, subject
+from .subjects import PREFIX, in_swarm, stream_name, subject
 
 if TYPE_CHECKING:
     from .nats import NatsBus
@@ -89,7 +89,7 @@ class NatsScopedBus:
             return store
 
     def request(self, subject: str, data: bytes, timeout_ms: int) -> bytes:
-        if not subject.startswith(f"{PREFIX}.{self._swarm}."):
+        if not in_swarm(self._swarm, subject):
             raise ValueError(f"a scoped bus cannot request outside swarm {self._swarm!r}")
         return self._root.request(subject, data, timeout_ms)
 

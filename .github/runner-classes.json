@@ -5,6 +5,7 @@
   "branch-lanes.yml/grade": "light",
   "chaos.yml/chaos": "standard",
   "chart-release.yml/publish": "light",
+  "ci-minutes.yml/measure": "light",
   "ci-templates.yml/actionlint": "hosted",
   "codex-cache.yml/seed": "standard",
   "count-record.yml/count-record": "standard",

@@ -108,6 +108,8 @@ MOVED = {
 }
 if (WORKFLOWS / "actions-storage.yml").exists():
     MOVED[("actions-storage.yml", "prune")] = LIGHT
+if (WORKFLOWS / "ci-minutes.yml").exists():
+    MOVED[("ci-minutes.yml", "measure")] = LIGHT
 
 # These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
 OIDC = {("pages.yml", "deploy"), ("publish-pypi.yml", "publish")}

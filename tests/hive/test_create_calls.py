@@ -12,7 +12,7 @@ from scripts import openbao_kv
 from scripts.hive import auth, cli, create, create_github, create_render, invite, machine, registry
 from scripts.hive.bundle_origin import SETTINGS_PATH
 from tests.codex_fakes import http_error
-from tests.hive.test_create import NAME, NFS, NOW, PR, RECORD, REPO, TARGET, TEMPLATE, Run, Store
+from tests.hive.test_create import NAME, NOW, PR, RECORD, REPO, TARGET, TEMPLATE, Run, Store
 from tests.hive.test_invite import LIKE, SWARM, URL, Bao, _bao
 
 pytestmark = pytest.mark.unit
@@ -105,7 +105,6 @@ def test_a_full_create_makes_exactly_these_calls(world):
         ["kubectl", "get", "service", "-A", "-o", "json"],
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", NAME, "-f", "host_key"],
         ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.TEMPLATE_PATH}?ref=dev"],
-        ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.NFS_HOMES_PATH}?ref=dev"],
         ["gh", "pr", "list", "-R", REPO, "--head", NAME, "--state", "all", "--json", "url,state", "--jq", PENDING],
         [*_gh_api(f"repos/{REPO}/git/ref/heads/dev"), ".object.sha"],
         [*_gh_api(f"repos/{REPO}/git/commits/sha"), ".tree.sha"],
@@ -151,14 +150,6 @@ def test_a_full_create_makes_exactly_these_calls(world):
                     for path, text in create.create_render.render(
                         TEMPLATE, create_render.Hive(NAME, RECORD, 2225, "worker-001", "10.10.30.207")
                     ).items()
-                ]
-                + [
-                    {
-                        "path": create_render.NFS_HOMES_PATH,
-                        "mode": "100644",
-                        "type": "blob",
-                        "content": create_render.with_home(NFS, NAME),
-                    }
                 ],
             },
         ),
@@ -196,7 +187,7 @@ def test_a_full_create_makes_exactly_these_calls(world):
 
 def test_the_dry_run_names_the_pull_request_files(world):
     create.create(world.tools, create.Options(dry_run=True))
-    files = f"k8s/manifests/{NAME}/ssh-lan.yaml, {create_render.NFS_HOMES_PATH}"
+    files = f"k8s/manifests/{NAME}/ssh-lan.yaml"
     assert f"hive create {NAME}: manifests: would open a pull request into {REPO} dev with {files}" in world.lines
     keys = f"hive create {NAME}: ssh keys: would write a new SSH host key and 2 authorized keys into OpenBao secret/{RECORD}"
     assert keys in world.lines
@@ -215,6 +206,57 @@ def test_a_pull_request_that_never_merges_times_out_naming_it(world):
     world.run.on_merge = lambda: setattr(world.run, "state", "OPEN")
     with pytest.raises(auth.HiveError, match=f"waiting for pull request {PR} to merge; rerun hive create to resume"):
         create.create(world.tools, create.Options(timeout_s=0))
+
+
+ROLLUP = ["gh", "pr", "view", PR, "--json", "statusCheckRollup"]
+STATE = ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"]
+AUTO_REFUSED = "GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)"
+
+
+def _merge_calls(run):
+    return [argv for argv in run.calls if argv[:2] == ["gh", "pr"] and argv[2] in ("view", "merge")]
+
+
+def test_a_refused_auto_merge_waits_for_checks_then_squash_merges(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.checks = [
+        [{"__typename": "CheckRun", "name": "Gate", "status": "QUEUED", "conclusion": ""}],
+        [{"__typename": "CheckRun", "name": "Gate", "status": "COMPLETED", "conclusion": "SUCCESS"}],
+    ]
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    assert _merge_calls(world.run) == [
+        STATE,
+        ["gh", "pr", "merge", PR, "--squash", "--auto"],
+        ROLLUP,
+        ROLLUP,
+        ["gh", "pr", "merge", PR, "--squash"],
+        STATE,
+    ]
+    assert world.sleeps[0] == create.POLL_S
+    assert f"hive create {NAME}: merge: merged {PR}" in world.lines
+
+
+def test_a_failed_check_stops_the_create_without_merging(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.checks = [[{"__typename": "StatusContext", "context": "Gate", "state": "FAILURE"}]]
+    with pytest.raises(auth.HiveError, match=f"pull request {PR} has failed checks: Gate;"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    assert ["gh", "pr", "merge", PR, "--squash"] not in world.run.calls
+
+
+def test_checks_that_never_pass_time_out_naming_them(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.checks = [[]]
+    with pytest.raises(auth.HiveError, match=f"waiting for pull request {PR} checks to pass; rerun hive create"):
+        create.create(world.tools, create.Options(timeout_s=0))
+
+
+def test_a_merge_error_other_than_the_auto_merge_refusal_stops_the_create(world):
+    world.run.merge_error = "Pull request is not mergeable"
+    with pytest.raises(auth.HiveError, match="gh pr merge exited 1: Pull request is not mergeable"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    assert ROLLUP not in world.run.calls
 
 
 def test_a_stale_heartbeat_is_not_live(world):
