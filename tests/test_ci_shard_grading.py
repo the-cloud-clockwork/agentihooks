@@ -78,6 +78,7 @@ def test_shard_grading_has_no_legacy_grader_and_no_base_branch_conditions():
     assert not any(step.get("uses", "").startswith("astral-sh/setup-uv") for step in steps)
     for job in ("split", "unit", "shard-check"):
         assert "base.ref" not in str(jobs[job])
+        assert "'main'" not in str(jobs[job])
 
 
 _ACTIONS_SHELLS = {None: ["bash", "-e"], "bash": ["bash", "--noprofile", "--norc", "-eo", "pipefail"]}
