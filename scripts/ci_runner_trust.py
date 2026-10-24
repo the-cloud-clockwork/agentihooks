@@ -152,7 +152,7 @@ def _selector(runner: object, policy: object) -> bool:
 
 
 def _trusted_runner(job: dict, actors: object) -> bool:
-    uses = job.get("uses", "")
+    uses = job.get("uses")
     if uses and uses.lower() != SHARED:
         return False
     runner = (job.get("with") or {}).get("runs_on") if uses else job.get("runs-on")
