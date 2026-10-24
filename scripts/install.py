@@ -5481,12 +5481,12 @@ def cmd_claude(extra_args: list[str]) -> None:
         print(f"[agentihooks] deps: preflight skipped: {exc}", file=sys.stderr)
     route_lock_path = _cache_path(os.environ).with_name("claude-route.lock")
     route_lock_path.parent.mkdir(parents=True, exist_ok=True)
-    # Held until exec: the descriptor is close-on-exec, so the next launch counts this
-    # process only once it already runs as claude.
     route_lock = route_lock_path.open("a+", encoding="utf-8")
     fcntl.flock(route_lock, fcntl.LOCK_EX)
     try:
         if route in ROUTE_LAUNCHERS:
+            if route == "master-login":
+                route_lock.close()
             return import_module(ROUTE_LAUNCHERS[route]).launch_claude(claude_bin, extra_args, os.environ, report)
         decision = (
             forced(os.environ, route)
