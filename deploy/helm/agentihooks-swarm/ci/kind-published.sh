@@ -3,7 +3,6 @@ set -euo pipefail
 
 version="${1:?usage: kind-published.sh VERSION}"
 version="${version#v}"
-cd "$(dirname "$0")/../../../.."
 owner="${GHCR_OWNER:-the-cloud-clockwork}"
 chart="oci://ghcr.io/$owner/charts/agentihooks-swarm"
 image="ghcr.io/$owner/agentihooks-swarm:$version"
@@ -11,6 +10,7 @@ release=agentihooks-swarm
 cluster="swarm-published-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:8])')"
 pulled="$(mktemp -d)"
 cluster_setup=""
+ledger_tls=""
 
 finish() {
   status=$?
@@ -22,7 +22,7 @@ finish() {
     fi
     kind delete cluster --name "$cluster" || true
   fi
-  rm -rf "$pulled"
+  rm -rf "$pulled" "$ledger_tls"
   exit "$status"
 }
 trap finish EXIT
@@ -36,11 +36,12 @@ if [[ ! -f $archive ]] || [[ "$(helm show chart "$archive" | sed -n 's/^version:
   printf 'the pulled chart is not agentihooks-swarm version %s\n' "$version" >&2
   exit 1
 fi
+tar -xzf "$archive" -C "$pulled"
 printf 'pulled %s version %s\n' "$chart" "$version"
 
 kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
 cluster_setup=$!
-deadline=$((SECONDS + ${IMAGE_WAIT_SECONDS:-1500}))
+deadline=$((SECONDS + ${IMAGE_WAIT_SECONDS:-1200}))
 until docker pull -q "$image"; do
   if ((SECONDS >= deadline)); then
     printf 'the image %s was not published in time\n' "$image" >&2
@@ -59,9 +60,8 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$ledger_host" \
   -keyout "$ledger_tls/tls.key" -out "$ledger_tls/tls.crt" 2>/dev/null
 kubectl create secret generic swarm-ledger-tls --from-file="$ledger_tls/tls.crt" --from-file="$ledger_tls/tls.key" \
   --from-file=ca.crt="$ledger_tls/tls.crt"
-rm -rf "$ledger_tls"
 
-helm install "$release" "$archive" -f deploy/helm/agentihooks-swarm/ci/kind-values.yaml \
+helm install "$release" "$archive" -f "$pulled/agentihooks-swarm/ci/kind-values.yaml" \
   --set image.repository="${image%:*}" --set image.tag="$version" --set image.pullPolicy=Never \
   --wait --timeout 5m
 helm test "$release" --logs --timeout 2m

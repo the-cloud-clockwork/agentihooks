@@ -55,34 +55,40 @@ def test_the_chart_just_published_installs_on_kind_after_publication():
     assert step["run"] == 'bash deploy/helm/agentihooks-swarm/ci/kind-published.sh "$VERSION"'
 
 
-@pytest.mark.parametrize("missing", [True, False])
-def test_a_missing_published_chart_fails_before_any_cluster_starts(tmp_path, missing):
+def _install_published(tmp_path, mode):
     stub = tmp_path / "helm"
     stub.write_text(
         f"#!{sys.executable}\n"
-        "import json, os, sys\n"
+        "import io, json, os, sys, tarfile\n"
         "from pathlib import Path\n"
+        "tool = Path(sys.argv[0]).name\n"
         "args = sys.argv[1:]\n"
         "with Path(os.environ['CALLS']).open('a') as stream:\n"
-        "    stream.write(json.dumps([Path(sys.argv[0]).name, *args]) + '\\n')\n"
-        "if args[0] == 'pull':\n"
-        "    if os.environ['MISSING'] == '1':\n"
+        "    stream.write(json.dumps([tool, *args]) + '\\n')\n"
+        "if tool == 'helm' and args[0] == 'pull':\n"
+        "    if os.environ['MODE'] == 'missing':\n"
         "        sys.exit(1)\n"
         "    destination = Path(args[args.index('--destination') + 1])\n"
-        "    (destination / f\"agentihooks-swarm-{args[args.index('--version') + 1]}.tgz\").touch()\n"
-        "if args[0] == 'show':\n"
-        "    print('version: 9.9.8')\n"
-        "if Path(sys.argv[0]).name == 'kind':\n"
-        "    sys.exit(29)\n"
+        "    archive = destination / f\"agentihooks-swarm-{args[args.index('--version') + 1]}.tgz\"\n"
+        "    with tarfile.open(archive, 'w:gz') as tar:\n"
+        "        member = tarfile.TarInfo('agentihooks-swarm/ci/kind-values.yaml')\n"
+        "        tar.addfile(member, io.BytesIO())\n"
+        "if tool == 'helm' and args[0] == 'show':\n"
+        "    print('version: ' + ('9.9.8' if os.environ['MODE'] == 'mismatch' else '9.9.9'))\n"
+        "if tool == 'helm' and args[0] == 'install':\n"
+        "    assert args[args.index('-f') + 1].endswith('/agentihooks-swarm/ci/kind-values.yaml')\n"
+        "    sys.exit(1)\n"
     )
     stub.chmod(0o755)
-    (tmp_path / "kind").symlink_to(stub)
+    for tool in ("kind", "docker", "kubectl"):
+        (tmp_path / tool).symlink_to(stub)
     calls = tmp_path / "calls"
     env = {
-        **os.environ,
+        **{key: value for key, value in os.environ.items() if key != "GHCR_OWNER"},
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
         "CALLS": str(calls),
-        "MISSING": "1" if missing else "0",
+        "MODE": mode,
+        "KIND_NODE_IMAGE": "kindest/node:fixture",
     }
     result = subprocess.run(
         ["bash", str(ROOT / "deploy/helm/agentihooks-swarm/ci/kind-published.sh"), "v9.9.9"],
@@ -90,20 +96,34 @@ def test_a_missing_published_chart_fails_before_any_cluster_starts(tmp_path, mis
         capture_output=True,
         text=True,
     )
+    return result, [json.loads(line) for line in calls.read_text().splitlines()]
+
+
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    [
+        ("missing", "version 9.9.9 is not published"),
+        ("mismatch", "the pulled chart is not agentihooks-swarm version 9.9.9"),
+    ],
+)
+def test_a_missing_or_wrong_published_chart_fails_before_any_cluster_starts(tmp_path, mode, message):
+    result, calls = _install_published(tmp_path, mode)
     assert result.returncode == 1
-    recorded = [json.loads(line) for line in calls.read_text().splitlines()]
-    assert recorded[0][:4] == [
-        "helm",
-        "pull",
-        "oci://ghcr.io/the-cloud-clockwork/charts/agentihooks-swarm",
-        "--version",
-    ]
-    assert recorded[0][4] == "9.9.9"
-    assert all(call[0] != "kind" for call in recorded)
-    if missing:
-        assert "version 9.9.9 is not published" in result.stderr
-    else:
-        assert "the pulled chart is not agentihooks-swarm version 9.9.9" in result.stderr
+    assert calls[0][:3] == ["helm", "pull", "oci://ghcr.io/the-cloud-clockwork/charts/agentihooks-swarm"]
+    assert calls[0][3:5] == ["--version", "9.9.9"]
+    assert all(call[0] != "kind" for call in calls)
+    assert message in result.stderr
+
+
+def test_a_failed_install_of_the_published_chart_fails_and_deletes_the_cluster(tmp_path):
+    result, calls = _install_published(tmp_path, "install")
+    assert result.returncode == 1
+    install = next(call for call in calls if call[:2] == ["helm", "install"])
+    assert install[3].endswith("agentihooks-swarm-9.9.9.tgz")
+    assert "image.tag=9.9.9" in install
+    assert ["docker", "pull", "-q", "ghcr.io/the-cloud-clockwork/agentihooks-swarm:9.9.9"] in calls
+    assert not [call for call in calls if call[:2] == ["helm", "test"]]
+    assert calls[-1][:3] == ["kind", "delete", "cluster"]
 
 
 def _publish(tmp_path, version, fail=""):
