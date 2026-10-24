@@ -269,6 +269,19 @@ def grouped(groups: dict) -> list[Finding]:
     return found
 
 
+def fresh_groups(groups: dict, eligible: set[str], raised: set[str]) -> tuple[dict, set[str]]:
+    fresh = {}
+    runs = set()
+    for identity, entry in groups.items():
+        if identity not in eligible or entry["kind"] not in ("ci runner wait", "ci tier wall time"):
+            continue
+        members = {key: member for key, member in entry["members"].items() if key not in raised}
+        if members:
+            fresh[identity] = {**entry, "members": members}
+            runs.update(members)
+    return fresh, runs
+
+
 def scope_of(subject: str) -> str:
     """The label set or tier of a grouped subject, without the window start older ids carry."""
     head, _, rest = subject.partition("-")
