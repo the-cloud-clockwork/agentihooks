@@ -1218,7 +1218,7 @@ jobs:
           CI_FLAKES: ${{ github.workspace }}/flakes.jsonl
           CI_REUSED: ${{ github.workspace }}/reused.json
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
-        run: if [[ -n "${QUEUE_SHARDS:-}" ]]; then SHARD="${SHARD%/*}/$QUEUE_SHARDS"; fi; start=$SECONDS && status=0 && workers=$(python -m scripts.ci_cpu_quota) && python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n "$workers" --dist loadgroup --shard "$SHARD" -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?; echo "{\"seconds\":$((SECONDS - start))}" > elapsed.json; exit "$status"
+        run: if [[ -n "${QUEUE_SHARDS:-}" ]]; then SHARD="${SHARD%/*}/$QUEUE_SHARDS"; fi; start=$SECONDS && status=0 && workers=$(python -m scripts.ci_cpu_quota) && python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n "$workers" --dist loadgroup --shard "$SHARD" -p tests.flake_ledger --reruns 2 --tb=short --timeout=60 --timeout-method=thread -o faulthandler_timeout=45 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?; echo "{\"seconds\":$((SECONDS - start))}" > elapsed.json; exit "$status"
 
       - name: Mint the token that restores queue unit artifacts
         id: unit-token
@@ -1471,7 +1471,7 @@ jobs:
           read -ra files <<< "$FILES"
           start=$SECONDS
           status=0
-          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?
+          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short --timeout=60 --timeout-method=thread -o faulthandler_timeout=45 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?
           echo "{\"seconds\":$((SECONDS - start)),\"job\":\"$GITHUB_JOB\"}" > elapsed.json
           exit "$status"
 
