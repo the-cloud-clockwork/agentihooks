@@ -251,18 +251,27 @@ def test_after_a_backend_master_retires_the_items_it_decided_belong_to_the_front
     table = masters.MasterSeats(world.redis)
     table.set_count(SLUG, 3)
     world.seat(world.store.names.next(SLUG, "master"), f"master-3@{SLUG}")
-    assert world.decide(SECOND_NAME)["accepted"]
-    decided_at = world.doc()["_meta"]["stamps"][f"{cases.FOLLOWUP}/done"]["at"]
+    table.own_hive(SLUG, "anton", SECOND)
+    add = {"op": "add_item", "id": "targeted", "by": ENGINEER, "list": "followups", "text": "Ready", "hive": "anton"}
+    assert world.write(add)["accepted"]
+
+    def decide(by, n):
+        op = {"op": "set", "id": f"set-targeted-{n}", "by": by, "path": "followups/targeted/done", "value": True}
+        return world.write(op)
+
+    assert decide(SECOND_NAME, 0)["accepted"]
+    assert world.doc()["_meta"][master_fence.DECISIONS]["followups/targeted"]["seat"] == SECOND
+    decided_at = world.doc()["_meta"]["stamps"]["followups/targeted/done"]["at"]
     world.down(SECOND_NAME)
 
     table.retire(SLUG, SECOND, decided_at)
 
-    refused = [f"{cases.FOLLOWUP} belongs to {LEAD}, so {cases.FORMER} cannot decide it"]
-    assert world.decide(cases.FORMER, False, 1)["warnings"] == refused
+    refused = [f"followups/targeted belongs to {LEAD}, so {cases.FORMER} cannot decide it"]
+    assert decide(cases.FORMER, 1)["warnings"] == refused
+    assert table.hive_owners(SLUG) == {f"{masters.HIVES}/anton": LEAD}
     world.redis.hdel(table.key(SLUG), masters.RETIRED)
-    refill = world.store.names.next(SLUG, "master")
-    world.seat(refill, SECOND)
-    assert world.decide(cases.FORMER, False, 2)["warnings"] == refused
+    world.seat(world.store.names.next(SLUG, "master"), SECOND)
+    assert decide(cases.FORMER, 2)["warnings"] == refused
 
 
 def racing_pipelines(world, monkeypatch, times):

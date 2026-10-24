@@ -125,6 +125,10 @@ def _added(held: list[str], address: str) -> list[str]:
     return held if address in held else [*held, address]
 
 
+def _handed(owned: dict[str, str], address: str, front: str) -> dict[str, str]:
+    return {item: front if owner == address else owner for item, owner in owned.items()}
+
+
 def count_of(text: str) -> int:
     if not text.isdecimal():
         raise MasterError(f"masters takes a whole number of master seats, not {text!r}")
@@ -213,12 +217,13 @@ class MasterSeats:
                     pipe.watch(key)
                     saved = json.loads(pipe.hget(key, "owners") or "{}")
                     held = json.loads(pipe.hget(key, RETIRED) or "[]")
-                    moved = {p: front if owner == address else owner for p, owner in saved.items()}
+                    hives = json.loads(pipe.hget(key, HIVES) or "{}")
                     pipe.multi()
                     pipe.hset(
                         key,
                         mapping={
-                            "owners": json.dumps(moved),
+                            "owners": json.dumps(_handed(saved, address, front)),
+                            HIVES: json.dumps(_handed(hives, address, front), sort_keys=True),
                             RETIRED: json.dumps(_added(held, address)),
                             f"{RETIRED_AT}{address}": at,
                         },
