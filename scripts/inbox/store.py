@@ -840,7 +840,7 @@ class InboxStore:
         return sorted(self._items(list(item_ids)), key=_order)
 
     def pending_items(self, address):
-        return sorted(self._items(self._pending_ids(address)), key=_order)
+        return sorted(self._items(self._pending_ids(address)), key=_order)[1:]
 
     def _items(self, item_ids):
         if not item_ids:
