@@ -44,6 +44,7 @@ def test_handoff_missing_original_choices_cannot_spawn(launching, key):
     assert error.value.status == "unsupported"
     assert not calls
 
+
 @pytest.mark.parametrize("key", ["model", "effort"])
 def test_handoff_missing_run_options_uses_defaults(launching, key):
     engine, config, task, saved, calls = launching
