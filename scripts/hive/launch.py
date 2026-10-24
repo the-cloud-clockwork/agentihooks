@@ -101,7 +101,15 @@ def _open_claude_rows(rows: list, hived: dict[str, int]) -> list:
     ]
 
 
+def _count_claude(counted: dict[str, int], counts: dict[str, int]) -> None:
+    for slot, count in counts.items():
+        harness, _, account = slot.partition(":")
+        if harness == "claude" and account:
+            counted[_key(account)] = counted.get(_key(account), 0) + count
+
+
 def _hive_sessions(redis: object, now_ms: int) -> dict[str, int]:
+    """Remote hive sessions plus launch reservations no hive reports yet, as the account reservation counts them."""
     from scripts.routing import aggregate
 
     if aggregate.enabled():
@@ -110,14 +118,15 @@ def _hive_sessions(redis: object, now_ms: int) -> dict[str, int]:
 
     local = hive_id()
     counted: dict[str, int] = {}
+    seen: set[str] = set()
     for hive in registry.hives(redis):
-        if hive["id"] == local or not registry.live(hive, now_ms):
+        if not registry.live(hive, now_ms):
             continue
         counts = json.loads(redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
-        for slot, count in counts.items():
-            harness, _, account = slot.partition(":")
-            if harness == "claude" and account:
-                counted[_key(account)] = counted.get(_key(account), 0) + count
+        seen.update(execution for ids in counts.pop("_executions", {}).values() for execution in ids)
+        if hive["id"] != local:
+            _count_claude(counted, counts)
+    _count_claude(counted, LaunchSlots(redis).counts(seen))
     return counted
 
 
