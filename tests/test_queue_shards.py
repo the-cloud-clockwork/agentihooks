@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from tests import refresh_durations
+from tests.queue_shards import SLOWDOWN, STARTUP_SECONDS
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,6 +17,7 @@ def _a_420_second_step(monkeypatch):
     from tests import queue_shards
 
     monkeypatch.setattr(queue_shards, "STEP_SECONDS", 420)
+    monkeypatch.setattr(queue_shards, "SLOWDOWN", 1.15)
 
 
 def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
@@ -46,8 +48,6 @@ _RECORDED_QUEUE_RUNS = [
 
 
 def test_the_planned_slowest_queue_shard_is_within_fifteen_percent_of_every_recorded_real_slowest_shard():
-    from tests.queue_shards import SLOWDOWN, STARTUP_SECONDS
-
     ratios = sorted((STARTUP_SECONDS + SLOWDOWN * peak) / real for peak, real in _RECORDED_QUEUE_RUNS)
 
     assert 0.85 <= ratios[0] and ratios[-1] <= 1.15
