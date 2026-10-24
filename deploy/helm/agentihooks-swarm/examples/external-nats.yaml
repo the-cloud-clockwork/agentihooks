@@ -1,0 +1,8 @@
+# A hub install on a NATS that runs outside this release; the bundled NATS stays out.
+hub:
+  enabled: true
+  bus:
+    url: nats://nats.nats.svc.cluster.local:4222
+
+nats:
+  enabled: false

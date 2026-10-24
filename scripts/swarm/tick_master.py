@@ -77,7 +77,7 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
     forcing = bool(state) and config.state != "stopping" and _due(state, now_ms, minutes)
     finished = _finish_dead(store, slug) if forcing else []
     if forcing and not _starting(store, slug):
-        store.redis.delete(store.key(slug, "master-start"))
+        master_start.clear_unalerted(store, slug)
     launched = launch()
     if forcing and not launched:
         launched = [_launch_refusal(store, slug)]
@@ -142,7 +142,7 @@ def _launch_refusal(store, slug):
     if name := pending.get("name"):
         return f"master launch refused: startup pending for {name}"
     if pending.get("alerted"):
-        return "master launch refused: startup retries exhausted, operator action is required"
+        return "master launch refused: startup retry backoff pending"
     return NO_LAUNCH
 
 

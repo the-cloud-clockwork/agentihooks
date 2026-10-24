@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import uuid
 from typing import TYPE_CHECKING
 
@@ -9,6 +10,10 @@ from scripts.scheduler.core import Scheduler
 if TYPE_CHECKING:
     from redis import Redis
 
+RECHECK_S = 30
+# BLPOP treats a zero timeout as block forever.
+MIN_POP_S = 0.01
+
 
 def blocking_client() -> "Redis":
     from redis import ConnectionPool, Redis
@@ -17,7 +22,7 @@ def blocking_client() -> "Redis":
 
     source = redis_client()
     pool = source.connection_pool
-    options = {**pool.connection_kwargs, "socket_timeout": None}
+    options = {**pool.connection_kwargs, "socket_timeout": RECHECK_S + 5}
     client = Redis(connection_pool=ConnectionPool(connection_class=pool.connection_class, **options))
     source.close()
     return client
@@ -29,6 +34,12 @@ def wake(event: dict, delivery_id: str, redis: "Redis") -> None:
         pipe.rpush(key, delivery_id)
         pipe.ltrim(key, -1, -1)
         pipe.execute()
+
+
+def _recheck(deadline: float | None) -> float:
+    if deadline is None:
+        return RECHECK_S
+    return min(RECHECK_S, max(MIN_POP_S, deadline - time.monotonic()))
 
 
 class Timer:
@@ -47,8 +58,12 @@ class Timer:
             self.close()
             raise
 
-    def wait(self) -> None:
-        self.redis.blpop(self.key)
+    def wait(self, timeout: float | None = None) -> None:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while self.redis.blpop(self.key, timeout=_recheck(deadline)) is None:
+            if deadline is not None and time.monotonic() >= deadline:
+                return
+            service.ensure_running()
 
     def close(self) -> None:
         if self.closed:
@@ -66,9 +81,9 @@ class Timer:
         self.close()
 
 
-def wait(delay: float) -> None:
-    with Timer(delay) as timer:
-        timer.wait()
+def wait(delay: float, redis: "Redis | None" = None, timeout: float | None = None) -> None:
+    with Timer(delay, redis=redis) as timer:
+        timer.wait(timeout)
 
 
 async def async_wait(delay: float) -> None:

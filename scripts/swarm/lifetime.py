@@ -61,11 +61,12 @@ def retire_idle_master(
     return actions
 
 
-def sleeping(slug: str, store: RedisStore, rows: dict) -> bool:
+def sleeping(slug: str, store: RedisStore, rows: dict, write: bool = True) -> bool:
     previous = store.redis.get(store.key(slug, "master-retired-tasks"))
     if previous is None:
         return False
     if set(rows).difference(json.loads(previous)):
-        store.redis.delete(store.key(slug, "master-retired-tasks"))
+        if write:
+            store.redis.delete(store.key(slug, "master-retired-tasks"))
         return False
     return not InboxStore(store.redis).pending_items(seat_address(slug, MASTER))

@@ -104,12 +104,12 @@ def test_host_room_caps_the_target_and_applies_a_lower_ceiling_at_once():
     assert decision["reason"] == "Quota seats 20 (claude 10, codex 10); host room 1; ceiling 5 of 5."
 
 
-def test_a_changed_target_restarts_the_three_consecutive_ticks():
+def test_a_changed_target_keeps_counting_until_the_raise_is_interrupted():
     previous = calculate({"eng": 2}, {"claude": 6}, 10, {"eng": 100})
     previous = calculate({"eng": 2}, {"claude": 6}, 10, {"eng": 100}, previous)
     changed = calculate({"eng": 2}, {"claude": 7}, 10, {"eng": 100}, previous)
-    assert changed["ceilings"] == {"plan": 0, "ci": 0, "eng": 3}
-    assert changed["pending_raise"] == {"target": 9, "ticks": 1}
+    assert changed["ceilings"] == {"plan": 0, "ci": 0, "eng": 5}
+    assert changed["pending_raise"] == {"target": 9, "ticks": 3}
     interrupted = calculate({"eng": 2}, {"claude": 0}, 10, {"eng": 100}, changed)
     assert interrupted["pending_raise"] == {"target": None, "ticks": 0}
     restarted = calculate({"eng": 2}, {"claude": 7}, 10, {"eng": 100}, interrupted)
@@ -142,6 +142,39 @@ def test_a_confirmed_raise_reason_names_the_two_seat_limit():
     assert decision["reason"] == (
         "Quota seats 8 (claude 8); host room 20; ceiling 4 of 10; raise held by the two seat per tick limit."
     )
+
+
+def test_ready_work_cap_replaces_the_unused_tick_limit_reason():
+    previous = {
+        "ceilings": {"plan": 0, "ci": 3, "eng": 10},
+        "pending_raise": {"target": 34, "ticks": 3},
+        "reason": "",
+    }
+    for _ in range(3):
+        decision = calculate(
+            {"eng": 9, "ci": 3, "plan": 0},
+            {"claude": 22},
+            22,
+            {"eng": 1, "ci": 0, "plan": 0},
+            previous,
+        )
+        assert decision["ceilings"] == {"eng": 10, "ci": 3, "plan": 0}
+        assert decision["reason"] == (
+            "Quota seats 22 (claude 22); host room 22; ceiling 13 of 34; capped by ready work eng 1, ci 0, plan 0."
+        )
+        previous = decision
+
+
+def test_ready_work_reason_counts_missing_lanes_as_zero():
+    decision = calculate({"eng": 9, "ci": 3}, {"claude": 22}, 22, {"eng": 1})
+    assert decision["reason"] == (
+        "Quota seats 22 (claude 22); host room 22; ceiling 13 of 34; capped by ready work eng 1, ci 0, plan 0."
+    )
+
+
+def test_reaching_the_quota_target_does_not_report_a_ready_work_cap():
+    decision = calculate({"eng": 9, "ci": 3}, {"claude": 1}, 22, {"eng": 1})
+    assert decision["reason"] == "Quota seats 1 (claude 1); host room 22; ceiling 13 of 13."
 
 
 def test_idle_lanes_hold_only_their_live_agents_even_with_a_large_shift():
@@ -205,3 +238,23 @@ def test_lane_shifts_respect_sparse_live_counts_and_the_requested_shift():
         )
         assert decision["ceilings"] == expected
         assert decision["shift"] == moved
+
+
+def test_a_raise_whose_target_grows_each_tick_still_lifts_the_ceiling_on_the_third_tick():
+    live = {"plan": 0, "ci": 1, "eng": 6}
+    previous = {
+        "ceilings": {"plan": 0, "ci": 1, "eng": 8},
+        "pending_raise": {"target": None, "ticks": 0},
+        "reason": "",
+    }
+    decisions = []
+    for room in (15, 20, 25, 30):
+        previous = calculate(live, {"claude": 23, "codex": 10}, room, {"eng": 5}, previous)
+        decisions.append(previous)
+    assert [d["pending_raise"] for d in decisions] == [
+        {"target": 22, "ticks": 1},
+        {"target": 27, "ticks": 2},
+        {"target": 32, "ticks": 3},
+        {"target": 37, "ticks": 3},
+    ]
+    assert [sum(d["ceilings"].values()) for d in decisions] == [9, 9, 11, 12]

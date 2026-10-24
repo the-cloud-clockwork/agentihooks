@@ -1,4 +1,4 @@
-from scripts.swarm_ledger import ledger_kinds
+from scripts.swarm_ledger import ledger_kinds, ports
 from scripts.swarm_ledger.ledger_groups import AUTHOR_RE, ITEM_RE, REFUSED_LANES
 
 OPS = ("task_split",)
@@ -62,7 +62,7 @@ def _covers(whole, ranges):
 
 
 def apply(doc, op, ctx):
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     if lane_of(op["by"]) in REFUSED_LANES:
         ctx.refused.append(f"{op['by']}: {lane_of(op['by'])} lane, no split")

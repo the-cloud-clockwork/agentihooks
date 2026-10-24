@@ -19,6 +19,10 @@ REAL_REQUIRED_GREEN = waits.required_green
 ME = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/7"
 NO_SUITES = {"nodes": [], "pageInfo": {"hasNextPage": False}}
+FINISH_TURN = (
+    "finish the current turn now unless you have independent work; do not sleep or poll, "
+    "the swarm tick ends this wait and sends your next prompt"
+)
 
 
 @pytest.fixture
@@ -50,7 +54,37 @@ def test_a_wait_on_checks_lasts_until_the_tick_ends_it(started, capsys):
         "agent": ME,
         "until": "1970-01-01T12:00:01+00:00",
         "on": {"kind": "checks", "target": URL, "head": "first"},
+        "next": FINISH_TURN,
     }
+
+
+@pytest.mark.parametrize("on", [("task", "t2"), ("merge", URL)])
+def test_every_checked_wait_tells_the_agent_to_finish_the_current_turn(started, capsys, on):
+    assert run("sw", "--as", ME, "wait", "--on", *on) == 0
+    assert json.loads(capsys.readouterr().out)["next"] == FINISH_TURN
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [("wait", "--on", "checks", "7"), ("wait", "--on", "task", "t9"), ("wait", "--on", "deploy", "x"), ("wait", "0")],
+)
+def test_a_failed_wait_never_tells_the_agent_it_has_yielded(started, capsys, argv):
+    assert run("sw", "--as", ME, *argv) == 1
+    told = capsys.readouterr()
+    assert "finish the current turn" not in told.out + told.err
+    assert held(started[0]) is None
+
+
+def test_a_failed_checks_head_read_never_tells_the_agent_it_has_yielded(started, capsys, monkeypatch):
+    monkeypatch.setattr(cli.ledger_events, "head", lambda url: "")
+    assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 1
+    told = capsys.readouterr()
+    assert "finish the current turn" not in told.out + told.err
+
+
+def test_a_bare_wait_keeps_the_turn_open(started, capsys):
+    assert run("sw", "--as", ME, "wait", "30", "--reason", "the after window") == 0
+    assert "next" not in json.loads(capsys.readouterr().out)
 
 
 def test_the_wait_usage_names_its_kind_and_target(capsys):
@@ -1024,10 +1058,12 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "graphql",
                 "-f",
                 "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} mergeable isDraft body "
+                "timelineItems(last:1,itemTypes:[REOPENED_EVENT,ADDED_TO_MERGE_QUEUE_EVENT])"
+                "{nodes{...on ReopenedEvent{createdAt} ...on AddedToMergeQueueEvent{createdAt}}} "
                 "commits(last:1){nodes{commit{id oid committedDate "
                 'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
-                "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:7) "
+                "nodes{...on CheckRun{databaseId name conclusion startedAt completedAt isRequired(pullRequestNumber:7) "
                 "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name resourcePath}}}} "
                 "...on StatusContext{context state createdAt isRequired(pullRequestNumber:7)}} "
                 "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){"

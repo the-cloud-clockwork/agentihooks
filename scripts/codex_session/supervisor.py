@@ -40,6 +40,12 @@ OMITTED_STATE = (*SHARED_ROLLOUTS, "bin", "history.jsonl", "session_index.jsonl"
 RUNTIME_SUBDIR = "cx"
 HOME_SUBDIR = ".agentihooks"
 CODEX_HOME_KEY = "codexHome"
+OPENING_ATTEMPTS = 2
+OPENING_WATCH_S = 30.0
+TURN_COMPLETED = "turn/completed"
+USER_MESSAGE = "userMessage"
+INPUT_ITEMS = (USER_MESSAGE, "hookPrompt")
+CAPACITY = "Selected model is at capacity"
 
 LONG_SOCKET = f"socket path is longer than {SOCKET_PATH_MAX} bytes"
 DAEMON_REFUSED = "app-server takes no --no-daemon flag"
@@ -54,6 +60,7 @@ OTHER_HOME = "the server runs from another Codex home than the rendered profile"
 OTHER_ACCOUNT = "the server is not signed in with a {} account"
 NO_THREAD = "the server returned no thread id"
 SPAWN_FAILED = "app-server could not start: {}"
+OPENING_CAPACITY = "the opening Codex turn ended twice on a provider capacity error: {}"
 
 
 class LaunchFailure(RuntimeError):
@@ -100,6 +107,7 @@ class Started:
     record: TransportRecord
     agent: AgentRecord
     process: subprocess.Popen
+    slot_hive: str = ""
 
 
 def runtime_root(environ: Mapping[str, str]) -> Path:
@@ -155,7 +163,9 @@ def admit(store: RedisStore, launch: Launch, deps: Deps) -> AgentRecord:
         raise LaunchFailure("transport", OTHER_TRANSPORT.format(launch.slug, chosen))
     pid_start = deps.start_identity(os.getpid())
     target = {"pid": os.getpid(), "pid_start": pid_start} if pid_start else {}
-    agent = replace(launch.agent, harness="codex", transport=chosen, runtime_target=target)
+    from scripts.swarm.commands import hive_id
+
+    agent = replace(launch.agent, harness="codex", transport=chosen, hive=hive_id(), runtime_target=target)
     return store.start_execution(launch.slug, agent, launch.previous_execution_id)
 
 
@@ -231,6 +241,36 @@ def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> N
         protocol.set_thread_name(connection, thread_id, name)
 
 
+def opening_end(connection: protocol.Connection, events: list[dict], deadline: float, clock: Callable) -> dict:
+    """The opening turn as it completed; empty once the model answers or the watch ends first."""
+    for _ in range(MAX_POLLS):
+        while events:
+            message = events.pop(0)
+            params = message.get("params") or {}
+            if message["method"] == TURN_COMPLETED:
+                return params["turn"]
+            if params.get("item", {}).get("type", USER_MESSAGE) not in INPUT_ITEMS:
+                return {}
+        if not connection.poll(deadline - clock()):
+            return {}
+    return {}
+
+
+def open_turn(connection: protocol.Connection, thread_id: str, launch: Launch, deps: Deps) -> str:
+    for _ in range(OPENING_ATTEMPTS):
+        events: list[dict] = []
+        connection.listener = events.append
+        turn_id = protocol.start_turn(connection, thread_id, launch.opening)
+        turn = opening_end(connection, events, deps.clock() + OPENING_WATCH_S, deps.clock)
+        error = str((turn.get("error") or {}).get("message"))
+        if CAPACITY not in error:
+            return turn_id
+    reason = OPENING_CAPACITY.format(error)
+    if launch.environ.get(binding.REPORT):
+        binding.refuse(Path(launch.environ[binding.REPORT]), reason)
+    raise LaunchFailure("capacity", reason)
+
+
 def stop(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
@@ -279,7 +319,7 @@ def _connect_bound(store, bindings, launch, agent, record, process, deps) -> tup
         store.put_agent(launch.slug, agent)
         name_thread(connection, thread["id"], shown_name(launch, agent))
         if launch.opening and bindings.claim_opening(launch.slug, agent.execution_id, deps.now_ms()):
-            record = replace(record, active_turn_id=protocol.start_turn(connection, thread["id"], launch.opening))
+            record = replace(record, active_turn_id=open_turn(connection, thread["id"], launch, deps))
             bindings.put(launch.slug, record)
         return record, agent
     except (OSError, TimeoutError, protocol.ProtocolError) as exc:
@@ -289,15 +329,22 @@ def _connect_bound(store, bindings, launch, agent, record, process, deps) -> tup
 
 
 def spawn(spec: Launch, deps: Deps, path: Path) -> subprocess.Popen:
+    from scripts.hive import account_slots
+
     try:
-        return deps.popen(
-            server_command(deps.codex_bin, path, spec.server_args),
-            env=dict(spec.environ),
-            cwd=spec.cwd,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
+        return account_slots.execute(
+            "codex",
+            spec.agent.account,
+            {**spec.environ, account_slots.EXECUTION_ENV: spec.agent.execution_id},
+            lambda env: deps.popen(
+                server_command(deps.codex_bin, path, spec.server_args),
+                env=env,
+                cwd=spec.cwd,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            ),
         )
-    except OSError as exc:
+    except (OSError, account_slots.Unavailable) as exc:
         raise LaunchFailure("spawn", SPAWN_FAILED.format(exc)) from exc
 
 
@@ -401,7 +448,7 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
     try:
         path = socket_path(deps.runtime_root or runtime_root(spec.environ), agent.execution_id)
         record = bindings.reserve(spec.slug, _record(spec, agent, path))
-        spec = execution_home(spec, path.parent)
+        spec = execution_home(replace(spec, agent=agent), path.parent)
         process = spawn(spec, deps, path)
         record = replace(record, server_pid=process.pid, server_start_identity=deps.start_identity(process.pid) or 0)
         bindings.put(spec.slug, record)
@@ -410,6 +457,7 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
         try:
             if process is not None:
                 stop(process)
+                _release_slot(spec.environ.get("AGENTIHOOKS_SLOT_HIVE", ""), agent)
         finally:
             try:
                 if record is not None:
@@ -424,10 +472,18 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
                     if path is not None:
                         shutil.rmtree(path.parent)
         raise
-    return Started(record, agent, process)
+    return Started(record, agent, process, spec.environ.get("AGENTIHOOKS_SLOT_HIVE", ""))
+
+
+def _release_slot(hive: str, agent: AgentRecord) -> None:
+    if hive:
+        from scripts.hive.account_slots import release
+
+        release(hive, agent.execution_id, "codex", agent.account)
 
 
 def finish(store: RedisStore, slug: str, started: Started, now_ms: int) -> TransportRecord:
+    _release_slot(started.slot_hive, started.agent)
     bindings = BindingStore(store)
     current = bindings.get(slug, started.record.execution_id) or started.record
     record = replace(current, state=EXITED, active_turn_id="", last_transport_activity=now_ms)

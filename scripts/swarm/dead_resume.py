@@ -53,7 +53,18 @@ def _reason(store, slug, agent):
     return ""
 
 
-def reopen(slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, agent: AgentRecord, at: int) -> bool:
+FRESH_NOTICE = "Starting a fresh agent after {name} ended because {reason}."
+
+
+def reopen(
+    slug: str,
+    store: RedisStore,
+    ledger: Ledger,
+    runtime: Runtime,
+    agent: AgentRecord,
+    at: int,
+    notice: str = FRESH_NOTICE,
+) -> bool:
     config = store.config(slug)
     if config.state in {"stopped", "stopping"} or not _owns(store, slug, agent, ledger):
         return False
@@ -96,5 +107,6 @@ def reopen(slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, agent
             store.names.note(agent.name, session_id=agent.conversation_id)
             ledger.notify(slug, f"Resumed {agent.name} in its own conversation and seat after its pane ended.")
             return True
-    ledger.notify(slug, f"Starting a fresh agent after {agent.name} ended because {reason}.")
+    if notice:
+        ledger.notify(slug, notice.format(name=agent.name, reason=reason))
     return False

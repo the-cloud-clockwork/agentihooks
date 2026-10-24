@@ -1,0 +1,6 @@
+{
+  "scripts/gates/one_push.py:scripts.gates.one_push.x_expand__mutmut_16:28ccefff0a7cbc77f6062a329611e7f9fa5d8eba98af9cd2a889024e5546f094": {
+    "reader": "standards_reader",
+    "reason": "Dropping the default makes os.environ.get return None for an unset name, which takes the same empty string path in re.sub as the original, so the output is unchanged."
+  }
+}

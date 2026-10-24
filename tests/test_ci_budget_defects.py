@@ -478,3 +478,30 @@ def test_each_pass_meters_at_most_a_batch_of_runs(swarm, sink, monkeypatch):
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21]
     defects.refresh("sw", config, store, NOW_MS + defects.REFRESH_MS, run=_metered_gh([]), environ=SINK)
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21, 22]
+
+
+def test_with_the_sink_set_finished_merge_group_runs_are_metered_as_the_queue_tier(swarm, sink, monkeypatch):
+    store, config = swarm
+    group = _metered_run(24, "merge_group", "gh-readonly-queue/dev/pr-5-sha", "success", "09:00")
+    monkeypatch.setitem(globals(), "METERED_RUNS", [*METERED_RUNS, group])
+    monkeypatch.setitem(METERED_JOBS, 24, [{**_job("Gate — Required", "07:00", "07:30", 24), "id": 241}])
+    calls = []
+    defects.refresh("sw", config, store, NOW_MS, run=_metered_gh(calls), environ=SINK)
+    assert (24, "merge_group") in [(r["run_id"], r["event"]) for r in _inserted(sink, "ci_runs")]
+    assert (24, "gate-required") in [(r["run_id"], r["stage"]) for r in _inserted(sink, "ci_stages")]
+
+
+def test_merge_group_runs_are_read_from_the_swarm_repo_and_a_failed_read_is_named(swarm, sink, capsys):
+    store, config = swarm
+    healthy, folders = _metered_gh([]), []
+
+    def run(command, **kwargs):
+        if "event=merge_group" in command[2]:
+            folders.append(kwargs["cwd"])
+            raise subprocess.CalledProcessError(1, command, stderr="HTTP 503")
+        return healthy(command, **kwargs)
+
+    defects.refresh("sw", config, store, NOW_MS, run=run, environ=SINK)
+    assert folders and set(folders) == {"/repo"}
+    assert "ci budget skipped reading merge queue Tests runs: HTTP 503" in capsys.readouterr().err
+    assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [22, 21]

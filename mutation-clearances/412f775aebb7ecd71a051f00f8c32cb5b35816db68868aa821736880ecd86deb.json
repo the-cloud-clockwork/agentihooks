@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/bus.py:scripts.inbox.bus.x__swarm_of__mutmut_2:6d2f833aefc228603cd9ef0e0c81fab4b52fca011e2b5d91d60df6aacfc39621": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: every seat address the callers pass is `<seat>@<slug>` with exactly one `@`, because seat names come from fixed lane kinds and swarm slugs must match `^[a-z][a-z0-9-]{0,47}$` (`scripts/swarm/cli.py:209`), which excludes `@`, so `partition` and `rpartition` return the same slug."
+  }
+}

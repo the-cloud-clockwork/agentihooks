@@ -509,6 +509,34 @@ def test_tick_expects_the_overlays_the_agent_was_launched_wearing(store, monkeyp
     assert launch_check.report(store, "sw", "t1")["misses"]["overlay"] == {"expected": ["tuner"], "actual": []}
 
 
+def test_expected_reads_the_overlays_the_host_rendered(monkeypatch):
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): [f"{profile}-overlay", *worn])
+    agent = AgentRecord("a", "eng", "t", profile="engineer", overlays=["tuner"])
+    assert launch_check.expected(agent) == ["engineer-overlay", "tuner"]
+    assert launch_check.expected(replace(agent, profile_decision={launch_check.HOST_OVERLAYS: ["tuner"]})) == ["tuner"]
+    assert launch_check.expected(replace(agent, profile_decision={launch_check.HOST_OVERLAYS: []})) == []
+
+
+def test_tick_passes_a_hive_launch_without_an_overlay_its_host_cannot_render(store, monkeypatch, scratch):
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): ["brain"])
+    original = runtime.spawn
+
+    def hive(*args, **kwargs):
+        placed = original(*args, **kwargs)
+        return replace(placed, profile_decision={**placed.profile_decision, launch_check.HOST_OVERLAYS: []})
+
+    runtime.spawn = hive
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    joined(ledger, runtime, LAUNCH + 1)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert f"{name} passed its launch check in 0 seconds" in actions
+    assert name not in runtime.killed
+    assert launch_check.report(store, "sw", "t1")["state"] == "passed"
+
+
 def test_a_take_master_launch_that_fails_is_reported_and_kept(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     store.update("sw", max_eng=0)

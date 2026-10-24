@@ -88,15 +88,77 @@ def test_failure_records_cost_and_reraises_the_same_exception(monkeypatch, capsy
                 raise error
     assert caught.value is error
     rows = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    here = test_failure_records_cost_and_reraises_the_same_exception
     assert rows[-1] == {
         **rows[0],
         "phase": "finished",
         "outcome": "error",
+        "error": "builtins.KeyboardInterrupt",
+        "raised_at": f"tests/swarm/test_timing.py:{here.__code__.co_firstlineno + 8} {here.__name__}",
         "wall_s": 2.0,
         "own_cpu_s": 0.0,
         "reaped_child_cpu_s": 0.0,
     }
     assert timing.SWARM.get() is None
+
+
+def _drop():
+    raise ConnectionError("Connection closed by server.")
+
+
+def test_failure_names_the_innermost_repository_frame_and_leaves_out_the_message(capsys):
+    with pytest.raises(ConnectionError), timing.tick("sw"), timing.step("sweep"):
+        _drop()
+    finished = json.loads(capsys.readouterr().err.splitlines()[-1])
+    assert finished["error"] == "builtins.ConnectionError"
+    assert finished["raised_at"] == f"tests/swarm/test_timing.py:{_drop.__code__.co_firstlineno + 1} _drop"
+    assert "closed by server" not in json.dumps(finished)
+
+
+def test_failure_outside_the_repository_names_its_caller_here(capsys):
+    with pytest.raises(json.JSONDecodeError), timing.tick("sw"), timing.step("parse"):
+        json.loads("{")
+    finished = json.loads(capsys.readouterr().err.splitlines()[-1])
+    here = test_failure_outside_the_repository_names_its_caller_here
+    assert finished["error"] == "json.decoder.JSONDecodeError"
+    assert finished["raised_at"] == f"tests/swarm/test_timing.py:{here.__code__.co_firstlineno + 2} {here.__name__}"
+
+
+def test_a_failure_inside_a_timed_call_names_the_call_frame(capsys):
+    with pytest.raises(json.JSONDecodeError), timing.tick("sw"):
+        timing.call(json.loads, "{")
+    finished = json.loads(capsys.readouterr().err.splitlines()[-1])
+    line = timing.call.__code__.co_firstlineno + 3
+    assert finished["raised_at"] == f"scripts/swarm/timing.py:{line} call"
+
+
+def _raised_in(root, monkeypatch, name):
+    root = root.resolve()
+    monkeypatch.setattr(timing, "ROOT", root)
+    code = compile("raise ValueError()", str(root / name), "exec")
+    with pytest.raises(ValueError) as caught:
+        exec(code)
+    return timing.raised_at(caught.value)
+
+
+def test_a_repository_file_outside_the_code_packages_names_no_frame(tmp_path, monkeypatch):
+    assert _raised_in(tmp_path, monkeypatch, "setup.py") == ""
+
+
+def test_a_hooks_frame_is_repository_code(tmp_path, monkeypatch):
+    assert _raised_in(tmp_path, monkeypatch, "hooks/probe.py") == "hooks/probe.py:1 <module>"
+
+
+def test_an_exception_that_never_ran_here_has_no_frame():
+    assert timing.raised_at(ValueError()) == ""
+
+
+def test_success_and_stop_records_carry_no_error_fields(capsys):
+    with timing.tick("sw"), timing.step("fine"):
+        pass
+    finished = json.loads(capsys.readouterr().err.splitlines()[-1])
+    assert "error" not in finished
+    assert "raised_at" not in finished
 
 
 def test_nested_scopes_restore_the_parent_and_unscoped_steps_are_silent(capsys):

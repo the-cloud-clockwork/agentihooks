@@ -60,8 +60,9 @@ def changes(before: list[dict], after: list[dict]) -> dict:
 
 
 class Journal:
-    def __init__(self, url: str, run=subprocess.run, environ=os.environ, clock=lambda: datetime.now(UTC)):
+    def __init__(self, url: str, run=subprocess.run, environ=os.environ, clock=lambda: datetime.now(UTC), context=None):
         self.url = url
+        self.context = context or {}
         self.run = run
         self.environ = environ
         self.clock = clock
@@ -109,6 +110,7 @@ class Journal:
             **(changes(before, after) if before is not None and after is not None else {}),
             "gaps": self.gaps,
             "errors": list(errors),
+            **self.context,
             **extra,
         }
         path = Path(self.environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "merge-queue-events.jsonl"

@@ -60,7 +60,8 @@ def _head(repo: str, run: Callable) -> list[str]:
 def pull(repo: str, run: Callable, python: str, source: Path = SOURCE) -> list[str]:
     tracked = Path(repo).resolve() == Path(source).resolve()
     before = _head(repo, run) if tracked else []
-    run(["git", "-C", repo, "pull", "--ff-only", "origin", "dev"])
+    run(["git", "-C", repo, "fetch", "origin", "dev"])
+    run(["git", "-C", repo, "merge", "--ff-only", "origin/dev"])
     if not tracked:
         return []
     after = _head(repo, run)

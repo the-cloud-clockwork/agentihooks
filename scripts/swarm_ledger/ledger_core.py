@@ -43,6 +43,7 @@ from scripts.swarm_ledger import (
     ledger_rank,
     ledger_splits,
     models,
+    ports,
 )
 from scripts.swarm_ledger.ledger_files import LOG_MAX_BYTES, append_capped, atomic_write, rotate_if_full  # noqa: F401
 from scripts.swarm_ledger.page_assets import (  # noqa: F401
@@ -282,7 +283,7 @@ def parse_seed(html):
 
 
 def watch_path(slug, name):
-    from scripts.swarm.naming import addresses
+    addresses = ports.swarm().naming.addresses
 
     paths = [LEDGER_DIR / ".sessions" / f"{slug}.{candidate}.watch" for candidate in addresses(name)]
     return next((path for path in paths if path.exists()), paths[0])
@@ -320,12 +321,13 @@ class Context:
         self.at, self.rev = at, meta["rev"] + 1
         self.stamps, self.events = meta["stamps"], []
         self.meta, self.dirty, self.refused, self.dropped = meta, False, [], []
+        self.unstored = set()
         self.names = {}
         self.slug = slug
 
     def author(self, name: str) -> str:
         if name not in self.names:
-            from scripts.swarm.naming import resolve_name
+            resolve_name = ports.swarm().naming.resolve_name
 
             resolved = resolve_name(name)
             self.names[name] = resolved
@@ -483,8 +485,8 @@ def apply_op(doc, op, ctx):
 def _screened(op):
     if not op["thread"].endswith("/comments"):
         return op["text"]
-    from hooks.context.conditions import LEDGER_WRITE
-    from hooks.filters import check as filters
+    LEDGER_WRITE = ports.hooks().conditions.LEDGER_WRITE
+    filters = ports.hooks().filters
 
     return filters.screen(LEDGER_WRITE, op["text"])
 

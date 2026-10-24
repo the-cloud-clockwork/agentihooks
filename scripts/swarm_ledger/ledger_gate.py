@@ -5,6 +5,8 @@ Pure functions over a ledger's `_meta` and document; the CLI, the server and the
 
 import re
 
+from scripts.swarm_ledger import ports
+
 DEFAULT_POLICY = {"nudge_after_calls": 25, "stop_after_calls": 10, "stop_blocks": 3}
 MENTION_RE = re.compile(r"^@([A-Za-z][\w.@-]{0,63})")
 IGNORED_KINDS = ("chat cleared", "artifact deleted", "artifact restored", "alert claimed", "alert closed")
@@ -41,7 +43,7 @@ def owner(event, members, tasks=()):
     boss = orchestrator(members)
     target = event.get("target", "")
     if target == "chat" or target.startswith("notes/"):
-        from scripts.swarm.naming import resolve_name
+        resolve_name = ports.swarm().naming.resolve_name
 
         mention = MENTION_RE.match(event.get("note_text", event.get("text", "")))
         named = resolve_name(mention.group(1)) if mention else None
@@ -56,7 +58,7 @@ def owner(event, members, tasks=()):
 
 
 def owes(event, members, name, tasks=()):
-    from scripts.swarm.naming import resolve_name
+    resolve_name = ports.swarm().naming.resolve_name
 
     name = resolve_name(name)
     who = owner(event, members, tasks)
@@ -64,7 +66,7 @@ def owes(event, members, name, tasks=()):
 
 
 def unhandled_for(meta, name, tasks=(), owners=None):
-    from scripts.swarm.naming import resolve_name
+    resolve_name = ports.swarm().naming.resolve_name
 
     return pending_for(meta, resolve_name(name), operator_events(meta), tasks, {} if owners is None else owners)
 
@@ -121,7 +123,7 @@ def sync_summary(doc, meta):
 
 
 def crew(meta):
-    from scripts.swarm.naming import resolve_names
+    resolve_names = ports.swarm().naming.resolve_names
 
     members = meta.get("members", {})
     names = resolve_names(list(members))

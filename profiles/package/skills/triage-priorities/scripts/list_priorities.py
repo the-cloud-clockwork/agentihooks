@@ -3,7 +3,7 @@
 
 Usage: list_priorities.py SLUG [--clear-resolved] [--skip ID...] [--as NAME]
 
-Reads the ledger through `agentihooks ledger --slug SLUG show`. Prints JSON {"open": [...], "resolved": [...]}.
+Reads the priorities collection and each referenced item through the ledger API. Prints JSON {"open": [...], "resolved": [...]}.
 --clear-resolved clears every resolved priority through `agentihooks ledger priority clear`.
 --skip leaves out the priorities the operator already decided this run.
 """
@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+from urllib.error import HTTPError
 
 # The last comments carry the item's current ask; older ones are history.
 RECENT = 3
@@ -21,13 +22,30 @@ GROUP_ORDER = ("questions", "approvals", "blocked", "follow ups", "phases", "tas
 
 
 def load(slug):
+    from scripts.swarm_ledger import ledger
+
     try:
-        done = subprocess.run(["agentihooks", "ledger", "--slug", slug, "show"], capture_output=True, text=True)
-        if done.returncode:
-            raise ValueError((done.stderr or done.stdout).strip())
-        return json.loads(done.stdout)
+        priorities = ledger.resource(slug, "priorities", collection=True)
+        doc = {"priorities": priorities}
+        for path in dict.fromkeys(row["item"] for row in priorities):
+            name, _, _ = path.partition("/")
+            item = read_item(slug, path)
+            if item is not None:
+                doc.setdefault(name, []).append(item)
+        return doc
     except (OSError, ValueError) as exc:
         sys.exit(f"cannot read ledger {slug}: {exc}. Check the slug with: agentihooks ledger list")
+
+
+def read_item(slug: str, path: str) -> dict | None:
+    from scripts.swarm_ledger import ledger
+
+    try:
+        return ledger.resource(slug, path)
+    except HTTPError as exc:
+        if exc.code != 404:
+            raise
+        return None
 
 
 def find(doc, item):

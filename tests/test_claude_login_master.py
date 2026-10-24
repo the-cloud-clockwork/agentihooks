@@ -1,6 +1,7 @@
 import json
 import os
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -121,8 +122,8 @@ def test_the_master_flag_routes_main_to_master_mode(monkeypatch, capsys):
     monkeypatch.setattr(claude_login, "master", lambda *args: seen.append(args) or 0)
     console = _console()
     assert claude_login.main(["--master", "--openbao"], {"A": "1"}, console=console, opener="op") == 0
-    openbao, environ, deps = seen[0]
-    assert (openbao, environ, deps.console, deps.opener) == (True, {"A": "1"}, console, "op")
+    openbao, environ, deps, slot = seen[0]
+    assert (openbao, environ, deps.console, deps.opener, slot) == (True, {"A": "1"}, console, "op", None)
     with pytest.raises(SystemExit):
         claude_login.main(["--master", "rig"], {}, console=console)
     assert len(seen) == 1
@@ -143,3 +144,69 @@ def test_the_default_render_renders_the_profile_and_returns_its_claude_home(monk
     assert claude_login._rendered("master") == tmp_path / "master" / "claude"
     assert rendered == ["master"]
     assert claude_login.Deps(console=_console()).render is None
+
+
+def test_a_slot_login_builds_its_own_home_and_becomes_the_active_master_login(ah, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "1")
+    runs = []
+    assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, runs), 2) == 0
+    base = Path(login.hooks_config.AGENTIHOOKS_HOME)
+    home = str(base / "master-login-2" / "claude")
+    assert runs[0][1]["CLAUDE_CONFIG_DIR"] == home
+    monkeypatch.delenv(login.SLOT_ENV)
+    assert login.slot() == 2
+    assert login.home() == base / "master-login-2" / "claude"
+    assert login.creds() == "agentihooks/master-claude-login-2"
+
+
+def test_a_failed_slot_login_keeps_the_active_master_login(ah, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "1")
+    assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, [], code=1), 3) == 1
+    monkeypatch.delenv(login.SLOT_ENV)
+    assert login.slot() == 1
+    assert login.home() == Path(login.hooks_config.AGENTIHOOKS_HOME) / "master-login" / "claude"
+
+
+def test_a_slot_outside_the_cap_is_refused_before_any_login(ah, monkeypatch, capsys):
+    monkeypatch.setenv(login.SLOT_ENV, "1")
+    runs = []
+    assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, runs), login.MAX_SLOTS + 1) == 2
+    assert runs == []
+    assert "outside 1 to" in capsys.readouterr().err
+
+
+def test_slot_needs_the_master_flag():
+    with pytest.raises(SystemExit):
+        claude_login.main(["--slot", "2"])
+
+
+def test_slot_without_master_names_the_refusal(capsys):
+    with pytest.raises(SystemExit):
+        claude_login.main(["--slot", "2"])
+    assert "error: --slot picks a master login slot and needs --master" in capsys.readouterr().err
+
+
+def test_the_slot_flag_reaches_master_mode_as_an_integer(monkeypatch):
+    seen = []
+    monkeypatch.setattr(claude_login, "master", lambda *args: seen.append(args) or 0)
+    assert claude_login.main(["--master", "--slot", "3"], {}, console=_console()) == 0
+    assert seen[0][3] == 3
+
+
+@pytest.mark.parametrize("number", [0, login.MAX_SLOTS + 1])
+def test_a_slot_outside_one_to_the_cap_is_refused_with_its_number(ah, monkeypatch, capsys, number):
+    monkeypatch.setenv(login.SLOT_ENV, "1")
+    runs = []
+    assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, runs), number) == 2
+    assert runs == []
+    assert f"master login slot {number} is outside 1 to {login.MAX_SLOTS}" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("number", [1, login.MAX_SLOTS])
+def test_the_first_and_last_slot_log_in_and_become_active(ah, monkeypatch, number):
+    monkeypatch.setenv(login.SLOT_ENV, "1")
+    runs = []
+    assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, runs), number) == 0
+    assert len(runs) == 1
+    monkeypatch.delenv(login.SLOT_ENV)
+    assert login.slot() == number

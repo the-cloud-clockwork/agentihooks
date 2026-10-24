@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/dispatch.py:scripts.inbox.dispatch.xǁDispatcherǁ_ref_state__mutmut_1:06a283aa86bf85f437f01cba77ee24ccf2358ac3dd70dee81659ef72e2df1818": {
+    "reader": "standards-reader",
+    "reason": "Sole production caller explicitly supplies replayed; default-only test returns on empty ref before using replayed."
+  }
+}

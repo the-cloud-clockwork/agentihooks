@@ -100,6 +100,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
         *failed_launches(events, tasks),
         *idle_with_claim(agents, tasks, limits, waiting),
         *waiting_on_input(agents, tasks),
+        *master_blocked_on_prompt(agents),
         *stalled(agents, limits),
         *master_rc(agents),
         *master_fallback_auth(agents),
@@ -231,6 +232,8 @@ def proof_loops(
     rounds = {tid: max(reviews.get(tid, {}).values(), default=0) for tid in tasks}
     found = []
     for tid in tasks:
+        if tasks[tid].get("state") == "done":
+            continue
         if reruns[tid] > limits.reruns or rounds[tid] > limits.review_rounds:
             found.append(
                 Finding(
@@ -324,6 +327,24 @@ def waiting_on_input(agents: list[dict], tasks: dict[str, dict]) -> list[Finding
     return found
 
 
+def master_blocked_on_prompt(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        if agent.get("lane") != "master" or not agent.get("input_prompt") or agent["input_ticks"] <= 3:
+            continue
+        found.append(
+            Finding(
+                "master blocked on prompt",
+                agent.get("seat") or agent["name"],
+                f"the master pane has waited on a question prompt for {agent['input_ticks']} ticks",
+                (f"prompt: {agent['input_prompt']}", f"agent {agent['name']}"),
+                "more than 3 consecutive ticks on a question prompt",
+                agent["input_ticks"],
+            )
+        )
+    return found
+
+
 def stalled(agents: list[dict], limits: Limits) -> list[Finding]:
     found = []
     for agent in agents:
@@ -369,7 +390,7 @@ def master_fallback_auth(agents: list[dict]) -> list[Finding]:
             agent.get("lane") != "master"
             or agent.get("seat", "").partition("@")[0] not in ("", "master")
             or agent.get("desired_route_kind") != "interactive"
-            or agent.get("route_kind") == "interactive"
+            or agent.get("route_kind") in ("interactive", "master-login")
             or agent.get("state") in ("finished", "ended")
         ):
             continue

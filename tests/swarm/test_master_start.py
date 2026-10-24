@@ -41,10 +41,10 @@ def test_unreported_master_retries_original_handoff_then_alerts_once(store):  # 
     alerts = [text for text in ledger.notes if "hook" in text]
     assert len(alerts) == 1
     assert alerts == [
-        "The master reported no hook within two minutes on either launch. Automatic retry is exhausted; operator action is required. The original handoff is retained."
+        "The master reported no hook within two minutes on either launch. The operator has been alerted; automatic retries continue every five minutes. The original handoff is retained."
     ]
     tick("sw", store, ledger, runtime, 10 * DEADLINE)
-    assert len(runtime.masters) == 2
+    assert len(runtime.masters) == 3
     assert [text for text in ledger.notes if "hook" in text] == alerts
     assert store.handoff("sw", MASTER) == "Original complete handoff"
 
@@ -119,7 +119,7 @@ def test_startup_spawn_exceptions_are_bounded(store):  # noqa: F811
         tick("sw", store, ledger, runtime, DEADLINE + 1)
         tick("sw", store, ledger, runtime, 2 * DEADLINE + 1)
         tick("sw", store, ledger, runtime, 10 * DEADLINE)
-    assert spawn.call_count == 2
+    assert spawn.call_count == 3
     assert len([text for text in ledger.notes if "hook" in text]) == 1
 
 

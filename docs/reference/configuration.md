@@ -95,7 +95,7 @@ load time. See [MCP Transport](../hooks/mcp-transport.md) for the full setup.
 | `REDIS_SESSION_TTL` | `86400` | Session TTL in seconds (24 hours). |
 | `REDIS_POSITION_TTL` | `3600` | Position TTL in seconds (1 hour). |
 | `REDIS_KEY_PREFIX` | `agenticore` | Redis key prefix for all stored keys. |
-| `REDIS_SOCKET_TIMEOUT` | `5.0` | Redis socket timeout in seconds. |
+| `REDIS_SOCKET_TIMEOUT` | `5.0` | Hook runtime Redis socket timeout in seconds. The hive endpoint does not read it. |
 
 ---
 
@@ -231,6 +231,7 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | `AGENTIHOOKS_ROUTE_ACCOUNT` | set by the router | Account a Claude launch was routed to (`api` for the api side) |
 | — | — | Api weights and caps are routing settings, not variables: `agentihooks balance set` (see [CLI Commands](cli-commands.md#agentihooks-balance)) |
 | — | — | Each account's live session cap comes from its five-hour window alone: 6 at 60%+ left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5% until reset; no new session below 5% of the week. The next session goes to the eligible account with the fewest live sessions, ties to the soonest resetting week. |
+| `AGENTIHOOKS_HIVE_SESSION_CEILING` | `12` | Most live sessions a hive reports for one Claude subscription; the hive cap is this ceiling times the smaller of five hour and week left, at least the band unless the ceiling is lower |
 | `QUOTA_POLICY_ENABLED` | `true` | Hand off / wait / stop when a session's own quota runs out |
 | `AGENTIHOOKS_HANDOFF_WEEK_PCT` | `98` | 7-day used % that triggers the quota policy |
 | `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the quota policy |
@@ -442,6 +443,28 @@ Every agent reports gh as logged out at once:
 
 ---
 
+## Master Inbox Intent Grouping
+
+See [Intent grouping](../pillars/swarm.md#intent-grouping). Read by every process that hands out a swarm's master inbox pool.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` | `on` | `1`, `true`, `yes` or `on` keep grouping on; any other value turns it off and the pool deals items round robin |
+| `MASTER_INBOX_CLASSIFIER_TIMEOUT_S` | `3` | Seconds one pool pass waits for its intent verdicts before unanswered items go round robin |
+
+---
+
+## Swarm Grafana Alerts
+
+See [Grafana bottleneck alerts](grafana-bottleneck-alerts.md). The swarm tick reads alert state through the gateway with these; no listener, token or secret path of its own.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_KEY_GATEWAY` | — | LiteLLM gateway key; its LiteLLM unit must reach the `grafana` MCP server. Unset → the tick reads no alerts |
+| `LANGFUSE_MCP_URL` | — | Gateway MCP endpoint, shared with the Langfuse summary pass. Unset → the tick reads no alerts |
+
+---
+
 ## Brain Adapter
 
 Every variable in this section is owned by Agentibrain and stored in
@@ -477,4 +500,4 @@ duplicating them into its own environment file.
 | `RETRY_BREAKER_TTL` | `300` | Seconds before a failure fingerprint expires from the counter. |
 | `CONTROLS_BYPASS_ENABLED` | `true` | Enable the controls toggle (bypass mode). Operator phrase `disable controls` lifts branch, non-protected PR, hotfix and non-main force-push gates session-wide. Protected promotion remains CI-only; PyPI publication still requires `release dance`. See [Guardrail 9](/docs/pillars/guardrails/#guardrail-9-controls-toggle-bypass-mode). |
 | `KUBECTL_MUTATION_GUARD_ENABLED` | `true` | HARD-FLOOR live-patching guard. PreToolUse Bash hook that blocks `kubectl exec`/`cp` writes, `kubectl edit`/`patch`/`set`/`scale`/`rollout-restart`/`annotate`/`label`/`drain`/`debug`/`create -f`/`apply -f`/`autoscale`, `helm install`/`upgrade`/`rollback` outside CI, `argocd app sync --local`, SSH-edit, `scp` INTO host, and `docker exec` writes. Does NOT honor bypass mode, hotfix signals, or release-gate signals — code is the source of truth. See CI Manifesto §3.5 and `rules/code-is-source.md`. |
-| `AGENTIHOOKS_SERENA` | `true` | Serena edit guard. PreToolUse hook that blocks a built-in or shell rewrite of Python in a linked worktree, routing it to Serena's symbol tools instead. `false` turns the whole guard off for that session or machine: every edit is let through and no Serena directive is injected; unset or any other value keeps it on. See Development Manifesto §7 and `rules/code-intelligence.md`. |
+| `AGENTIHOOKS_SERENA` | `true` | Serena edit guard. PreToolUse hook that blocks a built-in or shell rewrite of Python in a linked worktree, routing it to Serena's symbol tools instead. `false` turns the whole guard off for that session or machine: every edit is let through and no Serena directive is injected; unset or any other value keeps it on. Deleting a whole Python file stays open in the session's own checkout and is refused in any other. See [Guardrail 10](/docs/pillars/guardrails/#guardrail-10-serena-edit-guard), Development Manifesto §7 and `rules/code-intelligence.md`. |

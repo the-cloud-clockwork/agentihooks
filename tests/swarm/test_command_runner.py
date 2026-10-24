@@ -227,12 +227,14 @@ def test_spawn_receiver_refuses_epoch_after_launch_preparation(store, monkeypatc
     assert lease.release(store, "sw", held)
     lease.acquire(store, "sw", "other")
     with pytest.raises(SwarmError) as error:
-        receiver._launch(SimpleNamespace(slug="sw"), "eng", "t", "one", ["--agent", "claude"], controller_epoch=1)
+        receiver._launch(
+            SimpleNamespace(slug="sw"), "eng", "t", "one", ["--dir", "/repo", "--agent", "claude"], controller_epoch=1
+        )
     assert str(error.value) == "the controller lease is stale"
     assert calls == []
 
 
-def test_new_epoch_can_tick_while_the_old_tick_is_still_locked(store, monkeypatch):
+def test_new_epoch_waits_while_the_old_tick_is_still_locked(store, monkeypatch):
     from scripts.swarm import lease
 
     monkeypatch.setenv("SWARM_HIVE_ID", "home")
@@ -241,10 +243,13 @@ def test_new_epoch_can_tick_while_the_old_tick_is_still_locked(store, monkeypatc
     assert cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({})) == ["another tick is running"]
     assert lease.release(store, "sw", held)
     monkeypatch.setenv("SWARM_HIVE_ID", "other")
-    result = cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({}))
-    assert "another tick is running" not in result
+    assert cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({})) == ["another tick is running"]
     assert lease.current(store, "sw").epoch == 2
     assert lease.current(store, "sw").owner == "other"
+    assert store.redis.get(store.key("sw", "tick-lock")) == '{"epoch": 1, "token": "old tick"}'
+    store.redis.delete(store.key("sw", "tick-lock"))
+    result = cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({}))
+    assert "another tick is running" not in result
     assert store.redis.get(store.key("sw", "tick-lock")) is None
 
 
@@ -259,6 +264,8 @@ def test_old_tick_cannot_release_a_new_epochs_lock(store):
     assert store.redis.pttl(store.key("sw", "tick-lock")) > 9000
     assert lease.release(store, "sw", first)
     second = lease.acquire(store, "sw", "other")
+    assert controller.take_tick_lock(store, "sw", second, 10000) is None
+    store.redis.delete(store.key("sw", "tick-lock"))
     new = controller.take_tick_lock(store, "sw", second, 10000)
     assert json.loads(new)["epoch"] == 2
     assert old != new
@@ -424,7 +431,9 @@ def test_launch_receiver_accepts_the_current_epoch(store, monkeypatch, tmp_path)
     receiver = runtime.HerdrRuntime(home=tmp_path, run=launch)
     config = SimpleNamespace(slug="sw", autonomy="delegate", compact_limit=0)
     with pytest.raises(SwarmError) as error:
-        receiver._launch(config, "eng", "t", "one", ["--agent", "claude"], controller_epoch=held.epoch)
+        receiver._launch(
+            config, "eng", "t", "one", ["--dir", "/repo", "--agent", "claude"], controller_epoch=held.epoch
+        )
     assert str(error.value) == "launch reached"
 
 
@@ -447,3 +456,15 @@ def test_a_joined_member_beats_under_its_member_id_only_when_it_uses_the_member_
     monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", member_url)
 
     assert commands.hive_id() == expected
+
+
+def test_publish_hands_the_tick_view_to_the_status_report(store, monkeypatch):
+    seen = []
+    monkeypatch.setattr(command_runner, "status_report", lambda *args: seen.append(args) or {})
+
+    def view(url):
+        return None
+
+    command_runner.publish(store, "sw", {"tasks": []}, view)
+    command_runner.publish(store, "sw", {"tasks": []})
+    assert seen == [(store, "sw", {"tasks": []}, None, view), (store, "sw", {"tasks": []}, None, None)]

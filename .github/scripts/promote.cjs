@@ -28,6 +28,20 @@ async function deleteSnapshot(github, api, ref) {
   }
 }
 
+async function supersededBy(github, api, graded, main) {
+  const promoted = /^Graded dev revision: ([0-9a-f]{40})$/m.exec(main.commit.message)?.[1];
+  if (!promoted || (await github.rest.repos.compareCommits({ ...api, base: promoted, head: graded })).data.status === 'ahead') return null;
+  return promoted;
+}
+
+async function endSuperseded(core, graded, main, promoted) {
+  core.setOutput('graded', graded);
+  core.setOutput('superseded', promoted);
+  await core.summary.addHeading('Promotion superseded').addTable([
+    ['Graded dev', graded], ['Main', main.sha], ['Main already promoted dev', promoted],
+  ]).write();
+}
+
 module.exports = async ({ github, context, core, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) => {
   const { owner, repo } = context.repo;
   const repository = `${owner}/${repo}`;
@@ -40,10 +54,8 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
     const head = `promotion/${context.sha}`;
     const ref = `heads/${head}`;
     const pulls = (await github.rest.pulls.list({ ...api, state: 'open', base: 'main', head: `${owner}:${head}` })).data;
-    const promoted = /^Graded dev revision: ([0-9a-f]{40})$/m.exec(main.commit.message)?.[1];
-    if (promoted && ['behind', 'identical'].includes((await github.rest.repos.compareCommits({ ...api, base: promoted, head: context.sha })).data.status)) {
-      throw new Error('Graded revision is not newer than the last promotion');
-    }
+    let promoted = await supersededBy(github, api, context.sha, main);
+    if (promoted) return endSuperseded(core, context.sha, main, promoted);
     const body = `Graded dev revision: ${context.sha}\n\nTests: ${context.serverUrl}/${repository}/actions/runs/${context.runId}`;
     let snapshot;
     try {
@@ -78,6 +90,16 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       await sleep(5000);
     }
     if (!ready) throw new Error('Promotion checks did not become mergeable within four minutes');
+    const current = (await github.rest.repos.getCommit({ ...api, ref: 'main' })).data;
+    if (current.sha !== main.sha) {
+      promoted = await supersededBy(github, api, context.sha, current);
+      if (promoted) {
+        await github.rest.pulls.update({ ...api, pull_number: pull.number, state: 'closed' });
+        await deleteSnapshot(github, api, ref);
+        return endSuperseded(core, context.sha, current, promoted);
+      }
+      throw new Error('Promotion snapshot is stale, main moved during the wait');
+    }
     const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: snapshot, merge_method: 'squash', commit_message: body })).data;
     if (!merged.merged) throw new Error('GitHub refused the promotion merge');
     main = (await github.rest.repos.getCommit({ ...api, ref: merged.sha })).data;

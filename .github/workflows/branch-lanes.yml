@@ -22,7 +22,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: dev
-          fetch-depth: 0
+          fetch-depth: 1
+          sparse-checkout: |
+            /.github/workflows/
+            /scripts/__init__.py
+            /scripts/gh_config.py
+            /scripts/ci_branch_lanes.py
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - uses: actions/setup-python@v5
@@ -33,7 +39,7 @@ jobs:
         run: python -m pip install "pyyaml>=6.0"
 
       - name: Fetch the head as data
-        run: git fetch --no-tags origin "$GITHUB_SHA"
+        run: git fetch --no-tags --depth 1 origin "$GITHUB_SHA"
 
       - name: Refuse branch only workflows off the shared hosted lanes
         env:

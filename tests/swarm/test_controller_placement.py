@@ -235,3 +235,72 @@ def test_two_ticks_never_spawn_one_task_twice(store):
     tick(store, ledger, runtime)
     assert [task for _, _, task in runtime.spawned] == ["build"]
     assert states(ledger) == {"build": "claimed"}
+
+
+@pytest.mark.parametrize(
+    ("machine", "hive_placement", "deployment"),
+    [
+        ({"AGENTIHOOKS_DEPLOYMENT": "local"}, True, "hybrid"),
+        ({}, True, "hybrid"),
+        ({"AGENTIHOOKS_DEPLOYMENT": "local"}, False, "local"),
+        ({}, False, "local"),
+        ({"AGENTIHOOKS_DEPLOYMENT": "distributed"}, True, "distributed"),
+        ({"AGENTIHOOKS_DEPLOYMENT": "compose"}, False, "compose"),
+    ],
+)
+def test_hive_placement_turns_only_a_local_machine_swarm_hybrid(store, machine, hive_placement, deployment):
+    from scripts.swarm import controller
+
+    config = store.update("sw", hive_placement=hive_placement)
+    assert controller.deployment_for(config, machine) == deployment
+
+
+def test_hive_placement_is_stored_on_the_swarm_and_off_by_default(store):
+    assert store.config("sw").hive_placement is False
+    assert store.update("sw", hive_placement=True).hive_placement is True
+    assert store.config("sw").hive_placement is True
+    assert store.update("sw", hive_placement=False).hive_placement is False
+    assert store.config("sw").hive_placement is False
+
+
+@pytest.mark.parametrize(("value", "stored"), [("on", True), ("off", False)])
+def test_swarm_set_switches_hive_placement(store, capsys, value, stored):
+    import argparse
+    import json
+
+    from scripts.swarm import cli
+
+    store.update("sw", state="paused", hive_placement=not stored)
+    cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=[f"hive-placement={value}"]))
+    assert store.config("sw").hive_placement is stored
+    assert json.loads(capsys.readouterr().out)["hive_placement"] is stored
+
+
+def test_swarm_set_refuses_another_hive_placement_value(store):
+    import argparse
+
+    from scripts.swarm import cli
+    from scripts.swarm.store import SwarmError
+
+    store.update("sw", state="paused")
+    with pytest.raises(SwarmError, match="^hive-placement takes on or off$"):
+        cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=["hive-placement=yes"]))
+    assert store.config("sw").hive_placement is False
+
+
+def test_the_tick_of_a_local_machine_swarm_with_hive_placement_runs_hybrid(store, monkeypatch):
+    from scripts.swarm import controller
+    from tests.swarm.test_tick import FakeLedger
+
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    store.update("sw", hive_placement=True)
+    built = []
+    real = controller.FencedRuntime
+
+    def fenced(store, slug, held, runtime, deployment):
+        built.append(deployment)
+        return real(store, slug, held, runtime, deployment)
+
+    monkeypatch.setattr(controller, "FencedRuntime", fenced)
+    tick(store, FakeLedger([]), placed_runtime())
+    assert built == ["hybrid"]

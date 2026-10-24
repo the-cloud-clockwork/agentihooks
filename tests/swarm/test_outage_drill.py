@@ -117,7 +117,7 @@ class Drill:
 
         async def deliver():
             for agent in [rig.master, *rig.agents]:
-                await channel._deliver(rig.inbox, agent.name, Receiver(agent))
+                await channel._deliver(rig.inbox, agent.name, Receiver(agent), channel.Pushed())
 
         anyio.run(deliver)
 

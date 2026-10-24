@@ -1,5 +1,7 @@
 """Production workflow and image guards; CI alone owns protected promotion."""
 
+import json
+import os
 import re
 import shlex
 import subprocess
@@ -20,6 +22,13 @@ _SESSION_SIGNAL_TTL = 14400  # 4 hours — session-scoped signals (release, hotf
 # Legacy hotfix/emergency vocabulary — kept for backwards-compat.
 # Full signal vocabulary now sourced from CI Manifesto via ci_manifesto.py.
 BYPASS_PHRASES: list[str] = ["--emergency-prod", "prod override", "emergency"]
+
+_MERGE_QUEUE = (
+    "query($url: URI!, $branch: String!) { resource(url: $url) { ... on PullRequest {"
+    " repository { mergeQueue(branch: $branch) { id } } } } }"
+)
+
+_ENQUEUE_READERS = frozenset({"agentihooks", "cat", "echo", "grep", "head", "jq", "ls", "printf", "tail", "wc"})
 
 _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
@@ -277,23 +286,85 @@ def _merge_view_command(line: str) -> list[str] | None:
     command = ["gh", "pr", "view", *selectors]
     if repo:
         command.extend(["--repo", repo])
-    return [*command, "--json", "baseRefName", "--jq", ".baseRefName"]
+    return [*command, "--json", "baseRefName,url", "--jq", '.baseRefName + " " + .url']
 
 
-def _check_pr_merge(line: str, cwd: str) -> None:
+def _check_pr_merge(line: str, cwd: str, bypass: bool) -> None:
     try:
         command = _merge_view_command(line)
         if command is None:
             return
-        base = subprocess.run(command, capture_output=True, text=True, check=True, timeout=10, cwd=cwd).stdout.strip()
-        if not base:
-            raise ValueError
+        base, url = subprocess.run(
+            command, capture_output=True, text=True, check=True, timeout=10, cwd=cwd
+        ).stdout.split()
     except (OSError, ValueError, StopIteration, subprocess.SubprocessError):
         raise BlockAction(
             "BLOCKED: Cannot resolve the pull request base; promotion protection remains closed."
         ) from None
     if base in {"main", "master", "v1"}:
         raise BlockAction("BLOCKED [gh pr merge to main/master/v1]: CI alone promotes dev into protected branches.")
+    if bypass:
+        return
+    try:
+        queue = subprocess.run(
+            ["gh", "api", "graphql", "-f", f"query={_MERGE_QUEUE}", "-f", f"url={url}", "-f", f"branch={base}"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+            cwd=cwd,
+        ).stdout
+        queued = json.loads(queue)["data"]["resource"]["repository"]["mergeQueue"] is not None
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        raise BlockAction(f"BLOCKED: Cannot tell whether '{base}' has a merge queue; the merge stays closed.") from None
+    if queued:
+        raise BlockAction(
+            f"BLOCKED [gh pr merge into a merge queue branch]: '{base}' merges only through its merge queue, "
+            "and gh pr merge lands it directly. Queue it with `agentihooks swarm <slug> merge queue "
+            f"{url}`, or outside a swarm with the GitHub enqueuePullRequest mutation."
+        )
+
+
+def _check_swarm_enqueue(command: str) -> None:
+    slug = os.environ.get("AGENTIHOOKS_SWARM")
+    if not slug or "enqueuePullRequest" not in command:
+        return
+    tree = Parser(Language(tree_sitter_bash.language())).parse(command.encode())
+    if tree.root_node.has_error or _runs_enqueue(tree.root_node):
+        raise BlockAction(
+            "BLOCKED [raw enqueuePullRequest in a swarm]: the swarm queue command records every merge queue "
+            f"entry in its journal. Queue it with `agentihooks swarm {slug} merge queue <url>`."
+        )
+
+
+def _runs_enqueue(node: Node) -> bool:
+    if b"enqueuePullRequest" in node.text:
+        command = node.child_by_field_name("body") if node.type == "redirected_statement" else node
+        if command and command.type == "command" and _sends_enqueue(command):
+            return True
+        if node.type == "pipeline" and _feeds_enqueue(node.named_children):
+            return True
+    return any(_runs_enqueue(child) for child in node.named_children)
+
+
+def _program(node: Node) -> str | None:
+    if node.type == "command":
+        return Path(shlex.split(node.child_by_field_name("name").text.decode())[0]).name
+
+
+def _sends_enqueue(command: Node) -> bool:
+    arguments = [
+        child.text.decode()
+        for index, child in enumerate(command.named_children)
+        if command.field_name_for_named_child(index) == "argument"
+    ]
+    program = _program(command)
+    return program not in _ENQUEUE_READERS and (program != "gh" or "api" in arguments)
+
+
+def _feeds_enqueue(stages: list[Node]) -> bool:
+    first = next(index for index, stage in enumerate(stages) if b"enqueuePullRequest" in stage.text)
+    return any(_program(stage) not in _ENQUEUE_READERS for stage in stages[first + 1 :])
 
 
 def check_prod_lockdown(payload: dict) -> None:
@@ -328,8 +399,9 @@ def check_prod_lockdown(payload: dict) -> None:
         raise BlockAction(
             f"BLOCKED [{name}]: {reason}\nAdd --emergency-prod / 'prod override' / 'emergency' to your message."
         )
+    _check_swarm_enqueue(command)
     from hooks.context.branch_guard import _resolve_cwd
 
     cwd = _resolve_cwd(command, payload.get("cwd", ""))
     for line in check_text.splitlines():
-        _check_pr_merge(line, cwd)
+        _check_pr_merge(line, cwd, controls_off)
