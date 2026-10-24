@@ -344,6 +344,17 @@ def test_the_operator_shell_scales_the_doctor_without_a_quote(env, monkeypatch, 
     assert doctor.main([WATCHED, "start", "--max-eng-agents", "3"]) == 0, capsys.readouterr().err
     assert store.config(DOCTOR).max_eng == 3
     assert not relays(WATCHED) and not relays(DOCTOR)
+    assert doctor._order(store, WATCHED, "", "start") == ""
+
+
+def test_start_and_stop_default_to_no_repo_and_no_quote_and_take_whole_number_caps():
+    parser = doctor.build_parser()
+    start = parser.parse_args([WATCHED, "start", "--max-eng-agents", "2", "--max-ci-agents", "1"])
+    assert (start.repo, start.quote, start.max_eng_agents, start.max_ci_agents) == ("", "", 2, 1)
+    assert parser.parse_args([WATCHED, "stop"]).quote == ""
+    for flag in ("--max-eng-agents", "--max-ci-agents"):
+        with pytest.raises(SystemExit):
+            parser.parse_args([WATCHED, "start", flag, "two"])
 
 
 def test_the_master_relaying_a_fresh_operator_order_stops_the_doctor_and_records_it(seated_master, capsys):
@@ -358,6 +369,7 @@ def test_the_master_relaying_a_fresh_operator_order_stops_the_doctor_and_records
     typed(ORDER, 60)
     assert doctor.main([WATCHED, "stop", "--quote", ORDER]) == 0, capsys.readouterr().err
     assert state(DOCTOR)["closed_at"] and store.config(DOCTOR).state == "stopped"
+    assert not [i for i in InboxStore(store.redis).pending_items(f"master@{WATCHED}") if "stopped the Doctor" in i.text]
     assert (
         relays(WATCHED)
         == relays(DOCTOR)
