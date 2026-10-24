@@ -32,6 +32,31 @@ def test_the_intent_check_runs_while_the_tick_runs(env, monkeypatch):  # noqa: F
     assert "judged" in actions
 
 
+def test_an_intent_failure_still_reaches_the_pass_when_the_tick_fails(env, monkeypatch):  # noqa: F811
+    import pytest
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    judged, ticked = RuntimeError("intent failed"), ValueError("tick failed")
+
+    class Failing:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, doc):
+            raise judged
+
+    def tick(*args):
+        raise ticked
+
+    monkeypatch.setattr(intent, "Check", Failing)
+    monkeypatch.setattr(cli, "tick", tick)
+    with pytest.raises(RuntimeError) as caught:
+        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert caught.value is judged
+    assert caught.value.__context__ is ticked
+
+
 def test_the_later_pull_request_snapshot_reuses_the_earlier_one(env, monkeypatch):  # noqa: F811
     from scripts.swarm import ledger_events
 

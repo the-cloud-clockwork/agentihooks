@@ -367,9 +367,11 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             doc, config = timing.call(ledger.state, slug), store.config(slug)
             with ThreadPoolExecutor(max_workers=1) as worker:
                 judged = worker.submit(copy_context().run, _intent_pass, inbox, store, slug, doc, ledger, config)
-                actions += skip_refused(reboot.boot_pass, slug, store, ledger, runtime, now_ms())
-                actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
-                view, checked = judged.result()
+                try:
+                    actions += skip_refused(reboot.boot_pass, slug, store, ledger, runtime, now_ms())
+                    actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
+                finally:
+                    view, checked = judged.result()
             actions += checked
             if store.config(slug).template == "doctor":
                 from scripts.doctor import cli as doctor
