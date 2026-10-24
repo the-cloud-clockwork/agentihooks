@@ -33,7 +33,16 @@ def _tagged_wheel(tmp_path):
         ".coverage",
         ".coverage.*",
     )
-    shutil.copytree(REPO, src, ignore=ignore)
+    non_package_dirs = {
+        path.name for path in REPO.iterdir() if path.is_dir() and path.name not in {"hooks", "scripts", "profiles"}
+    }
+    shutil.copytree(
+        REPO,
+        src,
+        ignore=lambda directory, names: (
+            ignore(directory, names) | (non_package_dirs if Path(directory) == REPO else set())
+        ),
+    )
     pyproject = src / "pyproject.toml"
     text = pyproject.read_text()
     current = next((line for line in text.splitlines() if line.startswith("version = ")), None)
