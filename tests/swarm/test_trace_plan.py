@@ -476,6 +476,34 @@ def test_clearance_pieces_never_count_as_cut_toward_a_failed_plan(ask):
     assert [row["kept"] for row in record["pieces"]] == [True, False, True]
 
 
+@pytest.mark.parametrize(
+    ("areas", "kept"),
+    [
+        (("changelog.d/fix-replay.md",), True),
+        (("./changelog.d/fix-replay.md",), True),
+        (("changelog.d/README.md",), False),
+        (("changelog.d",), False),
+        (("changelog.d/fix-replay.txt",), False),
+        (("docs/changelog.d/fix-replay.md",), False),
+        (("changelog.d/../guide.md",), False),
+        (("changelog.d/nested/fix-replay.md",), False),
+        (("changelog.d/fix-replay.md", "docs/guide.md"), False),
+        (("docs/guide.md",), False),
+    ],
+)
+def test_required_changelog_fragment_is_kept_without_scope_comment(ask, areas, kept):
+    ask(0.95, 0.0, 0.0)
+    pieces = [
+        piece("Repair receipt replay", "scripts/receipt.py"),
+        piece("Add the required changelog fragment for receipt replay", *areas),
+        piece("Add an unrelated user guide", "docs/guide.md"),
+    ]
+    record = trace_plan.trace(pieces, INTENT, None, now_ms=5)
+    assert record["authorizations"] == []
+    assert [row["kept"] for row in record["pieces"]] == [True, kept, False]
+    assert record["verdict"] == ("pass" if kept else "fail")
+
+
 @pytest.mark.parametrize(("p_yes", "kept"), [(0.3, True), (0.29, False), (0.0, False), (1.0, True)])
 def test_a_piece_under_three_tenths_is_cut(ask, p_yes, kept):
     ask(p_yes, 0.9, 0.9)
