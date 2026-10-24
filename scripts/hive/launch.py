@@ -187,7 +187,7 @@ class HiveLaunch:
         self.opening = orders.build_opening
 
     def hives(self) -> list[dict]:
-        return loaded_hives(self.store)
+        return placement.for_swarm(loaded_hives(self.store), self.slug)
 
     def _record_wait(self, lane: str, task: dict, selected: Selection | placement.Wait) -> Selection | placement.Wait:
         reason = selected.reason if isinstance(selected, placement.Wait) else ""
