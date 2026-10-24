@@ -1002,3 +1002,13 @@ def test_workspace_links_tree_files_and_copies_when_links_fail(tmp_path, monkeyp
     assert (tmp_path / "copied.txt").read_text() == "kept\n"
     assert (tmp_path / "copied.txt").stat().st_ino != source.stat().st_ino
     assert (tmp_path / "copied.txt").stat().st_mtime == source.stat().st_mtime
+
+
+def test_prepared_workspace_links_the_source_tree(tmp_path):
+    root, work = tmp_path / "root", tmp_path / "work"
+    (root / "hooks").mkdir(parents=True)
+    (root / "hooks" / "sample.py").write_text("value = 1\n")
+    (root / "pyproject.toml").write_text("[tool]\n")
+    work.mkdir()
+    runner.prepare_workspace(root, work, [], [])
+    assert (work / "hooks" / "sample.py").stat().st_ino == (root / "hooks" / "sample.py").stat().st_ino
