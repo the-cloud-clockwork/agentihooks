@@ -60,6 +60,17 @@ def test_a_publish_appends_a_patch_that_rebuilds_the_new_value():
     assert hub.resource(SLUG, "ledger") == ledger(2, tasks=[{"id": "t1"}])
 
 
+def test_a_wait_with_no_new_event_returns_empty_once_its_timeout_passes():
+    hub = Hub()
+    seq, _ = opened(hub)
+    found = []
+    waiter = threading.Thread(target=lambda: found.append(hub.wait(SLUG, seq, 0.01)), daemon=True)
+    waiter.start()
+    waiter.join(5)
+    assert not waiter.is_alive()
+    assert found == [[]]
+
+
 def test_immutable_snapshot_publication_keeps_names_revisions_and_replay():
     hub = Hub()
     old = ledger(1, tasks=[{"id": "t1", "title": "first"}])
