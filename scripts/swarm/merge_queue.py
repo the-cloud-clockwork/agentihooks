@@ -142,7 +142,7 @@ def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None)
     }
 
 
-def waiting_ahead(url: str, target: str, run) -> list[dict]:
+def waiting_around(url: str, target: str, run) -> tuple[list[dict], list[dict]]:
     query = """query($url: URI!, $after: String) { resource(url: $url) { ... on PullRequest {
       repository { mergeQueue(branch: "dev") { entries(first: 100, after: $after) {
         nodes { state pullRequest { id url headRefOid } }
@@ -150,16 +150,17 @@ def waiting_ahead(url: str, target: str, run) -> list[dict]:
       } } }
     } } }"""
     variables = {"url": url}
-    waiting = []
+    ahead, behind = [], []
+    waiting = ahead
     while True:
         page = graphql(query, variables, run)["resource"]["repository"]["mergeQueue"]["entries"]
         for entry in page["nodes"]:
             if entry["pullRequest"]["id"] == target:
-                return waiting
-            if entry["state"] == "QUEUED":
+                waiting = behind
+            elif entry["state"] == "QUEUED":
                 waiting.append(entry["pullRequest"])
         if not page["pageInfo"]["hasNextPage"]:
-            return waiting
+            return ahead, behind
         variables["after"] = page["pageInfo"]["endCursor"]
 
 
@@ -182,7 +183,8 @@ def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=N
         raise SwarmError("queue priority requires a dev merge queue")
     staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
     require_green(url, raw["headRefOid"], run)
-    waiting = [pull for pull in waiting_ahead(url, raw["id"], run) if pull["url"] not in ahead]
+    displacing, behind = waiting_around(url, raw["id"], run)
+    waiting = [pull for pull in displacing if pull["url"] not in ahead] + behind
     before = journal.groups() if journal is not None else None
     errors = []
     steps = []

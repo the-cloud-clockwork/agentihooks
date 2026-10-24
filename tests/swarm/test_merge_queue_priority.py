@@ -119,16 +119,25 @@ class FakeQueue:
         return subprocess.CompletedProcess(command, 0, json.dumps(data), "")
 
 
-@pytest.mark.parametrize("queued, expected", [(False, [1, 9, 2, 3]), (True, [1, 9, 4, 2, 3])])
+@pytest.mark.parametrize("queued, expected", [(False, [1, 9, 2, 3]), (True, [1, 9, 2, 3, 4])])
 def test_priority_preserves_displaced_order_and_running_entries(queued, expected):
     queue = FakeQueue(queued)
     result = merge_queue.prioritize(URL, run=queue.run)
     assert [int(e["pullRequest"]["id"][1:]) for e in queue.entries] == expected
-    assert queue.mutations == [("dequeue", 3), ("dequeue", 2)] + ([] if queued else [("queue", 9)]) + [
-        ("queue", 2),
-        ("queue", 3),
+    later = [4] if queued else []
+    assert queue.mutations == [("dequeue", n) for n in [*later, 3, 2]] + ([] if queued else [("queue", 9)]) + [
+        ("queue", n) for n in [2, 3, *later]
     ]
-    assert result["displaced"] == [URL[:-1] + "2", URL[:-1] + "3"]
+    assert result["displaced"] == [URL[:-1] + str(n) for n in [2, 3, *later]]
+
+
+def test_priority_keeps_displaced_ahead_of_later_arrivals_in_one_pass():
+    queue = FakeQueue(queued=True)
+    queue.entries += [queue.entry(5), queue.entry(6)]
+    result = merge_queue.prioritize(URL, run=queue.run)
+    assert [int(e["pullRequest"]["id"][1:]) for e in queue.entries] == [1, 9, 2, 3, 4, 5, 6]
+    assert queue.mutations == [("dequeue", n) for n in (6, 5, 4, 3, 2)] + [("queue", n) for n in (2, 3, 4, 5, 6)]
+    assert result == {"url": URL, "displaced": [URL[:-1] + str(n) for n in (2, 3, 4, 5, 6)], "errors": []}
 
 
 @pytest.mark.parametrize("errors, status", [([], 0), (["restore refused", "second refusal"], 1)])
@@ -255,7 +264,7 @@ def test_priority_reenqueues_a_critical_entry_ejected_during_reorder():
 
     result = merge_queue.prioritize(URL, run=run)
     assert result["errors"] == []
-    assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P4", "P9", "P2", "P3"]
+    assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9", "P2", "P3", "P4"]
 
 
 def test_priority_attempts_every_restoration_after_one_is_refused():
