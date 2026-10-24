@@ -1,5 +1,4 @@
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -7,6 +6,7 @@ import pytest
 from scripts.recall.cli import main
 from scripts.recall.evaluate import GoldenError, evaluate, load_golden
 from scripts.recall.store import SQLiteRecallStore
+from tests.swarm_ledger import legacy_page
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -15,7 +15,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def environ(tmp_path):
     ledgers = tmp_path / "ledgers"
     ledgers.mkdir()
-    shutil.copy(FIXTURES / "ledger.json", ledgers / "fixture.json")
+    legacy_page.store(ledgers, "fixture", json.loads((FIXTURES / "ledger.json").read_text()))
     environ = {"LEDGER_DIR": str(ledgers), "AGENTIHOOKS_HOME": str(tmp_path / "home")}
     assert main(["reindex", "--ledger", "fixture"], environ) == 0
     return environ
