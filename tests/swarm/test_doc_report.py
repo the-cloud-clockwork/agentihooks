@@ -55,6 +55,8 @@ def test_a_done_task_naming_a_doc_item_reports_it_to_the_watchdog_once(world):
     assert sweep(world) == [f"reported doc items of t1 to {WATCHDOG}"]
     [item] = inbox.inbox(WATCHDOG)
     assert item.task == "t1" and item.id == doc_report.report_id(SLUG, "t1", PR)
+    assert item.sender == "swarm" and item.text == doc_report.text(SLUG, task("t1"), AT)
+    assert doc_report.report_id("s", "t", "p") == "69b937ce5b88"
     for part in ("Status: done", "10 Report every completed item", PR, "evidence: run 42", doc_report.utc(AT)):
         assert part in item.text
     assert task("t1")["watchdog"] == {"item": item.id, "to": WATCHDOG, "pr": PR, "sent_at": doc_report.utc(AT)}
@@ -148,6 +150,7 @@ def test_the_default_window_is_thirty_minutes_in_utc(monkeypatch):
     try:
         assert doc_report.ack_ms() == 1_800_000
         assert doc_report.utc(0) == "1970-01-01T00:00:00Z"
+        assert doc_report._ms("1970-01-01T00:00:01Z") == 1000
     finally:
         monkeypatch.undo()
         time.tzset()
@@ -186,8 +189,18 @@ def test_a_done_task_without_a_pull_request_is_reported_once(world):
     assert sweep(world) == []
 
 
+def test_only_a_done_task_naming_doc_items_is_reported(world):
+    inbox, ledger = world
+    ledger.add_task(SLUG, {"task": "t4", "title": "Still open", "lane": "eng"}, "init-swarm")
+    ledger.update_task(SLUG, "t4", {"doc_items": ["14 Report fields"]})
+    for tid in ("t2", "t4"):
+        assert doc_report.report(inbox, ledger, SLUG, task(tid), AT) == ""
+        assert "watchdog" not in task(tid)
+    assert inbox.inbox(WATCHDOG) == []
+
+
 def test_task_set_parses_doc_items_as_a_list():
-    import ledger
+    from scripts.swarm_ledger import ledger
 
     assert ledger._task_set_fields(["doc_items=10 a,13 b"]) == {"doc_items": ["10 a", "13 b"]}
 
@@ -198,13 +211,9 @@ def test_swarm_done_sends_the_report_as_the_engineer(env, monkeypatch, capsys): 
     run("sw", "start")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     ledger.rows["t1"]["doc_items"] = ["13 Every completion triggers a watchdog update"]
-    authors = []
-    report = doc_report.report
-    monkeypatch.setattr(doc_report, "report", lambda *a, by: authors.append(by) or report(*a, by=by))
     capsys.readouterr()
     assert run("sw", "done", "--pr", PR) == 0
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["state"] == "done"
     [item] = InboxStore(store.redis).inbox(WATCHDOG)
     assert "13 Every completion triggers a watchdog update" in item.text and PR in item.text
     assert ledger.rows["t1"]["watchdog"]["item"] == item.id
-    assert authors == ["engineer@a1b2c3-0001"]

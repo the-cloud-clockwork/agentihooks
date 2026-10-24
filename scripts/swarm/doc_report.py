@@ -31,7 +31,7 @@ def _ms(stamp: str) -> int:
     return int(datetime.strptime(stamp, STAMP).replace(tzinfo=UTC).timestamp() * 1000)
 
 
-def report_id(slug: str, task_id: str, pr_url: str = "") -> str:
+def report_id(slug: str, task_id: str, pr_url: str) -> str:
     return hashlib.sha256(f"doc-report:{slug}:{task_id}:{pr_url}".encode()).hexdigest()[:12]
 
 
@@ -49,9 +49,9 @@ def text(slug: str, task: dict, at_ms: int) -> str:
     return "\n".join(lines)
 
 
-def _current(task: dict) -> dict:
+def _current(task: dict) -> bool:
     record = task.get(FIELD) or {}
-    return record if record.get("item") and record.get("pr", "") == task.get("pr_url", "") else {}
+    return bool(record.get("item")) and record.get("pr") == task["pr_url"]
 
 
 def _send(inbox: InboxStore, slug: str, task: dict, record: dict) -> None:
@@ -62,12 +62,12 @@ def _send(inbox: InboxStore, slug: str, task: dict, record: dict) -> None:
         pass
 
 
-def report(inbox: InboxStore, ledger, slug: str, task: dict, at_ms: int, by: str = SENDER) -> str:
+def report(inbox: InboxStore, ledger, slug: str, task: dict, at_ms: int) -> str:
     if task.get("state") != "done" or not task.get(ITEMS) or _current(task):
         return ""
-    pr_url = task.get("pr_url", "")
+    pr_url = task["pr_url"]
     record = {"item": report_id(slug, task["id"], pr_url), "to": address(), "pr": pr_url, "sent_at": utc(at_ms)}
-    ledger.update_task(slug, task["id"], {FIELD: record}, by=by)
+    ledger.update_task(slug, task["id"], {FIELD: record})
     _send(inbox, slug, task, record)
     return f"reported doc items of {task['id']} to {record['to']}"
 
@@ -104,10 +104,6 @@ def _settle(inbox: InboxStore, ledger, slug: str, task: dict, at_ms: int) -> str
 def report_pass(inbox: InboxStore, ledger, slug: str, tasks: list[dict], at_ms: int) -> list[str]:
     actions = []
     for task in tasks:
-        if task.get("state") != "done" or not task.get(ITEMS):
-            continue
-        if _current(task):
-            actions.append(_settle(inbox, ledger, slug, task, at_ms))
-        else:
-            actions.append(report(inbox, ledger, slug, task, at_ms))
+        step = _settle if _current(task) else report
+        actions.append(step(inbox, ledger, slug, task, at_ms))
     return [a for a in actions if a]
