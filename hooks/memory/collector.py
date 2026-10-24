@@ -38,7 +38,7 @@ def _entries(complete: bytes) -> list[object]:
     entries = []
     for raw in complete.splitlines():
         try:
-            entries.append(json.loads(raw.decode("utf-8")))
+            entries.append(json.loads(raw.decode()))
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
     return entries

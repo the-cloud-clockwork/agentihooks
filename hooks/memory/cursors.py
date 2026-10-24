@@ -44,7 +44,7 @@ class CursorStore:
         path = self._path(source)
         if not path.exists():
             return Cursor(source)
-        return Cursor(**json.loads(path.read_text(encoding="utf-8")))
+        return Cursor(**json.loads(path.read_bytes()))
 
     def commit(self, cursor: Cursor) -> Cursor:
         with self._locked():
@@ -53,8 +53,8 @@ class CursorStore:
             committed = replace(cursor, revision=cursor.revision + 1)
             path = self._path(cursor.source)
             temporary = path.with_suffix(".tmp")
-            with open(temporary, "w", encoding="utf-8") as handle:
-                json.dump(asdict(committed), handle, sort_keys=True)
+            with open(temporary, "wb") as handle:
+                handle.write(json.dumps(asdict(committed)).encode())
                 handle.flush()
                 os.fsync(handle.fileno())
             temporary.replace(path)
@@ -66,4 +66,4 @@ class CursorStore:
             return committed
 
     def replays_total(self) -> int:
-        return sum(json.loads(path.read_text(encoding="utf-8"))["replays"] for path in self.root.glob("*.json"))
+        return sum(json.loads(path.read_bytes())["replays"] for path in self.root.glob("*.json"))
