@@ -1235,7 +1235,7 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
             continue
         try:
             placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})
-            if agent.state == "finished" and task.get("state") == "blocked":
+            if agent.state == "finished":
                 actions.append(_finished_launch(slug, store, doc, agent))
                 continue
             launched = codex.admit_legacy(store, slug, placed_record(agent, placed), runtime)
