@@ -28,6 +28,7 @@ JSON_FIELDS = {
     "interactive": dict,
     "master_login": dict,
     "repos": list,
+    "capabilities": list,
 }
 INT_FIELDS = ("max_agents", "heartbeat_at")
 LEGACY = "roles"
@@ -55,6 +56,7 @@ def _default(hive_id: str, ui: str = "no") -> dict:
         "interactive": {"claude": "", "codex": ""},
         "master_login": {"claude": ""},
         "repos": [],
+        "capabilities": [],
         "heartbeat_at": 0,
         "version": "",
     }
@@ -86,6 +88,14 @@ def _excluded(setting: str, value: str) -> list[str]:
     return names
 
 
+def _capabilities(setting: str, value: str) -> list[str]:
+    names = list(dict.fromkeys(name.strip() for name in value.split(",") if name.strip()))
+    for name in names:
+        if not EXCLUDED_NAME.fullmatch(name):
+            raise HiveError(f"{setting} takes capability names, not {name!r}")
+    return names
+
+
 def _prefer(setting: str, value: str) -> dict[str, int]:
     prefer = {}
     for pair in filter(None, value.split(",")):
@@ -104,6 +114,7 @@ SETTINGS = {
     "excluded": ("excluded", _excluded),
     "prefer": ("prefer", _prefer),
     "max-agents": ("max_agents", _count),
+    "capabilities": ("capabilities", _capabilities),
 }
 
 

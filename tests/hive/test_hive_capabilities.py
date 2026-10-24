@@ -6,7 +6,7 @@ import pytest
 from scripts.hive import launch, placement, placement_waits, registry
 from scripts.hive.auth import HiveError
 from scripts.hive.placement import Wait
-from scripts.swarm import cli, commands, status
+from scripts.swarm import cli, commands, controller, status
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2.runtime.base import LOCAL, Placement
 from tests.hive.test_controller_launch import setup as setup
@@ -63,7 +63,7 @@ def test_a_hybrid_controller_never_overflows_a_headed_task_to_a_local_machine_wi
 
 def test_a_local_swarm_refuses_a_headed_task_unless_the_local_hive_declares_it(setup, monkeypatch):
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
-    fenced = hybrid(setup, monkeypatch, deployment="local")
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
     assert fenced.placement_refusal("eng", HEADED) == placement.NEEDS_CAPABILITY.format(needs="headed")
     write_hive(setup, id="workstation", ui="yes", excluded=[], capabilities=["headed"], max_agents=8)
     assert fenced.placement_refusal("eng", HEADED) == ""
@@ -78,11 +78,11 @@ def test_runtime_placement_keeps_a_task_with_needs_off_backends_without_capabili
 def test_swarm_status_prints_each_agents_hive(monkeypatch, capsys):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/r", 4, 0))
-    store.put_agent("sw", AgentRecord("on-desk", "eng", "t1", harness="claude", hive="desk"))
-    store.put_agent("sw", AgentRecord("nowhere", "eng", "t2", harness="claude"))
+    store.put_agent("sw", AgentRecord("on-desk", "eng", "t1", harness="claude", seat="eng-1@sw", hive="desk"))
+    store.put_agent("sw", AgentRecord("nowhere", "eng", "t2", harness="claude", seat="eng-2@sw"))
     monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
     monkeypatch.setattr(status.HerdrRuntime, "live_names", lambda self: {"on-desk", "nowhere"})
-    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(commands, "hive_id", lambda: "")
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
     lines = capsys.readouterr().out.splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith("Agent\t"))
