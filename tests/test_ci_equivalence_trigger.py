@@ -87,6 +87,7 @@ def replays(tmp_path):
             "hooks/__init__.py": "",
             "hooks/redis_link.py": "",
             "scripts/unrelated.py": "",
+            "__init__.py": "",
         },
     )
     return tmp_path
@@ -105,6 +106,7 @@ def test_the_trigger_follows_relative_nested_and_patched_imports(replays):
         "hooks/__init__.py",
     } <= files
     assert "scripts/unrelated.py" not in files
+    assert "__init__.py" not in files
 
 
 @pytest.mark.parametrize(
@@ -126,15 +128,27 @@ def test_a_change_triggers_only_when_it_reaches_the_replays(replays, changed, hi
 
 
 @pytest.mark.parametrize(("touched", "run"), [("scripts/inbox/keys.py", "true"), ("scripts/unrelated.py", "false")])
-def test_main_writes_whether_the_pull_request_reaches_the_replays(replays, monkeypatch, touched, run):
-    git(replays, "init", "-q", "-b", "dev")
-    git(replays, "add", ".")
-    git(replays, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base")
-    base = git(replays, "rev-parse", "HEAD")
-    (replays / touched).write_text("CHANGED = 1\n")
-    git(replays, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "head")
+def test_main_writes_whether_the_pull_request_reaches_the_replays(replays, monkeypatch, capsys, touched, run):
+    base = commit_change(replays, touched)
     output = replays / "output"
     monkeypatch.chdir(replays)
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    assert trigger.main(["--base", base, "--head", "HEAD"]) == 0
+    assert trigger.main([base, "HEAD"]) == 0
     assert output.read_text() == f"run={run}\n"
+    assert capsys.readouterr().out == (f"reaches the replays: {touched}\n" if run == "true" else "")
+
+
+def test_changed_files_diff_the_given_checkout_from_anywhere(replays, tmp_path_factory, monkeypatch):
+    base = commit_change(replays, "scripts/inbox/keys.py")
+    monkeypatch.chdir(tmp_path_factory.mktemp("elsewhere"))
+    assert trigger.changed_files(replays, base, "HEAD") == ["scripts/inbox/keys.py"]
+
+
+def commit_change(root, touched):
+    git(root, "init", "-q", "-b", "dev")
+    git(root, "add", ".")
+    git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base")
+    base = git(root, "rev-parse", "HEAD")
+    (root / touched).write_text("CHANGED = 1\n")
+    git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "head")
+    return base

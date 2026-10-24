@@ -27,8 +27,9 @@ def module_files(root: Path, name: str) -> list[Path]:
     parts = name.split(".")
     found = []
     for base in SEARCH:
-        for depth in range(1, len(parts) + 1):
-            stem = (root / base).joinpath(*parts[:depth])
+        stem = root / base
+        for part in parts:
+            stem = stem / part
             found += [path for path in (stem / "__init__.py", stem.with_suffix(".py")) if path.is_file()]
     return found
 
@@ -73,9 +74,9 @@ def changed_files(root: Path, base: str, head: str) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the ledger equivalence check when a change reaches its replays.")
-    parser.add_argument("--base", required=True)
-    parser.add_argument("--head", required=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("base")
+    parser.add_argument("head")
     args = parser.parse_args(argv)
     root = Path.cwd().resolve()
     hits = triggering(root, changed_files(root, args.base, args.head), imported_files(root))

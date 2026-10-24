@@ -29,7 +29,7 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
-        run: python -m scripts.ci_equivalence_trigger --base "$BASE" --head "$HEAD"
+        run: python -m scripts.ci_equivalence_trigger "$BASE" "$HEAD"
 
   ledger-equivalence:
     needs: trigger
