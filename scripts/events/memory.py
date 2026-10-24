@@ -9,7 +9,7 @@ from .config import BusConfig, QueuePolicy
 from .dead import dead_letter
 from .envelope import Envelope
 from .scope import RoutedLog, ScopedLog, ScopedQueue, queue_lane
-from .subjects import PREFIX
+from .subjects import PREFIX, in_swarm
 from .subjects import subject as event_subject
 
 Clock = Callable[[], int]
@@ -334,7 +334,7 @@ class MemoryBus:
             self._runtime.handlers.append((subject, handler))
 
     def request(self, subject: str, data: bytes, timeout_ms: int) -> bytes:
-        if self._swarm is not None and not subject.startswith(f"swarm.{self._swarm}."):
+        if self._swarm is not None and not in_swarm(self._swarm, subject):
             raise ValueError(f"a scoped bus cannot request outside swarm {self._swarm!r}")
         with self._runtime.cond:
             self._runtime.require_open()

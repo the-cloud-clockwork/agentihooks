@@ -9,6 +9,9 @@ from scripts.hive import auth
 Run = Callable[..., subprocess.CompletedProcess]
 GH_TIMEOUT_S = 120
 RAW = "Accept: application/vnd.github.raw"
+AUTO_REFUSED = "auto merge is not allowed"
+PASSED = ("SUCCESS", "NEUTRAL", "SKIPPED")
+WAITING = (None, "PENDING", "EXPECTED")
 
 
 def gh(run: Run, argv: list[str], body: dict | None = None) -> str:
@@ -65,5 +68,28 @@ def pr_state(run: Run, url: str) -> str:
     return gh(run, ["pr", "view", url, "--json", "state", "--jq", ".state"])
 
 
-def merge(run: Run, url: str) -> None:
-    gh(run, ["pr", "merge", url, "--squash", "--auto"])
+def merge(run: Run, url: str) -> bool:
+    try:
+        gh(run, ["pr", "merge", url, "--squash", "--auto"])
+    except auth.HiveError as exc:
+        if AUTO_REFUSED not in str(exc).lower():
+            raise
+        return False
+    return True
+
+
+def checks_passed(run: Run, url: str) -> bool:
+    rollup = json.loads(gh(run, ["pr", "view", url, "--json", "statusCheckRollup"]))["statusCheckRollup"] or []
+    results = [
+        (check.get("name") or check.get("context"), check.get("conclusion") or check.get("state")) for check in rollup
+    ]
+    failed = [name for name, result in results if result not in (*PASSED, *WAITING)]
+    if failed:
+        raise auth.HiveError(
+            f"pull request {url} has failed checks: {', '.join(failed)}; fix them and rerun hive create"
+        )
+    return bool(results) and all(result in PASSED for _, result in results)
+
+
+def squash(run: Run, url: str) -> None:
+    gh(run, ["pr", "merge", url, "--squash"])

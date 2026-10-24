@@ -8,7 +8,7 @@ from scripts.events.nats import EVENT_STREAM, queue_names
 from scripts.events.nats_legacy import LEGACY_EVENTS
 from scripts.events.nats_state import ScopedStateStore
 from scripts.events.scope import LANES
-from scripts.events.subjects import stream_name, subject
+from scripts.events.subjects import slot_request, stream_name, subject
 from scripts.hive import nats_grant
 from scripts.hive.auth import NATS_CREDS_FILE
 from scripts.hub import slots
@@ -23,7 +23,7 @@ def test_doc_names_the_settings_buckets_lanes_and_streams_the_code_uses():
         assert f"`{name}`" in text
     for name in (*SCOPED_STATE_BUCKETS, *slots.BUCKETS, slots.QUEUE, *LANES, *LEGACY_EVENTS):
         assert f"`{name}`" in text
-    assert f"`{subject('rig', 'slots').replace('.rig.', '.<swarm>.')}`" in text
+    assert f"`{slot_request('rig', 'm1').replace('.rig.', '.<swarm>.').replace('.m1', '.<hive>')}`" in text
     assert stream_name("rig", "EVENTS") == "AGENTIHOOKS_726967_EVENTS"
     assert "`726967`" in text
     assert stream_name("other", "STATE_spoke-work") in text

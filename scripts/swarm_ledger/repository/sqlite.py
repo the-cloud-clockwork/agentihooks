@@ -486,6 +486,30 @@ class SQLiteLedgerRepository:
             if current is None or current.generation < entry.generation:
                 self._cache[self._key(slug)] = entry
 
+    def _cached(self) -> dict:
+        with self._guard:
+            return {key[1]: entry for key, entry in self._cache.items() if key[0] == str(self.path)}
+
+    def generations(self) -> dict:
+        """{slug: generation} of every cached ledger."""
+        return {slug: entry.generation for slug, entry in self._cached().items()}
+
+    def carry(self, since: dict) -> dict:
+        """{slug: [generation, text]} of the cached ledgers whose generation moved past since."""
+        return {
+            slug: [entry.generation, entry.text]
+            for slug, entry in self._cached().items()
+            if since.get(slug) != entry.generation
+        }
+
+    def adopt_carried(self, carried: dict) -> None:
+        """Cache the committed copies another process carried over, unless a copy at least as new is already cached."""
+        held = self.generations()
+        for slug, (generation, text) in carried.items():
+            if slug not in held or held[slug] < generation:
+                fragments = document(json.loads(text))
+                self._remember(slug, Entry(generation, None, fragments.value, fragments))
+
     def _adopt(self, slug: str | None = None) -> None:
         from . import legacy
 

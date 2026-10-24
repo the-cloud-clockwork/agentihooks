@@ -469,6 +469,16 @@ def _swarm_tick_reaps_no_real_process(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _codex_resumes_find_their_rollout(request, monkeypatch):
+    """A fake Codex resume finds its rollout unless the test is marked codex_rollouts."""
+    if request.node.get_closest_marker("codex_rollouts"):
+        return
+    from scripts.profiles import render
+
+    monkeypatch.setattr(render, "has_codex_rollout", lambda name, overlays, conversation_id: True)
+
+
+@pytest.fixture(autouse=True)
 def _tool_deps_never_read_the_real_checkout(tmp_path, monkeypatch):
     from scripts import tool_deps
 
