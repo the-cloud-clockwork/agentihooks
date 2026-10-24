@@ -910,3 +910,70 @@ def test_browser_home_preserves_an_existing_unheld_grant(ah, rendered):
     assert login.login_account(1) == "masteratexample_com"
     held = json.loads((login.root(2) / login.OWNER).read_text())
     assert held == {"epoch": 1, "alone": "master@a-1", "holders": {"master@a-1": os.getpid()}}
+
+
+@pytest.mark.parametrize("outcome", ["captcha", "failure"])
+def test_master_launch_uses_subscription_fallback_without_remote_control(ah, rendered, tmp_path, monkeypatch, outcome):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer as router
+    from scripts import master_login_chain as chain
+    from scripts.hive import account_slots
+    from scripts.routing import native_login
+
+    _seed(rendered)
+    (rendered / "settings.json").write_text('{"forceLoginMethod":"claudeai","hooks":{"Stop":[]}}')
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.chdir(tmp_path)
+    selections, executed = [], []
+
+    def invalid(*_):
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    def select(environ, **options):
+        selections.append(options)
+        return router.RouteDecision(router.Credential("AH_CC_TOKEN_workeratexample_com", "routed"), None, "cache")
+
+    monkeypatch.setattr(native_login, "check", invalid)
+    monkeypatch.setattr(chain, "authorize", lambda *_: outcome)
+    monkeypatch.setattr(router, "select_credential", select)
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(account_slots, "execute", lambda harness, account, environ, launch: launch(environ))
+    monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, environ: executed.append((binary, argv, environ)))
+    report = tmp_path / "route"
+    args = ["--remote-control", "master proof", "--remote-control-session-name-prefix", "proof", "--model", "opus"]
+    login.launch_claude("/opt/claude", args, _environ(rendered, ANTHROPIC_API_KEY="api"), str(report))
+    assert selections[0]["exclude"] == (router.API_ACCOUNT,)
+    assert selections[0]["sessions"] == {}
+    binary, argv, environ = executed[0]
+    assert binary == "/opt/claude"
+    assert "--remote-control" not in argv and "--remote-control-session-name-prefix" not in argv
+    assert argv[-2:] == ["--model", "opus"]
+    assert environ["CLAUDE_CODE_OAUTH_TOKEN"] == "routed"
+    assert "ANTHROPIC_API_KEY" not in environ
+    target = Path(environ["CLAUDE_CONFIG_DIR"])
+    assert target != rendered and target != login.home()
+    assert environ["CLAUDE_SECURESTORAGE_CONFIG_DIR"] == str(target)
+    assert json.loads((target / "settings.json").read_text()) == {"hooks": {"Stop": []}}
+    assert not (target / login.CREDENTIALS).exists()
+    assert login.holders(login.root()) == {}
+    assert dict(line.split("=", 1) for line in report.read_text().splitlines()) == {
+        "status": "routed",
+        "account": "workeratexample_com",
+        "placement": "fallback",
+        "remote_control": "off",
+    }
+
+
+def test_native_master_launch_checks_the_session_before_exec(ah, rendered, tmp_path, monkeypatch):
+    from scripts.hive import account_slots
+    from scripts.routing import native_login
+
+    _seed(rendered)
+    checked = []
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.setattr(native_login, "check", lambda environ, account: checked.append(account))
+    monkeypatch.setattr(account_slots, "execute", lambda harness, account, environ, launch: launch(environ))
+    monkeypatch.setattr(login.os, "execvpe", lambda *_: None)
+    monkeypatch.chdir(tmp_path)
+    login.launch_claude("/opt/claude", ["--model", "opus"], _environ(rendered), "")
+    assert checked == ["masteratexample_com"]
