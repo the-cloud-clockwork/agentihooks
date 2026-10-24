@@ -51,6 +51,7 @@ UPDATABLE = (
     "after_release",
     "applied_at",
     "workstation",
+    "needs",
     "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up", "workstation")
@@ -58,7 +59,16 @@ DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
 NUMBER_FIELDS = ("difficulty_confidence",)
-LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays", "split_pulls", "repositories")
+LIST_FIELDS = (
+    "depends_on",
+    "territory",
+    "parked_on",
+    "parked_repos",
+    "overlays",
+    "split_pulls",
+    "repositories",
+    "needs",
+)
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
@@ -362,6 +372,7 @@ def _add(doc, op, ctx):
         "slice",
         "follow_up",
         "workstation",
+        "needs",
     ):
         if key in op:
             task[key] = op[key]

@@ -333,11 +333,28 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
 | `max-agents` | whole number, 1 or more | `20` on `ui=no`, `10` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. |
+| `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
 Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
 role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded` or
 `max-agents` follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
 stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
+
+### Capabilities and task needs
+
+A hive declares what it offers with `capabilities`, and a task names what it requires with `needs`:
+
+```bash
+agentihooks hive set desk capabilities=headed
+agentihooks ledger --slug <slug> --as <name> task add browse "Check the logged in page" --lane eng --needs headed
+agentihooks ledger --slug <slug> --as <name> task set browse needs=headed
+```
+
+Placement keeps only the live hives whose capabilities cover every name in the task's `needs`. When none does, the
+task waits with `the task needs a hive with headed, and no hive declares it`, shown with the other placement waits
+in `swarm status`. Overflow to the local machine and a local swarm take such a task only when the local hive record
+declares the capabilities too, and runtime placement keeps it off a backend that cannot declare them. `swarm status`
+prints each agent's hive in its Hive column, and the ledger page agents table names it under the agent.
 
 ### Excluded and prefer: the operator's layout
 

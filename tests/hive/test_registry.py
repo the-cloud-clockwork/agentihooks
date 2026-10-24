@@ -23,6 +23,7 @@ DEFAULT = {
     "interactive": {"claude": "", "codex": ""},
     "master_login": {"claude": ""},
     "repos": [],
+    "capabilities": [],
     "heartbeat_at": 0,
     "version": "",
 }
@@ -214,9 +215,12 @@ def test_a_record_written_by_another_writer_shows_with_defaults(redis):
         ([], "hive set needs at least one setting"),
         (
             ["colour=red"],
-            "unknown setting 'colour=red'; settings are name, ui, ephemeral, draining, excluded, prefer, max-agents",
+            "unknown setting 'colour=red'; settings are name, ui, ephemeral, draining, excluded, prefer, max-agents, capabilities",
         ),
-        (["ui"], "unknown setting 'ui'; settings are name, ui, ephemeral, draining, excluded, prefer, max-agents"),
+        (
+            ["ui"],
+            "unknown setting 'ui'; settings are name, ui, ephemeral, draining, excluded, prefer, max-agents, capabilities",
+        ),
         (["ui=maybe"], "ui must be yes or no, not 'maybe'"),
         (["ephemeral=true"], "ephemeral must be yes or no, not 'true'"),
         (["name="], "name must not be empty"),
