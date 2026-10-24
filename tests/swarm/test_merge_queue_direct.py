@@ -88,13 +88,7 @@ class GitHub:
             self.merged.append(command[5:])
             return self.answer(
                 command,
-                {
-                    "data": {
-                        "mergePullRequest": {
-                            "pullRequest": {"state": "MERGED", "mergeCommit": self.commit}
-                        }
-                    }
-                },
+                {"data": {"mergePullRequest": {"pullRequest": {"state": "MERGED", "mergeCommit": self.commit}}}},
             )
         if query == f"query={merge_queue.QUEUE}":
             self.enqueued.append(command[5:])
