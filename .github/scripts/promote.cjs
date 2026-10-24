@@ -93,7 +93,11 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
     const current = (await github.rest.repos.getCommit({ ...api, ref: 'main' })).data;
     if (current.sha !== main.sha) {
       promoted = await supersededBy(github, api, context.sha, current);
-      if (promoted) return endSuperseded(core, context.sha, current, promoted);
+      if (promoted) {
+        await github.rest.pulls.update({ ...api, pull_number: pull.number, state: 'closed' });
+        await deleteSnapshot(github, api, ref);
+        return endSuperseded(core, context.sha, current, promoted);
+      }
       throw new Error('Promotion snapshot is stale, main moved during the wait');
     }
     const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: snapshot, merge_method: 'squash', commit_message: body })).data;

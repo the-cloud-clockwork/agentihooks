@@ -59,6 +59,7 @@ function fixture(options = {}) {
         mergeable_state: options.mergeState || (options.pending || options.waitOnce && readiness++ === 0 ? 'blocked' : 'clean') } }),
       list: async () => ({ data: options.existing ? [pull] : [] }),
       create: async args => { writes.push(['create', args]); return { data: pull }; },
+      update: async args => { writes.push(['update', args]); },
       merge: async args => {
         writes.push(['merge', args]);
         if (options.refused) throw new Error('Required checks are pending');
@@ -232,8 +233,8 @@ for (const order of ['behind', 'identical', 'diverged']) {
 test('ends superseded when main takes a newer promotion during the wait', async () => {
   const f = fixture({ promoted: last, mainMoves: newer, orders: { [last]: 'ahead', [newer]: 'behind' } });
   await promote(f);
-  assert.deepEqual(f.writes.map(([kind]) => kind), ['create']);
-  assert.deepEqual(f.refs.map(([kind, args]) => kind === 'compare' ? args.base : kind), [last, 'commit', 'create', newer]);
+  assert.deepEqual(f.writes, [['create', f.writes[0][1]], ['update', { owner: 'owner', repo: 'repo', pull_number: 7, state: 'closed' }]]);
+  assert.deepEqual(f.refs.map(([kind, args]) => kind === 'compare' ? args.base : kind), [last, 'commit', 'create', newer, 'delete']);
   assert.equal(f.outputs.superseded, newer);
   assert.equal(f.outputs.main, undefined);
 });
