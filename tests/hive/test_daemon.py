@@ -228,6 +228,24 @@ def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis
     assert ttl - 5 < redis.pttl(f"{ROOT}:launch-slot:first") / 1000 <= ttl
 
 
+def test_a_beat_refused_the_index_write_still_reports_the_heartbeat(redis, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "other")
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+
+    def refuse(key, *members):
+        raise NoPermissionError("No permissions to access a key")
+
+    monkeypatch.setattr(redis, "sadd", refuse)
+
+    daemon.beat(redis, "machine")
+
+    assert registry.show(redis, "machine")["heartbeat_at"] > 0
+
+
 def _once(connection):
     return Mock(side_effect=[(connection, connection), AssertionError("reconnected")])
 
