@@ -11,6 +11,7 @@ import ledger  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_kinds  # noqa: E402
 
+from scripts.swarm_ledger import workflow_task  # noqa: E402
 from tests.swarm.test_cli import env, run  # noqa: E402, F401
 from tests.swarm_ledger import test_task_kinds as kinds  # noqa: E402
 
@@ -79,9 +80,9 @@ def test_the_ledger_refuses_done_without_a_passed_workflow_and_a_pass_verdict():
 def _workflow_task(env, monkeypatch, tmp_path, state=None, verdict=None):  # noqa: F811
     _, rows, _ = env
     if state is not None:
-        (tmp_path / "workflow.json").write_text(json.dumps(state))
+        (tmp_path / workflow_task.STATE).write_text(json.dumps(state))
     if verdict is not None:
-        (tmp_path / "verdict.json").write_text(json.dumps(verdict))
+        (tmp_path / workflow_task.VERDICT).write_text(json.dumps(verdict))
     rows.rows["t1"].update(kind="workflow", workflow="simple-workflow")
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
@@ -117,3 +118,48 @@ def test_an_exhausted_workflow_blocks_its_task_with_the_last_judge_notes(env, mo
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["state"] == "blocked"
     assert rows.rows["t1"]["state"] == "blocked"
     assert rows.comments[-1] == ("t1", notes, NAME)
+
+
+def test_the_workspace_files_are_workflow_json_and_verdict_json():
+    assert (workflow_task.STATE, workflow_task.VERDICT) == ("workflow.json", "verdict.json")
+
+
+def test_add_fields_keeps_a_named_profile_and_omits_an_absent_case():
+    assert workflow_task.add_fields("simple-workflow", "", "eng", "reviewer", Path.cwd()) == {
+        "workflow": "simple-workflow",
+        "profile": "reviewer",
+    }
+
+
+@pytest.mark.parametrize(
+    ("name", "case", "lane", "message"),
+    [
+        ("no-such-workflow", "", "eng", "unknown workflow no-such-workflow"),
+        ("simple-workflow", "", "ci", "workflow tasks use the eng lane"),
+        ("simple-workflow", "missing-case.md", "eng", "case not found: missing-case.md"),
+    ],
+)
+def test_add_fields_names_what_it_refuses(name, case, lane, message):
+    with pytest.raises(ValueError) as refused:
+        workflow_task.add_fields(name, case, lane, None, Path.cwd())
+    assert str(refused.value) == message
+
+
+@pytest.mark.parametrize("text", [None, "not json", "[1, 2]"])
+def test_read_gives_an_empty_record_for_a_missing_broken_or_non_object_file(tmp_path, text):
+    if text is not None:
+        (tmp_path / workflow_task.STATE).write_text(text)
+    assert workflow_task.read(str(tmp_path), workflow_task.STATE) == {}
+    assert workflow_task.read("", workflow_task.STATE) == {}
+
+
+def test_proof_and_notes_of_an_empty_workspace(tmp_path):
+    assert workflow_task.proof(str(tmp_path)) == {"workflow": "", "verdict": ""}
+    assert workflow_task.exhausted_notes(str(tmp_path)) is None
+
+
+def test_exhausted_notes_fall_back_when_the_judge_left_none(tmp_path):
+    (tmp_path / workflow_task.STATE).write_text(json.dumps({"status": "passed", "last_notes": "kept"}))
+    assert workflow_task.exhausted_notes(str(tmp_path)) is None
+    (tmp_path / workflow_task.STATE).write_text(json.dumps({"status": "exhausted", "last_notes": ""}))
+    assert workflow_task.exhausted_notes(str(tmp_path)) == "workflow exhausted"
