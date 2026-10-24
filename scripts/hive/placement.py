@@ -130,6 +130,12 @@ def overflow(role: str, waited: Wait, local_agents: int, local_max: int) -> Choi
     return Choice(LOCAL_MACHINE, waited.reason)
 
 
+def _private_master(hive: dict, harness: str, front: bool) -> bool:
+    return front and (
+        bool(hive["master_login"].get(harness)) or (harness == "claude" and hive.get("master_login_enabled") == YES)
+    )
+
+
 def place_master(
     harness: str, login: str, repo: str, hives: list[dict], now: int, front: bool = False
 ) -> MasterPlacement | Wait:
@@ -142,11 +148,12 @@ def place_master(
     candidates = []
     for hive in listing:
         headless = hive["ui"] != YES
-        forced = front and hive["master_login"].get(harness)
+        account = hive["master_login"].get(harness, "")
+        forced = _private_master(hive, harness, front)
         if forced:
-            if login in ("", forced):
-                placed = MasterPlacement(hive["id"], forced, MASTER_LOGIN, False)
-                candidates.append((headless, False, _order(MASTER)(hive), forced, placed))
+            if login in ("", account):
+                placed = MasterPlacement(hive["id"], account, MASTER_LOGIN, False)
+                candidates.append((headless, not bool(account), _order(MASTER)(hive), account, placed))
             continue
         native = hive["interactive"].get(harness)
         if native and login in ("", native):
