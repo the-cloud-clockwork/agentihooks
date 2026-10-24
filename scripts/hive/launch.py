@@ -431,9 +431,9 @@ class HiveLaunch:
             ended = replace(
                 agent,
                 runtime_target=ack.target,
-                pane_id=ack.execution.get("pane_id", agent.pane_id),
-                launched_at=ack.execution.get("launched_at", agent.launched_at),
-                launch_timings=ack.execution.get("launch_timings", agent.launch_timings),
+                pane_id=ack.execution["pane_id"],
+                launched_at=ack.execution["launched_at"],
+                launch_timings=ack.execution["launch_timings"],
             )
             self.store.execution_registry.update(self.slug, ended)
         return Outcome("spawn", Status.OK, HIVE)
