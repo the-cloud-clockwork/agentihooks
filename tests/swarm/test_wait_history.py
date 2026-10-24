@@ -110,7 +110,9 @@ def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatc
         assert slug == "sw"
         return []
 
-    store = SimpleNamespace(redis=redis, agents=rows)
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(redis)
     ledger = SimpleNamespace(tasks=rows)
     idle.declare_wait(redis, "sw", "engineer", until, "proof", 60_000)
     idle.end_wait(redis, "sw", "engineer", until)
