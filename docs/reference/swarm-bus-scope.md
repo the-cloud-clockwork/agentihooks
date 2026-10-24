@@ -182,17 +182,21 @@ the operator's signing key: its rendered config carries no `accounts`, `authoriz
 so a connection without a signed credential is refused. The service users the hub signs with
 `agentihooks hive nats-trust` are listed in antoncore `k8s/values-overlays/agentihooks-swarm-nats/users.yaml`:
 `swarm-controller`, `swarm-github-webhook` and `swarm-ledger`. The shared `swarm-hive` user, which subscribed to every
-`_INBOX.>` reply subject, is no longer among them, so `hive nats-trust` stops signing it. antoncore's render tests
-fail when any user named `swarm-hive`, or any user granting the spoke execution subjects, returns to that file.
+`_INBOX.>` reply subject, is no longer among them, so `hive nats-trust` stops signing it. antoncore's
+`test_no_shared_hive_user_remains` reads that file and fails when a user named `swarm-hive` returns, or when any user
+is granted publish on the spoke execution subject `swarm.*.execution.>`.
 
 A `swarm-hive` credential signed before the user was retired stays valid until it is revoked; removing the user
-only stops new signing.
+only stops new signing. To revoke it, list the user under `retired` in the same file with the OpenBao record to
+delete, then rerun `agentihooks hive nats-trust`: its key joins the shared NATS revocation hash and its record is
+deleted. antoncore lists no `retired` entry for `swarm-hive` yet.
 
 ## The grant check
 
-Each agentihooks pull request runs `scripts.ci_hive_nats_grants` from the protected grader in the `Hold the hive
-member NATS grants equal to the antoncore hive user` step. It reads antoncore dev's NATS values and users files and
-compares the grants agentihooks renders with the antoncore users:
+Every run of the agentihooks test workflow, on pull requests into `dev`, merge groups and pushes to `dev`, runs
+`scripts.ci_hive_nats_grants` from the protected grader in the
+`Hold the hive member NATS grants equal to the antoncore hive user` step. It reads antoncore dev's NATS values and
+users files and compares the grants agentihooks renders with the antoncore users:
 
 | Credential rendered by `scripts/hive/nats_grant.py` | antoncore user | Outcome |
 |---|---|---|
@@ -202,6 +206,7 @@ compares the grants agentihooks renders with the antoncore users:
 Run it from an agentihooks checkout beside an antoncore checkout:
 
 ```bash
+python -m pip install "pyyaml>=6.0" "cryptography>=42"
 python -m scripts.ci_hive_nats_grants --agentihooks . --antoncore ../antoncore
 ```
 
