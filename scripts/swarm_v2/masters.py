@@ -198,9 +198,14 @@ class MasterSeats:
             self.redis.hdel(self.key(slug), RETIRED)
 
     def retire(self, slug: str, address: str) -> None:
+        """Every phase the seat owns moves to the front door in the same write."""
+        front = seat_address(slug, MASTER)
+        saved = json.loads(self.redis.hget(self.key(slug), "owners") or "{}")
+        mapping = {"owners": json.dumps({p: front if owner == address else owner for p, owner in saved.items()})}
         held = self.retired(slug)
         if address not in held:
-            self.redis.hset(self.key(slug), RETIRED, json.dumps([*held, address]))
+            mapping[RETIRED] = json.dumps([*held, address])
+        self.redis.hset(self.key(slug), mapping=mapping)
 
     def retired(self, slug: str) -> list[str]:
         return json.loads(self.redis.hget(self.key(slug), RETIRED) or "[]")

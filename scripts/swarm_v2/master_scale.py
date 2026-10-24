@@ -30,7 +30,7 @@ ENDED = ("stopping", "stopped")
 ASK = (
     "Swarm {slug} shrank to {want} master seats, so seat {address} retires. Write your Handoff v2 for the lead master "
     "{lead}, run agentihooks swarm {slug} handoff <doc> and stop; the tick then moves your phases and pending items to "
-    "the remaining masters."
+    "the lead master."
 )
 HANDED = "Master seat {address} of swarm {slug} retired as the swarm shrank. Its handoff document follows.\n\n"
 EARLY = "Master seat {address} retired; its phases moved: {moved}."
@@ -135,6 +135,7 @@ def _retire(slug, store, address, asked, now_ms):
     """asked is [ask time, ask item id] when the seat's master was asked to hand off, else None."""
     inbox, lead, seat_name = InboxStore(store.redis), _address(slug, 1), address.removesuffix(f"@{slug}")
     ask_id = asked[1] if asked else ""
+    masters.MasterSeats(store.redis).retire(slug, address)
     text = store.handoff(slug, seat_name)
     if text:
         inbox.send(SENDER, lead, HANDED.format(address=address, slug=slug) + text)
@@ -155,11 +156,10 @@ def _retire(slug, store, address, asked, now_ms):
 
 
 def _retire_early(slug, store, doc, address, asked, now_ms):
-    """A seat below a live higher seat stays counted; its phases move to the remaining seats in the same step."""
-    action = _retire(slug, store, address, asked, now_ms)
+    """A seat below a live higher seat stays counted; its phases move to the front door in the same step."""
     seats = masters.MasterSeats(store.redis)
     owned = [p for p, owner in seats.owners(slug, doc).items() if owner == address]
-    seats.retire(slug, address)
+    action = _retire(slug, store, address, asked, now_ms)
     owners = seats.owners(slug, doc)
     moved = ", ".join(f"{p} to {owners.get(p, _address(slug, 1))}" for p in owned)
     text = EARLY.format(address=address, moved=moved) if owned else EARLY_EMPTY.format(address=address)
