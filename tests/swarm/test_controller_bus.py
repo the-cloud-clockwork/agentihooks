@@ -1,7 +1,9 @@
 import pytest
 
+from scripts import operator_env
 from scripts.events import nkey
 from scripts.swarm import controller
+from scripts.swarm_v2 import control_service, proof_swarm
 
 pytestmark = pytest.mark.unit
 
@@ -35,10 +37,38 @@ def test_controller_keeps_running_when_the_bus_refuses(capsys):
 
     environ = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_CREDENTIALS": creds("swarm-controller")}
     assert controller.open_controller_bus(environ, refused) is None
-    assert capsys.readouterr().err == "controller: bus nats unreachable as swarm-controller: connection refused\n"
+    assert capsys.readouterr().err == "controller: bus nats refused: connection refused\n"
+
+
+def test_controller_keeps_running_on_a_malformed_bus_credential(capsys):
+    environ = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_CREDENTIALS": "not creds"}
+    assert controller.open_controller_bus(environ, lambda config: "bus") is None
+    assert (
+        capsys.readouterr().err == "controller: bus nats refused: a NATS creds file holds one user JWT and one seed\n"
+    )
 
 
 def test_controller_bus_without_credentials_signs_in_anonymously(capsys):
     environ = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://bus:4222"}
     assert controller.open_controller_bus(environ, lambda config: "bus") == "bus"
     assert capsys.readouterr().out == "controller: bus nats at nats://bus:4222 as anonymous\n"
+
+
+class Bus:
+    closed = 0
+
+    def close(self):
+        self.closed += 1
+
+
+def test_controller_run_holds_its_bus_open_through_the_ticks_and_closes_it_on_exit(monkeypatch):
+    bus, seen = Bus(), []
+    monkeypatch.setattr(operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(operator_env, "classifier", lambda env: [])
+    monkeypatch.setattr(controller, "connect", lambda: "store")
+    monkeypatch.setattr(controller, "open_controller_bus", lambda env: bus if env is controller.os.environ else None)
+    monkeypatch.setattr(proof_swarm, "run", lambda env, store, require=None: None)
+    monkeypatch.setattr(control_service, "host", lambda env, store, hive: None)
+    monkeypatch.setattr(controller, "tick_once", lambda store, service: seen.append(bus.closed) or {})
+    assert controller.main(["run", "--once"]) == 0
+    assert (seen, bus.closed) == ([0], 1)

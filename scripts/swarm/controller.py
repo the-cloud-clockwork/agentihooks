@@ -439,11 +439,11 @@ def open_controller_bus(environ: Mapping[str, str], opener=open_bus):
     config = BusConfig.from_environ(environ)
     if config.backend != "nats":
         return None
-    user = bus_user(config.credentials)
     try:
+        user = bus_user(config.credentials)
         bus = opener(replace(config, provision=False))
     except Exception as exc:
-        print(f"controller: bus nats unreachable as {user}: {exc}", file=sys.stderr, flush=True)
+        print(f"controller: bus nats refused: {exc}", file=sys.stderr, flush=True)
         return None
     print(f"controller: bus nats at {config.url} as {user}", flush=True)
     return bus
