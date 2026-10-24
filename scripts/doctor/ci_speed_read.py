@@ -43,7 +43,7 @@ class _Api:
             if self.responses is not None and endpoint in self.responses:
                 return self.responses[endpoint]
         body = self.request(endpoint)
-        if self.responses is not None and "/actions/jobs/" not in endpoint:
+        if self.responses is not None:
             self.responses[endpoint] = body
         return body
 

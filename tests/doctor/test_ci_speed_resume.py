@@ -61,7 +61,7 @@ def test_budgeted_passes_resume_jobs_without_losing_active_run_coverage(store, m
     assert state.get("continuation") is None
 
 
-@pytest.mark.parametrize("status", [403, 503])
+@pytest.mark.parametrize("status", [403, 502, 503, 504])
 def test_request_errors_keep_safe_http_details_in_the_journal(store, monkeypatch, status):
     import subprocess
 
@@ -79,7 +79,7 @@ def test_request_errors_keep_safe_http_details_in_the_journal(store, monkeypatch
     assert "repos/the-cloud-clockwork/agentihooks/actions/runs" in line
     assert "untrusted diagnostic" not in line
     assert len(line) < 1000
-    assert len(calls) == (2 if status == 503 else 1)
+    assert len(calls) == (1 if status == 403 else 2)
     state = json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))
     assert state["last"] == NOW - 60000
     assert state["report"]["complete"] is False
