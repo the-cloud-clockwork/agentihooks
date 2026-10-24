@@ -1374,7 +1374,7 @@ def _master_or_operator(store, args, message):
 
 
 def cmd_verdict(store, args):
-    by = _master_or_operator(store, args, "only the master or the operator gives a finding a verdict")
+    by = args.by = _master_or_operator(store, args, "only the master or the operator gives a finding a verdict")
     verdict = verdict_store(store, args.slug).judge(args.finding, args.verdict, args.note, by, now_ms())
     minutes = health.limits().cooldown_minutes
     print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
