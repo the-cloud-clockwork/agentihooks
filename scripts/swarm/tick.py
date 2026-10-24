@@ -1182,7 +1182,17 @@ def _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms):
     _release_admission(slug, runtime, task)
     _release_hive_launch(slug, store, record)
     _record_spawn_failure(slug, store, record, exc, now_ms)
-    actions = [f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}"]
+    actions = []
+    if "account reservation is full" in str(exc):
+        from scripts.swarm import capacity
+
+        decision = capacity.read(store, slug)
+        snapshot = {
+            "harness": decision.get("tasks", {}).get(task["id"], record.harness),
+            "accounts": decision.get("accounts", []) if decision.get("observed_at") == now_ms else [],
+        }
+        actions.append(f"spawn capacity for {task['id']}: {json.dumps(snapshot)}")
+    actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
     if isinstance(exc, ProfileUnresolved):
         actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
     return actions
