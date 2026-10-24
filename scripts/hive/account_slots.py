@@ -1,9 +1,12 @@
 import hashlib
 import json
+import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from scripts.events import subjects
 from scripts.events.bus import Bus, StateConflict
+from scripts.events.config import SWARMS_ENV
 from scripts.hive import presence
 
 TTL_MS = presence.TTL_MS
@@ -13,6 +16,9 @@ ENDED = frozenset({"exited", "dead"})
 
 HIVE_ENV = "AGENTIHOOKS_SLOT_HIVE"
 EXECUTION_ENV = "AGENTIHOOKS_SLOT_EXECUTION"
+SLOTS = "slots"
+UNBOUND = "hive"
+REQUEST_TIMEOUT_MS = 10_000
 
 
 class Unavailable(RuntimeError):
@@ -141,6 +147,45 @@ class Slots:
             raise
 
 
+def request_subject(swarm: str) -> str:
+    return subjects.subject(swarm, SLOTS)
+
+
+def asker(bus: Any, swarm: str, timeout_ms: int = REQUEST_TIMEOUT_MS) -> Callable[[dict], Any]:
+    def ask(request: dict) -> Any:
+        answer = json.loads(bus.request(request_subject(swarm), json.dumps(request).encode(), timeout_ms))
+        if not answer["ok"]:
+            raise Unavailable(answer["error"])
+        return answer["result"]
+
+    return ask
+
+
+class Remote(Slots):
+    def __init__(self, ask: Callable[[dict], Any], hive: str, read: Callable[[], dict] | None = None) -> None:
+        self.ask, self.hive, self.read = ask, hive, read
+
+    def heartbeat(self, report: dict, executions: dict) -> None:
+        self.ask({"op": "heartbeat", "hive": self.hive, "report": report, "executions": executions})
+
+    def take(self, execution: str, harness: str, preferred: str = "") -> str | None:
+        request = {"execution": execution, "harness": harness, "preferred": preferred, "report": self.read()}
+        return self.ask({"op": "take", "hive": self.hive, **request})
+
+    def release(self, execution: str, harness: str, account: str) -> None:
+        self.ask({"op": "release", "hive": self.hive, "execution": execution, "harness": harness, "account": account})
+
+
+def _swarm(environ: Mapping[str, str]) -> str:
+    return next((swarm for swarm in environ.get(SWARMS_ENV, "").split(",") if swarm), UNBOUND)
+
+
+def _slots(bus: Bus, backend: str, hive: str, read: Callable[[], dict], environ: Mapping[str, str]) -> Slots:
+    if backend == "memory":
+        return Slots(bus, hive, read)
+    return Remote(asker(bus, _swarm(environ)), hive, read)
+
+
 def _reading(hive: str) -> dict:
     from hooks.context import account_sessions
     from scripts.hive import daemon
@@ -160,26 +205,20 @@ def execute(harness: str, account: str, environ: Mapping[str, str], invoke: Call
     hive = environ.get(HIVE_ENV)
     if not hive:
         return invoke(child)
-    bus = open_bus(BusConfig.from_environ())
+    config = BusConfig.from_environ()
+    bus = open_bus(config)
     try:
-        slots = Slots(bus, hive, lambda: _reading(hive))
+        slots = _slots(bus, config.backend, hive, lambda: _reading(hive), environ)
         return slots.launch(environ[EXECUTION_ENV], harness, account, lambda selected: invoke(child))
     finally:
         bus.close()
 
 
 def release(hive: str, execution: str, harness: str, account: str) -> None:
-    from scripts.events.config import BusConfig
-    from scripts.events.factory import open_bus
-
-    bus = open_bus(BusConfig.from_environ())
-    try:
-        Slots(bus, hive, lambda: {}).release(execution, harness, account)
-    finally:
-        bus.close()
+    _remote(hive, lambda slots: slots.release(execution, harness, account))
 
 
-def publish(hive: str, report: dict, hosted: dict) -> None:
+def _remote(hive: str, act: Callable[["Remote"], None]) -> None:
     from scripts.events.config import BusConfig
     from scripts.events.factory import open_bus
 
@@ -188,6 +227,10 @@ def publish(hive: str, report: dict, hosted: dict) -> None:
         return
     bus = open_bus(config)
     try:
-        Slots(bus, hive, lambda: report).heartbeat(report, hosted["executions"])
+        act(Remote(asker(bus, _swarm(os.environ)), hive))
     finally:
         bus.close()
+
+
+def publish(hive: str, report: dict, hosted: dict) -> None:
+    _remote(hive, lambda slots: slots.heartbeat(report, hosted["executions"]))

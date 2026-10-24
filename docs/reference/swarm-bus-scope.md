@@ -9,7 +9,7 @@ nav_order: 50
 A hive member's NATS credential reaches the event, work queue, dead letter and state resources of the swarms it
 belongs to and nothing of any other swarm. Every subject a scoped member publishes or reads sits under
 `swarm.<swarm>.`. The JetStream API subjects that cannot carry that prefix are granted only for stream and consumer
-names that carry the swarm id. The two shared slot buckets below are the only exception. A member credential of one swarm is refused by the NATS server on another swarm's
+names that carry the swarm id. A member credential of one swarm is refused by the NATS server on another swarm's
 queue, dead letter, state and stream subjects, even when those resources exist.
 
 ## When a credential is scoped
@@ -21,7 +21,7 @@ changed list applies without restarting `hive serve`:
 | Signer record | Credential | `hive.env` |
 |---|---|---|
 | No `member_swarms` field | The unscoped member grant: legacy execution subjects, the shared dead letter stream and the shared `KV_<bucket>` store of every hive state bucket | No `AGENTIHOOKS_BUS_SCOPED` line |
-| `member_swarms` maps the member id to a list of swarms | Publish and subscribe only under each listed swarm's prefix, plus publish to the two shared slot buckets | `AGENTIHOOKS_BUS_SCOPED=1` |
+| `member_swarms` maps the member id to a list of swarms | Publish and subscribe only under each listed swarm's prefix | `AGENTIHOOKS_BUS_SCOPED=1` |
 | `member_swarms` maps the member id to an empty list | Publish denied on `>`; subscribe only on the member's own `_INBOX.<user>.>` | `AGENTIHOOKS_BUS_SCOPED=1` |
 | `member_swarms` present, member id absent | None. The endpoint answers 403 `the hub record lists no member swarms for hive member <id>; it mints no unscoped bus credential`, checked before it rotates the member's Redis password | Unchanged |
 
@@ -64,7 +64,7 @@ edit its marker.
 | `AGENTIHOOKS_BUS=nats` | operator or `hive.env` | Selects the NATS backend |
 | `AGENTIHOOKS_BUS_URL` | invite (`hive invite --bus-url`) | NATS address the member reaches |
 | `AGENTIHOOKS_BUS_CREDENTIALS` | `hive join` | The minted credential, or an `openbao:` reference to it |
-| `AGENTIHOOKS_BUS_SCOPED=1` | `hive invite` and `hive join`, when the grant is scoped | Routes every queue, dead letter and event call to the swarm's own streams; state is reached through `for_swarm(<swarm>)`, and the root bus opens only the two shared slot buckets |
+| `AGENTIHOOKS_BUS_SCOPED=1` | `hive invite` and `hive join`, when the grant is scoped | Routes every queue, dead letter and event call to the swarm's own streams; state is reached through `for_swarm(<swarm>)`, and the root bus opens no state bucket |
 | `AGENTIHOOKS_BUS_BIND=1` | hive members | Binds existing streams and consumers instead of creating them; members hold no stream create grant |
 
 The hub reads the same variables. Set `AGENTIHOOKS_BUS_SCOPED=1` on the hub, without `AGENTIHOOKS_BUS_BIND`, once
@@ -82,8 +82,8 @@ Stream names carry the swarm id as the hex of its UTF-8 bytes, so `rig` becomes 
 | Work queue, one per lane `eng`, `ci`, `plan` | `AGENTIHOOKS_<hex>_QUEUE_<lane>` | `swarm.<swarm>.queue.<lane>.>`; offers publish to `swarm.<swarm>.queue.<lane>.work` | durable named `<lane>` |
 | State bucket | `AGENTIHOOKS_<hex>_STATE_<bucket>` | `swarm.<swarm>.state.<bucket>.<key>`, 64 revisions kept per key | none; reads use direct message get |
 
-Each swarm has a state stream for `spoke-work`, `spoke-pending`, `hive-presence`, `hive-executions`,
-`execution-starts`, `account-slots` and `hive-slot-accounts`.
+Each swarm has a state stream for `spoke-work`, `spoke-pending`, `hive-presence`, `hive-executions`
+and `execution-starts`.
 
 Callers keep their logical names. A scoped bus maps `swarm.<swarm>.ready.<lane>` to the lane queue, `dead.<swarm>`
 to `swarm.<swarm>.dead.event`, and an event subject such as `swarm.*.execution.>` or
@@ -102,11 +102,11 @@ For each listed swarm the credential allows publishing to:
 
 and subscribing to `swarm.<swarm>.>` and its own `_INBOX.<user>.>`.
 
-Two buckets stay shared across swarms because account slot accounting spans every swarm on a hive:
-`account-slots` and `hive-slot-accounts`. A member's root bus opens them as the shared `KV_<bucket>` store; a swarm
-view from `for_swarm` opens every bucket name, these two included, as that swarm's own state stream. Every credential
-listing at least one swarm carries `$KV.<bucket>.>`, `$JS.API.STREAM.INFO.KV_<bucket>` and `$JS.API.STREAM.MSG.GET.KV_<bucket>` for those two. A scoped member that opens
-any other bucket through the root bus without selecting a swarm gets `PermissionError: select a swarm before opening
+Account slot accounting spans every swarm on a hive, so its two buckets, `account-slots` and
+`hive-slot-accounts`, belong to the hub and no member credential reaches them. A member takes, renews and
+returns an account slot by a request on `swarm.<swarm>.slots`, which its `swarm.<swarm>.>` grant covers;
+the hub answers it from the `hub-slots` queue group. A scoped member that opens
+any bucket through the root bus without selecting a swarm gets `PermissionError: select a swarm before opening
 scoped state`.
 
 Nothing grants stream or consumer creation, the legacy `AGENTIHOOKS_EVENTS` and `AGENTIHOOKS_DEAD` streams, or any

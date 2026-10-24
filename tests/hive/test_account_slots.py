@@ -4,6 +4,7 @@ import pytest
 
 from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
+from scripts.hub import slots
 
 
 def reading(cap=1, sessions=0):
@@ -22,6 +23,7 @@ def rig():
     report = [reading()]
     first = account_slots.Slots(bus, "one", lambda: report[0], lambda: now[0])
     second = account_slots.Slots(bus, "two", lambda: reading(), lambda: now[0])
+    slots.serve(bus, clock=lambda: now[0])
     yield first, second, now, report, bus
     bus.close()
 
@@ -414,8 +416,6 @@ def test_published_exit_uses_the_current_hive_and_real_execution_report(rig, mon
 
     first, second, now, _, bus = rig
     assert first.take("one", "claude") == "a"
-    original = account_slots.Slots
-    monkeypatch.setattr(account_slots, "Slots", lambda bus, hive, read: original(bus, hive, read, lambda: now[0]))
     monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig(backend="nats"))
     closed = []
 
@@ -432,22 +432,125 @@ def test_published_exit_uses_the_current_hive_and_real_execution_report(rig, mon
 
 def test_public_release_returns_the_requested_hive_execution_and_closes_the_bus(rig, monkeypatch):
     from scripts.events import factory
-    from scripts.events.config import BusConfig
+    from scripts.events.config import SWARMS_ENV, BusConfig
     from scripts.hive import account_slots
 
     first, second, _, _, bus = rig
     assert first.take("one", "claude") == "a"
     closed = []
-
-    def opened(config):
-        assert isinstance(config, BusConfig)
-        return bus
-
-    monkeypatch.setattr(factory, "open_bus", opened)
-    monkeypatch.setattr(bus, "close", lambda: closed.append(True))
+    recording = Recording(bus, closed)
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig(backend="nats"))
+    monkeypatch.setattr(factory, "open_bus", lambda config: recording)
+    monkeypatch.setenv(SWARMS_ENV, "rig,other")
     account_slots.release("one", "one", "claude", "a")
     assert second.take("two", "claude") == "a"
     assert closed == [True]
+    assert recording.sent == [
+        (
+            "swarm.rig.slots",
+            {"op": "release", "hive": "one", "execution": "one", "harness": "claude", "account": "a"},
+            account_slots.REQUEST_TIMEOUT_MS,
+        )
+    ]
+
+
+class Recording:
+    def __init__(self, bus, closed):
+        self.bus, self.closed, self.sent = bus, closed, []
+
+    def request(self, subject, data, timeout_ms):
+        self.sent.append((subject, json.loads(data), timeout_ms))
+        return self.bus.request(subject, data, timeout_ms)
+
+    def close(self):
+        self.closed.append(True)
+
+
+def test_memory_release_opens_no_bus(monkeypatch):
+    from scripts.events import factory
+    from scripts.events.config import BusConfig
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig())
+    monkeypatch.setattr(factory, "open_bus", lambda config: pytest.fail("memory release opened a bus"))
+    account_slots.release("one", "one", "claude", "a")
+
+
+@pytest.mark.parametrize(
+    ("environ", "swarm"),
+    [({"AGENTIHOOKS_BUS_SWARMS": "rig,other"}, "rig"), ({"AGENTIHOOKS_BUS_SWARMS": ",rig"}, "rig"), ({}, "hive")],
+)
+def test_a_member_asks_on_its_first_configured_swarm(environ, swarm):
+    from scripts.hive import account_slots
+
+    assert account_slots._swarm(environ) == swarm
+
+
+def test_a_remote_take_sends_the_whole_reservation_with_a_fresh_reading():
+    from scripts.hive import account_slots
+
+    sent = []
+    remote = account_slots.Remote(lambda request: sent.append(request) or "a", "one", lambda: reading(cap=2))
+    assert remote.take("execution", "claude", "a") == "a"
+    assert sent == [
+        {
+            "op": "take",
+            "hive": "one",
+            "execution": "execution",
+            "harness": "claude",
+            "preferred": "a",
+            "report": reading(cap=2),
+        }
+    ]
+
+
+def test_only_the_memory_backend_reserves_in_local_state(rig):
+    from scripts.hive import account_slots
+
+    *_, bus = rig
+
+    def read():
+        return reading()
+
+    local = account_slots._slots(bus, "memory", "one", read, {})
+    assert type(local) is account_slots.Slots
+    assert (local.bus, local.hive, local.read) == (bus, "one", read)
+    remote = account_slots._slots(bus, "nats", "one", read, {"AGENTIHOOKS_BUS_SWARMS": "rig"})
+    assert type(remote) is account_slots.Remote
+    assert (remote.hive, remote.read) == ("one", read)
+    assert remote.take("execution", "claude") == "a"
+
+
+def test_a_memory_launch_reserves_in_the_opened_bus_without_a_hub(monkeypatch):
+    from scripts.events import factory
+    from scripts.events.config import BusConfig
+    from scripts.hive import account_slots
+
+    bus = open_bus(BusConfig())
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig())
+    monkeypatch.setattr(factory, "open_bus", lambda config: bus)
+    monkeypatch.setattr(account_slots, "_reading", lambda hive: reading())
+    monkeypatch.setattr(bus, "close", lambda: None)
+    env = {account_slots.HIVE_ENV: "one", account_slots.EXECUTION_ENV: "execution"}
+    assert account_slots.execute("claude", "a", env, lambda child: child) == {}
+    entry = bus.state("account-slots").get(account_slots.key("claude", "a"))
+    assert json.loads(entry.value)["holders"]["execution"]["hive"] == "one"
+    bus.close()
+
+
+def test_a_member_launch_asks_the_hub_on_the_swarm_its_launch_names(rig, monkeypatch):
+    from scripts.events import factory
+    from scripts.events.config import SWARMS_ENV, BusConfig
+    from scripts.hive import account_slots
+
+    *_, bus = rig
+    recording = Recording(bus, [])
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig(backend="nats"))
+    monkeypatch.setattr(factory, "open_bus", lambda config: recording)
+    monkeypatch.setattr(account_slots, "_reading", lambda hive: reading())
+    env = {account_slots.HIVE_ENV: "one", account_slots.EXECUTION_ENV: "execution", SWARMS_ENV: "rig"}
+    assert account_slots.execute("claude", "a", env, lambda child: child) == {SWARMS_ENV: "rig"}
+    assert {subject for subject, _, _ in recording.sent} == {"swarm.rig.slots"}
 
 
 def test_two_real_nats_clients_share_atomic_account_capacity(tmp_path):
