@@ -234,6 +234,15 @@ jobs:
       files_1: ${{ steps.select.outputs.files_1 }}
       files_2: ${{ steps.select.outputs.files_2 }}
       files_3: ${{ steps.select.outputs.files_3 }}
+      files_4: ${{ steps.select.outputs.files_4 }}
+      files_5: ${{ steps.select.outputs.files_5 }}
+      files_6: ${{ steps.select.outputs.files_6 }}
+      files_7: ${{ steps.select.outputs.files_7 }}
+      files_8: ${{ steps.select.outputs.files_8 }}
+      files_9: ${{ steps.select.outputs.files_9 }}
+      files_10: ${{ steps.select.outputs.files_10 }}
+      files_11: ${{ steps.select.outputs.files_11 }}
+      files_12: ${{ steps.select.outputs.files_12 }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
@@ -583,7 +592,7 @@ jobs:
             [[ -f "$file" ]] && durations+=("$file")
           done
           cd "$RUNNER_TEMP/grader"
-          python -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 3 --durations "${durations[@]}"
+          python -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 12 --durations "${durations[@]}"
 
   test-count:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'push' }}
@@ -1356,7 +1365,7 @@ jobs:
     env:
       CODEX_RELEASE: rust-v0.160.0
       UNIT_SOURCE: ""
-      FILES: ${{ matrix.leg == 1 && needs.select.outputs.files_1 || matrix.leg == 2 && needs.select.outputs.files_2 || needs.select.outputs.files_3 }}
+      FILES: ${{ needs.select.outputs[format('files_{0}', matrix.leg)] }}
       LEG: ${{ matrix.leg }}
     strategy:
       fail-fast: false
