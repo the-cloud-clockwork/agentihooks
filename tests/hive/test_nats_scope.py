@@ -91,11 +91,20 @@ def test_scoped_claims_keep_the_member_reply_inbox(signer):
 def test_member_credentials_hold_no_grant_on_the_hub_owned_account_buckets():
     from scripts.hive.nats_grant import MEMBER_PUBLISH, member_claims
 
-    claims = member_claims("member", ("rig",))
+    claims = member_claims("member", ("rig",), member="m1")
     for granted in (claims["pub"]["allow"], MEMBER_PUBLISH):
         assert not [value for value in granted if "account-slots" in value or "hive-slot-accounts" in value]
     assert not [value for value in claims["pub"]["allow"] if value.startswith("$KV.") or ".KV_" in value]
-    assert "swarm.*.slots" in MEMBER_PUBLISH
+
+
+@pytest.mark.parametrize(
+    ("swarms", "slots"), [(None, ["slots.*.m1"]), (("rig", "other"), ["slots.rig.m1", "slots.other.m1"])]
+)
+def test_a_member_credential_publishes_only_the_slot_subject_of_its_own_hive(swarms, slots):
+    from scripts.hive.nats_grant import member_claims
+
+    claims = member_claims("member", swarms, member="m1")
+    assert [value for value in claims["pub"]["allow"] if "slots" in value] == slots
 
 
 @pytest.mark.parametrize("kind", ["EVENTS", "DEAD", "QUEUE_eng", "STATE_spoke-work"])

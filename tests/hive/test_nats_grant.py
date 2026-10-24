@@ -650,7 +650,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
     )
     publish = [
         "swarm.*.execution.>",
-        "swarm.*.slots",
+        "slots.*.m1",
         "dead.*",
         "dead.*.*",
         "$JS.API.INFO",
