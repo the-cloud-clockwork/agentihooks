@@ -184,7 +184,7 @@ def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=N
     staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
     require_green(url, raw["headRefOid"], run)
     displacing, behind = waiting_around(url, raw["id"], run)
-    waiting = [pull for pull in displacing if pull["url"] not in ahead] + behind
+    waiting = [pull for pull in [*displacing, *behind] if pull["url"] not in ahead]
     before = journal.groups() if journal is not None else None
     errors = []
     steps = []

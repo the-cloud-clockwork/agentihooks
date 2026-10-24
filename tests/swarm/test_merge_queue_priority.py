@@ -140,6 +140,15 @@ def test_priority_keeps_displaced_ahead_of_later_arrivals_in_one_pass():
     assert result == {"url": URL, "displaced": [URL[:-1] + str(n) for n in (2, 3, 4, 5, 6)], "errors": []}
 
 
+def test_priority_leaves_earlier_priority_targets_in_place_on_either_side():
+    queue = FakeQueue(queued=True)
+    queue.entries.append(queue.entry(5))
+    result = merge_queue.prioritize(URL, run=queue.run, ahead=(URL[:-1] + "2", URL[:-1] + "5"))
+    assert [int(e["pullRequest"]["id"][1:]) for e in queue.entries] == [1, 2, 9, 5, 3, 4]
+    assert queue.mutations == [("dequeue", 4), ("dequeue", 3), ("queue", 3), ("queue", 4)]
+    assert result["displaced"] == [URL[:-1] + "3", URL[:-1] + "4"]
+
+
 @pytest.mark.parametrize("errors, status", [([], 0), (["restore refused", "second refusal"], 1)])
 def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, status):
     from tests.swarm.test_merge_queue import swarm_of
