@@ -747,3 +747,21 @@ def test_a_push_connects_once_without_reconnecting_and_bounds_both_waits(monkeyp
         "request": ("$SYS.REQ.CLAIMS.UPDATE", b"a.b.c", {"timeout": 10}),
         "closed": True,
     }
+
+
+def test_a_push_cancels_the_initial_connection_retry_loop(monkeypatch):
+    import asyncio
+
+    import nats as nats_client
+
+    from scripts.events import nats
+
+    async def connect(*args, **kwargs):
+        await asyncio.sleep(0.1)
+        raise AssertionError("connection retry outlived the push deadline")
+
+    monkeypatch.setattr(nats_client, "connect", connect)
+    monkeypatch.setattr(nats, "auth_options", lambda credentials: {})
+    monkeypatch.setattr(nats_grant, "PUSH_TIMEOUT_S", 0.01)
+    with pytest.raises(TimeoutError):
+        nats_grant.push(_offline_signer(), "a.b.c")
