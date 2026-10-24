@@ -165,6 +165,19 @@ def test_ready_work_cap_replaces_the_unused_tick_limit_reason():
         previous = decision
 
 
+def test_ready_work_reason_counts_missing_lanes_as_zero():
+    decision = calculate({"eng": 9, "ci": 3}, {"claude": 22}, 22, {"eng": 1})
+    assert decision["reason"] == (
+        "Quota seats 22 (claude 22); host room 22; ceiling 13 of 34"
+        "; capped by ready work eng 1, ci 0, plan 0."
+    )
+
+
+def test_reaching_the_quota_target_does_not_report_a_ready_work_cap():
+    decision = calculate({"eng": 9, "ci": 3}, {"claude": 1}, 22, {"eng": 1})
+    assert decision["reason"] == "Quota seats 1 (claude 1); host room 22; ceiling 13 of 13."
+
+
 def test_idle_lanes_hold_only_their_live_agents_even_with_a_large_shift():
     for shift in (-16, 0, 16):
         decision = calculate(
