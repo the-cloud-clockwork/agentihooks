@@ -39,7 +39,7 @@ def failed(jobs: list[dict], lost: Callable[[dict], bool] = lambda job: False) -
 def settled(jobs: list[dict]) -> bool:
     shards = [job["name"].removeprefix(SHARD) for job in jobs if base_name(job["name"]) == SHARD]
     passed = {
-        job["name"].removeprefix(RERUN if base_name(job["name"]) == RERUN else SHARD)
+        job["name"].removeprefix(base_name(job["name"]))
         for job in jobs
         if base_name(job["name"]) in (SHARD, RERUN) and job.get("conclusion") == "success"
     }
