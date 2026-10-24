@@ -2522,13 +2522,12 @@ jobs:
           test -s .test_durations || { echo "::error::refresh durations: wrote no .test_durations"; exit 1; }
 
       - name: Publish merged durations
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: durations-merged
           path: .test_durations*
           include-hidden-files: true
           retention-days: 14
-          overwrite: true
 
       - name: Stage merged durations for the cache
         run: mkdir -p ~/dev-durations && cp .test_durations* ~/dev-durations/
