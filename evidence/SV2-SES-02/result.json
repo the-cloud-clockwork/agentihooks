@@ -41,6 +41,7 @@
     "Records a rotated file had not yet delivered before rotation are not read; the collector restarts on the new file.",
     "A rewrite that keeps the same inode, a size at or above the offset and identical bytes in the anchor window is read as an append.",
     "A complete final record without a trailing newline waits until a newline is written.",
+    "Two pollers on one source can both call accept for the same Batch.identity before one commit is refused as stale_cursor; the collector proves only the shared identity, and no duplicate authoritative effect depends on an idempotent accept, which the durable spool of SV2-SES-03 must provide.",
     "The durable spool and supervisor wiring belong to SV2-SES-03."
   ]
 }

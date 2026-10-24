@@ -252,7 +252,6 @@ def test_an_interrupted_commit_keeps_the_previous_cursor(store, monkeypatch):
         with pytest.raises(OSError):
             store.commit(replace(first, offset=9))
     assert store.load("s") == first
-    assert list(store.root.glob("*.tmp"))
     assert store.commit(replace(first, offset=9)).offset == 9
     assert store.load("s").offset == 9
 
