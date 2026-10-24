@@ -224,6 +224,49 @@ controller:
   `controller: built the Kubernetes runtime for <swarm>: workers in <namespace> run <image>:<tag> with profile <profile>`.
 - The other worker values are in [Configure the worker reading](../pillars/swarm.md#configure-the-worker-reading).
 
+### Which ledger address a tick uses
+
+A swarm's stored `api_url` names a ledger destination only for a process in local client mode. Every other process
+ignores it and reaches the ledger through its own `SWARM_URL` or `LEDGER_URL`.
+
+| Process | Client mode | Ledger address for the swarm's commands, ticks and waits |
+|---|---|---|
+| Workstation CLI, host tick and wait timer | `local` | The swarm's `api_url` when set, else the workstation ledger server |
+| Controller with `controller.api` enabled | `distributed` or `compose` | Its own `SWARM_URL`, else `LEDGER_URL`; the stored `api_url` is ignored |
+| Worker and hive pods | Any mode other than `local` | Their own `SWARM_URL`, else `LEDGER_URL` |
+
+The rule matters because a controller with `controller.workers.apiUrl` set writes that control API address into the
+served swarm's `api_url` on every pass. The address points at the controller itself, never at a hosted ledger.
+
+A scheduled `run_tick` routed to a stored `api_url`, or for a swarm with a staged `api-url-pending`, runs its pass
+only when it carries tick authority: the `X-Ledger-Tick` token that `agentihooks swarm tick`, the scheduled host tick,
+signs with the hosted ledger's server secret. A command tick (`swarm start`, `pause`, `stop`, `reopen`, `restore`)
+carries none. Without it the tick returns `the host tick will apply the settings` and spawns, reaps and writes nothing. Kubernetes runs no host
+tick, so a controller that reached this branch would never apply a setting.
+
+```bash
+# in the controller pod: the chart sets the mode and the ledger link the tick uses
+kubectl -n agentihooks-swarm exec deploy/agentihooks-swarm-controller -- printenv AGENTIHOOKS_DEPLOYMENT LEDGER_URL
+# distributed
+# http://agentihooks-swarm-ledger:8765
+```
+
+From [#4793](https://github.com/the-cloud-clockwork/agentihooks/pull/4793) until
+[#4943](https://github.com/the-cloud-clockwork/agentihooks/pull/4943) the routing read `api_url` in every mode. The
+controller then took its own control API address for a hosted destination, every in-cluster pass logged only `the
+host tick will apply the settings`, and the helm kind smoke timed out at its host pressure step. Red: dev push
+[run 39326662179](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39326662179); green: dev push
+[run 39337452296](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39337452296), where the controller
+recorded the host pressure off reason. The regression test
+`test_a_controller_deployment_ticks_its_swarm_on_its_own_ledger_link` runs a scheduled tick in `distributed` and
+`compose` mode with `api_url` set and asserts that the tick reaches `LEDGER_URL` and ignores the stored address.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The controller log repeats `the host tick will apply the settings` and agents never change | The controller runs code from before #4943, or `AGENTIHOOKS_DEPLOYMENT=local` is set in the controller pod | Deploy a release that contains #4943; leave `deployment` at a non-local value in the chart values |
+| A workstation tick prints `the host tick will apply the settings` | A command tick for a swarm with a hosted `api_url` or a staged `api-url-pending` has no tick authority | Let the scheduled host tick apply it on its next minute |
+| A controller tick writes to the wrong ledger | `SWARM_URL` or `LEDGER_URL` in the controller pod names another ledger | Set the pod's ledger address; changing `api_url` has no effect on the controller |
+
 ### Which work runs where
 
 The routed runtime places each launch by lane and profile:
