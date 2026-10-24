@@ -787,6 +787,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   #icon-strip { padding-top: 4px; }
   #main-content { padding-bottom: 72px; }
   .chat-panel, .chat-panel.big { top: 48px; bottom: 72px; height: auto; }
+  .chat-panel.big { top: 8px; }
   #chat-title { white-space: nowrap; }
   .chat-panel { overflow: hidden; }
   #chat-log { flex: 1 1 96px; min-height: 32px; }
@@ -844,5 +845,5 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .chat-compose > .chat-to { flex: 1 1 auto; }
   .chat-compose > textarea { order: 2; }
   .chat-send { margin-top: 0; }
-  #chat-log { min-height: 96px; }
+  #chat-log { min-height: 64px; }
 }
