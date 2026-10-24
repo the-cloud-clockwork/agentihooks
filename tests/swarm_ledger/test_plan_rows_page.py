@@ -49,12 +49,6 @@ def tab(browser):
     context.close()
 
 
-def fold_v2_and_reload(tab):
-    tab.click("#item-plans-v2 > details.plan-fold > summary")
-    reload_after_folds(tab, "#item-plans-v2 > details.plan-fold")
-    assert tab.locator("#item-phases-p3").count() == 0
-
-
 def plan_rows(tab):
     return tab.evaluate(
         """() => [...document.querySelectorAll("#phases > li.plan")].map((li) => ({
@@ -99,13 +93,11 @@ def test_a_phase_fold_lists_its_slices_with_task_counts(tab):
     assert tab.locator("#item-phases-p3 .phase-slices").count() == 0
 
 
-def test_a_plan_row_folds_and_remembers_it_after_a_reload(tab):
+def test_a_plan_row_never_folds_and_always_lists_its_phases(tab):
     show(tab, shell_html(), ledger=ledger_state(DOC))
-    tab.click("#item-plans-v2 > details.plan-fold > summary")
-    assert tab.locator("#item-phases-p3").is_hidden()
-    reload_after_folds(tab, "#item-plans-v2 > details.plan-fold")
-    assert tab.evaluate("() => document.querySelector('#item-plans-v2 > details.plan-fold').open") is False
-    assert tab.evaluate("() => document.querySelector('#item-plans-hier > details.plan-fold').open") is True
+    assert tab.locator("#phases details:not([data-key])").count() == 0
+    tab.click("#item-plans-v2 > .plan-head .plan-title")
+    assert tab.locator("#item-phases-p3").is_visible()
 
 
 def test_a_phase_with_an_unknown_plan_lists_under_a_trailing_row(tab):
@@ -152,22 +144,19 @@ def test_the_phases_section_folds_and_refills_its_plan_rows(tab):
     assert [row["id"] for row in plan_rows(tab)] == ["item-plans-hier", "item-plans-v2", "item-plans-standalone"]
 
 
-def test_the_outline_opens_a_folded_plan_to_reach_its_phase(tab):
+def test_the_outline_reaches_a_phase_inside_a_plan(tab):
     show(tab, shell_html(), ledger=ledger_state(DOC))
-    fold_v2_and_reload(tab)
     tab.click('#outline a[data-target="item-phases-p3"]')
-    tab.wait_for_function("() => document.querySelector('#item-plans-v2 > details.plan-fold').open")
+    tab.locator("#item-phases-p3").wait_for()
     assert tab.locator("#item-phases-p3").is_visible()
 
 
-def test_show_all_comments_reaches_phases_inside_a_folded_plan(tab):
+def test_show_all_comments_reaches_phases_inside_a_plan(tab):
     show(tab, shell_html(), ledger=ledger_state(DOC))
     comments = "#item-phases-p3 details[data-key='phases/p3'] > summary"
     tab.click(comments)
     tab.click(comments)
-    fold_v2_and_reload(tab)
     tab.click("#sec-phases button[data-comments]")
-    tab.click("#item-plans-v2 > details.plan-fold > summary")
     tab.wait_for_function(
         "() => document.querySelector('#item-phases-p3 details[data-key=\"phases/p3\"]')?.open === true"
     )

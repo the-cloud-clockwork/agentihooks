@@ -471,6 +471,9 @@ class HerdrRuntime:
     def _quota_transfer(self, saved, profile, environ, lane, want, planned=None):
         from scripts.swarm import capacity, quota_handoff
 
+        if not hasattr(self, "_quota_accounts"):
+            read = self.quota_accounts or capacity.accounts
+            self._quota_accounts = read(environ, time.time(), refresh=False)
         thresholds = quota_handoff.Thresholds.from_env(environ)
         allocation = getattr(self, "_quota_allocations", {}).get(lane)
         predecessor = (saved["harness"], saved.get("account"))

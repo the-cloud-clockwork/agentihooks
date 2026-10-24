@@ -66,12 +66,15 @@ class Home(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 edited = Path(tmp) / "home.html"
-                edited.write_text(
-                    source.replace("</title>", '</title><p id="edited">__HOME_HEADING__</p>'), encoding="utf-8"
-                )
+                edited.write_text(source.replace("</title>", '</title><p id="edited">edited</p>'), encoding="utf-8")
                 with mock.patch.object(core, "HOME", edited):
-                    self.assertIn('<p id="edited">HOME</p>', rendered_home(server, self.browser, "home"))
-                    self.assertIn('<p id="edited">BIN</p>', rendered_home(server, self.browser, "bin"))
+                    home, binned = (
+                        rendered_home(server, self.browser, "home"),
+                        rendered_home(server, self.browser, "bin"),
+                    )
+                    for page, heading in ((home, "<h1>HOME</h1>"), (binned, "<h1>BIN</h1>")):
+                        self.assertIn('<p id="edited">edited</p>', page)
+                        self.assertIn(heading, page)
         finally:
             server.served_page.cache_clear()
         self.assertTrue(source.rstrip().endswith("</html>"))

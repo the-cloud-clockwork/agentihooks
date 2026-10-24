@@ -94,6 +94,7 @@ dev = [
     "pytest-random-order>=1.2",
     "pytest-reportlog>=1.0",
     "pytest-rerunfailures>=16.7",
+    "pytest-timeout>=2.4",
     "detect-test-pollution==1.2.0",
     "uv>=0.5",
 ]

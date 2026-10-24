@@ -343,23 +343,23 @@ A merge group runs its unit suite as one wave of shards on the `anton-oss-queue`
 
 ### How the plan is built
 
-The `split` job's `Size queue shards from conservative durations` step runs only on `merge_group` events, once per Python version in the matrix (3.12 today):
+The `split` job's `Size queue shards from median durations` step runs only on `merge_group` events, once per Python version in the matrix (3.12 today):
 
 ```bash
 python -m tests.queue_shards --root . --collection collected.json --version "$PYTHON_VERSION" --reused reused.json --output queue-plan.txt
 python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
 ```
 
-1. The first command prices every collected test from the slowest recent dev durations, drops tests the queue reuses, and starts at 12 shards. It adds one shard at a time until the predicted slowest shard is under `TARGET_SECONDS`, or half the step timeout when that is lower, or until it reaches `MAX_SHARDS`. It writes `queue_312=<legs>` to `queue-plan.txt` and prints `Python 3.12: <n> queue shards, predicted slowest <s>s of <target>s`.
+1. The first command prices every collected test from the median of the recent dev durations, drops tests the queue reuses, and starts at 12 shards. It adds one shard at a time until the predicted slowest shard is under `TARGET_SECONDS`, or half the step timeout when that is lower, or until it reaches `MAX_SHARDS`. It writes `queue_312=<legs>` to `queue-plan.txt` and prints `Python 3.12: <n> queue shards, predicted slowest <s>s of <target>s`.
 2. `combine` reads the plan back and grades it against the pool. The `unit` matrix takes its `include` list from that output.
 
 | Setting | Value | Where it comes from |
 |---|---|---|
 | `MAX_SHARDS` | 30 | The `maxRunners` of the antoncore `anton-oss-queue` scale set, less the queue tier jobs that run during the unit stage (none today) |
 | `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import; see [Step timeout limits](#step-timeout-limits) |
-| `TARGET_SECONDS` | 195 | The slowest shard the planner sizes for: the 210 s acceptance divided by the 1.08 overshoot measured on recorded queue runs |
+| `TARGET_SECONDS` | 195 | The slowest shard the planner sizes for: 15 s under the 210 s acceptance, because merge group runs [40119907157](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40119907157) and [40119162144](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40119162144) after pull request [6707](https://github.com/the-cloud-clockwork/agentihooks/pull/6707) predicted 240 s and 264 s against a slowest `Run tests` step of 239 s and 242 s |
 | Half step timeout | 360 s | The most a plan may predict before `combine` refuses it; also the sizing target when lower than `TARGET_SECONDS` |
-| `SLOWDOWN` | 1.15 | Factor applied to the predicted slowest shard, calibrated from recorded queue runs |
+| `SLOWDOWN` | 1.85 | The one margin: factor applied to the predicted slowest shard from median durations, calibrated so the prediction lands within 15 % of the slowest `Run tests` step of ten recorded merge groups |
 | `STARTUP_SECONDS` | 30 | Added to every shard's prediction |
 
 ### What combine decides
@@ -557,7 +557,7 @@ When shards over budget have different limits, the last line joins them, for exa
 
 Delivered by pull request [5043](https://github.com/the-cloud-clockwork/agentihooks/pull/5043) for issue [5041](https://github.com/the-cloud-clockwork/agentihooks/issues/5041). Before it, the planner held a fixed 420 s timeout while `Run tests` stopped at 720 s, and the budget graded every shard, selected legs included, against a fixed twelve minutes of summed test time, though `Run the selected tests` stops at seven minutes and recorded no elapsed time. Red: Tests run [39357706899](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39357706899), on the test only commit, failed exactly the six new or changed tests. Green: Tests run [39358460209](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39358460209).
 
-Measured over completed merge group Tests runs, counting Python 3.12 unit shards per group and the slowest `Run tests` step: the last ten groups before the merge ran 20 shards each, slowest 388 s; the ten groups after 06:01 UTC on 20 October ran a mean of 13.3 shards (13 or 14), slowest 305 s, and no shard reached 720 s. Calibrating `SLOWDOWN` from 1.5 to 1.15 in pull request [5659](https://github.com/the-cloud-clockwork/agentihooks/pull/5659) later changed the plan again.
+Measured over completed merge group Tests runs, counting Python 3.12 unit shards per group and the slowest `Run tests` step: the last ten groups before the merge ran 20 shards each, slowest 388 s; the ten groups after 06:01 UTC on 20 October ran a mean of 13.3 shards (13 or 14), slowest 305 s, and no shard reached 720 s. Calibrating `SLOWDOWN` from 1.5 to 1.15 in pull request [5659](https://github.com/the-cloud-clockwork/agentihooks/pull/5659) later changed the plan again. Pull request [6707](https://github.com/the-cloud-clockwork/agentihooks/pull/6707) for issue [6703](https://github.com/the-cloud-clockwork/agentihooks/issues/6703) dropped the slowest of five durations and set `SLOWDOWN` to 1.85 on median durations, calibrated on merge group runs [40084693315](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40084693315), [40085105981](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40085105981), [40085828452](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40085828452), [40086486432](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40086486432), [40087075078](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40087075078), [40087870160](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40087870160), [40088540093](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40088540093), [40089176680](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40089176680), [40089783935](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40089783935), [40090459054](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40090459054): at 17 shards they predicted 346 to 353 s against a measured slowest `Run tests` step of 299 to 378 s, 8 of 10 within 15 %; on median durations the same groups predict 331 to 338 s, all 10 within 15 %.
 
 ## Grouped test files in the unit shard planner
 
@@ -672,8 +672,8 @@ Every test the unit shard planner sees has a stored duration. Two writers fill t
 
 | Writer | Runs in | Fills |
 |---|---|---|
-| `tests.refresh_durations` | The `Refresh measured durations` step of the dev push refresh job: `python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5` | Each map it writes (`.test_durations`, `.test_durations-<version>`, `.test_durations-slowest` and `.test_durations-slowest-<version>`) gets every collected test it lacks, priced at that map's own median. The maps go out as the `durations-merged` artifact and the `durations-merged-<sha>` cache |
-| `tests.dev_durations` | The split job's `Adopt latest dev durations` step, and the `Size queue shards from conservative durations` step on merge groups | After choosing which durations to use, every collected test still missing from `.test_durations` gets the median of that file. The completed file goes out as the `split-<version>` artifact, and the unit shards plan from it |
+| `tests.refresh_durations` | The `Refresh measured durations` step of the dev push refresh job: `python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5` | Each map it writes (`.test_durations` and `.test_durations-<version>`) gets every collected test it lacks, priced at that map's own median. The maps go out as the `durations-merged` artifact and the `durations-merged-<sha>` cache |
+| `tests.dev_durations` | The split job's `Adopt latest dev durations` step, and the `Size queue shards from median durations` step on merge groups | After choosing which durations to use, every collected test still missing from `.test_durations` gets the median of that file. The completed file goes out as the `split-<version>` artifact, and the unit shards plan from it |
 
 ### How a push picks and completes its durations
 
@@ -684,7 +684,7 @@ Every test the unit shard planner sees has a stored duration. Two writers fill t
 
 On the dev push refresh the same one in ten check runs first, and the step fails with `::error::refresh durations: <n> of <m> tests have no stored duration` when a written map would lack more than that. When the run's own shard samples are incomplete, the line ends `; run <id> kept no samples from durations-3.12-<shard>`. Within that limit the fill gives a new test the median until a later dev push times it; `ci_medians` then replaces the estimate with a measured value.
 
-The median is small. On the dev push Tests run [39992377126](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39992377126) at `94dcb486bf`, each `durations-merged` map held 43558 tests; the median was 0.0529 s in `.test_durations` and `.test_durations-3.12`, and 0.1013 s in both slowest maps.
+The median is small. On the dev push Tests run [39992377126](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39992377126) at `94dcb486bf`, each `durations-merged` map held 43558 tests; the median was 0.0529 s in `.test_durations` and `.test_durations-3.12`.
 
 ### Measured effect
 

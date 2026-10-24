@@ -140,7 +140,6 @@ def test_counts_follow_an_item_change(tab):
     tab.locator("#item-phases-p0 input[type=checkbox]").evaluate("(el) => el.click()")
     settle(tab)
     assert counts(tab)["phases"] == "· 1 open · 2 done"
-    tab.locator("#followups-done > summary").click()
     tab.locator("#item-followups-f1 input[type=checkbox]").evaluate("(el) => el.click()")
     settle(tab)
     assert counts(tab)["followups"] == "· 1 open"

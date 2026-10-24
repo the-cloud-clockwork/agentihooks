@@ -248,17 +248,18 @@ def push(signer: Signer, jwt: str) -> None:
     from scripts.events.nats import auth_options
 
     async def send() -> dict:
-        nc = await nats_client.connect(
-            signer.url,
-            allow_reconnect=False,
-            connect_timeout=PUSH_TIMEOUT_S,
-            **auth_options(signer.system_credentials),
-        )
-        try:
-            reply = await nc.request(CLAIMS_UPDATE, jwt.encode(), timeout=PUSH_TIMEOUT_S)
-        finally:
-            await nc.close()
-        return json.loads(reply.data)
+        async with asyncio.timeout(PUSH_TIMEOUT_S):
+            nc = await nats_client.connect(
+                signer.url,
+                allow_reconnect=False,
+                connect_timeout=PUSH_TIMEOUT_S,
+                **auth_options(signer.system_credentials),
+            )
+            try:
+                reply = await nc.request(CLAIMS_UPDATE, jwt.encode(), timeout=PUSH_TIMEOUT_S)
+            finally:
+                await nc.close()
+            return json.loads(reply.data)
 
     answer = asyncio.run(send())
     if "error" in answer:

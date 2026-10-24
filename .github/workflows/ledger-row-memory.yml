@@ -54,3 +54,4 @@ jobs:
           name: row-memory-${{ matrix.revision }}
           path: row-memory-${{ matrix.revision }}.json
           if-no-files-found: error
+          retention-days: 7
