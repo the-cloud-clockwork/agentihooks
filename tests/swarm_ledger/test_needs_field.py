@@ -29,6 +29,14 @@ def run(argv):
     return lifecycle.TestCommands().run(argv)
 
 
+def test_task_add_help_names_the_needs_option():
+    from scripts.swarm_ledger import ledger
+    from tests.swarm_ledger.test_workstation_field import options
+
+    flag = next(action for action in options(ledger.build_parser()) if "--needs" in action.option_strings)
+    assert flag.help == "comma separated hive capabilities, such as headed, that its hive must declare"
+
+
 def test_task_add_needs_marks_the_task():
     assert run(["task", "add", "h9", "Browse", "--needs", "headed, gpu"])["needs"] == ["headed", "gpu"]
     assert "needs" not in run(["task", "add", "h9", "Browse"])

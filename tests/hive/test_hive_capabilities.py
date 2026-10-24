@@ -40,6 +40,9 @@ def test_a_normal_hive_skips_a_headed_task_with_a_waits_line(setup):
     assert selected.role == "eng"
     row = placement_waits.read(setup.store, setup.config.slug)["browse"]
     assert (row["lane"], row["reason"]) == ("eng", selected.reason)
+    assert setup.launcher.select(setup.config, "eng", {**HEADED, "needs": ["headed", "gpu"]}).reason == (
+        "the task needs a hive with headed, gpu, and no hive declares it"
+    )
 
 
 def test_a_headed_hive_claims_the_headed_task_over_a_preferred_normal_hive(setup):
@@ -64,6 +67,15 @@ def test_a_hybrid_controller_never_overflows_a_headed_task_to_a_local_machine_wi
     assert fenced.placement_refusal("eng", HEADED) == reason
     write_hive(setup, id="workstation", ui="yes", excluded=[], capabilities=["headed"], max_agents=8)
     assert fenced.placement_refusal("eng", HEADED) == ""
+
+
+def test_a_hybrid_controller_overflows_a_headed_task_to_a_local_machine_that_declares_it(setup, monkeypatch):
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    fenced = hybrid(setup, monkeypatch)
+    write_hive(setup, id="workstation", ui="yes", excluded=[], capabilities=["headed"], max_agents=8, heartbeat_at=0)
+    assert fenced.placement_refusal("eng", HEADED) == ""
+    assert fenced.spawn(setup.config, "eng", "eng name", HEADED) == "placed on the workstation"
+    fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
 def test_a_local_swarm_refuses_a_headed_task_unless_the_local_hive_declares_it(setup, monkeypatch):
