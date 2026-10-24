@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -50,7 +51,7 @@ def test_scan_excludes_only_the_mutable_action_tag_rule():
 def test_scan_reads_the_domain_rules_folder_that_holds_rule_files():
     rules_dir = _ROOT / _jobs()["scan"]["with"]["rules_dir"]
     assert rules_dir == _ROOT / ".semgrep"
-    assert sorted(rules_dir.glob("*.yml"))
+    assert any(rules_dir.glob("*.yml"))
 
 
 def test_scan_and_charts_run_on_the_select_runner_expression():
@@ -76,6 +77,6 @@ def test_wrapper_holds_only_read_permission():
 
 
 def test_charts_is_the_only_wrapper_job_on_a_runner_class():
-    classes = (_ROOT / ".github/runner-classes.json").read_text()
-    assert '"semgrep.yml/charts"' in classes
-    assert '"semgrep.yml/scan"' not in classes
+    classes = json.loads((_ROOT / ".github/runner-classes.json").read_text())
+    assert classes["semgrep.yml/charts"] == "light"
+    assert "semgrep.yml/scan" not in classes
