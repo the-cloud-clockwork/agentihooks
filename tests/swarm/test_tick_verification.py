@@ -19,14 +19,18 @@ def test_a_released_verification_owner_frees_its_seat_without_reclaiming(store, 
     )
     store.release("sw", "t1", owner.name)
     released = dict(ledger.rows["t1"])
+    ledger.rows["t2"] = {"id": "t2", "state": "open", "claimed_by": "", "lane": "eng"}
     for at in (2_000, 3_000):
         tick("sw", store, ledger, runtime, now_ms=at)
         assert ledger.rows["t1"] == released
         assert store.claimant("sw", "t1") is None
-        assert workers(store) == []
-        assert store.seats.occupant(owner.seat).occupant == ""
+        successor = workers(store)[0]
+        assert successor.task == "t2"
+        assert successor.name != owner.name
+        assert successor.seat == owner.seat
+        assert store.seats.occupant(owner.seat).occupant == successor.name
     assert runtime.killed == [owner.name]
-    assert len(runtime.spawned) == 1
+    assert len(runtime.spawned) == 2
 
 
 @pytest.mark.parametrize("generation", [1, 2])
@@ -50,7 +54,7 @@ def test_a_verification_release_at_the_repair_write_frees_the_owner(store, monke
     assert ledger.rows["t1"]["claim_generation"] == generation
     assert store.claimant("sw", "t1") is None
     assert workers(store) == []
-    assert store.seats.occupant(owner.seat).occupant == ""
+    assert store.seats.left(owner.name, owner.seat) is True
     assert runtime.killed == [owner.name]
 
 
