@@ -69,6 +69,21 @@ def first_registration(home: Path, session: str) -> float | None:
     return before / 1e9 if registered and before == after else None
 
 
+def awaited_registration(
+    home: Path,
+    session: str,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> float:
+    budget = REGISTRATION_BUDGET_SECONDS
+    deadline = clock() + budget
+    while (registered_at := first_registration(home, session)) is None:
+        if clock() >= deadline:
+            raise AssertionError(f"Codex session {session} never registered within {budget} seconds")
+        sleep(POLL_SECONDS)
+    return registered_at
+
+
 def reaper(flag: int) -> None:
     if ctypes.CDLL(None, use_errno=True).prctl(PR_SET_CHILD_SUBREAPER, flag, 0, 0, 0) != 0:
         raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER failed")
@@ -155,6 +170,7 @@ def codex_session_start(home: Path, tmp: Path | None = None) -> dict:
         raise AssertionError(f"Codex hook children outlived registration: {survivors}") from failure
     if failure is not None:
         raise failure
+    registered_at = registered_at or awaited_registration(home, session)
     assert sessions(home) == {session: str(Path.cwd())}
     return {
         "registered_at": registered_at,
