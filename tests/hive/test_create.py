@@ -401,6 +401,22 @@ def test_create_without_the_hub_signer_record_refuses_before_anything_is_named(w
     assert not (world.home / "agentihooks" / create.STATE_FILE).exists()
 
 
+def _listing_line(world):
+    return next(line for line in world.lines if line.startswith(f"hive create {NAME}: invite: ")).rsplit("; ", 1)[1]
+
+
+def _keep_member(world):
+    grant = auth.mint(world.tools.redis, NAME, "redis://127.0.0.1:6379/0")
+    world.bao.records[RECORD] = {"credential": auth.env_text("https://hive.example:8770", grant)}
+    world.bao.versions[RECORD] = 1
+    return grant["id"]
+
+
+LISTED = (
+    "listed {} on the hub signer record " + SIGNER + " for demo and asked the hub's " + SYNC + " sync to refresh it now"
+)
+
+
 def test_create_lists_the_new_member_and_its_swarms_and_resyncs_the_hub(world):
     create.create(world.tools, create.Options(timeout_s=60))
 
@@ -409,24 +425,31 @@ def test_create_lists_the_new_member_and_its_swarms_and_resyncs_the_hub(world):
     assert invite._env(world.bao.records[RECORD]["credential"])["AGENTIHOOKS_BUS_SCOPED"] == "1"
     assert world.run.named("kubectl", "-n") == [RESYNC]
     assert world.run.calls.index(RESYNC) < world.run.calls.index(world.run.named("ssh-keygen")[0])
-    line = next(line for line in world.lines if line.startswith(f"hive create {NAME}: invite: "))
-    assert line.endswith(
-        f"; listed {member} on the hub signer record {SIGNER} for demo and asked the hub's {SYNC} sync to refresh it now"
-    )
+    assert _listing_line(world) == LISTED.format(member)
 
 
 def test_a_kept_member_left_unlisted_is_listed_on_the_rerun(world):
+    member = _keep_member(world)
+
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    assert world.bao.records[SIGNER]["member_swarms"] == {"old": ["demo"], member: ["demo"]}
+    assert world.run.named("kubectl", "-n") == [RESYNC]
+    assert world.lines[0] == (
+        f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; {LISTED.format(member)}"
+    )
+
+
+def test_a_kept_member_that_was_revoked_is_replaced_by_a_new_listed_member(world):
     world.bao.records[RECORD] = {"credential": _credential("feedfacefeedface")}
     world.bao.versions[RECORD] = 1
 
     create.create(world.tools, create.Options(timeout_s=60))
 
-    assert world.bao.records[SIGNER]["member_swarms"] == {"old": ["demo"], "feedfacefeedface": ["demo"]}
-    assert world.run.named("kubectl", "-n") == [RESYNC]
-    assert world.lines[0] == (
-        f"hive create {NAME}: invite: kept hive member feedfacefeedface in OpenBao secret/{RECORD}; "
-        f"listed feedfacefeedface on the hub signer record {SIGNER} for demo and asked the hub's {SYNC} sync to refresh it now"
-    )
+    member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    assert member != "feedfacefeedface"
+    assert world.bao.records[SIGNER]["member_swarms"] == {"old": ["demo"], member: ["demo"]}
+    assert _listing_line(world) == LISTED.format(member)
 
 
 def test_a_rerun_after_a_crash_before_the_resync_resyncs_the_listed_member(world, monkeypatch):
@@ -448,13 +471,10 @@ def test_a_rerun_after_a_crash_before_the_resync_resyncs_the_listed_member(world
 
     assert world.run.named("kubectl", "-n") == [RESYNC]
     assert _state(world)["resynced"] == member
-    assert (
-        f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; "
-        + (
-            f"listed {member} on the hub signer record {SIGNER} for demo and asked the hub's {SYNC} sync to refresh it now"
-        )
-        in world.lines
-    )
+    assert world.lines[:2] == [
+        f"hive create {NAME}: resuming the unfinished create",
+        f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; {LISTED.format(member)}",
+    ]
 
 
 def test_a_finished_listing_is_not_resynced_on_the_rerun(world):
@@ -467,10 +487,9 @@ def test_a_finished_listing_is_not_resynced_on_the_rerun(world):
     create.create(world.tools, create.Options(timeout_s=0))
 
     assert world.run.named("kubectl", "-n") == [RESYNC]
-    assert (
+    assert world.lines[len(create.STEPS)] == (
         f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; "
-        + (f"kept {member} on the hub signer record {SIGNER}")
-        in world.lines
+        f"kept {member} on the hub signer record {SIGNER}"
     )
 
 
@@ -481,8 +500,7 @@ def test_a_hub_record_without_member_swarms_scopes_no_member(world):
 
     assert world.bao.records[SIGNER] == {"url": "nats://hub"}
     assert world.run.named("kubectl", "-n") == []
-    line = next(line for line in world.lines if line.startswith(f"hive create {NAME}: invite: "))
-    assert line.endswith(f"; the hub signer record {SIGNER} lists no member swarms, so the hub scopes no member")
+    assert _listing_line(world) == f"the hub signer record {SIGNER} lists no member swarms, so the hub scopes no member"
 
 
 def test_the_dry_run_names_the_listing_and_writes_no_hub_record(world):
@@ -491,6 +509,25 @@ def test_the_dry_run_names_the_listing_and_writes_no_hub_record(world):
     assert world.bao.written == []
     assert world.run.named("kubectl", "-n") == []
     assert world.lines[0] == (
-        f"hive create {NAME}: invite: would mint a hive member into OpenBao secret/{RECORD} like {LIKE} "
-        f"and list it on the hub signer record {SIGNER} for demo"
+        f"hive create {NAME}: invite: would mint a hive member into OpenBao secret/{RECORD} like {LIKE}; "
+        f"would list it on the hub signer record {SIGNER} for demo and refresh {SYNC}"
+    )
+
+
+def test_the_dry_run_of_a_hub_record_without_member_swarms_promises_no_listing(world):
+    world.bao.records[SIGNER] = {"url": "nats://hub"}
+
+    create.create(world.tools, create.Options(dry_run=True))
+
+    assert _listing_line(world) == f"the hub signer record {SIGNER} lists no member swarms, so the hub scopes no member"
+
+
+def test_the_dry_run_of_a_kept_unlisted_member_names_its_listing(world):
+    member = _keep_member(world)
+
+    create.create(world.tools, create.Options(dry_run=True))
+
+    assert world.lines[0] == (
+        f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; "
+        f"would list {member} on the hub signer record {SIGNER} for demo and refresh {SYNC}"
     )

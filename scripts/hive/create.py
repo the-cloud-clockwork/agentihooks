@@ -127,27 +127,27 @@ def _member(tools: Tools) -> dict[str, str]:
 def _invite(tools: Tools, options: Options) -> str:
     listing = Listing(_signer_path(tools.environ), member_swarms.swarms(tools.redis, ()))
     member = _member(tools).get(invite.HIVE_ID)
+    if member and not tools.redis.exists(f"{auth.PREFIX}:member:{member}"):
+        member = None
     where = f"OpenBao {openbao_kv.MOUNT}/{tools.state['record']}"
-    if not member and options.dry_run:
-        return f"would mint a hive member into {where} like {options.like} and {listing.would()}"
     if member:
         done = f"kept hive member {member} in {where}"
+    elif options.dry_run:
+        done = f"would mint a hive member into {where} like {options.like}"
     else:
         name, record = tools.state["name"], tools.state["record"]
         request = invite.Request(
             name, record, options.like, ledger_ca=tools.ledger_ca, signer_path=listing.path, swarms=listing.swarms
         )
         done = invite.invite(tools.redis, tools.bao, request, tools.local_redis_url)
-    return f"{done}; {_listed(tools, options, listing, member or _member(tools)[invite.HIVE_ID])}"
+        member = _member(tools)[invite.HIVE_ID]
+    return f"{done}; {_listed(tools, options, listing, member)}"
 
 
 @dataclass(frozen=True)
 class Listing:
     path: str
     swarms: tuple[str, ...]
-
-    def would(self) -> str:
-        return f"list it on the hub signer record {self.path} for {', '.join(self.swarms)}"
 
 
 def _signer_path(environ: Mapping[str, str]) -> str:
@@ -160,19 +160,24 @@ def _signer_path(environ: Mapping[str, str]) -> str:
     return path
 
 
-def _listed(tools: Tools, options: Options, listing: Listing, member: str) -> str:
-    if not member_swarms.listing(tools.bao, listing.path):
+def _listed(tools: Tools, options: Options, listing: Listing, member: str | None) -> str:
+    try:
+        listed = openbao_kv.read(tools.bao, listing.path)[0].get(member_swarms.FIELD)
+    except openbao_kv.OpenBaoError as exc:
+        raise auth.HiveError(str(exc)) from None
+    if listed is None:
         return f"the hub signer record {listing.path} lists no member swarms, so the hub scopes no member"
-    if options.dry_run:
-        return f"would {listing.would()}"
-    member_swarms.assign(tools.bao, listing.path, [member], listing.swarms)
-    if tools.state.get("resynced") == member:
+    if member in listed and tools.state.get("resynced") == member:
         return f"kept {member} on the hub signer record {listing.path}"
+    swarms = ", ".join(listing.swarms)
+    if options.dry_run:
+        return f"would list {member or 'it'} on the hub signer record {listing.path} for {swarms} and refresh {SIGNER_SYNC}"
+    member_swarms.assign(tools.bao, listing.path, [member], listing.swarms)
     resync = f"force-sync={int(tools.clock() * 1000)}"
     _kubectl(tools, ["-n", SIGNER_NAMESPACE, "annotate", "externalsecret", SIGNER_SYNC, resync, "--overwrite"])
     tools.state["resynced"] = member
     return (
-        f"listed {member} on the hub signer record {listing.path} for {', '.join(listing.swarms)} "
+        f"listed {member} on the hub signer record {listing.path} for {swarms} "
         f"and asked the hub's {SIGNER_SYNC} sync to refresh it now"
     )
 
