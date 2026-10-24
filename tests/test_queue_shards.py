@@ -205,6 +205,33 @@ def test_queue_sizing_uses_idle_runners_to_finish_serial_work_within_four_minute
     assert all(leg["predicted_seconds"] == pytest.approx(237.0, abs=0.001) for leg in plan)
 
 
+@pytest.mark.parametrize(("seconds", "warned"), [(90.0, False), (100.0, True)])
+def test_a_capped_plan_over_the_queue_target_warns_in_the_annotations_and_the_job_summary(
+    tmp_path, monkeypatch, capsys, seconds, warned
+):
+    from tests import queue_shards
+
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 720)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    path = tmp_path / "tests/test_serial.py"
+    path.parent.mkdir()
+    path.write_text("import pytest\npytestmark = pytest.mark.xdist_group('serial')\n")
+    measured = {f"tests/test_serial.py::test_{i}": seconds for i in range(48)}
+
+    plan = queue_shards.matrix(tmp_path, {"3.12": measured})
+
+    assert {leg["total"] for leg in plan} == {24}
+    message = "Python 3.12: the shard cap of 24 predicts the slowest queue shard at 260.0s, over the 240s target"
+    out = capsys.readouterr().out
+    if warned:
+        assert f"::warning title=Queue shard pool cannot reach the target::{message}\n" in out
+        assert summary.read_text() == f"{message}\n"
+    else:
+        assert "::warning" not in out
+        assert not summary.exists()
+
+
 def test_unknown_cases_use_module_maxima_and_the_global_tail_for_new_modules(tmp_path):
     from tests.queue_shards import main
 
