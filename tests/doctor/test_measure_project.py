@@ -135,7 +135,11 @@ def test_the_trace_detector_reads_through_the_client_it_is_given(monkeypatch):
         raise RuntimeError(WRONG)
 
     monkeypatch.setattr(traces_read, "client", lambda environ: pytest.fail("the default client was used"))
-    store = type("Store", (), {"redis": object(), "agents": lambda self, slug: []})()
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     ledger = type("Ledger", (), {"tasks": lambda self, slug: []})()
     reader = detect.readers(store, ledger, "s", 1, environ=CALLER, telemetry=refusing)["trace"]
     with pytest.raises(RuntimeError, match=WRONG):
