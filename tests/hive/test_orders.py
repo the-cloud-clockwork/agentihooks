@@ -377,7 +377,7 @@ def test_runtime_substitution_is_refused_and_terminated(setup, field, value):
         {"account": ""},
         {"harness": "codex"},
         {"profile": "qa"},
-        {"placement": "forced"},
+        {"placement": "open"},
         {"profile_decision": {"validation": {"pid": 12, "account": "other"}}},
     ],
 )

@@ -504,10 +504,10 @@ def headless_front_door_order(setup, route=""):
     ("enabled", "reason"),
     [
         (False, "the master claude ai login is off on this hive: set AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true"),
-        (True, "no master claude ai login: run agentihooks claude login --master"),
+        ("true", "the master claude ai login is off on this hive: set AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true"),
     ],
 )
-def test_a_headless_hive_without_a_usable_master_login_refuses_the_front_door_launch(
+def test_a_headless_hive_with_master_login_disabled_refuses_the_front_door_launch(
     setup, monkeypatch, tmp_path, enabled, reason, route
 ):
     from hooks import config as hooks_config
@@ -563,14 +563,16 @@ def test_empty_native_inventory_is_selected_as_private_recovery(setup):
 
 def test_native_master_fallback_account_is_recorded_canonically(setup):
     from dataclasses import replace
+    from types import SimpleNamespace
 
-    from scripts.hive.orders import Ack
+    from scripts.hive.orders import Ack, launch_target
 
     order, admitted, task = headless_front_door_order(setup)
     order = replace(order, hive="remote")
+    target = {"host_id": "remote", **launch_target(12, "fixture", {12: SimpleNamespace(start_time=34)})}
     ack = Ack(
         "live",
-        {"host_id": "remote", "pid": 12, "start_time": 34},
+        target,
         execution={
             "account": "token-account",
             "placement": "fallback",

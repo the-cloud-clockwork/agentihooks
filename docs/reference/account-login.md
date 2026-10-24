@@ -97,6 +97,11 @@ preparation takes the free stored login with the most room left (five hour and
 week windows from the router cache and its own sessions' quota snapshots), then
 checks it with `claude auth status --text`. A valid login ends the chain.
 
+Hive heartbeats advertise `master_login_enabled` separately from the stored
+`master_login` account. An enabled hive can accept private recovery with an
+empty inventory; the account remains unknown until the verified native or
+subscription launch reports it.
+
 When no valid session is available, preparation reserves an unused slot or
 renews the slot it already holds. Native `claude auth login` runs in that
 isolated home. The master seat receives an inbox directive with its authorization

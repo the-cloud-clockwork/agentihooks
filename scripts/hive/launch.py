@@ -553,7 +553,7 @@ class HiveLaunch:
         _match("ack host", order.hive, ack.target.get("host_id"))
         _match("profile decision type", "dict", type(decision).__name__)
         account = ack.execution.get("account", agent.account)
-        if account != agent.account and not orders.master_login_fallback(
+        if account != agent.account and not orders.resolved_master_login(
             order, account, ack.execution.get("placement", ""), decision
         ):
             _match("ack account", agent.account, account)
