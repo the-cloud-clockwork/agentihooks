@@ -60,8 +60,8 @@ check() {
     printf 'the operator identity could not attach to the worker terminal %s: %s\n' "$execution" "$out"
     return 1
   fi
-  if [[ $out != *"\"incarnation\": \"$execution/"* ]]; then
-    printf 'the operator identity attach named no incarnation of %s: %s\n' "$execution" "$out"
+  if [[ $out != *"\"target\": \""* || $out != *"\"incarnation\": \"$execution/"* ]]; then
+    printf 'the operator identity attach named no compatible target and incarnation of %s: %s\n' "$execution" "$out"
     return 1
   fi
   printf 'the operator identity attached to the worker terminal: %s\n' "$(tail -1 <<< "$out")"
