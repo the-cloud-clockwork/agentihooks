@@ -1,0 +1,28 @@
+{
+  "case": "T-SV2-SES-02-C",
+  "evidence_class": "mocked: local files in a temporary folder stand in for a provider transcript; no provider process, spool or network runs",
+  "input_sha256": {
+    "transcript-tailing.json": "2ee8606705605efe43acb86e3b166c18fa4a479081c53afb6a5fe751ea361025"
+  },
+  "observed": {
+    "accepted_texts": [
+      "café first prompt ✓",
+      "partial über record ☃"
+    ],
+    "committed_revision": 2,
+    "completed_start": 83,
+    "completed_texts": [
+      "partial über record ☃"
+    ],
+    "cursor_files_retained": 1,
+    "duplicate_records": 0,
+    "resumed_offset": 83,
+    "rollback_whole_file_reader": [
+      "café first prompt ✓",
+      "partial über record ☃"
+    ],
+    "stale_commit": "stale_cursor",
+    "transcript_cursor_replays_total": 0
+  },
+  "state": "passed"
+}
