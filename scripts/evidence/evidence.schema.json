@@ -16,7 +16,7 @@
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "claim": {"type": "string", "minLength": 1},
-          "source": {"type": "string", "pattern": "^(https?://\\S+|[A-Za-z0-9_.][A-Za-z0-9_./-]*)$"},
+          "source": {"type": "string", "pattern": "^(https?://\\S+|(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9_.][A-Za-z0-9_./-]*)$"},
           "excerpt": {"type": "string", "minLength": 1},
           "retrieved_at": {"type": "string", "minLength": 1}
         }

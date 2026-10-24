@@ -20,7 +20,7 @@ def _validator(kind: str) -> Draft202012Validator:
     return Draft202012Validator(json.loads((SCHEMAS / f"{kind}.schema.json").read_text()))
 
 
-def validate(kind: str, doc: object) -> object:
+def validate(kind: str, doc: object) -> dict:
     error = best_match(_validator(kind).iter_errors(doc))
     if error is not None:
         where = "/".join(str(part) for part in error.absolute_path) or "document"

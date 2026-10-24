@@ -14,6 +14,7 @@ ITEM = {
     "excerpt": "verdict: pass",
     "retrieved_at": "2026-10-24T14:00:00Z",
 }
+SOURCE = r"^(https?://\S+|(?!.*(^|/)\.\.(/|$))[A-Za-z0-9_.][A-Za-z0-9_./-]*)$"
 
 
 def write(tmp_path, name, doc):
@@ -67,7 +68,12 @@ def test_refusal_names_the_document_when_the_error_has_no_path():
         (
             "evidence",
             {"items": [{**ITEM, "source": "see the run logs"}]},
-            "evidence items/0/source: 'see the run logs' does not match '^(https?://\\\\S+|[A-Za-z0-9_.][A-Za-z0-9_./-]*)$'",
+            f"evidence items/0/source: 'see the run logs' does not match {SOURCE!r}",
+        ),
+        (
+            "evidence",
+            {"items": [{**ITEM, "source": "scripts/../../outside"}]},
+            f"evidence items/0/source: 'scripts/../../outside' does not match {SOURCE!r}",
         ),
     ],
 )
