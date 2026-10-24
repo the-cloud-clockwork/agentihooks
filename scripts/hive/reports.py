@@ -74,7 +74,6 @@ class Reports:
             return False
         return record is not None and 0 < record["heartbeat_at"] < now_ms - LOST_MS
 
-
     def removed(self, agent: "AgentRecord", now_ms: int) -> bool:
         hive = host(agent)
         if agent.state != "finished" or not hive:
