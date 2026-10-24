@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.xǁSQLiteRecallStoreǁ_indexed__mutmut_7:498b02af9804fa5ef0153dfd4ceda97c7939a02aab7f433b97af90a65e9a7d82": {
+    "reader": "standards_reader",
+    "reason": "Uppercasing INDEXED and SOURCE in the same query is a no-op because SQLite identifiers are case-insensitive."
+  }
+}
