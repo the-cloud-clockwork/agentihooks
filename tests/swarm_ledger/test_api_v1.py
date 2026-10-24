@@ -1031,16 +1031,33 @@ def test_publish_plan_writes_land_through_the_plans_and_slices_resources(live, t
 
 def test_a_planner_publishes_a_plan_and_plan_read_prints_its_sliced_task(live, tmp_path, monkeypatch, capsys):
     from scripts.swarm_ledger import ledger_artifacts, ledger_core, ledger_plans, plan_read
-    from tests.swarm_ledger.test_ledger_authority import admin_put, core, ledger, operation
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import core, ledger
 
     planner = "planner@323133-0258"
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
     seed = [
-        operation("join", by=planner),
-        {**operation("task_add", task="tp", title="Slice the proof phase", lane="plan", phase="p1"), "kind": "plan"},
-        operation("task_update", by="swarm", item="tasks/tp", fields={"claimed_by": planner, "state": "claimed"}),
+        {"op": "join", "id": "planner-master-join", "by": "boss", "role": "orchestrator"},
+        {"op": "join", "id": "planner-join", "by": planner},
+        {
+            "op": "task_add",
+            "id": "planner-task-seed",
+            "by": "boss",
+            "task": "tp",
+            "title": "Slice the proof phase",
+            "lane": "plan",
+            "kind": "plan",
+            "phase": "p1",
+        },
+        {
+            "op": "task_update",
+            "id": "planner-claim-seed",
+            "by": "swarm",
+            "item": "tasks/tp",
+            "fields": {"claimed_by": planner, "state": "claimed"},
+        },
     ]
-    status, reply = admin_put(live, *seed)
-    assert (status, [op["id"] for op in seed if op["id"] in reply["rejected"]]) == (200, [])
+    assert [client.mutate(SLUG, [op]).get("rejected") for op in seed] == [[], [], [], []]
     monkeypatch.setattr(ledger_core, "LEDGER_DIR", core.LEDGER_DIR)
     one = "".join(f"One detail {n}\n" for n in range(12))
     three = "".join(f"Three detail {n}\n" for n in range(12))
