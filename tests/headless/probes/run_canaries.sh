@@ -80,7 +80,7 @@ run_claude() {
   printf '%q ' claude "$@" "$prompt" >"$dir/command.txt"
   (cd "$WORK" && env -i HOME="$HOME" PATH="$PATH" CLAUDE_CONFIG_DIR="$CLAUDE_HOME" \
     CLAUDE_CODE_OAUTH_TOKEN="${!CLAUDE_ACCOUNT}" HDL0_HOOK_LOG="$dir/hooks.log" \
-    timeout 300 claude "$@" "$prompt" >"$dir/stdout.jsonl" 2>"$dir/stderr.txt") && echo 0 >"$dir/exit" || echo $? >"$dir/exit"
+    timeout 300 "${HDL0_CLAUDE_BIN:-claude}" "$@" "$prompt" >"$dir/stdout.jsonl" 2>"$dir/stderr.txt") && echo 0 >"$dir/exit" || echo $? >"$dir/exit"
   [[ -f "$WORK/written.txt" ]] && echo present >"$dir/written" || echo absent >"$dir/written"
   [[ -f "$OUT/mcp.log" ]] && mv "$OUT/mcp.log" "$dir/mcp.log" || true
 }

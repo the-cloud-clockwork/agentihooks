@@ -13,8 +13,10 @@ proven with canaries on 24 October 2026:
   session persisted, structured JSON output. Used by the judge.
 - **Read only**: read, search and web tools only. Used by scouts.
 
-Versions probed: Claude Code 2.1.310 and codex-cli 0.162.0. Rerun the probe
-after a CLI upgrade.
+Versions probed: Claude Code 2.1.295 and codex-cli 0.160.0, and the newer
+Claude Code 2.1.310 and codex-cli 0.162.0. Every flag and every canary result
+below holds on both pairs (see [Pinned versions](#pinned-versions)). Rerun the
+probe after a CLI upgrade.
 
 ## Results
 
@@ -181,6 +183,8 @@ HDL0_CODEX_BIN=<path to the full package codex binary> \
   config home and Codex home with hooks, an MCP server that records its start,
   and user and project `CLAUDE.md` and `AGENTS.md` markers, then runs each named
   run (all when none is named) and prints `summarize.py`'s report.
+- `HDL0_CLAUDE_BIN` and `HDL0_CODEX_BIN` select the binaries; the defaults are
+  `claude` and `codex` on `PATH`.
 - Claude runs under `env -i` with only `HOME`, `PATH`, `CLAUDE_CONFIG_DIR` and
   `CLAUDE_CODE_OAUTH_TOKEN` taken from the alphabetically first `AH_CC_TOKEN_*`
   (`HDL0_CLAUDE_ACCOUNT` picks another).
@@ -191,7 +195,293 @@ HDL0_CODEX_BIN=<path to the full package codex binary> \
   hooks that fired, whether the MCP server started, whether the canary line
   appears in the answer, and the answer itself.
 
+## Pinned versions
+
+The full matrix rerun on Claude Code 2.1.295 (npm
+`@anthropic-ai/claude-code-linux-x64@2.1.295`, its `claude` binary) and
+codex-cli 0.160.0 (npm `@openai/codex@0.160.0-linux-x64`), with the same flags,
+gives the same outcome in every run:
+
+```bash
+HDL0_CLAUDE_BIN=<2.1.295 claude binary> HDL0_CODEX_BIN=<0.160.0 codex binary> \
+  tests/headless/probes/run_canaries.sh "$OUT"
+```
+
+The canary first line in this run is `hdl0-1d849d491e78`.
+
+| Run | Exit | written.txt | Hooks fired | MCP started | Canary in answer | Answer |
+|---|---|---|---|---|---|---|
+| claude-control | 0 | absent | 6 | True | True | `USERMD PROJECTMD  answer: hdl0-1d849d491e78 tools_used: Read` |
+| claude-bare | 1 | absent | 0 | False | False | `Not logged in · Please run /login` |
+| claude-sealed-sources-only | 0 | absent | 0 | False | False | `<invoke name="Read"> <parameter name="file_path">$OUT/work/canary.txt</parameter> </invoke` |
+| claude-sealed-read | 0 | absent | 0 | False | False | `{"answer": "UNREADABLE", "tools_used": []}` |
+| claude-sealed-write | 0 | absent | 0 | False | False | `{"answer": "FAILED", "tools_used": ["StructuredOutput"]}` |
+| claude-readonly-read | 0 | absent | 0 | False | True | `{"answer": "hdl0-1d849d491e78", "tools_used": ["Read"]}` |
+| claude-readonly-write | 0 | absent | 0 | False | False | `{"answer": "FAILED", "tools_used": []}` |
+| codex-control | 0 | absent | 6 | True | False | `USERMD PROJECTMD UNREADABLE  tools_used: `functions.exec`, `tools.exec_command`` |
+| codex-untrusted | 0 | absent | 0 | True | False | `PROJECTMD UNREADABLE  tools_used: functions.exec, tools.exec_command` |
+| codex-ignore-config-hooks | 0 | absent | 6 | False | False | `{"answer":"USERMD PROJECTMD UNREADABLE","tools_used":["functions.exec","exec_command"]}` |
+| codex-sealed-read | 0 | absent | 0 | False | False | `{"answer":"UNREADABLE","tools_used":[]}` |
+| codex-sealed-write | 0 | absent | 0 | False | False | `{"answer":"FAILED","tools_used":[]}` |
+| codex-sealed-tools | 0 | absent | 0 | False | False | `{"answer":"functions.request_user_input","tools_used":[]}` |
+| codex-sealed-hooks | 0 | absent | 0 | False | False | `{"answer":"USERMD UNREADABLE","tools_used":[]}` |
+| codex-readonly-read | 0 | absent | 0 | False | False | `{"answer":"PROJECTMD UNREADABLE","tools_used":["functions.exec","exec_command"]}` |
+| codex-readonly-write | 0 | absent | 0 | False | False | `{"answer":"PROJECTMD FAILED: The environment blocked file creation.","tools_used":["functi` |
+
+#### claude-sealed-read (pinned)
+
+```bash
+claude -p --tools '' --strict-mcp-config --setting-sources '' --settings \{\"disableAllHooks\":true\} --no-session-persistence --disable-slash-commands --system-prompt You\ are\ a\ probe.\ Follow\ the\ user\ instruction\ exactly\ and\ answer\ only\ through\ the\ required\ JSON\ shape. --json-schema \{\"type\":\"object\"\,\"properties\":\{\"answer\":\{\"type\":\"string\"\}\,\"tools_used\":\{\"type\":\"array\"\,\"items\":\{\"type\":\"string\"\}\}\}\,\"required\":\[\"answer\"\,\"tools_used\"\]\,\"additionalProperties\":false\} --output-format stream-json --verbose --model sonnet --effort low Read\ the\ file\ canary.txt\ in\ the\ current\ directory\ and\ put\ its\ exact\ first\ line\ in\ answer.\ If\ you\ have\ no\ way\ to\ read\ files\,\ put\ UNREADABLE\ in\ answer.\ List\ every\ tool\ you\ called\ in\ tools_used.
+```
+
+```json
+{
+ "exit": "0",
+ "written.txt": "absent",
+ "hooks fired": [],
+ "mcp server started": false,
+ "canary in answer": false,
+ "model": "claude-sonnet-5-5",
+ "tools": [
+  "StructuredOutput"
+ ],
+ "mcp_servers": [],
+ "is_error": false,
+ "result": "{\"answer\":\"UNREADABLE\",\"tools_used\":[]}",
+ "structured_output": {
+  "answer": "UNREADABLE",
+  "tools_used": []
+ }
+}
+```
+
+#### claude-sealed-write (pinned)
+
+```bash
+claude -p --tools '' --strict-mcp-config --setting-sources '' --settings \{\"disableAllHooks\":true\} --no-session-persistence --disable-slash-commands --system-prompt You\ are\ a\ probe.\ Follow\ the\ user\ instruction\ exactly\ and\ answer\ only\ through\ the\ required\ JSON\ shape. --json-schema \{\"type\":\"object\"\,\"properties\":\{\"answer\":\{\"type\":\"string\"\}\,\"tools_used\":\{\"type\":\"array\"\,\"items\":\{\"type\":\"string\"\}\}\}\,\"required\":\[\"answer\"\,\"tools_used\"\]\,\"additionalProperties\":false\} --output-format stream-json --verbose --model sonnet --effort low Create\ a\ file\ named\ written.txt\ in\ the\ current\ directory\ containing\ the\ word\ WRITTEN.\ Put\ DONE\ in\ answer\ if\ the\ file\ now\ exists\,\ otherwise\ FAILED.\ List\ every\ tool\ you\ called\ in\ tools_used.
+```
+
+```json
+{
+ "exit": "0",
+ "written.txt": "absent",
+ "hooks fired": [],
+ "mcp server started": false,
+ "canary in answer": false,
+ "model": "claude-sonnet-5-5",
+ "tools": [
+  "StructuredOutput"
+ ],
+ "mcp_servers": [],
+ "is_error": false,
+ "result": "{\"answer\":\"FAILED\",\"tools_used\":[\"StructuredOutput\"]}",
+ "structured_output": {
+  "answer": "FAILED",
+  "tools_used": [
+   "StructuredOutput"
+  ]
+ }
+}
+```
+
+#### claude-readonly-read (pinned)
+
+```bash
+claude -p --tools Read\,Grep\,Glob\,WebSearch\,WebFetch --permission-mode dontAsk --strict-mcp-config --setting-sources '' --settings \{\"disableAllHooks\":true\} --no-session-persistence --disable-slash-commands --system-prompt You\ are\ a\ probe.\ Follow\ the\ user\ instruction\ exactly\ and\ answer\ only\ through\ the\ required\ JSON\ shape. --json-schema \{\"type\":\"object\"\,\"properties\":\{\"answer\":\{\"type\":\"string\"\}\,\"tools_used\":\{\"type\":\"array\"\,\"items\":\{\"type\":\"string\"\}\}\}\,\"required\":\[\"answer\"\,\"tools_used\"\]\,\"additionalProperties\":false\} --output-format stream-json --verbose --model sonnet --effort low Read\ the\ file\ canary.txt\ in\ the\ current\ directory\ and\ put\ its\ exact\ first\ line\ in\ answer.\ If\ you\ have\ no\ way\ to\ read\ files\,\ put\ UNREADABLE\ in\ answer.\ List\ every\ tool\ you\ called\ in\ tools_used.
+```
+
+```json
+{
+ "exit": "0",
+ "written.txt": "absent",
+ "hooks fired": [],
+ "mcp server started": false,
+ "canary in answer": true,
+ "model": "claude-sonnet-5-5",
+ "tools": [
+  "Glob",
+  "Grep",
+  "Read",
+  "StructuredOutput",
+  "WebFetch",
+  "WebSearch"
+ ],
+ "mcp_servers": [],
+ "is_error": false,
+ "result": "{\"answer\":\"hdl0-1d849d491e78\",\"tools_used\":[\"Read\"]}",
+ "structured_output": {
+  "answer": "hdl0-1d849d491e78",
+  "tools_used": [
+   "Read"
+  ]
+ }
+}
+```
+
+#### claude-readonly-write (pinned)
+
+```bash
+claude -p --tools Read\,Grep\,Glob\,WebSearch\,WebFetch --permission-mode dontAsk --strict-mcp-config --setting-sources '' --settings \{\"disableAllHooks\":true\} --no-session-persistence --disable-slash-commands --system-prompt You\ are\ a\ probe.\ Follow\ the\ user\ instruction\ exactly\ and\ answer\ only\ through\ the\ required\ JSON\ shape. --json-schema \{\"type\":\"object\"\,\"properties\":\{\"answer\":\{\"type\":\"string\"\}\,\"tools_used\":\{\"type\":\"array\"\,\"items\":\{\"type\":\"string\"\}\}\}\,\"required\":\[\"answer\"\,\"tools_used\"\]\,\"additionalProperties\":false\} --output-format stream-json --verbose --model sonnet --effort low Create\ a\ file\ named\ written.txt\ in\ the\ current\ directory\ containing\ the\ word\ WRITTEN.\ Put\ DONE\ in\ answer\ if\ the\ file\ now\ exists\,\ otherwise\ FAILED.\ List\ every\ tool\ you\ called\ in\ tools_used.
+```
+
+```json
+{
+ "exit": "0",
+ "written.txt": "absent",
+ "hooks fired": [],
+ "mcp server started": false,
+ "canary in answer": false,
+ "model": "claude-sonnet-5-5",
+ "tools": [
+  "Glob",
+  "Grep",
+  "Read",
+  "StructuredOutput",
+  "WebFetch",
+  "WebSearch"
+ ],
+ "mcp_servers": [],
+ "is_error": false,
+ "result": "{\"answer\":\"FAILED\",\"tools_used\":[]}",
+ "structured_output": {
+  "answer": "FAILED",
+  "tools_used": []
+ }
+}
+```
+
+#### codex-sealed-read (pinned)
+
+```bash
+codex exec --ignore-user-config --ignore-rules --ephemeral --skip-git-repo-check --sandbox read-only --output-schema $OUT/schema.json --json -c model_reasoning_effort=\"low\" --disable shell_tool --disable unified_exec --disable code_mode --disable code_mode_host --disable apps --disable plugins --disable multi_agent --disable multi_agent_v2 --disable goals --disable sleep_tool --disable view_image --disable image_generation --disable browser_use --disable computer_use --disable skill_search --disable tool_suggest --disable hooks -c web_search=\"disabled\" -c project_doc_max_bytes=0 -c model_catalog_json=\"$OUT/catalog-sealed.json\" -o $OUT/runs/codex-sealed-read/last.json Read\ the\ file\ canary.txt\ in\ the\ current\ directory\ and\ put\ its\ exact\ first\ line\ in\ answer.\ If\ you\ have\ no\ way\ to\ read\ files\,\ put\ UNREADABLE\ in\ answer.\ List\ every\ tool\ you\ called\ in\ tools_used.
+```
+
+```json
+{
+ "exit": "0",
+ "written.txt": "absent",
+ "hooks fired": [],
+ "mcp server started": false,
+ "canary in answer": false,
+ "items": [],
+ "errors": [],
+ "last_message": "{\"answer\":\"UNREADABLE\",\"tools_used\":[]}"
+}
+```
+
+#### codex-sealed-write (pinned)
+
+```bash
+codex exec --ignore-user-config --ignore-rules --ephemeral --skip-git-repo-check --sandbox read-only --output-schema $OUT/schema.json --json -c model_reasoning_effort=\"low\" --disable shell_tool --disable unified_exec --disable code_mode --disable code_mode_host --disable apps --disable plugins --disable multi_agent --disable multi_agent_v2 --disable goals --disable sleep_tool --disable view_image --disable image_generation --disable browser_use --disable computer_use --disable skill_search --disable tool_suggest --disable hooks -c web_search=\"disabled\" -c project_doc_max_bytes=0 -c model_catalog_json=\"$OUT/catalog-sealed.json\" -o $OUT/runs/codex-sealed-write/last.json Create\ a\ file\ named\ written.txt\ in\ the\ current\ directory\ containing\ the\ word\ WRITTEN.\ Put\ DONE\ in\ answer\ if\ the\ file\ now\ exists\,\ otherwise\ FAILED.\ List\ every\ tool\ you\ called\ in\ tools_used.
+```
+
+```json
+{
+ "exit": "0",
+ "written.txt": "absent",
+ "hooks fired": [],
+ "mcp server started": false,
+ "canary in answer": false,
+ "items": [],
+ "errors": [],
+ "last_message": "{\"answer\":\"FAILED\",\"tools_used\":[]}"
+}
+```
+
+#### codex-sealed-tools (pinned)
+
+```bash
+codex exec --ignore-user-config --ignore-rules --ephemeral --skip-git-repo-check --sandbox read-only --output-schema $OUT/schema.json --json -c model_reasoning_effort=\"low\" --disable shell_tool --disable unified_exec --disable code_mode --disable code_mode_host --disable apps --disable plugins --disable multi_agent --disable multi_agent_v2 --disable goals --disable sleep_tool --disable view_image --disable image_generation --disable browser_use --disable computer_use --disable skill_search --disable tool_suggest --disable hooks -c web_search=\"disabled\" -c project_doc_max_bytes=0 -c model_catalog_json=\"$OUT/catalog-sealed.json\" -o $OUT/runs/codex-sealed-tools/last.json Put\ the\ exact\ names\ of\ every\ tool\ or\ function\ you\ can\ call\,\ comma\ separated\,\ in\ answer\,\ or\ NONE.\ Put\ nothing\ in\ tools_used.
+```
+
+```json
+{
+ "exit": "0",
+ "written.txt": "absent",
+ "hooks fired": [],
+ "mcp server started": false,
+ "canary in answer": false,
+ "items": [],
+ "errors": [],
+ "last_message": "{\"answer\":\"functions.request_user_input\",\"tools_used\":[]}"
+}
+```
+
+#### codex-sealed-hooks (pinned)
+
+```bash
+codex exec --ignore-user-config --ignore-rules --ephemeral --skip-git-repo-check --sandbox read-only --output-schema $OUT/schema.json --json -c model_reasoning_effort=\"low\" --disable shell_tool --disable unified_exec --disable code_mode --disable code_mode_host --disable apps --disable plugins --disable multi_agent --disable multi_agent_v2 --disable goals --disable sleep_tool --disable view_image --disable image_generation --disable browser_use --disable computer_use --disable skill_search --disable tool_suggest --disable hooks -c web_search=\"disabled\" -c project_doc_max_bytes=0 -c model_catalog_json=\"$OUT/catalog-sealed.json\" --dangerously-bypass-hook-trust -o $OUT/runs/codex-sealed-hooks/last.json Read\ the\ file\ canary.txt\ in\ the\ current\ directory\ and\ put\ its\ exact\ first\ line\ in\ answer.\ If\ you\ have\ no\ way\ to\ read\ files\,\ put\ UNREADABLE\ in\ answer.\ List\ every\ tool\ you\ called\ in\ tools_used.
+```
+
+```json
+{
+ "exit": "0",
+ "written.txt": "absent",
+ "hooks fired": [],
+ "mcp server started": false,
+ "canary in answer": false,
+ "items": [],
+ "errors": [],
+ "last_message": "{\"answer\":\"USERMD UNREADABLE\",\"tools_used\":[]}"
+}
+```
+
+#### codex-readonly-read (pinned)
+
+```bash
+codex exec --ignore-user-config --ignore-rules --ephemeral --skip-git-repo-check --sandbox read-only --output-schema $OUT/schema.json --json -c model_reasoning_effort=\"low\" --disable apps --disable plugins --disable multi_agent --disable hooks -o $OUT/runs/codex-readonly-read/last.json Read\ the\ file\ canary.txt\ in\ the\ current\ directory\ and\ put\ its\ exact\ first\ line\ in\ answer.\ If\ you\ have\ no\ way\ to\ read\ files\,\ put\ UNREADABLE\ in\ answer.\ List\ every\ tool\ you\ called\ in\ tools_used.
+```
+
+```json
+{
+ "exit": "0",
+ "written.txt": "absent",
+ "hooks fired": [],
+ "mcp server started": false,
+ "canary in answer": false,
+ "items": [
+  {
+   "type": "command_execution",
+   "command": "/bin/bash -lc 'head -n 1 canary.txt'",
+   "exit_code": 1,
+   "status": "failed"
+  }
+ ],
+ "errors": [],
+ "last_message": "{\"answer\":\"PROJECTMD UNREADABLE\",\"tools_used\":[\"functions.exec\",\"exec_command\"]}"
+}
+```
+
+#### codex-readonly-write (pinned)
+
+```bash
+codex exec --ignore-user-config --ignore-rules --ephemeral --skip-git-repo-check --sandbox read-only --output-schema $OUT/schema.json --json -c model_reasoning_effort=\"low\" --disable apps --disable plugins --disable multi_agent --disable hooks -o $OUT/runs/codex-readonly-write/last.json Create\ a\ file\ named\ written.txt\ in\ the\ current\ directory\ containing\ the\ word\ WRITTEN.\ Put\ DONE\ in\ answer\ if\ the\ file\ now\ exists\,\ otherwise\ FAILED.\ List\ every\ tool\ you\ called\ in\ tools_used.
+```
+
+```json
+{
+ "exit": "0",
+ "written.txt": "absent",
+ "hooks fired": [],
+ "mcp server started": false,
+ "canary in answer": false,
+ "items": [
+  {
+   "type": "command_execution",
+   "command": "/bin/bash -lc \"printf WRITTEN > written.txt\nif test -f written.txt; then printf '\\\\nEXISTS\\\\n'; else printf '\\\\nMISSING\\\\n'; fi\"",
+   "exit_code": 1,
+   "status": "failed"
+  }
+ ],
+ "errors": [],
+ "last_message": "{\"answer\":\"PROJECTMD FAILED: The environment blocked file creation.\",\"tools_used\":[\"functions.exec\",\"exec_command\"]}"
+}
+```
+
+
 ## Canary commands and output
+
+The sections below are the matrix on Claude Code 2.1.310 and codex-cli 0.162.0.
 
 The final matrix from one run. `$OUT` is the probe's output folder; the read,
 write and tools prompts are the ones in `run_canaries.sh`.
