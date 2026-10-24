@@ -206,7 +206,9 @@ def test_a_shard_whose_tests_reported_failures_is_not_lost_whatever_its_output_q
     quoted = "Process completed with exit code 1.\\n##[error]The runner has received a shutdown signal.-True]"
     pages = {
         "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
-        "repos/o/r/check-runs/1/annotations": json.dumps([{"message": quoted}, {"message": "Process completed with exit code 1."}]),
+        "repos/o/r/check-runs/1/annotations": json.dumps(
+            [{"message": quoted}, {"message": "Process completed with exit code 1."}]
+        ),
         "repos/o/r/actions/jobs/1/logs": QUOTED_LOSS,
     }
     monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
