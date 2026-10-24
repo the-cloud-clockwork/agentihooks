@@ -66,8 +66,10 @@ CONTROLLER_BUCKETS = (
 # Queue stream names hash the swarm and lane into one token, so stream level API grants take any stream name.
 CONTROLLER_PUBLISH = (
     f"{subjects.PREFIX}.>",
+    f"legacy.{subjects.PREFIX}.>",
     "dead.>",
     "agentihooks.queue.>",
+    "$JS.API.STREAM.LIST",
     "$JS.API.STREAM.CREATE.*",
     "$JS.API.STREAM.INFO.*",
     "$JS.API.STREAM.MSG.GET.*",
