@@ -349,6 +349,23 @@ The profile chain is read for `AGENTIHOOKS_TARGET` (default `claude`).
 
 ---
 
+## `agentihooks recall`
+
+Read and build the recall archive of ledgers and swarms. The read commands print the same JSON as the [recall MCP tools](../mcp-tools/index.md#recall) and exit 1 when the answer is `"success": false`.
+
+```bash
+agentihooks recall search "merge queue" --scope all --kind task --since 2d   # ranked hits
+agentihooks recall get <ledger>/tasks/<id>                                    # one item, parents and comments
+agentihooks recall timeline --kind task --kind comment --since 1d             # items oldest first
+agentihooks recall sources                                                    # indexed ledgers and swarms
+agentihooks recall reindex --all                                              # backfill from the stored ledgers
+agentihooks recall eval golden.json                                           # top five hit rate
+```
+
+`--scope` defaults to your own swarm (every source outside a swarm); a ledger or swarm slug narrows it and `all` crosses swarms. `search` also takes `--author`, `--seat` and `--limit`; `timeline` takes `--limit`. `--kind` repeats.
+
+---
+
 ## `agentihooks claude` / `agenti`
 
 Launch Claude Code on one of the `AH_CC_TOKEN_<slug>` accounts, with

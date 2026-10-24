@@ -274,3 +274,81 @@ def timeline(
         Entry(row.item, row.ledger_slug, row.swarm_slug, row.kind, row.ref, row.title, row.author, row.time)
         for row in (_Row(*values) for values in found)
     ]
+
+
+@dataclass(frozen=True)
+class Comment:
+    ref: str
+    kind: str
+    author: str
+    time: int
+    text: str
+    comments: tuple["Comment", ...] = ()
+
+
+@dataclass(frozen=True)
+class Item:
+    item: str
+    ledger_slug: str
+    swarm_slug: str
+    kind: str
+    ref: str
+    title: str
+    author: str
+    time: int
+    archived: bool
+    text: str
+    parents: tuple[Parent, ...]
+    comments: tuple[Comment, ...]
+
+
+def _text(connection: sqlite3.Connection, row: _Row) -> str:
+    chunks = connection.execute(
+        "SELECT text FROM records WHERE source = ? AND ref = ? ORDER BY chunk_index", (row.source, row.ref)
+    ).fetchall()
+    return "\n\n".join(text for (text,) in chunks)
+
+
+def _comments(connection: sqlite3.Connection, row: _Row) -> tuple[Comment, ...]:
+    found = connection.execute(
+        f"SELECT {COLUMNS} FROM records WHERE source = ? AND parent_ref = ? AND chunk_index = 0"
+        " AND kind IN ('comment', 'answer') ORDER BY time, key",
+        (row.source, row.ref),
+    ).fetchall()
+    return tuple(
+        Comment(child.ref, child.kind, child.author, child.time, _text(connection, child), _comments(connection, child))
+        for child in (_Row(*values) for values in found)
+    )
+
+
+def get(store: SQLiteRecallStore, ref: str, scope: str = "all") -> Item | None:
+    where, params = _where(Filters(scope=scope), now_ms())
+    with store.connect() as connection:
+        found = (
+            connection.execute(f"SELECT {COLUMNS} FROM records WHERE records.key = ?", (f"{ref}#0",)).fetchall()
+            or connection.execute(
+                f"SELECT {COLUMNS} FROM records WHERE {where} AND records.ref = ? AND records.chunk_index = 0"
+                " ORDER BY records.key",
+                [*params, ref],
+            ).fetchall()
+        )
+        if len(found) > 1:
+            names = ", ".join(_Row(*values).item for values in found)
+            raise ValueError(f"{ref} names {len(found)} items: {names}; pass one of them or a narrower scope")
+        if not found:
+            return None
+        row = _Row(*found[0])
+        return Item(
+            item=row.item,
+            ledger_slug=row.ledger_slug,
+            swarm_slug=row.swarm_slug,
+            kind=row.kind,
+            ref=row.ref,
+            title=row.title,
+            author=row.author,
+            time=row.time,
+            archived=row.source_state == "archived",
+            text=_text(connection, row),
+            parents=_parents(connection, row),
+            comments=_comments(connection, row),
+        )

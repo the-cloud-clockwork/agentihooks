@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import time
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -23,7 +24,18 @@ CREATE TABLE IF NOT EXISTS records (
 );
 CREATE INDEX IF NOT EXISTS records_source_ref ON records(source, ref);
 CREATE VIRTUAL TABLE IF NOT EXISTS recall_fts USING fts5(title, text, tokenize="unicode61 tokenchars '-_'");
+CREATE TABLE IF NOT EXISTS indexed (source TEXT PRIMARY KEY, at INTEGER NOT NULL);
 """
+
+
+@dataclass(frozen=True)
+class SourceCount:
+    source: str
+    swarm_slug: str
+    records: int
+    items: int
+    archived: int
+    indexed_at: int
 
 
 @dataclass(frozen=True)
@@ -101,6 +113,7 @@ class SQLiteRecallStore:
         refs = {record.ref for record in records}
         counts = dict.fromkeys(("written", "unchanged", "archived", "removed"), 0)
         with self._write() as connection:
+            self._mark(connection, source)
             counts["removed"] = self._remove(connection, source, deleted)
             existing = {
                 key: (rowid, ref, digest, state)
@@ -139,7 +152,29 @@ class SQLiteRecallStore:
 
     def remove(self, source: str, refs: Iterable[str]) -> int:
         with self._write() as connection:
+            self._mark(connection, source)
             return self._remove(connection, source, refs)
+
+    def _mark(self, connection: sqlite3.Connection, source: str) -> None:
+        connection.execute(
+            "INSERT INTO indexed (source, at) VALUES (?, ?) ON CONFLICT(source) DO UPDATE SET at = excluded.at",
+            (source, int(time.time() * 1000)),
+        )
+
+    def sources(self) -> list[SourceCount]:
+        with self.connect() as connection:
+            indexed = dict(connection.execute("SELECT source, at FROM indexed"))
+            counts = {
+                source: rest
+                for source, *rest in connection.execute(
+                    "SELECT source, max(swarm_slug), count(*), sum(chunk_index = 0),"
+                    " sum(chunk_index = 0 AND source_state = 'archived') FROM records GROUP BY source"
+                )
+            }
+        return [
+            SourceCount(source, *counts.get(source, ("", 0, 0, 0)), indexed.get(source, 0))
+            for source in sorted(indexed.keys() | counts.keys())
+        ]
 
     def match(self, expression: str) -> list[str]:
         with self.connect() as connection:
