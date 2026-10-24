@@ -69,13 +69,16 @@ class Rig:
         self.spool = Spool(self.config, self.clock)
         self.central = Central()
 
+    def accept(self, batch):
+        self.spool.append(f"{self.source.name}:{batch.start}:{batch.cursor.offset}", list(batch.records))
+
     def write(self, text):
         with open(self.source, "ab") as handle:
             handle.write(line(text))
 
     def step(self, text):
         self.write(text)
-        self.collector.poll(self.source, self.spool.accept)
+        self.collector.poll(self.source, self.accept)
         flushed = self.spool.flush(self.central)
         self.clock.now += self.inputs["tick_seconds"]
         return flushed
@@ -105,7 +108,7 @@ def positive(inputs, root):
     assert rig.central.accepted == {}
     assert warned.acknowledged == 0 and warned.pending == list(range(1, warned.buffered + 1))
     assert rig.cursors.load(str(rig.source)).offset == rig.source.stat().st_size
-    idle = rig.collector.poll(rig.source, rig.spool.accept)
+    idle = rig.collector.poll(rig.source, rig.accept)
     assert idle.records == [] and rig.spool.status().pending == warned.pending
     rig.central.down = False
     stop = threading.Event()
@@ -138,7 +141,7 @@ def rejection(inputs, root):
         protected = (snapshot(rig.spool.batches), snapshot(rig.cursors.root), rig.spool.status())
         rig.write(text)
         try:
-            rig.collector.poll(rig.source, rig.spool.accept)
+            rig.collector.poll(rig.source, rig.accept)
         except SpoolFull as error:
             refused = (text, str(error))
             break
@@ -151,7 +154,7 @@ def rejection(inputs, root):
     assert refused[0] not in refused[1]
     rig.central.down = False
     flushed = rig.spool.flush(rig.central)
-    resumed = rig.collector.poll(rig.source, rig.spool.accept)
+    resumed = rig.collector.poll(rig.source, rig.accept)
     rig.spool.flush(rig.central)
     assert [record["text"] for record in resumed.records] == [refused[0]]
     assert rig.central.texts() == inputs["prompts"][: after.buffered + 1]
@@ -203,7 +206,7 @@ def recovery(inputs, root):
         "central_texts": rig.central.texts(),
         "replayed_uploaded": flushed.uploaded,
         "lost": final.lost,
-        "quarantined": sorted(path.name for path in restarted.quarantine.glob("*.json")),
+        "quarantined": sorted(int(path.name[:20]) for path in restarted.quarantine.glob("*.json")),
         "torn_append_retained_uncounted": (restarted.batches / ".00000000000000000004-torn.json.tmp").exists(),
         "final_acknowledged": final.acknowledged,
         "stale_flush_uploaded": stale.uploaded,
