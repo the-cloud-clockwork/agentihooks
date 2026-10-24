@@ -1,6 +1,0 @@
-{
-  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁretire_pane__mutmut_14:a3bf3c9f315f198d13ccc76ee833607db9572390b89642dbd609daeae7995dba": {
-    "reader": "standards_reader",
-    "reason": "The mutant changes only the argument retire_pane passes on its named fallback, replace(agent, pane_id=None) instead of pane_id empty; the pane gate at the top of retire_pane runs before that line and is unchanged. The only consumer is retire_process, which reads agent.pane_id only through a truth test where None and the empty string are both falsy; end, refusals and live_binding.managed never read it, so the mutant retires and refuses exactly like the original."
-  }
-}
