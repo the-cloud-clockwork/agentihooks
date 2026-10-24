@@ -42,3 +42,12 @@ def test_open_accounts_excluded_by_handoff_do_not_establish_free_capacity(store,
     actions = reconcile.tick("sw", store, ledger, runtime, now_ms=1_000)
     context = next(action for action in actions if action.startswith("spawn capacity for t1: "))
     assert json.loads(context.split(": ", 1)[1]) == {"harness": "claude", "accounts": []}
+
+
+@pytest.mark.parametrize("error_type", [reconcile.SpawnError, OSError])
+def test_missing_capacity_and_refusal_harness_stay_unknown(store, error_type):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime(crash=error_type("account reservation is full"))
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"observed_at": 1_000}))
+    actions = reconcile.tick("sw", store, ledger, runtime, now_ms=1_000)
+    context = next(action for action in actions if action.startswith("spawn capacity for t1: "))
+    assert json.loads(context.split(": ", 1)[1]) == {"harness": "", "accounts": []}
