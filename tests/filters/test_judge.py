@@ -164,7 +164,7 @@ def test_with_the_classifier_down_the_input_passes_unchanged(shipped, judge):
             ["robust", "comprehensive", "perfectly", "I verified"],
         ),
         ("the cache keeps one entry per key", []),
-        ("clone git@github.com:org/repo.git and mail eng-1@example.com", []),
+        ("clone git@github.com:org/repo.git and mail eng-1@example.com or x@1-2.example.com", []),
     ],
 )
 def test_the_cue_finder_flags_each_cue_once(text, cues):

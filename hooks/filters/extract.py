@@ -79,7 +79,9 @@ def pieces(tool_name: str | None, tool_input: dict) -> list[Piece]:
 
 
 def _node(patch: dict, tool_input: dict, where: tuple):
-    node = patch.setdefault(where[0], copy.deepcopy(tool_input[where[0]]))
+    if where[0] not in patch:
+        patch[where[0]] = copy.deepcopy(tool_input[where[0]])
+    node = patch[where[0]]
     for key in where[1:-1]:
         node = node[key]
     return node

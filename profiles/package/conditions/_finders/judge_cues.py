@@ -3,7 +3,7 @@ import re
 import sys
 
 _CUES = (
-    (r"\b[a-z]+@\d+-\d+\b|\b(?:[a-z]+-\d+|master)@[a-z0-9][a-z0-9-]*\b(?![@\w-]|\.\w)", "agent or seat name"),
+    (r"\b(?:[a-z]+@\d+-\d+|(?:[a-z]+-\d+|master)@[a-z0-9][a-z0-9-]*)\b(?![@\w-]|\.\w)", "agent or seat name"),
     (r"\b(?:engineer|master|planner|dispatcher|cicd)s?\b", "profile or role name"),
     (r"\b(?:opus|sonnet|haiku|codex|gpt-[\w.-]*\w)\b", "model name"),
     (
