@@ -98,19 +98,22 @@ def test_queue_sizing_splits_a_serial_group_until_it_has_half_timeout_margin(tmp
     assert {leg["total"] for leg in legs} == {16}
 
 
-def test_queue_sizing_targets_195_seconds_under_a_longer_step_timeout(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("step", "tests", "shards", "target"), [(720, 2400, 26, 195), (300, 1200, 18, 150)])
+def test_queue_sizing_targets_195_seconds_or_half_a_shorter_step_timeout(
+    tmp_path, monkeypatch, step, tests, shards, target
+):
     from tests import queue_shards
 
-    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 720)
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", step)
     path = tmp_path / "tests/test_parallel.py"
     path.parent.mkdir()
     path.write_text("")
-    measured = {f"tests/test_parallel.py::test_{i}": 6.0 for i in range(2400)}
+    measured = {f"tests/test_parallel.py::test_{i}": 6.0 for i in range(tests)}
 
     plan = queue_shards.matrix(tmp_path, {"3.12": measured})
 
-    assert len(plan) == 26
-    assert max(leg["predicted_seconds"] for leg in plan) < 195
+    assert len(plan) == shards
+    assert max(leg["predicted_seconds"] for leg in plan) < target
 
 
 def test_queue_sizing_keeps_independent_worker_groups_parallel(tmp_path):
