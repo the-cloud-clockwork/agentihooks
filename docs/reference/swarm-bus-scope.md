@@ -175,6 +175,50 @@ nats --server "$AGENTIHOOKS_BUS_URL" --creds "$AGENTIHOOKS_BUS_CREDENTIALS" \
 NATS server in the scoped NATS tests, together with a member's own queue, dead letter and state round trip and a
 legacy bus working beside a scoped one.
 
+## No shared hive user
+
+Every hive connects with the member credential `hive join` minted for it. The Anton swarm NATS server trusts only
+the operator's signing key: its rendered config carries no `accounts`, `authorization`, `no_auth_user` or password,
+so a connection without a signed credential is refused. The service users the hub signs with
+`agentihooks hive nats-trust` are listed in antoncore `k8s/values-overlays/agentihooks-swarm-nats/users.yaml`:
+`swarm-controller`, `swarm-github-webhook` and `swarm-ledger`. The shared `swarm-hive` user, which subscribed to every
+`_INBOX.>` reply subject, is no longer among them, so `hive nats-trust` stops signing it. antoncore's render tests
+fail when any user named `swarm-hive`, or any user granting the spoke execution subjects, returns to that file.
+
+A `swarm-hive` credential signed before the user was retired stays valid until it is revoked; removing the user
+only stops new signing.
+
+## The grant check
+
+Each agentihooks pull request runs `scripts.ci_hive_nats_grants` from the protected grader in the `Hold the hive
+member NATS grants equal to the antoncore hive user` step. It reads antoncore dev's NATS values and users files and
+compares the grants agentihooks renders with the antoncore users:
+
+| Credential rendered by `scripts/hive/nats_grant.py` | antoncore user | Outcome |
+|---|---|---|
+| `member_claims`, with its `_INBOX.<user>.>` read as `_INBOX.>` | `swarm-hive` | Compared while the user exists; skipped with a notice once it is gone |
+| `controller_claims` | `swarm-controller` | Always compared; a missing user fails the check |
+
+Run it from an agentihooks checkout beside an antoncore checkout:
+
+```bash
+python -m scripts.ci_hive_nats_grants --agentihooks . --antoncore ../antoncore
+```
+
+With the hive user retired the check prints:
+
+```text
+The antoncore swarm-hive user is retired, so hives connect only with minted member credentials.
+The controller NATS grants match antoncore: <n> publish and <m> subscribe subjects.
+```
+
+and exits 0. A subject granted on one side only prints one `::error::` line naming the side that grants it, for
+example `publish allow <subject> is granted only by the antoncore swarm-controller user
+(k8s/values-overlays/agentihooks-swarm-nats/values.yaml).`, and exits 1. The
+missing hive user is accepted only in operator mode, where the values file has no `accounts` block and users come from
+`users.yaml`; a values file that still defines the `SWARM` account without `swarm-hive` fails with
+`::error::The swarm NATS grants cannot be read (ValueError: the SWARM account has no swarm-hive user).`
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -187,3 +231,5 @@ legacy bus working beside a scoped one.
 | `hive refresh` or `hive join` answers 403 `the hub record lists no member swarms for hive member <id>` | `member_swarms` exists but omits this member id | `agentihooks hive scope` on the hub, or add the member id with its swarms |
 | `the hive offered an unscoped bus credential; ask its hub to list this member's swarms` | The invite is marked scoped but the hub record has no `member_swarms` field | Run `agentihooks hive scope` on the hub, then join again |
 | `scoped queue migration is incomplete` | The hub has not finished `migrate_queue` for that lane | Finish the migration on the hub, then restart the member |
+| The grant check fails with `the SWARM account has no swarm-hive user` | The antoncore values file still defines the `SWARM` account, so the check expects the shared user | Finish the antoncore operator mode change, which removes the `accounts` block, or restore the user |
+| The grant check fails with `the SWARM account has no swarm-controller user` | The controller user is missing from antoncore `users.yaml` | Restore `swarm-controller` there; only the hive user may be retired |
