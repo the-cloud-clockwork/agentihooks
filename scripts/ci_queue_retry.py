@@ -9,11 +9,14 @@ from pathlib import Path
 SHARD = "unit"
 RERUN = "unit rerun"
 WORKFLOW = Path(".github/workflows/test.yml")
+UNREADABLE_LOG = "The job log could not be read"
 RUNNER_LOSS = re.compile(
     r"The runner has received a shutdown signal"
     r"|lost communication with the server"
     r"|The job was not acquired by Runner"
+    r"|" + re.escape(UNREADABLE_LOG)
 )
+STEP_EXITED = re.compile(r"Process completed with exit code (?:[1-9]|[1-9]\d|1[01]\d|12[0-7])\.")
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
 EXIT_POLLS = 60
 EXIT_POLL_SECONDS = 30
@@ -68,7 +71,11 @@ def log_errors(repo: str, job_id: int) -> list[str]:
 def job_text(repo: str, job_id: int, log: bool) -> str:
     notes = [note["message"] for note in json.loads(_api(f"repos/{repo}/check-runs/{job_id}/annotations"))]
     if log:
-        notes += log_errors(repo, job_id)
+        try:
+            notes += log_errors(repo, job_id)
+        except subprocess.CalledProcessError:
+            if not any(STEP_EXITED.search(note) for note in notes):
+                notes.append(UNREADABLE_LOG)
     return "\n".join(notes)
 
 
