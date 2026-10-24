@@ -1685,9 +1685,9 @@ def cmd_done(store, args):
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
-    doc_report.report(InboxStore(store.redis), ledger, args.slug, closed, now_ms(), by=agent.name)
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
+    doc_report.report(InboxStore(store.redis), ledger, args.slug, closed, now_ms(), by=agent.name)
     fallback = {"pull_request": pull.fallback} if pull is not None and pull.fallback else {}
     print(
         json.dumps({"task": agent.task, "state": "done", **fallback, "next": "stop now; the swarm closes this session"})

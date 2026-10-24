@@ -54,10 +54,10 @@ def test_a_done_task_naming_a_doc_item_reports_it_to_the_watchdog_once(world):
     inbox, _ = world
     assert sweep(world) == [f"reported doc items of t1 to {WATCHDOG}"]
     [item] = inbox.inbox(WATCHDOG)
-    assert item.task == "t1" and item.id == doc_report.report_id(SLUG, "t1")
-    for part in ("10 Report every completed item", PR, "evidence: run 42", "2026-10-"):
+    assert item.task == "t1" and item.id == doc_report.report_id(SLUG, "t1", PR)
+    for part in ("Status: done", "10 Report every completed item", PR, "evidence: run 42", doc_report.utc(AT)):
         assert part in item.text
-    assert task("t1")["watchdog"] == {"item": item.id, "to": WATCHDOG, "sent_at": doc_report.utc(AT)}
+    assert task("t1")["watchdog"] == {"item": item.id, "to": WATCHDOG, "pr": PR, "sent_at": doc_report.utc(AT)}
     assert sweep(world) == []
     assert len(inbox.inbox(WATCHDOG)) == 1
     assert "watchdog" not in task("t2")
@@ -66,7 +66,7 @@ def test_a_done_task_naming_a_doc_item_reports_it_to_the_watchdog_once(world):
 def test_the_watchdog_reply_is_recorded_on_the_task(world):
     inbox, _ = world
     sweep(world)
-    inbox.reply(doc_report.report_id(SLUG, "t1"), WATCHDOG, "Closed doc item 10")
+    inbox.reply(doc_report.report_id(SLUG, "t1", PR), WATCHDOG, "Closed doc item 10")
     assert sweep(world, AT + 60_000) == ["recorded the watchdog acknowledgment of t1"]
     record = task("t1")["watchdog"]
     assert record["ack"] == "Closed doc item 10" and record["acked_at"] == doc_report.utc(AT + 60_000)
@@ -76,9 +76,42 @@ def test_the_watchdog_reply_is_recorded_on_the_task(world):
 def test_a_watchdog_close_without_a_reply_records_its_detail(world):
     inbox, _ = world
     sweep(world)
-    inbox.close(doc_report.report_id(SLUG, "t1"), WATCHDOG, "done", "item 10 closed on the doc")
+    inbox.close(doc_report.report_id(SLUG, "t1", PR), WATCHDOG, "done", "item 10 closed on the doc")
     assert sweep(world, AT + 60_000) == ["recorded the watchdog acknowledgment of t1"]
     assert task("t1")["watchdog"]["ack"] == "item 10 closed on the doc"
+
+
+def test_a_cancelled_report_counts_as_answered_and_raises_no_priority(world):
+    inbox, _ = world
+    sweep(world)
+    inbox.close(doc_report.report_id(SLUG, "t1", PR), WATCHDOG, "cancel", "not a doc item")
+    late = AT + doc_report.ack_ms()
+    assert sweep(world, late) == ["recorded the watchdog acknowledgment of t1"]
+    assert task("t1")["watchdog"]["ack"] == "not a doc item"
+    assert state(SLUG)["priorities"] == []
+
+
+def test_a_completion_with_a_new_pull_request_sends_a_new_report(world):
+    inbox, ledger = world
+    sweep(world)
+    later = "https://github.com/o/r/pull/8"
+    ledger.update_task(SLUG, "t1", {"pr_url": later})
+    assert sweep(world, AT + 60_000) == [f"reported doc items of t1 to {WATCHDOG}"]
+    assert [i.id for i in inbox.inbox(WATCHDOG)] == [
+        doc_report.report_id(SLUG, "t1", PR),
+        doc_report.report_id(SLUG, "t1", later),
+    ]
+    assert task("t1")["watchdog"]["pr"] == later
+
+
+def test_a_recorded_report_missing_from_the_inbox_is_sent_again(world):
+    inbox, ledger = world
+    record = {"item": doc_report.report_id(SLUG, "t1", PR), "to": WATCHDOG, "pr": PR, "sent_at": doc_report.utc(AT)}
+    ledger.update_task(SLUG, "t1", {"watchdog": record})
+    assert sweep(world, AT + 60_000) == [f"resent the doc item report of t1 to {WATCHDOG}"]
+    [item] = inbox.inbox(WATCHDOG)
+    assert item.id == record["item"] and doc_report.utc(AT) in item.text
+    assert sweep(world, AT + 120_000) == []
 
 
 def test_an_unacknowledged_report_raises_one_priority_after_the_window(world):
