@@ -14,9 +14,9 @@ class InvalidPlacement(RacingRuntime):
 def test_validation_failure_during_cleanup_releases_the_original_failed_launch(store):  # noqa: F811
     ledger, runtime = tasks(("t1", "eng")), InvalidPlacement(store)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert len(actions) == 1
-    assert actions[0].startswith("spawn failed for t1")
-    assert actions[0].endswith(ROOM)
+    assert [action for action in actions if action.startswith("spawn failed")] == [
+        f"spawn failed for t1, task t1 reopened: {ROOM}"
+    ]
     assert ledger.rows["t1"]["state"] == "open"
     assert ledger.rows["t1"]["claimed_by"] == ""
     assert store.claimant("sw", "t1") is None
