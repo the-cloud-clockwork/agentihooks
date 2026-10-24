@@ -132,7 +132,7 @@ def test_duplicate_delivery_keeps_one_wake(redis, monkeypatch):
     assert not redis.exists(timer.key)
 
 
-def test_blocking_client_keeps_connection_settings_without_a_read_timeout(monkeypatch):
+def test_blocking_client_keeps_connection_settings_with_a_read_deadline(monkeypatch):
     import redis
 
     source = Mock()
@@ -145,7 +145,7 @@ def test_blocking_client_keeps_connection_settings_without_a_read_timeout(monkey
     monkeypatch.setattr(redis, "Redis", Mock(return_value=client))
     assert process_timer.blocking_client() is client
     constructor.assert_called_once_with(
-        connection_class=object, host="scheduler", socket_timeout=None, decode_responses=True
+        connection_class=object, host="scheduler", socket_timeout=35, decode_responses=True
     )
     source.close.assert_called_once_with()
 
