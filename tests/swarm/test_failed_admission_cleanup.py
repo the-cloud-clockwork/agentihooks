@@ -21,8 +21,6 @@ def test_validation_failure_during_cleanup_releases_the_original_failed_launch(s
     assert ledger.rows["t1"]["claimed_by"] == ""
     assert store.claimant("sw", "t1") is None
     assert workers(store) == []
-    assert [(row["task"], row["state"], row["error"]) for row in store.launches("sw")] == [
-        ("t1", "failed", ROOM)
-    ]
+    assert [(row["task"], row["state"], row["error"]) for row in store.launches("sw")] == [("t1", "failed", ROOM)]
     assert store.launch_failure("sw", "t1") == ROOM
     assert runtime.admission.pending_execution_admission_total("sw") == {ADMITTED: 1, RELEASED: 1}
