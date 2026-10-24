@@ -976,3 +976,24 @@ def test_a_returning_hive_resets_the_absence_lease(remote, signal):
     tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW + registry.LIVE_MS * 3)
 
     assert remote.store.agents("fixture") == []
+
+
+@pytest.mark.parametrize("identity", ["execution", "generation"])
+def test_a_later_execution_cannot_inherit_a_removed_hive_absence_lease(remote, identity):
+    from scripts.hive import registry
+
+    first = replace(remote.agent, state="finished")
+    remote.redis.srem(registry.INDEX, HIVE)
+    assert not remote.runtime.hive.removed(first, NOW)
+    assert remote.runtime.hive.removed(first, NOW + registry.LIVE_MS)
+    remote.redis.sadd(registry.INDEX, HIVE)
+    remote.redis.srem(registry.INDEX, HIVE)
+    successor = (
+        replace(first, execution_id="later")
+        if identity == "execution"
+        else replace(first, generation=first.generation + 1)
+    )
+
+    assert not remote.runtime.hive.removed(successor, NOW + registry.LIVE_MS * 2)
+    assert not remote.runtime.hive.removed(successor, NOW + registry.LIVE_MS * 3 - 1)
+    assert remote.runtime.hive.removed(successor, NOW + registry.LIVE_MS * 3)
