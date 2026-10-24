@@ -2,6 +2,7 @@ import faulthandler
 import os
 import signal
 import subprocess
+import sys
 import threading
 from contextlib import contextmanager, suppress
 from dataclasses import replace
@@ -328,14 +329,35 @@ def test_local_retirement_refuses_an_incomplete_process_identity(tmp_path, monke
 
 
 def test_retirement_without_a_recorded_pid_ends_only_its_owned_pane(tmp_path, monkeypatch):
+    from scripts import terminate_agent
+
     pane = {"pane_id": "w1:p1", "name": NAME, "agent_session": None}
     herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
-    monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
-    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {PID: proc()})
-    agent = replace(record(pid=None, start=None), state="finished")
-    assert RuntimeRouter([local]).terminate(agent).ok
-    assert ["pane", "close", "w1:p1"] in calls
-    assert all(NAME not in call for call in calls)
+    herdr.end = reaper.retire
+    environment = {
+        **os.environ,
+        "AGENTIHOOKS_AGENT_NAME": NAME,
+        "HERDR_PANE_ID": "w1:p1",
+        "HERDR_SOCKET_PATH": "/owned/herdr.sock",
+    }
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/owned/herdr.sock")
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], env=environment, start_new_session=True
+    )
+    try:
+        table = processes()
+        session = terminate_agent.Session("", "claude", NAME, table[child.pid], "", "alive")
+        monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+        local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: table)
+        agent = replace(record(pid=None, start=None), state="finished")
+        assert RuntimeRouter([local]).terminate(agent).ok
+        assert child.wait(timeout=5) == -signal.SIGTERM
+        assert ["pane", "close", "w1:p1"] in calls
+        assert all(NAME not in call for call in calls)
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
 
 
 @pytest.mark.parametrize("owner", [None, "", "engineer@a1b2c3-0009"])
