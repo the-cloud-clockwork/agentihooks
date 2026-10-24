@@ -131,9 +131,59 @@
     },
     "retired": {
       "catalog_events_kept": 17,
-      "sessions": 4,
+      "export": {
+        "digest": "9447829a511c1ac363858feba6af2a9b6ed5a06d1987dfa2d34b138fb4fd4f72",
+        "events": 17,
+        "sessions": 4
+      },
       "state": "retired"
     },
+    "search_after_growth": [
+      {
+        "byte_end": 325,
+        "byte_start": 156,
+        "event_id": "bb8abac0ae170d4dff7584baafbe44127ada791cacb9ac8960b1c3cb68a5af85",
+        "project_id": "github.com/acme/agentihooks",
+        "record": {
+          "kind": "user_text",
+          "source_time": "2026-02-10T08:00:01Z",
+          "text": "tail the rollout cursor"
+        },
+        "sequence": 2,
+        "session_uid": "swarm-fixture:codex:workstation-a:0199aa00-codex",
+        "source": {
+          "importer_version": "1",
+          "installation": "workstation-a",
+          "provider": "codex",
+          "relative_path": "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl",
+          "source_sha256": "2402df842e906ad2a635bb99fedb694524b5d874177ca1e0d25251aef1995c9e",
+          "unknown": []
+        },
+        "source_generation": "import:2402df842e906ad2a635bb99fedb694524b5d874177ca1e0d25251aef1995c9e"
+      },
+      {
+        "byte_end": 813,
+        "byte_start": 634,
+        "event_id": "7e3c7114c1f8535d0868c1133d02e2f6b5746bd3d1693b64e649eb8e542d7fa5",
+        "project_id": "github.com/acme/agentihooks",
+        "record": {
+          "kind": "assistant_text",
+          "source_time": "2026-02-10T08:00:04Z",
+          "text": "the rollout cursor advances"
+        },
+        "sequence": 5,
+        "session_uid": "swarm-fixture:codex:workstation-a:0199aa00-codex",
+        "source": {
+          "importer_version": "1",
+          "installation": "workstation-a",
+          "provider": "codex",
+          "relative_path": "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl",
+          "source_sha256": "2402df842e906ad2a635bb99fedb694524b5d874177ca1e0d25251aef1995c9e",
+          "unknown": []
+        },
+        "source_generation": "import:2402df842e906ad2a635bb99fedb694524b5d874177ca1e0d25251aef1995c9e"
+      }
+    ],
     "survived_crash": {
       "catalog_events": 4,
       "marked": []

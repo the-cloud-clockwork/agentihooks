@@ -279,7 +279,11 @@
           "installation": "workstation-a",
           "provider": "claude",
           "relative_path": "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl",
-          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
+          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908",
+          "unknown": [
+            "provider_version",
+            "project"
+          ]
         },
         "source_generation": "import:714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
       },
@@ -300,7 +304,11 @@
           "installation": "workstation-a",
           "provider": "claude",
           "relative_path": "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl",
-          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
+          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908",
+          "unknown": [
+            "provider_version",
+            "project"
+          ]
         },
         "source_generation": "import:714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
       },
@@ -323,7 +331,11 @@
           "installation": "workstation-a",
           "provider": "claude",
           "relative_path": "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl",
-          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
+          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908",
+          "unknown": [
+            "provider_version",
+            "project"
+          ]
         },
         "source_generation": "import:714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
       }
@@ -346,7 +358,8 @@
           "installation": "workstation-a",
           "provider": "codex",
           "relative_path": "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl",
-          "source_sha256": "6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c"
+          "source_sha256": "6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c",
+          "unknown": []
         },
         "source_generation": "import:6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c"
       },
@@ -367,7 +380,8 @@
           "installation": "workstation-a",
           "provider": "codex",
           "relative_path": "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl",
-          "source_sha256": "6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c"
+          "source_sha256": "6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c",
+          "unknown": []
         },
         "source_generation": "import:6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c"
       }
