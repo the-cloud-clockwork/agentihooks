@@ -14,7 +14,6 @@ from pathlib import Path
 
 from scripts.ci_storage import rows
 
-WORKERS = 8
 HOUR = timedelta(hours=1)
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 ANTON = "anton"
@@ -120,7 +119,7 @@ def read_runs(repo: str, since: datetime, until: datetime) -> list[dict]:
         first, last = (moment.strftime(STAMP) for moment in window)
         return rows(f"repos/{repo}/actions/runs?created={first}..{last}&per_page=100", "workflow_runs")
 
-    with ThreadPoolExecutor(WORKERS) as pool:
+    with ThreadPoolExecutor() as pool:
         found = [run for listed in pool.map(read, hours) for run in listed]
     return list({run["id"]: run for run in found}.values())
 
@@ -129,7 +128,7 @@ def read_jobs(repo: str, runs: list[dict]) -> list[dict]:
     def read(run):
         return rows(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100", "jobs")
 
-    with ThreadPoolExecutor(WORKERS) as pool:
+    with ThreadPoolExecutor() as pool:
         return [job for listed in pool.map(read, runs) for job in listed]
 
 
@@ -145,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hours", type=int, default=24)
     parser.add_argument("--out", type=Path, default=Path("ci-minutes.json"))
     args = parser.parse_args(argv)
-    until = datetime.strptime(args.until, STAMP).replace(tzinfo=UTC) if args.until else datetime.now(UTC)
+    until = datetime.strptime(args.until, STAMP) if args.until else datetime.now(UTC)
     since = until - timedelta(hours=args.hours)
     runs = read_runs(args.repo, since, until)
     result = aggregate(runs, read_jobs(args.repo, runs), merged_count(args.repo, since, until))

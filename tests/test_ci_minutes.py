@@ -64,13 +64,13 @@ def test_only_anton_labels_count_as_anton():
 def test_minutes_split_by_tier_workflow_and_job_per_merged_pull_request():
     runs = [run(1, "pull_request"), run(2, "merge_group"), run(3, "push", "feature", PREFLIGHT)]
     jobs = [
+        job(99, "orphan", 1800),
         job(1, "unit (3.12, 1)", 307),
         job(1, "unit (3.12, 2)", 300),
         job(2, "unit (3.12, 1)", 244),
         job(3, "stats (0)", 365),
         job(1, "lint", 545, labels=("ubuntu-latest",)),
         job(1, "gate", 20, labels=None),
-        job(99, "orphan", 1800),
     ]
     assert ci_minutes.aggregate(runs, jobs, merged=2) == {
         "runs": 3,
@@ -168,6 +168,9 @@ def test_runs_are_read_one_hour_at_a_time_and_kept_once(monkeypatch):
         ("repos/o/r/actions/runs?created=2026-10-24T02:00:00Z..2026-10-24T02:29:59Z&per_page=100", "workflow_runs"),
     ]
     assert sorted(item["id"] for item in found) == [1, 2, 3]
+    calls.clear()
+    ci_minutes.read_runs("o/r", since, datetime(2026, 10, 24, 2, tzinfo=UTC))
+    assert len(calls) == 2
 
 
 def test_jobs_are_read_for_every_attempt_of_every_run(monkeypatch):
@@ -206,6 +209,7 @@ def test_merged_pull_requests_are_counted_in_the_window(monkeypatch):
 
 
 def fake_rows(path, key):
+    assert "o/r" in path
     if key == "items":
         return [{}] * 4
     if key == "jobs":
