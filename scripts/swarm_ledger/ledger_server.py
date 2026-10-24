@@ -1311,6 +1311,21 @@ def follow_shared(interval=FOLLOW_S):
         scheduled_wait(interval)
 
 
+def retrying(target, sleep=time.sleep, first=1.0, cap=30.0):
+    @functools.wraps(target)
+    def run():
+        delay = first
+        while True:
+            try:
+                return target()
+            except Exception:  # an unresolved Redis name at pod start must not end the thread for good
+                sys.stderr.write(f"{target.__name__} stopped, retrying in {delay:g}s: {sys.exc_info()[1]}\n")
+                sleep(delay)
+                delay = min(delay * 2, cap)
+
+    return run
+
+
 def adopt_disk_files():
     for folder in sorted(core.LEDGER_DIR.glob("*.media")):
         slug = folder.name.removesuffix(".media")
@@ -1333,9 +1348,9 @@ def serve():
     adopt_unrelayed()
     threading.Thread(target=adopt_disk_files, daemon=True).start()
     metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
-    threading.Thread(target=watch_ledgers, daemon=True).start()
+    threading.Thread(target=retrying(watch_ledgers), daemon=True).start()
     if storage.shared():
-        threading.Thread(target=follow_shared, daemon=True).start()
+        threading.Thread(target=retrying(follow_shared), daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler, bind_and_activate=False)
     server.request_queue_size = 128
     server.server_bind()

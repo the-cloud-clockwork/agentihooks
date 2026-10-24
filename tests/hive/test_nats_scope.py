@@ -72,17 +72,14 @@ def test_scoped_join_credentials_allow_each_hub_configured_swarm(admin, signer, 
     assert _violations(scoped, credentials, act) == []
 
 
-def test_unlisted_member_gets_no_swarm_permissions(admin, signer):
+def test_the_hive_endpoint_refuses_to_mint_for_a_member_the_hub_record_does_not_list(admin, signer):
     member = auth.mint(admin, "h1", PUBLIC)
     scoped = replace(signer, member_swarms={"another-member": ("rig",)})
-    credentials = _refresh(admin, scoped, member["ledger_credential"])["nats_credentials"]
-
-    async def act(nc):
-        await nc.publish("swarm.rig.queue.eng", b"{}")
-
-    assert _violations(scoped, credentials, act, refused=True) == [
-        'nats: permissions violation for publish to "swarm.rig.queue.eng"'
-    ]
+    grant = _refresh(admin, scoped, member["ledger_credential"])
+    assert grant == {
+        "error": f"the hub record lists no member swarms for hive member {member['id']}; "
+        "it mints no unscoped bus credential"
+    }
 
 
 def test_scoped_claims_keep_the_member_reply_inbox(signer):
@@ -236,13 +233,22 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
     assert claims["sub"] == {"allow": ["swarm.rig.>", f"_INBOX.{user.public}.>"]}
 
 
-@pytest.mark.parametrize("memberships", [{}, {"another": ("rig",)}, {"m1": ()}])
-def test_unlisted_or_empty_membership_carries_an_explicit_publish_deny(signer, memberships):
-    scoped = replace(signer, member_swarms=memberships)
+def test_empty_membership_carries_an_explicit_publish_deny(signer):
+    scoped = replace(signer, member_swarms={"m1": ()})
     jwt, user = nkey.parse_creds(nats_grant.mint(scoped, "m1"))
     claims = nkey.claims(jwt)["nats"]
     assert claims["pub"] == {"deny": [">"]}
     assert claims["sub"] == {"allow": [f"_INBOX.{user.public}.>"]}
+
+
+@pytest.mark.parametrize("memberships", [{}, {"another": ("rig",)}])
+def test_unlisted_membership_mints_no_credential(signer, memberships):
+    scoped = replace(signer, member_swarms=memberships)
+    with pytest.raises(auth.HiveError) as error:
+        nats_grant.mint(scoped, "m1")
+    assert str(error.value) == (
+        "the hub record lists no member swarms for hive member m1; it mints no unscoped bus credential"
+    )
 
 
 @pytest.mark.parametrize(

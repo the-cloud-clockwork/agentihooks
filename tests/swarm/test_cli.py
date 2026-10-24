@@ -337,9 +337,11 @@ def test_block_on_dev_red_records_the_failing_dev_run(env, capsys, monkeypatch):
     monkeypatch.setattr(
         dev_red, "latest", lambda repo, run=None: read.append(repo) or {"id": 41, "conclusion": "failure"}
     )
+    store.redis.hset(store.key("sw", "started-lives"), "t2", 2)
     capsys.readouterr()
     assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev Tests is red on a test I never touched") == 0
     assert read == ["/repo"]
+    assert store.claims("sw", "t2") == 1
     assert ledger.rows["t2"]["state"] == "blocked"
     assert ledger.comments == [("t2", "dev Tests is red on a test I never touched", "ci@a1b2c3-0001")]
     assert store.redis.hgetall(dev_red.key("sw")) == {"t2": "41"}
@@ -349,6 +351,19 @@ def test_block_on_dev_red_records_the_failing_dev_run(env, capsys, monkeypatch):
         "dev_red_run": 41,
         "next": "stop now; the swarm closes this session",
     }
+
+
+def test_block_on_dev_red_refunds_nothing_once_the_agent_no_longer_holds_its_claim(env, monkeypatch):
+    from scripts.swarm import dev_red
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(dev_red, "latest", lambda repo, run=None: {"id": 41, "conclusion": "failure"})
+    store.redis.hset(store.key("sw", "started-lives"), "t2", 2)
+    assert store.release("sw", "t2", "ci@a1b2c3-0001")
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev Tests is red on a test I never touched") == 0
+    assert store.claims("sw", "t2") == 2
 
 
 def test_block_on_dev_red_is_refused_while_dev_is_green(env, capsys, monkeypatch):

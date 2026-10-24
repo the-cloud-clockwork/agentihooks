@@ -572,7 +572,7 @@ def _restore_owner(slug, store, ledger, rows, agent):
 
 def _drop_remote(slug, store, ledger, rows, agent, reason):
     master_retire.forget(store, slug, agent.name)
-    _refund_parked(slug, store, rows, agent.task)
+    _refund_parked(slug, store, rows, agent)
     return f"retired {agent.name}: {reason}" + _drop(slug, store, ledger, rows, agent)
 
 
@@ -598,9 +598,9 @@ def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
     if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
         retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
         return [f"could not retire {agent.name}, retrying next tick"]
+    _refund_parked(slug, store, rows, agent)
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
-    _refund_parked(slug, store, rows, agent.task)
     row = rows.get(agent.task, {})
     goes_on = bool(store.handoff(slug, agent.task)) and row.get("state") in ACTIVE and not awaiting_merge(row)
     if goes_on:
@@ -912,10 +912,10 @@ def _stacked_dep(dep, row, repo):
     return {**base, "repo": row["branch_repo"]} if elsewhere else base
 
 
-def _refund_parked(slug, store, rows, task_id):
-    quota = (store.handoff_envelope(slug, task_id) or {}).get("reason") == "quota"
-    if _parked(rows.get(task_id, {}), rows) or quota:
-        store.refund_claim(slug, task_id)
+def _refund_parked(slug, store, rows, agent):
+    quota = (store.handoff_envelope(slug, agent.task) or {}).get("reason") == "quota"
+    if _parked(rows.get(agent.task, {}), rows) or quota:
+        store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
 
 
 def _master_set(doc, task_id):
@@ -1232,12 +1232,9 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     rows, actions = {t["id"]: t for t in doc["tasks"]}, []
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
-        if agent.state == "finished" and task.get("state") == "done":
-            actions.append(_finished_launch(slug, store, doc, agent))
-            continue
         try:
             placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})
-            if agent.state == "finished" and task.get("state") == "blocked":
+            if agent.state == "finished":
                 actions.append(_finished_launch(slug, store, doc, agent))
                 continue
             launched = codex.admit_legacy(store, slug, placed_record(agent, placed), runtime)

@@ -216,15 +216,6 @@ def test_verified_historical_starts_keep_their_life_budget(store):
     assert store.claims("smoke", "t1") == 0
 
 
-def test_a_refunded_claim_gives_back_one_started_life(store):
-    store.record_launch("smoke", AgentRecord("first", "eng", "t1"), "started")
-    store.record_launch("smoke", AgentRecord("second", "eng", "t1"), "started")
-    assert store.refund_claim("smoke", "t1") == 1
-    assert store.claims("smoke", "t1") == 1
-    store.count_claim("smoke", "t2")
-    assert (store.refund_claim("smoke", "t2"), store.claims("smoke", "t2")) == (0, 0)
-
-
 def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generation_match(store):
     store.record_launch("smoke", AgentRecord("first", "eng", "t1"), "started")
     store.record_launch("smoke", AgentRecord("second", "eng", "t1"), "started")
@@ -237,6 +228,18 @@ def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generat
     assert store.refund_held_claim("smoke", "t1", "second", generation) is True
     assert store.claims("smoke", "t1") == 1
     assert store.claimant("smoke", "t1") == "second"
+
+
+def test_a_held_claim_refunds_one_life_however_many_paths_ask(store):
+    for _ in range(3):
+        store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is True
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 2
+    assert store.claimant("smoke", "t1") == "agent"
 
 
 def test_a_held_claim_refund_reads_a_missing_generation_as_zero(store):
@@ -269,11 +272,31 @@ def test_a_held_claim_refund_refuses_after_the_same_claimant_claimed_again(store
     assert store.claims("smoke", "t1") == 1
 
 
+def test_a_held_claim_refund_refuses_a_second_refund_for_the_same_claimant_and_generation(store):
+    for _ in range(3):
+        store.count_claim("smoke", "t1")
+    store.count_claim("smoke", "t2")
+    store.claim("smoke", "t1", "agent", 60_000)
+    store.claim("smoke", "t2", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is True
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claimant("smoke", "t1") == "agent"
+    assert store.claims("smoke", "t1") == 2
+    assert store.refund_held_claim("smoke", "t2", "agent", store.claim_generation("smoke", "t2")) is True
+    store.release("smoke", "t1", "agent")
+    store.claim("smoke", "t1", "agent", 60_000)
+    assert store.refund_held_claim("smoke", "t1", "agent", generation + 1) is True
+    assert store.claims("smoke", "t1") == 1
+
+
 @pytest.mark.parametrize(
     ("moved_key", "move", "lives"),
     [
         ("claim", lambda redis, key: redis.set(key, "other"), 1),
         ("claim", lambda redis, key: redis.incr(f"{key}:generation"), 1),
+        ("claim", lambda redis, key: redis.set(f"{key}:refunded", redis.get(f"{key}:generation")), 1),
         ("started-lives", lambda redis, key: redis.hset(key, "t1", 5), 5),
         ("task-authority", lambda redis, key: redis.set(key, "hub"), 1),
         ("claim-journal", lambda redis, key: redis.set(key, "hub"), 1),
