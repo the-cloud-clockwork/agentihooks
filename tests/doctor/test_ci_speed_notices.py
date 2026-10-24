@@ -38,19 +38,20 @@ def test_finished_runs_are_mentioned_once_when_group_members_join_leave_or_retur
     batch[:] = [first]
     loop.speed(store, DOCTOR, WATCHED, NOW)
     if judged:
-        monkeypatch.setenv("AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES", "0")
         details = store.redis.hgetall(store.key(DOCTOR, "doctor-findings"))
         for identity in details:
             if identity.startswith(f"{kind.replace(' ', '-')}/"):
                 loop.verdicts(store, DOCTOR).judge(identity, "established", "investigated", "reader", NOW)
     batch[:] = [second, finished(103, kind, "cancelled"), finished(104, kind, "superseded")]
-    loop.speed(RedisStore(store.redis), DOCTOR, WATCHED, NOW + 180000)
+    loop.speed(RedisStore(store.redis), DOCTOR, WATCHED, NOW + 60000)
     for slug in (DOCTOR, WATCHED):
         assert mentions(store, slug, kind) == {"101": 1, "102": 1}
     state = json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))
     group = next(entry for entry in state["groups"].values() if entry["kind"] == kind)
     assert {member["run"] for member in group["members"].values()} == {"101", "102"}
-    batch[:] = [first, second]
+    batch[:] = [second]
     loop.speed(RedisStore(store.redis), DOCTOR, WATCHED, NOW + 3600000)
+    batch[:] = [first, second]
+    loop.speed(RedisStore(store.redis), DOCTOR, WATCHED, NOW + 3660000)
     for slug in (DOCTOR, WATCHED):
         assert mentions(store, slug, kind) == {"101": 1, "102": 1}

@@ -185,6 +185,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
         )
     cooldown_ms = limits().cooldown_minutes * MINUTE_MS
     judgments = store.redis.hgetall(verdicts(store, doctor).key)
+    eligible = {finding.id for finding in found}
     found = ci_speed.unjudged(found, judgments, now_ms, cooldown_ms)
     record(store, doctor, found, now_ms, cooldown_ms)
     report["retracted"] = len(retract(store, doctor, watched, gone, now_ms))
@@ -203,7 +204,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
         }
         run_notified = store.key(doctor, "ci-speed-runs-notified", slug)
         groups, run_ids = ci_speed.fresh_groups(
-            state["groups"], {finding.id for finding in found}, store.redis.smembers(run_notified)
+            state["groups"], eligible, store.redis.smembers(run_notified)
         )
         fresh.update({finding.id: finding for finding in ci_speed.grouped(groups)})
         if fresh:
