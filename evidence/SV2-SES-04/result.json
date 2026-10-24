@@ -4,7 +4,7 @@
   "integration_gate": "G4",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/6731",
   "pull_request": "pending",
-  "tested_commit": "deaf77532",
+  "tested_commit": "ed1ca855f",
   "package_complete": false,
   "evidence_class": "mocked: an in-process caller and a SQLite catalog file stand in for the collector, the network and the central database; no HTTP server, Pod or hive collector runs",
   "interfaces": [
@@ -46,7 +46,8 @@
     "The catalog is SQLite; the Postgres session schema of the plan and its migration framework are not implemented.",
     "Grants are passed in by the caller; no principal is authenticated here.",
     "The NormalizedEvent fields trust_class, original_hash and redaction are not stored: the SV2-SES-01 TranscriptRecord carries none of them, so they stay unavailable until normalization emits them; injected memory is therefore not yet marked as derived context.",
-    "The rollback rehearsal covers restart and replay against the same catalog; disabling a producer was not rehearsed because no producer calls ingest yet."
+    "The rollback rehearsal covers restart and replay against the same catalog; disabling a producer was not rehearsed because no producer calls ingest yet.",
+    "Unknown request and event fields are refused as invalid_request on purpose: spec 13.1 allows ignoring an unknown field only where the schema explicitly permits extension, and no 2.x extension field is defined yet, so a later optional field such as native_event_id must be added to the accepted list before clients send it."
   ],
   "compatibility": "Explicitly local compatibility path: ingest accepts the SV2-SES-01 TranscriptRecord kinds unchanged and stores each record exactly as submitted; the collector, spool, whole-file reader and memory store are untouched.",
   "authority": "The corpus and every event project come from the caller's Grant; a project label inside a record is never read as permission, and an unattributed event stays unattributed."
