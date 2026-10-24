@@ -106,12 +106,22 @@ def test_main_writes_the_matrix_and_fails_without_a_rerun(monkeypatch, tmp_path,
         ("", [PLAN[1]]),
     ],
 )
+@pytest.mark.parametrize("unreadable", [False, True])
 def test_recovery_uses_step_results_to_distinguish_timeout_from_runner_loss(
-    monkeypatch, tmp_path, capsys, log, expected
+    monkeypatch, tmp_path, capsys, log, expected, unreadable
 ):
+    import subprocess
+
     from scripts import ci_queue_retry
 
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda *args: log)
+    def api(path, *flags):
+        if path.endswith("/annotations"):
+            return json.dumps([{"message": log}] if log else [])
+        if unreadable:
+            raise subprocess.CalledProcessError(1, ["gh", "api", path])
+        return log
+
+    monkeypatch.setattr(ci_queue_retry, "_api", api)
     listing = tmp_path / "jobs.jsonl"
     listing.write_text(json.dumps(_job("unit (3.12, 2)", "failure", 9)))
     plan = json.dumps(PLAN[:3])[1:-1]
