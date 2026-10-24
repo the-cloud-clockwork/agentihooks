@@ -30,7 +30,7 @@ def _store(environ: Mapping[str, str]) -> SQLiteRecallStore:
     path = default_path(environ)
     if not path.is_file():
         raise RecallError(f"no recall archive at {path}; build it with agentihooks recall reindex --all")
-    return SQLiteRecallStore(path)
+    return SQLiteRecallStore(path, read_only=True)
 
 
 def default_scope(scope: str, environ: Mapping[str, str]) -> str:
@@ -38,7 +38,7 @@ def default_scope(scope: str, environ: Mapping[str, str]) -> str:
         return scope
     from scripts.gates.base import Who
 
-    return Who.from_env(None if environ is os.environ else environ).swarm or "all"
+    return Who.from_env(environ).swarm or "all"
 
 
 def _kinds(kinds: str) -> tuple[str, ...]:

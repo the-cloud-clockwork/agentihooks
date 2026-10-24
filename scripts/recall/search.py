@@ -325,7 +325,9 @@ def get(store: SQLiteRecallStore, ref: str, scope: str = "all") -> Item | None:
     where, params = _where(Filters(scope=scope), now_ms())
     with store.connect() as connection:
         found = (
-            connection.execute(f"SELECT {COLUMNS} FROM records WHERE records.key = ?", (f"{ref}#0",)).fetchall()
+            connection.execute(
+                f"SELECT {COLUMNS} FROM records WHERE {where} AND records.key = ?", [*params, f"{ref}#0"]
+            ).fetchall()
             or connection.execute(
                 f"SELECT {COLUMNS} FROM records WHERE {where} AND records.ref = ? AND records.chunk_index = 0"
                 " ORDER BY records.key",

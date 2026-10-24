@@ -1,4 +1,5 @@
 import json
+import sqlite3
 
 import pytest
 
@@ -160,6 +161,28 @@ def test_get_resolves_a_bare_ref_inside_the_scope(environ):
     assert tools.get("tasks/t1", environ=in_swarm(environ, "beta"))["item"]["text"] == "beta shared words"
 
 
+def test_get_keeps_an_item_key_inside_the_scope(environ):
+    assert tools.get("beta/tasks/t1", environ=in_swarm(environ)) == {
+        "success": False,
+        "error": "no recall item beta/tasks/t1 in scope alpha",
+    }
+    assert tools.get("beta/tasks/t1", scope="all", environ=in_swarm(environ))["item"]["item"] == "beta/tasks/t1"
+
+
+def test_reads_never_change_the_archive_schema(environ):
+    path = default_path(environ)
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE indexed")
+    assert tools.search("shared", environ=environ)["success"] is True
+    assert tools.get("alpha/tasks/t1", environ=environ)["success"] is True
+    assert tools.timeline(environ=environ)["success"] is True
+    listed = tools.sources(environ=environ)["sources"]
+    assert {entry["last_indexed"] for entry in listed} == {0}
+    with sqlite3.connect(path) as connection:
+        tables = {name for (name,) in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "indexed" not in tables
+
+
 def test_get_refuses_an_ambiguous_or_unknown_ref(environ):
     ambiguous = tools.get("tasks/t1", scope="all", environ=environ)
     assert ambiguous["success"] is False
@@ -231,11 +254,12 @@ def test_the_cli_prints_the_same_json(environ, capsys):
 def test_the_mcp_tools_answer_json_for_the_session_swarm(environ, monkeypatch):
     for key, value in in_swarm(environ).items():
         monkeypatch.setenv(key, value)
+    monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda: 0)
     from hooks.mcp import build_server
 
     served = {name: tool.fn for name, tool in build_server(["recall"])._tool_manager._tools.items()}
     assert served.keys() == {"recall_search", "recall_get", "recall_timeline", "recall_sources"}
-    assert recall_mcp.register
+    assert callable(recall_mcp.register)
     assert [hit["item"] for hit in json.loads(served["recall_search"]("shared"))["hits"]] == ["alpha/tasks/t1"]
     assert json.loads(served["recall_get"]("tasks/t1"))["item"]["item"] == "alpha/tasks/t1"
     assert json.loads(served["recall_timeline"](kinds="phase"))["entries"][0]["ref"] == "phases/p1"

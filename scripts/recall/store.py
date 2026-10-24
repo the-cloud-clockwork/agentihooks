@@ -68,8 +68,11 @@ def content_hash(record: RecallRecord) -> str:
 
 
 class SQLiteRecallStore:
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str, *, read_only: bool = False):
         self.path = Path(path)
+        self.read_only = read_only
+        if read_only:
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
@@ -77,7 +80,8 @@ class SQLiteRecallStore:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        target = f"{self.path.resolve().as_uri()}?mode=ro" if self.read_only else self.path
+        connection = sqlite3.connect(target, timeout=30, isolation_level=None, uri=self.read_only)
         try:
             yield connection
         finally:
@@ -169,7 +173,8 @@ class SQLiteRecallStore:
 
     def sources(self) -> list[SourceCount]:
         with self.connect() as connection:
-            indexed = dict(connection.execute("SELECT source, at FROM indexed"))
+            tables = {name for (name,) in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            indexed = dict(connection.execute("SELECT source, at FROM indexed")) if "indexed" in tables else {}
             counts = {
                 source: rest
                 for source, *rest in connection.execute(
