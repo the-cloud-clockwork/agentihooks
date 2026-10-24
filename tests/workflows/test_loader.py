@@ -60,9 +60,10 @@ def test_a_broken_file_is_reported_and_skipped(tmp_path):
     found, errors = loader.load([("bundle", layer), ("profile:engineer", tmp_path / "missing")])
 
     assert list(found) == ["good"]
-    assert len(errors) == 1
-    assert errors[0].startswith(f"{bad}: ")
-    assert "stages.build: unknown key persona" in errors[0]
+    assert errors == [
+        f"{bad}: stages.build: unknown key persona",
+        f"{bad}: stages.build: missing required key profile",
+    ]
 
 
 def test_an_unreadable_file_is_reported_and_the_other_layers_still_load(tmp_path):
