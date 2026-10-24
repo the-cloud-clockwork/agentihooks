@@ -1356,6 +1356,18 @@ def test_full_hive_accounts_report_local_and_remote_session_counts(setup, monkey
     assert result.role == "eng"
 
 
+def test_launch_counts_remote_sessions_already_in_capacity_once(setup, monkeypatch):
+    from scripts.hive import registry
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
+    setup.herdr._quota_accounts = [Account("claude", "account", "room", 5, 80, 80, 6)]
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", '{"claude:account": 4}')
+
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}).account.name == "account"
+
+
 def test_account_selection_orders_room_by_usage_then_name(setup):
     from scripts.swarm.capacity import Account
 
