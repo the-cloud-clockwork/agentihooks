@@ -47,6 +47,7 @@ jobs:
         if: steps.open.outputs.open != 'true'
         with:
           fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
 
       # Only the pull request tier ran the suite speed contracts, so a branch could pass mutation and then fail its pull request shards.
