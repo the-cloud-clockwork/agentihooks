@@ -214,13 +214,13 @@ def test_queue_sizing_uses_idle_runners_to_finish_serial_work_within_four_minute
     path = tmp_path / "tests/test_serial.py"
     path.parent.mkdir()
     path.write_text("import pytest\npytestmark = pytest.mark.xdist_group('serial')\n")
-    measured = {f"tests/test_serial.py::test_{i}": 90.0 for i in range(48)}
+    measured = {f"tests/test_serial.py::test_{i}": 60.0 for i in range(48)}
 
     plan = queue_shards.matrix(tmp_path, {"3.12": measured})
 
     assert len(plan) == 24
     assert {leg["total"] for leg in plan} == {24}
-    assert all(leg["predicted_seconds"] == pytest.approx(237.0, abs=0.001) for leg in plan)
+    assert all(leg["predicted_seconds"] == pytest.approx(168.0, abs=0.001) for leg in plan)
 
 
 def test_unknown_cases_use_module_maxima_and_the_global_tail_for_new_modules(tmp_path):
