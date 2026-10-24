@@ -1,7 +1,6 @@
 from copy import deepcopy
 from types import SimpleNamespace
 
-import fakeredis
 import pytest
 
 from scripts.doctor import detect
@@ -24,6 +23,8 @@ def _trace(task, tokens, end):
 
 @pytest.fixture
 def scan(monkeypatch):
+    import fakeredis
+
     redis = fakeredis.FakeRedis(decode_responses=True)
     tasks = [{"id": task, "state": "done", "pr_url": f"https://example.com/{task}"} for task in ("a", "b", "old")]
     record = {
@@ -101,6 +102,7 @@ def test_backlog_first_seen_during_outage_is_not_new_on_recovery(scan):
     record["reader"]["failures"] = []
     assert [f.subject for f in run()] == ["new"]
     assert run() == []
+
 
 @pytest.mark.parametrize("missing", ["trace", "turns"])
 def test_a_new_merge_waits_for_its_exported_cost_before_it_is_consumed(scan, missing):
