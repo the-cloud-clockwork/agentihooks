@@ -377,7 +377,7 @@ class Program:
                 if value is not None and self._held(value, unit, local):
                     local[target] = True
                 elif not isinstance(value, ast.Call) or self._callees(value.func, unit) is not None:
-                    local.setdefault(target, False)
+                    local[target] = local.get(target) is True
             if local == before:
                 return local
 

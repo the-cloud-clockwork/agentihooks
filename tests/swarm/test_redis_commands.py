@@ -536,13 +536,12 @@ TYPED = {
 }
 
 
-@pytest.fixture(scope="module")
-def typed(tmp_path_factory):
-    root = tmp_path_factory.mktemp("typed")
+@pytest.fixture
+def typed(tmp_path):
     for name, text in TYPED.items():
-        (root / name).parent.mkdir(parents=True, exist_ok=True)
-        (root / name).write_text(text)
-    return code_reach.Program(code_reach.parse(root))
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    return code_reach.Program(code_reach.parse(tmp_path))
 
 
 @pytest.mark.parametrize(
