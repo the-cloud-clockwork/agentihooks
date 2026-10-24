@@ -89,6 +89,7 @@ from scripts.swarm import (
     dev_red,
     dispatch_seat,
     dispatcher,
+    doc_report,
     done_gate,
     failed_panes,
     idle,
@@ -413,6 +414,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 doc,
             )
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
+            actions += skip_refused(doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms())
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
             if scheduled:
                 from scripts.swarm import refresh_job
@@ -1349,6 +1351,19 @@ def cmd_names(store, args):
         )
 
 
+def cmd_merge_path(store, args):
+    from scripts.swarm import merge_path
+
+    if args.hours <= 0:
+        raise SwarmError("merge-path takes hours above zero")
+    until_s = now_ms() / 1000
+    repo, found = merge_path.collect(store.config(args.slug).repo, (until_s - args.hours * 3600, until_s))
+    line = merge_path.render(repo, found)
+    print(json.dumps({"repo": repo, **found}) if args.json else line)
+    if args.post:
+        LedgerClient().comment_item(args.slug, args.post, line)
+
+
 def cmd_rename(store, args):
     from scripts.herdr_host import HerdrError
     from scripts.swarm.rename import rename_swarm
@@ -1694,10 +1709,11 @@ def cmd_done(store, args):
     if refused:
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
-    ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
+    doc_report.report(InboxStore(store.redis), ledger, args.slug, closed, now_ms())
     fallback = {"pull_request": pull.fallback} if pull is not None and pull.fallback else {}
     print(
         json.dumps({"task": agent.task, "state": "done", **fallback, "next": "stop now; the swarm closes this session"})
@@ -2174,6 +2190,10 @@ def build_parser():
     scale.add_argument("--json", action="store_true")
     sub.add_parser("controller").add_argument("action", nargs="?", choices=("release",), default=None)
     sub.add_parser("names").add_argument("--json", action="store_true")
+    path = sub.add_parser("merge-path")
+    path.add_argument("--hours", type=float, default=24.0)
+    path.add_argument("--json", action="store_true")
+    path.add_argument("--post")
     verdict = sub.add_parser("verdict")
     verdict.add_argument("finding")
     verdict.add_argument("verdict")

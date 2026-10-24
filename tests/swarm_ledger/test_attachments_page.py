@@ -47,7 +47,7 @@ def test_a_line_without_attachments_stays_plain():
 
 def test_the_optimistic_entry_shows_its_attachments_before_the_server_answers():
     result = run(
-        ["itemOf", "threadOf", "applyOp"],
+        ["itemOf", "threadOf", "pendingKey", "applyOp"],
         "const d = {chat: []};"
         f"applyOp(d, {{op: 'add', thread: 'chat', id: 'm-2', text: '', attachments: [{json.dumps(ATT)}]}});"
         "console.log(JSON.stringify(d.chat[0].attachments));",

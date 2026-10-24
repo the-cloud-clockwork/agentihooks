@@ -1,4 +1,6 @@
-const view = document.querySelector("main").className;
+import { loadTips, readCollection, readLayout, readLedgerPage, writeBin, writeLayout, writeLedgerSwarm } from "../js/api.js";
+
+const view = new URLSearchParams(location.search).get("view") === "bin" ? "bin" : "home";
 const list = document.getElementById("rows");
 const SORT_KEY = "home-sort";
 const FIRST = { kind: 1, open: -1, done: -1, swarm: 1, at: -1 };
@@ -6,7 +8,13 @@ const SWARM_RANK = { running: 0, paused: 1, stopping: 1, drained: 2, stopped: 3,
 const ICONS = {
   trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/>',
   restore: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
 };
+const HEADS = {
+  home: ["Ledger", "Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at", ""],
+  bin: ["Ledger", "Kind", "Overview", ">Deleted", ">Left", ""],
+};
+const FABS = { home: ["bin-fab", "/?view=bin", "Bin", "trash"], bin: ["home-fab", "/", "HOME", "home"] };
 
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -24,12 +32,30 @@ function icon(name) {
   return box.content.firstChild;
 }
 
+function headCell(label) {
+  const [text, key] = label.split(":"), name = text.replace(/^>/, ""), right = text !== name;
+  if (!key) return h("span", { class: right ? "r" : null, text: name });
+  return h("button", { class: right ? "sort r" : "sort", type: "button", "data-sort": key }, name, h("i", { "aria-hidden": "true", text: "\u2195" }));
+}
+
+function shell() {
+  const main = document.querySelector("main"), heading = view === "bin" ? "BIN" : "HOME";
+  const [id, href, label, name] = FABS[view];
+  main.className = view;
+  document.title = heading;
+  main.prepend(h("header", {}, h("a", { class: "logo-link", href: "/", "aria-label": "HOME" }, h("span", { class: "logo", "aria-hidden": "true" })),
+    h("span", { class: "brand", text: "agentihooks" }), h("h1", { text: heading }), view === "bin" ? h("span", { class: "total", id: "total" }) : null));
+  if (view === "home") main.before(h("div", { class: "watermark", "aria-hidden": "true" }));
+  main.querySelector(".row.head").replaceChildren(...HEADS[view].map(headCell));
+  main.after(h("a", { class: "fab", id, href, "aria-label": label }, icon(name)));
+}
+
 async function collection(path) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const rows = [];
     let cursor = null, restart = false;
     do {
-      const resp = await fetch(`/api/v1/${path}?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { cache: "no-store" });
+      const resp = await readCollection(path, cursor);
       if (resp.status === 409) { restart = true; break; }
       if (!resp.ok) throw new Error(`the server answered ${resp.status}`);
       const page = await resp.json();
@@ -88,20 +114,17 @@ function binRow(s) {
 }
 
 async function reopenLedger(b) {
-  const slug = encodeURIComponent(b.dataset.slug), page = await fetch("/" + slug);
+  const page = await readLedgerPage(b.dataset.slug);
   if (!page.ok) return page;
   const doc = new DOMParser().parseFromString(await page.text(), "text/html");
-  const token = doc.querySelector("meta[name=ledger-token]").content;
-  return fetch("/api/swarm/" + slug, { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": token },
-    body: JSON.stringify({ action: "reopen" }) });
+  return writeLedgerSwarm(b.dataset.slug, doc.querySelector("meta[name=ledger-token]").content, { action: "reopen" });
 }
 
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-act]");
   if (!b) return;
   b.disabled = true;
-  const r = b.dataset.act === "reopen" ? await reopenLedger(b)
-    : await fetch("/api/bin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: b.dataset.act, slug: b.dataset.slug }) });
+  const r = b.dataset.act === "reopen" ? await reopenLedger(b) : await writeBin(b.dataset.act, b.dataset.slug);
   if (r.ok) return location.reload();
   b.disabled = false;
   alert(await r.text());
@@ -158,9 +181,7 @@ function setColumns(widths) {
   layout = { ...layout, columns: { ...(layout.columns || {}), [view]: widths.map((w) => Math.round(w)) } };
   applyColumns();
   clearTimeout(layoutSave);
-  layoutSave = setTimeout(() => {
-    fetch("/api/layout", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(layout) }).catch(() => {});
-  }, 300);
+  layoutSave = setTimeout(() => { writeLayout(layout).catch(() => {}); }, 300);
 }
 
 function columns() {
@@ -190,11 +211,13 @@ function columns() {
     const index = heads().indexOf(grip.parentElement);
     setColumns(measured().map((w, i) => (i === index ? Math.max(COLUMN_MIN, w + step * (ev.shiftKey ? 4 : 1)) : w)));
   });
-  fetch("/api/layout", { cache: "no-store" }).then((r) => (r.ok ? r.json() : {})).then((saved) => { layout = saved || {}; applyColumns(); }).catch(() => {});
+  readLayout().then((r) => (r.ok ? r.json() : {})).then((saved) => { layout = saved.data || {}; applyColumns(); }).catch(() => {});
 }
 
 async function start() {
   const now = Date.now();
+  shell();
+  loadTips();
   try {
     if (view === "bin") {
       const rows = await collection("bin");

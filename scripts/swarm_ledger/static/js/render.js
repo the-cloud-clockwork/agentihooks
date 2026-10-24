@@ -1,20 +1,20 @@
-import { ACTIVE_MS, PHASE_LABELS } from "./config.js";
+import { ACTIVE_MS } from "./config.js";
 import { $, closedText, excerpt, h, headCount, newId, span, when } from "./dom.js";
 import { renderCycle } from "./render_cycle.js";
-import { hiddenDone, inScope, itemState, phaseLifecycle, taskBlockers, taskRank, taskRanks } from "./state.js";
+import { hiddenDone, inScope, itemState, pendingOf, taskBlockers, taskRank, taskRanks } from "./state.js";
 import { closedLeft, closedLeftIn, doc, meta, queue, renderSync, toggle } from "./sync.js";
 import { renderArtifacts } from "./artifacts.js";
-import { closedComments, commentsView, openComments, rememberComment, taskLink, threadView } from "./threads.js";
+import { commentsView, taskLink, threadView } from "./threads.js";
 import { bottleneckStat, renderAlerts, renderNotifications, renderPriorities, statGrip, statKey } from "./notices.js";
 import { renderOutline } from "./outline.js";
-import { collapsible, markToggles } from "./folds.js";
+import { markToggles } from "./folds.js";
 import { renderChat, renderChatBadge } from "./chat.js";
 import { inboxPending, renderSwarm, swarm } from "./swarm.js";
 import { readWorkspace } from "./api.js";
-import { closedMore, firstPage, lazy, moreButton, wanted } from "./pages.js";
+import { closedMore, firstPage, moreButton } from "./pages.js";
 import { frozen, held, ownFreeze, snowflake } from "./freezes.js";
 import { prepareFrozenView, viewCount, viewItems, viewVisible } from "./frozen_view.js";
-import { phaseReview } from "./phase_review.js";
+import { phaseReview, phaseStatus } from "./phase_review.js";
 
 function scopeDot(key, item, off) {
   if (item.done) return null;
@@ -36,7 +36,7 @@ function freezeButton(key) {
 }
 
 export function verdictButton(item, verdict, cls, text, off) {
-  return h("button", { class: `link ${cls}`, type: "button", text, disabled: off ? "" : false, on: { click: () => queue({ op: "verdict", id: newId("comment"), item, verdict }) } });
+  return h("button", { class: `link ${cls}`, type: "button", text, disabled: off || pendingOf(doc, item) ? "" : false, on: { click: () => queue({ op: "verdict", id: newId("comment"), item, verdict }) } });
 }
 
 function itemActions(key, item) {
@@ -68,26 +68,15 @@ function checkRow(list, item, n, titleText, descText) {
   return h("li", { class: itemClass(item, key), id: `item-${list}-${item.id}` }, holdMark(key), row, commentsView(key, item.comments));
 }
 
-function phaseLabel(phase, doc) {
-  const state = phaseLifecycle(phase, doc);
-  if (state !== "waiting") return PHASE_LABELS[state];
-  const byId = Object.fromEntries(doc.phases.map((p) => [p.id, p]));
-  const hidden = ((doc.closed || {}).phases || {}).ids || [];
-  const waits = phase.depends_on.filter((id) => !(byId[id] || {}).done && !hidden.includes(id)).map((id) => (byId[id] || {}).title || id);
-  return `Waits for phase ${waits.join(", ")}`;
-}
-
 function phaseRow(item, n) {
   const key = `phases/${item.id}`;
   const box = h("input", { type: "checkbox", "data-focus": `check:${key}`, "aria-label": item.title, disabled: item.out_of_scope || frozen(doc, key) ? "" : false });
   box.checked = !!item.done;
   box.addEventListener("change", () => toggle(key, box.checked, "done"));
-  const fold = h("details", { class: "phase-fold" },
-    h("summary", {}, h("span", { class: "item-title", text: item.title }), h("span", { class: "phase-state", text: phaseLabel(item, doc) })),
+  const body = h("div", { class: "phase-body" },
+    h("div", { class: "phase-head" }, h("span", { class: "item-title", text: item.title }), h("span", { class: "phase-state", text: phaseStatus(item).label })),
     item.description ? h("p", { class: "desc", text: item.description }) : null, phaseSlices(item), phaseReview(item));
-  fold.open = !closedComments.has(`${key}/row`);
-  fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
-  const row = h("div", { class: "row" }, box, h("span", { class: "num", text: `${n}.` }), h("div", {}, fold), itemActions(key, item));
+  const row = h("div", { class: "row" }, box, h("span", { class: "num", text: `${n}.` }), h("div", {}, body), itemActions(key, item));
   return h("li", { class: itemClass(item, key), id: `item-phases-${item.id}` }, holdMark(key), row, commentsView(key, item.comments));
 }
 
@@ -118,13 +107,11 @@ function planActions(key, plan) {
 function planRow({ key, id, title, phases, plan }) {
   const idOf = (p) => `item-phases-${p.id}`;
   const total = phases.length + closedLeftIn("phases", key);
-  const fold = h("details", { class: "plan-fold" }, h("summary", {}, plan ? holdMark(key) : null, h("span", { class: "plan-title", text: title }),
-    h("span", { class: "plan-count", text: `${total} ${total === 1 ? "phase" : "phases"}` }), planActions(key, plan)));
-  fold.open = !closedComments.has(`${key}/row`) || phases.some((p) => idOf(p) === wanted.id || wanted.ids.has(idOf(p)));
-  fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
-  lazy(fold, () => h("ol", { class: "plan-phases" }, ...firstPage(key, phases, idOf).map((p, i) => phaseRow(p, i + 1)),
-    moreButton(key, phases.length, "more phases", render), phases.length ? null : h("li", { class: "empty", text: "None." })));
-  return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, fold);
+  const head = h("div", { class: "plan-head" }, plan ? holdMark(key) : null, h("span", { class: "plan-title", text: title }),
+    h("span", { class: "plan-count", text: `${total} ${total === 1 ? "phase" : "phases"}` }), planActions(key, plan));
+  const list = h("ol", { class: "plan-phases" }, ...firstPage(key, phases, idOf).map((p, i) => phaseRow(p, i + 1)),
+    moreButton(key, phases.length, "more phases", render), phases.length ? null : h("li", { class: "empty", text: "None." }));
+  return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, head, list);
 }
 
 function phaseList(cooperative = false, current = () => true) {
@@ -166,27 +153,26 @@ function proofList(rows) {
   return h("dl", {}, ...rows.flatMap(([k, v]) => [h("dt", { text: label(k) }), value(v)]));
 }
 
-function proofBody(item) {
-  const list = proofList(proofRows(item.contract, item.proof));
-  if (item.workspace) readWorkspace(item.id).then((resp) => (resp.ok ? resp.json() : null)).then((tails) => {
-    if (tails) list.replaceWith(proofList(proofRows(item.contract, item.proof, tails.data)));
-  }).catch(() => null);
-  return list;
+const workTails = new Map();
+
+function workButton(item) {
+  if (!item.workspace || workTails.has(item.id)) return null;
+  return h("button", { class: "link", type: "button", text: "Show work folder", on: { click: () => readWorkspace(item.id)
+    .then((resp) => (resp.ok ? resp.json() : null)).then((tails) => { if (tails) { workTails.set(item.id, tails.data); render(); } }).catch(() => null) } });
 }
 
-function taskProof(key, item) {
+function taskProof(item) {
   if (!item.workspace && !proofRows(item.contract, item.proof).length) return null;
-  const box = h("details", { class: "task-proof" }, h("summary", {}, "Contract and proof"));
-  box.open = openComments.has(key);
-  box.addEventListener("toggle", () => rememberComment(key, box.open));
-  return lazy(box, () => proofBody(item));
+  return h("div", { class: "task-proof" }, h("div", { class: "task-proof-head", text: "Contract and proof" }),
+    proofList(proofRows(item.contract, item.proof, workTails.get(item.id))), workButton(item));
 }
 
 function rankPick(key, item) {
-  const pick = h("select", { class: `rank-pick rank-${taskRank(item)}`, "aria-label": `Queue rank of ${item.title}`, "data-focus": `rank:${key}`,
-    disabled: item.state === "done" || frozen(doc, key) ? "" : false, on: { change: () => queue({ op: "task_rank", id: newId("rank"), item: key, rank: pick.value }) } },
+  const sending = pendingOf(doc, key), rank = sending && sending.op === "task_rank" ? sending.rank : taskRank(item);
+  const pick = h("select", { class: `rank-pick rank-${rank}${sending ? " pending" : ""}`, "aria-label": `Queue rank of ${item.title}`, "data-focus": `rank:${key}`,
+    disabled: sending || item.state === "done" || frozen(doc, key) ? "" : false, on: { change: () => queue({ op: "task_rank", id: newId("rank"), item: key, rank: pick.value }) } },
     ...taskRanks().map((r) => h("option", { value: r, text: r })));
-  pick.value = taskRank(item);
+  pick.value = rank;
   return pick;
 }
 
@@ -214,7 +200,7 @@ function taskRow(item, tasks) {
     item.description ? h("p", { class: "desc", text: item.description }) : null, meta,
     waits ? h("p", { class: "desc", text: waits }) : null);
   const row = h("div", { class: "row" }, body, itemActions(key, item));
-  return h("li", { class: itemClass(item, key), id: `item-tasks-${item.id}` }, holdMark(key), row, taskProof(`${key}/proof`, item), commentsView(key, item.comments));
+  return h("li", { class: itemClass(item, key), id: `item-tasks-${item.id}` }, holdMark(key), row, taskProof(item), commentsView(key, item.comments));
 }
 
 function taskCounts(tasks) {
@@ -305,11 +291,10 @@ function groupedWork(name, items, row) {
   if (!items.length && doc[name].some((i) => !i.deleted)) $(name).append(h("li", { class: "empty", text: "All items are hidden." }));
   if (!done.length && !closedLeft(name)) return;
   done.reverse();
-  const box = h("details", { class: "fold", id: name + "-done" }, h("summary", { text: `${done.length + closedLeft(name)} done` }));
-  collapsible(box);
-  if (done.some((i) => idOf(i) === wanted.id)) box.open = true;
-  lazy(box, () => h("ol", {}, ...done.map(row), closedMore(name, `done ${NOUNS[name]}`, render) || ""));
-  $(name).append(h("li", {}, box));
+  const key = `${name}-done`;
+  $(name).append(h("li", { class: "done-group", id: key }, h("div", { class: "done-head", text: `${done.length + closedLeft(name)} done` }),
+    h("ol", {}, ...firstPage(key, done, idOf).map(row), moreButton(key, done.length, `more done ${NOUNS[name]}`, render) || "",
+      closedMore(name, `done ${NOUNS[name]}`, render) || "")));
 }
 
 function lastSeen() {

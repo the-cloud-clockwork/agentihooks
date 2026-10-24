@@ -269,7 +269,11 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     assert steps in [
         diagnostic(
             finish(
-                rerun(ci_reuse.inline_mutation(ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)))
+                rerun(
+                    ci_reuse.inline_mutation(
+                        ci_reuse.postgres_required(ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss))
+                    )
+                )
             )
         )
         for diagnostic in (list, ci_reuse.selection_diagnostic)

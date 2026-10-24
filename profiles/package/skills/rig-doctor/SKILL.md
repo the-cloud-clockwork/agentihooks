@@ -1,7 +1,7 @@
 ---
 name: rig-doctor
 description: Starts a Doctor crew on a working ledger, or resets and starts a demo dating app swarm with its Doctor. Use when the operator says "rig-doctor", "rig doctor", "watch this swarm with a Doctor", or "rig doctor stop".
-argument-hint: "[LEDGER] [stop]"
+argument-hint: "[LEDGER] [stop] [--quote WORDS] [--max-eng-agents N] [--max-ci-agents N]"
 ---
 
 # Rig Doctor
@@ -22,6 +22,10 @@ argument-hint: "[LEDGER] [stop]"
    Run exactly one form: a ledger starts its Doctor; no argument resets the
    demo and executes the init-swarm ledger, task, create and start primitives;
    `rig doctor stop` maps to `stop`. `LEDGER stop` closes a specific Doctor.
+   A watched swarm's master adds `--quote "<the operator's words>"`, copied
+   from what he typed in its pane within the last thirty minutes, to every
+   form, and `--max-eng-agents N` / `--max-ci-agents N` to a start when he
+   names a crew size; without the quote the master is refused.
    Completion: exit zero and Doctor status prints, or the stop command prints
    its closed summary. On failure use the script's remediation and rerun.
 
