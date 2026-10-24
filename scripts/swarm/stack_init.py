@@ -4,6 +4,7 @@ It never creates or starts a swarm; swarm init creates it after this step and th
 """
 
 import argparse
+import ipaddress
 import json
 import os
 import shlex
@@ -18,7 +19,7 @@ from scripts.swarm.stack_env import BIND, client_env, read_env, settings, write_
 
 PROJECT = "agentihooks-swarm"
 BUNDLED = Path(__file__).with_name("stack")
-SERVICES = ("redis", "swarm", "controller")
+SERVICES = ("redis", "nats", "swarm", "controller")
 ADOPTION = "deploy/compose/adopt.yaml"
 PREPARED_CLIENT = "swarm-client.env"
 LEDGER_PORT = 8765
@@ -39,6 +40,8 @@ DOCKER_CHECKS = (
 FIXES = {
     "redis": "read its logs; if port {SWARM_REDIS_PORT} is in use, set SWARM_REDIS_PORT in {env} to a free port, "
     "and keep the password in {env} as it was at the first start, {again}",
+    "nats": "read its logs; NATS keeps its JetStream store on the nats-data volume, so free space there "
+    "or remove that volume to start the bus empty, {again}",
     "swarm": "read its logs; the ledger server needs Redis healthy, and if port {SWARM_PORT} is in use, "
     "set SWARM_PORT in {env} to a free port, {again}",
     "adopted": "read its logs; the adopted ledger server serves port {SWARM_PORT} on the host network, "
@@ -103,6 +106,14 @@ def materialize(home: Path) -> None:
     (home / "deploy" / "compose" / "tls").mkdir(exist_ok=True)
 
 
+def loopback(url: str) -> bool:
+    try:
+        host = urllib.parse.urlsplit(url).hostname
+        return host == "localhost" or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def adopt(env_file: Path, environ: Mapping[str, str]) -> bool:
     from scripts.swarm_ledger.server_compose import ROOT
 
@@ -123,6 +134,15 @@ def adopt(env_file: Path, environ: Mapping[str, str]) -> bool:
             "SWARM_PORT": str(LEDGER_PORT),
         }
     )
+    values.update(
+        {
+            key: environ[key]
+            for key in ("AGENTIHOOKS_SWARM_DATABASE_URL", "AGENTIHOOKS_SWARM_REDIS_URL")
+            if environ.get(key)
+        }
+    )
+    if "AGENTIHOOKS_SWARM_REDIS_URL" in values and loopback(values["AGENTIHOOKS_SWARM_REDIS_URL"]):
+        del values["AGENTIHOOKS_SWARM_REDIS_URL"]
     write_private(env_file, "".join(f"{key}={value}\n" for key, value in values.items()))
     return True
 
@@ -182,7 +202,7 @@ def failed(out: TextIO, paint: Paint, problem: str, fix: str, command: str = "")
 
 
 def ready(out: TextIO, paint: Paint, home: Path, base: str, name: str) -> None:
-    print(paint("Swarm stack ready: redis, swarm and controller are healthy.", "ready"), file=out)
+    print(paint("Swarm stack ready: redis, nats, swarm and controller are healthy.", "ready"), file=out)
     print("Next steps:", file=out)
     print(f"  1. Open the ledger: {paint(base + '/', 'link')}", file=out)
     print(f"  2. Point this shell at the stack: set -a; . {home / 'client.env'}; set +a", file=out)
@@ -221,7 +241,7 @@ def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable
         fix = "run agentihooks swarm init --prepare-clients, then agentihooks swarm init --adopt"
         failed(out, paint, "no prepared swarm Redis client to adopt", fix)
         return 1
-    values = settings(home / ".env")
+    values = settings(home / ".env", environ)
     write_private(home / "client.env", client_env(values, home))
     if args.no_start:
         print(f"Swarm stack settings written to {home}; no service was started.", file=out)

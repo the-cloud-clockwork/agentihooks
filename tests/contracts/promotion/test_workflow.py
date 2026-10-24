@@ -6,6 +6,7 @@ import yaml
 
 from scripts import ci_budget
 from tests.contracts.ci_tiers.test_workflow import enabled
+from tests.test_ci_anton_runners import resolve
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -22,6 +23,28 @@ def test_promotion_requires_all_push_checks_and_never_runs_for_a_red_grade():
     assert "!contains(needs.*.result, 'cancelled')" in promote["if"]
 
 
+def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pull_requests_or_the_queue():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    hierarchy = jobs["hierarchy-cpu"]
+    assert hierarchy["uses"] == "./.github/workflows/hierarchy-cpu.yml"
+    assert "hierarchy-cpu" in jobs["promote"]["needs"]
+    assert "hierarchy-cpu" not in jobs["gate-required"]["needs"]
+    assert enabled(hierarchy["if"], "push", {})
+    for event in ("pull_request", "merge_group", "workflow_dispatch"):
+        assert not enabled(hierarchy["if"], event, {})
+    callee = yaml.safe_load((ROOT / ".github/workflows/hierarchy-cpu.yml").read_text())
+    assert "workflow_call" in callee[True]
+    push = {
+        "event_name": "push",
+        "ref": "refs/heads/dev",
+        "actor": "github-merge-queue[bot]",
+        "triggering_actor": "github-merge-queue[bot]",
+        "repository": "the-cloud-clockwork/agentihooks",
+    }
+    for job in ("hierarchy", "load"):
+        assert resolve(callee["jobs"][job]["runs-on"], **push) == "anton-oss-batch"
+
+
 def _graded_needs(promote, analysis="A1"):
     return {
         name: SimpleNamespace(result="success", outputs=SimpleNamespace(analysis=analysis)) for name in promote["needs"]
@@ -29,13 +52,23 @@ def _graded_needs(promote, analysis="A1"):
 
 
 @pytest.mark.parametrize("result", ["failure", "cancelled"])
-@pytest.mark.parametrize("job", ["gate-required", "refresh-durations", "coverage-baseline", "flake-budget", "sonar"])
+@pytest.mark.parametrize(
+    "job", ["gate-required", "refresh-durations", "coverage-baseline", "flake-budget", "sonar", "hierarchy-cpu"]
+)
 def test_a_red_or_cancelled_promotion_dependency_prevents_all_promotion_writes(job, result):
     promote = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["promote"]
     needs = _graded_needs(promote)
     assert enabled(promote["if"], "push", needs)
     needs[job].result = result
     assert not enabled(promote["if"], "push", needs)
+
+
+@pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
+def test_promotion_requires_a_successful_hierarchy_proof(result):
+    promote = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["promote"]
+    needs = _graded_needs(promote)
+    needs["hierarchy-cpu"].result = result
+    assert enabled(promote["if"], "push", needs) == (result == "success")
 
 
 def test_a_revision_sonar_graded_promotes_from_its_own_analysis():

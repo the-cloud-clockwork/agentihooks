@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE)
 [![Tests](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml/badge.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://the-cloud-clockwork.github.io/agentihooks/)
 
 AgentiHooks is a harness for [Claude Code](https://code.claude.com/docs) and
@@ -32,7 +32,7 @@ Full documentation: [the-cloud-clockwork.github.io/agentihooks](https://the-clou
 
 ## Quick start
 
-Requirements: Python 3.11 or later, [uv](https://docs.astral.sh/uv/), and Claude
+Requirements: Python 3.12 or later, [uv](https://docs.astral.sh/uv/), and Claude
 Code or Codex. A swarm also needs Docker with the Compose plugin and
 [herdr](https://herdr.dev), the terminal runtime the swarm
 opens its agent panes in.
@@ -59,30 +59,40 @@ It also adds an `agenti` alias to `~/.bashrc`. Running it again is safe.
 ### 2. Start the local swarm stack with Docker Compose
 
 ```bash
-agentihooks swarm init
+agentihooks swarm init my-swarm --plan ~/plans/my-plan.md --repo ~/dev/my-repo \
+  --operator-asked "start a swarm for my plan"
 ```
 
 This copies the Compose files packaged with AgentiHooks into
-`~/.agentihooks/swarm-stack` and starts three services:
+`~/.agentihooks/swarm-stack` and starts four services:
 
 | Service | What it does |
 |---|---|
 | `redis` | Swarm state, claims, leases and the inbox, behind a generated password |
+| `nats` | The swarm event bus with JetStream, reachable only inside the stack |
 | `swarm` | The ledger server and its web page |
 | `controller` | Holds the swarm lease and reconciles every swarm each minute |
 
 The first run writes `.env` there with a random Redis password, free ledger and
 Redis ports and the released swarm image. Later runs keep them, so running it
-again keeps your data. When every service is healthy it prints the ledger
-address and the next steps:
+again keeps your data. When every service is healthy and the ledger page
+answers, it creates the swarm `my-swarm` and its ledger, paused, and prints the
+ledger address and the next steps:
 
 ```bash
 set -a; . ~/.agentihooks/swarm-stack/client.env; set +a   # point this shell at the stack
-agentihooks swarm my-swarm create --repo ~/dev/my-repo      # register a swarm, paused
 agentihooks swarm my-swarm start                            # run it
 ```
 
-`swarm init` never creates or starts a swarm by itself.
+`swarm init` never starts a swarm by itself. A missing Docker, daemon or
+Compose plugin, or an unhealthy service, is named with its fix. Details:
+[Docker Compose quick start](docs/getting-started/compose-quick-start.md).
+
+Other install paths:
+
+- [Single machine quick start](docs/getting-started/single-machine-quick-start.md): the stack and this machine as its hive.
+- [Kubernetes quick start](docs/getting-started/kubernetes-quick-start.md): the hub from the OCI Helm chart on ghcr, with NATS and JetStream.
+- [Add a hive](docs/getting-started/add-hive-quick-start.md): join another machine or a Kubernetes worker hive with one invite.
 
 ## What ships
 
@@ -124,6 +134,12 @@ A bundle is your own git repository of profiles, linked with
 `agentihooks bundle link <path>`. AgentiHooks ships a `default` profile and the
 swarm role profiles; your bundle adds the rest, and overlays add domain experts
 to a base role.
+
+For remote HTTP MCP servers, `AGENTIHOOKS_MCP_URLS` maps server names to URLs.
+`AGENTIHOOKS_MCP_BEARER_ENV` maps server names to environment variable names
+for bearer authentication. Both are JSON objects, apply when rendering profiles,
+and are published by `agentihooks hive setup`. Store credential values in OpenBao;
+put only their environment variable names in the bearer mapping.
 
 Docs: [Identity](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/identity/),
 [Bundles](https://the-cloud-clockwork.github.io/agentihooks/docs/bundles/),
@@ -201,11 +217,11 @@ Docs: [Account load balancing](https://the-cloud-clockwork.github.io/agentihooks
 guards, profile, brain feed and quota routing. No ledger, Redis or Docker is
 needed.
 
-**As a swarm.** Start the stack with `agentihooks swarm init`, create a swarm on
-a repository and start it. The master takes your requests in its pane or on the
-ledger page chat, and the tick staffs the tasks. You steer it with
-`agentihooks swarm <id> start|pause|stop` and `set` for the lane caps, or the
-same controls on the Swarm tab.
+**As a swarm.** Run `agentihooks swarm init <name>` to start the stack and
+create a paused swarm on a repository, then start it. The master takes your
+requests in its pane or on the ledger page chat, and the tick staffs the
+tasks. You steer it with `agentihooks swarm <id> start|pause|stop` and `set`
+for the lane caps, or the same controls on the Swarm tab.
 
 ## Where it runs
 
@@ -230,10 +246,10 @@ panes on the same host. Credentials come from any mix of:
 
 ### Several machines
 
-A small company adds machines to one stack as hives. On the stack host,
-`agentihooks hive invite <name>` prints a one time join code and the Compose
-`join` profile runs the TLS join endpoint. On each member,
-`agentihooks hive join <url> <code>` stores its credentials and
+A small company adds machines to one stack as hives. On the UI hive,
+`agentihooks hive add <ssh target> --label <name> --url <hive endpoint>` saves
+the machine in herdr with `herdr machine add` and delivers its member
+credentials over SSH; headless hives add none. On each member,
 `agentihooks hive install` runs the hive service, which reports the machine's
 accounts and repositories and opens the agents the controller places on it.
 

@@ -1,0 +1,59 @@
+name: Pinned NATS server
+description: Install the pinned nats-server release binary, checksum verified, for the bus backend tests
+runs:
+  using: composite
+  steps:
+    - name: Resolve the pinned nats server
+      id: pin
+      shell: bash
+      env:
+        NATS_SERVER_RELEASE: v2.15.1
+        NATS_SERVER_SHA256_AMD64: bf5edc7b1ce98e885c368cb43a886eb148dc5d0551d99f3cf6141fb5e1954c70
+        NATS_SERVER_SHA256_ARM64: e2fbab4cad7d3c76e3052eb959570393c9d73ba756b70bf8e9eea61e9ae6d49c
+      run: |
+        set -euo pipefail
+        case "$(uname -m)" in
+          x86_64) arch=amd64 sha="$NATS_SERVER_SHA256_AMD64" ;;
+          aarch64) arch=arm64 sha="$NATS_SERVER_SHA256_ARM64" ;;
+          *) echo "no pinned nats-server for $(uname -m)" >&2; exit 1 ;;
+        esac
+        name="nats-server-${NATS_SERVER_RELEASE}-linux-${arch}"
+        {
+          echo "release=$NATS_SERVER_RELEASE"
+          echo "name=$name"
+          echo "sha=$sha"
+          echo "archive=$RUNNER_TEMP/$name.tar.gz"
+        } >> "$GITHUB_OUTPUT"
+    - name: Restore the pinned nats server archive
+      id: cache
+      uses: actions/cache/restore@v4
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+      with:
+        path: ${{ steps.pin.outputs.archive }}
+        key: ${{ steps.pin.outputs.name }}-${{ steps.pin.outputs.sha }}
+    - name: Install the pinned nats server
+      shell: bash
+      env:
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        NATS_SERVER_RELEASE: ${{ steps.pin.outputs.release }}
+        NATS_SERVER_NAME: ${{ steps.pin.outputs.name }}
+        NATS_SERVER_SHA256: ${{ steps.pin.outputs.sha }}
+        NATS_SERVER_ARCHIVE: ${{ steps.pin.outputs.archive }}
+      run: |
+        set -euo pipefail
+        if [[ "$CACHE_HIT" != true ]] || ! sha256sum --check --strict --status <<< "$NATS_SERVER_SHA256  $NATS_SERVER_ARCHIVE"; then
+          curl -fsSL --connect-timeout 10 --max-time 25 --retry 3 --retry-delay 3 --retry-connrefused -o "$NATS_SERVER_ARCHIVE" "https://github.com/nats-io/nats-server/releases/download/${NATS_SERVER_RELEASE}/$NATS_SERVER_NAME.tar.gz"
+        fi
+        sha256sum --check --strict <<< "$NATS_SERVER_SHA256  $NATS_SERVER_ARCHIVE"
+        mkdir -p "$RUNNER_TEMP/nats"
+        tar -xzf "$NATS_SERVER_ARCHIVE" -C "$RUNNER_TEMP/nats" --strip-components=1 "$NATS_SERVER_NAME/nats-server"
+        "$RUNNER_TEMP/nats/nats-server" --version
+        echo "$RUNNER_TEMP/nats" >> "$GITHUB_PATH"
+        echo "NATS_SERVER_REQUIRED=1" >> "$GITHUB_ENV"
+    - name: Save the pinned nats server archive
+      if: steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.pin.outputs.archive }}
+        key: ${{ steps.cache.outputs.cache-primary-key }}

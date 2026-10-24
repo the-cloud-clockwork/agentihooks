@@ -79,6 +79,7 @@ def test_two_swarms_masters_sum():
                 _Agent("master", "codex", "main"),
                 _Agent("master", "claude", "main", state="finished"),
                 _Agent("master", "claude", "main", route_kind="interactive"),
+                _Agent("master", "claude", "main", route_kind="master-login"),
             ],
         }
     )

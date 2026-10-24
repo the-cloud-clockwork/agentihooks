@@ -4,7 +4,7 @@ dynamic = ["version"]
 description = "Hook system and MCP tool server for Claude Code agents"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
     {name = "The Cloud Clockwork"},
 ]
@@ -13,7 +13,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries",
 ]
@@ -50,15 +49,21 @@ dependencies = [
     # The ledger repository writes a multi-megabyte indented document on every sync;
     # the stdlib encoder takes the pure Python path whenever indent is set.
     "orjson>=3.10",
+    "lz4>=4.4",
     # Operator architecture approvals are Ed25519 signed (scripts/swarm_v2/architecture.py).
     "cryptography>=42",
     # The Codex app server client connects over a unix socket (scripts/codex_session/protocol.py).
     "websockets>=15.0",
+    # The swarm tick imports both; the editable CLI tool install takes no extras.
+    "boto3>=1.34.0",
+    "psycopg2-binary>=2.9.9",
 ]
 
 [project.optional-dependencies]
 ledger = ["redis>=5.0.0", "jsonschema>=4.23", "orjson>=3.10", "pyyaml>=6.0", "tomlkit>=0.12", "requests>=2.31.0", "cryptography>=42", "boto3>=1.34.0", "psycopg2-binary>=2.9.9"]
 postgres = ["psycopg2-binary>=2.9.9"]
+# The swarm event bus NATS JetStream backend (scripts/events/nats.py).
+nats = ["nats-py>=2.9"]
 otel = [
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
@@ -66,6 +71,7 @@ otel = [
     "opentelemetry-exporter-otlp-proto-http>=1.20.0",
 ]
 all = [
+    "nats-py>=2.9",
     "psycopg2-binary>=2.9.9",
     "redis>=5.0.0",
     "boto3>=1.34.0",
@@ -111,16 +117,17 @@ include = ["hooks*", "scripts*", "profiles*"]
 # under scripts/ so AGENTIHOOKS_ROOT-relative resolution works from a wheel too.
 "scripts" = ["packaging/**/*.template"]
 "scripts.swarm_v2.worker" = ["*.sh"]
+"scripts.host_guard" = ["*.sh", "*.json"]
 "scripts.swarm" = ["stack/*.yaml", "stack/deploy/compose/*.yaml", "stack/deploy/compose/redis/*"]
 "scripts.swarm_ledger" = ["*.html", "*.css", "*.js", "static/**/*.js", "static/**/*.css"]
 # Ship every native config and Markdown artifact under profiles/ — personas,
-# rules, settings, and profile manifests. Recursive ** globs cover .claude/
-# and target-specific subdirectories at any depth.
+# rules, settings, and profile manifests. Recursive ** globs skip hidden
+# folders, so hidden profile trees need their own explicit entry.
 # One entry per discovered profiles package; the bare "profiles" key also
 # captures files under non-package subdirs like profiles/package/rules/.
-"profiles" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md", "**/*.sh", "**/*.py"]
-"profiles._base" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
-"profiles.default" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
+"profiles" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md", "**/*.sh", "**/*.py", "**/.*/**/*"]
+"profiles._base" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md", "**/.*/**/*"]
+"profiles.default" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md", "**/.*/**/*"]
 
 [project.urls]
 Homepage = "https://github.com/The-Cloud-Clockwork/agentihooks"
@@ -139,7 +146,7 @@ asyncio_mode = "auto"
 source_paths = ["hooks/", "scripts/"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 120
 
 [tool.ruff.lint]

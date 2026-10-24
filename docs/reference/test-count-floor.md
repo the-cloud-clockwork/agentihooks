@@ -10,7 +10,7 @@ The `test-count` job in the Tests workflow fails when the head collects fewer te
 
 ## Where it runs
 
-`test-count` runs on Python 3.11 and 3.12 for pull requests, merge groups and dispatched runs that pass admission. Pushes do not run it. It checks out the base revision into a second worktree and runs the base revision's own `tests/count_floor.py`:
+`test-count` runs on Python 3.12 for pull requests, merge groups and dispatched runs that pass admission. Pushes do not run it. It checks out the base revision into a second worktree and runs the base revision's own `tests/count_floor.py`:
 
 ```bash
 cd "$RUNNER_TEMP/base"
@@ -23,13 +23,156 @@ The base is the merge base of the head with the event's base: `origin/dev` for p
 
 ## What it compares
 
-Each checkout collects its own `tests/` with `pytest --collect-only`, in its own directory so the base imports its own sources. Both collections run in parallel.
+The head collects its own `tests/` with `pytest --collect-only`. The base uses a matching [dev suite record](#dev-suite-records) when available; otherwise it collects in its own directory so it imports its own sources. Each side's collection is [split across processes](#collection-across-processes), and when both sides need collection, they run at the same time and share the processes.
 
 - A collection error, or no tests collected, on either side fails the job: `Collecting the base tests failed or found none, so the floor cannot be graded.`
 - The floor is the base count minus the admitted lost tests.
 - The job passes when the head count is at least the floor. Otherwise it lists every lost test that was not admitted and fails: `The head collects N fewer tests than the base floor of F.`
 
 The floor compares counts. A renamed test passes, since the new id offsets the lost one, and so does any lost test offset by an equal number of added tests.
+
+## Collection across processes
+
+Every collection the gate runs, for the head, a base without a usable record and the dev record producer, is split across several `pytest --collect-only` processes and the results are joined in order. The collected test ids, their order, the count and the floor comparison are the same as a single process collection of the same tree; only the time changes. Before pull request [4864](https://github.com/the-cloud-clockwork/agentihooks/pull/4864) the head collection ran in one process and took 20 to 25 seconds of a 55 to 63 second job.
+
+### Process count
+
+`tests.count_floor.collection_processes` returns the runner's usable CPUs: the CPUs the job may run on, capped by the cgroup CPU quota when one is set (`scripts.ci_cpu_quota.worker_count`, the same rule the unit shards use), and never below one. When the base and the head both need collection, each side gets half of that count, rounded down; a side left with zero or one process collects in a single process. A side read from a dev record or the collection cache starts no process.
+
+| Usable CPUs | CPU quota | Sides collected | Processes per side |
+|---|---|---|---|
+| 6 | none | head only | 6 |
+| 6 | 2.5 | head only | 2 |
+| 4 | none | base and head | 2 |
+| 2 | none | base and head | 1 |
+
+There is no setting for the process count; it follows the runner.
+
+### How the suite is split
+
+`tests.count_floor.collection_groups` lists the top level entries of `tests/` in name order and gives each a weight: the number of `test_*.py` files beneath a directory, 1 for a top level `test_*.py` file and 0 for anything else. It walks the entries in order and starts a new group when the files placed so far reach the next equal share of the total, so each group is a contiguous run of names with about the same number of test files. An entry with weight 0 never starts a group; it joins the current one. `__init__.py` and `conftest.py` at the top of `tests/` are added to every group, so each process loads the same root fixtures and configuration hooks.
+
+For a `tests/` holding `alpha/` (two test files), `beta/` (no test files), `notes.txt`, `test_a.py`, `test_b.py` and `test_data.json`:
+
+| Processes | Groups, after the shared `__init__.py` and `conftest.py` |
+|---|---|
+| 1 | `alpha beta notes.txt test_a.py test_b.py test_data.json` |
+| 2 | `alpha beta notes.txt` · `test_a.py test_b.py test_data.json` |
+| 3 | `alpha beta notes.txt` · `test_a.py` · `test_b.py test_data.json` |
+
+A split never goes below the top level: one large directory is collected by one process however many CPUs are free, and a suite with fewer weighted entries than processes produces fewer groups.
+
+Each process runs `pytest --collect-only -qq --assert=plain -p no:cacheprovider tests/` from its own tree, with a plugin whose `pytest_ignore_collect` hook skips every top level entry outside its group. Groups run at the same time and are joined in group order, which is name order, so the joined list matches the single process list.
+
+### Failures
+
+- A side fails when any of its groups fails to collect, or its process exits with an error. A side with no tests collected also fails. Either way the job fails with the collection error described in [What it compares](#what-it-compares). Every failing module and its exception is printed to the job log.
+- A group that collects no tests adds nothing and does not fail the side.
+- Groups never share an entry, so a test id returned by two groups means the split leaked; the side then fails instead of counting the test twice. A test id repeated within one group is kept, as a single process collection keeps it.
+- The joined list is what the [collection cache](#configuration-and-ci-usage) stores and what the dev record producer writes, so a cached or recorded side is graded exactly as a collected one.
+
+### Checking the split in CI
+
+The collection runs inside the `Hold the base revision's test count` step of each `test-count` job. Read that step's duration across pull request runs:
+
+```bash
+gh api 'repos/the-cloud-clockwork/agentihooks/actions/runs/RUN_ID/jobs?per_page=100' --paginate \
+  --jq '.jobs[] | select(.name | startswith("test-count")) | .steps[]
+        | select(.name == "Hold the base revision'\''s test count")
+        | {started_at, completed_at, conclusion}'
+```
+
+Replace `RUN_ID` with a Tests run id. The step's log carries the usual `head collects N tests, base floor F` line; the split prints nothing of its own. When one step is much slower than others from the same hour, check whether the base was collected as well (`no dev record matches the base, so it is collected`), which halves the processes per side. Node load also moves this step by several seconds, so compare cohorts from the same hours of day.
+
+### Contract tests
+
+`tests/test_count_floor.py` pins the behaviour:
+
+| Test | Holds |
+|---|---|
+| `test_collection_splits_across_processes_and_matches_one_process` | Three processes return exactly the single process ids, in order, and three distinct processes ran |
+| `test_collection_groups_are_contiguous_runs_weighted_by_test_files` | The grouping shown above, independent of directory listing order |
+| `test_each_collected_side_shares_the_processes` | Four processes over base and head start two per side |
+| `test_one_failed_group_fails_the_whole_side` | One failing group fails the side |
+| `test_groups_that_overlap_fail_the_side_instead_of_inflating_the_count` | A leaked split fails closed |
+| `test_a_group_that_collects_no_tests_adds_nothing` | An empty group adds nothing |
+| `test_collection_processes_follow_the_cpu_quota` | The process count follows the CPU quota |
+
+A change to the split, like any change to the gate, grades from the next pull request on, since the base revision's copy of `tests/count_floor.py` runs.
+
+## Dev suite records
+
+A pull request can reuse the base suite collected on protected `dev` instead of collecting that same base again. The record contains the collected test ids, preserving both the count and the lost-test admission rules. It never substitutes a dev result for the head collection or changes the floor.
+
+The **Dev test count records** workflow runs on pushes to `dev`, independently of the Tests workflow. Its `count-record` job collects a clean detached checkout of the pushed commit and uploads `record.json` as `count-record-3.12`, retained for seven days. Separate production ensures that reusing an earlier Tests result does not skip recording the new dev commit. The job is best effort, with a six minute job timeout and a two minute recording step timeout; an absent record leaves later grading to collection.
+
+### Which record is trusted
+
+For a same-repository pull request into `dev`, Tests uses a CI App token with Actions read permission to look up the record. The base checkout's own `tests.count_floor.dev_record` selects from the first hundred artifacts named for the Python version. It accepts an unexpired artifact only when its run:
+
+- names branch `dev`;
+- names the exact merge base commit printed as `BASE: <sha>`;
+- has matching repository and head repository ids, both present.
+
+A newer dev commit's record does not match an older merge base. Records supplied by the pull request's own run or by a fork are ignored. The artifact selector and the floor grader run from the base checkout, so editing the head's record or grader cannot lower its own floor. The workflow fetches these records only for pull request events; other grading events use collection or the separate collection cache.
+
+The base grader then validates the record's `identity` against the clean base checkout. Identity covers the Git tree, tests path, Python version, platform, installed package names and versions, collector source and `PYTEST_` environment options. The project's own commit-derived package version is excluded. `nodeids` must be a nonempty list of strings. A changed dependency environment can therefore cause a miss even for the correct commit.
+
+### Configuration and CI usage
+
+Reuse is automatic; contributors do not upload or commit records. The current producer and consumer both use Python 3.12. Maintainers changing that matrix must keep the artifact name and collection environment aligned. The consumer requires the existing `TCC_CI_CLIENT_ID` and `TCC_CI_APP_PRIVATE_KEY` secrets to mint its Actions read token.
+
+The producer runs this command inside its clean CI checkout, with the output directory already created:
+
+```bash
+python -m tests.count_floor \
+  --record "$RUNNER_TEMP/count-record/record.json" \
+  --head "$RUNNER_TEMP/base"
+```
+
+The existing base grading command accepts these environment settings:
+
+| Setting | Use |
+|---|---|
+| `TEST_COUNT_BASE_RECORD` | Downloaded record file. Unset, unreadable, malformed or mismatched records fall back to base collection. |
+| `TEST_COUNT_COLLECTION_CACHE` | Directory for the separate exact collection cache, used for sides still needing collection. |
+| `TEST_COUNT_ENVIRONMENT` | Environment key required to enable that cache; CI uses the restored test environment's primary cache key. |
+| `TEST_COUNT_HEAD_COLLECTION` | Optional output file for collected head ids, reused by later CI steps. |
+
+For example, the workflow grades from the base checkout with the downloaded record:
+
+```bash
+cd "$RUNNER_TEMP/base"
+TEST_COUNT_BASE_RECORD="$RUNNER_TEMP/base-record.json" \
+  python -m tests.count_floor \
+  --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+```
+
+These are CI collection commands; collection imports the test suite. Run verification through CI under the repository's test policy.
+
+### Inspecting a hit or miss
+
+Find a pull request's Tests run and read its job output:
+
+```bash
+gh run list --workflow test.yml --event pull_request --limit 10
+gh run view RUN_ID --log | rg 'BASE: |suite count|dev record|head collects'
+gh run list --workflow count-record.yml --branch dev --limit 10
+gh api 'repos/the-cloud-clockwork/agentihooks/actions/artifacts?name=count-record-3.12&per_page=100' \
+  --jq '.artifacts[] | {id, expired, workflow_run}'
+```
+
+Replace `RUN_ID` with the selected run's id. Compare the artifact run's `head_sha` with the logged base, rather than the latest dev head.
+
+| Output or symptom | Meaning and action |
+|---|---|
+| `base count read from the dev record` | Provenance and identity matched; only the head needs collection, subject to its own collection cache. |
+| `No dev run recorded the suite count for <sha>.` | No eligible artifact appeared in the lookup. Check the producer for that exact commit, artifact expiry and the hundred-artifact lookup limit. Base collection continues. |
+| `no dev record matches the base, so it is collected` | The configured file is missing, invalid or has a different identity. Check environment differences and the downloaded artifact. |
+| Artifact listing, download or extraction failed | The fetch step leaves no usable record and grading falls back. Inspect that step's error before treating a slower job as a grading failure. |
+| `The tree did not collect cleanly, so no record is written.` | The producer could not collect tests or its checkout identity was unavailable or changed. Fix that producer failure through a normal pull request; later grading still collects the base. |
+
+A cache miss preserves normal grading. Token creation is a separate workflow step: its failure can fail the job before the best effort artifact fetch runs. A fallback collection error or empty suite still fails the floor as described above.
 
 ## Admitted lost tests
 
@@ -125,6 +268,27 @@ Delete the function, class or constant and the tests that exercised it in the sa
 - for a keyword branch, check that the test passed the keyword by name, that the base function tested it in a branch condition and never reassigned it, and that the head copy sits in the same module with no `**kwargs` and no new parameter.
 
 ## Proof
+
+Dev record reuse shipped in pull requests [4239](https://github.com/the-cloud-clockwork/agentihooks/pull/4239) and [4278](https://github.com/the-cloud-clockwork/agentihooks/pull/4278). Issue [4238](https://github.com/the-cloud-clockwork/agentihooks/issues/4238) records the matched cohort: green full scope pull request Tests runs from 17 October 2026 at 22:03 to 18 October at 03:00 UTC, with the same job layout, classified by the test count log line.
+
+| Base source | Jobs | Median test count job | Median collection step |
+|---|---|---|---|
+| Collected | 12 | 61.5 seconds | 25.0 seconds |
+| Dev record | 18 | 53.0 seconds | 18.0 seconds |
+
+The observed hit rate was 60 percent; this comparison measures hits against fallback within that cohort, rather than guaranteeing a hit for every pull request. Record production now runs in its own workflow.
+
+The unmerged plant [4307](https://github.com/the-cloud-clockwork/agentihooks/pull/4307) uploaded a lowered record from its own run and deleted one test. Run [39081653661](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39081653661) ignored that record, collected the base and failed with `The head collects 1 fewer tests than the base floor of 34831.`
+
+Collection across processes shipped in pull request [4864](https://github.com/the-cloud-clockwork/agentihooks/pull/4864) (issue [4863](https://github.com/the-cloud-clockwork/agentihooks/issues/4863)). Red run [39299441156](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39299441156) carried only the contract test: the equality with one process passed and the process count failed with `assert 1 == 3`. Green run [39300792289](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39300792289) passed it and the six other split tests. The `Hold the base revision's test count` step, successful pull request `test-count` jobs from Tests runs created between 17:00 and 18:00 UTC, the same hour on each day because node load moves this step by several seconds:
+
+| Day | Collection | Jobs | Median step |
+|---|---|---|---|
+| 19 October 2026 | one process | 30 | 25.0 seconds |
+| 21 October 2026 | split | 12 | 13.5 seconds |
+| 22 October 2026 | split | 22 | 19.0 seconds |
+
+The hour held fewer than thirty jobs on both later days, so every job in it is counted. The step fell by 6 to 11.5 seconds, short of the 8 second median the change targeted.
 
 Definition admission, both ways on planted branches, graded by the delivered gate as the base copy (pull request [3492](https://github.com/the-cloud-clockwork/agentihooks/pull/3492)):
 

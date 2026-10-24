@@ -9,7 +9,7 @@ from scripts.gates import Call, Gate, Who, entry
 from scripts.gates.one_push import OnePush, actions, destinations, open_refusal, push_refusal, queue_refusal
 from scripts.gates.subagents import SubagentBudget
 from scripts.gates.verdicts import Verdicts
-from scripts.swarm.ledger_events import PullRequest
+from scripts.swarm.ledger_events import PullRequest, pull_request
 
 ME = Who(name="ci@323133-0001", swarm="demo", lane="ci", task="t1")
 URL = "https://github.com/o/r/pull/7"
@@ -55,7 +55,14 @@ class Ledger:
 
 def pull(state="OPEN", red=False, running=True, queued=False):
     return PullRequest(
-        state=state, merged_at=None, pushed_at=None, red=red, resolved=not running, queued=queued, running=running
+        state=state,
+        merged_at=None,
+        pushed_at=None,
+        red=red,
+        resolved=not running,
+        queued=queued,
+        running=running,
+        started=running,
     )
 
 
@@ -122,7 +129,7 @@ def test_an_open_before_both_reviews_is_refused(tree, tmp_path):
     reviewed(tmp_path, "standards-reader")
     decision = gate().decide(bash("gh pr create --base dev", tree), ME, state(tmp_path))
     assert not decision.allowed
-    assert decision.reason == open_refusal("demo", ["spec-reader"], "")
+    assert decision.reason == open_refusal("demo", ["spec-reader"], "") + f". Checked worktree: {tree}"
 
 
 def test_an_open_after_both_reviews_with_the_work_on_origin_passes(tree, tmp_path):
@@ -150,14 +157,14 @@ def test_ready_counts_the_command_checkout_instead_of_the_session_checkout(tree,
     decision = gate(target="codex").decide(call, ME, state(tmp_path))
     assert decision.allowed is not unpushed_command, decision.reason
     if unpushed_command:
-        assert decision.reason == open_refusal("demo", [], "commits not on origin")
+        assert decision.reason == open_refusal("demo", [], "commits not on origin") + f". Checked worktree: {work}"
 
 
 def test_ready_without_a_command_folder_counts_the_session_checkout(tree, tmp_path):
     (tree / "a.txt").write_text("unpublished\n")
     git(tree, "commit", "-q", "-am", "unpublished")
     decision = gate(target="codex").decide(bash("gh pr ready 1", tree), ME, state(tmp_path))
-    assert decision.reason == open_refusal("demo", [], "commits not on origin")
+    assert decision.reason == open_refusal("demo", [], "commits not on origin") + f". Checked worktree: {tree}"
 
 
 def codex_rollout(tmp_path, *programs, filler=0):
@@ -215,7 +222,7 @@ def test_ready_counts_the_codex_exec_workdir_from_the_rollout(monkeypatch, tree,
     decision = gate(target="codex").decide(codex_call(monkeypatch, rollout, command, tree), ME, state(tmp_path))
     assert decision.allowed is not unpushed_command, decision.reason
     if unpushed_command:
-        assert decision.reason == open_refusal("demo", [], "commits not on origin")
+        assert decision.reason == open_refusal("demo", [], "commits not on origin") + f". Checked worktree: {work}"
 
 
 def test_ready_reads_the_latest_codex_exec_program(monkeypatch, tree, tmp_path):
@@ -229,7 +236,8 @@ def test_ready_reads_the_latest_codex_exec_program(monkeypatch, tree, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "program", ["no-workdir", "other-command", "two-workdirs", "malformed", "beyond-tail", "no-rollout"]
+    "program",
+    ["no-workdir", "other-command", "two-workdirs", "malformed", "undecodable", "beyond-tail", "no-rollout"],
 )
 def test_ready_without_a_codex_exec_workdir_counts_the_session_checkout(monkeypatch, tree, tmp_path, program):
     work = tmp_path / "command"
@@ -244,13 +252,14 @@ def test_ready_without_a_codex_exec_workdir_counts_the_session_checkout(monkeypa
             tmp_path, earlier, exec_command("gh pr ready 1", work) + exec_command("gh pr ready 1", tree)
         ),
         "malformed": lambda: codex_rollout(tmp_path, earlier + 'exec_command({cmd:"gh pr ready 2",workdir:"open'),
+        "undecodable": lambda: codex_rollout(tmp_path, 'exec_command({cmd:"gh pr ready 1",workdir:"/x\\x2"});'),
         "beyond-tail": lambda: codex_rollout(tmp_path, earlier, filler=1 << 20),
         "no-rollout": lambda: tmp_path / "missing.jsonl",
     }
     call = codex_call(monkeypatch, rollouts[program](), "gh pr ready 1", tree)
     assert "workdir" not in call.tool_input
     decision = gate(target="codex").decide(call, ME, state(tmp_path))
-    assert decision.reason == open_refusal("demo", [], "commits not on origin")
+    assert decision.reason == open_refusal("demo", [], "commits not on origin") + f". Checked worktree: {tree}"
 
 
 def test_a_codex_payload_workdir_wins_over_the_rollout(monkeypatch, tree, tmp_path):
@@ -278,10 +287,10 @@ def test_an_open_over_uncommitted_or_unpushed_work_is_refused(tree, tmp_path):
     reviewed(tmp_path, "standards-reader", "spec-reader")
     (tree / "a.txt").write_text("b\n")
     decision = gate().decide(bash("gh pr create --base dev", tree), ME, state(tmp_path))
-    assert decision.reason == open_refusal("demo", [], "uncommitted changes")
+    assert decision.reason == open_refusal("demo", [], "uncommitted changes") + f". Checked worktree: {tree}"
     git(tree, "commit", "-q", "-am", "b")
     decision = gate().decide(bash("gh pr create --base dev", tree), ME, state(tmp_path))
-    assert decision.reason == open_refusal("demo", [], "commits not on origin")
+    assert decision.reason == open_refusal("demo", [], "commits not on origin") + f". Checked worktree: {tree}"
 
 
 def test_a_draft_open_passes_before_any_review(tree, tmp_path):
@@ -344,6 +353,39 @@ def test_a_push_while_the_pull_request_waits_in_the_merge_queue_is_refused(tree,
     decision = gate(pull(running=False, queued=True)).decide(bash("git push", tree), ME, state(tmp_path))
     assert decision.reason == queue_refusal("demo", URL)
     assert gate(pull(running=False, queued=True, red=True)).decide(bash("git push", tree), ME, state(tmp_path)).allowed
+
+
+NEVER_STARTED = {"state": "OPEN", "gated": True, "gate_workflows": ["tests.yml"]}
+LINT_EXPECTED = [{"context": "lint", "state": "EXPECTED"}]
+TESTS_RUNNING = [{"status": "IN_PROGRESS", "workflowRun": {"databaseId": 1}}]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {**NEVER_STARTED, "mergeable": "CONFLICTING"},
+        {**NEVER_STARTED, "mergeable": "CONFLICTING", "statusCheckRollup": LINT_EXPECTED},
+        {**NEVER_STARTED, "mergeable": "MERGEABLE"},
+    ],
+)
+def test_a_required_workflow_that_never_started_lets_the_push_pass(tree, tmp_path, raw):
+    found = pull_request(raw)
+    assert found.running
+    assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {**NEVER_STARTED, "mergeable": "CONFLICTING", "checkSuites": TESTS_RUNNING},
+        {**NEVER_STARTED, "mergeable": "CONFLICTING", "statusCheckRollup": [{"context": "lint", "state": "PENDING"}]},
+        {**NEVER_STARTED, "mergeable": "MERGEABLE", "statusCheckRollup": LINT_EXPECTED},
+    ],
+)
+def test_a_real_running_check_or_a_pending_placeholder_on_a_mergeable_head_still_holds_the_push(tree, tmp_path, raw):
+    decision = gate(pull_request(raw)).decide(bash("git push", tree), ME, state(tmp_path))
+    assert not decision.allowed
+    assert decision.reason == push_refusal("demo", URL)
 
 
 def test_a_reader_counts_when_either_its_name_or_its_type_names_it(tree, tmp_path):
@@ -468,3 +510,91 @@ def test_the_rollout_tail_holds_a_whole_exec_program(monkeypatch, tree, tmp_path
     rollout.write_bytes(head + program + b" " * (rest - 1) + b"\n")
     call = codex_call(monkeypatch, rollout, "gh pr ready 1", tree)
     assert call.tool_input["workdir"] == str(work)
+
+
+@pytest.mark.parametrize("unpushed_command", [False, True])
+def test_ready_honors_json_quoted_exec_fields(monkeypatch, tree, tmp_path, unpushed_command):
+    work = tmp_path / "command"
+    git(tree, "worktree", "add", "--detach", str(work), "HEAD")
+    changed = work if unpushed_command else tree
+    (changed / "a.txt").write_text("unpublished\n")
+    git(changed, "commit", "-q", "-am", "unpublished")
+    command = "gh pr ready 1"
+    program = "await tools.exec_command(" + json.dumps({"cmd": command, "workdir": str(work)}) + ");"
+    rollout = codex_rollout(tmp_path, program)
+    decision = gate(target="codex").decide(codex_call(monkeypatch, rollout, command, tree), ME, state(tmp_path))
+    assert decision.allowed is not unpushed_command, decision.reason
+    if unpushed_command:
+        assert f"Checked worktree: {work}" in decision.reason
+
+
+def test_ready_refusal_names_the_shell_checkout(tree, tmp_path):
+    (tree / "a.txt").write_text("unpublished\n")
+    decision = gate(target="codex").decide(bash(f"cd {tree} && gh pr ready 1", tmp_path), ME, state(tmp_path))
+    assert not decision.allowed
+    assert f"Checked worktree: {tree}" in decision.reason
+
+
+@pytest.fixture
+def other_repo(tmp_path):
+    work = tmp_path / "other"
+    git(tmp_path, "init", "-q", "-b", "task", str(work))
+    git(work, "remote", "add", "origin", "https://github.com/o/b.git")
+    return work
+
+
+def test_a_cross_repo_push_through_a_shell_variable_passes_while_the_other_repos_checks_run(
+    tree, other_repo, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("OTHER_REPO", str(other_repo))
+    for command in (
+        f'B={other_repo}; cd "$B" && git push origin task',
+        'cd "$OTHER_REPO" && git push origin task',
+        "git -C ${OTHER_REPO} push origin HEAD:task",
+    ):
+        assert gate(pull()).decide(bash(command, tree), ME, state(tmp_path)).allowed, command
+
+
+def test_a_push_through_a_shell_variable_into_the_pull_request_repo_is_still_refused(tree, other_repo, tmp_path):
+    decision = gate(pull()).decide(bash(f'A={tree}; cd "$A" && git push origin task', other_repo), ME, state(tmp_path))
+    assert (decision.allowed, decision.reason) == (False, push_refusal("demo", URL))
+    assert not gate(pull()).decide(bash("git push origin task", tree), ME, state(tmp_path)).allowed
+
+
+def test_a_push_from_a_folder_that_is_no_checkout_holds_nothing(tree, tmp_path):
+    command = f"cd {tmp_path / 'missing'} && git push origin task"
+    assert gate(pull()).decide(bash(command, tree), ME, state(tmp_path)).allowed
+
+
+def test_an_unset_variable_or_an_exported_one_still_finds_the_pull_request_checkout(tree, other_repo, tmp_path):
+    for command, cwd in (
+        ('cd "$NO_SUCH_REPO_FOLDER" && git push origin task', tree),
+        (f'export A={tree}; cd "$A" && git push origin task', other_repo),
+        (f'export ROOT={tree.parent} X=1; cd "${{ROOT}}/work" && git push origin task', other_repo),
+        (f'declare A={tree}; cd "$A" && git push origin task', other_repo),
+        (f"pushd {tree} && git push origin task", other_repo),
+        (f"cd -P -- {tree} && git push origin task", other_repo),
+        (f"cd {tree}; cd {other_repo}; cd - && git push origin task", other_repo),
+    ):
+        decision = gate(pull()).decide(bash(command, cwd), ME, state(tmp_path))
+        assert (decision.allowed, decision.reason) == (False, push_refusal("demo", URL)), command
+
+
+def test_a_folder_named_by_a_command_substitution_is_held_as_the_task_repo(tree, other_repo, tmp_path):
+    command = 'B=$(wt.sh path); cd "$B" && git push origin task'
+    assert not gate(pull()).decide(bash(command, other_repo), ME, state(tmp_path)).allowed
+
+
+def test_expand_puts_in_assigned_and_environment_names_and_empties_unset_ones(monkeypatch):
+    from scripts.gates.one_push import expand
+
+    monkeypatch.setenv("SET_NAME", "/env")
+    monkeypatch.delenv("UNSET_NAME", raising=False)
+    assert expand("$UNSET_NAME/x", {}) == "/x"
+    assert expand("${SET_NAME}/$A/$(c)", {"A": "a"}) == "/env/a/$(c)"
+
+
+def test_assignments_split_at_their_first_equals_and_read_earlier_ones():
+    command = 'R=/r; B=$R/b=c; cd "$B" && git push'
+    assert list(actions(command, "/x")) == [("push", Path("/r/b=c"), [])]
+    assert list(actions("cd - && git push", "/x")) == [("push", Path("/x/$OLDPWD"), [])]

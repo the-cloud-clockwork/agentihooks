@@ -87,12 +87,12 @@ def _test_id(context: str) -> str:
     return context.rsplit("|", 1)[0]
 
 
-def _executed(coverage_file: Path, root: Path) -> dict[str, set[str]]:
+def _executed(coverage_file: Path, root: Path) -> tuple[dict[str, set[str]], dict[str, dict[str, list[int]]]]:
     from coverage import CoverageData
 
     data = CoverageData(basename=str(coverage_file))
     data.read()
-    executed = {}
+    executed, lines = {}, {}
     for measured in sorted(data.measured_files()):
         path = Path(measured)
         relative = path.relative_to(root).as_posix() if path.is_absolute() else path.as_posix()
@@ -106,12 +106,16 @@ def _executed(coverage_file: Path, root: Path) -> dict[str, set[str]]:
         for line, contexts in data.contexts_by_lineno(measured).items():
             unit = f"{relative}::{by_line.get(line, MODULE)}"
             for context in filter(None, contexts):
-                executed.setdefault(_test_id(context), set()).update((unit, module))
-    return executed
+                test = _test_id(context)
+                executed.setdefault(test, set()).update((unit, module))
+                lines.setdefault(test, {}).setdefault(relative, []).append(line)
+    return executed, {
+        test: {path: sorted(set(found)) for path, found in paths.items()} for test, paths in lines.items()
+    }
 
 
 def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, environment: str) -> dict:
-    executed = _executed(coverage_file, root)
+    executed, lines = _executed(coverage_file, root)
     units = sorted(set().union(*executed.values()))
     index = {name: number for number, name in enumerate(units)}
     tests = {
@@ -130,6 +134,7 @@ def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, envi
         "environment": environment,
         "units": units,
         "tests": dict(sorted(tests.items())),
+        "lines": lines,
     }
 
 

@@ -17,6 +17,17 @@ def test_hive_join_acquires_redis_before_starting_without_another_pull():
     assert " --pull never " in start
 
 
+def test_smoke_pulls_redis_from_the_ledger_load_registry():
+    load = yaml.safe_load((ROOT / ".github/workflows/ledger-load.yml").read_text())["jobs"]["load"]
+    registry = load["services"]["redis"]["image"].rsplit(":", 1)[0]
+    assert registry == "public.ecr.aws/docker/library/redis"
+    workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())
+    step = next(step for step in workflow["jobs"]["smoke"]["steps"] if step.get("name") == "Build the swarm image")
+    for tag in ("7", "7-alpine"):
+        assert f"bash scripts/packaging/pull-runtime-image.sh {registry}:{tag} &&" in step["run"]
+    assert "pull-runtime-image.sh mirror.gcr.io/library/redis" not in step["run"]
+
+
 def test_terminal_clients_acquires_every_python_base_before_building():
     workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())
     steps = workflow["jobs"].get("terminal-clients", workflow["jobs"]["smoke"])["steps"]
@@ -30,3 +41,14 @@ def test_terminal_clients_acquires_every_python_base_before_building():
         pull = f"bash scripts/packaging/pull-runtime-image.sh {base}\n"
         assert pull in commands
         assert commands.index(pull) < build
+
+
+def test_smoke_steps_after_the_build_run_only_when_the_build_and_redis_pulls_succeeded():
+    steps = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]["smoke"]["steps"]
+    build = next(i for i, step in enumerate(steps) if step.get("name") == "Build the swarm image")
+    assert steps[build]["id"] == "build"
+    assert all("if" not in step for step in steps[: build + 1])
+    gated = "${{ !cancelled() && steps.build.outcome == 'success' }}"
+    after = steps[build + 1 :]
+    assert [step["if"] for step in after if "cancelled()" in step.get("if", "")] == [gated] * 4
+    assert all(step.get("if") == gated or "()" not in step.get("if", "") for step in after)

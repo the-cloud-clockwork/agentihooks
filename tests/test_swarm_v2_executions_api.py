@@ -817,9 +817,12 @@ def test_a_failed_lock_release_keeps_the_committed_heartbeat(world, worker, monk
 
     agent, token = worker
     lock = world.store.key("fixture", "heartbeat-lock", agent.execution_id)
+    evaluate = world.store.redis.eval
 
-    def lost(*args):
-        raise StoreLost("fixture release lost")
+    def lost(script, count, *args):
+        if args[:count] == (lock,):
+            raise StoreLost("fixture release lost")
+        return evaluate(script, count, *args)
 
     monkeypatch.setattr(world.store.redis, "eval", lost)
     status, ack = world.put(agent.execution_id, token, world.beat(agent, 1))

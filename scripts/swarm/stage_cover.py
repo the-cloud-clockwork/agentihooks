@@ -1,8 +1,8 @@
 """A bottleneck stage covered by an open phase or task proposes no task and holds no dispatcher seat open.
 
 A cover on a share covers every stage inside it; a cover on a stage also frees its share's dispatcher seat but never
-silences a sibling stage's remedy. It lapses, and is
-forgotten, the first time `covered` reads it after that phase or task is done, out of scope or gone from a ledger
+silences a sibling stage's remedy. It lapses, and is forgotten,
+the first time the tick's `covered` reads it after that phase or task is done, out of scope or gone from a ledger
 that still lists others of its kind; a read with none of its kind keeps the cover, so an empty read never erases one.
 A new cover on a stage replaces the old one.
 """
@@ -73,7 +73,7 @@ def cover(store: RedisStore, slug: str, doc: dict, request: Request, now_ms: int
     return found
 
 
-def covered(store: RedisStore, slug: str, doc: dict, name: str, share: bool = False) -> bool:
+def covered(store: RedisStore, slug: str, doc: dict, name: str, share: bool = False, write: bool = True) -> bool:
     key, names = store.key(slug, KEY), _related(name, share)
     held = False
     for stage in names:
@@ -83,7 +83,8 @@ def covered(store: RedisStore, slug: str, doc: dict, name: str, share: bool = Fa
         item = json.loads(raw)["item"]
         row = _row(doc, item)
         if (row is None and doc.get(item.partition("/")[0])) or (row is not None and _closed(row, item)):
-            _lapse(store.redis, key, stage, raw)
+            if write:
+                _lapse(store.redis, key, stage, raw)
         else:
             held = True
     return held

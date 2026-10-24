@@ -21,6 +21,13 @@ if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
   rm -f "$KIND_LAYER_CACHE/complete"
 fi
 python3 tests/kind_request.py
+sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
+python3 tests/chart_examples.py "$chart"
+python3 tests/chart_github_auth.py "$chart"
+python3 tests/chart_hive_home.py "$chart"
+python3 tests/chart_hive_only.py "$chart"
+python3 tests/chart_hub.py "$chart"
+python3 tests/chart_nats.py "$chart"
 
 finish() {
   status=$?
@@ -32,7 +39,7 @@ finish() {
   if [[ -n $terminal ]]; then
     wait "$terminal" || true
   fi
-  rm -f "$load_lock"
+  rm -f "$load_lock" "${ledger_values:-}"
   if [[ -n $route ]]; then
     wait "$route" || true
   fi
@@ -42,7 +49,13 @@ finish() {
   if [[ $status -ne 0 ]]; then
     kubectl get pods -o wide || true
     kubectl logs "${controller[@]}" --tail 100 || true
-    kubectl logs "${controller[@]}" --previous --tail 100 || true
+    restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' || true)"
+    if [[ -n $restarts && $restarts != 0 ]]; then
+      kubectl logs "${controller[@]}" --previous --tail 100 || true
+    fi
+    kubectl logs "$release-redis-0" --tail 30 || true
+    kubectl exec "$release-redis-0" -- redis-cli ping || true
+    kubectl exec "$ledger_pod" -- env SLUG="$slug" python -c 'import json, os; from scripts.swarm.store import connect; store = connect(); key = store.key(os.environ["SLUG"], "tick-lock"); raw = store.redis.get(key); held = json.loads(raw) if raw else {}; print(json.dumps({"tick_lock": {field: held.get(field) for field in ("epoch", "host", "pid", "start")}, "ttl_ms": store.redis.pttl(key)}))' || true
     kubectl get pods "${controller[@]}" -o jsonpath='{range .items[*].status.initContainerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}{range .items[*].status.containerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}' || true
     kubectl logs "$ledger_pod" --tail 100 || true
   fi
@@ -138,6 +151,18 @@ if [[ -n "$(ledger_reload)" ]]; then
   printf 'the plain http ledger StatefulSet asked Reloader to watch a TLS secret\n' >&2
   exit 1
 fi
+ledger_values="$(mktemp)"
+printf 'ledger:\n  secretEnv:\n    - {name: AGENTIHOOKS_SWARM_DATABASE_URL, secretName: swarm-ledger-database, key: url}\n' >"$ledger_values"
+helm template "$release" "$chart" "${secrets[@]}" -f "$ledger_values" \
+  | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml" "$ledger_values"
+planted="$(helm template "$release" "$chart" "${secrets[@]}" -f "$ledger_values" \
+  --set 'secretEnv[0].name=AGENTIHOOKS_SWARM_DATABASE_URL' --set 'secretEnv[0].secretName=swarm-ledger-database' \
+  --set 'secretEnv[0].key=url' | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml" "$ledger_values" 2>&1 >/dev/null || true)"
+if [[ $planted != *"container controller references the ledger only Secret swarm-ledger-database"* ]]; then
+  printf 'the chart check did not flag a planted shared reference to the ledger only Secret: %s\n' "$planted" >&2
+  exit 1
+fi
+printf 'only the ledger container reads the ledger secret env\n'
 printf 'the TLS ledger rolls when its TLS secret renews and a plain ledger watches no secret\n'
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
 rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
@@ -213,7 +238,18 @@ plant_hive_join 'the hive join command is' --set hive.join.memberRedisUrl=rediss
 plant_hive_join 'the hive join Service ports are' --set hive.join.port=8771
 plant_hive_join 'the hive join volumes are' --set hive.join.tlsSecretName=other-tls
 plant_hive_join 'the hive join env is' --set hive.join.redisSecret.name=swarm-redis
+plant_hive_join 'the hive join env is' --set hive.join.natsSigner.trustedOperator=OAOTHER
+plant_hive_join 'the hive join volumes are' --set hive.join.natsSigner.secretName=other-signer
 plant_hive_join 'the hive join tolerations are' --set-json 'hive.join.tolerations=[{"operator":"Exists"}]'
+foreign="$chart/ci/kind-hive-join-foreign-ledger.yaml"
+helm template "$release" "$chart" "${hive_join[@]}" -f "$foreign" \
+  | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}" "$foreign"
+planted="$(helm template "$release" "$chart" "${hive_join[@]}" -f "$foreign" --set hive.join.serveLedgerCa=true \
+  | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}" "$foreign" 2>&1 >/dev/null || true)"
+if [[ $planted != *"the hive join env is"* ]]; then
+  printf 'the chart check did not flag a hive join serving its ledger CA with serveLedgerCa off: %s\n' "$planted" >&2
+  exit 1
+fi
 planted="$(helm template "$release" "$chart" | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}" 2>&1 >/dev/null || true)"
 if [[ $planted != *"the chart renders no hive join Deployment"* ]]; then
   printf 'the chart check did not flag a missing hive join service: %s\n' "$planted" >&2
@@ -366,6 +402,7 @@ kubectl create secret generic swarm-ledger-tls --from-file="$ledger_tls/tls.crt"
 rm -rf "$ledger_tls"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
+bash "$chart/ci/redis-readiness-proof.sh" "$release"
 
 ca_dir="$(mktemp -d)"
 (
@@ -441,7 +478,26 @@ if [[ $restarts != 0 ]]; then
 fi
 printf 'controller restarts: 0\n'
 
+frozen_pod="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].metadata.name}')"
+frozen_container="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
+frozen_holder="$(kubectl exec "$frozen_pod" -c controller -- python -c 'import json; from scripts.swarm import controller; print(json.dumps({"host": controller._host(), "pid": 1, "start": controller._stat(1)[19]}))')"
 docker exec "$cluster-control-plane" pkill -STOP -f "agentihooks controller run"
+frozen_lock="$(kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HOLDER="$frozen_holder" python - <<'FROZEN'
+import json
+import os
+import uuid
+
+from scripts.swarm.store import connect
+
+store = connect()
+slug = os.environ["SLUG"]
+epoch = int(store.redis.get(store.key(slug, "control-epoch")))
+token = json.dumps({"epoch": epoch, "token": uuid.uuid4().hex, **json.loads(os.environ["HOLDER"])})
+store.redis.set(store.key(slug, "tick-lock"), token, px=600_000, nx=True)
+print(store.redis.get(store.key(slug, "tick-lock")))
+FROZEN
+)"
+printf 'planted a held tick lock while the controller is frozen\n'
 printf 'controller frozen; its lease must lapse and the liveness probe must restart it\n'
 kubectl wait pod "${controller[@]}" --for=jsonpath='{.status.containerStatuses[0].restartCount}'=1 --timeout 5m || true
 restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
@@ -450,6 +506,24 @@ if [[ $restarts != 1 ]]; then
   exit 1
 fi
 printf 'liveness probe restarted the frozen controller\n'
+terminated="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.containerID}')"
+current="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
+if [[ $terminated != "$frozen_container" || $current == "$frozen_container" ]]; then
+  printf 'the frozen controller container has no confirmed termination record\n' >&2
+  exit 1
+fi
+kubectl exec -i "$ledger_pod" -- env SLUG="$slug" TOKEN="$frozen_lock" python - <<'RELEASE'
+import os
+
+from scripts.swarm import controller
+from scripts.swarm.store import connect
+
+store = connect()
+slug, token = os.environ["SLUG"], os.environ["TOKEN"]
+controller.release_tick_lock(store, slug, token)
+assert store.redis.get(store.key(slug, "tick-lock")) != token
+print("released only the captured tick lock after its frozen container terminated")
+RELEASE
 retaken=""
 for _ in $(seq 180); do
   held="$(read_lease)" || held="{}"
@@ -961,5 +1035,6 @@ fi
 printf 'the controller start pass reached the herdr client and refused nothing\n'
 wait "$terminal"
 bash "$chart/ci/terminal-attach-proof.sh" "$terminal_image" "$release" "$slug"
+bash "$chart/ci/startup-refusal-proof.sh" "$image" "$release" "$slug"
 wait "$route"
 printf 'Helm chart kind proof passed\n'

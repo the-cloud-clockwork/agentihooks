@@ -156,7 +156,7 @@ def test_no_tls_settings_serve_plain_http():
 
 
 @pytest.fixture
-def tls_ledger(cert):
+def tls_ledger(cert, monkeypatch):
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     handler = type(
         "TLSHandler",
@@ -171,8 +171,9 @@ def tls_ledger(cert):
     with (
         patch("hooks._redis.get_redis", return_value=None),
         patch.object(ledger_server, "ALLOWED_HOSTS", {f"localhost:{port}"}),
-        patch.dict(os.environ, {"LEDGER_CA_PEM": Path(cert[0]).read_text()}),
+        patch.dict(os.environ),
     ):
+        monkeypatch.setenv("LEDGER_CA_PEM", Path(cert[0]).read_text())
         thread.start()
         try:
             yield {"base": f"https://localhost:{port}", "port": port, "admin": core.read_token(page)}

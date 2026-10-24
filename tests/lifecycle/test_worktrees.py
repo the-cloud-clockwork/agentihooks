@@ -3,8 +3,9 @@ import time
 
 from hooks.lifecycle.gitstate import TreeState
 from hooks.lifecycle.lease import add_holder, admin_dir, lease_path
+from hooks.lifecycle.liveness import Snapshot
 from hooks.lifecycle.model import Finding, Holder, Lease, Root
-from hooks.lifecycle.worktrees import CLEAN_IDLE, _idle_verdict, classify, discover, nested_worktrees
+from hooks.lifecycle.worktrees import CLEAN_IDLE, _idle_verdict, classify, discover, nested_worktrees, stale_after
 
 from .conftest import age, git, process, snap
 
@@ -173,3 +174,106 @@ def test_discover_follows_git_registry_to_deeply_nested_worktrees(repo, tmp_path
     assert found[deep].id == "scratchpad"
     outside = repo.worktree("elsewhere", base=tmp_path / "unmanaged")
     assert outside not in dict(discover(roots))
+
+
+DAY = 24 * HOUR
+
+
+def test_stale_worktree_is_acted_on_whatever_holds_it(repo, monkeypatch):
+    monkeypatch.setenv("WT_STALE_DAYS", "3")
+    used = repo.worktree("stale-used")
+    age(used, 4 * DAY)
+    assert verdict(repo, used, cwds=(str(used),)) == ("remove", "untouched over 3 days though a process works inside")
+    assert verdict(repo, used, uptime=600) == ("remove", "untouched over 3 days though boot grace")
+    busy = repo.worktree("stale-busy")
+    (admin_dir(busy) / "MERGE_HEAD").write_text("x\n")
+    age(busy, 4 * DAY)
+    assert verdict(repo, busy) == ("remove", "untouched over 3 days though git MERGE_HEAD in progress")
+    locked = repo.worktree("stale-locked")
+    (admin_dir(locked) / "locked").write_text("")
+    age(locked, 4 * DAY)
+    assert verdict(repo, locked) == ("remove", "untouched over 3 days though git-locked")
+    dirty = repo.worktree("stale-dirty")
+    (dirty / "notes.txt").write_text("unsaved\n")
+    age(dirty, 4 * DAY)
+    assert verdict(repo, dirty, cwds=(str(dirty),)) == (
+        "snapshot",
+        "untouched over 3 days though a process works inside",
+    )
+    plant = repo.worktree("stale-plant")
+    add_holder(plant, "ephemeral", Holder("", 1, 1, "gone"), 0.0)
+    (plant / "notes.txt").write_text("unsaved\n")
+    age(plant, 4 * DAY)
+    assert verdict(repo, plant, cwds=(str(plant),)) == (
+        "remove",
+        "untouched over 3 days though a process works inside",
+    )
+    age(used, 2 * DAY)
+    assert verdict(repo, used, cwds=(str(used),)) == ("keep", "a process works inside")
+
+
+def test_stale_never_overrides_a_protected_branch_or_a_live_owner(repo, monkeypatch):
+    monkeypatch.setenv("WT_STALE_DAYS", "1")
+    main = repo.worktree("main")
+    age(main, 5 * DAY)
+    assert verdict(repo, main) == ("keep", "protected branch main")
+    owned = repo.worktree("stale-owned")
+    add_holder(owned, "worktree", Holder("", 4242, 77, "boot-1"), 0.0)
+    age(owned, 5 * DAY)
+    assert verdict(repo, owned, table={4242: process(4242, start=77)}) == ("keep", "owner session alive")
+
+
+def test_stale_boundary_is_inclusive(repo, monkeypatch):
+    monkeypatch.setenv("WT_STALE_DAYS", "3")
+    used = repo.worktree("edge-used")
+    age(used, DAY)
+    touched = classify(used, repo.root(), snap()).last_touch
+    exact = Snapshot("boot-1", 99999.0, touched + 3 * DAY, {}, (str(used),), {})
+    finding = classify(used, repo.root(), exact)
+    assert (finding.action, finding.reason) == ("remove", "untouched over 3 days though a process works inside")
+
+
+def test_a_locked_worktree_mid_merge_is_kept_not_skipped(repo):
+    path = repo.worktree("locked-merge")
+    (admin_dir(path) / "locked").write_text("")
+    (admin_dir(path) / "MERGE_HEAD").write_text("x\n")
+    age(path, 30 * HOUR)
+    assert verdict(repo, path) == ("keep", "git-locked")
+
+
+def test_stale_days_default_to_seven_and_are_read_on_every_call(repo, monkeypatch):
+    monkeypatch.delenv("WT_STALE_DAYS", raising=False)
+    assert stale_after() == 7 * DAY
+    used = repo.worktree("week-used")
+    age(used, 6 * DAY)
+    assert verdict(repo, used, cwds=(str(used),)) == ("keep", "a process works inside")
+    age(used, 7 * DAY)
+    assert verdict(repo, used, cwds=(str(used),)) == ("remove", "untouched over 7 days though a process works inside")
+    monkeypatch.setenv("WT_STALE_DAYS", "0.5")
+    assert stale_after() == DAY / 2
+    for unusable in ("soon", "0", "-2", "nan"):
+        monkeypatch.setenv("WT_STALE_DAYS", unusable)
+        assert stale_after() == 7 * DAY, unusable
+
+
+def test_unique_work_in_a_scratch_repository_snapshots_with_a_removal_fallback(repo, tmp_path):
+    tree = repo.worktree("fixture", base=tmp_path / "scratch" / "task")
+    (tree / "notes.txt").write_text("unsaved\n")
+    age(tree, 25 * HOUR)
+    finding = classify(tree, Root("scratchpad", str(tmp_path), "scratch"), snap())
+    assert (finding.action, finding.reason, finding.disposable) == (
+        "snapshot",
+        "unique work, owner gone: push to wip/ then remove; scratch repository: removed if the push fails",
+        True,
+    )
+    outside = classify(tree, Root("scratchpad", str(tmp_path / "scratch"), "scratch"), snap())
+    assert (outside.action, outside.reason, outside.disposable) == (
+        "snapshot",
+        "unique work, owner gone: push to wip/ then remove",
+        False,
+    )
+    managed = classify(tree, Root("worktrees", str(tmp_path), "worktrees"), snap())
+    assert (managed.action, managed.disposable) == ("snapshot", False)
+    age(tree, 3 * HOUR)
+    recent = classify(tree, Root("scratchpad", str(tmp_path), "scratch"), snap())
+    assert (recent.action, recent.reason, recent.disposable) == ("keep", "unique work, recent", False)

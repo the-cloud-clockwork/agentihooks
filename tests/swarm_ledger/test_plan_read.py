@@ -1,3 +1,4 @@
+import io
 import json
 import re
 
@@ -369,7 +370,8 @@ def test_task_read_appends_the_linked_cases_after_the_slice(tmp_path, monkeypatc
 def test_task_read_resolves_its_anchor_after_lines_are_inserted(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
     original = "<!-- slice: first -->\n### First\nEarlier work\n\n<!-- slice: assigned -->\n### Assigned\nDo assigned work\n\n<!-- slice: later -->\n### Later\nLater work\n"
-    file = ledger_artifacts.store("shifted", "plan.md", original.encode())
+    inserted = "".join(f"Inserted row {n}\n" for n in range(30))
+    file = ledger_artifacts.store("shifted", "plan.md", (inserted + original).encode())
     ref = {"artifact": f"http://127.0.0.1:8765/artifacts/shifted/{file['id']}", "lines": "1-11"}
     doc = {
         "artifacts": [{"plan": True, "file": file}],
@@ -377,8 +379,6 @@ def test_task_read_resolves_its_anchor_after_lines_are_inserted(tmp_path, monkey
         "tasks": [{"id": "assigned", "phase": "p1", "plan_slice": "assigned", "plan_lines": "5-7"}],
     }
     SQLiteLedgerRepository(tmp_path / DATABASE).import_document("shifted", {**doc, "_meta": {"rev": 1}})
-    inserted = "".join(f"Inserted row {n}\n" for n in range(30))
-    ledger_artifacts.path_of("shifted", file["id"]).write_text(inserted + original)
     assert run(capsys, ["--task", "assigned"], {"AGENTIHOOKS_SWARM": "shifted"}) == (
         "".join(f"Inserted row {n}\n" for n in range(24, 30)) + original
     )
@@ -416,3 +416,94 @@ def test_swarm_v2_package_read_appends_the_linked_cases(monkeypatch):
     assert result.endswith(f"\n#### Detail\n- a detail\n\n{CASE_B}\n{CASE_C}")
     assert result.count("### Case A\n") == 1
     assert result.count("- a body\n") == 1
+
+
+def test_remote_hive_reads_the_ledger_and_plan_through_the_hosted_server(slug, tmp_path, monkeypatch, capsys):
+    from scripts.swarm_ledger import ledger, ledger_link
+    from scripts.swarm_ledger.storage import read_ledger
+
+    served = read_ledger(tmp_path, slug, "tasks", "phases", "artifacts")
+    file_id = served["artifacts"][0]["file"]["id"]
+    plan = ledger_artifacts.path_of(slug, file_id).read_bytes()
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path / "absent")
+    reads, opened = [], []
+
+    def resource(name, path, collection=False):
+        reads.append((name, path, collection))
+        return served[path]
+
+    def urlopen(request, timeout, environ):
+        opened.append((request.full_url, timeout, environ))
+        return io.BytesIO(plan)
+
+    monkeypatch.setattr(ledger, "resource", resource)
+    monkeypatch.setattr(ledger_link, "urlopen", urlopen)
+    environ = {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_DEPLOYMENT": "compose", "LEDGER_URL": "https://ledger.test/"}
+    assert run(capsys, ["--task", "mid"], environ) == numbered(5, 27)
+    assert reads == [(slug, "tasks", True), (slug, "phases", True), (slug, "artifacts", True)]
+    assert opened == [(f"https://ledger.test/artifacts/{slug}/{file_id}", ledger.REQUEST_TIMEOUT, environ)]
+
+
+def hosted_refusal(monkeypatch, code):
+    import urllib.error
+
+    from scripts.swarm_ledger import ledger
+
+    def resource(name, path, collection=False):
+        raise urllib.error.HTTPError(f"https://ledger.test/{path}", code, "refused", {}, None)
+
+    monkeypatch.setattr(ledger, "resource", resource)
+    return {"AGENTIHOOKS_SWARM": "gone", "AGENTIHOOKS_DEPLOYMENT": "compose", "LEDGER_URL": "https://ledger.test"}
+
+
+def test_remote_hive_names_a_ledger_the_hosted_server_does_not_hold(monkeypatch):
+    assert refusal(["--task", "mid"], hosted_refusal(monkeypatch, 404)) == "no ledger gone"
+
+
+def test_remote_hive_passes_on_other_hosted_server_refusals(monkeypatch):
+    import urllib.error
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        plan_read.main(["read", "--task", "mid"], hosted_refusal(monkeypatch, 503))
+    assert caught.value.code == 503
+
+
+def served_refusal(monkeypatch, code):
+    import urllib.error
+
+    from scripts.swarm_ledger import ledger_link
+
+    def urlopen(request, timeout, environ):
+        raise urllib.error.HTTPError(request.full_url, code, "refused", {}, None)
+
+    monkeypatch.setattr(ledger_link, "urlopen", urlopen)
+    return {"LEDGER_URL": "https://ledger.test", "AGENTIHOOKS_DEPLOYMENT": "compose"}
+
+
+def test_a_plan_the_hosted_server_does_not_hold_reads_as_a_missing_artifact(monkeypatch):
+    with pytest.raises(ValueError) as caught:
+        plan_read._served(served_refusal(monkeypatch, 404), "chunks", "abc.md")
+    assert str(caught.value) == "no stored artifact abc.md"
+
+
+def test_other_plan_refusals_from_the_hosted_server_pass_on(monkeypatch):
+    import urllib.error
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        plan_read._served(served_refusal(monkeypatch, 503), "chunks", "abc.md")
+    assert caught.value.code == 503
+
+
+def test_stored_plan_text_comes_from_the_given_loader(slug, tmp_path):
+    from scripts.swarm_ledger import plan_ranges
+    from scripts.swarm_ledger.storage import read_ledger
+
+    doc = read_ledger(tmp_path, slug, "phases", "artifacts")
+    asked = []
+
+    def load(name, file_id):
+        asked.append((name, file_id))
+        return b"served plan\n"
+
+    assert plan_ranges.stored_text(doc["phases"][0]["plan_ref"], doc, load) == "served plan\n"
+    assert asked == [(slug, doc["artifacts"][0]["file"]["id"])]

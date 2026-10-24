@@ -24,19 +24,25 @@ jobs:
       - name: Pull the Python base with bounded retries
         run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
       - name: Build the swarm image
-        if: ${{ !cancelled() }}
+        id: build
         run: |
           docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
           build=$!
           status=0
-          bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7 &
+          bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &&
+            docker tag public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 &
           redis=$!
-          bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine || status=$?
+          bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nats:2.15.1-alpine &&
+            docker tag public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine &
+          nats=$!
+          bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
+            docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
           wait "$redis" || status=$?
+          wait "$nats" || status=$?
           wait "$build" || status=$?
           exit "$status"
-      - name: Run the hive launch, Compose install, hive join and Compose hive scenarios in parallel
-        if: ${{ !cancelled() }}
+      - name: Run the hive launch, Compose install, hive join, Compose hive, Compose task and recovery drill scenarios in parallel
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           SWARM_SMOKE_RUNTIME_IMAGES_READY: 'true'
         run: >-
@@ -45,12 +51,14 @@ jobs:
           scripts/packaging/swarm-smoke.sh
           scripts/packaging/hive-join-smoke.sh
           scripts/packaging/compose-hive-smoke.sh
+          scripts/packaging/compose-task-smoke.sh
+          scripts/packaging/compose-recovery-drill.sh
       - uses: actions/setup-python@v5
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
           python-version: '3.12'
       - name: Bring up the local stack twice with swarm init from the installed package
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           SWARM_SMOKE_RUNTIME_IMAGES_READY: 'true'
         run: bash scripts/packaging/swarm-init-smoke.sh
@@ -58,5 +66,5 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: bash scripts/packaging/hive-launch-attestation-proof.sh
       - name: Run the pinned herdr and ssh clients inside the swarm image
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check

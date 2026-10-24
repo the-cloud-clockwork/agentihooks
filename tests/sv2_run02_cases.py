@@ -20,7 +20,7 @@ def colliding(root: Path) -> dict:
         router = RuntimeRouter([local, remote], REMOTE)
         worker = on_worker(router)
         on_anton = record()
-        impostor = replace(record(namespace=WORKER), name="engineer@a1b2c3-0003")
+        impostor = replace(record(namespace="boot-anton/pid:[4026532001]"), name="engineer@a1b2c3-0003")
         worker_end = router.terminate(worker)
         anton_end = router.terminate(on_anton)
         impostor_end = router.terminate(impostor)

@@ -19,11 +19,16 @@ from pathlib import Path
 
 import httpx
 
+from hooks.config import langfuse_route
 from hooks.observability.signals import safe_name
+from scripts import profile_telemetry
 from scripts.doctor import registry
 from scripts.swarm.runtime import SWARM_HOME
 
 DEFAULT_HOST = "https://langfuse.homeofanton.com"
+SWARM_PROJECT = "agent-swarm"
+CALLER_ROUTE = ("LANGFUSE_HOST", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
+INGRESS = httpx.URL(langfuse_route({})[0]).host
 PAGE = 100
 OBSERVATION_PAGE = 50
 WORKED = {"claimed", "pr", "done"}
@@ -35,6 +40,8 @@ CACHE_DIR = "doctor-traces"
 class Budget:
     active_seconds: float = 15.0
     history_seconds: float = 45.0
+    wait_seconds: float = 15.0
+    step_seconds: float = 55.0
     request_seconds: float = 7.0
     trace_pages: int = 20
     observation_pages: int = 20
@@ -44,14 +51,50 @@ class Budget:
 def client(environ: Mapping[str, str], timeout: float = Budget.request_seconds) -> Callable[[str, dict], dict]:
     host = (environ.get("LANGFUSE_HOST") or DEFAULT_HOST).rstrip("/")
     auth = (environ.get("LANGFUSE_PUBLIC_KEY", ""), environ.get("LANGFUSE_SECRET_KEY", ""))
+    send = _through_ingress if host == DEFAULT_HOST else httpx.get
 
     def get(path: str, params: dict) -> dict:
         if not all(auth):
             raise RuntimeError("LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set")
-        response = httpx.get(f"{host}/api/public/{path}", params=params, auth=auth, timeout=timeout)
+        response = send(f"{host}/api/public/{path}", params=params, auth=auth, timeout=timeout)
         response.raise_for_status()
         return response.json()
 
+    return get
+
+
+def _through_ingress(url: str, **options) -> httpx.Response:
+    public = httpx.URL(url)
+    with httpx.Client() as session:
+        return session.get(
+            public.copy_with(host=INGRESS),
+            headers={"Host": public.host},
+            extensions={"sni_hostname": public.host},
+            **options,
+        )
+
+
+def installed_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """The caller's environment with its Langfuse host and keys replaced by the installed swarm telemetry keys,
+    so the installed secret only ever reaches the default host."""
+    keys = {name.removeprefix("OTEL_"): value for name, value in profile_telemetry.agentihooks_langfuse_keys().items()}
+    return {name: value for name, value in environ.items() if name not in CALLER_ROUTE} | keys
+
+
+def measured_client(environ: Mapping[str, str]) -> Callable[[str, dict], dict]:
+    """The reader on the installed keys, refused unless they serve the watched swarm's Langfuse project."""
+    get = client(installed_env(environ))
+    try:
+        names = [project.get("name") for project in get("projects", {})["data"]]
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"Langfuse project identity is unavailable: {type(exc).__name__}: {exc}") from exc
+    if not names or not all(names):
+        raise RuntimeError("Langfuse project identity is unavailable: the installed keys name no project")
+    if names != [SWARM_PROJECT]:
+        raise RuntimeError(
+            f"the installed Langfuse keys serve project {', '.join(names)}, "
+            f"not the watched swarm project {SWARM_PROJECT}"
+        )
     return get
 
 
@@ -120,7 +163,7 @@ def _listing(slug, get, budget, deadline, clock):
                 return rows, False, max(body["meta"]["totalItems"] - len({row["id"] for row in rows}), 0), []
             page += 1
     except Exception as exc:  # noqa: BLE001
-        return rows, False, 0, [f"trace listing failed: {registry.failure(exc)}"]
+        return rows, False, 0, [registry.failed_read("trace listing", exc)]
 
 
 def _backfill(get, cache, trace, budget, deadline, clock):
@@ -132,7 +175,7 @@ def _backfill(get, cache, trace, budget, deadline, clock):
         if capped:
             entry["capped"] = True
     except Exception as exc:  # noqa: BLE001
-        entry = {"updated_at": trace.get("updatedAt"), "failed": registry.failure(exc)}
+        entry = {"updated_at": trace.get("updatedAt"), "failed": registry.failed_read("observation read", exc)}
     entry["deduplicated"] = True
     if _settled(entry):
         registry.save(_cache_path(cache, trace["id"]), entry)
@@ -188,6 +231,24 @@ def history(
         "unreadable": [f"trace {key} unreadable: {e['failed']}" for key, e in entries.items() if e.get("failed")],
     }
     return found, coverage, failures
+
+
+def waits(
+    read: Callable[[str], list[dict]],
+    names: list[str],
+    started: float,
+    budget: Budget,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[dict[str, list[dict]], list[str]]:
+    """Each named agent's wait history until the wait budget or the step that started at `started` is spent;
+    the agents left unread are returned as a list."""
+    deadline = min(started + budget.step_seconds, clock() + budget.wait_seconds)
+    found = {}
+    for name in names:
+        if clock() >= deadline:
+            break
+        found[name] = read(name)
+    return found, names[len(found) :]
 
 
 def sessions(tasks: list[dict], agents: list[dict]) -> list[dict]:

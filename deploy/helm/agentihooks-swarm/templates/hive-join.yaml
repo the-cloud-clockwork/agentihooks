@@ -1,5 +1,5 @@
 {{- $join := .Values.hive.join }}
-{{- if $join.enabled }}
+{{- if and $join.enabled (not .Values.hiveOnly) }}
 {{- if not $join.tlsSecretName }}
 {{- fail "hive.join.tlsSecretName is required: the join endpoint hands out credentials, so it serves only TLS" }}
 {{- end }}
@@ -12,8 +12,15 @@
 {{- if not $join.ingressFrom }}
 {{- fail "hive.join.ingressFrom needs at least one peer: an empty peer list would admit every source to the join port" }}
 {{- end }}
+{{- $signer := $join.natsSigner }}
+{{- if and $signer.secretName (not $signer.trustedOperator) }}
+{{- fail "hive.join.natsSigner.trustedOperator is required with natsSigner.secretName: the endpoint refuses to sign for an operator NATS does not trust" }}
+{{- end }}
 {{- $fullname := include "swarm.fullname" . }}
 {{- $reload := list $join.tlsSecretName }}
+{{- with $signer.secretName }}
+{{- $reload = append $reload . }}
+{{- end }}
 {{- with ($join.redisSecret.name | default .Values.redis.existingSecret.name) }}
 {{- $reload = append $reload . }}
 {{- end }}
@@ -72,6 +79,15 @@ spec:
             {{- else }}
             {{- include "swarm.redisEnv" (dict "Values" .Values "Chart" .Chart "Release" .Release "role" "hive-join") | nindent 12 }}
             {{- end }}
+            {{- if $join.serveLedgerCa }}
+            {{- include "swarm.ledgerCa" . | nindent 12 }}
+            {{- end }}
+            {{- if $signer.secretName }}
+            - name: AGENTIHOOKS_NATS_SIGNER
+              value: file:/nats-signer
+            - name: AGENTIHOOKS_NATS_TRUSTED_OPERATOR
+              value: {{ $signer.trustedOperator | quote }}
+            {{- end }}
           ports:
             - name: join
               containerPort: {{ $join.port }}
@@ -90,9 +106,18 @@ spec:
             - name: tls
               mountPath: /tls
               readOnly: true
+            {{- if $signer.secretName }}
+            - name: nats-signer
+              mountPath: /nats-signer
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tls
           secret: {secretName: {{ $join.tlsSecretName | quote }}}
+        {{- with $signer.secretName }}
+        - name: nats-signer
+          secret: {secretName: {{ . | quote }}}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

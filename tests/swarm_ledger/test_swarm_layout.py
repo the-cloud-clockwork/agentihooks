@@ -34,7 +34,6 @@ ROWS = [
     "hives-box",
     "overlays-box",
     "agents-box",
-    "health-box",
     "handoff-box",
     "recovery-box",
     "freeze-box",
@@ -184,7 +183,7 @@ def open_page(browser):
         page.context.close()
 
 
-def test_rows_run_header_alert_capacity_quota_overlays_agents_health_handoffs():
+def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_with_no_health_panel():
     page = page_source()
     box = page.split('<div id="swarm-box">', 1)[1].split('<aside id="stats-column"', 1)[0]
     positions = [box.index(f'id="{row}"') for row in ROWS]
@@ -202,6 +201,7 @@ def test_rows_run_header_alert_capacity_quota_overlays_agents_health_handoffs():
         "swarm-row-work",
         "swarm-row-accounts",
         "doctor-box",
+        'id="health',
         "<section",
     ):
         assert gone not in box, gone
@@ -217,7 +217,6 @@ def test_every_swarm_row_stays_full_width_at_every_viewport(open_page):
             "hives-box",
             "overlays-box",
             "agents-box",
-            "health-box",
             "handoff-box",
         ):
             assert abs(page.box(row)["width"] - full) < 1, row
@@ -430,7 +429,7 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     payload["agents"][1]["overlays"] = ["qitp-tuner", "trader", "reviewer"]
     page = open_page(payload)
     assert page.table("swarm-agents") == [
-        ["master-1", "—", "—", "—", "opus high", "—", "—", "LIVE", "2h 0m", "message\nterminate"],
+        ["master-1\nluna", "—", "—", "—", "opus high", "—", "—", "LIVE", "2h 0m", "message\nterminate"],
         [
             "eng-58",
             "eng",
@@ -573,7 +572,7 @@ def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(o
     ]
     rows = page.table("swarm-agents")
     assert [row[:2] + row[7:10] for row in rows] == [
-        ["master-1", "—", "LIVE", "WORKING seen 1m ago\nlocal · gen 1", "—"],
+        ["master-1\nluna", "—", "LIVE", "WORKING seen 1m ago\nlocal · gen 1", "—"],
         ["eng-58", "eng", "IDLE", "INPUT WAIT not seen\nlocal · gen 3", "—"],
         [
             "eng-60",
@@ -650,7 +649,7 @@ def test_agents_table_lists_live_agents_first_and_pages_the_finished_ones_newest
     payload["agents"] = finished[:60] + payload["agents"] + finished[60:]
     page = open_page(payload, width=1920)
     rows = page.table("swarm-agents")
-    assert [row[0] for row in rows[:2]] == ["master-1", "eng-58"]
+    assert [row[0] for row in rows[:2]] == ["master-1\nluna", "eng-58"]
     assert [row[0] for row in rows[2:52]] == [f"done-{i}" for i in range(119, 69, -1)]
     assert all(row[7] == "FINISHED" and row[9] == "" for row in rows[2:52])
     assert [cell.lower() for cell in rows[52]] == ["show 50 more finished agents · 70 left"]
@@ -791,7 +790,7 @@ def test_full_length_agent_names_stay_on_one_line_and_fit_the_desktop_column(ope
         })""",
     )
     assert lines and all(count == 1 for _text, count in lines if "\n" not in _text), lines
-    assert [row[0] for row in page.table("swarm-agents")] == ["master@323133-0004", "engineer@323133-0072"]
+    assert [row[0] for row in page.table("swarm-agents")] == ["master@323133-0004\nluna", "engineer@323133-0072"]
     titles = page.tab.eval_on_selector_all("#swarm-agents td:first-child .sw-id", "ids => ids.map(e => e.title)")
     assert titles == ["master@323133-0004", "engineer@323133-0072"]
 
@@ -923,27 +922,6 @@ def test_doctor_row_shows_off_or_on_and_toggles_its_own_button(open_page):
     assert not on.tab.locator("[data-swarm=doctor_start]").is_visible()
 
 
-def test_health_rows_carry_evidence_threshold_seen_verdict_and_note(open_page):
-    finding = {
-        "id": "ceremony/eng-59",
-        "kind": "ceremony",
-        "subject": "eng-59",
-        "evidence": ["24 moves", "1 outcome"],
-        "threshold": "20 · ratio 12",
-        "seen_at": NOW_MS - 540_000,
-        "verdict": {"value": "false-positive", "note": "pr open"},
-    }
-    page = open_page(status(findings=[finding]))
-    row = page.table("health")[0]
-    assert row[:5] == ["ceremony", "eng-59", "24 moves · 1 outcome", "20 · ratio 12", "9m ago"]
-    assert page.tab.locator("#health .hl-pick").input_value() == "false-positive"
-    assert page.tab.locator("#health .hl-note").input_value() == "pr open"
-    page.tab.locator("#health .hl-note").fill("still open")
-    page.tab.locator("#health .hl-pick").select_option("resolved")
-    page.tab.wait_for_function("() => !document.querySelector('#swarm-modes button').disabled")
-    assert page.puts == [{"action": "verdict", "id": "ceremony/eng-59", "verdict": "resolved", "note": "still open"}]
-
-
 def test_handoff_rows_show_each_seat_and_offer_the_restore_decision(open_page):
     handoffs = [
         {
@@ -978,7 +956,7 @@ def test_handoff_rows_show_each_seat_and_offer_the_restore_decision(open_page):
 
 def test_swarm_tab_styles_use_only_palette_tokens():
     page = page_source()
-    rules = re.findall(r"^\s*(?:\.sw-|#swarm|\.lbl|#health-table|#agents-table|#quota-table)[^{]*\{[^}]*\}", page, re.M)
+    rules = re.findall(r"^\s*(?:\.sw-|#swarm|\.lbl|#agents-table|#quota-table)[^{]*\{[^}]*\}", page, re.M)
     assert len(rules) > 30
     for rule in rules:
         assert not re.search(

@@ -11,6 +11,7 @@ from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm.tick import Placed, SpawnError
 from scripts.swarm_v2.runtime.base import (
+    HIVE_LANES,
     LOCAL,
     Outcome,
     Placement,
@@ -97,7 +98,7 @@ def hive_controller(runtime: RoutedRuntime, store: RedisStore, slug: str, held: 
         [*runtime.router.runtimes.values(), hive],
         default=HIVE,
         disabled=runtime.router.disabled,
-        placement=Placement(HIVE, local_profiles=frozenset()),
+        placement=Placement(HIVE, lanes=HIVE_LANES, local_profiles=frozenset()),
     )
     placed = RoutedRuntime(runtime.herdr_runtime, router)
     placed.hive_launch = hive

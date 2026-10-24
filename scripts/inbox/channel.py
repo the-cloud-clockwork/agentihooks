@@ -9,10 +9,12 @@ that runs without the channel.
 import json
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from scripts.inbox.bus import FeedError, feed_for
 from scripts.inbox.cli import check_answer, identity
-from scripts.inbox.seen import claim
+from scripts.inbox.seen import CLAIM_BATCH, claim
 from scripts.inbox.store import NOTIFY, InboxError, connect
 
 NAME = "inbox"
@@ -23,6 +25,14 @@ RECHECK_S = 5.0
 SETTLE_S = 1.0
 METHOD = "notifications/claude/channel"
 UNSHOWN = "the inbox channel could not show it"
+UNCONFIRMED_MAX = 10
+HELD = ("pending", "delivered")
+
+
+@dataclass
+class Pushed:
+    shown: set[str] = field(default_factory=set)
+    held: set[str] = field(default_factory=set)
 
 
 def launch_args(root: str = ROOT, python: str = sys.executable, *, active: bool = True) -> list[str]:
@@ -127,11 +137,13 @@ async def _recheck(store, me, pubsub):
         raise error
 
 
-async def _deliver(store, me, write):
+async def _deliver(store, me, write, pushed):
     import mcp.types as types
     from mcp.shared.message import SessionMessage
 
-    items = claim(store, me)
+    pushed.held.intersection_update([item_id for item_id in pushed.held if _held(store, item_id)])
+    room = UNCONFIRMED_MAX - len(pushed.held)
+    items = [item for item in claim(store, me, min(room, CLAIM_BATCH)) if item.id not in pushed.shown]
     for index, item in enumerate(items):
         note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
         try:
@@ -140,23 +152,35 @@ async def _deliver(store, me, write):
             for unsent in items[index:]:
                 store.requeue(unsent.id, me, UNSHOWN)
             raise
+        pushed.shown.add(item.id)
+        pushed.held.add(item.id)
 
 
-async def _push(store, me, write, ready):
+def _held(store, item_id):
+    try:
+        return store.get(item_id).state in HELD
+    except InboxError:
+        return False
+
+
+async def _push(store, me, write, ready, feed=None):
     import anyio
     from redis.exceptions import RedisError
 
-    pubsub, delay = None, 1.0
+    pubsub, delay, pushed = None, 1.0, Pushed()
     try:
         await ready.wait()
         await anyio.sleep(SETTLE_S)
         while True:
             try:
-                if pubsub is None:
+                if pubsub is None and feed is None:
                     pubsub = store.redis.pubsub()
                     pubsub.subscribe(NOTIFY)
-                await _deliver(store, me, write)
-                await _recheck(store, me, pubsub)
+                await _deliver(store, me, write, pushed)
+                if feed is None:
+                    await _recheck(store, me, pubsub)
+                else:
+                    await _pull(feed)
                 delay = 1.0
             except RedisError:
                 if pubsub is not None:
@@ -167,9 +191,21 @@ async def _push(store, me, write, ready):
     finally:
         if pubsub is not None:
             pubsub.close()
+        if feed is not None:
+            feed.close()
 
 
-async def run(store, me, read, write, active=True):
+async def _pull(feed):
+    import anyio
+
+    try:
+        await anyio.to_thread.run_sync(feed.settle)
+        await anyio.to_thread.run_sync(feed.wait, int(RECHECK_S * 1000))
+    except FeedError:
+        pass
+
+
+async def run(store, me, read, write, active=True, feed=None):
     import anyio
     import mcp.types as types
     from mcp.server.lowlevel import Server
@@ -198,7 +234,7 @@ async def run(store, me, read, write, active=True):
             except InboxError:
                 await anyio.sleep(delay)
                 delay = min(delay * 2, 30.0)
-        await _push(store, me, write, ready)
+        await _push(store, me, write, ready, feed if feed is not None else feed_for(store, me))
 
     options = server.create_initialization_options(experimental_capabilities={"claude/channel": {}})
     async with anyio.create_task_group() as group:

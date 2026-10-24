@@ -234,7 +234,13 @@ def test_missing_live_validation_retires_the_named_process(tmp_path):
     engine = runtime.HerdrRuntime(home=tmp_path, run=run)
     config = SimpleNamespace(slug="proof", repo=str(tmp_path), autonomy="delegate", compact_limit=0)
     with pytest.raises(SpawnError, match="validation is missing"):
-        engine._launch(config, "eng", "task", "worker", ["init-agent", "--agent", "codex", "--profile", "engineer"])
+        engine._launch(
+            config,
+            "eng",
+            "task",
+            "worker",
+            ["init-agent", "--dir", "/repo", "--agent", "codex", "--profile", "engineer"],
+        )
     assert calls[-1][1:] == ["terminate-agent", "worker", "--force-shared"]
 
 

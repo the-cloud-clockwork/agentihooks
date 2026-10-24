@@ -34,11 +34,13 @@ class BrokenMaster(FakeRuntime):
         return agent.name in (self.live if self.registered is None else self.registered)
 
 
-def outage(store):  # noqa: F811
+def outage(store, startup=True):  # noqa: F811
     runtime, ledger = BrokenMaster(), tasks(("t1", "eng"))
     tick("sw", store, ledger, runtime, 1)
     for at in (2, 3, 130_000):
         tick("sw", store, ledger, runtime, at)
+    if not startup:
+        store.redis.delete(store.key("sw", "master-start"))
     return runtime, ledger
 
 
@@ -71,7 +73,7 @@ def test_the_startup_retry_stays_bounded_inside_the_down_window(store):  # noqa:
 
 
 def test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promoted(store):  # noqa: F811
-    runtime, ledger = outage(store)
+    runtime, ledger = outage(store, startup=False)
     runtime.broken = False
     actions = tick("sw", store, ledger, runtime, 1 + DOWN)
     assert from_forced(actions, 2) == [
@@ -84,7 +86,7 @@ def test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promote
 
 
 def test_a_failed_forced_launch_promotes_one_live_engineer(store):  # noqa: F811
-    runtime, ledger = outage(store)
+    runtime, ledger = outage(store, startup=False)
     actions = tick("sw", store, ledger, runtime, 1 + DOWN)
     assert from_forced(actions, 4) == [
         "master down 5 minutes, forced a master launch",
@@ -144,7 +146,7 @@ def test_nobody_told_is_saved_before_its_notice(store):  # noqa: F811
 
 
 def test_a_finished_master_record_does_not_hold_off_the_promotion(store):  # noqa: F811
-    runtime, ledger = outage(store)
+    runtime, ledger = outage(store, startup=False)
     store.put_agent("sw", AgentRecord("master@a1b2c3-0099", MASTER, MASTER, state="finished", seat=MASTER_SEAT))
     actions = tick("sw", store, ledger, runtime, 1 + DOWN)
     assert f"promoted {ENGINEER} to restore the master: {BROKEN}" in actions
@@ -204,7 +206,7 @@ def test_a_master_that_binds_ends_the_promotion_and_hands_back(store):  # noqa: 
 
 
 def test_a_forced_launch_with_no_hook_promotes_after_the_startup_deadline(store):  # noqa: F811
-    runtime, ledger = outage(store)
+    runtime, ledger = outage(store, startup=False)
     runtime.broken, runtime.registered = False, set()
     tick("sw", store, ledger, runtime, 1 + DOWN)
     assert tick_master.promoted(store, "sw") == ""
@@ -230,7 +232,7 @@ def test_a_gone_promoted_engineer_is_replaced(store):  # noqa: F811
 
 
 def test_a_promoted_engineer_whose_record_is_gone_leaves_nobody_promoted(store):  # noqa: F811
-    runtime, ledger = outage(store)
+    runtime, ledger = outage(store, startup=False)
     tick("sw", store, ledger, runtime, 1 + DOWN)
     seat = workers(store)[0].seat
     runtime.live.discard(ENGINEER)
@@ -335,3 +337,19 @@ def test_the_status_line_names_the_promoted_engineer():
     state = {"since": 1, "failure": "master spawn failed: boom", "promoted": ENGINEER}
     assert tick_master.status_line(state) == f"promoted  {ENGINEER}  restoring the master: master spawn failed: boom"
     assert tick_master.status_line({"since": 1}) == ""
+
+
+@pytest.mark.parametrize("profile", ["", "custom-master"])
+def test_a_recycled_master_fills_its_empty_profile_and_keeps_saved_choices(store, profile):  # noqa: F811
+    launch = {"profile": profile, "harness": "claude", "model": "claude-opus-5-5", "effort": "high", "account": ""}
+    store.put_handoff("sw", MASTER, "continue", MASTER_SEAT, {"reason": "recycle", "launch": launch})
+    runtime = FakeRuntime()
+    assert "spawned master master@a1b2c3-0001" in tick("sw", store, tasks(), runtime, 1)
+    ((_, task),) = runtime.masters
+    saved = task["handoff_envelope"]["launch"]
+    assert saved["profile"] == (profile or "master")
+    assert {key: saved[key] for key in ("harness", "model", "effort")} == {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "high",
+    }

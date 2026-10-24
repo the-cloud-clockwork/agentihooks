@@ -187,7 +187,11 @@ class OperationJournal:
         return self._write(slug, update)
 
     def _current(self, slug: str, execution_id: str, generation: int, pipe: Any) -> Any:
-        raw = pipe.hget(self.store.key(slug, "executions"), execution_id)
+        from scripts.swarm.execution import ARCHIVE
+
+        raw = pipe.hget(self.store.key(slug, "executions"), execution_id) or pipe.hget(
+            self.store.key(slug, ARCHIVE), execution_id
+        )
         if not raw:
             raise OperationConflict(_ERRORS["admission"])
         agent = json.loads(raw)

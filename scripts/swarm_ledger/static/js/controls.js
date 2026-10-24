@@ -129,7 +129,7 @@ function opNote(phase, action, error) {
   const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy", gate: "Set gate mode",
     eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap", masters_down: "Lower masters step", masters_up: "Raise masters step",
     compact_down: "Lower compact limit", compact_up: "Raise compact limit",
-    effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", overlays: "Apply overlays", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota", routing: "Set routing", hive: "Set hive", master_move: "Move master",
+    effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", overlays: "Apply overlays", lift: "Lift the gate", quota_refresh: "Refresh quota", routing: "Set routing", hive: "Set hive", master_move: "Move master",
     attach: "Attach", drain: "Drain", cancel: "Cancel", force_stop: "Force stop", "restore-decision": "Recovery decision" }[action] || action;
   return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
 }
@@ -318,11 +318,4 @@ export function wireSwarm() {
   });
 
   wireHives();
-
-  $("health").addEventListener("change", (event) => {
-    const pick = event.target.closest("select.hl-pick");
-    if (!pick || !pick.value) return;
-    const row = pick.closest("tr");
-    swarmControl({ action: "verdict", id: pick.dataset.verdict, verdict: pick.value, note: row.querySelector(".hl-note").value.trim() });
-  });
 }

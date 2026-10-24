@@ -60,6 +60,36 @@ def test_a_lost_communication_annotation_is_retried():
     assert ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
 
 
+def test_a_shard_lost_again_on_its_in_run_rerun_is_not_requeued():
+    failed = [*lost_run(), job("unit rerun (3.11, 2)", SHUTDOWN), job("unit rerun (3.11, 5)", LOST)]
+    retry, reason = ci_queue_retry.decide(RUN, failed, WORKFLOW)
+    assert not retry
+    assert reason == "failed again on its in-run rerun: unit rerun (3.11, 2), unit rerun (3.11, 5)"
+
+
+def test_a_timed_out_rerun_is_listed_so_it_refuses_the_requeue(monkeypatch):
+    jobs = {
+        "total_count": 2,
+        "jobs": [
+            {"id": 1, "name": "unit (3.12, 2)", "conclusion": "failure"},
+            {"id": 2, "name": "unit rerun (3.12, 2)", "conclusion": "timed_out"},
+        ],
+    }
+
+    def api(*args):
+        if args[0].endswith("jobs?filter=latest&per_page=100"):
+            return json.dumps(jobs)
+        return "##[error]" + SHUTDOWN if args[0].endswith("/logs") else "[]"
+
+    monkeypatch.setattr(ci_queue_retry, "_api", api)
+    failed = ci_queue_retry.failed_jobs("o/r", 7)
+    assert [entry["name"] for entry in failed] == ["unit (3.12, 2)", "unit rerun (3.12, 2)"]
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (
+        False,
+        "failed again on its in-run rerun: unit rerun (3.12, 2)",
+    )
+
+
 def test_a_real_test_failure_is_not_retried():
     failed = [job("unit (3.11, 2)", RED), job("Gate — Required", "")]
     retry, reason = ci_queue_retry.decide(RUN, failed, WORKFLOW)
@@ -181,6 +211,36 @@ def test_colour_codes_in_the_shard_log_keep_the_runner_loss(monkeypatch):
     monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
     failed = ci_queue_retry.failed_jobs("o/r", 9)
     assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (True, "runner lost on unit (3.11, 2)")
+
+
+def unreadable_log_api(conclusion, annotations):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.12, 13)", "conclusion": conclusion}]}
+    pages = {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": json.dumps([{"message": note} for note in annotations]),
+    }
+
+    def api(path, *flags):
+        if path not in pages:
+            raise subprocess.CalledProcessError(1, ["gh", "api", path])
+        return pages[path]
+
+    return api
+
+
+def test_an_unreadable_shard_log_is_a_runner_loss(monkeypatch):
+    monkeypatch.setattr(ci_queue_retry, "_api", unreadable_log_api("cancelled", []))
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert failed == [{"name": "unit (3.12, 13)", "text": "The job log could not be read"}]
+    run = {**RUN, "conclusion": "cancelled"}
+    assert ci_queue_retry.decide(run, failed, WORKFLOW) == (True, "runner lost on unit (3.12, 13)")
+
+
+def test_an_unreadable_log_beside_a_step_exit_is_not_a_runner_loss(monkeypatch):
+    monkeypatch.setattr(ci_queue_retry, "_api", unreadable_log_api("failure", ["Process completed with exit code 1."]))
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert failed == [{"name": "unit (3.12, 13)", "text": "Process completed with exit code 1."}]
+    assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
 
 
 def cancelled_run_pages(lost_log):

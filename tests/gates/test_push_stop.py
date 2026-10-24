@@ -774,6 +774,16 @@ def test_the_hook_start_is_read_when_the_gate_is_built():
     assert PushStop(clock=lambda: 7.0).started == 7.0
 
 
+def test_the_pull_request_reader_is_the_injected_reader_or_the_ledger_events_view():
+    from scripts.swarm.ledger_events import view
+
+    def reader(url):
+        return None
+
+    assert PushStop(github=reader).github() is reader
+    assert PushStop().github() is view
+
+
 @pytest.mark.wall_clock
 def test_a_passing_gate_followed_by_a_slow_push_and_ledger_write_ends_inside_the_stop_condition(monkeypatch, rig):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
@@ -882,27 +892,42 @@ def test_a_push_slower_than_the_budget_is_cut_off_inside_the_stop_condition(monk
     assert rig.ledger.comments == []
 
 
+@pytest.mark.parametrize(("spent", "late"), [(1.0, False), (2.5, True)])
 @pytest.mark.wall_clock
-def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch, rig):
+def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch, rig, spent, late):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     second_tree_with_work(rig)
     rig.commit()
+    slow = 8
     hook = rig.origin / "hooks" / "pre-receive"
-    hook.write_text(
-        f'#!/bin/sh\nread old new ref\nif [ "$ref" = "refs/heads/{BRANCH}-2" ]; then sleep 1.2; else sleep 8; fi\n'
-    )
+    hook.write_text(f'#!/bin/sh\nread old new ref\nif [ "$ref" != "refs/heads/{BRANCH}-2" ]; then sleep {slow}; fi\n')
     hook.chmod(0o755)
     timeout = RESERVE_S + 2
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
-    started = time.monotonic()
-    decision = rig.stop(started=started)
-    took = time.monotonic() - started
+    clock, real_push, pushes = [0.0], push_stop.push, []
+
+    def charged_push(tree, branch, seconds):
+        began = time.monotonic()
+        pushed = real_push(tree, branch, seconds)
+        pushes.append((seconds, pushed, time.monotonic() - began))
+        clock[0] += spent
+        return pushed
+
+    monkeypatch.setattr(rig.gate, "_clock", lambda: clock[0])
+    monkeypatch.setattr(push_stop, "push", charged_push)
+    decision = rig.stop(started=0.0)
     assert not decision.allowed
-    assert took < timeout
     assert rig.remote_head() == ""
     assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
     assert len(rig.ledger.comments) == 1
-    assert PUSH_LATE.format(path=rig.tree) not in decision.reason
+    assert pushes[0][:2] == (pytest.approx(timeout - FLOOR_S), True)
+    assert (PUSH_LATE.format(path=rig.tree) in decision.reason) is late
+    assert len(pushes) == (1 if late else 2)
+    if not late:
+        seconds, pushed, took = pushes[1]
+        assert seconds == pytest.approx(timeout - spent - FLOOR_S)
+        assert not pushed
+        assert took < slow
 
 
 @pytest.mark.parametrize(("seconds", "expected"), [(75, 60), (2, 2)])
@@ -1003,3 +1028,55 @@ def test_a_wait_during_a_ledger_outage_still_refuses_the_stop(rig):
     (rig.tree / "new").write_text("new\n")
     wait_on(rig, {"kind": "task", "target": "t2"})
     assert rig.stop().reason == TEMPLATE
+
+
+@pytest.mark.parametrize("target", ["https://github.com/o/r/pull/7", "https://github.com/o/r/pull/8"])
+def test_a_live_merge_wait_on_an_open_pull_request_lets_a_refused_push_stop(rig, target):
+    from scripts.swarm.ledger_events import PullRequest
+
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    theirs = refuse_the_push(rig)
+    with_task(rig, "claimed")
+    seen = []
+    rig.gate._github = lambda url: seen.append(url) or PullRequest("OPEN", None, 1, False, True, queued=True)
+    wait_on(rig, {"kind": "merge", "target": target})
+    assert rig.stop().allowed
+    assert seen == [target]
+    assert rig.remote_head() == theirs
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED", None])
+def test_a_merge_wait_on_a_pull_request_no_longer_open_still_refuses_the_stop(rig, state):
+    from scripts.swarm.ledger_events import PullRequest
+
+    refuse_the_push(rig)
+    with_task(rig, "claimed")
+    rig.gate._github = lambda url: PullRequest(state, None, 1, False, True) if state else None
+    wait_on(rig, {"kind": "merge", "target": "https://github.com/o/r/pull/8"})
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_a_merge_wait_never_holds_uncommitted_changes(rig):
+    from scripts.swarm.ledger_events import PullRequest
+
+    with_task(rig, "claimed")
+    (rig.tree / "new").write_text("new\n")
+    rig.gate._github = lambda url: PullRequest("OPEN", None, 1, False, True, queued=True)
+    wait_on(rig, {"kind": "merge", "target": "https://github.com/o/r/pull/8"})
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_a_pull_request_in_another_repo_does_not_answer_for_pushed_work_in_this_one(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/elsewhere/pull/3"
+    rig.commit()
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
+    assert rig.remote_head()
+    rig.ledger.task["pr_url"] = "https://github.com/O/R/pull/7"
+    assert rig.stop().allowed
+
+
+def test_pushed_work_with_an_origin_off_github_and_no_pull_request_is_still_refused(rig):
+    git(rig.seed, "remote", "set-url", "origin", str(rig.origin))
+    rig.commit()
+    assert (rig.stop().allowed, rig.stop().reason) == (False, TEMPLATE)

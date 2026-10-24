@@ -57,3 +57,24 @@ def current(now: float) -> dict[str, dict]:
 
 def counts(harness: str, now: float) -> dict[str, int]:
     return {row["account"]: row["sessions"] for row in current(now).values() if row["harness"] == harness}
+
+
+def elsewhere(redis: "Redis", harness: str, now: float, own: str) -> dict[str, int]:
+    """Per account, what the launch reservation counts beyond this host's own hive report, which is its /proc."""
+    from scripts.routing.reservation import LaunchSlots
+
+    slots: dict[str, int] = {}
+    seen: set[str] = set()
+    for hive in registry.hives(redis):
+        if not registry.live(hive, int(now * 1000)):
+            continue
+        report = json.loads(redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
+        seen.update(execution for ids in report.get("_executions", {}).values() for execution in ids)
+        if hive["id"] != own:
+            for name, count in report.items():
+                if name.startswith(f"{harness}:"):
+                    slots[name] = slots.get(name, 0) + count
+    for name, count in LaunchSlots(redis).counts(seen).items():
+        if name.startswith(f"{harness}:"):
+            slots[name] = slots.get(name, 0) + count
+    return {name.split(":", 1)[1]: count for name, count in slots.items()}

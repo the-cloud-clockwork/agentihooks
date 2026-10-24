@@ -15,10 +15,7 @@ REPOSITORY = "the-cloud-clockwork/agentihooks"
 
 EXPECTED_ARTIFACTS = set(
     """
-split-3.11 collected-3.11 split-3.12 collected-3.12
-durations-3.11-1 flakes-3.11-1 durations-3.11-2 flakes-3.11-2
-durations-3.11-3 flakes-3.11-3 durations-3.11-4 flakes-3.11-4
-durations-3.11-5 flakes-3.11-5 durations-3.11-6 flakes-3.11-6
+split-3.12 collected-3.12
 durations-3.12-1 flakes-3.12-1 coverage-3.12-1
 durations-3.12-2 flakes-3.12-2 coverage-3.12-2
 durations-3.12-3 flakes-3.12-3 coverage-3.12-3
@@ -31,6 +28,14 @@ durations-3.12-9 flakes-3.12-9 coverage-3.12-9
 durations-3.12-10 flakes-3.12-10 coverage-3.12-10
 durations-3.12-11 flakes-3.12-11 coverage-3.12-11
 durations-3.12-12 flakes-3.12-12 coverage-3.12-12
+durations-3.12-13 flakes-3.12-13 coverage-3.12-13
+durations-3.12-14 flakes-3.12-14 coverage-3.12-14
+durations-3.12-15 flakes-3.12-15 coverage-3.12-15
+durations-3.12-16 flakes-3.12-16 coverage-3.12-16
+durations-3.12-17 flakes-3.12-17 coverage-3.12-17
+durations-3.12-18 flakes-3.12-18 coverage-3.12-18
+durations-3.12-19 flakes-3.12-19 coverage-3.12-19
+durations-3.12-20 flakes-3.12-20 coverage-3.12-20
 """.split()
 )
 
@@ -69,8 +74,7 @@ def evidence(tmp_path, *, reused=False, run_id=123):
     folder.mkdir()
     attest(folder, record)
     jobs = [{"name": "reuse", "conclusion": "success"}]
-    for version, count in [("3.11", 6), ("3.12", 12)]:
-        jobs += [{"name": f"unit ({version}, {shard})", "conclusion": "success"} for shard in range(1, count + 1)]
+    jobs += [{"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in range(1, 21)]
     (folder / "jobs.jsonl").write_text("".join(json.dumps(job) + "\n" for job in jobs))
     artifacts = [{"name": name, "expired": False} for name in sorted(EXPECTED_ARTIFACTS)]
     (folder / "artifacts.jsonl").write_text("".join(json.dumps(item) + "\n" for item in artifacts))
@@ -97,7 +101,7 @@ def test_exact_passed_queue_commit_reuses_all_unit_artifacts(tmp_path):
 def test_queue_partitions_with_more_shards_do_not_reuse_a_partial_promotion_suite(tmp_path):
     _, _, folder = evidence(tmp_path)
     with (folder / "jobs.jsonl").open("a") as jobs:
-        jobs.write(json.dumps({"name": "unit (3.11, 7)", "conclusion": "success"}) + "\n")
+        jobs.write(json.dumps({"name": "unit (3.12, 21)", "conclusion": "success"}) + "\n")
 
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
@@ -241,7 +245,7 @@ def test_each_missing_artifact_falls_back(tmp_path, missing):
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
-@pytest.mark.parametrize("failed", ["unit (3.11, 1)", "unit (3.11, 6)", "unit (3.12, 1)", "unit (3.12, 12)"])
+@pytest.mark.parametrize("failed", ["unit (3.12, 1)", "unit (3.12, 12)"])
 def test_each_edge_shard_must_pass(tmp_path, failed):
     _, _, folder = evidence(tmp_path)
     jobs = [json.loads(line) for line in (folder / "jobs.jsonl").read_text().splitlines()]
@@ -345,5 +349,5 @@ def test_cli_without_an_output_file_reports_the_source(tmp_path, monkeypatch, ca
 def test_a_queue_run_that_reused_tests_never_feeds_a_dev_push(tmp_path):
     _, _, folder = evidence(tmp_path)
     with (folder / "artifacts.jsonl").open("a") as items:
-        items.write(json.dumps({"name": "reused-tests-3.11", "expired": False}) + "\n")
+        items.write(json.dumps({"name": "reused-tests-3.12", "expired": False}) + "\n")
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None

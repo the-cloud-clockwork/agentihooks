@@ -309,6 +309,17 @@ def notify_on_error(transcript_path: str) -> None:
 # =============================================================================
 
 
+def _close_master_coding(session_id: str, source: str | None) -> None:
+    if source == "compact":
+        return
+    try:
+        from hooks.context import master_coding
+
+        master_coding.close(session_id)
+    except Exception as e:
+        log("master coding window close failed", {"error": str(e)})
+
+
 def _run_start_conditions(payload: dict) -> None:
     try:
         from hooks.context import conditions
@@ -333,9 +344,13 @@ def on_session_start(payload: dict) -> None:
     log("Session started", {"session_id": session_id})
     if payload.get("source") == "compact":
         _inject_refocus(session_id, "compact")
+    _close_master_coding(session_id, payload.get("source"))
     from hooks.lifecycle.guard import session_event
 
     session_event()
+    from hooks.context import operator_mode
+
+    operator_mode.reset(payload)
     _run_start_conditions(payload)
     try:
         from hooks.lifecycle.deps_kick import kick as deps_kick
@@ -347,6 +362,7 @@ def on_session_start(payload: dict) -> None:
 
     codex_refresh_kick()
     _swarm_ledger(payload)
+    _hive_join(payload, "start")
     otel.emit_event(
         "agentihooks.session.started",
         {
@@ -575,6 +591,7 @@ def on_session_end(payload: dict) -> None:
     """Handle SessionEnd event."""
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
+    _hive_join(payload, "end")
     from hooks.lifecycle.guard import session_event
 
     session_event()
@@ -938,11 +955,9 @@ def _prompt_signals(payload: dict, session_id: str, typed: bool) -> None:
             contains_pr_signal,
             contains_release_signal,
         )
-        from hooks.context.pane_guard import observe_pane_signal
         from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
 
         prompt = payload.get("prompt", "")
-        observe_pane_signal(session_id, prompt, typed)
         if prompt and typed:
             from hooks.context.conditions import arm_gate, contains_condition_signal
 
@@ -1127,6 +1142,8 @@ def _inject_after_tool(payload: dict) -> None:
     session_id, cwd = payload.get("session_id", ""), payload.get("cwd", "")
     _inject_inbox(session_id, cwd)
     _inject_refocus(session_id, "tool")
+    for context in _wait_nudge_blocks(payload):
+        inject_context(context, also_log=False, skip_compression=True, kind="refocus")
     quota = posttool_context(session_id, payload.get("tool_name"), cwd)
     if quota:
         inject_context(quota, also_log=False, skip_compression=True, kind="alert")
@@ -1161,6 +1178,15 @@ def _master_login_checkpoint() -> None:
         master_claude_login.checkpoint(os.environ)
     except Exception as e:
         log("master login checkpoint failed", {"error": str(e)})
+
+
+def _hive_join(payload: dict, event: str) -> None:
+    try:
+        from hooks.context.hive_join import run
+
+        run(payload, event)
+    except Exception as exc:
+        log("hive join report failed", {"error": type(exc).__name__})
 
 
 def _swarm_ledger(payload: dict) -> None:
@@ -1220,9 +1246,11 @@ def _master_coding(payload: dict, typed: bool) -> None:
 
 def _operator_question(payload: dict) -> str:
     try:
-        from hooks.context import operator_mode
+        from hooks.context import master_question, operator_mode
 
-        return operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
+        return master_question.move(payload) or operator_mode.question_block(
+            payload.get("tool_name"), payload.get("session_id")
+        )
     except Exception as e:
         log("operator question check failed", {"error": str(e)})
         return _QUESTION_CHECK_FAILED if payload.get("tool_name") == "AskUserQuestion" else ""
@@ -1335,12 +1363,10 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
 
 def _check_shell_guards(payload: dict) -> None:
     from hooks.context.local_test_guard import check_local_tests
-    from hooks.context.pane_guard import check_panes
     from hooks.context.swarm_wait_nudge import check_github_watch
 
     check_local_tests(payload)
     check_github_watch(payload)
-    check_panes(payload)
     if payload.get("tool_name") != "Bash":
         return
     try:
@@ -2835,6 +2861,10 @@ def main() -> None:
         from hooks.context.swarm_pin import unpin
 
         unpin()
+
+        from hooks.context.claim_fence import enforce as claim_fence
+
+        claim_fence(payload)
 
         # Route to handler
         handler = EVENT_HANDLERS.get(event_name)

@@ -32,6 +32,16 @@ app.kubernetes.io/component: {{ .component }}
 {{- printf "%s://%s-ledger:%v" (ternary "https" "http" (not (empty .Values.ledger.tls.secretName))) (include "swarm.fullname" .) .Values.ledger.port -}}
 {{- end -}}
 
+{{- define "swarm.busUrl" -}}
+{{- if .Values.hub.bus.url -}}
+{{- .Values.hub.bus.url -}}
+{{- else if .Values.nats.enabled -}}
+{{- $name := default "nats" .Values.nats.nameOverride -}}
+{{- $service := ternary .Release.Name (printf "%s-%s" .Release.Name $name) (contains $name .Release.Name) -}}
+{{- printf "nats://%s:4222" (default $service .Values.nats.fullnameOverride | trunc 63 | trimSuffix "-") -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "swarm.ledgerCa" -}}
 {{- with .Values.ledger.tls.secretName }}
 - name: LEDGER_CA_PEM
@@ -104,8 +114,8 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 {{- end -}}
 
-{{- define "swarm.controllerSecretEnv" -}}
-{{- range .Values.controller.secretEnv }}
+{{- define "swarm.secretKeyEnv" -}}
+{{- range . }}
 - name: {{ .name }}
   valueFrom:
     secretKeyRef:
@@ -167,3 +177,13 @@ exec:
     - import os, urllib.request; urllib.request.urlopen("http://127.0.0.1:" + os.environ["LEDGER_PORT"] + "/healthz", timeout=2).read()
     {{- end }}
 {{- end -}}
+
+{{- define "swarm.homeSource" -}}
+{{- if .hostPath -}}
+hostPath:{{ .hostPath.path }}
+{{- else if .persistentVolumeClaim -}}
+claim:{{ .persistentVolumeClaim.claimName }}
+{{- else -}}
+{{ toJson . }}
+{{- end -}}
+{{- end }}

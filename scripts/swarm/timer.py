@@ -16,6 +16,7 @@ DROPPED = ("agentihooks-alert-intake.service",)
 PROBER = "agentihooks-quota-prober"
 WAITS = "agentihooks-swarm-waits"
 TICK_WATCH = "agentihooks-tick-watch"
+SPOKE = "agentihooks-spoke"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
 DRAIN_S = 30
@@ -50,7 +51,7 @@ def units(binary):
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         f'ExecStart="{binary}" swarm waits\n'
-        "TimeoutStartSec=120\n"
+        "TimeoutStartSec=120\nKillMode=process\n"
     )
     wait_timer = (
         "[Unit]\nDescription=agentihooks swarm wait checks every fifteen seconds\n\n"
@@ -63,7 +64,7 @@ def units(binary):
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         f'ExecStart="{binary}" swarm tick-watch\n'
-        "Restart=always\nRestartSec=5\n\n"
+        "Restart=always\nRestartSec=5\nNotifyAccess=main\nWatchdogSec=600\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
     return {
@@ -94,6 +95,40 @@ def tick_units(binary):
         "[Install]\nWantedBy=timers.target\n"
     )
     return {f"{UNIT}.service": service, f"{UNIT}.timer": timer}
+
+
+def spoke_units(binary):
+    spoke = (
+        "[Unit]\nDescription=agentihooks workstation spoke for master work\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm spoke\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+    return {f"{SPOKE}.service": spoke}
+
+
+ENGINE = (*units(""), *tick_units(""), *DROPPED)
+SYSTEMCTL = {"capture_output": True, "text": True, "timeout": 30}
+UNCHECKED = {**SYSTEMCTL, "check": False}
+SPOKE_ENABLE = ["systemctl", "--user", "enable", "--now", f"{SPOKE}.service"]
+RELOAD = ["systemctl", "--user", "daemon-reload"]
+
+
+def _spoke_only(binary, unit_dir, run):
+    unschedule()
+    retired = [name for name in ENGINE if (unit_dir / name).exists()]
+    for name in retired:
+        run(["systemctl", "--user", "disable", "--now", name], **UNCHECKED)
+        (unit_dir / name).unlink()
+    stale = {name: text for name, text in spoke_units(binary).items() if not _current(unit_dir / name, text)}
+    for name, text in stale.items():
+        (unit_dir / name).write_text(text)
+    if retired or stale:
+        run(RELOAD, **UNCHECKED)
+    return run(SPOKE_ENABLE, **SYSTEMCTL).returncode == 0
 
 
 def _services(names):
@@ -188,9 +223,57 @@ def _retire(unit_dir, run):
 
 def supervise():
     from scripts.scheduler.service import ensure_running
+
+    return ensure_running(_scheduler_env())
+
+
+def _scheduler_env():
     from scripts.swarm.store import redis_url
 
-    return ensure_running({**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)})
+    return {**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)}
+
+
+def _off_installed(held):
+    from scripts.scheduler.service import revision
+
+    pid, root, installed = held["pid"], held.get("root"), _roots()[1]
+    if not root:
+        return f"the scheduler supervisor {pid} left no record of the code it loaded"
+    if Path(root).resolve() != Path(installed).resolve():
+        return f"the scheduler supervisor {pid} runs {root}, not the installed {installed}"
+    if (loaded := held.get("revision")) != (current := revision(installed)):
+        return f"the scheduler supervisor {pid} loaded revision {loaded}, not the installed revision {current}"
+    return ""
+
+
+def recycle():
+    from scripts.scheduler import service
+
+    env = _scheduler_env()
+    held = service.holder(env)
+    if held is None or not (why := _off_installed(held)):
+        return
+    print(f"recycling the scheduler supervisor: {why}", file=sys.stderr)
+    if not service.drain(held["pid"], env):
+        print(
+            f"the scheduler supervisor {held['pid']} still holds its lock; the next wait pass tries again",
+            file=sys.stderr,
+        )
+
+
+def _proven():
+    from redis.exceptions import RedisError
+
+    from scripts.scheduler import service
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm import scheduled_tick
+    from scripts.swarm.store import redis_client
+
+    started = (service.holder(_scheduler_env()) or {}).get("started")
+    try:
+        return started is not None and scheduled_tick.delivered_at(Scheduler(redis_client())) >= started
+    except RedisError:
+        return False
 
 
 def schedule():
@@ -207,6 +290,19 @@ def schedule():
         return False
     supervise()
     return True
+
+
+def unschedule():
+    from redis.exceptions import RedisError
+
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm import scheduled_tick
+    from scripts.swarm.store import redis_client
+
+    try:
+        scheduled_tick.cancel(Scheduler(redis_client()))
+    except RedisError as exc:
+        print(f"the scheduled swarm tick could not be cancelled: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def undelivered():
@@ -259,6 +355,10 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         print(refusal, file=sys.stderr)
         return False
     unit_dir.mkdir(parents=True, exist_ok=True)
+    from scripts.hive import workstation
+
+    if not workstation.runs_engine(os.environ):
+        return _spoke_only(binary, unit_dir, run)
     kept = _kept()
     expected = units(binary)
     if kept:
@@ -293,8 +393,11 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
 
 def guard(binary, unit_dir=None, run=subprocess.run):
     unit_dir = unit_dir or UNIT_DIR
+    recycle()
     supervise()
     if not _kept():
+        if any((unit_dir / name).exists() for name in RETIRED) and _left(run) == "0" and _proven():
+            return ensure(binary, unit_dir, run)
         return True
     enabled = ["systemctl", "--user", "is-enabled", "--quiet", f"{UNIT}.timer"]
     if all(_current(unit_dir / name, text) for name, text in tick_units(binary).items()) and not (
@@ -310,8 +413,14 @@ def reconcile(binary, unit_dir=None, run=subprocess.run):
         print(refusal, file=sys.stderr)
         return False
     expected = units(binary)
+    from scripts.hive import workstation
+
     current = all(_current(unit_dir / name, text) for name, text in expected.items())
-    if current and not any((unit_dir / name).exists() for name in (*RETIRED, *DROPPED)):
+    if (
+        current
+        and workstation.runs_engine(os.environ)
+        and not any((unit_dir / name).exists() for name in (*RETIRED, *DROPPED))
+    ):
         names = [*_services(expected), f"{WAITS}.timer"]
         enabled = ["systemctl", "--user", "is-enabled", "--quiet"]
         if all(run([*enabled, name], capture_output=True, text=True, timeout=30).returncode == 0 for name in names):

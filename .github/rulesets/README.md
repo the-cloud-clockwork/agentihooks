@@ -2,28 +2,51 @@
 
 These JSON files are update payloads for the existing repository rulesets,
 using the [GitHub REST API](https://docs.github.com/en/rest/repos/rules#update-a-repository-ruleset).
-They contain writable settings only. Both rulesets enforce deletion and force
-push protection, linear history and pull requests without bypass actors.
+They contain writable settings only. `dev-no-delete` and `main-prod-lockdown`
+enforce deletion and force push protection, linear history and pull requests. `main-prod-lockdown` has no
+bypass actors. `dev-no-delete` lists two in `pull_request` mode, the repository
+admin role (`RepositoryRole` 5) and the agenticore GitHub App (`Integration`,
+its app id from the OpenBao `k8s/agenticore` field `GITHUB_APP_ID`), because
+GitHub honours a merge queue jump only for a bypass actor of the ruleset that
+holds the `merge_queue` rule. Pull request mode still lets those actors bypass
+linear history and the required check on a pull request merge, so
+`dev-history.json` repeats deletion, force push, linear history and the
+`Gate — Required` check on dev with no bypass actors. A jump moves a pull
+request ahead in the queue; it still lands only on a passing gate.
+The antoncore reconcile also accepts the admin role in `always` mode, the
+fallback if a pull request mode jump is refused; `always` would also let an
+admin push to dev without a pull request, so it stays out of the payload
+until a jump needs it.
 Dev requires the exact `Gate — Required` check from the Tests workflow and
 allows squash merges with zero required approvals. Instead of requiring each
 branch to be up to date, dev merges through a merge queue: the Tests workflow
 runs on `merge_group`, so the full unit suite and test count floor grade the
 merged tree before it lands. Mutation stays on the pull request head.
-Once the queue is active, `gh pr merge --squash` adds the pull request to the
-queue; it lands when the queue run passes the gate.
+Pull requests enter the queue through the GraphQL `enqueuePullRequest`
+mutation (`agentihooks swarm <slug> merge queue <url>` in a swarm) and land
+when the queue run passes the gate. The installed gh predates merge queues, so
+`gh pr merge --squash` calls the direct merge mutation, and the admin bypass
+actor below lets it land past the queue and cancel the running group build.
+The prod lockdown guard refuses `gh pr merge` into any branch with a merge
+queue unless the operator ran `disable controls`.
 The queue groups with `ALLGREEN`: every entry is built on dev plus the
 entries ahead of it and merges only on its own passing run, so a red pull
 request never lands. A failing entry leaves the queue and the entries behind
 it rebuild without it. Merge groups run on the `anton-oss-queue` pool, which
-serves only merge queue runs. The queue builds two entries at a time, and a
-check that has not reported within 25 minutes fails the entry.
+serves only merge queue runs. The queue builds up to three entries at a time
+and merges groups of up to five, waits at most one minute for a group to fill, and a
+check that has not reported within 45 minutes fails the entry. Build
+concurrency counts entries, not groups, and under `ALLGREEN` each entry
+merges only on its own passing run. `max_entries_to_build` is three to limit
+simultaneous full unit suites competing for the capped queue runner pool;
+`max_entries_to_merge` remains five.
 An entry ejected only because a unit shard lost its runner is requeued once by
 the Queue retry workflow; see
 [Lost runner requeue](../../docs/reference/delivery-tiers.md#lost-runner-requeue).
-Main keeps its existing branch match and rules; only its bypass list changes.
 
 The antoncore `Organization secrets and dev rulesets` workflow applies
-`dev-no-delete.json` from this repository's dev and reads it back on every
+`dev-history.json`, creating it when absent, then `dev-no-delete.json` from
+this repository's dev and reads both back on every
 antoncore dev push or dispatch, so a change here goes live on the next
 antoncore dev push or a dispatch of that workflow. The reconcile requires the
 required check to name its source, `integration_id` 15368 for GitHub Actions.
@@ -43,6 +66,7 @@ Verify the effective rules and bypass lists:
 ```bash
 gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/dev
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/16090886 --jq .bypass_actors
+gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/25468405 --jq .bypass_actors
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 --jq .bypass_actors
 gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/dev \
   --jq '.[] | select(.type == "pull_request") | .parameters.require_code_owner_review'
@@ -54,7 +78,8 @@ the swarm's pull requests, so owner review waits on an approval nobody else
 can give. Turning it on is a separate operator decision.
 The dev response must include `pull_request`, `required_linear_history`,
 `merge_queue` and `required_status_checks` requiring `Gate — Required` with
-`strict_required_status_checks_policy` false; both bypass lists must be empty.
+`strict_required_status_checks_policy` false; the dev bypass list holds the
+two actors above and the main bypass list is empty.
 The first pull request merged through the queue must show a Tests run on the
 `merge_group` event whose `Gate — Required` passed. A controlled direct push attempt must be rejected by GitHub's pull
 request rule. An unchanged ref or a dry run does not exercise that rule.

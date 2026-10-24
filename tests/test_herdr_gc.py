@@ -13,6 +13,7 @@ from scripts.herdr_host import Placement
 MIN = 60_000
 NOW = 100 * MIN
 QUIET = herdr_gc.wake.DEFAULT_QUIET_S * 1000
+IDLE = 5 * MIN
 SHELL = {"foreground_processes": [{"name": "bash", "argv": ["-bash"], "pid": 9}], "shell_pid": 9}
 LOGIN = {"foreground_processes": [{"name": "bash", "argv": ["/bin/bash", "-l"], "pid": 9}], "shell_pid": 9}
 CLAUDE = {"foreground_processes": [{"name": "claude", "argv": ["claude"], "pid": 10}], "shell_pid": 9}
@@ -42,6 +43,7 @@ class FakeHerdr:
     def __init__(self):
         self.panes, self.info, self.screens, self.closed = {}, {}, {}, []
         self.extra_tabs, self.extra_workspaces = set(), set()
+        self.labels = {}
 
     def add(self, pane_id, terminal, spot=Spot()):
         tab = spot.tab or f"{spot.workspace}:t-{pane_id}"
@@ -70,7 +72,9 @@ class FakeHerdr:
         counts = {tab: 0 for tab in self.extra_tabs}
         for pane in self.panes.values():
             counts[pane["tab_id"]] = counts.get(pane["tab_id"], 0) + 1
-        return [{"tab_id": tab, "pane_count": count} for tab, count in counts.items()]
+        return [
+            {"tab_id": tab, "pane_count": count, "label": self.labels.get(tab, "")} for tab, count in counts.items()
+        ]
 
     def workspaces(self):
         counts = {space: 0 for space in self.extra_workspaces}
@@ -88,8 +92,11 @@ class FakeHerdr:
 
 
 class FakeOwners:
-    def __init__(self, states=None, prompts=None):
-        self.states, self.prompts = states or {}, prompts or {}
+    def __init__(self, states=None, prompts=None, tasks=None):
+        self.states, self.prompts, self.tasks = states or {}, prompts or {}, tasks or {}
+
+    def task(self, record):
+        return self.tasks.get(record.owner_session, "")
 
     def state(self, record):
         default = herdr_gc.LIVE if record.owner_swarm else herdr_gc.NO_SWARM
@@ -236,14 +243,25 @@ def test_a_screen_changed_since_the_last_sweep_is_kept_for_the_quiet_window(env)
     launch(env, herdr, "w1:p2", "term_a", owner=Owner(seen="older screen"))
     assert actions(sweep(env, herdr))["w1:p2"] == (herdr_gc.KEEP, "used inside the quiet window")
     assert herdr_panes.load(env)[0].active_at == NOW
-    assert actions(sweep(env, herdr, now=NOW + QUIET))["w1:p2"][0] == herdr_gc.CLOSE
+    assert actions(sweep(env, herdr, now=NOW + IDLE - 1))["w1:p2"][0] == herdr_gc.KEEP
+    assert actions(sweep(env, herdr, now=NOW + IDLE))["w1:p2"][0] == herdr_gc.CLOSE
 
 
-def test_the_quiet_window_ends_exactly_at_its_length(env):
+def test_the_quiet_window_ends_exactly_at_five_minutes_idle(env):
     herdr = FakeHerdr()
     launch(env, herdr, "w1:p2", "term_a")
-    found = herdr_gc.sweep({**env, herdr_gc.GRACE_ENV: "0"}, QUIET, True, herdr, FakeOwners())
+    found = herdr_gc.sweep({**env, herdr_gc.GRACE_ENV: "0"}, IDLE - 1, False, herdr, FakeOwners())
+    assert actions(found)["w1:p2"][0] == herdr_gc.KEEP
+    found = herdr_gc.sweep({**env, herdr_gc.GRACE_ENV: "0"}, IDLE, True, herdr, FakeOwners())
     assert actions(found)["w1:p2"][0] == herdr_gc.CLOSE
+
+
+def test_a_longer_inbox_quiet_window_holds_a_pane_past_five_minutes(env):
+    herdr = FakeHerdr()
+    launch(env, herdr, "w1:p2", "term_a")
+    quiet = {**env, herdr_gc.GRACE_ENV: "0", herdr_gc.wake.QUIET_ENV: "600"}
+    assert actions(herdr_gc.sweep(quiet, 10 * MIN - 1, False, herdr, FakeOwners()))["w1:p2"][0] == herdr_gc.KEEP
+    assert actions(herdr_gc.sweep(quiet, 10 * MIN, True, herdr, FakeOwners()))["w1:p2"][0] == herdr_gc.CLOSE
 
 
 def test_a_first_look_counts_as_use_and_even_a_dry_run_records_it(env):
@@ -252,7 +270,7 @@ def test_a_first_look_counts_as_use_and_even_a_dry_run_records_it(env):
     assert actions(sweep(env, herdr, act=False))["w1:p2"][0] == herdr_gc.KEEP
     [looked] = herdr_panes.load(env)
     assert (looked.seen, looked.active_at) == (herdr_gc.digest(PROMPT), NOW)
-    assert actions(sweep(env, herdr, act=False, now=NOW + QUIET))["w1:p2"][0] == herdr_gc.CLOSE
+    assert actions(sweep(env, herdr, act=False, now=NOW + IDLE))["w1:p2"][0] == herdr_gc.CLOSE
     assert herdr.closed == []
 
 
@@ -323,7 +341,7 @@ def test_without_enforce_the_sweep_only_lists(env):
     assert actions(found)["w1:p2"][0] == herdr_gc.CLOSE
     assert herdr.closed == [] and herdr_panes.load(env) == [made]
     assert herdr_gc.lines(found, act=False) == [
-        "would close pane w1:p2 of eng-1: a failed launch left it at a bare shell"
+        "would close pane w1:p2 of eng-1, task none, idle 100 minutes: a failed launch left it at a bare shell"
     ]
 
 
@@ -333,9 +351,35 @@ def test_every_close_is_reported_with_its_reason(env):
     launch(env, herdr, "w1:p3", "term_b", owner=Owner(at=NOW))
     launch(env, herdr, "w1:p4", "term_c", owner=Owner(name=""))
     assert herdr_gc.lines(sweep(env, herdr), act=True) == [
-        "closed pane w1:p2 of eng-1: a failed launch left it at a bare shell",
-        "closed pane w1:p4 of no session: a failed launch left it at a bare shell",
+        "closed pane w1:p2 of eng-1, task none, idle 100 minutes: a failed launch left it at a bare shell",
+        "closed pane w1:p4 of no session, task none, idle 100 minutes: a failed launch left it at a bare shell",
     ]
+
+
+def test_the_tick_closes_a_dead_swarm_pane_after_five_idle_minutes_and_keeps_live_and_foreign_panes(env):
+    herdr = FakeHerdr()
+    swarm = Owner(swarm="crew", route="routed", seen="")
+    launch(env, herdr, "w1:p2", "term_dead", Spot(info=SHELL), replace(swarm, name="eng@crew-1"))
+    launch(env, herdr, "w1:p3", "term_live", Spot(info=CLAUDE), replace(swarm, name="eng@crew-2"))
+    launch(env, herdr, "w1:p4", "term_master", Spot(info=CLAUDE), replace(swarm, name="master@crew-1"))
+    launch(env, herdr, "w1:p5", "term_mine", owner=Owner(name="operator-session", route="routed", seen=""))
+    herdr.add("w1:p1", "term_operator")
+    owners = FakeOwners(
+        {"eng@crew-1": herdr_gc.RETIRED, "eng@crew-2": herdr_gc.LIVE, "master@crew-1": herdr_gc.LIVE},
+        tasks={"eng@crew-1": "t-dead"},
+    )
+
+    def tick(now):
+        return herdr_gc.sweep(env, now, True, herdr, owners, swarm_only=True)
+
+    assert herdr_gc.lines(tick(NOW), act=True) == []
+    assert herdr_gc.lines(tick(NOW + IDLE - MIN), act=True) == []
+    assert herdr_gc.lines(tick(NOW + IDLE), act=True) == [
+        "closed pane w1:p2 of eng@crew-1, task t-dead, idle 5 minutes: its agent was retired"
+    ]
+    assert herdr.closed == [("pane", "w1:p2")]
+    assert set(herdr.panes) == {"w1:p1", "w1:p3", "w1:p4", "w1:p5"}
+    assert {r.pane_id for r in herdr_panes.load(env)} == {"w1:p3", "w1:p4", "w1:p5"}
 
 
 def test_a_tab_and_space_left_empty_are_closed(env):
@@ -413,7 +457,7 @@ class FakeStore:
 
     def agents(self, slug):
         assert slug == self.slug
-        return [SimpleNamespace(name=n, state=s) for n, s in self._agents]
+        return [SimpleNamespace(name=n, state=s, task=f"task-of-{n}") for n, s in self._agents]
 
 
 def owned(store_url=""):
@@ -498,6 +542,58 @@ def test_a_withheld_swarm_store_is_unknown_and_never_opened():
     assert owners.prompted_at(owned(herdr_panes.WITHHELD)) is None
 
 
+def secret_url(db):
+    return "redis://" + ":" + "x" * 8 + "@localhost:6379/" + db
+
+
+def test_a_withheld_store_opens_on_the_environments_own_url_when_its_digest_matches():
+    opened = []
+    environ = {herdr_panes.STORE_ENV: secret_url("4")}
+    store = FakeStore("crew", agents=[("eng-1", "finished")])
+    owners = herdr_gc.Owners(lambda url: opened.append(url) or store, environ)
+    record = owned(herdr_panes.store_ref(secret_url("4")))
+    assert owners.state(record) == herdr_gc.RETIRED
+    assert owners.task(record) == "task-of-eng-1"
+    assert opened == [secret_url("4")]
+
+
+@pytest.mark.parametrize("other", [secret_url("5"), "redis://localhost:6379/4", ""])
+def test_a_withheld_store_of_another_url_is_unknown_and_never_opened(other):
+    owners = herdr_gc.Owners(lambda url: pytest.fail("store opened"), {herdr_panes.STORE_ENV: other})
+    record = owned(herdr_panes.store_ref(secret_url("4")))
+    assert owners.state(record) == herdr_gc.UNKNOWN
+    assert owners.task(record) == ""
+
+
+def test_a_legacy_withheld_record_reads_the_environments_store_only_while_it_holds_the_swarm():
+    environ = {herdr_panes.STORE_ENV: secret_url("4")}
+    retired = herdr_gc.Owners(lambda url: FakeStore("crew", agents=[("eng-1", "finished")]), environ)
+    assert retired.state(owned(herdr_panes.WITHHELD)) == herdr_gc.RETIRED
+    elsewhere = herdr_gc.Owners(lambda url: FakeStore("other"), environ)
+    assert elsewhere.state(owned(herdr_panes.WITHHELD)) == herdr_gc.UNKNOWN
+    assert herdr_gc.Owners(lambda url: FakeStore("other")).state(owned()) == herdr_gc.REMOVED
+
+
+def test_a_legacy_withheld_record_never_opens_a_store_without_a_password():
+    owners = herdr_gc.Owners(lambda url: pytest.fail("store opened"), {herdr_panes.STORE_ENV: "redis://localhost/4"})
+    assert owners.state(owned(herdr_panes.WITHHELD)) == herdr_gc.UNKNOWN
+
+
+@pytest.mark.parametrize("agents", [[("eng-2", "working")], []])
+def test_an_agent_the_store_does_not_hold_has_no_task(agents):
+    assert herdr_gc.Owners(lambda url: FakeStore("crew", agents=agents)).task(owned()) == ""
+
+
+def test_a_task_read_that_fails_is_empty():
+    store = FakeStore("crew")
+
+    def down(slug):
+        raise ConnectionError("gone")
+
+    store.agents = down
+    assert herdr_gc.Owners(lambda url: store).task(owned()) == ""
+
+
 def test_a_pane_outside_a_swarm_has_no_swarm_state():
     owners = herdr_gc.Owners(lambda url: pytest.fail("store opened"))
     assert owners.state(replace(owned(), owner_swarm="")) == herdr_gc.NO_SWARM
@@ -515,7 +611,7 @@ def test_the_last_prompt_comes_from_the_agents_swarm(monkeypatch):
 @pytest.mark.parametrize(
     "owner,prompt_name", [("ci-323133-0759", "ci@323133-0759"), ("ci@323133-0759", "ci-323133-0759")]
 )
-@pytest.mark.parametrize("age,kept", [(MIN, True), (QUIET, False)])
+@pytest.mark.parametrize("age,kept", [(MIN, True), (QUIET, True), (IDLE, False)])
 def test_a_dropped_agent_prompt_protects_its_pane_under_either_name(env, owner, prompt_name, age, kept):
     from fnmatch import fnmatchcase
 
@@ -731,23 +827,25 @@ def test_run_cleans_the_launch_folder_and_reports_the_sweep(env, monkeypatch):
     old = aged(folder / "eng-1-a.sh", herdr_gc.RUN_FILE_AGE_S + 60)
     fresh = aged(folder / "eng-2-b.sh", 60)
     herdr = FakeHerdr()
-    launch(env, herdr, "w1:p2", "term_a")
+    now = int((old.stat().st_mtime + herdr_gc.RUN_FILE_AGE_S + 60) * 1000)
+    launch(env, herdr, "w1:p2", "term_a", owner=Owner(at=now - IDLE))
     made = []
     monkeypatch.setattr(herdr_gc.herdr_host, "binary", lambda: "/bin/herdr")
     monkeypatch.setattr(herdr_gc.herdr_host, "server_running", lambda environ: True)
     monkeypatch.setattr(herdr_gc, "Herdr", lambda environ: made.append(environ) or herdr)
-    monkeypatch.setattr(herdr_gc, "Owners", FakeOwners)
-    now = int((old.stat().st_mtime + herdr_gc.RUN_FILE_AGE_S + 60) * 1000)
+    owned_by = []
+    monkeypatch.setattr(herdr_gc, "Owners", lambda environ: owned_by.append(environ) or FakeOwners())
     assert herdr_gc.run(env, now, False) == [
         "would remove eng-1-a.sh",
-        "would close pane w1:p2 of eng-1: a failed launch left it at a bare shell",
+        "would close pane w1:p2 of eng-1, task none, idle 5 minutes: a failed launch left it at a bare shell",
     ]
+    assert herdr_gc.run(env, now, True, swarm_only=True) == ["removed eng-1-a.sh"]
+    assert "w1:p2" in herdr.panes
     assert herdr_gc.run(env, now, True) == [
-        "removed eng-1-a.sh",
-        "closed pane w1:p2 of eng-1: a failed launch left it at a bare shell",
+        "closed pane w1:p2 of eng-1, task none, idle 5 minutes: a failed launch left it at a bare shell",
     ]
     assert not old.exists() and fresh.exists() and herdr.panes == {}
-    assert made == [env, env]
+    assert made == owned_by == [env, env, env]
 
 
 def test_a_herdr_failure_mid_sweep_is_reported(env, monkeypatch):
@@ -811,18 +909,20 @@ def test_every_tick_closes_and_journals_with_reasons(monkeypatch, capsys):
     monkeypatch.setattr(
         herdr_gc,
         "run",
-        lambda environ, now_ms, act: calls.append((environ, now_ms, act)) or ["closed pane w1:p2 of a: why"],
+        lambda environ, now_ms, act, swarm_only=False: (
+            calls.append((environ, now_ms, act, swarm_only)) or ["closed pane w1:p2 of a: why"]
+        ),
     )
     cli.cmd_tick(SimpleNamespace(slugs=lambda: []), None)
-    [(environ, now, act)] = calls
-    assert act is True and environ == dict(os.environ) and isinstance(now, int)
+    [(environ, now, act, swarm_only)] = calls
+    assert act is True and swarm_only is True and environ == dict(os.environ) and isinstance(now, int)
     assert "herdr: closed pane w1:p2 of a: why" in capsys.readouterr().out
 
 
 def test_a_failing_sweep_never_breaks_the_tick(monkeypatch, capsys):
     from scripts.swarm import cli
 
-    def broken(environ, now_ms, act):
+    def broken(environ, now_ms, act, swarm_only=False):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
@@ -835,3 +935,76 @@ def test_a_failing_sweep_never_breaks_the_tick(monkeypatch, capsys):
 def test_the_suite_never_sweeps_the_real_launch_folder_or_herdr(tmp_path):
     assert herdr_panes.run_folder(dict(os.environ)).is_relative_to(tmp_path)
     assert os.environ["HERDR_SOCKET_PATH"].startswith(str(tmp_path))
+
+
+def restored(herdr, pane_id, label, info=SHELL):
+    herdr.add(pane_id, f"term-{pane_id}", Spot(info=info, tab=f"w1:t-{pane_id}"))
+    herdr.labels[f"w1:t-{pane_id}"] = label
+    return f"w1:t-{pane_id}"
+
+
+def test_a_restored_agent_tab_with_no_live_agent_closes(env):
+    herdr = FakeHerdr()
+    tab = restored(herdr, "w1:p1", "engineer-323133-2505")
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == [tab]
+    assert herdr.closed == [("tab", tab)]
+
+
+def test_a_tab_whose_agent_runs_is_kept(env):
+    herdr = FakeHerdr()
+    restored(herdr, "w1:p1", "engineer-323133-2505")
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, {"engineer@323133-2505"}) == []
+    assert herdr.closed == []
+
+
+@pytest.mark.parametrize("label", ["1", "dev", "engineer-323133-2505-tail", "agentihooks-323133"])
+def test_a_tab_without_an_agent_label_is_kept(env, label):
+    herdr = FakeHerdr()
+    restored(herdr, "w1:p1", label)
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == []
+
+
+@pytest.mark.parametrize("info", [CLAUDE, LAUNCHER])
+def test_a_tab_running_anything_but_a_bare_shell_is_kept(env, info):
+    herdr = FakeHerdr()
+    restored(herdr, "w1:p1", "ci-323133-1356", info)
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == []
+
+
+def test_a_tab_with_one_live_pane_among_bare_shells_is_kept(env):
+    herdr = FakeHerdr()
+    tab = restored(herdr, "w1:p1", "ci-323133-1356")
+    herdr.add("w1:p2", "term-2", Spot(info=CLAUDE, tab=tab))
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == []
+
+
+def test_a_tab_launched_inside_the_grace_is_left_for_its_launcher(env):
+    herdr = FakeHerdr()
+    launch(env, herdr, "w1:p1", "term-1", Spot(tab="w1:t-new"), Owner(name="engineer@323133-2600", at=NOW - 1))
+    herdr.labels["w1:t-new"] = "engineer-323133-2600"
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == []
+    later = NOW - 1 + herdr_gc.DEFAULT_GRACE_MINUTES * MIN
+    assert herdr_gc.close_dead_tabs(env, later, herdr, set()) == ["w1:t-new"]
+
+
+def test_a_record_whose_pane_now_holds_a_restored_terminal_does_not_hold_the_tab(env):
+    herdr = FakeHerdr()
+    launch(env, herdr, "w1:p1", "term-old", Spot(tab="w1:t-old"), Owner(name="engineer@323133-2601", at=NOW - 1))
+    herdr.panes["w1:p1"]["terminal_id"] = "term-restored"
+    herdr.labels["w1:t-old"] = "engineer-323133-2601"
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == ["w1:t-old"]
+
+
+def test_a_fresh_record_whose_pane_herdr_dropped_holds_nothing(env):
+    herdr = FakeHerdr()
+    launch(env, herdr, "w1:p9", "term-9", Spot(tab="w1:t-gone"), Owner(name="engineer@323133-2602", at=NOW - 1))
+    del herdr.panes["w1:p9"]
+    tab = restored(herdr, "w1:p1", "engineer-323133-2505")
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == [tab]
+
+
+def test_a_kept_tab_does_not_stop_the_tabs_after_it(env):
+    herdr = FakeHerdr()
+    restored(herdr, "w1:p1", "engineer-323133-2505")
+    later = restored(herdr, "w1:p2", "engineer-323133-2506")
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, {"engineer@323133-2505"}) == [later]

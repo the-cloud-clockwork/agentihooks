@@ -20,6 +20,7 @@ from tests.test_terminate_agent import process
 @pytest.mark.parametrize("registered", [False, True, "alias"])
 def test_a_named_session_confirms_and_writes_as_its_new_master(taker, monkeypatch, tmp_path, capsys, registered):  # noqa: F811
     store, _, rt, _ = taker
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda *_: store.redis)
     carried = store.next_name("sw", "eng") if registered is True else "s-261007-104655"
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", carried)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")

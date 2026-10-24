@@ -69,6 +69,12 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     collected = json.loads(args.collection.read_text()) if args.collection else collected_tests(_ROOT)
     _choose(args.version, args.restored, collected)
+    durations_path = _ROOT / ".test_durations"
+    durations = _durations(durations_path)
+    missing = set(collected).difference(durations)
+    if missing:
+        durations.update(dict.fromkeys(missing, statistics.median(durations.values())))
+        durations_path.write_text(json.dumps(durations, indent=4, sort_keys=True) + "\n")
     if args.collected:
         args.collected.write_text(json.dumps(collected))
     if args.hash:

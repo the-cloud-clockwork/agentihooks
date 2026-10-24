@@ -15,7 +15,11 @@ DURATION_JOB = (
     if "durations" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     else "select"
 )
-UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"}
+UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"} | (
+    {"test-summary"}
+    if "test-summary" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    else set()
+)
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = (
     UNIT
@@ -35,7 +39,9 @@ PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lin
     "swarm-image",
     "worker-image",
     "brain-smoke",
+    "writer-lock",
     "ledger-load",
+    "hierarchy-cpu",
     "kind-due",
     "helm-kind",
     "stage-budget",
@@ -86,7 +92,12 @@ def jobs_for(event, base_ref="dev", scope="full"):
             completed[name] = SimpleNamespace(
                 result="success" if runs else "skipped",
                 outputs=SimpleNamespace(
-                    due="true", reused="false", scope=scope if runs else "", analysis="A1" if runs else ""
+                    due="true",
+                    reused="false",
+                    scope=scope if runs else "",
+                    analysis="A1" if runs else "",
+                    shards="[0, 1]",
+                    stats_parts="[0, 1]",
                 ),
             )
             del pending[name]
@@ -122,10 +133,25 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     steps = jobs["gate-required"]["steps"]
     steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
     assert steps in [
-        ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=watcher_loss)
+        finish(
+            rerun(
+                ci_reuse.inline_mutation(
+                    ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True)
+                )
+            )
+        )
         for summary in (False, True)
-        for watcher_loss in (False, True)
+        for rerun in (list, ci_reuse.lost_rerun)
+        for finish in (list, ci_reuse.pipefail_summary)
     ]
+
+
+def test_the_queue_gate_needs_the_fail_fast_watcher():
+    from scripts.ci_queue_fail_fast import SELF
+
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert SELF in jobs, f"the Tests workflow has no {SELF} job"
+    assert SELF in jobs["gate-required"]["needs"], f"the required gate does not need {SELF}"
 
 
 def test_the_queue_keeps_completeness_but_skips_the_shard_time_budget():

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/trace_plan.py:scripts.swarm.trace_plan.x__file_cuts__mutmut_7:5d5c741f1af3785e2e06c28b2ebcc72d0a4092a7554a9dc9a47bbaa0ed30b9a9": {
+    "reader": "Standards reader of the plan trace hosted follow up pull request",
+    "reason": "followup_text ignores its task argument and returns the cut piece text alone, so passing None instead of the task leaves the follow up text, the ledger followup arguments and the gate log row unchanged."
+  }
+}

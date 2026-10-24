@@ -181,11 +181,35 @@ def test_engineer_guidance_dequeues_a_queued_pull_request_before_pushing_a_fix(s
     assert [text.index(step) for step in steps] == sorted(text.index(step) for step in steps)
 
 
-@pytest.mark.parametrize("skill", [_skill("engineer"), ROLES / "engineer" / ".claude" / "rules" / "engineer-role.md"])
+@pytest.mark.parametrize(
+    "skill",
+    [
+        _skill("engineer"),
+        ROLES / "engineer" / ".claude" / "rules" / "engineer-role.md",
+        ROLES / "cicd" / ".claude" / "skills" / "swarm-ci" / "SKILL.md",
+        ROLES / "master" / "CLAUDE.md",
+        ROLES / "master" / ".claude" / "rules" / "master-role.md",
+    ],
+)
 def test_swarm_engineer_guidance_names_no_raw_gh_merge_or_dequeue_mutation(skill):
     text = skill.read_text()
 
     assert [raw for raw in ("dequeuePullRequest", "gh pr merge") if raw in text] == []
+
+
+@pytest.mark.parametrize(
+    "guidance",
+    [
+        ROLES / "cicd" / ".claude" / "skills" / "swarm-ci" / "SKILL.md",
+        ROLES / "master" / "CLAUDE.md",
+        ROLES / "master" / ".claude" / "rules" / "master-role.md",
+    ],
+)
+def test_ci_and_master_guidance_queues_instead_of_merging(guidance):
+    text = " ".join(guidance.read_text().split())
+
+    assert "agentihooks swarm <slug> merge queue <url>" in text
+    assert "merge on green" not in text.lower()
 
 
 def test_rendered_qa_persona_reads_tests_from_ci_only(world):

@@ -304,6 +304,85 @@ def test_the_changed_files_come_from_the_merge_base(repo):
     assert ci_select.changed_files(repo, base, head) == ["hooks/sample.py"]
 
 
+TREE_CHECK_FILES = {"tests/test_codeowners.py": "OWNERS = 1\n", "tests/test_ci_pull_request_api.py": "API = 1\n"}
+
+
+@pytest.fixture
+def tree(repo):
+    write(repo, TREE_CHECK_FILES)
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "tree checks")
+    return repo
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        ["mv", "scripts/lonely.py", "scripts/moved.py"],
+        ["rm", "scripts/lonely.py"],
+        ["add", "scripts/new.py"],
+    ],
+)
+def test_adding_removing_or_moving_a_file_reshapes_the_tree(tree, change):
+    if change[0] == "add":
+        write(tree, {change[1]: "VALUE = 3\n"})
+    git(tree, *change)
+    git(tree, "commit", "-m", "reshape")
+    assert ci_select.reshaped(tree, "HEAD~1", "HEAD") is True
+
+
+def test_editing_a_file_leaves_the_tree_shape(tree):
+    base = git(tree, "rev-parse", "HEAD")
+    git(tree, "switch", "-c", "change")
+    write(tree, {"hooks/sample.py": "VALUE = 3\n"})
+    git(tree, "commit", "-am", "change")
+    git(tree, "switch", "dev")
+    git(tree, "mv", "scripts/lonely.py", "scripts/moved.py")
+    git(tree, "commit", "-m", "dev moved")
+    assert ci_select.reshaped(tree, "dev", "change") is False
+    assert ci_select.reshaped(tree, base, "change") is False
+
+
+def test_a_reshape_check_on_an_unknown_revision_fails(tree):
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        ci_select.reshaped(tree, "not-a-revision", "HEAD")
+    assert error.value.returncode == 128
+    assert error.value.cmd == [
+        "git",
+        "diff",
+        "--quiet",
+        "--no-renames",
+        "--diff-filter=AD",
+        "not-a-revision...HEAD",
+    ]
+
+
+def test_a_reshaped_tree_selects_the_whole_tree_checks(tree):
+    assert ci_select.decide(tree, ["hooks/sample.py"], {}, 3, tree_reshaped=True) == (
+        "selected",
+        [sorted(["tests/test_sample.py", *TREE_CHECK_FILES])],
+    )
+
+
+def test_a_reshaped_doc_selects_the_whole_tree_checks(tree):
+    assert ci_select.decide(tree, ["docs/unnamed.md"], {}, 3, tree_reshaped=True) == (
+        "selected",
+        [sorted(TREE_CHECK_FILES)],
+    )
+
+
+def test_an_edited_file_leaves_the_whole_tree_checks_out(tree):
+    assert decide(tree, ["hooks/sample.py"]) == ("selected", [["tests/test_sample.py"]])
+
+
+def test_main_selects_the_whole_tree_checks_for_a_moved_file(tree, monkeypatch, tmp_path):
+    git(tree, "mv", "scripts/lonely.py", "scripts/moved.py")
+    git(tree, "commit", "-m", "move")
+    assert run_main(tree, monkeypatch, tmp_path, "pull_request") == (
+        "scope=selected\nlegs=[1]\ncount=1\nfiles_1=tests/test_ci_pull_request_api.py tests/test_codeowners.py\n"
+    )
+
+
 def test_the_workflow_keeps_a_one_file_change_selected_after_dev_moves(repo, monkeypatch, tmp_path):
     opened = git(repo, "rev-parse", "HEAD")
     git(repo, "switch", "-c", "change")
