@@ -619,9 +619,9 @@ def test_a_fresh_quota_handoff_without_accounts_is_refused(tmp_path, monkeypatch
         "handoff_envelope": {"reason": "quota", "launch": LAUNCH},
     }
     config = SwarmConfig("sw", str(tmp_path), code="a1b2c3")
-    with pytest.raises(runtime.SpawnError, match="no observed accounts") as caught:
+    with pytest.raises(runtime.SpawnError, match="no accounts were observed") as caught:
         rt.spawn(config, lane, "engineer@a1b2c3-0002", task)
-    assert caught.value.kind == "unavailable"
+    assert caught.value.status == "unavailable"
 
 
 @pytest.mark.parametrize(
