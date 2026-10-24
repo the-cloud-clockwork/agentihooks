@@ -92,14 +92,30 @@ its account, the live master holding it and its five hour and week usage; `--rem
 and clears its record. A login command refuses while a master or another login
 command holds that slot. Native Claude is the only refresher of the login.
 
-One live master holds one login: two masters never share a slot. A master
-launch takes the free stored login with the most room left (five hour and week
-windows from the router cache and its own sessions' quota snapshots), and
-refuses naming every holder when all stored logins are held. It never falls back
-to an `AH_CC_TOKEN_<slug>` token, because Remote Control refuses long lived
-tokens. At 98% of the week or 99% of five hours the quota policy hands the
-master's seat off, and the successor launches on the free stored login with the
-most room; with no free login the master gets `QUOTA STOP`, never a token.
+One live master holds one login: two masters never share a slot. Launch
+preparation takes the free stored login with the most room left (five hour and
+week windows from the router cache and its own sessions' quota snapshots), then
+checks it with `claude auth status --text`. A valid login ends the chain.
+
+When no valid session is available, preparation reserves an unused slot or
+renews the slot it already holds. Native `claude auth login` runs in that
+isolated home. The master seat receives an inbox directive with its authorization
+link and uses the operator browser connector's already signed in claude.ai
+session. It must never sign in, sign out or switch accounts. It replies to that
+request with exactly `success`, `captcha` or `failure`. Preparation waits for
+the matching reply; success also requires the native login process to finish
+and the renewed session to pass the live check.
+
+CAPTCHA, browser failure or a timeout ends the native login attempt and releases
+only the launching process's slot claim. The master then takes normal
+subscription token routing. This fallback has no Remote Control and no forced
+claude.ai login; Remote Control requires a native login. Held slots remain
+untouched. No step sends email. Browser outcomes are recorded in the slot's
+`login-notifications.jsonl` with transport `inbox`, without credentials.
+
+At 98% of the week or 99% of five hours the quota policy hands the master's seat
+off. The successor runs the same chain, returning to a valid native login when
+one is available.
 
 Each claim takes an epoch above the one stored in OpenBao. With `--openbao`, and
 at each master launch and Stop where `OPENBAO_URL` and `OPENBAO_TOKEN` are set,
