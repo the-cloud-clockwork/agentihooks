@@ -26,7 +26,7 @@ REVOKED = f"{auth.PREFIX}:nats-revoked"
 CLAIMS_UPDATE = "$SYS.REQ.CLAIMS.UPDATE"
 PUSH_TIMEOUT_S = 10
 UNLIMITED = {"subs": -1, "data": -1, "payload": -1}
-# The shared swarm-hive password user serves every hive, so the grant rendered for it names no one hive.
+# A render with no member, such as the grant grader's, names no one hive.
 ANY_HIVE = "*"
 ACCOUNT_LIMITS = {
     **UNLIMITED,
