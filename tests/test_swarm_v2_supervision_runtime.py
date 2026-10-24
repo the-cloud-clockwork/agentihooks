@@ -388,7 +388,7 @@ def test_running_prioritizes_requested_termination(supervisor, monkeypatch):
 def test_quiesce_excludes_exporter_and_bounds_descendants(supervisor, monkeypatch, forced):
     supervisor.children["exporter"] = SimpleNamespace(pid=321)
     remaining = [SimpleNamespace(pid=123)]
-    living = Mock(side_effect=[remaining, remaining if forced else [], []] if forced else [remaining, []])
+    living = Mock(side_effect=[remaining, remaining, remaining, []] if forced else [remaining, [], []])
     monkeypatch.setattr(runtime.trees, "living", living)
     send = Mock()
     monkeypatch.setattr(runtime.trees, "send", send)
