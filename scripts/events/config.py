@@ -10,19 +10,17 @@ URL_ENV = "AGENTIHOOKS_BUS_URL"
 CREDENTIALS_ENV = "AGENTIHOOKS_BUS_CREDENTIALS"
 BIND_ENV = "AGENTIHOOKS_BUS_BIND"
 SCOPED_ENV = "AGENTIHOOKS_BUS_SCOPED"
+SWARMS_ENV = "AGENTIHOOKS_BUS_SWARMS"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
 INLINE_CREDENTIALS = "-----BEGIN NATS USER JWT-----"
 DEFAULT_BACKEND = "memory"
-SHARED_SLOT_BUCKETS = ("account-slots", "hive-slot-accounts")
 SCOPED_STATE_BUCKETS = (
     "spoke-work",
     "spoke-pending",
     "hive-presence",
     "hive-executions",
     "execution-starts",
-    "account-slots",
-    "hive-slot-accounts",
 )
 
 

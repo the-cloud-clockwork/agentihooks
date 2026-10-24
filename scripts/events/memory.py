@@ -34,6 +34,7 @@ class _Runtime:
         self.clock = clock
         self.cond = threading.Condition()
         self.closed = False
+        self.handlers: list[tuple[str, Callable[[str, bytes], bytes]]] = []
 
     def require_open(self) -> None:
         if self.closed:
@@ -326,6 +327,21 @@ class MemoryBus:
         with self._runtime.cond:
             self._runtime.require_open()
             return self._buckets.setdefault(bucket, MemoryStateStore(self._runtime))
+
+    def serve(self, subject: str, queue: str, handler: Callable[[str, bytes], bytes]) -> None:
+        with self._runtime.cond:
+            self._runtime.require_open()
+            self._runtime.handlers.append((subject, handler))
+
+    def request(self, subject: str, data: bytes, timeout_ms: int) -> bytes:
+        if self._swarm is not None and not subject.startswith(f"swarm.{self._swarm}."):
+            raise ValueError(f"a scoped bus cannot request outside swarm {self._swarm!r}")
+        with self._runtime.cond:
+            self._runtime.require_open()
+            handler = next((h for pattern, h in self._runtime.handlers if subject_matches(pattern, subject)), None)
+        if handler is None:
+            raise TimeoutError(f"no responders for {subject!r}")
+        return handler(subject, data)
 
     def close(self) -> None:
         if self._owned:

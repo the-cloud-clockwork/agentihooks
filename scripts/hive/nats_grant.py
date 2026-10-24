@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
 from scripts.events import nkey, subjects
-from scripts.events.config import SHARED_SLOT_BUCKETS
 from scripts.events.dead import DEAD_STREAM
 from scripts.hive import auth, buckets
 
@@ -40,6 +39,7 @@ ACCOUNT_LIMITS = {
 }
 MEMBER_PUBLISH = (
     "swarm.*.execution.>",
+    "swarm.*.slots",
     "dead.*",
     "dead.*.*",
     "$JS.API.INFO",
@@ -196,16 +196,7 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None) -> dict:
             "pub": {"allow": list(MEMBER_PUBLISH)},
             "sub": {"allow": [f"{subjects.inbox(user)}.>"]},
         }
-    shared = [
-        permission
-        for bucket in SHARED_SLOT_BUCKETS
-        for permission in (
-            f"$KV.{bucket}.>",
-            f"$JS.API.STREAM.INFO.KV_{bucket}",
-            f"$JS.API.STREAM.MSG.GET.KV_{bucket}",
-        )
-    ]
-    publish = [*shared, *(subject for swarm in swarms for subject in swarm_publish(swarm))] if swarms else []
+    publish = [subject for swarm in swarms for subject in swarm_publish(swarm)]
     return {
         **user_claims(),
         "pub": {"allow": publish} if publish else {"deny": [">"]},
@@ -266,11 +257,13 @@ def push(signer: Signer, jwt: str) -> None:
         raise auth.HiveError(f"NATS refused the account update ({answer['error'].get('description')})")
 
 
+def revoked(redis: "Redis") -> dict[str, int]:
+    return {key: int(value) for key, value in redis.hgetall(REVOKED).items()}
+
+
 def revoke(redis: "Redis", signer: Signer, member_id: str) -> str:
     redis.hset(REVOKED, member_user(signer, member_id).public, int(time.time()))
-    jwt = account_jwt(
-        signer.operator, signer.account, {key: int(value) for key, value in redis.hgetall(REVOKED).items()}
-    )
+    jwt = account_jwt(signer.operator, signer.account, revoked(redis))
     issuer = nkey.claims(jwt)["iss"]
     if issuer != signer.trusted_operator:
         raise auth.HiveError(

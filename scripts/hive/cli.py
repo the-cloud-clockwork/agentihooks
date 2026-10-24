@@ -229,7 +229,8 @@ def _nats_trust(args: argparse.Namespace) -> str:
         raise auth.HiveError(
             f"nats-trust writes OpenBao, so {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must be set"
         )
-    values, lines = nats_trust.bootstrap(bao, nats_trust.load_users(args.users), args.url)
+    users, retired = nats_trust.load_users(args.users), nats_trust.load_retired(args.users)
+    values, lines = nats_trust.bootstrap(bao, redis_client(), users, args.url, retired)
     Path(args.values).write_text(yaml.safe_dump(values, sort_keys=False))
     return "\n".join([*lines, f"wrote the public operator trust to {args.values}"])
 
@@ -315,7 +316,11 @@ def _parser() -> argparse.ArgumentParser:
     trust = sub.add_parser(
         "nats-trust", help="Create the swarm NATS operator trust once and sign the service users of a users file"
     )
-    trust.add_argument("--users", required=True, help="YAML file listing each service user and its OpenBao record")
+    trust.add_argument(
+        "--users",
+        required=True,
+        help="YAML file listing each service user and its OpenBao record, and the retired users to revoke",
+    )
     trust.add_argument("--url", required=True, help="NATS address the hive join endpoint pushes account updates to")
     trust.add_argument("--values", required=True, help="Helm values file to write the public operator trust to")
     sub.add_parser("show", help="Print a hive's record as JSON").add_argument("id")
