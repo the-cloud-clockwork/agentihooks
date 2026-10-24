@@ -457,3 +457,50 @@ def test_the_shared_follow_reads_every_watched_ledger_each_quarter_second(monkey
     assert read == ["broken", "kept"]
     assert slept == [0.25]
     assert capsys.readouterr().err == "shared follow broken: unreadable\n"
+
+
+class Conflict(Exception):
+    def __init__(self, pid):
+        self.holder = {"pid": pid}
+        super().__init__(f"held by {pid}")
+
+
+class Lease:
+    def __init__(self, holders):
+        self.holders, self.waits = list(holders), []
+
+    def acquire(self, claimant, wait):
+        self.waits.append((claimant, wait))
+        if self.holders:
+            raise Conflict(self.holders.pop(0))
+        return self
+
+
+WRITER = SimpleNamespace(owner=lambda: {"pid": 7}, WriterConflict=Conflict)
+
+
+def test_a_successor_outwaits_its_predecessor_still_holding_the_lease(capsys):
+    lease = Lease([41, 41])
+    server.take_lease(lease, WRITER, listener=object(), predecessor=lambda: 41)
+    assert lease.waits == [({"pid": 7}, server.LEASE_WAIT_S)] * 3
+    assert capsys.readouterr().err == "reload: predecessor pid 41 still holds the writer lease; waiting\n" * 2
+
+
+def test_a_successor_refuses_a_lease_another_process_holds():
+    lease = Lease([99])
+    with pytest.raises(SystemExit, match="held by 99"):
+        server.take_lease(lease, WRITER, listener=object(), predecessor=lambda: 41)
+    assert lease.waits == [({"pid": 7}, server.LEASE_WAIT_S)]
+
+
+def test_a_fresh_server_refuses_a_held_lease_at_once():
+    lease = Lease([41])
+    with pytest.raises(SystemExit, match="held by 41"):
+        server.take_lease(lease, WRITER, listener=None, predecessor=lambda: 41)
+    assert lease.waits == [({"pid": 7}, 0.0)]
+
+
+def test_a_free_lease_is_taken_on_the_first_try():
+    lease = Lease([])
+    server.take_lease(lease, WRITER, listener=None)
+    assert lease.waits == [({"pid": 7}, 0.0)]

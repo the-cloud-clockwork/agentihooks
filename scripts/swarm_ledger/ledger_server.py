@@ -1524,6 +1524,19 @@ def adopt_disk_files():
             sys.stderr.write(f"disk adoption {slug}: {exc}\n")
 
 
+def take_lease(writer, ledger_writer, listener, predecessor=os.getppid) -> None:
+    """A successor outwaits the predecessor that handed it the socket, since exiting would leave nothing listening."""
+    while True:
+        try:
+            writer.acquire(ledger_writer.owner(), wait=0.0 if listener is None else LEASE_WAIT_S)
+            return
+        except ledger_writer.WriterConflict as conflict:
+            held = conflict.holder.get("pid")
+            if listener is None or held != predecessor():
+                sys.exit(str(conflict))
+            sys.stderr.write(f"reload: predecessor pid {held} still holds the writer lease; waiting\n")
+
+
 def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     listener = server_handoff.inherited()
@@ -1536,10 +1549,7 @@ def serve():
     ledger_writer = ports.swarm().ledger_writer
     writer = ledger_writer.WriterLease(core.LEDGER_DIR)
     if not storage.shared():
-        try:
-            writer.acquire(ledger_writer.owner(), wait=0.0 if listener is None else LEASE_WAIT_S)
-        except ledger_writer.WriterConflict as conflict:
-            sys.exit(str(conflict))
+        take_lease(writer, ledger_writer, listener)
     if listener is not None:
         carried = take_carry()
     legacy.adopt(stored)
