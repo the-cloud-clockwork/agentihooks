@@ -6,6 +6,7 @@ import pytest
 @pytest.fixture
 def mcp_sdk():
     # An alarm inside the cold SDK import drops mcp.server but keeps mcp.server.stdio for the rest of the worker.
+    import anyio._backends._asyncio  # noqa: F401
     import fakeredis  # noqa: F401
     import mcp.server.lowlevel  # noqa: F401
     import mcp.server.stdio  # noqa: F401
