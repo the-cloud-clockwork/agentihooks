@@ -113,8 +113,8 @@ def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_th
     addresses = [seat, named, f"{SLUG}-eng-2", f"{SLUG}-eng-5", "engineer-100001-0001-tmp-1", "operator", doctor]
     items = [{"address": address, "history": []} for address in addresses]
     assert read.inbox_receivers(store, box, SLUG, items) == {
-        seat: Receiver(live=True, quiet_ms=2 * 60_000, occupant=f"{SLUG}-eng-1"),
-        named: Receiver(live=True, occupant=named),
+        seat: Receiver(live=True, quiet_ms=2 * 60_000, occupant=f"{SLUG}-eng-1", task="t1"),
+        named: Receiver(live=True, occupant=named, task="t6"),
         f"{SLUG}-eng-2": Receiver(),
         f"{SLUG}-eng-5": Receiver(),
         "engineer-100001-0001-tmp-1": Receiver(scoped=False),
@@ -135,7 +135,7 @@ def test_inbox_receivers_name_the_agent_that_took_delivery_apart_from_the_seat_o
     took = [{"state": "pending", "by": "swarm"}, {"state": "delivered", "by": f"{SLUG}-eng-1"}]
     items = [{"address": seat, "history": took}, {"address": seat, "history": took[:1]}]
     assert read.inbox_receivers(store, box, SLUG, items) == {
-        seat: Receiver(live=True, occupant=f"{SLUG}-eng-2"),
+        seat: Receiver(live=True, occupant=f"{SLUG}-eng-2", task="t2"),
         f"{SLUG}-eng-1": Receiver(),
     }
 
@@ -166,7 +166,7 @@ def test_receiver_reads_have_constant_round_trips_and_preserve_results(redis, mo
                 {"address": seat, "history": []},
             ]
         )
-        expected[alias] = expected[seat] = Receiver(live=True, quiet_ms=n * 60_000, occupant=name)
+        expected[alias] = expected[seat] = Receiver(live=True, quiet_ms=n * 60_000, occupant=name, task="t1")
         expected[taker] = Receiver(seat_wait=bool(n % 2))
     items.extend([{"address": "operator", "history": []}, {"address": "stranger", "history": []}])
     expected.update(operator=Receiver(), stranger=Receiver(scoped=False))
@@ -197,7 +197,7 @@ def test_receiver_reads_keep_delivery_seats_and_exited_occupants(redis, state, c
     assert read.inbox_receivers(store, box, SLUG, items) == {
         seat: Receiver(seat_wait=waiting),
         taker: Receiver(seat_wait=waiting),
-        name: Receiver(live=True, occupant=name, harness="codex"),
+        name: Receiver(live=True, occupant=name, harness="codex", task="t1"),
     }
 
 
