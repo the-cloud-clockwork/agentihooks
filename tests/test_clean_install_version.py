@@ -23,12 +23,12 @@ def _run(cmd, **kwargs):
 def _tagged_wheel(tmp_path):
     src = tmp_path / "src"
     src.mkdir(parents=True)
-    ignore = shutil.ignore_patterns("__pycache__", "*.egg-info")
+    ignore = shutil.ignore_patterns("__pycache__", "*.egg-info", ".coverage", ".coverage.*")
     for name in WHEEL_INPUTS:
         path = REPO / name
         if path.is_dir():
             shutil.copytree(path, src / name, ignore=ignore)
-        elif path.is_file():
+        else:
             shutil.copy2(path, src / name)
     pyproject = src / "pyproject.toml"
     text = pyproject.read_text()
@@ -97,8 +97,13 @@ def test_copied_package_build_accepts_tag_derived_metadata(tmp_path, monkeypatch
         '[project]\nname = "agentihooks"\ndynamic = ["version"]\n'
         '[build-system]\nrequires = ["setuptools>=68", "setuptools-scm>=8"]\n'
         'build-backend = "setuptools.build_meta"\n'
+        '[tool.setuptools]\npackages = ["hooks"]\n'
         "[tool.setuptools_scm]\n"
     )
+    (source / "scripts").mkdir()
+    (source / "profiles").mkdir()
+    (source / "README.md").write_text("")
+    (source / "LICENSE").write_text("")
     (source / ".coverage").symlink_to(source / "removed-coverage")
     (source / ".coverage.worker").symlink_to(source / "removed-worker-coverage")
     (source / ".coveragerc").write_text("[run]\nbranch = True\n")
@@ -110,7 +115,7 @@ def test_copied_package_build_accepts_tag_derived_metadata(tmp_path, monkeypatch
 
     assert wheel.name == f"agentihooks-{WHEEL_VERSION}-py3-none-any.whl"
     copied = tmp_path / "build" / "src"
-    assert sorted(path.name for path in copied.iterdir()) == ["hooks", "pyproject.toml"]
+    assert sorted(path.name for path in copied.iterdir()) == sorted(WHEEL_INPUTS)
 
 
 def test_version_is_unknown_without_package_metadata(monkeypatch):
