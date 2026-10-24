@@ -89,20 +89,23 @@ def _aggregator_problems(
             and base_id == "gate-required"
             and head_job.get("steps")
             in [
-                finish(
-                    rerun(
-                        shape(
-                            required(
-                                ci_reuse.gate_steps(
-                                    **form,
-                                    summary=summary,
-                                    docs="docs" in ci_wiring.needs_of(head_job),
-                                    watcher_loss=watcher_loss,
+                diagnostic(
+                    finish(
+                        rerun(
+                            shape(
+                                required(
+                                    ci_reuse.gate_steps(
+                                        **form,
+                                        summary=summary,
+                                        docs="docs" in ci_wiring.needs_of(head_job),
+                                        watcher_loss=watcher_loss,
+                                    )
                                 )
                             )
                         )
                     )
                 )
+                for diagnostic in (list, ci_reuse.selection_diagnostic)
                 for form in (
                     {},
                     {"selected": True},
