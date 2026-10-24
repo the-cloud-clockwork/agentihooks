@@ -70,11 +70,7 @@ def test_queue_durations_keep_the_median_recent_measurement_and_expire_old_runs(
 
 
 def test_queue_sizing_reads_the_median_durations_only():
-    from pathlib import Path
-
-    import yaml
-
-    jobs = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     step = next(
         step for step in jobs["split"]["steps"] if step.get("name") == "Size queue shards from median durations"
     )
