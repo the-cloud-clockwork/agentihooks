@@ -458,6 +458,42 @@ def test_unknown_local_reusable_workflow_names_the_ungraded_job():
     assert "build.yml/call" in problems[0] and "missing.yml" in problems[0]
 
 
+SHARED_SEMGREP = "The-Cloud-Clockwork/.github/.github/workflows/semgrep-reusable.yml@main"
+POLICY = {"actors": ACTORS, "queue_actor": "github-merge-queue[bot]"}
+
+
+@pytest.mark.parametrize("runner", ["ubuntu-latest", selector("anton-oss-light"), selector("anton-oss")])
+def test_shared_workflow_call_passes_with_a_hosted_or_trusted_runner_input(runner):
+    candidate = {"on": {"pull_request": {}}, "jobs": {"scan": {"uses": SHARED_SEMGREP, "with": {"runs_on": runner}}}}
+    assert ci_runner_trust.check({"test.yml": candidate}, POLICY) == []
+
+
+@pytest.mark.parametrize(
+    ("uses", "runner"),
+    [
+        (SHARED_SEMGREP, None),
+        (SHARED_SEMGREP, "anton-oss-light"),
+        (SHARED_SEMGREP, "self-hosted"),
+        (SHARED_SEMGREP, "${{ inputs.runner }}"),
+        (SHARED_SEMGREP, selector("anton-oss-light").replace("github.triggering_actor) ||", "github.actor) ||")),
+        ("someone/else/.github/workflows/semgrep-reusable.yml@main", "ubuntu-latest"),
+        ("The-Cloud-Clockwork/agentihooks/.github/workflows/semgrep.yml@dev", "ubuntu-latest"),
+    ],
+)
+def test_other_remote_calls_and_untrusted_runner_inputs_are_red(uses, runner):
+    call = {"uses": uses} if runner is None else {"uses": uses, "with": {"runs_on": runner}}
+    problems = ci_runner_trust.check({"test.yml": {"on": {"pull_request": {}}, "jobs": {"scan": call}}}, POLICY)
+    assert len(problems) == 1 and "test.yml/scan" in problems[0]
+
+
+def test_shared_workflow_call_from_a_target_event_is_red_even_on_a_trusted_runner():
+    candidate = {
+        "on": {"pull_request_target": {}},
+        "jobs": {"scan": {"uses": SHARED_SEMGREP, "with": {"runs_on": selector("anton-oss-light")}}},
+    }
+    assert len(ci_runner_trust.check({"test.yml": candidate}, POLICY)) == 1
+
+
 def test_loader_name_is_optional_and_does_not_change_admission():
     from pathlib import Path
 

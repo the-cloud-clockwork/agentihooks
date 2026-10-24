@@ -6,6 +6,8 @@ from pathlib import Path
 ACTORS = ".github/workflows/trusted-actors.json"
 LOADER = "the-cloud-clockwork/agentihooks/.github/workflows/runner-trust.yml@dev"
 POOLS = ("anton-oss", "anton-oss-light", "anton-oss-batch")
+# The org shared workflows place their job on the runner named by their runs_on input.
+SHARED = "the-cloud-clockwork/.github/.github/workflows/"
 QUEUE_POOLS = {"anton-oss": "anton-oss-queue"}
 GUARD = (
     "github.event_name != 'pull_request_target' && "
@@ -173,6 +175,9 @@ def check(workflows: dict[str, dict], actors: object = None) -> list[str]:
                     problems.append(f"{file}/{name}: runner trust cannot resolve local workflow {uses}")
                 continue
             if not uses and (_hosted(job.get("runs-on")) or _selector(job.get("runs-on"), actors)):
+                continue
+            runner = (job.get("with") or {}).get("runs_on")
+            if uses.lower().startswith(SHARED) and (_hosted(runner) or _selector(runner, actors)):
                 continue
             if "pull_request_target" in events or not _guarded(job, jobs):
                 problems.append(
