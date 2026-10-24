@@ -895,8 +895,8 @@ def test_a_stats_part_echoes_only_the_cache_report_from_its_log(tmp_path, capfd)
 
     log = tmp_path / "run.log"
     echo_cache_report(log)
-    log.write_text(
-        "collecting\nMutation stats cache: reused 3 test files; collect 1\n  Mutation stats cache: indented\n"
+    log.write_bytes(
+        b"collecting \xff\nMutation stats cache: reused 3 test files; collect 1\n  Mutation stats cache: indented\n"
     )
     echo_cache_report(log)
     assert capfd.readouterr().out == "Mutation stats cache: reused 3 test files; collect 1\n"

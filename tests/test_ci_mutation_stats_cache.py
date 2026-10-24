@@ -714,7 +714,7 @@ def test_dynamic_import_stats_track_the_modules_the_collection_loaded(tmp_path, 
     }[changed]
     (root / target).write_text(text)
     warm = collect_cached_stats(root, cache, {}, files, [], collect)
-    assert all("modules" not in result and "files" not in result for result in warm)
+    assert all(not result.keys() & {"modules", "files", "loaded"} for result in warm)
     assert (
         calls
         == {
@@ -760,8 +760,9 @@ def test_dynamic_import_stats_recollect_when_a_loaded_module_changes_its_mutated
     _repository(
         root,
         {
-            files[0]: "import importlib\nimport sys\nimportlib.import_module(sys.argv[0])\n",
+            files[0]: "import importlib\nimport sys\nimport scripts.other\nimportlib.import_module(sys.argv[0])\n",
             "scripts/a.py": "def first():\n    return 1\n\n\ndef second():\n    return 2\n",
+            "scripts/other.py": "value = 1\n",
         },
     )
     calls = []
@@ -794,3 +795,38 @@ def test_loaded_files_name_repository_modules_under_the_first_matching_base(tmp_
         "namespace": types.SimpleNamespace(__file__=None),
     }
     assert loaded_files([work / "mutants", work], entries) == ["conftest.py", "scripts/a.py"]
+
+
+@pytest.mark.parametrize("record_files", [True, False])
+def test_dynamic_import_stats_check_only_the_modules_of_their_own_bucket(tmp_path, record_files):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    loader = "import importlib\nimport sys\nimport scripts.other\nimportlib.import_module(sys.argv[0])\n"
+    _repository(
+        root,
+        {
+            files[0]: loader,
+            files[1]: loader + "# b\n",
+            "scripts/other.py": "value = 1\n",
+            "scripts/a_module.py": "value = 1\n",
+            "scripts/b_module.py": "value = 1\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        buckets = [
+            {"status": 0, "tests": {}, "durations": {}, "cpu": 1, "modules": [f"scripts/{path[-4]}_module.py"]}
+            | ({"files": [path]} if record_files else {})
+            for path in chosen
+        ]
+        return buckets if record_files else [{**buckets[0], "modules": [m for b in buckets for m in b["modules"]]}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "scripts/b_module.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == ([files, [files[1]]] if record_files else [files, files])

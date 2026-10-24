@@ -53,7 +53,7 @@ def failing_tests(log: Path) -> list[str]:
 def echo_cache_report(log: Path) -> None:
     for line in log.read_text(errors="replace").splitlines() if log.is_file() else []:
         if line.startswith("Mutation stats cache:"):
-            print(line, flush=True)
+            print(line)
 
 
 def path_parts(node: ast.AST, bindings: dict[str, ast.AST]) -> list[str]:

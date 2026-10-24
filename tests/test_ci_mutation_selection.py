@@ -626,6 +626,13 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
 
     monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
     monkeypatch.setenv("PY_IGNORE_IMPORTMISMATCH", "0")
+    work, root = tmp_path / "work", tmp_path / "root"
+    (work / "mutants/scripts").mkdir(parents=True)
+    (root / "scripts").mkdir(parents=True)
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("MUTATION_STATS_ROOT", str(root))
+    monkeypatch.setitem(sys.modules, "fake_mutated", SimpleNamespace(__file__=str(work / "mutants/scripts/m.py")))
+    monkeypatch.setitem(sys.modules, "fake_rooted", SimpleNamespace(__file__=str(root / "scripts/r.py")))
     engine = SimpleNamespace(tests_by_mangled_function_name={"m.x_f": {"b::t", "a::t"}}, duration_by_test={"a::t": 2.5})
     calls = []
 
@@ -656,7 +663,8 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
     result = json.loads(output.read_text())
     assert 0 <= result.pop("cpu") <= process_time()
     modules = result.pop("modules")
-    assert modules == sorted(modules) and "tests/test_ci_mutation_selection.py" in modules
+    assert modules == sorted(modules) and {"scripts/m.py", "scripts/r.py"} <= set(modules)
+    assert not any(name.startswith("mutants/") for name in modules)
     assert result == {
         "status": 4,
         "tests": {"m.x_f": ["a::t", "b::t"]},

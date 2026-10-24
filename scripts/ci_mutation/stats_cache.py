@@ -44,7 +44,7 @@ def test_inputs(
         if current not in records:
             content = (root / current).read_bytes()
             dependencies = set()
-            opened = False
+            unresolved = []
             if Path(current).suffix == ".py":
                 text = content.decode()
                 nodes = list(ast.walk(ast.parse(text)))
@@ -58,7 +58,7 @@ def test_inputs(
                 }
                 dynamic = [node for node in nodes if isinstance(node, ast.Call) and loader_name(node.func) in loaders]
                 called = {id(node.func) for node in dynamic}
-                opened = any(id(node) not in called and loader_name(node) in loaders for node in nodes)
+                unresolved = [node for node in nodes if id(node) not in called and loader_name(node) in loaders]
                 for node in dynamic:
                     if (
                         node.args
@@ -69,7 +69,7 @@ def test_inputs(
                     ):
                         names.add(node.args[0].value)
                     else:
-                        opened = True
+                        unresolved.append(node)
                 for name in names:
                     parts = []
                     for part in name.split("."):
@@ -83,7 +83,7 @@ def test_inputs(
                     if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
                 }
                 dependencies.update(resource for value in literals for resource in resources.get(value, ()))
-            records[current] = (hashlib.sha256(content).hexdigest(), dependencies, opened)
+            records[current] = (hashlib.sha256(content).hexdigest(), dependencies, unresolved)
         digest, dependencies, _ = records[current]
         inputs[current] = digest
         pending.update(dependencies - inputs.keys())
