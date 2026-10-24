@@ -58,20 +58,26 @@ def test_an_intent_failure_still_reaches_the_pass_when_the_tick_fails(env, monke
 
 
 def test_the_tick_hands_the_intent_check_the_pull_request_text_read(env, monkeypatch):  # noqa: F811
+    from scripts.swarm import ledger_events
+
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     built = []
 
     class Recorded:
         def __init__(self, *args, **kwargs):
-            built.append(kwargs)
+            built.append((args, kwargs))
 
         def run(self, doc):
             return []
 
     monkeypatch.setattr(intent, "Check", Recorded)
+    monkeypatch.setattr(ledger_events, "tick_view", lambda *args: lambda url: object())
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert [kwargs["text"] for kwargs in built] == [intent.pr_text]
+    [(args, kwargs)] = built
+    assert isinstance(args[2], int)
+    assert kwargs["text"] is intent.pr_text
+    assert kwargs["head"]("https://github.com/o/r/pull/1") is None
 
 
 def test_the_later_pull_request_snapshot_reuses_the_earlier_one(env, monkeypatch):  # noqa: F811
