@@ -250,6 +250,25 @@ def _pane_process(agent):
     return min(owned, key=lambda process: process.start_time, default=None)
 
 
+def _named_process(agent):
+    from scripts.herdr_host import server_socket
+    from scripts.terminate_agent import agent_environ, resolve, sessions, validate
+
+    items = sessions()
+    try:
+        session = resolve(items, agent.name, agent.harness or "any")
+        validate(session, items)
+    except ValueError:
+        return None
+    keys = ("HERDR_PANE_ID", "HERDR_SOCKET_PATH", "AGENTIHOOKS_SWARM_TASK")
+    pane, socket, task = agent_environ(session.process.pid, keys)
+    if not task or task != agent.task or agent.pane_id and pane != agent.pane_id:
+        return None
+    if socket and server_socket({"HERDR_SOCKET_PATH": socket}) != server_socket(dict(os.environ)):
+        return None
+    return session.process
+
+
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
 
@@ -1072,6 +1091,10 @@ class HerdrRuntime:
                     return self.retire_process(agent, None, homes)
         if found is None and agent.name not in self.live_names():
             return self.retire_process(replace(agent, pane_id=""), None, homes)
+        if found is None:
+            named = _named_process(agent)
+            if named is not None:
+                return self.retire_process(replace(agent, pane_id=""), named.pid, homes, named.start_time)
         self.refusals[agent.name] = {"process": 0, "refusal": "no owned pane for unrecorded process"}
         return False
 
