@@ -521,7 +521,9 @@ def _workflow_gates(data, run, cache):
     return gates
 
 
-def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[str], PullRequest | None]:
+def tick_view(
+    inbox: object, store: object, slug: str, doc: dict, earlier: Callable | None = None
+) -> Callable[[str], PullRequest | None]:
     from scripts.swarm import metrics_outbox, metrics_swarm
 
     urls = [
@@ -533,12 +535,14 @@ def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[s
         urls.extend(url for url, _ in metrics_swarm.pull_targets(doc, at, recent))
     notices = store.redis.hgetall(store.key(slug, "red-notices"))
     urls += [url for item_id, url in notices.items() if _open(inbox, item_id)]
-    snapshots = views(list(dict.fromkeys(urls)), cache=store.redis)
+    known = {url: pr for url, pr in getattr(earlier, "snapshots", {}).items() if pr is not None}
+    snapshots = {**known, **views([url for url in dict.fromkeys(urls) if url not in known], cache=store.redis)}
 
     @functools.cache
     def lookup(url):
         return snapshots[url] if url in snapshots else view(url)
 
+    lookup.snapshots = snapshots
     return lookup
 
 
