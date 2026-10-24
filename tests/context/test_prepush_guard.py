@@ -642,6 +642,10 @@ def test_only_the_newest_push_entry_counts_and_fetches_are_ignored(repo):
         ("git push origin HEAD:other", "other", "origin"),
         ("git push -u upstream +refs/heads/work:refs/heads/other", "other", "upstream"),
         ("git push --force-with-lease origin work", "work", "origin"),
+        ("git push origin +work", "work", "origin"),
+        ("git push origin refs/heads/work", "work", "origin"),
+        ("git push -o ci.skip origin work", "work", "origin"),
+        ("git push --push-option ci.skip origin :stale HEAD:other", "other", "origin"),
     ],
 )
 def test_the_spacing_reads_the_branch_and_remote_the_push_targets(repo, command, branch, remote):
@@ -674,3 +678,44 @@ def test_an_unpassed_push_names_the_gate_before_the_spacing(repo):
     with pytest.raises(BlockAction) as blocked:
         check_prepush(_bash("git push origin HEAD", repo))
     assert str(blocked.value) == _message(repo)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push origin HEAD:work :stale",
+        "git push origin HEAD:work HEAD:diffcheck/plant",
+    ],
+)
+def test_deleted_and_diffcheck_refspecs_in_a_mixed_push_are_not_spaced(repo, command):
+    _pushed(repo, "stale", (1000, "update by push"))
+    _pushed(repo, "diffcheck/plant", (1000, "update by push"))
+    assert _spacing(repo, command, 1010) is None
+    _pushed(repo, "work", (1000, "update by push"))
+    assert "the last push to work was" in _spacing(repo, command, 1010)
+
+
+@pytest.mark.parametrize(
+    "command", ["git push -n origin work", "git push --dry-run origin work", "git push origin HEAD:diffcheck/x"]
+)
+def test_dry_runs_and_diffcheck_pushes_are_never_spaced(repo, command):
+    _pushed(repo, "work", (1000, "update by push"))
+    _pushed(repo, "diffcheck/x", (1000, "update by push"))
+    assert _spacing(repo, command, 1010) is None
+
+
+def test_a_bare_push_reads_the_remote_and_branch_it_pushes_to(repo):
+    _git(repo, "config", "push.default", "current")
+    _git(repo, "remote", "add", "upstream", str(repo))
+    _git(repo, "config", "remote.pushDefault", "upstream")
+    _git(repo, "update-ref", "refs/remotes/upstream/work", "HEAD")
+    _pushed(repo, "work", (1000, "update by push"), remote="upstream")
+    assert "the last push to work was 10 s ago" in _spacing(repo, "git push", 1010)
+    assert _spacing(repo, "git push origin", 1010) is None
+
+
+def test_a_worktree_reads_the_push_reflog_of_its_repository(repo, swarm_worktree):
+    _pushed(repo, "task-branch", (1000, "update by push"))
+    assert "the last push to task-branch was 10 s ago" in prepush_guard._crowded(
+        [(swarm_worktree, ["origin", "HEAD"])], 1010
+    )

@@ -1,6 +1,7 @@
 import os
 import subprocess
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from hooks.common import log
 from hooks.hook_manager import BlockAction
 
 _PASS_ARGS = frozenset({"--delete", "-d", "--dry-run", "-n"})
+_VALUE_OPTIONS = frozenset({"-o", "--push-option", "--exec", "--receive-pack", "--repo"})
 
 
 def _push(tokens: list[str]) -> tuple[list[str], list[str]] | None:
@@ -22,14 +24,15 @@ def _push(tokens: list[str]) -> tuple[list[str], list[str]] | None:
     return (dirs, rest[1:]) if rest[:1] == ["push"] else None
 
 
+def _unspaced(spec: str) -> bool:
+    return spec.startswith(":") or spec.split(":")[-1].removeprefix("refs/heads/").startswith("diffcheck/")
+
+
 def _exempt(args: list[str]) -> bool:
     if _PASS_ARGS.intersection(args):
         return True
     refspecs = [arg for arg in args if not arg.startswith("-")][1:]
-    return bool(refspecs) and all(
-        spec.startswith(":") or spec.split(":")[-1].removeprefix("refs/heads/").startswith("diffcheck/")
-        for spec in refspecs
-    )
+    return bool(refspecs) and all(_unspaced(spec) for spec in refspecs)
 
 
 def _toplevel(cwd: Path) -> Path | None:
@@ -122,16 +125,15 @@ def _folder(cwd: Path, folders: list[str]) -> Path:
     return cwd
 
 
-def _pushes(payload: dict) -> list[tuple[Path, list[str]]]:
+def _pushes(payload: dict) -> Iterator[tuple[Path, list[str]]]:
     from hooks.context.shell_commands import located
 
     tool_input = payload["tool_input"]
     command = tool_input.get("command") or tool_input.get("cmd")
     if not command:
-        return []
+        return
     cwd = Path(payload.get("cwd") or os.getcwd(), _path(tool_input.get("workdir") or ""))
     selected = bool(tool_input.get("workdir"))
-    found = []
     for tokens, folders in located(command):
         push = _push(tokens)
         if push is None or _exempt(push[1]):
@@ -139,23 +141,39 @@ def _pushes(payload: dict) -> list[tuple[Path, list[str]]]:
         base = _push_directory(_folder(cwd, folders), selected or bool(folders) or bool(push[0]))
         root = _require_directory(_toplevel(base.joinpath(*map(_path, push[0]))), "repository lookup")
         if root:
-            found.append((root, push[1]))
-    return found
+            yield root, push[1]
 
 
-def _unpassed(pushes: list[tuple[Path, list[str]]]) -> Path | None:
+def _unpassed(pushes: Iterator[tuple[Path, list[str]]], seen: list[tuple[Path, list[str]]]) -> Path | None:
     from scripts.ci_prepush import passed
 
-    for root, _ in pushes:
+    for root, args in pushes:
+        seen.append((root, args))
         if (root / "scripts" / "ci_prepush" / "__init__.py").is_file() and not passed(root):
             return root
     return None
 
 
 def _branches(root: Path, args: list[str]) -> tuple[str, list[str]]:
-    words = [arg for arg in args if not arg.startswith("-")]
+    words, rest = [], iter(args)
+    for arg in rest:
+        if arg in _VALUE_OPTIONS:
+            next(rest, None)
+        elif not arg.startswith("-"):
+            words.append(arg)
+    if not words:
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"],
+            capture_output=True,
+            text=True,
+        )
+        remote, _, branch = result.stdout.strip().partition("/")
+        if result.returncode == 0 and branch:
+            return remote, [branch]
     branches = []
     for spec in words[1:] or ["HEAD"]:
+        if _unspaced(spec):
+            continue
         branch = spec.lstrip("+").split(":")[-1].removeprefix("refs/heads/")
         if branch == "HEAD":
             result = subprocess.run(
@@ -200,8 +218,8 @@ def check_prepush(payload: dict) -> None:
     import shlex
 
     try:
-        pushes = _pushes(payload)
-        root = _unpassed(pushes)
+        pushes = []
+        root = _unpassed(_pushes(payload), pushes)
         crowded = None if root else _crowded(pushes, time.time())
     except BlockAction:
         raise

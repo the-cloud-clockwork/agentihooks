@@ -51,12 +51,15 @@ gate commands' environment. Local tests run only when
 
 The push guard also refuses a passed `git push` to a branch whose last push
 from this clone is younger than `AGENTIHOOKS_PUSH_SPACING_S` seconds (default
-300; `0` turns it off). The time comes from the `update by push` entries in the
-remote tracking reflog, so the check costs no GitHub call. A pull request Tests
-run takes at least four and a half minutes, so a push inside that window
-cancels the run the previous push started. The refusal names the time the push
-may go; keep committing and push once, so one run grades every commit. Delete
-pushes, dry runs and `diffcheck/` pushes are not spaced.
+300; `0` turns it off), in every repository it guards. The time comes from the
+`update by push` entries in the remote tracking reflog of the remote the push
+names, or of `@{push}` for a bare `git push`, so the check costs no GitHub
+call. Over the day measured in issue 6909, pull request Tests runs took at
+least 4.6 minutes at the tenth percentile, so a push inside that window cancels
+the run the previous push started. The refusal names the time the push may go;
+keep committing and push once, so one run grades every commit. Delete
+refspecs, dry runs and `diffcheck/` refspecs are not spaced, and a push to a
+URL rather than a named remote has no reflog to read and is not spaced.
 
 ## How the size stage picks its base
 
