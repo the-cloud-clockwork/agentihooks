@@ -185,6 +185,7 @@ def test_judge_pieces_cover_case_and_evidence_text():
         extract.Piece(("text",), "t"),
         extract.Piece(("evidence", 0), "x"),
     ]
+    assert extract.pieces("other", _input("a claim")) == []
 
 
 def test_judge_units_group_each_item_and_the_case():
@@ -219,6 +220,8 @@ def test_fields_must_be_a_list_of_names():
     assert schema.parse({"fields": ["evidence"]}).fields == ("evidence",)
     with pytest.raises(schema.FilterSchemaError, match="fields"):
         schema.parse({"fields": "evidence"})
+    with pytest.raises(schema.FilterSchemaError, match="got evidnce"):
+        schema.parse({"fields": ["case", "evidnce"]})
 
 
 @pytest.mark.parametrize(

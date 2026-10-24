@@ -74,7 +74,8 @@ def pieces(tool_name: str | None, tool_input: dict) -> list[Piece]:
         return _items(tool_input, "edits", "new_string")
     text = tool_input.get("text")
     found = [Piece(("text",), text)] if isinstance(text, str) else []
-    return found + _items(tool_input, "evidence") + _case(tool_input) + _evidence(tool_input)
+    found += _items(tool_input, "evidence")
+    return found + _case(tool_input) + _evidence(tool_input) if tool_name == "judge" else found
 
 
 def _node(patch: dict, tool_input: dict, where: tuple):

@@ -343,6 +343,10 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
+def _is_filter(entry: dict) -> bool:
+    return entry["file"].lower().endswith(FILTER_SUFFIX)
+
+
 def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
     from hooks.filters import runner
 
@@ -362,7 +366,7 @@ def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
 
 def execute(entry: dict, step: str, payload: dict, timeout: float) -> dict:
     """Run one condition; never raises."""
-    if entry["file"].lower().endswith(FILTER_SUFFIX):
+    if _is_filter(entry):
         return _run_filter(entry, step, payload, timeout)
     cmd = _command(entry)
     if cmd is None:
@@ -427,11 +431,10 @@ def _run_chained(entries: list[dict], step: str, payload: dict) -> list[dict]:
 
 
 def _run_synchronous(entries: list[dict], step: str, payload: dict) -> list[dict]:
-    """Filters on one pre call run in turn, each on the input the earlier ones rewrote, so no rewrite is lost."""
-    chained = [entry for entry in entries if step == "pre" and entry["file"].lower().endswith(FILTER_SUFFIX)]
+    chained = [entry for entry in entries if step == "pre" and _is_filter(entry)]
     if len(chained) < 2:
         return _run_all(entries, step, payload)
-    rest = [entry for entry in entries if entry not in chained]
+    rest = [entry for entry in entries if not _is_filter(entry)]
     runs = dict(zip(map(id, chained), _run_chained(chained, step, payload)))
     if rest:
         runs.update(zip(map(id, rest), _run_all(rest, step, payload)))
