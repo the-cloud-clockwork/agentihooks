@@ -127,7 +127,7 @@ def _incidents(state, now_ms):
     return incidents, [incident for incident in incidents.values() if current and incident["end"] is None]
 
 
-def _crossings(state, runs, span, incidents, held):
+def _crossings(state, runs, span, incidents, held, observed_ms):
     """This pass window's grouped CI speed findings, none while an incident holds them, and the superseded ids."""
     since, now_ms = span
     width = interval_minutes(os.environ) * MINUTE_MS
@@ -138,7 +138,7 @@ def _crossings(state, runs, span, incidents, held):
     cleared = ci_speed.cleared(runs)
     gone = [*ci_speed.prune(groups, cleared), *cleared]
     if not held:
-        ci_speed.group(groups, runs, since, now_ms, window, github_status.windows(incidents, now_ms))
+        ci_speed.group(groups, runs, since, observed_ms, window, github_status.windows(incidents, now_ms))
     state["groups"] = groups
     current = {identity: entry for identity, entry in groups.items() if entry["window"] == window}
     gone = [identity for identity in gone if identity not in current]
@@ -172,10 +172,11 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
     continuation = state.get("continuation", {})
     end = continuation.get("end", min(now_ms, since + SPEED_SLICE_MINUTES * MINUTE_MS))
     active = continuation.get("active", end == now_ms)
+    observed = continuation.get("observed", now_ms)
     progress = ci_speed_read.Progress(state.get("pending"), continuation.get("responses", {}))
     snapshot = ci_speed_read.read(since, end, pending=progress, known=state.get("known"), active=active)
     incidents, held = _incidents(state, now_ms)
-    found, gone = _crossings(state, snapshot["runs"], (since, end), incidents, held)
+    found, gone = _crossings(state, snapshot["runs"], (since, now_ms), incidents, held, observed)
     report = {
         "complete": snapshot["complete"] and end == now_ms,
         "runs": len(snapshot["runs"]),
@@ -233,7 +234,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
         state.update(last=end, pending=[run["id"] for run in snapshot["runs"] if run["status"] != "completed"])
         state.pop("continuation", None)
     else:
-        state["continuation"] = {"end": end, "active": active, "responses": progress.responses}
+        state["continuation"] = {"end": end, "active": active, "observed": observed, "responses": progress.responses}
     finished = {
         str(run["id"]): {
             "status": run["status"],
