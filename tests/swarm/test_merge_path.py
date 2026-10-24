@@ -18,17 +18,18 @@ def stamp(offset_s):
     return merge_path._stamp(SINCE + offset_s)
 
 
-def run(run_id, event, conclusion, offset_s=60, spent_s=600, attempt=1, status="completed", head="feature"):
+def run(run_id, event, conclusion, offset_s=60, spent_s=600, **fields):
     return {
         "id": run_id,
         "event": event,
-        "head_branch": head,
-        "status": status,
+        "head_branch": "feature",
+        "status": "completed",
         "conclusion": conclusion,
         "created_at": stamp(offset_s),
         "run_started_at": stamp(offset_s + 30),
         "updated_at": stamp(offset_s + 30 + spent_s),
-        "run_attempt": attempt,
+        "run_attempt": 1,
+        **fields,
     }
 
 
@@ -52,7 +53,7 @@ def removed(offset_s, reason):
 RUNS = [
     run(1, "pull_request", "success"),
     run(2, "pull_request", "failure"),
-    run(3, "pull_request", "cancelled", attempt=2),
+    run(3, "pull_request", "cancelled", run_attempt=2),
     run(4, "pull_request", "success"),
     run(5, "merge_group", "success", spent_s=600),
     run(6, "merge_group", "failure", spent_s=1200),
@@ -60,9 +61,9 @@ RUNS = [
     run(8, "push", "success"),
     run(9, "pull_request", "success", offset_s=-60),
     run(10, "pull_request", "success", offset_s=4 * 3600),
-    run(11, "push", "success", offset_s=0, head="dev"),
-    run(12, "pull_request", "failure", head="dev"),
-    run(13, "pull_request", "cancelled", head="promotion/abc"),
+    run(11, "push", "success", offset_s=0, head_branch="dev"),
+    run(12, "pull_request", "failure", head_branch="dev"),
+    run(13, "pull_request", "cancelled", head_branch="promotion/abc"),
 ]
 PULLS = [
     pull(-3600, 1800, (added(600), removed(1800, "MERGED"))),
