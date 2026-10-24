@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -88,7 +87,7 @@ class Workflow:
 
 def parse(text: str) -> Workflow:
     try:
-        root = yaml.compose(text, Loader=yaml.SafeLoader)
+        root = yaml.compose(text)
         document = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise WorkflowError([f"not YAML: {exc}"]) from exc
@@ -99,14 +98,12 @@ def parse(text: str) -> Workflow:
 
 
 def flow_errors(node: yaml.Node | None) -> list[str]:
-    if node is None:
+    if not isinstance(node, (yaml.MappingNode, yaml.SequenceNode)):
         return []
     errors = []
-    flow_list = isinstance(node, yaml.SequenceNode) and bool(node.value)
-    if getattr(node, "flow_style", False) and (flow_list or isinstance(node, yaml.MappingNode)):
+    if node.flow_style and (isinstance(node, yaml.MappingNode) or node.value):
         errors.append(f"line {node.start_mark.line + 1}: flow style is refused; write block style")
-    children = node.value if isinstance(node.value, list) else []
-    for child in children:
+    for child in node.value:
         for item in child if isinstance(child, tuple) else (child,):
             errors.extend(flow_errors(item))
     return errors
@@ -144,10 +141,7 @@ def filled(body: dict, required: tuple[str, ...], defaults: dict, where: str, er
     errors.extend(unknown_keys(body, (*required, *defaults), where))
     errors.extend(f"{where}: missing required key {key}" for key in required if key not in body)
     errors.extend(f"{where}: {key} must not be empty" for key in required if key in body and body[key] is None)
-    out = copy.deepcopy(defaults)
-    out.update({key: None for key in required})
-    out.update(body)
-    return out
+    return {**defaults, **dict.fromkeys(required), **body}
 
 
 def stage_fields(stage_id: Any, body: Any, errors: list[str]) -> dict:

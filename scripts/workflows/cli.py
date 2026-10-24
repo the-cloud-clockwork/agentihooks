@@ -11,16 +11,23 @@ import yaml
 from scripts.workflows import loader, schema
 
 PROG = "agentihooks workflow"
+DESCRIPTION = "Workflows loaded from the package, bundle, profile and project layers"
+SUBCOMMANDS = {"dest": "action", "required": True}
+COMMANDS = {
+    "list": ("Every workflow with the layer and file it loads from", None),
+    "show": ("One workflow with its defaults filled in", "name"),
+    "validate": ("Check a workflow file or a loaded name", "target"),
+}
+BLOCK_DUMP = {"default_flow_style": False, "sort_keys": False}
 
 
 def parser() -> argparse.ArgumentParser:
-    out = argparse.ArgumentParser(
-        prog=PROG, description="Workflows loaded from the package, bundle, profile and project layers"
-    )
-    actions = out.add_subparsers(dest="action", required=True)
-    actions.add_parser("list", help="Every workflow with the layer and file it loads from")
-    actions.add_parser("show", help="One workflow with its defaults filled in").add_argument("name")
-    actions.add_parser("validate", help="Check a workflow file or a loaded name").add_argument("target")
+    out = argparse.ArgumentParser(prog=PROG, description=DESCRIPTION)
+    actions = out.add_subparsers(**SUBCOMMANDS)
+    for action, (text, argument) in COMMANDS.items():
+        command = actions.add_parser(action, help=text)
+        if argument:
+            command.add_argument(argument)
     return out
 
 
@@ -48,8 +55,7 @@ def show(args: argparse.Namespace) -> int:
         report(errors)
         return refuse(f"no workflow named {args.name}")
     entry = found[args.name]
-    print(f"# {entry.layer}: {entry.path}")
-    print(yaml.safe_dump(entry.workflow.to_document(), default_flow_style=False, sort_keys=False), end="")
+    sys.stdout.write(f"# {entry.layer}: {entry.path}\n" + yaml.safe_dump(entry.workflow.to_document(), **BLOCK_DUMP))
     return report(errors)
 
 

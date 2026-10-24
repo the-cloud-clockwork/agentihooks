@@ -92,12 +92,15 @@ def test_layer_dirs_list_package_bundle_profiles_then_project_in_order(tmp_path,
         calls.append((bundle_arg, profile_csv, linked))
         return [("engineer", role)]
 
-    monkeypatch.setattr(loader.profile_chain, "bundle_path", lambda state: bundle)
-    monkeypatch.setattr(loader.profile_chain, "active_profile", lambda state: "engineer")
-    monkeypatch.setattr(loader.profile_chain, "linked_profiles", lambda state: {"x": tmp_path})
+    state = {"bundle": "linked"}
+    monkeypatch.setattr(loader.profile_chain, "bundle_path", lambda given: bundle if given is state else None)
+    monkeypatch.setattr(loader.profile_chain, "active_profile", lambda given: "engineer" if given is state else None)
+    monkeypatch.setattr(
+        loader.profile_chain, "linked_profiles", lambda given: {"x": tmp_path} if given is state else {}
+    )
     monkeypatch.setattr(loader.profile_chain, "profile_dirs", profile_dirs)
 
-    layers = loader.layer_dirs({}, repo / "sub")
+    layers = loader.layer_dirs(state, repo / "sub")
 
     assert layers == [
         ("package", PACKAGE_DIR),

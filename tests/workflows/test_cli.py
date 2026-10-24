@@ -69,6 +69,20 @@ def test_show_prints_the_workflow_with_defaults_filled_in(resolved, capsys):
     assert document["workflow"]["max_iterations"] == 3
     assert document["stages"]["build"]["next"] == {"pass": "exit", "retry": None, "enhance": None}
     assert "{" not in out.split("\n", 1)[1]
+    assert out.endswith("      enhance: null\n")
+    assert list(document["stages"]["build"]) == list(schema.STAGE_KEYS)
+    assert resolved["cwds"] == [Path.cwd()]
+
+
+def test_help_names_every_action(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "200")
+
+    text = cli.parser().format_help()
+
+    assert cli.DESCRIPTION in text
+    for action, (help_text, _) in cli.COMMANDS.items():
+        assert action in text
+        assert help_text in text
 
 
 def test_show_refuses_an_unknown_name(resolved, capsys):
@@ -99,6 +113,7 @@ def test_validate_accepts_a_name_that_loads(resolved, capsys):
 
     assert cli.main(["validate", "tiny"]) == 0
     assert capsys.readouterr().out == f"valid: tiny ({resolved['path']})\n"
+    assert resolved["cwds"] == [Path.cwd()]
 
 
 def test_validate_by_name_fails_while_any_layer_file_is_broken(resolved, capsys):

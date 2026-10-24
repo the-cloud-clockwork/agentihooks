@@ -207,7 +207,58 @@ def test_an_empty_flow_list_stays_allowed():
 
 
 def test_text_that_is_not_a_mapping_is_refused():
-    assert "a workflow file is a mapping" in refused("- one\n- two\n")
+    assert refused("- one\n- two\n") == "a workflow file is a mapping with workflow and stages"
+
+
+def test_the_error_text_joins_every_error():
+    error = WorkflowError(["one", "two"])
+
+    assert str(error) == "one; two"
+    assert error.errors == ["one", "two"]
+
+
+def test_flow_style_errors_name_their_line():
+    text = "workflow:\n  name: tiny\nstages:\n  build:\n    input: [case]\n    next: {pass: exit}\n"
+
+    assert refused(text).splitlines() == [
+        "line 5: flow style is refused; write block style",
+        "line 6: flow style is refused; write block style",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"stages__build": "engineer"}, "stages.build: must be a mapping"),
+        ({"stages__build__next": "exit"}, "stages.build.next: must be a mapping of pass, retry and enhance"),
+        ({"stages__build__input": "case"}, "stages.build.input: must be a list of names"),
+        ({"stages": ["build"]}, "stages: must be a mapping"),
+        ({"workflow": "tiny"}, "workflow: must be a mapping"),
+    ],
+)
+def test_a_section_of_the_wrong_shape_is_refused(changes, message):
+    assert message in refused(block(document(**changes)))
+
+
+@pytest.mark.parametrize("key", ["workflow", "stages"])
+def test_a_missing_section_is_refused(key):
+    doc = copy.deepcopy(BASE)
+    del doc[key]
+
+    assert f"file: missing required key {key}" in refused(block(doc))
+
+
+def test_a_stage_id_that_is_not_text_is_refused():
+    doc = document()
+    doc["stages"][7] = {"profile": "engineer"}
+
+    assert "stages.7: a stage id must be text" in refused(block(doc))
+
+
+def test_every_stage_carries_its_id():
+    workflow = schema.parse(block(BASE))
+
+    assert [stage.id for stage in workflow.stages.values()] == ["build", "verdict"]
 
 
 def test_text_that_is_not_yaml_is_refused():
