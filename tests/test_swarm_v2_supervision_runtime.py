@@ -860,7 +860,7 @@ def test_main_routes_the_admitted_paths(monkeypatch, tmp_path, implicit):
 
 def test_forced_quiescence_waits_for_the_kill_window(supervisor, monkeypatch):
     remaining = {123: SimpleNamespace(pid=123)}
-    monkeypatch.setattr(runtime.trees, "living", Mock(side_effect=[remaining, remaining, []]))
+    monkeypatch.setattr(runtime.trees, "living", Mock(side_effect=[remaining, remaining, remaining, []]))
     monkeypatch.setattr(runtime.trees, "send", lambda *_: None)
     monkeypatch.setattr(runtime.time, "monotonic", Mock(side_effect=[0, 1, 1, 1]))
     wait = Mock()
