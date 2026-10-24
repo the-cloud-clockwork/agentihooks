@@ -291,6 +291,18 @@ def test_a_lost_shard_that_ends_cancelled_is_a_runner_loss(monkeypatch):
     assert ci_queue_retry.decide(run, failed, WORKFLOW) == (True, "runner lost on unit (3.12, 2)")
 
 
+def test_a_cancelled_shard_whose_tests_reported_failures_keeps_the_run_red(monkeypatch):
+    pages = cancelled_run_pages(QUOTED_LOSS + "##[error]The operation was canceled.")
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert [job["name"] for job in failed] == ["unit (3.12, 2)", "Gate — Required"]
+    run = {**RUN, "conclusion": "cancelled"}
+    assert ci_queue_retry.decide(run, failed, WORKFLOW) == (
+        False,
+        "failed without a runner loss signature: unit (3.12, 2)",
+    )
+
+
 def test_shards_cancelled_without_a_runner_loss_are_not_retried(monkeypatch):
     pages = cancelled_run_pages("##[error]The operation was canceled.")
     monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])

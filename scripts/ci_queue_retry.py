@@ -92,7 +92,7 @@ def failed_jobs(repo: str, run_id: int) -> list[dict]:
         if job["conclusion"] not in ("failure", "timed_out") and not (shard and job["conclusion"] == "cancelled"):
             continue
         text = job_text(repo, job["id"], shard)
-        if job["conclusion"] == "cancelled" and not runner_lost(text):
+        if job["conclusion"] == "cancelled" and not (runner_lost(text) or FAILED_RESULT.search(text)):
             continue
         failed.append({"name": job["name"], "text": text})
     unlisted = jobs["total_count"] - len(jobs["jobs"])
