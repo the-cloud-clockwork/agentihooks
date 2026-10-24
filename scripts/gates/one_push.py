@@ -40,8 +40,9 @@ def _gh_args(args):
 
 
 def expand(word, assigned):
-    """The word with each $NAME or ${NAME} the command assigned or the environment holds put in, the rest kept."""
-    return VARIABLE.sub(lambda m: assigned.get(m[1] or m[2], os.environ.get(m[1] or m[2], m[0])), word)
+    """The word with each $NAME or ${NAME} put in from the command's assignments or the environment, empty when unset
+    as the shell does; a command substitution stays as written."""
+    return VARIABLE.sub(lambda m: assigned.get(m[1] or m[2], os.environ.get(m[1] or m[2], "")), word)
 
 
 def actions(command, cwd):
@@ -49,8 +50,9 @@ def actions(command, cwd):
     here, assigned = Path(cwd or "."), {}
     for words in simple_commands(command):
         index = program_index(words)
-        if index is None:
-            assigned.update(word.split("=", 1) for word in words if ASSIGNED.fullmatch(word))
+        if index is None or words[index] == "export":
+            for name, value in (word.split("=", 1) for word in words if ASSIGNED.fullmatch(word)):
+                assigned[name] = expand(value, assigned)
             continue
         program, rest = PurePosixPath(words[index]).name, words[index + 1 :]
         if program == "cd" and rest:
@@ -163,7 +165,7 @@ class OnePush:
     def pushing(self, who, where, args):
         task = next((t for t in self.ledger().tasks(who.swarm) if t.get("id") == who.task), {})
         found = PULL_REPO.search(str(task.get("pr_url")))
-        if not found or git(where, "rev-parse", "--git-dir").returncode != 0:
+        if not found or ("$" not in str(where) and git(where, "rev-parse", "--git-dir").returncode != 0):
             return ""
         repo = repo_of(where, args)
         if repo and repo != found.group(1).lower():

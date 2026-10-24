@@ -562,5 +562,20 @@ def test_a_push_through_a_shell_variable_into_the_pull_request_repo_is_still_ref
 
 
 def test_a_push_from_a_folder_that_is_no_checkout_holds_nothing(tree, tmp_path):
-    command = 'cd "$NO_SUCH_REPO_FOLDER" && git push origin task'
+    command = f"cd {tmp_path / 'missing'} && git push origin task"
     assert gate(pull()).decide(bash(command, tree), ME, state(tmp_path)).allowed
+
+
+def test_an_unset_variable_or_an_exported_one_still_finds_the_pull_request_checkout(tree, other_repo, tmp_path):
+    for command, cwd in (
+        ('cd "$NO_SUCH_REPO_FOLDER" && git push origin task', tree),
+        (f'export A={tree}; cd "$A" && git push origin task', other_repo),
+        (f'export ROOT={tree.parent} X=1; cd "${{ROOT}}/work" && git push origin task', other_repo),
+    ):
+        decision = gate(pull()).decide(bash(command, cwd), ME, state(tmp_path))
+        assert (decision.allowed, decision.reason) == (False, push_refusal("demo", URL)), command
+
+
+def test_a_folder_named_by_a_command_substitution_is_held_as_the_task_repo(tree, other_repo, tmp_path):
+    command = 'B=$(wt.sh path); cd "$B" && git push origin task'
+    assert not gate(pull()).decide(bash(command, other_repo), ME, state(tmp_path)).allowed
