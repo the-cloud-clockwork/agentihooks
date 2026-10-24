@@ -334,7 +334,6 @@ def test_the_sweep_settles_departed_peer_task_mail_after_seat_reassignment(redis
         "unknown sender",
         "master sender",
         "information",
-        "unreceived",
         "unknown task",
         "empty seat",
         "closed",

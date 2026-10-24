@@ -43,7 +43,7 @@ def _settle_world(inbox, name, seat, exit_text):
             inbox.close(item.id, BY, "done", ended)
         elif successor:
             inbox.redirect(item.id, BY, successor, f"{name} {exit_text}; passed to {successor}, its successor", name)
-        elif seat:
+        elif seat and _task_continues(inbox, item, seat):
             inbox.redirect(item.id, BY, seat, f"{name} {exit_text}; moved to {seat} for its next occupant", name)
         elif names.entry(name).get("type") == "master":
             continue
@@ -75,13 +75,18 @@ def _settle_taken(inbox: "InboxStore", item, held: str, name: str, exit_text: st
     """Seat mail a gone life took: back to pending for the seat's next occupant when the work goes on, else closed."""
     if ended := _life_notice_end(item, name, exit_text):
         inbox.close(item.id, BY, "done", ended)
-    elif goes_on:
+    elif goes_on and _task_continues(inbox, item, held):
         inbox.redirect(item.id, BY, held, f"{name} {exit_text}; back to {held} for its next occupant", held, name)
     elif (
         inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it", held, name)
         and item.sender != BY
     ):
         inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text), fyi=True)
+
+
+def _task_continues(inbox: "InboxStore", item, seat: str) -> bool:
+    task = inbox.receiver_task(seat)
+    return item.fyi or not item.task or not task or item.task == task
 
 
 def _life_notice_end(item, name: str, exit_text: str) -> str:
@@ -290,10 +295,16 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
             if item.state in CLOSED or item.fyi or not item.task or item.task == agent.task:
                 continue
             owner = _taker(inbox, item)
-            if not owner or owner in active:
+            if owner in active:
                 continue
             exit_text = f"left its seat and task {item.task}"
-            if inbox.withdraw(item.id, BY, f"cancelled: {owner} {exit_text} before closing it", agent.seat, owner):
+            if inbox.withdraw(
+                item.id,
+                BY,
+                f"cancelled: {owner or agent.seat} {exit_text} before closing it",
+                agent.seat,
+                owner or None,
+            ):
                 inbox.send(BY, notice_address(inbox, item.sender), _told(item, owner, exit_text), fyi=True)
 
 
