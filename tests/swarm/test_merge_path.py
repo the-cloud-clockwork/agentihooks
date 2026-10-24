@@ -216,7 +216,7 @@ def test_collect_joins_every_paginated_search_page():
     assert repo == "o/r"
     assert found["merges"] == 2 and found["enqueues"] == 3 and found["open_ready_pull_requests"] == 7
     assert found["standard_jobs_per_queue_run"] == 0.5
-    searches = [argv for argv, _ in gh.calls if argv[1] == "graphql"]
+    searches = [argv for argv, _ in gh.calls if argv[2] == "graphql"]
     assert "--paginate" in searches[0] and f"q=repo:o/r is:pr base:dev updated:>={stamp(0)}" in searches[0]
     assert "q=repo:o/r is:pr is:open draft:false base:dev" in searches[1]
 
