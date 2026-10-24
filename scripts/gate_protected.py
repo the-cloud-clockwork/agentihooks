@@ -95,6 +95,7 @@ def _aggregator_problems(
                                 summary=summary,
                                 docs="docs" in ci_wiring.needs_of(head_job),
                                 watcher_loss=watcher_loss,
+                                postgres=postgres,
                             )
                         )
                     )
@@ -109,6 +110,7 @@ def _aggregator_problems(
                 )
                 for summary in (False, True)
                 for watcher_loss in (False, True)
+                for postgres in (False, True)
                 for rerun in (list, ci_reuse.lost_rerun)
                 for shape in (list, ci_reuse.inline_mutation)
                 for finish in (list, ci_reuse.pipefail_summary)

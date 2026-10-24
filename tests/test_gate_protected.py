@@ -762,6 +762,23 @@ def test_documentation_aggregation_accepts_only_the_canonical_transition(docs):
     assert _grade({"test.yml": head}, base={"test.yml": base})
 
 
+@pytest.mark.parametrize("postgres", [False, True])
+def test_postgres_aggregation_accepts_only_the_canonical_transition(postgres):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(
+        queue_tier=True, consolidated=True, docs=True, postgres=postgres
+    )
+    head["jobs"]["docs"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate-required"]["needs"].append("docs")
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+    head["jobs"]["gate-required"]["steps"][0]["run"] = head["jobs"]["gate-required"]["steps"][0]["run"].replace(
+        '"sonar"', '"semgrep"'
+    )
+    assert _grade({"test.yml": head}, base={"test.yml": base})
+
+
 @pytest.mark.parametrize("existing", [False, True])
 def test_a_declared_documentation_check_cannot_switch_to_legacy_aggregation(existing):
     from scripts import ci_reuse
