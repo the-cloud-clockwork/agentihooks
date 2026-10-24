@@ -227,6 +227,99 @@ def test_owners_engineers_and_messages_to_agents_without_a_task_pass(world, send
     assert world.refusals() == 0
 
 
+def test_after_a_backend_master_retires_the_front_door_messages_a_claimant_in_its_phase(world):
+    third = f"master-3@{SLUG}"
+    table = masters.MasterSeats(world.redis)
+    table.set_count(SLUG, 3)
+    world.seat(world.store.names.next(SLUG, "master"), third)
+    [phase] = [p for p, owner in table.owners(SLUG, world.doc()).items() if owner == SECOND]
+    world.down(SECOND_NAME)
+
+    table.retire(SLUG, SECOND, 1)
+
+    assert table.owners(SLUG, world.doc())[phase] == LEAD
+    assert table.retired(SLUG) == [SECOND]
+    table.retire(SLUG, SECOND, 1)
+    assert table.retired(SLUG) == [SECOND]
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+    assert world.refusals() == 0
+
+
+def test_after_a_backend_master_retires_the_items_it_decided_belong_to_the_front_door(world, monkeypatch):
+    clock = iter(range(1_000, 10**9, 1_000))
+    monkeypatch.setattr(core, "now_ms", lambda: next(clock))
+    table = masters.MasterSeats(world.redis)
+    table.set_count(SLUG, 3)
+    world.seat(world.store.names.next(SLUG, "master"), f"master-3@{SLUG}")
+    table.own_hive(SLUG, "anton", SECOND)
+    add = {"op": "add_item", "id": "targeted", "by": ENGINEER, "list": "followups", "text": "Ready", "hive": "anton"}
+    assert world.write(add)["accepted"]
+
+    def decide(by, n):
+        op = {"op": "set", "id": f"set-targeted-{n}", "by": by, "path": "followups/targeted/done", "value": True}
+        return world.write(op)
+
+    assert decide(SECOND_NAME, 0)["accepted"]
+    assert world.doc()["_meta"][master_fence.DECISIONS]["followups/targeted"]["seat"] == SECOND
+    decided_at = world.doc()["_meta"]["stamps"]["followups/targeted/done"]["at"]
+    world.down(SECOND_NAME)
+
+    table.retire(SLUG, SECOND, decided_at)
+
+    assert (table.retired_at(SLUG, SECOND), table.retired_at(SLUG, f"master-3@{SLUG}")) == (decided_at, 0)
+    refused = [f"followups/targeted belongs to {LEAD}, so {cases.FORMER} cannot decide it"]
+    assert decide(cases.FORMER, 1)["warnings"] == refused
+    assert table.hive_owners(SLUG) == {f"{masters.HIVES}/anton": LEAD}
+    world.redis.hdel(table.key(SLUG), masters.RETIRED)
+    world.seat(world.store.names.next(SLUG, "master"), SECOND)
+    assert decide(cases.FORMER, 2)["warnings"] == refused
+
+
+def racing_pipelines(world, monkeypatch, times):
+    real, raced = world.redis.pipeline, []
+
+    def pipeline():
+        pipe = real()
+        read = pipe.hget
+
+        def hget(key, field):
+            if field == "owners" and len(raced) < times:
+                raced.append(field)
+                world.redis.hset(key, "seats", json.dumps([LEAD]))
+            return read(key, field)
+
+        pipe.hget = hget
+        return pipe
+
+    monkeypatch.setattr(world.redis, "pipeline", pipeline)
+    return raced
+
+
+def test_a_retire_racing_another_masters_write_retries_and_still_hands_the_phases_to_the_front_door(world, monkeypatch):
+    table = masters.MasterSeats(world.redis)
+    [phase] = [p for p, owner in table.owners(SLUG, world.doc()).items() if owner == SECOND]
+    raced = racing_pipelines(world, monkeypatch, 1)
+
+    table.retire(SLUG, SECOND, 1)
+
+    assert raced == ["owners"]
+    assert json.loads(world.redis.hget(table.key(SLUG), "owners"))[phase] == LEAD
+    assert table.retired(SLUG) == [SECOND]
+
+
+def test_a_retire_that_keeps_losing_the_race_is_refused_naming_the_seat(world, monkeypatch):
+    table = masters.MasterSeats(world.redis)
+    table.owners(SLUG, world.doc())
+    raced = racing_pipelines(world, monkeypatch, masters.SAVE_ATTEMPTS)
+
+    with pytest.raises(masters.MasterError) as refused:
+        table.retire(SLUG, SECOND, 1)
+
+    assert str(refused.value) == f"master seats of {SLUG} kept changing; seat {SECOND} was not retired"
+    assert len(raced) == masters.SAVE_ATTEMPTS
+    assert table.retired(SLUG) == []
+
+
 def test_a_single_live_master_messages_without_reading_the_ledger(world, monkeypatch):
     world.down(SECOND_NAME)
     monkeypatch.setattr(master_fence, "_ledger_state", lambda slug: pytest.fail("read the ledger"))

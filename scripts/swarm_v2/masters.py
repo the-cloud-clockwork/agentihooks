@@ -12,6 +12,7 @@ SAVE_ATTEMPTS = 5
 UNNUMBERED = 10_000
 HIVES = "hives"
 RETIRED = "retired"
+RETIRED_AT = "retired-at."
 GONE = ("finished", "retiring")
 HIVE_KEY = "hive."
 HIVE_PAIR = f"a hive owner is set as {HIVE_KEY}<hive id>=<master seat>"
@@ -120,6 +121,14 @@ def _load(owners: dict[str, str], seat_id: str) -> int:
     return sum(owner == seat_id for owner in owners.values())
 
 
+def _added(held: list[str], address: str) -> list[str]:
+    return held if address in held else [*held, address]
+
+
+def _handed(owned: dict[str, str], address: str, front: str) -> dict[str, str]:
+    return {item: front if owner == address else owner for item, owner in owned.items()}
+
+
 def count_of(text: str) -> int:
     if not text.isdecimal():
         raise MasterError(f"masters takes a whole number of master seats, not {text!r}")
@@ -197,10 +206,36 @@ class MasterSeats:
         else:
             self.redis.hdel(self.key(slug), RETIRED)
 
-    def retire(self, slug: str, address: str) -> None:
-        held = self.retired(slug)
-        if address not in held:
-            self.redis.hset(self.key(slug), RETIRED, json.dumps([*held, address]))
+    def retire(self, slug: str, address: str, at: int) -> None:
+        """Every phase the seat owns moves to the front door in the same write; at outlives a later refill."""
+        from redis.exceptions import WatchError
+
+        front, key = seat_address(slug, MASTER), self.key(slug)
+        for _ in range(SAVE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key)
+                    saved = json.loads(pipe.hget(key, "owners") or "{}")
+                    held = json.loads(pipe.hget(key, RETIRED) or "[]")
+                    hives = json.loads(pipe.hget(key, HIVES) or "{}")
+                    pipe.multi()
+                    pipe.hset(
+                        key,
+                        mapping={
+                            "owners": json.dumps(_handed(saved, address, front)),
+                            HIVES: json.dumps(_handed(hives, address, front)),
+                            RETIRED: json.dumps(_added(held, address)),
+                            f"{RETIRED_AT}{address}": at,
+                        },
+                    )
+                    pipe.execute()
+                    return
+                except WatchError:
+                    continue
+        raise MasterError(f"master seats of {slug} kept changing; seat {address} was not retired")
+
+    def retired_at(self, slug: str, address: str) -> int:
+        return int(self.redis.hget(self.key(slug), f"{RETIRED_AT}{address}") or 0)
 
     def retired(self, slug: str) -> list[str]:
         return json.loads(self.redis.hget(self.key(slug), RETIRED) or "[]")
