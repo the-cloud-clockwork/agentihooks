@@ -81,6 +81,7 @@ class GitHub:
             resource = {"repository": {"nameWithOwner": "o/r"}, "baseRefName": "dev", "baseRef": None}
             return self.answer(command, {"data": {"resource": resource}})
         if query == f"query={merge_queue.STATE}":
+            assert command[5:] == ["-f", f"url={URL}"]
             return self.answer(command, {"data": {"resource": self.pull()}})
         if query == f"query={merge_queue.MERGE}":
             if self.merge_error:
@@ -235,3 +236,13 @@ def test_a_conflicting_pull_request_is_refused_without_waiting(no_sleep):
     assert str(caught.value) == "the pull request conflicts with dev; merge dev into it before merging"
     assert no_sleep == []
     assert github.merged == []
+
+
+def test_a_merge_without_named_attempts_reads_the_state_once_and_never_waits(no_sleep):
+    github = GitHub(states=("BLOCKED",))
+    with pytest.raises(SwarmError) as caught:
+        merge_queue.operate("queue", URL, github)
+    assert str(caught.value) == (
+        "required checks on the current pull request head must pass before merging; merge state BLOCKED"
+    )
+    assert no_sleep == []

@@ -93,11 +93,15 @@ def required_view(url: str, run) -> "ledger_events.PullRequest | None":
     return ledger_events.view(url, read, required_checks=expected)
 
 
+def refuse(pull: "ledger_events.PullRequest | None") -> None:
+    failed = f"; failed: {', '.join(pull.failed)}" if pull and pull.failed else ""
+    raise SwarmError(f"required checks on the current pull request head must pass before queueing{failed}")
+
+
 def require_green(url: str, head: str, run) -> None:
     pull = required_view(url, run)
     if pull is None or pull.head != head or not pull.resolved or pull.red:
-        failed = f"; failed: {', '.join(pull.failed)}" if pull and pull.failed else ""
-        raise SwarmError(f"required checks on the current pull request head must pass before queueing{failed}")
+        refuse(pull)
 
 
 def readable_view(url: str, run) -> "ledger_events.PullRequest | None":
@@ -110,17 +114,16 @@ def readable_view(url: str, run) -> "ledger_events.PullRequest | None":
 
 
 def settle(url: str, head: str, run, attempts: int) -> None:
-    status = "UNKNOWN"
+    status = "PENDING"
     for attempt in range(attempts):
         if attempt:
             time.sleep(POLL)
         pull = readable_view(url, run)
         if pull is not None:
             if pull.head != head or pull.red:
-                require_green(url, head, run)
+                refuse(pull)
             if pull.resolved:
                 return
-            status = "PENDING"
             continue
         raw = graphql(STATE, {"url": url}, run)["resource"]
         if raw["headRefOid"] != head:
