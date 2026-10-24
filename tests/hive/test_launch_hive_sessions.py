@@ -83,7 +83,6 @@ def test_hive_sessions_count_launch_reservations_no_hive_reports_yet(monkeypatch
     import fakeredis
 
     from hooks.context.account_sessions import hive_held
-
     from scripts.hive import registry
     from scripts.swarm.keyspace import ROOT
 
