@@ -468,7 +468,7 @@ def release(target: Path, environ: Mapping[str, str]) -> None:
         held["holders"] = {
             owner: pid for owner, pid in (held.get("holders") or {}).items() if (owner, pid) != (name, os.getpid())
         }
-        if held.get("alone") == name:
+        if held.get("alone") == name and name not in held["holders"]:
             held.pop("alone")
         _write(folder / OWNER, held)
 

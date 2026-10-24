@@ -816,3 +816,65 @@ def test_launch_preparation_checks_live_login_then_waits_for_browser(
         assert prepared is None
         assert calls == ["current", "browser"]
         assert login.holders(login.root()) == {}
+
+
+def test_browser_preparation_skips_a_slot_held_by_another_process(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    login._write(login.root(1) / login.OWNER, {"epoch": 4, "holders": {"other": os.getppid()}})
+    observed = []
+
+    def browser(environ, target):
+        observed.append(target)
+        _login(target)
+        return "success"
+
+    monkeypatch.setattr(chain, "authorize", browser, raising=False)
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(2), "masteratexample_com")
+    assert observed == [login.home(2)]
+    assert login.holders(login.root(1)) == {"other": os.getppid()}
+    assert login.holders(login.root(2)) == {"master@a-1": os.getpid()}
+
+
+def test_prepare_launch_keeps_incompatible_settings_out_of_every_fallback(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+
+    (rendered / "settings.json").write_text('{"apiKeyHelper":"unsafe"}')
+    monkeypatch.setattr(
+        chain, "authorize", lambda *_: pytest.fail("settings refusal must precede browser"), raising=False
+    )
+    with pytest.raises(login.LoginRefused, match="sets apiKeyHelper$"):
+        login.prepare_launch(_environ(rendered), tmp_path)
+    assert not login.root().exists()
+
+
+def test_browser_home_refuses_when_all_slots_are_occupied(ah, rendered):
+    for number in login.numbers():
+        login._write(login.root(number) / login.OWNER, {"holders": {"other": os.getppid()}})
+    with pytest.raises(login.LoginRefused, match="^all 5 master login slots hold a login"):
+        login.browser_home(_environ(rendered))
+    assert all(login.holders(login.root(number)) == {"other": os.getppid()} for number in login.numbers())
+
+
+def test_release_keeps_other_holders_and_the_owner_epoch(ah, rendered):
+    login._write(
+        login.root() / login.OWNER,
+        {"epoch": 7, "alone": "master@a-1", "holders": {"master@a-1": os.getpid(), "other": os.getppid()}},
+    )
+    login.release(login.home(), _environ(rendered))
+    assert json.loads((login.root() / login.OWNER).read_text()) == {"epoch": 7, "holders": {"other": os.getppid()}}
+
+
+def test_release_never_drops_a_successor_with_the_same_name(ah, rendered):
+    login._write(
+        login.root() / login.OWNER, {"epoch": 8, "alone": "master@a-1", "holders": {"master@a-1": os.getppid()}}
+    )
+    login.release(login.home(), _environ(rendered))
+    assert json.loads((login.root() / login.OWNER).read_text()) == {
+        "epoch": 8,
+        "alone": "master@a-1",
+        "holders": {"master@a-1": os.getppid()},
+    }
