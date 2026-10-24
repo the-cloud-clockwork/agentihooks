@@ -49,7 +49,7 @@ def member_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
     return {"publish": _direction(claims.get("pub")), "subscribe": subscribe}
 
 
-def hive_grants(antoncore: Path) -> dict[str, dict[str, frozenset[str]]]:
+def hive_grants(antoncore: Path) -> dict[str, dict[str, frozenset[str]]] | None:
     values = yaml.safe_load((antoncore / HIVE_VALUES).read_text())
     accounts = values["config"]["merge"].get("accounts")
     if accounts is None:
@@ -57,6 +57,8 @@ def hive_grants(antoncore: Path) -> dict[str, dict[str, frozenset[str]]]:
     else:
         users = accounts[ACCOUNT]["users"]
     hive = next((user for user in users if user["user"] == HIVE_USER), None)
+    if hive is None and accounts is None:
+        return None
     if hive is None:
         raise ValueError(f"the {ACCOUNT} account has no {HIVE_USER} user")
     permissions = hive.get("permissions") or {}
@@ -101,6 +103,9 @@ def main(argv: list[str] | None = None) -> int:
     ) as exc:
         print(f"::error::The hive member NATS grants cannot be read ({type(exc).__name__}: {exc}).")
         return 1
+    if hive is None:
+        print(f"The antoncore {HIVE_USER} user is retired, so hives connect only with minted member credentials.")
+        return 0
     lines = differences(member, hive)
     for line in lines:
         print(f"::error::{line}")
