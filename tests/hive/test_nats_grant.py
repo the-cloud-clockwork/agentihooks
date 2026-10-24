@@ -259,9 +259,13 @@ def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin,
         buckets.provision(hub)
         slots.serve(hub, clock=lambda: 1000)
         report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
-        first = account_slots.Remote(account_slots.asker(members[0], "rig"), "m1", lambda: report)
-        second = account_slots.Remote(account_slots.asker(members[1], "other"), "m2", lambda: report)
+        first = account_slots.Remote(account_slots.asker(members[0], "rig", "m1"), "m1", lambda: report)
+        second = account_slots.Remote(account_slots.asker(members[1], "other", "m2"), "m2", lambda: report)
         assert first.take("one", "claude") == "a"
+        assert second.take("two", "claude") is None
+        posing = account_slots.Remote(account_slots.asker(members[1], "rig", "m1", 500), "m1")
+        with pytest.raises(TimeoutError, match="^no responders for 'slots.rig.m1'$"):
+            posing.release("one", "claude", "a")
         assert second.take("two", "claude") is None
         first.release("one", "claude", "a")
         assert second.take("two", "claude") == "a"
