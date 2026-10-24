@@ -68,7 +68,7 @@ def _grant(operation: str, redis: "Redis", value: str, redis_url: str, signer: "
     grant = {**grant, "nats_credentials": nats_grant.mint(signer, grant["id"])}
     if signer.member_swarms is None:
         return {**grant, "bus_scoped": False}
-    return {**grant, "bus_scoped": True, "bus_swarms": list(signer.member_swarms.get(grant["id"], ()))}
+    return {**grant, "bus_scoped": True, "bus_swarms": list(signer.member_swarms[grant["id"]])}
 
 
 def _handler(

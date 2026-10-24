@@ -1232,12 +1232,9 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     rows, actions = {t["id"]: t for t in doc["tasks"]}, []
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
         task = rows.get(agent.task) or {"id": agent.task}
-        if agent.state == "finished" and task.get("state") == "done":
-            actions.append(_finished_launch(slug, store, doc, agent))
-            continue
         try:
             placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})
-            if agent.state == "finished" and task.get("state") == "blocked":
+            if agent.state == "finished":
                 actions.append(_finished_launch(slug, store, doc, agent))
                 continue
             launched = codex.admit_legacy(store, slug, placed_record(agent, placed), runtime)

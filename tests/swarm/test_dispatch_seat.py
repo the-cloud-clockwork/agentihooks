@@ -294,8 +294,8 @@ The tick woke you because its deterministic passes could not settle these trigge
 - The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day
 Your seat dispatcher@{SLUG} has no history yet: no handoff document, no recap and no learned notes.
 
-Before anything else, run once: {LED} join. Then read the ledger with agentihooks ledger --slug {SLUG} show and \
-each trigger's item in it.
+Before anything else, run once: {LED} join. Read each trigger's item through the ledger API with \
+agentihooks ledger --slug {SLUG} get <item> (priorities/<id>, tasks/<id> or followups/<id>).
 Settle each trigger within the swarm's autonomy with the agentihooks commands, the classifiers and read only sub \
 agents: comment on its item with {LED} comment <item> "<text>", close a decided follow up, rank a task, and clear the \
 priority once it is resolved with {LED} priority clear <priority id>.

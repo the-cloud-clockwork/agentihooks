@@ -1374,7 +1374,7 @@ def _master_or_operator(store, args, message):
 
 
 def cmd_verdict(store, args):
-    by = _master_or_operator(store, args, "only the master or the operator gives a finding a verdict")
+    by = args.by = _master_or_operator(store, args, "only the master or the operator gives a finding a verdict")
     verdict = verdict_store(store, args.slug).judge(args.finding, args.verdict, args.note, by, now_ms())
     minutes = health.limits().cooldown_minutes
     print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
@@ -1750,11 +1750,11 @@ def _dev_red_run(store, slug):
 
 def block_agent(store, slug, agent, note, ledger, red_run=None):
     dev_red.hold(store.redis, slug, agent.task, red_run)
-    if red_run is not None:
-        store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
     ledger.update_task(slug, agent.task, {"state": "blocked"}, by=agent.name)
     ledger.comment(slug, agent.task, note, by=agent.name)
     waits.settle_notices(InboxStore(store.redis), agent, "a block")
+    if red_run is not None:
+        store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
     _retire(store, slug, agent, "blocked its task and exited")
 
 
