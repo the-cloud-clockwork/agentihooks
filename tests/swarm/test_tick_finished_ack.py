@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+import pytest
+
 from scripts.swarm import failed_panes
 from scripts.swarm import tick as tick_module
 from scripts.swarm.tick import _acknowledging, _collect_acks, tick
@@ -7,12 +9,12 @@ from tests.swarm.test_tick import HiveAcks, tasks
 from tests.swarm.test_tick import store as store
 
 
-def _finished_before_ack(store, monkeypatch, *ids):
+def _finished_before_ack(store, monkeypatch, *ids, receipt=True):
     ledger, runtime = tasks(*[(i, "eng") for i in ids or ("t1",)]), HiveAcks()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     for agent in [a for a in store.agents("sw") if a.name in runtime.ordered]:
         store.put_agent("sw", replace(agent, state="finished", harness="claude"))
-        runtime.failing.add(agent.name)
+        (runtime.acked if receipt else runtime.failing).add(agent.name)
     released = []
     monkeypatch.setattr(
         tick_module, "_release_hive_launch", lambda s, st, record: released.append((s, st is store, record.name))
@@ -28,7 +30,7 @@ def test_an_agent_that_finished_before_its_acknowledgement_was_collected_is_no_s
     actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
     assert actions == [f"{name} finished t1 before the tick collected its hive acknowledgement"]
     assert released == [("sw", True, name)]
-    assert runtime.collected == []
+    assert runtime.collected == [name]
     rows = [(r["agent"], r["state"], r["error"], r["after"]) for r in store.launches("sw")]
     assert rows == [(name, "started", "", "reclaimed")]
     assert store.claims("sw", "t1") == lives + 1
@@ -60,9 +62,10 @@ def test_a_restart_cause_wins_over_the_master_who_closed_the_task(store, monkeyp
     assert [(r["agent"], r["state"], r["after"]) for r in store.launches("sw")] == [(name, "started", "reclaimed")]
 
 
-def test_an_agent_finished_before_its_acknowledgement_on_an_open_task_is_still_a_spawn_failure(store, monkeypatch):
-    ledger, runtime, name, released = _finished_before_ack(store, monkeypatch)
-    doc = {"tasks": [{"id": "t1", "lane": "eng", "state": "claimed"}]}
+@pytest.mark.parametrize("task_state", ["claimed", "done"])
+def test_an_agent_finished_before_a_failed_acknowledgement_is_still_a_spawn_failure(store, monkeypatch, task_state):
+    ledger, runtime, name, released = _finished_before_ack(store, monkeypatch, receipt=False)
+    doc = {"tasks": [{"id": "t1", "lane": "eng", "state": task_state}]}
     actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
     assert len(actions) == 1
     assert actions[0].startswith("spawn failed for t1")
