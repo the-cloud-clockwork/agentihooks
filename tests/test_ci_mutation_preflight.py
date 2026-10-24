@@ -416,6 +416,17 @@ def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
     assert not any(step.get("continue-on-error") for step in steps)
 
 
+def test_touched_tests_admission_does_not_wait_for_mutation_planning():
+    jobs = _workflow()["jobs"]
+    job = jobs["touched-tests"]
+    assert "needs" not in job
+    assert job["if"] == "${{ github.event_name == 'push' && !github.event.deleted }}"
+    assert job["steps"][0] == jobs["plan"]["steps"][0]
+    for step in job["steps"][1:]:
+        assert step["if"].startswith("steps.open.outputs.open == 'false'")
+    assert not any(step.get("continue-on-error") for step in job["steps"])
+
+
 def test_touched_test_selection_supplies_the_automatic_worker_limit():
     steps, names = _steps(_workflow()["jobs"]["touched-tests"])
     select = steps[names.index("Select the tests the branch touches")]
