@@ -5,7 +5,7 @@ import pytest
 from nats.errors import TimeoutError as NatsTimeout
 
 from scripts.events import nats
-from scripts.events.protocol import QueuePolicy
+from scripts.events.config import QueuePolicy
 
 
 @pytest.mark.parametrize("error", [TimeoutError, NatsTimeout])
