@@ -18,7 +18,7 @@ def redis():
 
 
 def headless(name="headless", **fields):
-    return hive(name, ui="no", excluded=["master"], master_swarms=[SCRATCH], **fields)
+    return hive(name, **{"ui": "no", "excluded": ["master"], "master_swarms": [SCRATCH], **fields})
 
 
 def test_a_hive_admits_masters_only_for_the_swarms_it_names():

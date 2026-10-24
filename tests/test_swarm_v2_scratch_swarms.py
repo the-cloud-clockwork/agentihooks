@@ -37,7 +37,7 @@ def test_a_listed_scratch_swarm_is_created_beside_the_live_swarm(store):
     assert content == proof_swarm.CONTENT
     config = store.config(SCRATCH)
     assert (config.repo, config.scratch, config.max_eng, config.max_ci) == (PROJECT, True, 1, 0)
-    assert sorted(store.slugs()) == [LIVE, SCRATCH]
+    assert sorted(store.slugs()) == sorted([LIVE, SCRATCH])
     assert store.config(LIVE).max_eng == 16
 
 
