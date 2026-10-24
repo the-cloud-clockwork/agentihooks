@@ -701,7 +701,7 @@ body.reordering, body.reordering .stat-grip { cursor: grabbing; user-select: non
 #stats .bottleneck-stage { font-weight: 600; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 * { scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
-.stats-toggle { display: none; }
+.stats-toggle, .chat-send { display: none; }
 @media (max-width: 1279px) {
   .workspace > .outline { display: none; }
   .jump-menu { display: flex; align-items: center; gap: var(--space-tight); margin-right: auto; font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
@@ -830,6 +830,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .title-pen, .logo-link { min-width: 32px; min-height: 32px; place-content: center; }
   #jump-to { min-width: 216px; }
   #chat-to-pick, #stats-sync { min-height: 44px; min-width: 44px; }
+  .chat-send { display: flex; align-items: center; order: 3; min-height: 44px; margin: 8px 0 0 auto; }
   .sw-acts .sw-btn, #freeze-table .sw-btn, #architecture-table .sw-btn { min-height: 32px; }
   .hl-pick, .hl-note, #hives-table .hl-pick, #hives-table .hl-note { font-size: 16px; }
 }
