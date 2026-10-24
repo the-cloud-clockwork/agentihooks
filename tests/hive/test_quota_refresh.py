@@ -191,12 +191,14 @@ def test_stale_codex_refresh_restores_each_routed_slot(cached, monkeypatch, caps
     monkeypatch.setattr(daemon, "_claude_snapshots", lambda observed: None)
     monkeypatch.setattr(codex_router, "_registry", lambda: {})
     for account in pool:
-        codex_usage.store(account.name, CodexQuota(NOW - 74 * 3600, "pro", seven_day=balancer.QuotaWindow(20, NOW + 86400)))
+        codex_usage.store(
+            account.name, CodexQuota(NOW - 74 * 3600, "pro", seven_day=balancer.QuotaWindow(20, NOW + 86400))
+        )
     counts = {"claude": {}, "codex": {}}
     assert [slot["cap"] for slot in daemon._subscriptions(environ, counts, NOW)[0]] == [0, 0]
 
     def probe(account, env, run):
-        used = 20 if account.name == "alpha" else 70
+        used = 20 if account.name == "alpha" else 99
         reading = CodexQuota(NOW, "pro", seven_day=balancer.QuotaWindow(used, NOW + 86400))
         codex_usage.store(account.name, reading)
         return reading
@@ -206,7 +208,7 @@ def test_stale_codex_refresh_restores_each_routed_slot(cached, monkeypatch, caps
     assert quota_refresh.due(environ, NOW) is True
     assert quota_refresh.refresh(environ, NOW) is True
     slots, readings = daemon._subscriptions(environ, counts, NOW)
-    assert [(slot["account"], slot["cap"]) for slot in slots] == [("alpha", 9), ("beta", 6)]
+    assert [(slot["account"], slot["cap"]) for slot in slots] == [("alpha", 9), ("beta", 0)]
     assert {name: row["probed_at"] for name, row in readings.items()} == {"codex:alpha": NOW, "codex:beta": NOW}
     assert [call.args[0].name for call in probing.call_args_list] == ["alpha", "beta"]
     assert quota_refresh.due(environ, NOW) is False
