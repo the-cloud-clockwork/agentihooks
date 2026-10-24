@@ -78,7 +78,12 @@ def test_a_missing_published_chart_fails_before_any_cluster_starts(tmp_path, mis
     stub.chmod(0o755)
     (tmp_path / "kind").symlink_to(stub)
     calls = tmp_path / "calls"
-    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "CALLS": str(calls), "MISSING": "1" if missing else "0"}
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "CALLS": str(calls),
+        "MISSING": "1" if missing else "0",
+    }
     result = subprocess.run(
         ["bash", str(ROOT / "deploy/helm/agentihooks-swarm/ci/kind-published.sh"), "v9.9.9"],
         env=env,
@@ -87,7 +92,12 @@ def test_a_missing_published_chart_fails_before_any_cluster_starts(tmp_path, mis
     )
     assert result.returncode == 1
     recorded = [json.loads(line) for line in calls.read_text().splitlines()]
-    assert recorded[0][:4] == ["helm", "pull", "oci://ghcr.io/the-cloud-clockwork/charts/agentihooks-swarm", "--version"]
+    assert recorded[0][:4] == [
+        "helm",
+        "pull",
+        "oci://ghcr.io/the-cloud-clockwork/charts/agentihooks-swarm",
+        "--version",
+    ]
     assert recorded[0][4] == "9.9.9"
     assert all(call[0] != "kind" for call in recorded)
     if missing:
