@@ -95,6 +95,11 @@ def test_verdict_log_counts_all_events_beside_latest_records_for_a_day(store, mo
     judgments, found = finding(store)
     judgments.judge(found.id, "false-positive", "first", "judge", START + 1)
     judgments.judge(found.id, "false-positive", "again", "judge", START + 2)
+    for subject, at in (("before", START - 1), ("after", START + DAY), ("pending", None)):
+        extra = Finding("test", subject, "Other finding", ("evidence",), "above zero", 1)
+        judgments.visible([extra], START, DAY)
+        if at is not None:
+            judgments.judge(extra.id, "resolved", subject, "judge", at)
     monkeypatch.setattr(cli.swarm, "connect", lambda: store)
     monkeypatch.setattr(cli.swarm, "now_ms", lambda: START + DAY)
     assert cli.main([slug, "verdict-log", "--since", "2026-10-23T00:00Z", "--until", "2026-10-24T00:00Z"]) == 0
@@ -104,3 +109,14 @@ def test_verdict_log_counts_all_events_beside_latest_records_for_a_day(store, mo
     assert report["events_by_value"] == {"false-positive": 2}
     assert report["latest_by_value"] == {"false-positive": 1}
     assert len(report["events"]) == 2
+    with capsys.disabled():
+        print(
+            json.dumps(
+                {
+                    "controlled_day_utc": "2026-10-23",
+                    "verdicts_written": 2,
+                    "event_count": report["event_count"],
+                    "latest_count": report["latest_count"],
+                }
+            )
+        )
