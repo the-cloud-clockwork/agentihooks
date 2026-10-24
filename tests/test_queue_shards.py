@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from tests import refresh_durations
+from tests.queue_shards import SLOWDOWN, STARTUP_SECONDS
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,6 +17,7 @@ def _a_420_second_step(monkeypatch):
     from tests import queue_shards
 
     monkeypatch.setattr(queue_shards, "STEP_SECONDS", 420)
+    monkeypatch.setattr(queue_shards, "SLOWDOWN", 1.15)
 
 
 def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
@@ -32,42 +34,27 @@ def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
 
 
 _RECORDED_QUEUE_RUNS = [
-    (347.0, 264),
-    (346.9, 268),
-    (346.7, 271),
-    (346.7, 278),
-    (347.0, 288),
-    (346.7, 282),
-    (346.9, 281),
-    (346.8, 315),
-    (346.7, 261),
-    (346.5, 262),
-    (346.7, 274),
-    (346.4, 257),
-    (346.4, 267),
-    (346.5, 280),
-    (342.6, 269),
-    (342.6, 265),
-    (342.7, 264),
-    (342.6, 270),
-    (342.6, 286),
-    (342.6, 346),
+    (166.5, 323),
+    (166.5, 361),
+    (166.5, 331),
+    (164.6, 299),
+    (164.7, 343),
+    (164.6, 319),
+    (164.6, 302),
+    (164.6, 326),
+    (162.9, 327),
+    (162.9, 378),
 ]
-_RECORDED_SLOWDOWN = 1.5
 
 
-def test_the_planned_slowest_queue_shard_is_within_ten_percent_of_the_recorded_real_slowest_shard():
-    from tests.queue_shards import SLOWDOWN, STARTUP_SECONDS
+def test_the_planned_slowest_queue_shard_is_within_fifteen_percent_of_every_recorded_real_slowest_shard():
+    ratios = sorted((STARTUP_SECONDS + SLOWDOWN * peak) / real for peak, real in _RECORDED_QUEUE_RUNS)
 
-    ratios = sorted(
-        (STARTUP_SECONDS + SLOWDOWN * (planned - STARTUP_SECONDS) / _RECORDED_SLOWDOWN) / real
-        for planned, real in _RECORDED_QUEUE_RUNS
-    )
-
-    assert 0.9 <= ratios[len(ratios) // 2] <= 1.1
+    assert 0.85 <= ratios[0] and ratios[-1] <= 1.15
+    assert 0.95 <= ratios[len(ratios) // 2] <= 1.05
 
 
-def test_queue_durations_keep_the_slowest_recent_measurement_and_expire_old_runs(tmp_path, monkeypatch):
+def test_queue_durations_keep_the_median_recent_measurement_and_expire_old_runs(tmp_path, monkeypatch):
     samples = tmp_path / "samples"
     for run, seconds in [("10", 99), ("11", 1), ("12", 9), ("13", 2)]:
         folder = samples / run / "durations-3.12-1"
@@ -78,9 +65,16 @@ def test_queue_durations_keep_the_slowest_recent_measurement_and_expire_old_runs
 
     refresh_durations.main(["--samples", str(samples), "--ci-run", "13", "--ci", "3"])
 
-    assert json.loads((tmp_path / ".test_durations-slowest-3.12").read_text()) == {"tests/t.py::test_a": 9}
-    assert json.loads((tmp_path / ".test_durations-slowest").read_text()) == {"tests/t.py::test_a": 9}
     assert json.loads((tmp_path / ".test_durations-3.12").read_text()) == {"tests/t.py::test_a": 2}
+    assert not list(tmp_path.glob(".test_durations-slowest*"))
+
+
+def test_queue_sizing_reads_the_median_durations_only():
+    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    step = next(
+        step for step in jobs["split"]["steps"] if step.get("name") == "Size queue shards from median durations"
+    )
+    assert "slowest" not in step["run"]
 
 
 def test_queue_sizing_splits_a_serial_group_until_it_has_half_timeout_margin(tmp_path):
@@ -369,7 +363,7 @@ def test_queue_capacity_admission_precedes_the_unit_matrix():
     jobs = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
     split = jobs["split"]
     assert split["strategy"]["matrix"]["python-version"] == ["3.12"]
-    step = next(step for step in split["steps"] if step.get("name") == "Size queue shards from conservative durations")
+    step = next(step for step in split["steps"] if step.get("name") == "Size queue shards from median durations")
     assert step["run"].index("combine --from-output") < step["run"].index('cat queue-plan.txt >> "$GITHUB_OUTPUT"')
     assert "queue-plan" not in jobs
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
@@ -388,7 +382,7 @@ def test_queue_sizing_writes_the_queue_input_durations_and_hash_for_the_single_v
     root = Path(__file__).resolve().parents[1]
     jobs = yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]
     step = next(
-        step for step in jobs["split"]["steps"] if step.get("name") == "Size queue shards from conservative durations"
+        step for step in jobs["split"]["steps"] if step.get("name") == "Size queue shards from median durations"
     )
     case = {"tests/test_one.py::test_one": 1.0}
     tests = tmp_path / "tests"
@@ -547,8 +541,8 @@ def test_queue_sizing_consumes_reuse_after_deselection():
         "split"
     ]["steps"]
     names = [step.get("name") for step in steps]
-    assert names.index("Download the early collection") < names.index("Size queue shards from conservative durations")
-    assert names.index("Adopt the test plan") < names.index("Size queue shards from conservative durations")
+    assert names.index("Download the early collection") < names.index("Size queue shards from median durations")
+    assert names.index("Adopt the test plan") < names.index("Size queue shards from median durations")
     count = [
         step.get("name")
         for step in yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())[
@@ -556,5 +550,5 @@ def test_queue_sizing_consumes_reuse_after_deselection():
         ]["test-count"]["steps"]
     ]
     assert count.index("Deselect the reused tests") < count.index("Upload the early collection")
-    sizing = next(step for step in steps if step.get("name") == "Size queue shards from conservative durations")
+    sizing = next(step for step in steps if step.get("name") == "Size queue shards from median durations")
     assert "--reused" in sizing["run"]
