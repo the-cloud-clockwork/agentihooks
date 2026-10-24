@@ -474,6 +474,10 @@ def looped(rows):
         kk.lrem("l", 0, "v")
 
 
+def comprehended(rows):
+    return [kk for kk, c in rows if kk.get("type")]
+
+
 def carried():
     prev = None
     conn = None
@@ -580,6 +584,7 @@ def typed(tmp_path):
         ("scripts.kinds:keywords", {"HSETNX", "HMGET"}),
         ("scripts.kinds:rebinding", {"ZREM"}),
         ("scripts.kinds:looped", {"LREM"}),
+        ("scripts.kinds:comprehended", set()),
         ("scripts.kinds:carried", {"GETDEL"}),
         ("scripts.made:url", {"DECRBY"}),
         ("scripts.made:Box.use", {"HINCRBY"}),

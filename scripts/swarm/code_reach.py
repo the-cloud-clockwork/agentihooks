@@ -117,6 +117,8 @@ def _bindings(node: ast.AST) -> tuple[list, ast.expr | None]:
         return [node.target], node.value
     if isinstance(node, ast.withitem) and node.optional_vars is not None:
         return [node.optional_vars], node.context_expr
+    if isinstance(node, ast.comprehension):
+        return [n for n in ast.walk(node.target) if isinstance(n, ast.Name)], ast.Constant(None)
     return [], None
 
 
