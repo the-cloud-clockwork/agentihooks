@@ -138,7 +138,7 @@ def _invite(tools: Tools, options: Options) -> str:
             name, record, options.like, ledger_ca=tools.ledger_ca, signer_path=listing.path, swarms=listing.swarms
         )
         done = invite.invite(tools.redis, tools.bao, request, tools.local_redis_url)
-    return f"{done}; {_listed(tools, options, listing, member or _member(tools)[invite.HIVE_ID], not member)}"
+    return f"{done}; {_listed(tools, options, listing, member or _member(tools)[invite.HIVE_ID])}"
 
 
 @dataclass(frozen=True)
@@ -160,16 +160,21 @@ def _signer_path(environ: Mapping[str, str]) -> str:
     return path
 
 
-def _listed(tools: Tools, options: Options, listing: Listing, member: str, minted: bool) -> str:
+def _listed(tools: Tools, options: Options, listing: Listing, member: str) -> str:
     if not member_swarms.listing(tools.bao, listing.path):
         return f"the hub signer record {listing.path} lists no member swarms, so the hub scopes no member"
     if options.dry_run:
         return f"would {listing.would()}"
-    if not (member_swarms.assign(tools.bao, listing.path, [member], listing.swarms) or minted):
+    member_swarms.assign(tools.bao, listing.path, [member], listing.swarms)
+    if tools.state.get("resynced") == member:
         return f"kept {member} on the hub signer record {listing.path}"
-    resync = f"force-sync={int(tools.clock())}"
+    resync = f"force-sync={int(tools.clock() * 1000)}"
     _kubectl(tools, ["-n", SIGNER_NAMESPACE, "annotate", "externalsecret", SIGNER_SYNC, resync, "--overwrite"])
-    return f"listed {member} on the hub signer record {listing.path} for {', '.join(listing.swarms)} and resynced it on the hub"
+    tools.state["resynced"] = member
+    return (
+        f"listed {member} on the hub signer record {listing.path} for {', '.join(listing.swarms)} "
+        f"and asked the hub's {SIGNER_SYNC} sync to refresh it now"
+    )
 
 
 def _ssh_keys(tools: Tools, options: Options) -> str:

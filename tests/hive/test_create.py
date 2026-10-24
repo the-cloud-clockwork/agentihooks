@@ -34,14 +34,15 @@ SERVICES = {
 }
 TARGET = "ssh://worker@10.10.30.207:2225"
 SIGNER = "agentihooks/hub/nats-signer"
+SYNC = "agentihooks-swarm-nats-signer"
 RESYNC = [
     "kubectl",
     "-n",
     "agentihooks-swarm",
     "annotate",
     "externalsecret",
-    "agentihooks-swarm-nats-signer",
-    f"force-sync={NOW}",
+    SYNC,
+    f"force-sync={NOW * 1000}",
     "--overwrite",
 ]
 
@@ -409,7 +410,9 @@ def test_create_lists_the_new_member_and_its_swarms_and_resyncs_the_hub(world):
     assert world.run.named("kubectl", "-n") == [RESYNC]
     assert world.run.calls.index(RESYNC) < world.run.calls.index(world.run.named("ssh-keygen")[0])
     line = next(line for line in world.lines if line.startswith(f"hive create {NAME}: invite: "))
-    assert line.endswith(f"; listed {member} on the hub signer record {SIGNER} for demo and resynced it on the hub")
+    assert line.endswith(
+        f"; listed {member} on the hub signer record {SIGNER} for demo and asked the hub's {SYNC} sync to refresh it now"
+    )
 
 
 def test_a_kept_member_left_unlisted_is_listed_on_the_rerun(world):
@@ -422,21 +425,52 @@ def test_a_kept_member_left_unlisted_is_listed_on_the_rerun(world):
     assert world.run.named("kubectl", "-n") == [RESYNC]
     assert world.lines[0] == (
         f"hive create {NAME}: invite: kept hive member feedfacefeedface in OpenBao secret/{RECORD}; "
-        f"listed feedfacefeedface on the hub signer record {SIGNER} for demo and resynced it on the hub"
+        f"listed feedfacefeedface on the hub signer record {SIGNER} for demo and asked the hub's {SYNC} sync to refresh it now"
     )
 
 
-def test_a_kept_member_already_listed_needs_no_resync(world):
-    world.bao.records[RECORD] = {"credential": _credential("feedfacefeedface")}
-    world.bao.versions[RECORD] = 1
-    world.bao.records[SIGNER] = {"member_swarms": {"feedfacefeedface": ["demo"]}}
+def test_a_rerun_after_a_crash_before_the_resync_resyncs_the_listed_member(world, monkeypatch):
+    real = create._kubectl
+
+    def crash(tools, argv):
+        if argv[:1] == ["-n"]:
+            raise auth.HiveError("killed")
+        return real(tools, argv)
+
+    monkeypatch.setattr(create, "_kubectl", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    assert world.bao.records[SIGNER]["member_swarms"] == {"old": ["demo"], member: ["demo"]}
+    monkeypatch.setattr(create, "_kubectl", real)
 
     create.create(world.tools, create.Options(timeout_s=60))
 
-    assert world.run.named("kubectl", "-n") == []
-    assert world.lines[0] == (
-        f"hive create {NAME}: invite: kept hive member feedfacefeedface in OpenBao secret/{RECORD}; "
-        f"kept feedfacefeedface on the hub signer record {SIGNER}"
+    assert world.run.named("kubectl", "-n") == [RESYNC]
+    assert _state(world)["resynced"] == member
+    assert (
+        f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; "
+        + (
+            f"listed {member} on the hub signer record {SIGNER} for demo and asked the hub's {SYNC} sync to refresh it now"
+        )
+        in world.lines
+    )
+
+
+def test_a_finished_listing_is_not_resynced_on_the_rerun(world):
+    Store.working = False
+    with pytest.raises(auth.HiveError, match="waiting for an engineer"):
+        create.create(world.tools, create.Options(timeout_s=0))
+    member = _state(world)["resynced"]
+    Store.working = True
+
+    create.create(world.tools, create.Options(timeout_s=0))
+
+    assert world.run.named("kubectl", "-n") == [RESYNC]
+    assert (
+        f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; "
+        + (f"kept {member} on the hub signer record {SIGNER}")
+        in world.lines
     )
 
 
