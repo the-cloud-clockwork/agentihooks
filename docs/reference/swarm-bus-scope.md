@@ -104,8 +104,10 @@ and subscribing to `swarm.<swarm>.>` and its own `_INBOX.<user>.>`.
 
 Account slot accounting spans every swarm on a hive, so its two buckets, `account-slots` and
 `hive-slot-accounts`, belong to the hub and no member credential reaches them. A member takes, renews and
-returns an account slot by a request on `swarm.<swarm>.slots`, which its `swarm.<swarm>.>` grant covers;
-the hub answers it from the `hub-slots` queue group. A scoped member that opens
+returns an account slot by a request on `slots.<swarm>.<hive>`, where the hive is the one its credential was
+minted for: a scoped member's grant names that subject for each listed swarm, an unscoped member's names
+`slots.*.<hive>`. The hub answers it from the `hub-slots` queue group and refuses, and
+logs, a request whose body names any other hive. A scoped member that opens
 any bucket through the root bus without selecting a swarm gets `PermissionError: select a swarm before opening
 scoped state`.
 

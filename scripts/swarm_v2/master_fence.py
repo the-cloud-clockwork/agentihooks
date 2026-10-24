@@ -68,13 +68,15 @@ def _fields(stamps: dict, item: str) -> dict:
     }
 
 
-def current(record: dict, item: str, stamps: dict) -> bool:
-    """A record holds while its own write is still stamped and nobody but a master has written the item since."""
+def current(record: dict, item: str, stamps: dict, retired_at: int) -> bool:
+    """A record holds while its own write is still stamped after its seat last retired and nobody but a master has
+    written the item since."""
     from scripts.swarm.naming import lane_of
 
     fields = _fields(stamps, item).values()
     later = [stamp for stamp in fields if stamp["rev"] > record["rev"]]
-    return any(stamp["rev"] == record["rev"] for stamp in fields) and all(lane_of(s["by"]) == MASTER for s in later)
+    own = any(stamp["rev"] == record["rev"] and stamp["at"] > retired_at for stamp in fields)
+    return own and all(lane_of(s["by"]) == MASTER for s in later)
 
 
 def announcement(seat: str, op: dict, owner: str = "") -> str:
@@ -163,10 +165,13 @@ class Seats:
     def owner(self, item: str, meta: dict) -> tuple[str, int]:
         record = meta.get(DECISIONS, {}).get(item)
         known = [*masters.seats(self.slug, self.count), *self.live]
-        if record and record["seat"] in known and current(record, item, meta["stamps"]):
+        if record and record["seat"] in known and current(record, item, meta["stamps"], self._retired(record)):
             return record["seat"], record["rev"]
         owners = functools.partial(self.table.owners, self.slug, self.doc)
         return masters.route(item, self.doc, owners, self.live, self.lead), 0
+
+    def _retired(self, record: dict) -> int:
+        return self.table.retired_at(self.slug, record["seat"])
 
 
 class Fence:

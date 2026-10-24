@@ -1362,6 +1362,7 @@ jobs:
       contents: read
     env:
       CODEX_RELEASE: rust-v0.160.0
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       UNIT_SOURCE: ""
       LEG: ${{ matrix.leg }}
     strategy:

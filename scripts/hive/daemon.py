@@ -462,10 +462,13 @@ def observe(processes: dict[str, dict[int, str]] | None = None) -> dict:
 
 
 def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, str]]) -> dict[str, list[str]]:
+    from scripts.swarm import live_binding
     from scripts.swarm.store import RedisStore
     from scripts.swarm_v2.registry import CLOSED, decode
+    from scripts.terminate_agent import sessions
 
     store = RedisStore(redis)
+    local = sessions()
     found: dict[str, list[str]] = {}
     counted: set[tuple[str, int]] = set()
     for swarm in store.slugs():
@@ -482,6 +485,17 @@ def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, st
                 continue
             counted.add(identity)
             found.setdefault(f"{record.harness}:{agent.account}", []).append(record.execution_id)
+        for agent in agents.values():
+            if not agent.execution_id or (agent.hive or agent.runtime_target.get("host_id")) != local_id:
+                continue
+            session = live_binding.bound_session(agent, local)
+            if session is None or session.target != agent.harness:
+                continue
+            identity = session.target, session.process.pid
+            if identity in counted or processes.get(session.target, {}).get(session.process.pid) != agent.account:
+                continue
+            counted.add(identity)
+            found.setdefault(f"{agent.harness}:{agent.account}", []).append(agent.execution_id)
     return found
 
 

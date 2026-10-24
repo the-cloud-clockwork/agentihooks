@@ -1,6 +1,7 @@
 import re
 
 PREFIX = "swarm"
+SLOTS = "slots"
 
 _TOKEN = re.compile(r"[^.*>\s]+")
 
@@ -15,6 +16,14 @@ def subject(swarm: str, *tokens: str) -> str:
     if not tokens:
         raise ValueError("event subject needs at least one token")
     return ".".join([PREFIX, _token(swarm), *map(_token, tokens)])
+
+
+def slot_request(swarm: str, hive: str) -> str:
+    return ".".join([SLOTS, _token(swarm), _token(hive)])
+
+
+def in_swarm(swarm: str, subject: str) -> bool:
+    return subject.startswith((f"{PREFIX}.{swarm}.", f"{SLOTS}.{swarm}."))
 
 
 def inbox(user: str) -> str:

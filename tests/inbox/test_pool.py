@@ -154,7 +154,7 @@ def test_operator_items_bypass_the_pool_to_the_front_door(swarm, inbox):
 def test_masters_gone_or_draining_are_passed_over(swarm, inbox):
     _masters(swarm, 6, {"sw-master-2": "finished", "sw-master-4": "retiring"})
     swarm.redis.hset(swarm.key(SLUG, "master-retire-requests"), "sw-master-3", json.dumps({"reason": "shrank"}))
-    MasterSeats(swarm.redis).retire(SLUG, "master-5@sw")
+    MasterSeats(swarm.redis).retire(SLUG, "master-5@sw", 1)
     assert live_masters(swarm.redis, SLUG) == [FRONT, "master-6@sw"]
     items = [inbox.send("swarm", FRONT, f"item {n}") for n in range(3)]
     assert [inbox.get(i.id).address for i in items] == [FRONT, "master-6@sw", FRONT]

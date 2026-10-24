@@ -60,6 +60,13 @@ def test_a_publish_appends_a_patch_that_rebuilds_the_new_value():
     assert hub.resource(SLUG, "ledger") == ledger(2, tasks=[{"id": "t1"}])
 
 
+@pytest.mark.wall_clock
+def test_a_wait_with_no_new_event_returns_empty_once_its_timeout_passes():
+    hub = Hub()
+    seq, _ = opened(hub)
+    assert bounded(hub.wait, SLUG, seq, 0.01)[0] == []
+
+
 def test_immutable_snapshot_publication_keeps_names_revisions_and_replay():
     hub = Hub()
     old = ledger(1, tasks=[{"id": "t1", "title": "first"}])
@@ -89,6 +96,7 @@ def test_immutable_snapshot_baseline_and_unwatched_resources():
     assert hub.channels[SLUG].seq == 0
 
 
+@pytest.mark.wall_clock
 @pytest.mark.parametrize("change", ["metadata", "equivalent", "copy", "append", "reorder", "no_ids"])
 def test_snapshot_comparison_work_is_bounded_by_changed_structure(change, monkeypatch):
     shared = [{"id": str(index), "values": list(range(64))} for index in range(32)]
@@ -119,7 +127,7 @@ def test_snapshot_comparison_work_is_bounded_by_changed_structure(change, monkey
         20 if change in {"metadata", "equivalent"} else len(shared) * (3 if change in {"append", "reorder"} else 1) + 20
     )
     assert calls <= budget
-    frames = hub.wait(SLUG, 1, 0)
+    frames, _ = bounded(hub.wait, SLUG, 1, 0)
     assert len(frames) == (0 if change == "equivalent" else 1)
     if frames:
         assert apply(old, frames[0][3]["patch"]) == new
@@ -422,3 +430,45 @@ def test_the_default_retention_is_bounded():
     hub = Hub()
     opened(hub)
     assert hub.channels[SLUG].log.maxlen == events_hub.RETAINED
+
+
+def test_a_new_hub_is_not_closing():
+    assert Hub().closing is False
+
+
+def test_draining_wakes_every_waiting_reader_with_closed():
+    hub = Hub()
+    seq, _ = opened(hub)
+    caught = []
+
+    def wait():
+        try:
+            hub.wait(SLUG, seq, 30)
+        except events_hub.Closed as exc:
+            caught.append(exc)
+
+    timer = threading.Timer(0.05, hub.drain)
+    timer.start()
+    bounded(wait, limit=10)
+    timer.join()
+    assert len(caught) == 1
+
+
+def test_a_drained_hub_answers_closed_at_once():
+    hub = Hub()
+    seq, _ = opened(hub)
+    hub.drain()
+    caught = []
+
+    def wait():
+        try:
+            hub.wait(SLUG, seq, 30)
+        except events_hub.Closed as exc:
+            caught.append(exc)
+
+    bounded(wait, limit=10)
+    assert len(caught) == 1
+
+
+def test_closed_is_not_expired():
+    assert not issubclass(events_hub.Closed, Expired)
