@@ -1,8 +1,8 @@
 """Dev promotion watch: the newest finished push run of Tests on dev files one urgent ci task per failed job and
 raises a ledger alert; the failed jobs that lost their runner, and the failed jobs whose own error is the missing
 output of a unit shard that lost its runner, share one runner outage task instead. The next green run whose promote
-job succeeded closes those tasks and the alert. A run whose only failure is the Sonar job finding dev already moved past its commit is reported as superseded and files
-nothing.
+job succeeded closes those tasks and the alert. A run whose only failure is the Sonar job finding dev already moved
+past its commit is reported as superseded and files nothing.
 
 The minute tick calls it; CI runners cannot reach the ledger, so the fixer tasks are filed from the machine that can.
 """
