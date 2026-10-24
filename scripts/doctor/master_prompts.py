@@ -22,7 +22,7 @@ def findings(agents: list[dict], since: dict[str, int | None], now_ms: int) -> l
         if agent["lane"] != "master" or not agent["input_prompt"] or not entered:
             continue
         waited = (now_ms - entered) // MINUTE_MS // STEP_MINUTES * STEP_MINUTES
-        if not waited:
+        if waited <= 0:
             continue
         seat = agent["seat"] or agent["name"]
         found.append(
@@ -36,7 +36,8 @@ def findings(agents: list[dict], since: dict[str, int | None], now_ms: int) -> l
                     f"waited {waited} minutes since {_iso(entered)}",
                     f"agent {agent['name']}",
                 ),
-                f"a master pane on one input prompt for {STEP_MINUTES} minutes, again each further {STEP_MINUTES} minutes",
+                f"a master pane on one input prompt for {STEP_MINUTES} minutes, "
+                f"again each further {STEP_MINUTES} minutes",
                 waited,
             )
         )

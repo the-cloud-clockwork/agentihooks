@@ -59,8 +59,9 @@ def test_a_master_without_a_seat_is_named_by_its_agent():
         ({**MASTER, "input_prompt": ""}, ENTERED),
         (MASTER, None),
         (MASTER, 0),
+        (MASTER, ENTERED + 61 * MINUTE),
     ],
-    ids=["engineer", "no prompt", "no entry time", "zero entry time"],
+    ids=["engineer", "no prompt", "no entry time", "zero entry time", "entry after now"],
 )
 def test_only_a_master_on_a_prompt_with_an_entry_time_is_read(agent, since):
     assert found_at(60, agent, since) == []
@@ -99,13 +100,14 @@ def test_the_tick_keeps_the_entry_time_while_the_same_prompt_holds_and_clears_it
     watch(store, runtime, PaneObservation("waiting", PROMPT), ENTERED)
     watch(store, runtime, PaneObservation("waiting", PROMPT), ENTERED + 5 * MINUTE)
     assert input_wait.since(store, "sw", name) == ENTERED
+    assert store.redis.ttl(store.key("sw", "input-since", name)) == input_wait.DAY_S
     watch(store, runtime, PaneObservation("waiting", "Another question?"), ENTERED + 6 * MINUTE)
     assert input_wait.since(store, "sw", name) == ENTERED + 6 * MINUTE
     watch(store, runtime, PaneObservation("idle"), ENTERED + 7 * MINUTE)
     assert input_wait.since(store, "sw", name) is None
 
 
-def test_a_wait_that_predates_the_entry_time_starts_counting_at_the_next_tick():
+def test_a_prompt_already_on_the_row_gets_its_entry_time_on_the_first_tick():
     store, runtime = watched()
     store.put_agent("sw", AgentRecord("master", "master", "", seat="master@sw", input_prompt=PROMPT))
     watch(store, runtime, PaneObservation("waiting", PROMPT), ENTERED)
