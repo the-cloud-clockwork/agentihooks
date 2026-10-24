@@ -138,12 +138,6 @@ def test_main_writes_whether_the_pull_request_reaches_the_replays(replays, monke
     assert capsys.readouterr().out == (f"reaches the replays: {touched}\n" if run == "true" else "")
 
 
-def test_changed_files_diff_the_given_checkout_from_anywhere(replays, tmp_path_factory, monkeypatch):
-    base = commit_change(replays, "scripts/inbox/keys.py")
-    monkeypatch.chdir(tmp_path_factory.mktemp("elsewhere"))
-    assert trigger.changed_files(replays, base, "HEAD") == ["scripts/inbox/keys.py"]
-
-
 def commit_change(root, touched):
     git(root, "init", "-q", "-b", "dev")
     git(root, "add", ".")

@@ -68,9 +68,9 @@ def triggering(root: Path, changed: list[str], files: set[str]) -> list[str]:
     ]
 
 
-def changed_files(root: Path, base: str, head: str) -> list[str]:
+def changed_files(base: str, head: str) -> list[str]:
     command = ["git", "diff", "--name-only", "--no-renames", "-z", f"{base}...{head}"]
-    return [name for name in subprocess.check_output(command, cwd=root).decode().split("\0") if name]
+    return [name for name in subprocess.check_output(command).decode().split("\0") if name]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("head")
     args = parser.parse_args(argv)
     root = Path.cwd().resolve()
-    hits = triggering(root, changed_files(root, args.base, args.head), imported_files(root))
+    hits = triggering(root, changed_files(args.base, args.head), imported_files(root))
     for path in hits:
         print(f"reaches the replays: {path}")
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
