@@ -82,9 +82,10 @@ def _workflow_task(env, monkeypatch, tmp_path, state=None, verdict=None):  # noq
         (tmp_path / "workflow.json").write_text(json.dumps(state))
     if verdict is not None:
         (tmp_path / "verdict.json").write_text(json.dumps(verdict))
-    rows.rows["t1"].update(kind="workflow", workflow="simple-workflow", workspace=str(tmp_path))
+    rows.rows["t1"].update(kind="workflow", workflow="simple-workflow")
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    rows.rows["t1"]["workspace"] = str(tmp_path)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", NAME)
     return rows
 
