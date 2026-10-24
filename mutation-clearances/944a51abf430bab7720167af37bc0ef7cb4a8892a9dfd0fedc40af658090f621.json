@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/registry.py:scripts.doctor.registry.x_progress__mutmut_20:824de3bde36d8361aff9447d1e48bd523d70392b80f8a798bba0ed1a259847a7": {
+    "reader": "Standards standards-reader",
+    "reason": "When buffered_turns is missing, the original default 0 and the mutant default 1 both give > 1 as False, and when the key is present the default is never read, so no output changes."
+  }
+}
