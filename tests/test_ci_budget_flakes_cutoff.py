@@ -3,12 +3,21 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.ci_budget import flakes
+from scripts.ci_budget import defects, flakes
 from tests.test_ci_budget_flakes import NOW_MS, TEST, _budget, _gh
 
 
-@pytest.mark.parametrize("newer", [False, True], ids=["before-fix", "after-fix"])
-def test_followups_only_count_retry_passes_after_the_latest_test_fix(newer):
+@pytest.mark.parametrize(
+    ("last_retry", "merged", "remaining"),
+    [
+        ("2026-10-22T00:00:00Z", "2026-10-23T12:00:00Z", 0),
+        ("2026-10-24T00:00:00Z", "2026-10-23T12:00:00Z", 1),
+        ("2026-10-23T12:00:00Z", "2026-10-23T12:00:00Z", 1),
+        ("2026-10-24T00:00:00Z", "", 2),
+    ],
+    ids=["before-fix", "after-fix", "at-merge", "no-merge"],
+)
+def test_followups_only_count_retry_passes_after_the_latest_test_fix(last_retry, merged, remaining):
     import fakeredis
 
     added = []
@@ -16,29 +25,39 @@ def test_followups_only_count_retry_passes_after_the_latest_test_fix(newer):
     store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
     config = SimpleNamespace(repo="/repo")
     artifact = _gh([], _budget(TEST))
+    responses = {
+        "repos/{owner}/{repo}/commits?sha=dev&path=tests%2Fswarm_ledger%2Ftest_alerts_page.py&per_page=1": (
+            ".[0].sha // empty",
+            "fix-sha\n",
+        ),
+        "repos/{owner}/{repo}/commits/fix-sha/pulls": (
+            '[.[] | select(.base.ref == "dev" and .merged_at != null) | .merged_at] | max // empty',
+            merged + "\n",
+        ),
+        "repos/{owner}/{repo}/actions/runs/31": (".created_at", "2026-10-22T00:00:00Z\n"),
+        "repos/{owner}/{repo}/actions/runs/32": (".created_at", last_retry + "\n"),
+    }
     calls = []
 
     def run(command, **kwargs):
+        if "/actions/artifacts" in command[2]:
+            return artifact(command, **kwargs)
         calls.append(command)
-        endpoint = command[2]
-        if "/commits?" in endpoint:
-            return subprocess.CompletedProcess(command, 0, "fix-sha\n", "")
-        if "/commits/fix-sha/pulls" in endpoint:
-            return subprocess.CompletedProcess(command, 0, "2026-10-23T12:00:00Z\n", "")
-        if "/actions/runs/" in endpoint:
-            at = "2026-10-24T00:00:00Z" if newer and endpoint.endswith("/32") else "2026-10-22T00:00:00Z"
-            return subprocess.CompletedProcess(command, 0, at + "\n", "")
-        return artifact(command, **kwargs)
+        query, output = responses[command[2]]
+        assert command == ["gh", "api", command[2], "--jq", query]
+        assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
+        return subprocess.CompletedProcess(command, 0, output, "")
 
     actions = flakes.refresh("sw", config, store, ledger, NOW_MS, run=run)
 
-    if newer:
+    if remaining:
         assert len(added) == 1
-        assert "retry in 1 dev runs" in added[0]
+        assert f"retry in {remaining} dev runs" in added[0]
     else:
         assert added == []
-    assert any("before the newest merged test change" in action for action in actions)
-    assert any(
-        "sha=dev" in command[2] and "path=tests%2Fswarm_ledger%2Ftest_alerts_page.py" in command[2] for command in calls
+        assert not store.redis.exists(defects.key("sw", "flaky", TEST))
+    before = 2 - remaining
+    assert actions == ([f"{before} retry passes were before the newest merged test change"] if before else []) + (
+        ["filed a ledger follow up for a test flaky in two dev runs within seven days"] if remaining else []
     )
-    assert any(command[2].endswith("/commits/fix-sha/pulls") and "dev" in command[-1] for command in calls)
+    assert len(calls) == (4 if merged else 2)
