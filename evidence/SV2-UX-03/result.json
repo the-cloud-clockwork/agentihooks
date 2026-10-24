@@ -39,7 +39,8 @@
     "The deployed controller lists no checkpoints yet, so every Pod card shows fresh only until a verified checkpoint listing is wired into the controller",
     "The fixture builds the listing entries from the checkpoint validator's verdict; the production listing must report verification the same way",
     "A local restore has only saved paths and a conversation id, so it is always path only and offers no context continuation",
-    "Published material lags a request by at most one controller pass; the page reads pending requests live"
+    "Published material lags a request by at most one controller pass; the page reads pending requests live",
+    "A local seat's native resume stays enabled when its account is out of quota: quota is retryable, so the attempt returns awaiting decision with the quota reason and the seat keeps waiting; only a lost conversation or worktree disables it"
   ],
   "cases": {
     "a": "evidence/SV2-UX-03/a-result.json",
