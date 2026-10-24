@@ -17,6 +17,27 @@ def test_recorded_spawns_and_planted_failed_spawn():
     assert record["actions"] == []
 
 
+def test_reservation_refusals_require_recorded_free_sessions():
+    import json
+
+    record = load("spawns")
+    slug = record["slug"]
+    refusal = f"{slug}: spawn failed for dt2: account reservation is full"
+    accounts = [
+        {"harness": "claude", "state": "OPEN", "sessions": 6, "cap": 6},
+        {"harness": "codex", "state": "OPEN", "sessions": 0, "cap": 8},
+    ]
+    capacity = {"harness": "claude", "accounts": accounts}
+    record["actions"] = [f"{slug}: spawn capacity for dt2: {json.dumps(capacity)}", refusal]
+    assert spawns.failed(record) == []
+    accounts[0]["sessions"] = 5
+    record["actions"] = [f"{slug}: spawn capacity for dt2: {json.dumps(capacity)}", refusal]
+    [found] = spawns.failed(record)
+    assert found.id == "failed-spawn/dt2"
+    assert found.measure == 1
+    assert found.evidence == ("account reservation is full",)
+
+
 def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     import os
     import subprocess
