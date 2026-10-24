@@ -312,8 +312,8 @@ def test_hive_heartbeat_keeps_beating_on_a_fresh_bus_until_the_hub_creates_the_s
     hosted = {"executions": {}, "names": []}
     client, beats = member(signer), []
 
-    def publish(hive, report, hosted):
-        account_slots.Slots(client, hive, lambda: report).heartbeat(report, hosted["executions"])
+    def publish(hive, beat_report, beat_hosted):
+        account_slots.Slots(client, hive, lambda: beat_report).heartbeat(beat_report, beat_hosted["executions"])
         beats.append(hive)
 
     monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
