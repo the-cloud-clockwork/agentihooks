@@ -328,9 +328,11 @@ def test_a_forty_job_queue_plan_is_capped_to_the_twenty_four_runner_queue_pool(t
     assert "40 queue jobs exceed the pool of 24; capped at 24 shards" in capsys.readouterr().out
 
 
-def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_pool(tmp_path, capsys):
+def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_pool(tmp_path, capsys, monkeypatch):
     from tests.queue_shards import main
 
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     root, output = _overflowing_plan(tmp_path, 400.0)
 
     main(["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")])
@@ -339,6 +341,9 @@ def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_poo
     assert len(plan) == 24
     out = capsys.readouterr().out
     assert "::warning::The capped queue plan predicts 490.0s, over 420s of the step timeout\n" in out
+    message = "Python 3.12: the shard cap of 24 predicts the slowest queue shard at 490.0s, over the 210s target"
+    assert f"::warning title=Queue shard pool cannot reach the target::{message}\n" in out
+    assert summary.read_text() == f"{message}\n"
     assert "24 queue jobs fit one wave of 24 runners; predicted slowest test step 490.0s" in out
 
 
