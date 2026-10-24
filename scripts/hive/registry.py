@@ -22,6 +22,7 @@ HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 EXCLUDED_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 JSON_FIELDS = {
     "excluded": list,
+    "master_swarms": list,
     "prefer": dict,
     "harnesses": list,
     "slots": list,
@@ -86,6 +87,14 @@ def _excluded(setting: str, value: str) -> list[str]:
     return names
 
 
+def _master_swarms(setting: str, value: str) -> list[str]:
+    names = list(dict.fromkeys(name.strip() for name in value.split(",") if name.strip()))
+    for name in names:
+        if not EXCLUDED_NAME.fullmatch(name):
+            raise HiveError(f"{setting} takes swarm slugs, not {name!r}")
+    return names
+
+
 def _prefer(setting: str, value: str) -> dict[str, int]:
     prefer = {}
     for pair in filter(None, value.split(",")):
@@ -102,6 +111,7 @@ SETTINGS = {
     "ephemeral": ("ephemeral", _flag),
     "draining": ("draining", _flag),
     "excluded": ("excluded", _excluded),
+    "master-swarms": ("master_swarms", _master_swarms),
     "prefer": ("prefer", _prefer),
     "max-agents": ("max_agents", _count),
 }
