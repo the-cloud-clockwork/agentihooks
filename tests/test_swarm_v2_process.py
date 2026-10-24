@@ -406,6 +406,18 @@ def test_a_live_agent_with_no_pid_and_no_recorded_pane_retires_by_its_session_na
         child.wait(timeout=5)
 
 
+def test_named_retirement_passes_the_process_start_and_skips_a_vanished_recorded_pane(tmp_path, monkeypatch):
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={})
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
+    monkeypatch.setattr("scripts.swarm.runtime._named_process", lambda agent: proc(start=999))
+    agent = replace(record(pid=None, start=None), pane_id="w7:p7", state="finished")
+    assert herdr.retire_pane(agent)
+    assert ended == [(NAME, PID, [], 999)]
+    assert ["pane", "close", "w7:p7"] not in calls
+
+
 @pytest.mark.parametrize(("pane_id", "socket"), [("w9:p9", "/owned/herdr.sock"), ("w1:p1", "/other/herdr.sock")])
 def test_unrecorded_retirement_refuses_a_named_process_on_another_pane_or_server(
     tmp_path, monkeypatch, pane_id, socket
