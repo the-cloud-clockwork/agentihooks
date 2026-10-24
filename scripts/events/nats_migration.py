@@ -1,10 +1,10 @@
+import asyncio
 import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from nats.errors import TimeoutError as FetchTimeout
 from nats.js.errors import APIError, NotFoundError
 
 from .config import QueuePolicy
@@ -131,7 +131,7 @@ async def _drain_work(
             messages = await source._consumer._subscription.fetch(
                 100, timeout=(policy.ack_wait_ms + sum(policy.backoff_ms) + 1000) / 1000
             )
-        except FetchTimeout:
+        except asyncio.TimeoutError:
             raise RuntimeError("legacy queue still has undelivered work") from None
         for message in messages:
             if message.metadata.sequence.stream > highwater or Envelope.decode(message.data).swarm != swarm:
