@@ -763,7 +763,7 @@ def test_a_live_worker_on_a_blocked_task_still_collects_its_runtime(setup, task_
     assert task["state"] == task_state
 
 
-@pytest.mark.parametrize("task_state", ["claimed", "blocked", "open", "pr"])
+@pytest.mark.parametrize("task_state", ["claimed", "blocked", "open", "pr", "done"])
 def test_finished_receipt_collection_returns_the_exact_outcome_whatever_the_task_state(setup, task_state):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
