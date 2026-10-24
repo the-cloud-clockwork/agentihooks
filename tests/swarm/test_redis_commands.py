@@ -362,6 +362,7 @@ def plain(items: list):
 def other():
     b = connect()
     b.ping()
+    kk = connect()
 
 
 def builtin():
@@ -402,8 +403,8 @@ def unpacked(rows):
     a, b = connect(), []
     a.rpush("l", "v")
     b.append("x")
-    for b, c in rows:
-        b.append(1)
+    for kk, c in rows:
+        kk.append(1)
     (d, (b, e)) = (connect(), ([], 1))
     d.lpop("l")
     first, second = scripts.made.pair()

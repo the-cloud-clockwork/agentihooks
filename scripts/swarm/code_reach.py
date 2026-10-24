@@ -171,7 +171,7 @@ class Program:
         for key in self.units:
             named.setdefault(re.split(r"[:.]", key)[-1], []).append(key)
         self.unique = {name: keys[0] for name, keys in named.items() if len(keys) == 1}
-        self.scoped: dict[int, dict] = {}
+        self.scoped = {id(unit): self._nested(unit) for unit in self.units.values()}
         self.clients: set[str] = set()
         self.factories: set[str] = set()
         self._receivers()
@@ -329,8 +329,6 @@ class Program:
     def _callees(self, func: ast.expr, unit: Unit) -> list[str] | None:
         """The functions here a call may run, found through the unit's names and imports, its own class, or a name
         only one function defines; None when the callee cannot be found here."""
-        if id(unit) not in self.scoped:
-            self.scoped[id(unit)] = self._nested(unit)
         scope = self.scoped[id(unit)]
         if isinstance(func, ast.Name):
             bound = func.id in scope or func.id in self.scopes[unit.module] or hasattr(builtins, func.id)
