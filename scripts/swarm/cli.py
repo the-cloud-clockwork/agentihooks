@@ -1278,7 +1278,7 @@ def cmd_freeze(store, args):
     writer = clearance.freezer(store, args.slug, Who.from_env())
     by = None if writer == clearance.OPERATOR else writer
     full = store.config(args.slug).autonomy == FULL
-    if by and naming.lane_of(by) != DISPATCH and not args.quote and not full:
+    if by and not args.quote and not full:
         raise SwarmError(
             "below full autonomy the master writes freezes only with the operator's words: pass them with --quote"
         )
