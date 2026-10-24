@@ -403,8 +403,6 @@ def unpacked(rows):
     a, b = connect(), []
     a.rpush("l", "v")
     b.append("x")
-    for kk, c in rows:
-        kk.append(1)
     (d, (b, e)) = (connect(), ([], 1))
     d.lpop("l")
     first, second = scripts.made.pair()
@@ -469,6 +467,20 @@ def rebinding():
     c = connect()
     c.zrem("z", "m")
     c = None
+
+
+def looped(rows):
+    for kk, c in rows:
+        kk.lrem("l", 0, "v")
+
+
+def carried():
+    prev = None
+    conn = None
+    for _ in range(2):
+        prev = conn
+        conn = connect()
+    prev.getdel("k")
 """
 MADE = """
 import os
@@ -567,6 +579,8 @@ def typed(tmp_path):
         ("scripts.kinds:attributes", {"LINDEX", "LSET"}),
         ("scripts.kinds:keywords", {"HSETNX", "HMGET"}),
         ("scripts.kinds:rebinding", {"ZREM"}),
+        ("scripts.kinds:looped", {"LREM"}),
+        ("scripts.kinds:carried", {"GETDEL"}),
         ("scripts.made:url", {"DECRBY"}),
         ("scripts.made:Box.use", {"HINCRBY"}),
         ("scripts.made:Box.listing", set()),

@@ -117,12 +117,10 @@ def _bindings(node: ast.AST) -> tuple[list, ast.expr | None]:
         return [node.target], node.value
     if isinstance(node, ast.withitem) and node.optional_vars is not None:
         return [node.optional_vars], node.context_expr
-    if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
-        return [node.target], None
     return [], None
 
 
-def _pairs(target: ast.expr, value: ast.expr | None) -> list[tuple[str, ast.expr | None]]:
+def _pairs(target: ast.expr, value: ast.expr) -> list[tuple[str, ast.expr]]:
     """Each name a binding sets with the value it gets; a name unpacked from a value that is not a literal tuple
     gets no pair, so its type stays unknown."""
     if isinstance(target, ast.Name):
@@ -131,7 +129,7 @@ def _pairs(target: ast.expr, value: ast.expr | None) -> list[tuple[str, ast.expr
         return []
     if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
         return [pair for t, v in zip(target.elts, value.elts) for pair in _pairs(t, v)]
-    return [pair for t in target.elts for pair in _pairs(t, None)] if value is None else []
+    return []
 
 
 def _annotated(node: ast.AST) -> dict[str, bool]:
@@ -366,20 +364,26 @@ class Program:
         return chained and expr.func.attr in methods(redis.Redis) and self._receiver(expr.func.value, unit, local)
 
     def _typed(self, unit: Unit) -> dict[str, bool]:
-        """The names a unit binds, each true when a binding holds a Redis client or pipeline, read in source order.
-        A name bound only to a call whose callee cannot be found here gets no entry, so it falls back by name."""
+        """The names a unit binds, each true when a binding holds a Redis client or pipeline. Bindings are read in
+        source order and reread until nothing changes, at most once per binding, so a name bound later in a loop
+        still reaches an alias read earlier. A name bound only to a call whose callee cannot be found here, or
+        only as a loop target, gets no entry, so it falls back by name."""
         local = {name: held for node in unit.nodes for name, held in _annotated(node).items()}
         bindings = sorted(
             (found for found in map(_bindings, unit.nodes) if found[0]),
             key=lambda found: (found[0][0].lineno, found[0][0].col_offset),
         )
         pairs = [pair for targets, value in bindings for t in targets for pair in _pairs(t, value)]
-        for target, value in pairs:
-            unresolved = isinstance(value, ast.Call) and self._callees(value.func, unit) is None
-            if value is not None and self._held(value, unit, local):
-                local[target] = True
-            elif not unresolved:
-                local[target] = local.get(target) is True
+        for _ in pairs:
+            before = dict(local)
+            for target, value in pairs:
+                unresolved = isinstance(value, ast.Call) and self._callees(value.func, unit) is None
+                if self._held(value, unit, local):
+                    local[target] = True
+                elif not unresolved:
+                    local[target] = local.get(target) is True
+            if local == before:
+                break
         return local
 
     def _spread(self, key: str, unit: Unit) -> None:
@@ -397,7 +401,7 @@ class Program:
     def _receivers(self) -> None:
         """Grow the names holding a Redis client and the functions returning one, typed from the client and
         pipeline constructors and annotations, until neither changes. Passes are capped at one per unit so a run
-        always ends; the chains in this code resolve in a few passes."""
+        always ends."""
         for _ in self.units:
             size = len(self.clients), len(self.factories)
             for key, unit in self.units.items():
