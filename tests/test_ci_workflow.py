@@ -253,6 +253,8 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     assert install["env"] == {"PYTHON_PATH": "${{ steps.python.outputs.python-path }}"}
     assert install["run"].strip().splitlines() == [
         'uv venv --python "$PYTHON_PATH" "$HOME/venv"',
+        'uv pip install --offline --no-index --find-links /opt/wheelhouse --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
+        'echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"',
         'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
@@ -730,6 +732,88 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
     )
     assert (outcome.returncode == 0) == (result == "success")
     assert (tmp_path / "calls").read_text() == "xx"
+
+
+def _await_steps():
+    return yaml.safe_load((_ROOT / ".github/actions/await-download/action.yml").read_text())["runs"]["steps"]
+
+
+def test_a_fork_split_waits_for_the_collection_instead_of_polling_without_a_token():
+    jobs = _workflow()["jobs"]
+    steps = jobs["split"]["steps"]
+    guard = next(step for step in steps if step.get("name") == "Require successful early collection")
+    download = next(step for step in steps if step.get("name") == "Download the early collection")
+    fork = next(step for step in steps if step.get("name") == "Wait for the early collection on a fork")
+    upload = next(step for step in jobs["test-count"]["steps"] if step.get("name") == "Upload the early collection")
+    mint = next(step for step in steps if step.get("id") == "app-token")
+    same = " && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
+    assert guard["if"] == mint["if"] and guard["if"].endswith(same)
+    assert fork["if"] == guard["if"].replace(
+        same,
+        " && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository",
+    )
+    assert fork["uses"] == "./.github/actions/await-download"
+    assert fork["with"] == {"name": upload["with"]["name"]}
+    assert (
+        steps.index(download)
+        < steps.index(fork)
+        < steps.index(next(step for step in steps if step.get("name") == "Adopt latest dev durations"))
+    )
+
+
+def test_the_collection_wait_outlasts_the_count_job_timeout(tmp_path):
+    attempts = [step for step in _await_steps() if step.get("uses")]
+    waits = [step for step in _await_steps() if step.get("name", "").startswith("Wait ")]
+    assert len(waits) == len(attempts) - 1
+    assert all(step["uses"] == "actions/download-artifact@v4" for step in attempts)
+    assert all(step["continue-on-error"] is True for step in attempts)
+    assert all(step["with"] == {"name": "${{ inputs.name }}", "path": "${{ github.workspace }}"} for step in attempts)
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "sleep").write_text('#!/usr/bin/env bash\necho "$1" >> "$SLEPT"\n')
+    (binary / "sleep").chmod(0o755)
+    for wait in waits:
+        subprocess.run(
+            ["bash", "-e", "-c", wait["run"]],
+            env=dict(os.environ, PATH=f"{binary}:{os.environ['PATH']}", SLEPT=str(tmp_path / "slept")),
+            check=True,
+        )
+    slept = sum(int(line) for line in (tmp_path / "slept").read_text().split())
+    jobs = _workflow()["jobs"]
+    assert jobs["test-count"]["timeout-minutes"] * 60 <= slept <= (jobs["split"]["timeout-minutes"] - 5) * 60
+
+
+@pytest.mark.parametrize("ready", [0, 25, 400, None])
+def test_the_collection_wait_downloads_once_the_artifact_lands_and_stays_red_when_it_never_does(tmp_path, ready):
+    outcomes, clock, tried = {}, 0, []
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "sleep").write_text('#!/usr/bin/env bash\necho "$1" > "$SLEPT"\n')
+    (binary / "sleep").chmod(0o755)
+    env = dict(os.environ, PATH=f"{binary}:{os.environ['PATH']}", SLEPT=str(tmp_path / "slept"), ARTIFACT="x")
+    final = None
+    for step in _await_steps():
+        match = re.fullmatch(r"steps\.(\w+)\.outcome == 'failure'", step.get("if", "steps.none.outcome == 'failure'"))
+        assert match, step["if"]
+        if "if" in step and outcomes.get(match.group(1)) != "failure":
+            continue
+        if step.get("uses"):
+            tried.append(clock)
+            outcomes[step["id"]] = "success" if ready is not None and clock >= ready else "failure"
+            continue
+        done = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+        if step.get("name", "").startswith("Wait "):
+            clock += int((tmp_path / "slept").read_text())
+        else:
+            final = done
+    if ready is None:
+        assert len(tried) == len([step for step in _await_steps() if step.get("uses")])
+        assert final.returncode == 1
+        assert "::error" in final.stdout
+    else:
+        assert final is None
+        assert tried[-1] >= ready
+        assert len(tried) == 1 or tried[-2] < ready
 
 
 @pytest.mark.parametrize("collection,floor", [(0, 0), (1, 0), (0, 1), (1, 1)])

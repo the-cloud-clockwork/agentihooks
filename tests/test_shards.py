@@ -310,6 +310,15 @@ def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
     }
 
 
+def test_grouped_files_parses_only_files_that_name_xdist_group(tmp_path):
+    from tests.shards import grouped_files
+
+    (tmp_path / "grouped.py").write_text('import pytest\npytestmark = pytest.mark.xdist_group("redis")\n')
+    (tmp_path / "unparsable.py").write_text("def test_x(:\n")
+
+    assert grouped_files(tmp_path, ["grouped.py", "unparsable.py"]) == {"grouped.py": "'redis'"}
+
+
 def test_shards_weigh_source_size_since_every_worker_collects_the_whole_shard():
     durations = {"tests/test_a.py::t": 1.0, "tests/test_b.py::t": 1.0, "tests/test_c.py::t": 1.0}
     files = ["tests/test_a.py", "tests/test_b.py", "tests/test_c.py"]

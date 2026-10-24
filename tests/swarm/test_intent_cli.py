@@ -162,7 +162,7 @@ def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_t
     cli.run_tick(store, "sw")
     assert heads == []
     cli.run_tick(store, "sw")
-    assert batches == [{URL, other}, {URL, other}, {URL, other}, {URL, other}]
+    assert batches == [{URL, other}, set(), {URL, other}, set()]
     assert heads == [URL]
 
 

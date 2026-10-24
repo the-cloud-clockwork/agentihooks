@@ -3,19 +3,23 @@ import json
 import re
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pytest
+if TYPE_CHECKING:
+    import pytest
 
 
 class _Collected:
     def __init__(self) -> None:
         self.nodeids: list[str] = []
 
-    def pytest_collection_finish(self, session: pytest.Session) -> None:
+    def pytest_collection_finish(self, session: "pytest.Session") -> None:
         self.nodeids = [item.nodeid for item in session.items]
 
 
 def collect(tests: str) -> list[str] | None:
+    import pytest
+
     recorder = _Collected()
     code = pytest.main(["--collect-only", "-qq", "-p", "no:cacheprovider", tests], plugins=[recorder])
     return recorder.nodeids if code == 0 else None

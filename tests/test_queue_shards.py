@@ -92,7 +92,7 @@ def test_queue_sizing_splits_a_serial_group_until_it_has_half_timeout_margin(tmp
     assert {leg["total"] for leg in legs} == {16}
 
 
-@pytest.mark.parametrize(("step", "tests", "shards", "target"), [(720, 2400, 26, 195), (300, 1200, 18, 150)])
+@pytest.mark.parametrize(("step", "tests", "shards", "target"), [(720, 1920, 21, 195), (300, 1200, 18, 150)])
 def test_queue_sizing_targets_195_seconds_or_half_a_shorter_step_timeout(
     tmp_path, monkeypatch, step, tests, shards, target
 ):
@@ -261,13 +261,13 @@ def test_combined_queue_plan_refuses_more_jobs_than_the_runner_pool(capsys):
     from tests.queue_shards import main
 
     plan = [
-        {"python-version": "3.12", "shard": shard, "total": 30, "predicted_seconds": 150.0} for shard in range(1, 31)
+        {"python-version": "3.12", "shard": shard, "total": 24, "predicted_seconds": 150.0} for shard in range(1, 25)
     ]
-    main(["combine", "--plans", json.dumps(plan[:15])[1:-1], json.dumps(plan[15:])[1:-1]])
-    assert "30 queue jobs fit one wave of 30 runners" in capsys.readouterr().out
+    main(["combine", "--plans", json.dumps(plan[:12])[1:-1], json.dumps(plan[12:])[1:-1]])
+    assert "24 queue jobs fit one wave of 24 runners" in capsys.readouterr().out
 
-    extra = {"python-version": "3.12", "shard": 31, "total": 31, "predicted_seconds": 150.0}
-    with pytest.raises(SystemExit, match="31 queue jobs exceed the pool of 30"):
+    extra = {"python-version": "3.12", "shard": 25, "total": 25, "predicted_seconds": 150.0}
+    with pytest.raises(SystemExit, match="25 queue jobs exceed the pool of 24"):
         main(["combine", "--plans", json.dumps(plan)[1:-1], json.dumps([extra])[1:-1]])
 
 
@@ -297,15 +297,15 @@ def test_an_overflowing_queue_plan_is_capped_at_the_runner_pool(tmp_path, capsys
     outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
     assert set(outputs) == {"queue_312"}
     plan = json.loads("[" + outputs["queue_312"] + "]")
-    assert [leg["shard"] for leg in plan] == list(range(1, 31))
-    assert {leg["total"] for leg in plan} == {30}
+    assert [leg["shard"] for leg in plan] == list(range(1, 25))
+    assert {leg["total"] for leg in plan} == {24}
     assert all(leg["predicted_seconds"] < STEP_SECONDS for leg in plan)
     out = capsys.readouterr().out
-    assert "35 queue jobs exceed the pool of 30; capped at 30 shards" in out
-    assert "30 queue jobs fit one wave of 30 runners" in out
+    assert "35 queue jobs exceed the pool of 24; capped at 24 shards" in out
+    assert "24 queue jobs fit one wave of 24 runners" in out
 
 
-def test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool(tmp_path, capsys):
+def test_a_forty_job_queue_plan_is_capped_to_the_twenty_four_runner_queue_pool(tmp_path, capsys):
     from tests.queue_shards import main
 
     root, output = _overflowing_plan(tmp_path, 1.0, total=40)
@@ -314,8 +314,8 @@ def test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool(tmp_pa
 
     outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
     totals = {leg["total"] for leg in json.loads("[" + outputs["queue_312"] + "]")}
-    assert totals == {30}
-    assert "40 queue jobs exceed the pool of 30; capped at 30 shards" in capsys.readouterr().out
+    assert totals == {24}
+    assert "40 queue jobs exceed the pool of 24; capped at 24 shards" in capsys.readouterr().out
 
 
 def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_pool(tmp_path, capsys):
@@ -326,10 +326,10 @@ def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_poo
     main(["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")])
 
     plan = json.loads("[" + output.read_text().strip().split("=", 1)[1] + "]")
-    assert len(plan) == 30
+    assert len(plan) == 24
     out = capsys.readouterr().out
     assert "::warning::The capped queue plan predicts 490.0s, over 420s of the step timeout\n" in out
-    assert "30 queue jobs fit one wave of 30 runners; predicted slowest test step 490.0s" in out
+    assert "24 queue jobs fit one wave of 24 runners; predicted slowest test step 490.0s" in out
 
 
 def test_a_capped_plan_at_the_step_timeout_warns(tmp_path, capsys, monkeypatch):

@@ -63,6 +63,7 @@ def beat(redis: "Redis", local_id: str) -> None:
         registry.seed(pipe, local_id)
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
         fields["master_login"] = json.dumps({"claude": master_claude_login.signed_in()})
+        fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
         beat_ms = int(time.time() * 1000)
         fields["heartbeat_at"] = str(beat_ms)
         pipe.hset(key, mapping=fields)

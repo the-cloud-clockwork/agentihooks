@@ -1,0 +1,180 @@
+name: Awaited artifact download
+description: Download an artifact of this run that another job of it may not have uploaded yet, retrying on a backoff that outlasts the uploading job's timeout. Needs no token, so fork pull requests can use it.
+inputs:
+  name:
+    description: Artifact name
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Download attempt 1
+      id: a1
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 10s before attempt 2
+      if: steps.a1.outcome == 'failure'
+      shell: bash
+      run: sleep 10
+    - name: Download attempt 2
+      id: a2
+      if: steps.a1.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 10s before attempt 3
+      if: steps.a2.outcome == 'failure'
+      shell: bash
+      run: sleep 10
+    - name: Download attempt 3
+      id: a3
+      if: steps.a2.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 20s before attempt 4
+      if: steps.a3.outcome == 'failure'
+      shell: bash
+      run: sleep 20
+    - name: Download attempt 4
+      id: a4
+      if: steps.a3.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 20s before attempt 5
+      if: steps.a4.outcome == 'failure'
+      shell: bash
+      run: sleep 20
+    - name: Download attempt 5
+      id: a5
+      if: steps.a4.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 30s before attempt 6
+      if: steps.a5.outcome == 'failure'
+      shell: bash
+      run: sleep 30
+    - name: Download attempt 6
+      id: a6
+      if: steps.a5.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 30s before attempt 7
+      if: steps.a6.outcome == 'failure'
+      shell: bash
+      run: sleep 30
+    - name: Download attempt 7
+      id: a7
+      if: steps.a6.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 60s before attempt 8
+      if: steps.a7.outcome == 'failure'
+      shell: bash
+      run: sleep 60
+    - name: Download attempt 8
+      id: a8
+      if: steps.a7.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 60s before attempt 9
+      if: steps.a8.outcome == 'failure'
+      shell: bash
+      run: sleep 60
+    - name: Download attempt 9
+      id: a9
+      if: steps.a8.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 120s before attempt 10
+      if: steps.a9.outcome == 'failure'
+      shell: bash
+      run: sleep 120
+    - name: Download attempt 10
+      id: a10
+      if: steps.a9.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 120s before attempt 11
+      if: steps.a10.outcome == 'failure'
+      shell: bash
+      run: sleep 120
+    - name: Download attempt 11
+      id: a11
+      if: steps.a10.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 180s before attempt 12
+      if: steps.a11.outcome == 'failure'
+      shell: bash
+      run: sleep 180
+    - name: Download attempt 12
+      id: a12
+      if: steps.a11.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 180s before attempt 13
+      if: steps.a12.outcome == 'failure'
+      shell: bash
+      run: sleep 180
+    - name: Download attempt 13
+      id: a13
+      if: steps.a12.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Wait 240s before attempt 14
+      if: steps.a13.outcome == 'failure'
+      shell: bash
+      run: sleep 240
+    - name: Download attempt 14
+      id: a14
+      if: steps.a13.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ github.workspace }}
+    - name: Fail when the artifact never landed
+      if: steps.a14.outcome == 'failure'
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.name }}
+      run: |
+        echo "::error title=Awaited download::$ARTIFACT did not land within the uploading job's timeout."
+        exit 1

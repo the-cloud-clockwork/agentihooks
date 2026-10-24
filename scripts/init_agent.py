@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from scripts import agent_choice, claude_trust, gh_config, herdr_host, herdr_panes, operator_env
-from scripts.swarm import effort_range
+from scripts.swarm import brain_binding, effort_range
 from scripts.targets.codex_target import codex_home, restore_hook_order
 
 
@@ -148,6 +148,7 @@ SWARM_IDENTITY = (
     "AGENTIHOOKS_SWARM_AUTONOMY",
     "AGENTIHOOKS_SWARM_LAUNCHER",
     "AGENTIHOOKS_CLAIM_FENCE",
+    brain_binding.VARIABLE,
     effort_range.VARIABLE,
 )
 
@@ -212,6 +213,17 @@ def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[s
         if gateway:
             launch_env["MCP_KEY_GATEWAY"] = gateway
     return launch_env
+
+
+def _bind_brain(environ: dict[str, str]) -> None:
+    # The profile renderer reads the binding from the process environment.
+    if not environ.get("AGENTIHOOKS_SWARM"):
+        os.environ.pop(brain_binding.VARIABLE, None)
+        environ.pop(brain_binding.VARIABLE, None)
+        return
+    # A herdr pane gets credentials only from the env files its launcher sources.
+    decided = brain_binding.decide(environ, operator_env.values(environ))
+    environ[brain_binding.VARIABLE] = os.environ[brain_binding.VARIABLE] = json.dumps(decided, sort_keys=True)
 
 
 def _with_predecessor(environ: dict[str, str], handoff: bool) -> dict[str, str]:
@@ -524,6 +536,7 @@ def _write_launcher(
         f"{_swarm_exports(environ)}"
         f"{langfuse_export}"
         f"{_binding_export(environ)}"
+        f"{brain_binding.exports(environ)}"
         f"sleep {LAUNCH_GRACE_S}\n"
         f"{before}{command_text}\n"
         "native_status=$?\n"
@@ -951,9 +964,18 @@ def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[
     return named
 
 
+def _launch_seconds(args) -> float:
+    from scripts.master_login_chain import BUDGET
+
+    if args.agent in ("", "claude") and _flag_value(args.claude_args, ("--route",)) == "master-login":
+        args.route_timeout = max(args.route_timeout, BUDGET.route)
+        return BUDGET.launch
+    return LAUNCH_DEADLINE_S
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    launch = LaunchDeadline(LAUNCH_DEADLINE_S)
+    launch = LaunchDeadline(_launch_seconds(args))
     active_env = dict(os.environ if environ is None else environ)
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
     operator_env.fill(active_env)
@@ -975,6 +997,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             exclude = _handoff_exclude(agent, active_env)
             if not prompt:
                 raise ValueError("--handoff needs the handoff document as --prompt-file")
+        _bind_brain(active_env)
         claude_args = _prepare_profile(args, agent, claude_args, active_env)
         claude_args = effort_range.launch_args(agent, claude_args, active_env)
         if not args.dry_run:
@@ -1026,6 +1049,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         f"claude_args={shlex.join(claude_args)}",
         f"launcher={launcher}",
         f"prompt_file={prompt_file or 'none'}",
+        *brain_binding.report(active_env),
         *(f"{k}={v}" for k, v in zip(("model", "effort"), model_effort(agent, claude_args, active_env))),
     ]
     if args.dry_run:

@@ -194,13 +194,16 @@ def test_three_missed_beats_expire_both_keys(redis, monkeypatch):
 
 
 @pytest.mark.parametrize("account", ["login", ""])
-def test_beat_publishes_the_master_login_account(redis, monkeypatch, account):
+@pytest.mark.parametrize("enabled", [True, False])
+def test_beat_publishes_the_master_login_account(redis, monkeypatch, account, enabled):
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
     monkeypatch.setattr(daemon.master_claude_login, "signed_in", lambda: account)
+    monkeypatch.setattr(daemon.master_claude_login, "unusable", lambda: "" if enabled else "off")
     daemon.beat(redis, "machine")
     assert registry.show(redis, "machine")["master_login"] == {"claude": account}
+    assert registry.show(redis, "machine")["master_login_enabled"] == ("yes" if enabled else "no")
 
 
 @pytest.mark.parametrize(("member", "indexed", "ttl"), [("machine", set(), 10), ("other", {"machine"}, 45)])
@@ -688,6 +691,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
         "master_login": {"claude": ""},
+        "master_login_enabled": "no",
         "repos": [],
         "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
         "version": "",

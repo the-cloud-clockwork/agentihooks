@@ -177,7 +177,7 @@ jobs:
     uses: ./.github/workflows/brain-smoke.yml
 
   writer-lock:
-    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
     needs: [reuse, admission]
     uses: ./.github/workflows/writer-lock.yml
 
@@ -664,6 +664,8 @@ jobs:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
+          uv pip install --offline --no-index --find-links /opt/wheelhouse --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
+          echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"
           bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       # Queue refs cannot read dev's entries, so saving there only fills the store with copies.
@@ -702,7 +704,7 @@ jobs:
           permission-actions: read
 
       - name: Fetch the base suite count recorded on dev
-        if: steps.app-token.outcome == 'success' && github.event_name == 'pull_request'
+        if: steps.app-token.outcome == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RECORD: count-record-${{ matrix.python-version }}
@@ -837,7 +839,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
     needs: [select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: read
     strategy:
@@ -885,6 +887,8 @@ jobs:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
+          uv pip install --offline --no-index --find-links /opt/wheelhouse --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
+          echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"
           bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - &save-venv
@@ -911,15 +915,11 @@ jobs:
           permission-actions: read
 
       - name: Require successful early collection
-        if: github.event_name != 'push' && needs.select.outputs.source == ''
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           COLLECTION_JOB: test-count (${{ matrix.python-version }})
         run: |
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "A fork pull request mints no App token; Gate Required still holds the count."
-            exit 0
-          fi
           while :; do
             state="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
               --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion)\"")" || state=""
@@ -931,12 +931,18 @@ jobs:
           done
 
       - name: Download the early collection
-        if: github.event_name != 'push' && needs.select.outputs.source == ''
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: ./.github/actions/retry-download
         with:
           name: early-collected-${{ matrix.python-version }}
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+
+      - name: Wait for the early collection on a fork
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        uses: ./.github/actions/await-download
+        with:
+          name: early-collected-${{ matrix.python-version }}
 
       - name: Download the queued run's dev durations
         if: needs.select.outputs.source == '' && needs.select.outputs.queued == 'true'
@@ -2415,7 +2421,7 @@ jobs:
               | (if $event == "merge_group" then
                 ["select", "split", "shard-check", "test-count"]
               else
-                ["select", "test-count", "lint", "docs", "semgrep", "sonar"]
+                ["select", "test-count", "lint", "docs", "semgrep", "sonar", "writer-lock"]
                 + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
                 + (if $mutation == "true" then ["mutation-plan", "mutation-stats"] + (if $inline == "true" then [] else ["mutation"] end) else [] end)
               end) as $required
