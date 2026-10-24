@@ -605,6 +605,7 @@ def test_codex_explicit_directory_without_a_repository_is_refused(repo, tmp_path
 
 
 def _pushed(root, branch, *entries, remote="origin"):
+    subprocess.run(["git", "-C", str(root), "remote", "add", remote, str(root)], capture_output=True)
     log_file = root / ".git" / "logs" / "refs" / "remotes" / remote / branch
     log_file.parent.mkdir(parents=True, exist_ok=True)
     zero = "0" * 40
@@ -719,3 +720,13 @@ def test_a_worktree_reads_the_push_reflog_of_its_repository(repo, swarm_worktree
     assert "the last push to task-branch was 10 s ago" in prepush_guard._crowded(
         [(swarm_worktree, ["origin", "HEAD"])], 1010
     )
+
+
+def test_a_push_to_a_path_rather_than_a_named_remote_is_not_spaced(repo, tmp_path):
+    target = tmp_path / "other"
+    _pushed(repo, "work", (1000, "update by push"))
+    target.mkdir()
+    zero = "0" * 40
+    (target / "work").write_text(f"{zero} {zero} t <t@example.com> 1000 +0000\tupdate by push\n")
+    assert _spacing(repo, f"git push {target} HEAD", 1010) is None
+    assert _spacing(repo, "git push origin HEAD", 1010) is not None

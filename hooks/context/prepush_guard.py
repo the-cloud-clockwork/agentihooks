@@ -186,8 +186,9 @@ def _branches(root: Path, args: list[str]) -> tuple[str, list[str]]:
 
 def _last_push(root: Path, remote: str, branch: str) -> float | None:
     common = _common_dir(root)
+    named = subprocess.run(["git", "-C", str(root), "remote"], capture_output=True, text=True).stdout.split()
     log_file = Path(common or "", "logs", "refs", "remotes", remote, branch)
-    if not common or not log_file.is_file():
+    if not common or remote not in named or not log_file.is_file():
         return None
     stamps = [
         float(head.rsplit(" ", 2)[1])

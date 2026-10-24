@@ -59,7 +59,8 @@ least 4.6 minutes at the tenth percentile, so a push inside that window cancels
 the run the previous push started. The refusal names the time the push may go;
 keep committing and push once, so one run grades every commit. Delete
 refspecs, dry runs and `diffcheck/` refspecs are not spaced, and a push to a
-URL rather than a named remote has no reflog to read and is not spaced.
+URL or path rather than a configured remote is not spaced. `--all` and
+`--tags` space only the current branch's `@{push}` branch.
 
 ## How the size stage picks its base
 
