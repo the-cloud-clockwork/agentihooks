@@ -788,7 +788,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .chat-panel, .chat-panel.big { top: 48px; bottom: 72px; height: auto; }
   #chat-title { white-space: nowrap; }
   .chat-panel { overflow: hidden; }
-  #chat-log { flex: 1 1 96px; min-height: 48px; }
+  #chat-log { flex: 1 1 96px; min-height: 32px; }
   .chat-compose { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; }
   .chat-compose > textarea { order: 2; flex: 0 0 100%; }
   .chat-to { flex: 1; }
@@ -809,7 +809,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .prio-title { position: relative; }
   .prio-title::after { content: ""; position: absolute; inset: -12px -4px; }
   .jump-menu select { min-height: 44px; }
-  .sw-gate .sw-mode, .sw-ovl-row .sw-mode, .sw-num, .hl-pick, .add { min-height: 32px; }
+  .sw-gate .sw-mode, .sw-ovl-row .sw-mode, .sw-num, .hl-pick, .hl-note, .add { min-height: 32px; }
   .sw-btn.sw-icon { min-width: 32px; min-height: 32px; justify-content: center; }
   input, select, textarea { font-size: 16px; }
   .chat-compose .hint { display: none; }
