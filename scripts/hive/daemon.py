@@ -83,16 +83,23 @@ def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive.execution_events import observe as publish_executions
 
     publish_executions(local_id, hosted)
-    from nats.errors import Error as NatsError
-
     from scripts.hive import account_slots
 
     try:
         account_slots.publish(local_id, report, hosted)
-    except (NatsError, TimeoutError, account_slots.Unavailable) as exc:
+    except _slot_errors() as exc:
         print(f"hive account slot heartbeat failed ({type(exc).__name__}: {exc}); retrying next beat", file=sys.stderr)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
+
+
+def _slot_errors() -> tuple[type[Exception], ...]:
+    """Evaluated only once a publish raised, so a hive without the nats extra never imports it."""
+    from nats.errors import Error as NatsError
+
+    from scripts.hive import account_slots
+
+    return NatsError, TimeoutError, account_slots.Unavailable
 
 
 def adopt_caps(redis: "Redis", report: dict) -> None:

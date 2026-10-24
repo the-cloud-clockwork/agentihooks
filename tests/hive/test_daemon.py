@@ -2,9 +2,10 @@ import json
 from unittest.mock import Mock
 
 import pytest
+from nats.js.errors import BucketNotFoundError
 
 from scripts import session_bands
-from scripts.hive import daemon, registry
+from scripts.hive import account_slots, daemon, registry
 
 pytestmark = pytest.mark.unit
 
@@ -71,23 +72,18 @@ def test_hive_heartbeat_renews_account_counters_from_its_own_quota_and_execution
 @pytest.mark.parametrize(
     "failure",
     [
-        "bucket",
+        BucketNotFoundError(),
         TimeoutError("no responders for 'swarm.hive.slots'"),
-        "unavailable",
+        account_slots.Unavailable("no account slot left"),
     ],
 )
 def test_hive_heartbeat_keeps_beating_when_the_account_slot_publish_fails(redis, monkeypatch, capsys, failure):
-    from nats.js.errors import BucketNotFoundError
-
-    from scripts.hive import account_slots
-
-    errors = {"bucket": BucketNotFoundError(), "unavailable": account_slots.Unavailable("no account slot left")}
     report = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     hosted = {"executions": {}, "names": ["kept"]}
     publish_config, close_dead_tabs = Mock(), Mock()
     monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
     monkeypatch.setattr(daemon, "execution_report", lambda *args: hosted)
-    monkeypatch.setattr(account_slots, "publish", Mock(side_effect=errors.get(failure, failure)))
+    monkeypatch.setattr(account_slots, "publish", Mock(side_effect=failure))
     monkeypatch.setattr(daemon, "publish_config", publish_config)
     monkeypatch.setattr(daemon, "close_dead_tabs", close_dead_tabs)
     daemon.beat(redis, "machine")

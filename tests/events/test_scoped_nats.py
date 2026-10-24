@@ -297,3 +297,35 @@ def test_scoped_members_share_only_the_two_approved_account_slot_buckets(hub, si
     finally:
         first.close()
         second.close()
+
+
+def test_hive_heartbeat_keeps_beating_on_a_fresh_bus_until_the_hub_creates_the_slot_buckets(
+    hub, signer, monkeypatch, capsys
+):
+    import fakeredis
+
+    from scripts.hive import account_slots, buckets, daemon
+
+    redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "interactive": {}, "repos": []}
+    report.update(sessions={"claude:a": 0}, quota={})
+    hosted = {"executions": {}, "names": []}
+    client, beats = member(signer), []
+
+    def publish(hive, report, hosted):
+        account_slots.Slots(client, hive, lambda: report).heartbeat(report, hosted["executions"])
+        beats.append(hive)
+
+    monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
+    monkeypatch.setattr(daemon, "execution_report", lambda *args: hosted)
+    monkeypatch.setattr(account_slots, "publish", publish)
+    try:
+        daemon.beat(redis, "machine")
+        assert "account slot heartbeat failed (BucketNotFoundError" in capsys.readouterr().err
+        assert beats == []
+        buckets.provision(hub)
+        daemon.beat(redis, "machine")
+        assert beats == ["machine"]
+        assert "account slot heartbeat failed" not in capsys.readouterr().err
+    finally:
+        client.close()
