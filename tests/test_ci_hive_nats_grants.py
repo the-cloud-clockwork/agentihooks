@@ -358,7 +358,7 @@ def test_the_controller_grants_render_the_controller_claims():
     assert claims["type"] == "user"
     assert grants.controller_grants(str(ROOT)) == {
         "publish": {"allow": frozenset(nats_grant.CONTROLLER_PUBLISH), "deny": frozenset()},
-        "subscribe": {"allow": frozenset({"_INBOX.>"}), "deny": frozenset()},
+        "subscribe": {"allow": frozenset({"_INBOX.>", "swarm.*.slots"}), "deny": frozenset()},
     }
 
 
