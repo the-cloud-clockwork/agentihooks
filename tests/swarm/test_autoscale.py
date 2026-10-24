@@ -144,6 +144,28 @@ def test_a_confirmed_raise_reason_names_the_two_seat_limit():
     )
 
 
+def test_ready_work_cap_replaces_the_unused_tick_limit_reason():
+    previous = {
+        "ceilings": {"plan": 0, "ci": 3, "eng": 10},
+        "pending_raise": {"target": 34, "ticks": 3},
+        "reason": "",
+    }
+    for _ in range(3):
+        decision = calculate(
+            {"eng": 9, "ci": 3, "plan": 0},
+            {"claude": 22},
+            22,
+            {"eng": 1, "ci": 0, "plan": 0},
+            previous,
+        )
+        assert decision["ceilings"] == {"eng": 10, "ci": 3, "plan": 0}
+        assert decision["reason"] == (
+            "Quota seats 22 (claude 22); host room 22; ceiling 13 of 34"
+            "; capped by ready work eng 1, ci 0, plan 0."
+        )
+        previous = decision
+
+
 def test_idle_lanes_hold_only_their_live_agents_even_with_a_large_shift():
     for shift in (-16, 0, 16):
         decision = calculate(
