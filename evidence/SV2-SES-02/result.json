@@ -3,7 +3,7 @@
   "dependency": "SV2-SES-01",
   "integration_gate": "G4",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/6645",
-  "tested_commit": "48dbf534b",
+  "tested_commit": "4573c9cb7",
   "package_complete": false,
   "evidence_class": "mocked: local files in a temporary folder stand in for a provider transcript; no provider process, spool or network runs",
   "interfaces": [

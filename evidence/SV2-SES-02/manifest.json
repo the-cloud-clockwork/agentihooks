@@ -6,7 +6,7 @@
     "tests/fixtures/swarm_v2/transcript-tailing.json": "7bc831c971fa610d3b2593aefd7d31adfbe092712112efa374efa20fd192481f"
   },
   "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40082171822",
-  "records_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40082210817",
+  "records_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40082763575",
   "records_note": "each record was printed by the committed evidence assertion failing on absent records in the records run; that run is not cited as green",
-  "tested_commit": "48dbf534b"
+  "tested_commit": "4573c9cb7"
 }

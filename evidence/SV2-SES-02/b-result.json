@@ -2,7 +2,7 @@
   "case": "T-SV2-SES-02-B",
   "evidence_class": "mocked: local files in a temporary folder stand in for a provider transcript; no provider process, spool or network runs",
   "input_sha256": {
-    "transcript-tailing.json": "2ee8606705605efe43acb86e3b166c18fa4a479081c53afb6a5fe751ea361025"
+    "transcript-tailing.json": "7bc831c971fa610d3b2593aefd7d31adfbe092712112efa374efa20fd192481f"
   },
   "observed": {
     "accepted_texts": [
