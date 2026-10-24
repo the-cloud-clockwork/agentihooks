@@ -70,6 +70,23 @@ def test_checksum_covers_every_field():
     assert base != spool_module._checksum(1, "b", 1.0, records("x"))
     assert base != spool_module._checksum(1, "a", 2.0, records("x"))
     assert base != spool_module._checksum(1, "a", 1.0, records("y"))
+    unsorted = [{"text": "x", "kind": "user_text"}]
+    assert spool_module._checksum(1, "a", 1.0, unsorted) == base
+
+
+def test_a_corrupt_pending_identity_is_appended_again(spool):
+    spool.append("same", records("one"))
+    path = spool.batches / batch_files(spool)[0]
+    path.write_bytes(path.read_bytes().replace(b"one", b"0ne"))
+    assert spool.append("same", records("one")).sequence == 2
+
+
+def test_lag_follows_the_oldest_pending_batch(spool, clock):
+    spool.append("a", records("x"))
+    clock.now += 10
+    spool.append("b", records("x"))
+    clock.now += 5
+    assert spool.status().archive_lag_seconds == 15.0
 
 
 def test_sequences_grow_and_keep_utf8(spool):
@@ -88,9 +105,11 @@ def test_a_pending_identity_is_appended_once(spool):
 
 
 def test_accept_appends_the_batch_identity_and_records(spool):
+    one = records("one")
+
     class Batch:
         identity = "d:i:0:5"
-        records = iter(records("one"))
+        records = one
 
     spool.accept(Batch())
     [entry] = [spool._read(path) for path in spool._files()]
@@ -102,7 +121,7 @@ def test_status_reports_levels_bytes_and_lag(tmp_path, clock):
     size = probe.append("a", records("x")).size
     spool = Spool(SpoolConfig(tmp_path / "s", max_bytes=size * 3, warn_bytes=size * 2), clock)
     empty = spool.status()
-    assert empty == spool_module.Status("ok", 0, 0, [], [], 0, 0.0)
+    assert empty == spool_module.Status("ok", 0, 0, 0, [], [], [], 0, 0.0)
     spool.append("a", records("x"))
     clock.now += 7
     one = spool.status()
@@ -154,7 +173,8 @@ def test_flush_uploads_in_order_and_acknowledges_after_each_upload(spool):
     assert result == FlushResult([1, 2, 3], [], "")
     assert seen == [(1, 0), (2, 1), (3, 2)]
     assert batch_files(spool) == []
-    assert json.loads(spool.ack_path.read_bytes()) == {"acknowledged": 3, "lost": []}
+    keys = {spool_module._key(name): sequence for sequence, name in enumerate("abc", 1)}
+    assert json.loads(spool.ack_path.read_bytes()) == {"settled": 3, "lost": [], "recent": keys}
     assert spool.append("d", records("d")).sequence == 4
 
 
@@ -188,7 +208,57 @@ def test_a_corrupt_batch_is_quarantined_and_reported_lost(spool):
     assert uploaded == ["b"]
     assert (spool.quarantine / path.name).exists()
     status = spool.status()
-    assert (status.acknowledged, status.lost) == (2, [1])
+    assert (status.settled, status.acknowledged, status.lost) == (2, 0, [1])
+    assert json.loads(spool.ack_path.read_bytes())["recent"] == {spool_module._key("b"): 2}
+
+
+def test_status_lists_a_corrupt_batch_apart_from_pending(spool):
+    spool.append("a", records("one"))
+    spool.append("b", records("two"))
+    path = spool.batches / batch_files(spool)[0]
+    path.write_bytes(path.read_bytes().replace(b"one", b"0ne"))
+    status = spool.status()
+    assert (status.pending, status.corrupt, status.buffered) == ([2], [1], 2)
+
+
+def test_an_acknowledged_identity_is_not_appended_again(spool):
+    spool.append("a", records("one"))
+    spool.flush(lambda entry: None)
+    assert spool.append("a", records("one")) is None
+    assert batch_files(spool) == []
+    assert spool.append("b", records("two")).sequence == 2
+
+
+def test_recent_identities_keep_only_the_newest(spool, monkeypatch):
+    monkeypatch.setattr(spool_module, "RECENT_IDENTITIES", 2)
+    for name in "abc":
+        spool.append(name, records(name))
+    spool.flush(lambda entry: None)
+    recent = json.loads(spool.ack_path.read_bytes())["recent"]
+    assert recent == {spool_module._key("b"): 2, spool_module._key("c"): 3}
+    assert spool.append("a", records("a")).sequence == 4
+
+
+def test_the_batch_file_stays_until_its_acknowledgement_is_written(spool, monkeypatch):
+    spool.append("a", records("one"))
+
+    def crash(path, lost):
+        raise OSError("ack write failed")
+
+    monkeypatch.setattr(spool, "_acknowledge", crash)
+    with pytest.raises(OSError):
+        spool.flush(lambda entry: None)
+    assert len(batch_files(spool)) == 1
+
+
+def test_every_lock_is_exclusive(spool, monkeypatch):
+    calls = []
+    real = spool_module.fcntl.flock
+    monkeypatch.setattr(spool_module.fcntl, "flock", lambda handle, mode: calls.append(mode) or real(handle, mode))
+    spool.append("a", records("one"))
+    spool.status()
+    spool.flush(lambda entry: None)
+    assert calls == [spool_module.fcntl.LOCK_EX] * 4
 
 
 @pytest.mark.parametrize(
@@ -217,16 +287,16 @@ def test_a_batch_renamed_to_another_sequence_reads_as_none(spool):
 
 def test_acknowledge_never_moves_the_watermark_back(spool):
     spool.batches.mkdir(parents=True)
-    spool._acknowledge(3, lost=False)
-    spool._acknowledge(2, lost=True)
-    spool._acknowledge(3, lost=True)
-    assert json.loads(spool.ack_path.read_bytes()) == {"acknowledged": 3, "lost": []}
+    spool._acknowledge(spool.batches / "00000000000000000003-k3.json", lost=False)
+    spool._acknowledge(spool.batches / "00000000000000000002-k2.json", lost=True)
+    spool._acknowledge(spool.batches / "00000000000000000003-k4.json", lost=True)
+    assert json.loads(spool.ack_path.read_bytes()) == {"settled": 3, "lost": [], "recent": {"k3": 3}}
 
 
 def test_files_at_or_below_the_watermark_are_neither_pending_nor_reuploaded(spool):
     spool.append("a", records("one"))
     spool.append("b", records("two"))
-    spool._acknowledge(1, lost=False)
+    spool._acknowledge(spool.batches / batch_files(spool)[0], lost=False)
     assert spool.status().pending == [2]
     uploaded = []
     spool.flush(lambda entry: uploaded.append(entry.sequence))
@@ -266,6 +336,8 @@ def test_write_durably_syncs_the_file_then_the_folder(tmp_path, monkeypatch):
 
     def record_fsync(fd):
         events.append(("fsync", fd in opened))
+        if fd not in opened:
+            assert os.fstat(fd).st_size == len(b"data")
         real_fsync(fd)
 
     def record_close(fd):

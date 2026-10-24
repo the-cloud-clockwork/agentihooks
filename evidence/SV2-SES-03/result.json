@@ -7,11 +7,11 @@
   "package_complete": false,
   "evidence_class": "mocked: a local transcript file and an in-process destination stand in for the provider and central ingestion; no network, Pod or hive collector runs",
   "interfaces": [
-    "hooks.memory.spool.Spool.append(identity, records) writes one batch file with its sequence, identity, creation time, records and a sha256 checksum through an fsynced temporary file, rename and folder fsync; a pending identity returns its existing entry",
-    "hooks.memory.spool.Spool.accept(batch) is the SV2-SES-02 Collector accept callback, so a refused append leaves the transcript cursor uncommitted",
+    "hooks.memory.spool.Spool.append(identity, records) writes one batch file with its sequence, identity, creation time, records and a sha256 checksum through an fsynced temporary file, rename and folder fsync; a pending identity returns its existing entry and an identity among the last RECENT_IDENTITIES acknowledged returns None",
+    "hooks.memory.spool.Spool.accept(batch) is the SV2-SES-02 Collector accept callback and is idempotent on Batch.identity, so a losing poller adds no second batch and a refused append leaves the transcript cursor uncommitted",
     "hooks.memory.spool.SpoolFull is raised when a new batch would pass max_bytes; no pending batch is removed to make room",
-    "hooks.memory.spool.Spool.status() reports level ok, warning at warn_bytes or full at max_bytes, the buffered and acknowledged sequences, pending and lost sequences, transcript_spool_bytes and archive_lag_seconds",
-    "hooks.memory.spool.Spool.flush(upload) uploads pending batches in sequence order, writes the fsynced acknowledged watermark only after upload returns, removes the batch file after that, stops at the first upload error and quarantines a batch failing its checksum as lost",
+    "hooks.memory.spool.Spool.status() reports level ok, warning at warn_bytes or full at max_bytes; buffered, the highest local sequence; settled, the highest sequence flushed or quarantined; acknowledged, the highest sequence below which every batch was centrally accepted; pending and corrupt sequences verified by checksum; lost sequences; transcript_spool_bytes and archive_lag_seconds",
+    "hooks.memory.spool.Spool.flush(upload) uploads pending batches in sequence order, writes the fsynced ack file only after upload returns, then removes the batch file, stops at the first upload error and quarantines a batch failing its checksum as lost without counting it acknowledged",
     "hooks.memory.spool.run_flusher(spool, upload, stop, interval) flushes every interval until stop is set, then once more for controlled shutdown"
   ],
   "supported_versions": {
@@ -37,12 +37,14 @@
   "rollback_rehearsal": {
     "action": "Stop the flusher and keep unacknowledged spool files; no indexing runs in this package, so nothing expensive needs disabling.",
     "authoritative_objects": "Pending batch files, quarantined lost batches and the ack file; none of them is deleted as a cache. A batch file is removed only after its sequence is in the fsynced ack file.",
-    "proof": "Case C loses the worker after central acceptance and before the local acknowledgement, restarts on the retained spool, reports only the earlier acknowledged sequence as durable, uploads the retained batch again under the same identity and keeps the corrupt batch in quarantine as lost."
+    "proof": "Case C loses the worker after central acceptance and before the local acknowledgement, restarts on the retained spool, reports only the earlier acknowledged sequence as durable and the corrupt batch as corrupt, uploads the retained batch again under the same identity, and keeps the corrupt batch in quarantine as lost while the acknowledged watermark stays below it."
   },
   "remaining_limitations": [
-    "Duplicate suppression covers pending identities only; a batch re-read after it was acknowledged is appended again, so central ingestion (SV2-SES-04) must be idempotent on identity, as case C relies on.",
+    "An identity acknowledged more than RECENT_IDENTITIES batches ago is appended again if the collector repeats it, so central ingestion (SV2-SES-04) must stay idempotent on identity.",
     "Losing the execution-local disk loses every pending batch; the spool then knows nothing, and the last central watermark must come from central ingestion.",
-    "The flusher is not yet started by the worker supervisor: there is no central ingestion endpoint to upload to until SV2-SES-04.",
+    "The flusher is not yet started by the worker supervisor because no ingestion client or endpoint exists to pass as upload until SV2-SES-04; a flusher with no destination would only report outages.",
     "Indexing does not exist yet, so the rollback rule to disable expensive indexing during an outage has nothing to act on."
-  ]
+  ],
+  "compatibility": "Explicitly local compatibility path: the spool is new and only consumes the SV2-SES-02 Collector accept contract, whose behaviour is unchanged; the whole-file transcript reader and the existing memory store are untouched.",
+  "authority": "Not applicable: the spool holds no grant and makes no permission decision; it buffers records the local collector already read and uploads them through a caller-supplied callable that owns any credential."
 }

@@ -33,11 +33,13 @@ class Central:
     def __init__(self):
         self.accepted = {}
         self.attempts = []
+        self.identities = []
         self.down = True
         self.lose_worker_after = None
 
     def __call__(self, entry):
         self.attempts.append(entry.sequence)
+        self.identities.append(entry.identity)
         if self.down:
             raise ConnectionError("destination unavailable")
         self.accepted.setdefault(entry.identity, [record["text"] for record in entry.records])
@@ -186,28 +188,34 @@ def recovery(inputs, root):
     third.write_bytes(third.read_bytes().replace("three".encode(), "thr3e".encode()))
     restarted = Spool(rig.config, rig.clock)
     reported = restarted.status()
-    assert (reported.acknowledged, reported.pending, reported.buffered) == (1, [2, 3], 3)
+    assert (reported.acknowledged, reported.pending, reported.corrupt, reported.buffered) == (1, [2], [3], 3)
     rig.central.lose_worker_after = None
     flushed = restarted.flush(rig.central)
     final = restarted.status()
-    assert rig.central.attempts.count(2) == 2 and len(rig.central.accepted) == 2
+    replays = [identity for sequence, identity in zip(rig.central.attempts, rig.central.identities) if sequence == 2]
+    assert len(replays) == 2 and len(set(replays)) == 1
     assert rig.central.texts() == inputs["prompts"][:2]
-    assert (flushed.uploaded, flushed.lost, final.acknowledged, final.lost) == ([2], [3], 3, [3])
+    assert (flushed.uploaded, flushed.lost) == ([2], [3])
+    assert (final.settled, final.acknowledged, final.lost, final.pending) == (3, 2, [3], [])
     stale = earlier.flush(rig.central)
-    assert (stale.uploaded, earlier.status().acknowledged) == ([], 3)
+    earlier._acknowledge(rig.spool.batches / "00000000000000000002-stale.json", lost=False)
+    assert (stale.uploaded, restarted.status().settled) == ([], 3)
     return {
         "reported_after_loss": {
             "remote_durable_through": reported.acknowledged,
             "local_only": reported.pending,
+            "corrupt": reported.corrupt,
             "transcript_spool_bytes": reported.transcript_spool_bytes,
             "archive_lag_seconds": reported.archive_lag_seconds,
         },
         "upload_attempts": rig.central.attempts,
+        "replayed_identity_attempts": len(replays),
         "central_texts": rig.central.texts(),
         "replayed_uploaded": flushed.uploaded,
         "lost": final.lost,
         "quarantined": sorted(int(path.name[:20]) for path in restarted.quarantine.glob("*.json")),
         "torn_append_retained_uncounted": (restarted.batches / ".00000000000000000004-torn.json.tmp").exists(),
+        "final_settled": final.settled,
         "final_acknowledged": final.acknowledged,
         "stale_flush_uploaded": stale.uploaded,
     }

@@ -4,11 +4,16 @@ import fcntl
 import hashlib
 import json
 import os
+import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from hooks.memory.collector import Batch
+
+RECENT_IDENTITIES = 4096
 
 
 class SpoolFull(Exception):
@@ -35,8 +40,10 @@ class Entry:
 class Status:
     level: str
     buffered: int
+    settled: int
     acknowledged: int
     pending: list[int]
+    corrupt: list[int]
     lost: list[int]
     transcript_spool_bytes: int
     archive_lag_seconds: float
@@ -97,16 +104,12 @@ class Spool:
 
     def _ack(self) -> dict:
         if not self.ack_path.exists():
-            return {"acknowledged": 0, "lost": []}
+            return {"settled": 0, "lost": [], "recent": {}}
         return json.loads(self.ack_path.read_bytes())
 
     def _files(self) -> list[Path]:
-        acknowledged = self._ack()["acknowledged"]
-        files = sorted(self.batches.glob("*.json"), key=_sequence) if self.batches.exists() else []
-        return [path for path in files if _sequence(path) > acknowledged]
-
-    def _bytes(self) -> int:
-        return sum(path.stat().st_size for path in self._files())
+        settled = self._ack()["settled"]
+        return [path for path in sorted(self.batches.glob("*.json"), key=_sequence) if _sequence(path) > settled]
 
     def _read(self, path: Path) -> Entry | None:
         try:
@@ -119,13 +122,17 @@ class Spool:
             return None
         return entry
 
-    def append(self, identity: str, records: list) -> Entry:
-        with self._locked("append"):
+    def append(self, identity: str, records: list) -> Entry | None:
+        """Returns the pending entry for a buffered identity, and None for one already acknowledged."""
+        with self._locked("spool"):
+            ack = self._ack()
+            if _key(identity) in ack["recent"]:
+                return None
             files = self._files()
             for path in files:
                 if path.name.endswith(f"-{_key(identity)}.json") and (entry := self._read(path)):
                     return entry
-            sequence = max([_sequence(path) for path in files] + [self._ack()["acknowledged"]]) + 1
+            sequence = max([_sequence(path) for path in files] + [ack["settled"]]) + 1
             created = self.clock()
             body = {"sequence": sequence, "identity": identity, "created": created, "records": records}
             body["sha256"] = _checksum(sequence, identity, created, records)
@@ -136,37 +143,52 @@ class Spool:
             _write_durably(path, data)
             return Entry(sequence, identity, created, records, len(data))
 
-    def accept(self, batch) -> None:
+    def accept(self, batch: Batch) -> None:
         self.append(batch.identity, list(batch.records))
 
     def status(self) -> Status:
-        ack = self._ack()
-        files = self._files()
-        entries = [self._read(path) for path in files]
-        created = [entry.created for entry in entries if entry]
-        size = sum(path.stat().st_size for path in files)
+        with self._locked("spool"):
+            ack = self._ack()
+            files = self._files()
+            entries = {_sequence(path): self._read(path) for path in files}
+            size = sum(path.stat().st_size for path in files)
+        created = [entry.created for entry in entries.values() if entry]
         level = "full" if size >= self.config.max_bytes else "warning" if size >= self.config.warn_bytes else "ok"
         return Status(
             level=level,
-            buffered=max([_sequence(path) for path in files] + [ack["acknowledged"]]),
-            acknowledged=ack["acknowledged"],
-            pending=[_sequence(path) for path in files],
+            buffered=max([*entries, ack["settled"]]),
+            settled=ack["settled"],
+            acknowledged=min(ack["lost"]) - 1 if ack["lost"] else ack["settled"],
+            pending=[sequence for sequence, entry in entries.items() if entry],
+            corrupt=[sequence for sequence, entry in entries.items() if not entry],
             lost=list(ack["lost"]),
             transcript_spool_bytes=size,
             archive_lag_seconds=max(0.0, self.clock() - min(created)) if created else 0.0,
         )
 
-    def _acknowledge(self, sequence: int, lost: bool) -> None:
+    def _acknowledge(self, path: Path, lost: bool) -> None:
         ack = self._ack()
-        if sequence <= ack["acknowledged"]:
+        sequence = _sequence(path)
+        if sequence <= ack["settled"]:
             return
-        ack = {"acknowledged": sequence, "lost": ack["lost"] + [sequence] * lost}
+        recent = ack["recent"] if lost else {**ack["recent"], path.stem.partition("-")[2]: sequence}
+        ack = {
+            "settled": sequence,
+            "lost": ack["lost"] + ([sequence] if lost else []),
+            "recent": dict(list(recent.items())[-RECENT_IDENTITIES:]),
+        }
         _write_durably(self.ack_path, json.dumps(ack).encode())
 
-    def _quarantine(self, path: Path) -> None:
-        self.quarantine.mkdir(parents=True, exist_ok=True)
-        path.replace(self.quarantine / path.name)
-        self._acknowledge(_sequence(path), lost=True)
+    def _settle(self, path: Path, lost: bool) -> None:
+        with self._locked("spool"):
+            self._acknowledge(path, lost)
+            if lost:
+                self.quarantine.mkdir(parents=True, exist_ok=True)
+                path.replace(self.quarantine / path.name)
+                _sync_dir(self.quarantine)
+            else:
+                path.unlink()
+            _sync_dir(self.batches)
 
     def flush(self, upload: Callable[[Entry], None]) -> FlushResult:
         """``upload`` returns only after central durable acceptance and must be idempotent on ``identity``."""
@@ -175,20 +197,19 @@ class Spool:
             for path in self._files():
                 entry = self._read(path)
                 if entry is None:
-                    self._quarantine(path)
+                    self._settle(path, lost=True)
                     lost.append(_sequence(path))
                     continue
                 try:
                     upload(entry)
                 except Exception as error:
                     return FlushResult(uploaded, lost, type(error).__name__)
-                self._acknowledge(entry.sequence, lost=False)
-                path.unlink()
+                self._settle(path, lost=False)
                 uploaded.append(entry.sequence)
         return FlushResult(uploaded, lost)
 
 
-def run_flusher(spool: Spool, upload: Callable[[Entry], None], stop, interval: float) -> FlushResult:
+def run_flusher(spool: Spool, upload: Callable[[Entry], None], stop: threading.Event, interval: float) -> FlushResult:
     """Flush every ``interval`` seconds until ``stop`` is set, then once more for controlled shutdown."""
     while not stop.wait(interval):
         spool.flush(upload)
