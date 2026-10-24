@@ -5,7 +5,8 @@ import time
 
 import pytest
 
-from scripts.ci_mutation.runner import run_gate, run_process
+from scripts.ci_mutation import runner
+from scripts.ci_mutation.runner import link_or_copy, run_gate, run_process
 
 
 def test_over_budget_reports_every_unfinished_file_by_name(tmp_path, capsys, monkeypatch):
@@ -985,3 +986,29 @@ def test_a_shard_with_missing_or_stale_stats_fails_before_mutating(tmp_path, mon
     assert report["not_mutated"][0]["reason"].startswith(reason)
     assert commands == []
     assert f"hooks/sample.py: not mutated, {reason}" in capsys.readouterr().out
+
+
+def test_workspace_links_tree_files_and_copies_when_links_fail(tmp_path, monkeypatch):
+    source = tmp_path / "source.txt"
+    source.write_text("kept\n")
+    link_or_copy(str(source), str(tmp_path / "linked.txt"))
+    assert (tmp_path / "linked.txt").stat().st_ino == source.stat().st_ino
+
+    def refuse(*args):
+        raise OSError("cross device")
+
+    monkeypatch.setattr(runner.os, "link", refuse)
+    link_or_copy(str(source), str(tmp_path / "copied.txt"))
+    assert (tmp_path / "copied.txt").read_text() == "kept\n"
+    assert (tmp_path / "copied.txt").stat().st_ino != source.stat().st_ino
+    assert (tmp_path / "copied.txt").stat().st_mtime == source.stat().st_mtime
+
+
+def test_prepared_workspace_links_the_source_tree(tmp_path):
+    root, work = tmp_path / "root", tmp_path / "work"
+    (root / "hooks").mkdir(parents=True)
+    (root / "hooks" / "sample.py").write_text("value = 1\n")
+    (root / "pyproject.toml").write_text("[tool]\n")
+    work.mkdir()
+    runner.prepare_workspace(root, work, [], [])
+    assert (work / "hooks" / "sample.py").stat().st_ino == (root / "hooks" / "sample.py").stat().st_ino
