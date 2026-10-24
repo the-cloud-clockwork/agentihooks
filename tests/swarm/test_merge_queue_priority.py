@@ -347,10 +347,21 @@ def test_priority_does_not_remove_an_entry_that_started_running():
             queue.entries[1]["state"] = "AWAITING_CHECKS"
         return done
 
-    result = merge_queue.prioritize(URL, run=run)
+    displaced = Displaced(queue)
+    result = merge_queue.prioritize(URL, run=run, displaced=displaced)
     assert result == {"url": URL, "displaced": [URL[:-1] + "3"], "errors": []}
     assert queue.mutations == [("dequeue", 3), ("queue", 9), ("queue", 3)]
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P2", "P9", "P3"]
+    assert displaced.pulls == {}
+
+
+def test_priority_checks_each_restored_entry_with_an_empty_body_when_it_has_none(monkeypatch):
+    queue, checked = FakeQueue(), []
+    monkeypatch.setattr(
+        merge_queue.staged_compatibility, "require", lambda url, head, body, run: checked.append((url, head, body))
+    )
+    merge_queue.prioritize(URL, run=queue.run)
+    assert checked == [(URL[:-1] + str(n), f"head{n}", "") for n in (9, 2, 3)]
 
 
 def test_master_priority_defers_without_cancelling_running_head(monkeypatch, capsys):
