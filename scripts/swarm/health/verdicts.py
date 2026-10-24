@@ -1,6 +1,7 @@
 """Health finding verdicts: who judged a finding, how, and whether it shows again after its cooldown."""
 
 import json
+from math import inf
 from uuid import uuid4
 
 from scripts.swarm.store import SwarmError
@@ -84,11 +85,11 @@ class VerdictStore:
             return
         event = {key: verdict[key] for key in ("value", "note", "by", "at", "measure")}
         event["finding"] = finding_id
-        member = json.dumps({"id": uuid4().hex, "event": event})
+        member = json.dumps([uuid4().hex, event])
         with self.redis.pipeline() as pipe:
             pipe.hset(self.key, finding_id, json.dumps(record))
             pipe.zadd(self.event_key, {member: verdict["at"]})
-            pipe.zremrangebyscore(self.event_key, "-inf", f"({verdict['at'] - self.HISTORY_MS}")
+            pipe.zremrangebyscore(self.event_key, -inf, f"({verdict['at'] - self.HISTORY_MS}")
             pipe.pexpire(self.event_key, self.HISTORY_MS)
             pipe.execute()
 
@@ -97,4 +98,4 @@ class VerdictStore:
             raise SwarmError("verdict log window exceeds seven day retention")
         if since >= until or until > now_ms:
             raise SwarmError("verdict log needs --since before --until and --until no later than now")
-        return [json.loads(raw)["event"] for raw in self.redis.zrangebyscore(self.event_key, since, f"({until}")]
+        return [json.loads(raw)[1] for raw in self.redis.zrangebyscore(self.event_key, since, f"({until}")]
