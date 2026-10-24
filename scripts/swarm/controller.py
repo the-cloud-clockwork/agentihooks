@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.events import nkey
-from scripts.events.config import BusConfig
+from scripts.events.config import BACKEND_ENV, BusConfig
 from scripts.events.factory import open_bus
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import holder_pod, lease, local_slots, tick_stop
@@ -436,10 +436,10 @@ def bus_user(credentials: str | None) -> str:
 
 
 def open_controller_bus(environ: Mapping[str, str], opener=open_bus):
-    config = BusConfig.from_environ(environ)
-    if config.backend != "nats":
+    if environ.get(BACKEND_ENV) != "nats":
         return None
     try:
+        config = BusConfig.from_environ(environ)
         user = bus_user(config.credentials)
         bus = opener(replace(config, provision=False))
     except Exception as exc:

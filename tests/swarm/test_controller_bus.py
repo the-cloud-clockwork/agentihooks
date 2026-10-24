@@ -41,11 +41,20 @@ def test_controller_keeps_running_when_the_bus_refuses(capsys):
 
 
 def test_controller_keeps_running_on_a_malformed_bus_credential(capsys):
-    environ = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_CREDENTIALS": "not creds"}
+    environ = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_CREDENTIALS": "-----BEGIN NATS USER JWT-----\nbroken\n"}
     assert controller.open_controller_bus(environ, lambda config: "bus") is None
     assert (
         capsys.readouterr().err == "controller: bus nats refused: a NATS creds file holds one user JWT and one seed\n"
     )
+
+
+def test_controller_keeps_running_when_its_bus_credential_cannot_be_read(capsys, tmp_path):
+    missing = tmp_path / "missing.creds"
+    environ = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_CREDENTIALS": str(missing)}
+    assert controller.open_controller_bus(environ, lambda config: "bus") is None
+    err = capsys.readouterr().err
+    assert err.startswith("controller: bus nats refused: [Errno 2] No such file or directory")
+    assert str(missing) in err
 
 
 def test_controller_bus_without_credentials_signs_in_anonymously(capsys):
