@@ -707,7 +707,6 @@ def test_dry_runs_and_diffcheck_pushes_are_never_spaced(repo, command):
 
 def test_a_bare_push_reads_the_remote_and_branch_it_pushes_to(repo):
     _git(repo, "config", "push.default", "current")
-    _git(repo, "remote", "add", "upstream", str(repo))
     _git(repo, "config", "remote.pushDefault", "upstream")
     _git(repo, "update-ref", "refs/remotes/upstream/work", "HEAD")
     _pushed(repo, "work", (1000, "update by push"), remote="upstream")

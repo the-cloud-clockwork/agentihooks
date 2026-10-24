@@ -54,13 +54,15 @@ from this clone is younger than `AGENTIHOOKS_PUSH_SPACING_S` seconds (default
 300; `0` turns it off), in every repository it guards. The time comes from the
 `update by push` entries in the remote tracking reflog of the remote the push
 names, or of `@{push}` for a bare `git push`, so the check costs no GitHub
-call. Over the day measured in issue 6909, pull request Tests runs took at
-least 4.6 minutes at the tenth percentile, so a push inside that window cancels
+call. Over the 24 hours to 2026-10-24T23:28Z measured on issue 6909, successful
+pull request Tests runs took 4.6 minutes at the tenth percentile and failed
+runs 4.9, so a push inside that window cancels
 the run the previous push started. The refusal names the time the push may go;
 keep committing and push once, so one run grades every commit. Delete
 refspecs, dry runs and `diffcheck/` refspecs are not spaced, and a push to a
-URL or path rather than a configured remote is not spaced. `--all` and
-`--tags` space only the current branch's `@{push}` branch.
+URL or path rather than a configured remote is not spaced. A bare `--all`
+or `--tags` push spaces the current branch's `@{push}` branch; with a named
+remote it spaces the current branch on that remote.
 
 ## How the size stage picks its base
 
