@@ -262,7 +262,7 @@ def _named_process(agent):
         return None
     keys = ("HERDR_PANE_ID", "HERDR_SOCKET_PATH", "AGENTIHOOKS_SWARM_TASK")
     pane, socket, task = agent_environ(session.process.pid, keys)
-    if task != agent.task or agent.pane_id and pane != agent.pane_id:
+    if not task or task != agent.task or agent.pane_id and pane != agent.pane_id:
         return None
     if socket and server_socket({"HERDR_SOCKET_PATH": socket}) != server_socket(dict(os.environ)):
         return None

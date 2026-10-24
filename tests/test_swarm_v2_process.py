@@ -421,18 +421,19 @@ def test_named_retirement_passes_the_process_start_and_skips_a_vanished_recorded
 
 
 @pytest.mark.parametrize(
-    ("recorded", "carried", "retired"),
+    ("recorded", "task", "carried", "retired"),
     [
-        ("", ("", "", "t1"), True),
-        ("w7:p7", ("w7:p7", "/owned/herdr.sock", "t1"), True),
-        ("w7:p7", ("w9:p9", "/owned/herdr.sock", "t1"), False),
-        ("", ("w9:p9", "/other/herdr.sock", "t1"), False),
-        ("", ("", "", "t2"), False),
-        ("", ("", "", ""), False),
+        ("", "t1", ("", "", "t1"), True),
+        ("w7:p7", "t1", ("w7:p7", "/owned/herdr.sock", "t1"), True),
+        ("w7:p7", "t1", ("w9:p9", "/owned/herdr.sock", "t1"), False),
+        ("", "t1", ("w9:p9", "/other/herdr.sock", "t1"), False),
+        ("", "t1", ("", "", "t2"), False),
+        ("", "t1", ("", "", ""), False),
+        ("", "", ("", "", ""), False),
     ],
 )
 def test_named_retirement_ends_only_a_process_of_this_task_pane_and_server(
-    tmp_path, monkeypatch, recorded, carried, retired
+    tmp_path, monkeypatch, recorded, task, carried, retired
 ):
     from scripts import terminate_agent
 
@@ -446,7 +447,7 @@ def test_named_retirement_ends_only_a_process_of_this_task_pane_and_server(
     monkeypatch.setattr(terminate_agent, "validate", lambda *args, **kwargs: [])
     asked = []
     monkeypatch.setattr(terminate_agent, "agent_environ", lambda pid, keys: asked.append((pid, keys)) or carried)
-    agent = replace(record(pid=None, start=None), pane_id=recorded, state="finished")
+    agent = replace(record(pid=None, start=None), task=task, pane_id=recorded, state="finished")
     assert herdr.retire_pane(agent) is retired
     assert asked == [(PID, ("HERDR_PANE_ID", "HERDR_SOCKET_PATH", "AGENTIHOOKS_SWARM_TASK"))]
     assert ended == ([(NAME, PID, [], STARTED)] if retired else [])
