@@ -1419,7 +1419,7 @@ def test_beat_counts_a_named_live_execution_once_without_fleet_registration(redi
     assert not slots.reserve(slot, "full", 3, 1000)
 
 
-@pytest.mark.parametrize("mismatch", ["none", "hive", "harness", "account", "pid", "name", "execution_id"])
+@pytest.mark.parametrize("mismatch", ["none", "hive", "harness", "account", "pid", "name"])
 def test_named_execution_discovery_requires_a_local_matching_process(redis, monkeypatch, mismatch):
     from dataclasses import replace
 
@@ -1429,22 +1429,31 @@ def test_named_execution_discovery_requires_a_local_matching_process(redis, monk
 
     store = RedisStore(redis)
     store.create(SwarmConfig("swarm", "repo", 8, 0))
-    agent = AgentRecord("agent", "eng", "task", hive="hive", harness="claude", account="one", execution_id="execution")
-    if mismatch in {"hive", "harness", "account", "execution_id"}:
-        agent = replace(agent, **{mismatch: "" if mismatch == "execution_id" else "other"})
+    agent = AgentRecord(
+        store.next_name("swarm", "eng"),
+        "eng",
+        "task",
+        hive="hive",
+        harness="claude",
+        account="one",
+        seat="eng-1@swarm",
+    )
+    if mismatch in {"hive", "harness", "account"}:
+        agent = replace(agent, **{mismatch: "other"})
+    agent = store.start_execution("swarm", agent)
     store.put_agent("swarm", agent)
     pid = 20 if mismatch == "pid" else 10
     session = terminate_agent.Session(
         "",
         "claude",
-        "stray" if mismatch == "name" else "agent",
+        "stray" if mismatch == "name" else agent.name,
         Process(pid, 1, pid, pid, 7, "S", "claude", ("claude",)),
         "",
         "unregistered",
     )
     monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
     assert daemon._executions(redis, "hive", {"claude": {10: "one"}}) == (
-        {"claude:one": ["execution"]} if mismatch == "none" else {}
+        {"claude:one": [agent.execution_id]} if mismatch == "none" else {}
     )
 
 
