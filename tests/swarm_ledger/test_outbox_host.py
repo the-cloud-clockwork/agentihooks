@@ -161,7 +161,7 @@ def test_ledger_server_alone_drives_the_outbox_until_shutdown(tmp_path, monkeypa
     server = Mock()
     monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
 
-    def serving():
+    def serving(poll_interval):
         repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]})
         assert published.wait(3), "only the running server should drive publication"
         close.assert_not_called()
@@ -234,7 +234,8 @@ def test_server_gives_the_relay_and_the_projector_their_stores_and_stops_them_be
         finally:
             lifecycle.append("projector stopped")
 
-    def serving():
+    def serving(poll_interval):
+        assert poll_interval == ledger_server.POLL_S
         lifecycle.append("serving")
         raise ValueError("serving failed")
 
