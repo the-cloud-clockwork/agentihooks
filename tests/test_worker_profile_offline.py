@@ -59,11 +59,40 @@ def test_offline_codex_profile_rejects_a_failing_rendered_hook(tmp_path):
     assert not (home / ".agentihooks/active-sessions.json").exists()
 
 
-def test_offline_codex_profile_rejects_a_hook_that_does_not_register(tmp_path):
+def test_offline_codex_profile_rejects_a_hook_that_does_not_register(tmp_path, monkeypatch):
+    monkeypatch.setattr(profile_probe, "REGISTRATION_BUDGET_SECONDS", 0.3)
     home = configured_home(tmp_path, f"{shlex.quote(sys.executable)} -c 'pass'")
 
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(AssertionError, match="Codex session worker-profile-codex never registered within 0.3 seconds"):
         profile_probe.codex_session_start(home)
+
+
+def test_offline_codex_profile_waits_for_a_registry_written_after_the_hook_exits(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(profile_probe, "surviving_hook_children", lambda existing: [])
+    writer = tmp_path / "writer.py"
+    writer.write_text(
+        "import json, sys, time\n"
+        "from pathlib import Path\n"
+        "home, session, cwd = Path(sys.argv[1]), sys.argv[2], sys.argv[3]\n"
+        "time.sleep(0.5)\n"
+        "registry = home / '.agentihooks/active-sessions.json'\n"
+        "registry.parent.mkdir()\n"
+        "registry.write_text(json.dumps({session: {'cwd': cwd}}))\n"
+    )
+    hook = tmp_path / "hook.py"
+    hook.write_text(
+        "import json, os, subprocess, sys\n"
+        "event = json.load(sys.stdin)\n"
+        f"subprocess.Popen([sys.executable, {str(writer)!r}, os.environ['HOME'], event['session_id'], event['cwd']],"
+        " start_new_session=True)\n"
+    )
+    home = configured_home(tmp_path, f"{shlex.quote(sys.executable)} {shlex.quote(str(hook))}")
+
+    result = profile_probe.codex_session_start(home)
+
+    assert profile_probe.sessions(home) == {"worker-profile-codex": str(tmp_path)}
+    assert result["registered_at"] == (home / ".agentihooks/active-sessions.json").stat().st_mtime_ns / 1e9
 
 
 def test_offline_codex_profile_rejects_an_empty_session_start_group(tmp_path):
