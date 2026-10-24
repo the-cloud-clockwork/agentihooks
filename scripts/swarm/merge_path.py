@@ -16,10 +16,11 @@ LISTED_CAP = 1000
 STANDARD = frozenset(("anton-oss", "anton-oss-queue"))
 SHORT = {"pull_request": "head", "merge_group": "queue"}
 QUEUE_EVENTS = "ADDED_TO_MERGE_QUEUE_EVENT, REMOVED_FROM_MERGE_QUEUE_EVENT"
+TIMELINE = 100
 PULLS = (
     "query($q: String!, $endCursor: String) { search(query: $q, type: ISSUE, first: 50, after: $endCursor) {"
-    " pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { url createdAt mergedAt"
-    f" timelineItems(last: 100, itemTypes: [{QUEUE_EVENTS}]) {{ nodes {{ __typename"
+    " issueCount pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { url createdAt mergedAt"
+    f" timelineItems(last: {TIMELINE}, itemTypes: [{QUEUE_EVENTS}]) {{ totalCount nodes {{ __typename"
     " ... on AddedToMergeQueueEvent { createdAt } ... on RemovedFromMergeQueueEvent { createdAt reason } } } } } } }"
 )
 OPEN_READY = "query($q: String!) { search(query: $q, type: ISSUE, first: 1) { issueCount } }"
@@ -45,6 +46,13 @@ def _per(count: int, total: int) -> float | None:
     return round(count / total, 2) if total else None
 
 
+def _promotion(run: dict) -> bool:
+    """Pull request runs from dev or a promotion snapshot grade promotions into main, not the merge path into dev."""
+    return run["event"] == "pull_request" and (
+        run["head_branch"] == "dev" or run["head_branch"].startswith("promotion/")
+    )
+
+
 def _queue_events(pulls: list[dict], since_s: float, until_s: float) -> tuple[int, Counter]:
     events = [
         event
@@ -61,7 +69,7 @@ def count(runs: list[dict], pulls: list[dict], jobs: dict, open_ready: int, wind
     """Counts the merge path over [since, until); jobs maps a merge group run id to its job runner labels."""
     since_s, until_s = window
     merged = [pull for pull in pulls if _within(pull.get("mergedAt"), since_s, until_s)]
-    mine = [run for run in runs if _within(run["created_at"], since_s, until_s)]
+    mine = [run for run in runs if _within(run["created_at"], since_s, until_s) and not _promotion(run)]
     by_event = Counter(run["event"] for run in mine)
     heads = [run for run in mine if run["event"] == "pull_request" and run["conclusion"] in ci_speed.FINISHED]
     queue = [run for run in mine if run["event"] == "merge_group"]
@@ -70,7 +78,11 @@ def count(runs: list[dict], pulls: list[dict], jobs: dict, open_ready: int, wind
         for run in queue
         if run["status"] == "completed" and run["conclusion"] in ci_speed.FINISHED
     ]
-    standard = [sum(bool(STANDARD & set(labels)) for labels in jobs[run["id"]]) for run in queue if run["id"] in jobs]
+    standard = [
+        sum(bool(STANDARD & set(labels)) for labels in jobs[run["id"]])
+        for run in queue
+        if run["id"] in jobs and run["status"] == "completed"
+    ]
     enqueues, removals = _queue_events(pulls, since_s, until_s)
     return {
         "hours": round((until_s - since_s) / 3600, 2),
@@ -102,11 +114,11 @@ def render(repo: str, found: dict) -> str:
         return "unknown" if value is None else value
 
     runs = ", ".join(f"{n} {SHORT.get(event, event)}" for event, n in found["tests_runs"].items()) or "none"
-    causes = {why: n for why, n in found["removals"].items() if why != "MERGED"}
+    causes = {why: n for why, n in found["removals"].items() if why.lower() != "merged"}
     removed = ", ".join(f"{n} {why.lower().replace('_', ' ')}" for why, n in causes.items()) or "none"
     rate = found["head_failure_rate"]
     return (
-        f"{repo.rpartition('/')[2]}, {found['hours']} hours: {found['merges']} merges, "
+        f"{repo.rpartition('/')[2].replace('-', ' ')}, {found['hours']} hours: {found['merges']} merges, "
         f"{found['merges_per_hour']} an hour. Runs {runs}. {found['cancelled_pull_request_runs']} cancelled, "
         f"{found['reruns']} reruns. {found['enqueues']} enqueues, removed {removed}. "
         f"Heads fail {shown(None if rate is None else round(rate * 100))} percent, "
@@ -132,7 +144,7 @@ def read_runs(repo_dir: str, event: str, window: tuple[float, float], run: Calla
     for page in range(1, LISTED_CAP // PAGE + 1):
         path = (
             f"repos/{{owner}}/{{repo}}/actions/workflows/{ci_speed.WORKFLOW}/runs?event={event}"
-            f"&created={created}&exclude_pull_requests=true&per_page={PAGE}&page={page}"
+            f"{'&branch=dev' if event == 'push' else ''}&created={created}&exclude_pull_requests=true&per_page={PAGE}&page={page}"
         )
         body = json.loads(_gh(["api", path], repo_dir, run))
         listed += body["workflow_runs"]
@@ -154,21 +166,38 @@ def _search(repo_dir: str, query: str, variables: dict, run: Callable, paginate:
     args = ["api", "graphql", *(["--paginate"] if paginate else []), "-f", f"query={query}"]
     for name, value in variables.items():
         args += ["-f", f"{name}={value}"]
-    out = _gh(args, repo_dir, run)
+    out = _gh(args, repo_dir, run).strip()
     decoder, pages, at = json.JSONDecoder(), [], 0
-    while at < len(out.strip()):
-        page, at = decoder.raw_decode(out, at)
-        pages.append(page["data"]["search"])
-        while at < len(out) and out[at].isspace():
-            at += 1
+    try:
+        while at < len(out):
+            page, at = decoder.raw_decode(out, at)
+            pages.append(page["data"]["search"])
+            while at < len(out) and out[at].isspace():
+                at += 1
+    except (ValueError, KeyError, TypeError) as exc:
+        raise SwarmError(f"GitHub search answered unreadably: {exc}") from exc
+    if not pages:
+        raise SwarmError("GitHub search answered nothing")
     return pages
+
+
+def read_pulls(repo_dir: str, repo: str, since_s: float, run: Callable) -> list[dict]:
+    pages = _search(repo_dir, PULLS, {"q": f"repo:{repo} is:pr base:dev updated:>={_stamp(since_s)}"}, run, True)
+    pulls = [node for page in pages for node in page["nodes"] if node]
+    total = pages[0]["issueCount"]
+    if len(pulls) < total:
+        raise SwarmError(f"listed {len(pulls)} of {total} updated pull requests; shorten the window")
+    if cut := [pull["url"] for pull in pulls if pull["timelineItems"]["totalCount"] > TIMELINE]:
+        raise SwarmError(f"more than {TIMELINE} merge queue events on {', '.join(cut)}; shorten the window")
+    return pulls
 
 
 def collect(repo_dir: str, window: tuple[float, float], run: Callable = subprocess.run) -> tuple[str, dict]:
     repo = _gh(["api", "repos/{owner}/{repo}", "--jq", ".full_name"], repo_dir, run).strip()
     runs = [found for event in EVENTS for found in read_runs(repo_dir, event, window, run)]
     jobs = {found["id"]: read_jobs(repo_dir, found["id"], run) for found in runs if found["event"] == "merge_group"}
-    updated = f"repo:{repo} is:pr updated:>={_stamp(window[0])}"
-    pulls = [node for page in _search(repo_dir, PULLS, {"q": updated}, run, True) for node in page["nodes"] if node]
-    ready = _search(repo_dir, OPEN_READY, {"q": f"repo:{repo} is:pr is:open draft:false"}, run)[0]["issueCount"]
+    pulls = read_pulls(repo_dir, repo, window[0], run)
+    ready = _search(repo_dir, OPEN_READY, {"q": f"repo:{repo} is:pr is:open draft:false base:dev"}, run)[0][
+        "issueCount"
+    ]
     return repo, count(runs, pulls, jobs, ready, window)

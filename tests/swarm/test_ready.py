@@ -1247,7 +1247,7 @@ def test_an_own_merge_group_failure_reopens_the_task(merging):
 def test_merge_group_runs_that_cannot_all_be_listed_reopen_the_task(merging):
     left_queue_green(merging)
     merging.exits.failures = None
-    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
+    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} {ready.UNREAD_EXIT}"
     assert merging.rows["t1"]["state"] == "open"
 
 

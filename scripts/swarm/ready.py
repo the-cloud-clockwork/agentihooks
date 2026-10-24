@@ -47,6 +47,7 @@ REQUEUED = (
 )
 HEAD_RED = "left the merge queue red"
 OWN_RED = "left the merge queue red in its own merge group run"
+UNREAD_EXIT = "left the merge queue green and its merge group runs could not all be read"
 DROPPED_GREEN = "left the merge queue green and was dropped again after {tries} requeues"
 BACKOFF_MS = 60_000
 RECOVER = "recover"
@@ -260,7 +261,7 @@ def _requeue(run, row, found):
         save(run.store, run.slug, task_id, found)
         return [f"could not read the merge group runs of {url} for task {task_id}: {exc}"]
     if failures is None:
-        return _reopen(run, row, found, "left the merge queue without merging")
+        return _reopen(run, row, found, UNREAD_EXIT)
     if failures:
         return _reopen(run, row, found, OWN_RED)
     if found.get("requeues", 0) >= QUEUE_TRIES:

@@ -1339,6 +1339,8 @@ def cmd_names(store, args):
 def cmd_merge_path(store, args):
     from scripts.swarm import merge_path
 
+    if args.hours <= 0:
+        raise SwarmError("merge-path takes hours above zero")
     until_s = now_ms() / 1000
     repo, found = merge_path.collect(store.config(args.slug).repo, (until_s - args.hours * 3600, until_s))
     print(json.dumps({"repo": repo, **found}) if args.json else merge_path.render(repo, found))
