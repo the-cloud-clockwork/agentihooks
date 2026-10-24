@@ -305,15 +305,15 @@ class Program:
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 sent |= lua(node.value)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                sent |= self._call(node, unit, local)
+                sent |= self._call(node, local)
         return sent
 
-    def _call(self, node: ast.Call, unit: Unit, local: dict[str, bool]) -> frozenset[str]:
+    def _call(self, node: ast.Call, local: dict[str, bool]) -> frozenset[str]:
         receiver, name = node.func.value, node.func.attr
         if name == RAW:
             first = node.args[0] if node.args else None
             return frozenset({str(first.value).upper()}) if isinstance(first, ast.Constant) else frozenset()
-        client = self._receiver(receiver, unit, local)
+        client = self._receiver(receiver, local)
         if client and name in HELPERS:
             return HELPERS[name]()
         if client and name in methods(redis.Redis):
@@ -322,11 +322,11 @@ class Program:
             return wire(PubSub, name)
         return frozenset()
 
-    def _factory(self, func: ast.expr, unit: Unit, local: dict[str, bool]) -> bool:
+    def _factory(self, func: ast.expr, local: dict[str, bool]) -> bool:
         """Whether a call makes a Redis client or pipeline: a redis-py constructor, or a function here that returns
         one."""
         if isinstance(func, ast.Attribute) and func.attr == "pipeline":
-            return self._receiver(func.value, unit, local)
+            return self._receiver(func.value, local)
         if isinstance(func, ast.Attribute) and func.attr == "from_url":
             return _tail(func.value) in CLIENT_TYPES | {"redis"}
         if _tail(func) in CLIENT_TYPES:
@@ -352,25 +352,25 @@ class Program:
         found = self.unique.get(func.attr)
         return [found] if found else None
 
-    def _held(self, expr: ast.expr, unit: Unit, local: dict[str, bool], loose: bool = False) -> bool:
+    def _held(self, expr: ast.expr, local: dict[str, bool], loose: bool = False) -> bool:
         """Whether an expression holds a Redis client or pipeline: a constructor or factory call, a name the unit
         binds to one, or an attribute bound to one somewhere. Loose also takes a name the unit does not bind, such
         as a parameter, when that name holds a client somewhere."""
         if isinstance(expr, ast.BoolOp):
-            return any(self._held(value, unit, local, loose) for value in expr.values)
+            return any(self._held(value, local, loose) for value in expr.values)
         if isinstance(expr, ast.IfExp):
-            return self._held(expr.body, unit, local, loose) or self._held(expr.orelse, unit, local, loose)
+            return self._held(expr.body, local, loose) or self._held(expr.orelse, local, loose)
         if isinstance(expr, ast.Call):
-            return self._factory(expr.func, unit, local)
+            return self._factory(expr.func, local)
         if isinstance(expr, ast.Name):
             return local[expr.id] if expr.id in local else loose and expr.id in self.clients
         return isinstance(expr, ast.Attribute) and expr.attr in self.clients
 
-    def _receiver(self, expr: ast.expr, unit: Unit, local: dict[str, bool]) -> bool:
-        if self._held(expr, unit, local, loose=True):
+    def _receiver(self, expr: ast.expr, local: dict[str, bool]) -> bool:
+        if self._held(expr, local, loose=True):
             return True
         chained = isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute)
-        return chained and expr.func.attr in methods(redis.Redis) and self._receiver(expr.func.value, unit, local)
+        return chained and expr.func.attr in methods(redis.Redis) and self._receiver(expr.func.value, local)
 
     def _shape(self, unit: Unit) -> tuple[dict, list, list, list, list]:
         """What typing reads from a unit, taken once: annotated parameters, name bindings in source order with
@@ -400,7 +400,7 @@ class Program:
         local = dict(annotated)
         for _ in pairs:
             for target, value, unresolved in pairs:
-                if self._held(value, unit, local):
+                if self._held(value, local):
                     local[target] = True
                 elif not unresolved:
                     local[target] = local.get(target) is True
@@ -410,9 +410,9 @@ class Program:
         local = self._typed(unit)
         _, _, attributes, keywords, returns = self.shapes[id(unit)]
         self.clients |= {name for name, held in local.items() if held}
-        self.clients |= {attr for attr, value in attributes if self._held(value, unit, local)}
-        self.clients |= {arg for arg, value in keywords if self._held(value, unit, local)}
-        if any(self._held(value, unit, local) for value in returns):
+        self.clients |= {attr for attr, value in attributes if self._held(value, local)}
+        self.clients |= {arg for arg, value in keywords if self._held(value, local)}
+        if any(self._held(value, local) for value in returns):
             self.factories.add(key)
 
     def _receivers(self) -> None:
