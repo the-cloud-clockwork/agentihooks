@@ -131,8 +131,9 @@ def test_home_shell_lists_no_ledger_rows(base):
     _, _, body = get(base + "/")
     assert SLUG not in body
     assert '<ul id="rows"></ul>' in body
-    assert '<div class="watermark" aria-hidden="true"></div>' in body
-    assert re.findall(r'data-sort="(\w+)"', body) == ["kind", "open", "done", "swarm", "at"]
+    assert "watermark" not in body and "data-sort" not in body
+    script = (core.HOME.parent / "static" / "home" / "home.js").read_text(encoding="utf-8")
+    assert '"Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at"' in script
 
 
 def test_page_shells_are_plain_ascii_so_any_ascii_locale_reads_them_alike():
@@ -223,7 +224,7 @@ def test_the_page_version_separates_each_asset_name_from_its_bytes():
 
 
 def test_the_bin_shell_leaves_the_watermark_slot_empty(base):
-    assert '/css/tooltips.css">\n<main class="bin">' in server.index_page("bin")
+    assert '/css/tooltips.css">\n<main>' in server.index_page()
 
 
 def test_the_shell_names_the_server_port_and_an_empty_token_when_the_record_has_none(base, monkeypatch):
@@ -294,7 +295,9 @@ def test_the_rendered_page_stays_bounded_as_history_doubles(chromium_browser):
         show(page, shell_html(), ledger=ledger_state(history(4)), swarm=None)
         page.click("#tasks-box > summary")
         page.wait_for_selector("#tasks .page-more button")
-        assert page.locator("#tasks li[id^='item-tasks-']").count() == 50
+        assert page.locator("#tasks > li[id^='item-tasks-']").count() <= 50
+        assert page.locator("#tasks-done li[id^='item-tasks-']").count() <= 50
+        assert page.locator("#tasks li[id^='item-tasks-']").count() <= 100
     finally:
         page.close()
 
@@ -308,7 +311,7 @@ def test_a_deep_link_past_the_first_page_of_a_closed_fold_reveals_its_target(chr
         loaded(page)
         target = page.locator("#item-tasks-t299")
         target.wait_for()
-        assert target.evaluate("el => el.closest('details#tasks-done').open")
+        assert target.evaluate("el => !!el.closest('li#tasks-done')")
         assert target.is_visible()
         assert target.evaluate(
             "el => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; }"

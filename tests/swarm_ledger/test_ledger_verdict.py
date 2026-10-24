@@ -189,9 +189,9 @@ def run_page(body):
         "const h = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: kids.filter(Boolean) });"
         "const scopeDot = () => ({ tag: 'scope', attrs: {}, kids: [] }); const queued = [];"
         "const queue = (op) => queued.push(op); const newId = (noun) => `${noun[0]}-1`;"
-        "const doc = { freezes: [] }; const frozen = () => false; const freezeButton = () => null;"
+        "const doc = { freezes: [], pending: {} }; const frozen = () => false; const freezeButton = () => null;"
     )
-    names = ("verdictButton", "itemActions", "itemOf", "applyOp")
+    names = ("verdictButton", "itemActions", "itemOf", "pendingKey", "pendingOf", "applyOp")
     script = stubs + "\n".join(function_source(n) for n in names) + "\n" + body
     out = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout
     return json.loads(out)
@@ -210,20 +210,22 @@ def test_every_item_row_carries_approve_then_deny_then_out_of_scope():
     ]
 
 
-def test_a_verdict_shows_at_once_and_drops_the_items_priority():
+def test_a_verdict_shows_at_once_and_leaves_the_priority_to_the_server():
     out = run_page(
-        "const d = { tasks: [{ id: 't1', comments: [] }],"
+        "const d = { tasks: [{ id: 't1', comments: [] }], pending: {},"
         " priorities: [{ id: 'p', item: 'tasks/t1' }, { id: 'q', item: 'tasks/t2' }] };"
         "applyOp(d, { op: 'verdict', id: 'c-1', item: 'tasks/t1', verdict: 'approved' });"
         "process.stdout.write(JSON.stringify({ comments: d.tasks[0].comments.map((c) => [c.id, c.by, c.text]),"
-        " priorities: d.priorities.map((p) => p.id) }));"
+        " priorities: d.priorities.map((p) => p.id), pending: Object.keys(d.pending) }));"
     )
-    assert out == {"comments": [["c-1", "operator", "approved"]], "priorities": ["q"]}
+    assert out == {"comments": [["c-1", "operator", "approved"]], "priorities": ["p", "q"], "pending": ["tasks/t1"]}
 
 
 def test_each_priority_row_offers_approve_before_clear():
     render = function_source("renderPriorities")
-    assert render.index('verdictButton(p.item, "approved", "approve", "Approve")') < render.index('text: "Clear"')
+    assert render.index('verdictButton(p.item, "approved", "approve", "Approve")') < render.index(
+        '"clearing" : "Clear"'
+    )
 
 
 def test_approve_and_deny_take_their_colours_from_palette_roles():
