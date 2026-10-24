@@ -811,4 +811,9 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .sw-num { min-width: 44px; min-height: 40px; text-align: center; }
   .overview-head .title-pen::after { inset: -14px; }
   .sw-doctor a { display: inline-block; padding-block: 10px; }
+  .sw-gate .sw-mode { min-width: 44px; min-height: 44px; }
+  .sw-cap.sw-gate { gap: 12px; }
+  .prio > .link { min-width: 44px; }
+  .item-actions, .prio { column-gap: 20px; }
+  details.fold > summary { min-height: 40px; }
 }

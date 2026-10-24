@@ -72,3 +72,4 @@ li.row:hover,li.row:focus-within{background:var(--hover)}
 .col-grip:focus-visible{outline:none}
 @media (min-width:1101px){.panel.sized-cols .row{grid-template-columns:var(--cols)}}
 *{scrollbar-width:thin;scrollbar-color:var(--edge) transparent}
+@media (pointer:coarse){.title{display:inline-block;padding-block:11px}.act{height:44px;min-width:44px}}
