@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/inbox.py:scripts.doctor.inbox.x__task_mismatch__mutmut_10:6f4e8b94d54998620be92742ab5e49af46daf93c82ad7cb80cb4b6b4205cb400": {
+    "reader": "Standards",
+    "reason": "Missing task defaults to None instead of empty string; the task truth guard rejects both before any output."
+  }
+}
