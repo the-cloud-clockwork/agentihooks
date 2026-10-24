@@ -198,7 +198,21 @@ function outlineTools() {
 function remoteMore(s) {
   const list = s.id.replace(/^sec-/, "");
   const left = filtering() ? (remoteTotal[list] || 0) - (remote[list] || []).length : 0;
-  return left > 0 ? h("li", { class: "ol-group ol-more", text: `${left} older matches` }) : "";
+  if (left <= 0) return "";
+  return h("li", { class: "page-more" }, h("button", { class: "link", type: "button", "data-matches": list,
+    text: `Show more matches · ${left} left`, on: { click: () => searchMore(list) } }));
+}
+
+async function searchMore(list) {
+  const turn = searchTurn;
+  try {
+    const resp = await searchClosed(list, filter.text, remote[list].length);
+    if (turn !== searchTurn || !resp.ok) return;
+    const { data, total } = await resp.json();
+    remote[list] = [...remote[list], ...data];
+    remoteTotal[list] = data.length ? total : remote[list].length;
+  } catch (e) { return; }
+  renderOutline();
 }
 
 function outlineRow(i) {

@@ -70,7 +70,8 @@ def ledger(browser):
             reads.append(query)
             rows = done_rows(query)
             offset = int(query["offset"]) - (0 if "q" in query else 10)
-            page = rows[offset : offset + int(query["limit"])]
+            size = min(int(query["limit"]), 5) if "q" in query else int(query["limit"])
+            page = rows[offset : offset + size]
             body = {"data": page, "revision": "0" * 64, "total": len(rows), "next_offset": None}
             return route.fulfill(body=json.dumps(body), content_type="application/json")
         return route.abort()
@@ -125,6 +126,22 @@ def test_type_ahead_finds_a_done_task_not_yet_loaded_and_reveals_it(ledger):
         """() => { const el = document.querySelector('#item-tasks-t5'); if (!el) return false;
         const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }"""
     )
+
+
+def test_remote_matches_page_until_every_match_is_listed(ledger):
+    page, reads = ledger
+    page.fill("#outline-filter", "old task")
+    count = "() => document.querySelectorAll('#ol-sec-tasks .ol-items a').length"
+    page.wait_for_function(f"() => ({count})() === 5")
+    more = page.locator('#ol-sec-tasks button[data-matches="tasks"]')
+    assert more.text_content() == "Show more matches · 6 left"
+    more.click()
+    page.wait_for_function(f"() => ({count})() === 10")
+    assert {"state": "done", "q": "old task", "offset": "5", "limit": "50"} in reads
+    more.click()
+    page.wait_for_function(f"() => ({count})() === 11")
+    assert more.count() == 0
+    assert sorted(shown(page)) == sorted(t["id"] for t in HIDDEN_TASKS if t["id"] != "t5")
 
 
 def test_tasks_group_under_their_phase_titles_done_tasks_included(ledger):
