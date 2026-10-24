@@ -495,7 +495,10 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
 
     def browser():
         nonlocal target
-        target = target or browser_home(environ)
+        try:
+            target = target or browser_home(environ)
+        except LoginRefused:
+            return "failure"
         return chain.authorize(environ, target)
 
     def token():

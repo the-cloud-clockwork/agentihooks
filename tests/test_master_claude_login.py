@@ -795,6 +795,7 @@ def test_launch_preparation_checks_live_login_then_waits_for_browser(
 
     def check(environ, account):
         calls.append("current")
+        assert account == "masteratexample_com"
         assert environ["CLAUDE_CONFIG_DIR"] == str(login.home())
         if not valid and calls.count("current") == 1:
             raise native_login.LoginError(native_login.EXPIRED)
@@ -802,6 +803,7 @@ def test_launch_preparation_checks_live_login_then_waits_for_browser(
 
     def browser(environ, target):
         calls.append("browser")
+        assert environ == _environ(rendered)
         assert target == login.home()
         return outcome
 
@@ -878,3 +880,26 @@ def test_release_never_drops_a_successor_with_the_same_name(ah, rendered):
         "alone": "master@a-1",
         "holders": {"master@a-1": os.getppid()},
     }
+
+
+def test_prepare_launch_falls_back_without_touching_fully_held_logins(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    for number in login.numbers():
+        target = login.build(rendered) if number == login.slot() else login._rebuild(login.root(number), rendered)
+        _login(target)
+        login._write(
+            login.root(number) / login.OWNER, {"epoch": 3, "alone": "other", "holders": {"other": os.getppid()}}
+        )
+    monkeypatch.setattr(chain, "authorize", lambda *_: pytest.fail("there is no free browser slot"), raising=False)
+    assert login.prepare_launch(_environ(rendered), tmp_path) is None
+    assert all(login.holders(login.root(number)) == {"other": os.getppid()} for number in login.numbers())
+
+
+def test_browser_home_preserves_an_existing_unheld_grant(ah, rendered):
+    _seed(rendered)
+    assert login.browser_home(_environ(rendered)) == login.home(2)
+    assert login.login_account(1) == "masteratexample_com"
+    held = json.loads((login.root(2) / login.OWNER).read_text())
+    assert held == {"epoch": 1, "alone": "master@a-1", "holders": {"master@a-1": os.getpid()}}
