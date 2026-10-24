@@ -252,6 +252,27 @@ def test_a_planners_words_count_and_an_engineers_or_another_swarms_do_not():
     assert ledger_relay.verified("master@abc123-0002", "drop the filters idea") == ""
 
 
+def test_a_hosted_ledger_lands_a_relay_of_words_recorded_on_the_workstation_and_refuses_others(monkeypatch, tmp_path):
+    import fakeredis
+
+    shared = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(operator_words, "_shared", lambda: shared)
+    operator_words.record("master@a1-1", "scale the stable hive to eight agents", swarm=SLUG)
+    operator_words.record("engineer@a1-3", "merge the filters work", swarm=SLUG)
+    monkeypatch.setattr(operator_words, "_dir", lambda: tmp_path / "hosted")
+    state = make_ledger()
+    phase = f"phases/{state['phases'][0]['id']}"
+    ops = [
+        relay(70, phase, text="Scale the hive.", quote="scale the stable hive"),
+        relay(71, phase, quote="words never recorded anywhere"),
+        relay(72, phase, quote="merge the filters work"),
+    ]
+    state, rejected = core.sync(SLUG, ops=ops)
+    assert rejected == ["rl-71", "rl-72"]
+    comment = state["phases"][0]["comments"][-1]
+    assert (comment["id"], comment["by"], comment["quote"]) == ("rl-70", "operator", "scale the stable hive")
+
+
 def test_cli_refuses_a_quote_in_no_operator_prompt_of_the_swarm(monkeypatch):
     state = make_ledger()
     question = f"questions/{state['questions'][0]['id']}"
