@@ -28,7 +28,7 @@ IDLE = ("stopped", "stopping")
 
 
 def verdicts(store, doctor):
-    return VerdictStore(store.redis, store.key(doctor, "doctor-findings"))
+    return VerdictStore(store.redis, store.key(doctor, "doctor-findings"), store.key(doctor, "doctor-verdicts"))
 
 
 def _details_key(store, doctor):
