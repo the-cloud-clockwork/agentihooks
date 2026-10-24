@@ -188,7 +188,10 @@ def _merged(tools: Tools, options: Options) -> str:
         _save(tools)
         raise auth.HiveError(f"pull request {url} was closed without merging; rerun hive create to open a new one")
     if found != "MERGED":
-        create_github.merge(tools.run, url)
+        if not create_github.merge(tools.run, url):
+            checks = f"pull request {url} checks to pass"
+            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url))
+            create_github.squash(tools.run, url)
         _wait(
             tools, options, f"pull request {url} to merge", lambda: create_github.pr_state(tools.run, url) == "MERGED"
         )

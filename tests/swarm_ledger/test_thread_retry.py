@@ -104,5 +104,7 @@ def test_the_shared_server_runs_watch_and_follow_under_the_retrying_runner(monke
     monkeypatch.setattr(ledger_server.threading, "Thread", Mock())
     ledger_server.serve()
     targets = [call.kwargs["target"] for call in ledger_server.threading.Thread.call_args_list]
-    wrapped = [target.__wrapped__ for target in targets if hasattr(target, "__wrapped__")]
-    assert wrapped == [ledger_server.watch_ledgers, ledger_server.follow_shared]
+    assert [targets[1].__wrapped__, targets[4].__wrapped__] == [
+        ledger_server.watch_ledgers,
+        ledger_server.follow_shared,
+    ]

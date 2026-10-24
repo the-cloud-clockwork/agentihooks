@@ -41,10 +41,15 @@ class Run:
         self.state = "OPEN"
         self.prs = []
         self.on_merge = lambda: None
+        self.merge_error = ""
+        self.checks = []
 
     def __call__(self, argv, **kwargs):
         self.calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, self._answer(argv, kwargs.get("input")), "")
+        answer = self._answer(argv, kwargs.get("input"))
+        if isinstance(answer, subprocess.CompletedProcess):
+            return answer
+        return subprocess.CompletedProcess(argv, 0, answer, "")
 
     def _answer(self, argv, stdin):
         if argv[:3] == ["kubectl", "get", "service"]:
@@ -69,8 +74,12 @@ class Run:
         if argv[:2] == ["pr", "create"]:
             self.prs.append(PR)
             return PR
+        if argv[:2] == ["pr", "view"] and "statusCheckRollup" in argv:
+            return json.dumps({"statusCheckRollup": self.checks.pop(0)})
         if argv[:2] == ["pr", "view"]:
             return self.state
+        if argv[:2] == ["pr", "merge"] and "--auto" in argv and self.merge_error:
+            return subprocess.CompletedProcess(argv, 1, "", self.merge_error)
         if argv[:2] == ["pr", "merge"]:
             self.state = "MERGED"
             self.on_merge()
