@@ -103,6 +103,11 @@ def test_a_rerun_classifier_or_judge_failure_is_named_even_when_lost(name):
             True,
             id="passed-result-then-loss",
         ),
+        pytest.param(
+            "== 3 passed, 0 failed in 4.10s ==\n##[error]The runner has received a shutdown signal.",
+            True,
+            id="zero-failed-result-then-loss",
+        ),
     ],
 )
 def test_only_a_nonzero_step_exit_without_a_loss_signature_is_a_real_failure(monkeypatch, log, lost):

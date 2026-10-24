@@ -16,7 +16,7 @@ RUNNER_LOSS = re.compile(
     r"|The job was not acquired by Runner"
     r"|" + re.escape(UNREADABLE_LOG)
 )
-FAILED_RESULT = re.compile(r"^(?:\S+Z )?(?:\x1b\[[\d;]*m)*=+ .*?\b\d+ (?:failed|errors?)\b.*? in [\d.]+s\b", re.M)
+FAILED_RESULT = re.compile(r"^(?:\S+Z )?(?:\x1b\[[\d;]*m)*=+ .*?\b[1-9]\d* (?:failed|errors?)\b.*? in [\d.]+s\b", re.M)
 STEP_EXITED = re.compile(r"Process completed with exit code (?:[1-9]|[1-9]\d|1[01]\d|12[0-7])\.")
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
 EXIT_POLLS = 60
@@ -28,7 +28,6 @@ def base_name(job_name: str) -> str:
 
 
 def runner_lost(text: str) -> bool:
-    # Tests that reported failures ran to their result, so any loss text beside it is test output.
     return bool(RUNNER_LOSS.search(text)) and not FAILED_RESULT.search(text)
 
 
