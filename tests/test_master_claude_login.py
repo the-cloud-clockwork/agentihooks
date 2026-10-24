@@ -1128,6 +1128,17 @@ def test_browser_home_reclaims_a_dead_holder(ah, rendered):
     assert login.holders(login.root()) == {"master@a-1": os.getpid()}
 
 
+@pytest.mark.parametrize(
+    "args,expected",
+    [
+        (["--model", "opus"], ["--model", "opus"]),
+        (["--remote-control=x=y", "--model", "opus"], ["--model", "opus"]),
+        (["--remote-control", "proof", "--model", "opus"], ["--model", "opus"]),
+        (["--remote-control"], []),
+        (["--remote-control", "--model", "opus"], ["--model", "opus"]),
+        (["--remote-control-session-name-prefix=x", "prompt"], ["prompt"]),
+    ],
+)
 def test_token_arguments_remove_only_remote_control(args, expected):
     class Arguments(list):
         reads = 0
