@@ -66,8 +66,6 @@ def units(tool_name: str | None, found: list[Piece]) -> list[Piece]:
 
 
 def pieces(tool_name: str | None, tool_input: dict) -> list[Piece]:
-    if tool_name == "judge":
-        return _case(tool_input) + _evidence(tool_input)
     field = _SINGLE_FIELD.get(tool_name)
     if field:
         value = tool_input.get(field)
@@ -76,7 +74,7 @@ def pieces(tool_name: str | None, tool_input: dict) -> list[Piece]:
         return _items(tool_input, "edits", "new_string")
     text = tool_input.get("text")
     found = [Piece(("text",), text)] if isinstance(text, str) else []
-    return found + _items(tool_input, "evidence")
+    return found + _items(tool_input, "evidence") + _case(tool_input) + _evidence(tool_input)
 
 
 def _node(patch: dict, tool_input: dict, where: tuple):

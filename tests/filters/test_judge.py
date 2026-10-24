@@ -181,7 +181,10 @@ def test_judge_pieces_cover_case_and_evidence_text():
         ("evidence", "items", 0, "claim"),
         ("evidence", "items", 0, "excerpt"),
     ]
-    assert extract.pieces("judge", {"case": "text", "evidence": ["x"]}) == []
+    assert extract.pieces("judge", {"text": "t", "case": "c", "evidence": ["x"]}) == [
+        extract.Piece(("text",), "t"),
+        extract.Piece(("evidence", 0), "x"),
+    ]
 
 
 def test_judge_units_group_each_item_and_the_case():
