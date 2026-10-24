@@ -168,6 +168,13 @@ def test_removal_causes_that_fit_are_all_named_largest_first():
     assert "removed 2 failed checks, 1 manual. Heads" in merge_path.render("o/r", found)
 
 
+def test_a_line_too_long_even_folded_folds_every_cause():
+    found = {**merge_path.count([], [], {}, 0, WINDOW), "removals": {"MANUAL": 1, "FAILED_CHECKS": 2}}
+    line = merge_path.render("o/" + "-".join(["word"] * 30), found)
+    assert "removed 3 other. Heads" in line
+    assert len(line.split()) > 50
+
+
 def test_stamps_are_utc_whatever_the_local_zone(monkeypatch):
     monkeypatch.setenv("TZ", "America/New_York")
     time.tzset()
