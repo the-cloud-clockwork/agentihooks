@@ -2,7 +2,7 @@ import pytest
 
 from scripts.gates import push_stop
 from scripts.gates.progress import Progress
-from tests.gates.test_push_stop import BRANCH, ME, NOW, SLUG, git, refuse_the_push, wait_on
+from tests.gates.test_push_stop import BRANCH, ME, NOW, SLUG, git, wait_on
 from tests.gates.test_push_stop import rig as rig
 
 RUN = "https://github.com/o/r/actions/runs/123"
@@ -49,10 +49,10 @@ def test_a_preflight_does_not_release_dirty_files(rig):
     assert not rig.stop().allowed
 
 
-def test_a_preflight_does_not_release_a_refused_unpushed_commit(rig):
+def test_a_preflight_does_not_release_a_refused_unpushed_commit(rig, monkeypatch):
     on = preflight(rig)
     on["head"] = rig.commit("more")
-    refuse_the_push(rig)
+    monkeypatch.setattr(push_stop, "push", lambda *args: False)
     wait_on(rig, on)
     assert not rig.stop().allowed
     assert push_stop.count(rig.tree, "HEAD", "--not", "--remotes=origin") == 1
