@@ -45,7 +45,8 @@ agentihooks swarm <id> restack           rebase parked task work onto dev after 
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
 agentihooks swarm <id> trace-plan        trace plan.md in the task work folder to task, phase and project intent
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
---evidence E with --fix URL or --filed FOLLOWUP; research --finding URL
+--evidence E with --fix URL or --filed FOLLOWUP; research --finding URL; workflow reads workflow.json and
+verdict.json from the task workspace, and an exhausted workflow blocks the task with the last judge notes
 """
 
 import argparse
@@ -164,7 +165,15 @@ from scripts.swarm.store import (
     connect,
 )
 from scripts.swarm.tick import agent_status, primed, ready_in_order, skip_refused, spawn_holds, tick
-from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_route, ledger_workspace, plan_shape
+from scripts.swarm_ledger import (
+    ledger_creator,
+    ledger_kinds,
+    ledger_link,
+    ledger_route,
+    ledger_workspace,
+    plan_shape,
+    workflow_task,
+)
 from scripts.swarm_v2 import master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 
@@ -1666,16 +1675,14 @@ def cmd_done(store, args):
     ledger = LedgerClient()
     row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
+    if ledger_kinds.kind(row) == "workflow":
+        if (found := _workflow_proof(store, args.slug, agent, ledger, row)) is None:
+            return
+        proof.update(found)
     proven = {**row, "proof": {**(row.get("proof") or {}), **proof}}
     missing = ledger_kinds.unmet(proven)
     if missing:
-        if ledger_kinds.kind(row) == "research":
-            raise SwarmError(
-                "a research task is done only with its proof: "
-                "--finding must be a single link to the artifact; put prose in a task comment"
-            )
-        flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
-        raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
+        raise SwarmError(_unproven(ledger_kinds.kind(row), missing))
     url = args.pr or row.get("pr_url")
     pull = ledger_events.view(url) if done_gate.gated(proven) and url else None
     if pull is not None and pull.state == "OPEN" and pull.queued:
@@ -1702,6 +1709,31 @@ def cmd_done(store, args):
     print(
         json.dumps({"task": agent.task, "state": "done", **fallback, "next": "stop now; the swarm closes this session"})
     )
+
+
+def _unproven(kind, missing):
+    if kind == "research":
+        return (
+            "a research task is done only with its proof: "
+            "--finding must be a single link to the artifact; put prose in a task comment"
+        )
+    if kind == "workflow":
+        return (
+            f"a workflow task is done only when {workflow_task.STATE} in its workspace says passed "
+            f"and the judge verdict record {workflow_task.VERDICT} says pass"
+        )
+    flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
+    return f"a {kind} task is done only with its proof: give {flags}"
+
+
+def _workflow_proof(store, slug, agent, ledger, row):
+    workspace = row.get("workspace", "")
+    notes = workflow_task.exhausted_notes(workspace)
+    if notes is None:
+        return workflow_task.proof(workspace)
+    block_agent(store, slug, agent, notes, ledger)
+    print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
+    return None
 
 
 def _pull_reader(url, pull):

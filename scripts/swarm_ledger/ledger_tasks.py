@@ -362,6 +362,7 @@ def _add(doc, op, ctx):
         "slice",
         "follow_up",
         "workstation",
+        *ledger_kinds.WORKFLOW_FIELDS,
     ):
         if key in op:
             task[key] = op[key]
