@@ -179,13 +179,43 @@ def test_in_operator_mode_a_differing_hive_user_is_red(tmp_path, capsys):
     ]
 
 
-def test_in_operator_mode_a_missing_hive_user_is_red(tmp_path, capsys):
+def test_in_operator_mode_a_retired_hive_user_passes(tmp_path, capsys):
     agentihooks, _ = _matching(tmp_path)
     antoncore = _operator_antoncore(tmp_path, {}, user="swarm-ledger")
     status, lines = _run(capsys, agentihooks, antoncore)
+    assert status == 0
+    assert lines == [
+        "The antoncore swarm-hive user is retired, so hives connect only with minted member credentials.",
+        MATCH[1],
+    ]
+
+
+def test_in_operator_mode_a_retired_hive_user_without_a_controller_user_is_red(tmp_path, capsys):
+    agentihooks, _ = _matching(tmp_path)
+    root = _operator_antoncore(tmp_path, {}, user="swarm-ledger")
+    users = yaml.safe_load((root / grants.SERVICE_USERS).read_text())["users"]
+    (root / grants.SERVICE_USERS).write_text(yaml.safe_dump({"users": users[1:]}))
+    status, lines = _run(capsys, agentihooks, root)
     assert status == 1
     assert lines == [
-        "::error::The swarm NATS grants cannot be read (ValueError: the SWARM account has no swarm-hive user)."
+        "::error::The swarm NATS grants cannot be read (ValueError: the SWARM account has no swarm-controller user)."
+    ]
+
+
+def test_in_operator_mode_a_retired_hive_user_still_grades_the_controller(tmp_path, capsys):
+    agentihooks, _ = _matching(tmp_path)
+    antoncore = _operator_antoncore(tmp_path, {}, user="swarm-ledger", controller=None)
+    status, lines = _run(capsys, agentihooks, antoncore)
+    assert status == 1
+    ours = "is granted only by the agentihooks controller credential (scripts/hive/nats_grant.py)."
+    theirs = f"is granted only by the antoncore swarm-controller user ({grants.HIVE_VALUES})."
+    assert lines == [
+        "The antoncore swarm-hive user is retired, so hives connect only with minted member credentials.",
+        f"::error::publish allow $KV.hub-leases.> {ours}",
+        f"::error::publish allow swarm.> {ours}",
+        f"::error::publish allow > {theirs}",
+        f"::error::subscribe allow _INBOX.> {ours}",
+        f"::error::subscribe allow > {theirs}",
     ]
 
 
@@ -365,11 +395,12 @@ def test_the_controller_grants_render_the_controller_claims():
 def test_the_controller_grant_covers_every_bucket_and_queue_the_hub_opens():
     from scripts.events import nats
     from scripts.hive import buckets, execution_events, presence
-    from scripts.hub import hive_loss, lease, pulls, reconciler, runner, timers
+    from scripts.hub import hive_loss, lease, pulls, reconciler, runner, slots, timers
     from scripts.inbox import migration
 
     opened = {
         *buckets.NAMES,
+        *slots.BUCKETS,
         presence.BUCKET,
         execution_events.STATE,
         execution_events.STARTS,
@@ -387,6 +418,7 @@ def test_the_controller_grant_covers_every_bucket_and_queue_the_hub_opens():
     assert set(nats_grant.CONTROLLER_BUCKETS) == opened
     publish = set(nats_grant.CONTROLLER_PUBLISH)
     assert {f"$KV.{bucket}.>" for bucket in opened} <= publish
+    assert {"$KV.account-slots.>", "$KV.hive-slot-accounts.>"} <= publish
     assert {"swarm.>", "dead.>", f"{nats.QUEUE_SUBJECT}.>", "$JS.ACK.>"} <= publish
     assert not {">", "$JS.API.>", "$KV.>"} & publish
 

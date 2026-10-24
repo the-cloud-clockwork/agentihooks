@@ -66,7 +66,7 @@ def controller_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
     return _rendered(agentihooks, RENDER_CONTROLLER, "controller_claims")
 
 
-def user_grants(antoncore: Path, name: str) -> dict[str, dict[str, frozenset[str]]]:
+def user_grants(antoncore: Path, name: str) -> dict[str, dict[str, frozenset[str]]] | None:
     values = yaml.safe_load((antoncore / HIVE_VALUES).read_text())
     accounts = values["config"]["merge"].get("accounts")
     if accounts is None:
@@ -74,6 +74,8 @@ def user_grants(antoncore: Path, name: str) -> dict[str, dict[str, frozenset[str
     else:
         users = accounts[ACCOUNT]["users"]
     user = next((user for user in users if user["user"] == name), None)
+    if user is None and accounts is None and name == HIVE_USER:
+        return None
     if user is None:
         raise ValueError(f"the {ACCOUNT} account has no {name} user")
     permissions = user.get("permissions") or {}
@@ -123,6 +125,10 @@ def main(argv: list[str] | None = None) -> int:
     ) as exc:
         print(f"::error::The swarm NATS grants cannot be read ({type(exc).__name__}: {exc}).")
         return 1
+    retired = [user for _, _, user, _, theirs in compared if theirs is None]
+    if retired:
+        print(f"The antoncore {HIVE_USER} user is retired, so hives connect only with minted member credentials.")
+    compared = [check for check in compared if check[2] not in retired]
     lines = [
         line for _, credential, user, ours, theirs in compared for line in differences(ours, theirs, credential, user)
     ]
