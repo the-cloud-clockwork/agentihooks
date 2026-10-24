@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "evidence set",
+  "type": "object",
+  "required": ["items"],
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["id", "claim", "source", "excerpt", "retrieved_at"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "claim": {"type": "string", "minLength": 1},
+          "source": {"type": "string", "minLength": 1},
+          "excerpt": {"type": "string", "minLength": 1},
+          "retrieved_at": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

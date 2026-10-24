@@ -30,8 +30,15 @@ def test_valid_case_and_evidence_set_load(tmp_path):
 
 def test_missing_excerpt_is_refused(tmp_path):
     item = {key: value for key, value in ITEM.items() if key != "excerpt"}
-    with pytest.raises(schema.SchemaError, match="'excerpt' is a required property"):
+    with pytest.raises(schema.SchemaError) as refused:
         schema.load_evidence(write(tmp_path, "evidence.json", {"items": [item]}))
+    assert str(refused.value) == "evidence items/0: 'excerpt' is a required property"
+
+
+def test_refusal_names_the_document_when_the_error_has_no_path():
+    with pytest.raises(schema.SchemaError) as refused:
+        schema.validate("case", {"intent": "x"})
+    assert str(refused.value) == "case document: 'points' is a required property"
 
 
 @pytest.mark.parametrize(
