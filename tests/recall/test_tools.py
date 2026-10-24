@@ -134,7 +134,7 @@ def test_search_hits_carry_parents_and_filters_apply(environ):
 def test_search_refuses_an_unreadable_time(environ):
     result = tools.search("words", tools.filters(period="yesterday-ish"), environ=environ)
     assert result["success"] is False
-    assert "yesterday-ish" in result["error"]
+    assert result["error"] == "not an ISO time, epoch milliseconds or span such as 1d: yesterday-ish"
 
 
 def test_filters_read_kinds_and_a_period():
@@ -248,7 +248,9 @@ def test_a_missing_archive_is_an_error_and_never_created(tmp_path):
         tools.sources(environ=environ),
     ):
         assert result["success"] is False
-        assert "agentihooks recall reindex" in result["error"]
+        assert result["error"] == (
+            f"no recall archive at {default_path(environ)}; build it with agentihooks recall reindex --all"
+        )
     assert not default_path(environ).exists()
 
 
