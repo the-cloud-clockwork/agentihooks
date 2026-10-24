@@ -105,37 +105,20 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
                 step["if"]
                 == "steps.plan.conclusion == 'success' && steps.plan.outputs.changed != '0' && github.workflow == 'Mutation preflight' && runner.environment == 'self-hosted'"
             )
-        elif (
-            step.get("uses", "").startswith(("actions/setup-python@", "astral-sh/setup-uv@"))
-            or step.get("name") == "Install dependencies"
-        ):
-            assert step["if"] == f"{gated} && steps.suite.outputs.changed != 'true'", step
         else:
             assert step["if"] == gated, step
 
 
-def test_preflight_runs_the_suite_speed_contracts_before_reuse_when_a_test_module_changes():
-    steps, names = _steps(_workflow()["jobs"]["plan"])
-    find_at = names.index("Find a changed test module")
-    find = steps[find_at]
-    assert find_at == 2
-    assert find["id"] == "suite"
-    assert find["if"] == "github.event_name == 'push' && steps.open.outputs.open == 'false'"
-    assert find["run"].startswith('files=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE...HEAD")\n')
-    assert "grep -qE '^tests/(.+/)?test_[^/]*\\.py$' <<< \"$files\"" in find["run"]
+def test_preflight_runs_the_suite_speed_contracts_after_the_touched_tests_when_a_test_module_changes():
+    workflow = _workflow()
+    plan_steps, plan_names = _steps(workflow["jobs"]["plan"])
+    assert "Run the suite speed contracts" not in plan_names
+    assert not any("steps.suite" in step.get("if", "") for step in plan_steps)
+    steps, names = _steps(workflow["jobs"]["touched-tests"])
     run_at = names.index("Run the suite speed contracts")
-    assert run_at < names.index("Record the revisions the report grades")
-    assert run_at < names.index("Reuse a green report when this head only adds tests to it")
-    changed = "steps.suite.outputs.changed == 'true'"
-    assert [step["if"] for step in steps[find_at + 1 : run_at + 1]] == [changed] * (run_at - find_at)
+    assert run_at == names.index("Run the tests the branch touches") + 1
+    assert steps[run_at]["if"] == "steps.touched.outputs.files != ''"
     assert steps[run_at]["run"] == "python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider"
-    reused = steps[find_at + 1 : run_at]
-    later = steps[names.index("Reuse a green report when this head only adds tests to it") + 1 :]
-    for step in reused:
-        if "uses" in step:
-            assert next(other for other in later if other.get("uses") == step["uses"])["with"] == step["with"], step
-        else:
-            assert step["run"] == steps[names.index("Install dependencies")]["run"]
     assert not any(step.get("continue-on-error") for step in steps)
 
 
