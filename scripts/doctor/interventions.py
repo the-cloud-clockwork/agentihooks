@@ -152,10 +152,11 @@ def restart_ledger_server(ctx, args):
                 "the ledger server already runs its current code; the Doctor restarts it only after a change"
             )
         why = f"{', '.join(changed)} changed since it started"
+        flag = "--reload"
     else:
         why = "no running server recorded its start"
-    for flag in ("--stop", "--ensure"):
-        _call(ctx, [sys.executable, str(ctx.code / "ledger_server.py"), flag])
+        flag = "--ensure"
+    _call(ctx, [sys.executable, str(ctx.code / "ledger_server.py"), flag])
     return f"The Doctor restarted the ledger server on its new code: {why}."
 
 

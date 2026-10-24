@@ -15,6 +15,7 @@ from pathlib import Path
 LOCK = ".ledger-writer.lock"
 CONFLICTS = ".ledger-writer-conflicts.jsonl"
 DATABASE = "ledgers.sqlite3"
+LEASE_POLL_S = 0.01
 
 
 class WriterConflict(RuntimeError):
@@ -60,16 +61,22 @@ class WriterLease:
     def held(self) -> bool:
         return self._fd is not None
 
-    def acquire(self, claimant: dict) -> "WriterLease":
+    def acquire(self, claimant: dict, wait: float = 0.0) -> "WriterLease":
         self.directory.mkdir(parents=True, exist_ok=True)
         fd = os.open(self.directory / LOCK, os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(fd)
-            found = holder(self.directory)
-            record_conflict(self.directory, found, claimant)
-            raise WriterConflict(self.directory, found) from None
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() < deadline:
+                    time.sleep(LEASE_POLL_S)
+                    continue
+                os.close(fd)
+                found = holder(self.directory)
+                record_conflict(self.directory, found, claimant)
+                raise WriterConflict(self.directory, found) from None
         record = json.dumps(claimant, sort_keys=True).encode()
         os.pwrite(fd, record, 0)
         os.ftruncate(fd, len(record))
