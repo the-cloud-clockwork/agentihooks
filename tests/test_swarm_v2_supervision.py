@@ -346,6 +346,24 @@ def assert_stale_acknowledgement_rejected(attempt, root, checkpoint_seconds):
     assert checkpoint(attempt, {**acknowledgement, "incarnation": scope["incarnation"]}, scope) == root.name
 
 
+@pytest.mark.parametrize("polls", [0, 1])
+def test_quiescence_checks_current_processes_after_its_deadline(tmp_path, monkeypatch, polls):
+    attempt, path, spec = launch_files(tmp_path)
+    spec["quiesce_seconds"] = 1
+    path.write_text(json.dumps(spec))
+    supervisor = Supervisor(Launch.load(attempt, path))
+    targets = {123: object()}
+    snapshots = iter([targets] * (polls + 1) + [{}])
+    clock = iter([0, *([0] * polls), 2])
+    signals = []
+    monkeypatch.setattr(supervision_runtime.trees, "living", lambda *args: next(snapshots, {}))
+    monkeypatch.setattr(supervision_runtime.trees, "send", lambda table, signum: signals.append(signum))
+    monkeypatch.setattr(supervision_runtime.time, "monotonic", lambda: next(clock, 2))
+    monkeypatch.setattr(supervisor, "wait", lambda: None)
+    assert supervisor.quiesce() is True
+    assert signals == [signal.SIGTERM]
+
+
 @pytest.mark.parametrize("ack,expected", [("complete", "complete"), ("stale", "incomplete"), ("missing", "incomplete")])
 def test_sigterm_during_tool_reports_observed_checkpoint(worker, ack, expected):
     start, attempt, spec = worker
