@@ -72,7 +72,7 @@ def _enclosing_lines(text: str, start: int, end: int) -> str:
 
 def _intent(spec: schema.FilterSpec, tool_input: dict) -> str:
     value = tool_input
-    for key in filter(None, spec.intent_from.split(".")):
+    for key in filter(None, (spec.intent_from or "").split(".")):
         value = value.get(key) if isinstance(value, dict) else None
     return value if isinstance(value, str) and value else spec.intent
 
