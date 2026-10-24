@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/plan.py:scripts.ci_mutation.plan.x_recorded_lines__mutmut_35:ded0376a40a1f28e09ddded673858003eade5931b62525a7d7dd638ae938e1b8": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "SequenceMatcher uses autojunk by truth value; False and None both disable the heuristic. Independent Standards ruling, CI 39256519947."
+  }
+}

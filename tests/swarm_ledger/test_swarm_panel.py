@@ -10,6 +10,8 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from tests.swarm_ledger.ledger_page import page_source
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
@@ -431,7 +433,6 @@ class SwarmPanel(unittest.TestCase):
             "swarm-overlays",
             "swarm-quota",
             "doctor-row",
-            "health",
             "swarm-handoffs",
             "capacity-box",
             "swarm-tick",
@@ -680,23 +681,29 @@ def test_a_quota_probe_failure_names_its_cause():
             assert command_runner.run(["quota"], {}) == expected
 
 
+def test_a_refused_swarm_read_answers_nothing_more():
+    handler = server.Handler.__new__(server.Handler)
+    handler.exists = lambda slug: True
+    handler.refused = lambda slug: True
+    handler.send = lambda *args: pytest.fail("refused already answered the request")
+    with patch.object(server, "swarm_status") as status, patch.object(server, "swarm_models") as models:
+        assert handler.get_swarm(SLUG, "") is None
+        assert handler.get_swarm(SLUG, "models") is None
+    status.assert_not_called()
+    models.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
 
 
 class HealthPanel(unittest.TestCase):
-    def test_a_verdict_pick_sends_the_picked_verdict_and_the_row_note(self):
+    def test_the_swarm_page_has_no_health_panel(self):
+        self.assertNotIn("renderNeedsYou", function_source("renderSwarm"))
         page = page_source()
-        self.assertIn('$("health").addEventListener("change"', page)
-        self.assertIn('swarmControl({ action: "verdict", id: pick.dataset.verdict, verdict: pick.value, note:', page)
-
-    def test_the_swarm_health_renders_findings_with_the_swarm(self):
-        source = function_source("renderSwarm")
-        self.assertIn("renderHealth(sw.findings, now)", source)
-        self.assertNotIn("renderNeedsYou", source)
-        page = page_source()
-        self.assertNotIn("needs-you", page)
-        self.assertNotIn("Needs you", page)
+        self.assertNotIn("renderHealth", page)
+        for gone in ('id="health', '$("health")', "No health findings", "needs-you", "Needs you"):
+            self.assertNotIn(gone, page)
 
     def test_health_styles_use_only_palette_tokens(self):
         page = page_source()

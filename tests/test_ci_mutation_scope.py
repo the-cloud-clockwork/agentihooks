@@ -118,6 +118,39 @@ def test_a_rewritten_test_module_is_selected_again(tmp_path):
     assert select_tests(tmp_path, Path("hooks/context/sample.py")) == ["tests/test_late.py"]
 
 
+def test_selection_parses_only_test_modules_that_name_a_reached_module(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_direct.py").write_text("from hooks.context import parsed_sample\n")
+    (tests / "parsed_helper.py").write_text("import hooks.context.parsed_sample\n")
+    (tests / "test_helper_user.py").write_text("from tests import parsed_helper\n")
+    for index in range(3):
+        (tests / f"test_unrelated_{index}.py").write_text(f"import os\nUNRELATED = {index}\n")
+    parsed = []
+    parse = scope.ast.parse
+    monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
+    scope.imported_names.cache_clear()
+    assert select_tests(tmp_path, Path("hooks/context/parsed_sample.py")) == [
+        "tests/test_direct.py",
+        "tests/test_helper_user.py",
+    ]
+    assert parsed and not any("UNRELATED" in text for text in parsed)
+
+
+@pytest.mark.parametrize(
+    "importer",
+    ["from.import *\n", "from..sub import *\n", "from\\\n. import *\n", "from hooks.context import ｐarsed_form\n"],
+)
+def test_selection_keeps_imports_written_without_spaces_or_with_normalized_names(tmp_path, importer):
+    package = tmp_path / "tests" / "sub"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("import hooks.context.parsed_form\n")
+    (package / "test_importer.py").write_text(importer)
+    assert select_tests(tmp_path, Path("hooks/context/parsed_form.py")) == ["tests/sub/test_importer.py"]
+
+
 def test_a_folder_named_like_a_module_is_skipped(tmp_path):
     tests = tmp_path / "tests"
     (tests / "a.py").mkdir(parents=True)
@@ -556,7 +589,7 @@ def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_p
     monkeypatch.setattr(scope.subprocess, "run", run)
     assert scope.graded_green("abc") is expected
     api = ["gh", "api", "-X", "GET"]
-    shards = '.jobs[] | select(.name | startswith("mutation (")) | .conclusion'
+    shards = scope.SHARDS
     listed = [
         *api,
         "repos/{owner}/{repo}/actions/workflows/test.yml/runs",
@@ -575,6 +608,77 @@ def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_p
         for run in asked
     ]
     assert calls[checked + 2 :] == jobs_listed
+
+
+_INLINE = "Mutate the only shard in the statistics job"
+
+
+@pytest.mark.parametrize(
+    ("jobs", "expected"),
+    [
+        (
+            [{"name": "mutation (0)", "conclusion": "success"}, {"name": "mutation (1)", "conclusion": "failure"}],
+            ["success", "failure"],
+        ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "success",
+                    "steps": [{"name": _INLINE, "conclusion": "success"}],
+                },
+                {"name": "mutation", "conclusion": "skipped"},
+            ],
+            ["success"],
+        ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "failure",
+                    "steps": [{"name": _INLINE, "conclusion": "failure"}],
+                }
+            ],
+            ["failure"],
+        ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "success",
+                    "steps": [{"name": _INLINE, "conclusion": "skipped"}],
+                },
+                {"name": "mutation (0)", "conclusion": "success"},
+            ],
+            ["success"],
+        ),
+        (
+            [
+                {"name": "mutation-stats (1)", "conclusion": "success"},
+                {"name": "mutation-plan", "conclusion": "success"},
+            ],
+            [],
+        ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "failure",
+                    "steps": [{"name": _INLINE, "conclusion": "success"}, {"name": "Upload", "conclusion": "failure"}],
+                }
+            ],
+            ["failure"],
+        ),
+    ],
+)
+def test_pull_request_grading_counts_the_shard_mutated_inside_the_statistics_job(jobs, expected):
+    import json
+    import subprocess
+
+    from scripts.ci_mutation import scope
+
+    found = subprocess.run(["jq", "-r", scope.SHARDS], input=json.dumps({"jobs": jobs}), capture_output=True, text=True)
+    assert (found.returncode, found.stdout.split()) == (0, expected), found.stderr
 
 
 @pytest.mark.parametrize("helper", ["oracle.py", "transitive", "fixture", "other.py", "dev.py"])

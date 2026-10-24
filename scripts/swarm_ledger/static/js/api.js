@@ -31,6 +31,10 @@ export function readWorkspace(taskId) {
   return fetch(`${API_V1}/tasks/${encodeURIComponent(taskId)}/workspace`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
 }
 
+export function readClosed(name, offset) {
+  return fetch(`${API_V1}/${name}?state=done&offset=${offset}&limit=10`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+}
+
 export function readArchitecture() {
   return fetch(`${API_V1}/architecture`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
 }

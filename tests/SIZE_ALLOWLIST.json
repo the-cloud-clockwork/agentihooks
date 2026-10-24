@@ -21,8 +21,8 @@
   "PLR0913": 8
  },
  "hooks/context/kubectl_mutation_guard.py::check_kubectl_mutation_command": {
-  "C901": 20,
-  "PLR0912": 19
+  "C901": 17,
+  "PLR0912": 16
  },
  "hooks/context/quota_policy.py::decide": {
   "PLR0913": 12
@@ -107,14 +107,6 @@
  "hooks/mcp/enforcement.py::register.enforcement_set": {
   "PLR0913": 8
  },
- "hooks/memory/transcript_reader.py::_iter_codex_records": {
-  "C901": 15,
-  "PLR0912": 14
- },
- "hooks/memory/transcript_reader.py::_iter_copilot_records": {
-  "C901": 19,
-  "PLR0912": 18
- },
  "hooks/quota.py::fmt_quota": {
   "C901": 15,
   "PLR0912": 14
@@ -148,7 +140,6 @@
   "PLR0913": 8
  },
  "scripts/inbox/wake.py::wake_pass": {
-  "C901": 13,
   "PLR0913": 8
  },
  "scripts/init_agent.py::main": {

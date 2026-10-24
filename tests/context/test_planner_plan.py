@@ -101,10 +101,7 @@ def test_non_swarm_sessions_get_the_pane_prompt_after_operator_on(
     assert _hook("PermissionRequest", tmp_path, capsys, tool) == {}
 
 
-def test_a_non_swarm_plan_exit_is_denied_until_operator_on(forced_claude, monkeypatch, capsys, tmp_path):
+def test_a_non_swarm_plan_exit_reaches_the_pane_without_operator_on(forced_claude, monkeypatch, capsys, tmp_path):
     _planner(monkeypatch, "eng")
     monkeypatch.delenv("AGENTIHOOKS_SWARM")
-    assert _hook("PermissionRequest", tmp_path, capsys)["decision"] == {
-        "behavior": "deny",
-        "message": operator_mode.PROMPT_REFUSAL.format(tool="ExitPlanMode"),
-    }
+    assert _hook("PermissionRequest", tmp_path, capsys) == {}

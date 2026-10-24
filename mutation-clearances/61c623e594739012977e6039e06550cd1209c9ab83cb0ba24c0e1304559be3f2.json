@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_cache.py:scripts.doctor.ci_cache.x__trim__mutmut_9:83bb0466f2bdf17a60334da01698c81e155ce9ef9983b915d546c97814b517dc": {
+    "reader": "Standards",
+    "reason": "SCAN COUNT is a work hint, not a limit or retention policy. 1001 preserves bounded batching; scan_iter exhausts the cursor and sorted(set(...)) normalizes batch boundaries, preserving retained entries and expiry actions."
+  }
+}

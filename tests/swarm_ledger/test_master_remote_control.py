@@ -22,7 +22,7 @@ def _function(page, name):
 
 def _run(script):
     page = page_source()
-    names = ("span", "modelText", "terminalView", "executionView", "agentRows", "agentRow")
+    names = ("span", "modelText", "terminalView", "executionView", "agentRows", "agentRow", "joinCell")
     js = STUBS + "\n".join(_function(page, name) for name in names) + script
     return json.loads(subprocess.check_output(["node", "-e", js], text=True))
 

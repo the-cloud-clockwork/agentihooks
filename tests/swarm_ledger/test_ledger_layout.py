@@ -17,7 +17,7 @@ SAVED = {
     "quota-box": {"height": 220},
     "overlays-box": {"height": 160},
     "agents-box": {"height": 320},
-    "health-box": {"height": 200},
+    "hives-box": {"height": 200},
     "handoff-box": {"height": 180},
 }
 
@@ -104,7 +104,7 @@ def test_an_empty_layout_resets_to_the_defaults():
 
 def test_an_empty_body_reads_as_the_defaults_and_a_broken_one_is_refused():
     assert layout.loads(b"") == {}
-    assert layout.loads(b'{"health-box": {"height": 90}}') == {"health-box": {"height": 90}}
+    assert layout.loads(b'{"handoff-box": {"height": 90}}') == {"handoff-box": {"height": 90}}
     with pytest.raises(ValueError) as error:
         layout.loads(b"{oops")
     assert str(error.value) == "body is not JSON"
@@ -115,6 +115,14 @@ def test_an_unreadable_file_reads_as_the_defaults():
     assert layout.read() == {}
     layout.path().write_text(json.dumps({"nowhere": {"height": 100}}), encoding="utf-8")
     assert layout.read() == {}
+    saved = {"health-box": {"height": 100}, "agents-box": {"height": 200}}
+    layout.path().write_text(json.dumps(saved), encoding="utf-8")
+    assert layout.read() == {"agents-box": {"height": 200}}
+
+
+def test_the_layout_rows_carry_no_health_row():
+    assert "health-box" not in layout.ROWS
+    assert {"quota-box", "hives-box", "agents-box", "handoff-box", "recovery-box"} <= set(layout.ROWS)
 
 
 @pytest.mark.parametrize(
@@ -122,14 +130,15 @@ def test_an_unreadable_file_reads_as_the_defaults():
     [
         ([], "layout must be an object of rows"),
         ({"nowhere": {"height": 100}}, "unknown row nowhere"),
-        ({"health-box": 100}, "health-box must be an object of sizes"),
-        ({"health-box": {}}, "health-box must be an object of sizes"),
-        ({"health-box": {"split": 50}}, "health-box takes only height"),
+        ({"health-box": {"height": 100}}, "unknown row health-box"),
+        ({"handoff-box": 100}, "handoff-box must be an object of sizes"),
+        ({"handoff-box": {}}, "handoff-box must be an object of sizes"),
+        ({"handoff-box": {"split": 50}}, "handoff-box takes only height"),
         ({"quota-box": {"width": 50}}, "quota-box takes only height"),
-        ({"health-box": {"height": 47}}, "health-box height must be a number from 48 to 4000"),
-        ({"health-box": {"height": 4001}}, "health-box height must be a number from 48 to 4000"),
-        ({"health-box": {"height": True}}, "health-box height must be a number from 48 to 4000"),
-        ({"health-box": {"height": "100"}}, "health-box height must be a number from 48 to 4000"),
+        ({"handoff-box": {"height": 47}}, "handoff-box height must be a number from 48 to 4000"),
+        ({"handoff-box": {"height": 4001}}, "handoff-box height must be a number from 48 to 4000"),
+        ({"handoff-box": {"height": True}}, "handoff-box height must be a number from 48 to 4000"),
+        ({"handoff-box": {"height": "100"}}, "handoff-box height must be a number from 48 to 4000"),
     ],
 )
 def test_a_layout_out_of_shape_is_refused(body, message):

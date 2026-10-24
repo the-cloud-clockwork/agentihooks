@@ -4,7 +4,7 @@ The sweep clears an agent's priority whose item is done, out of scope, merged or
 chat line on an item that carries a priority asks the classifier whether that write resolves what the priority
 asks. A yes clears it, closes a follow-up, records an operator comment on a question as its answer and notes the
 reason on the item; a no or a silent classifier leaves it. A priority that waits on an operator decision, a question,
-a merge approval, a follow-up flagged for him or an escalated plan, and one a dispatcher seat handed to him by raising
+a merge approval, a follow-up flagged for him or an escalated plan, and one a master or dispatcher seat handed to him by raising
 it under its own name, counts only the operator's writes, a verified master relay among them; an agent's write on it is
 never judged.
 """
@@ -113,7 +113,9 @@ def _writes(doc, rows, events):
 
 
 def _counts(doc, row, write):
-    return write.by == OPERATOR or not operator_only(doc, row)
+    found = naming.parse(row.get("by"))
+    master = found is not None and found.kind == "master"
+    return write.by == OPERATOR or not (master or operator_only(doc, row))
 
 
 def operator_only(doc, row):
@@ -184,13 +186,13 @@ RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"resolves": (True, Fals
 
 
 def _resolve(ledger, slug, row, write, reason):
+    ledger.comment_item(slug, row["item"], CLEARED.format(reason=reason))
     ledger.clear_priority(slug, row["id"], reason)
     name = _split(row["item"])[0]
     if name == "followups":
         ledger.mark_done(slug, row["item"])
     if name == "questions" and write.by == OPERATOR and write.kind == "comment":
         ledger.answer_as_operator(slug, row["item"], write.text)
-    ledger.comment_item(slug, row["item"], CLEARED.format(reason=reason))
 
 
 def _cleared(row, reason):

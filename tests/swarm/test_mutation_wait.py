@@ -48,6 +48,7 @@ def test_cli_wait_binds_the_branch_preflight_run(env, monkeypatch):  # noqa: F81
     assert idle.wait(store.redis, "sw", ME)["on"] == {
         "kind": "mutation",
         "target": URL,
+        "task": next(agent.task for agent in store.agents("sw") if agent.name == ME),
         "head": "first",
     }
     assert waits.resolution({"kind": "mutation", "target": URL, "head": "first"}, {}, None, None, None, False) == ""
@@ -70,6 +71,9 @@ def preflight(monkeypatch):
         missing=False,
         tip="first",
         base="base",
+        bases={},
+        gone=(),
+        gone_error=b"gh: Not Found (HTTP 404)",
         scope=None,
         scope_name="scope.json",
         report_name="report.json",
@@ -104,7 +108,10 @@ def preflight(monkeypatch):
         elif "/git/ref/heads/" in args[-1]:
             output = json.dumps({"object": {"sha": state.tip}})
         elif "/compare/" in args[-1]:
-            output = json.dumps({"merge_base_commit": {"sha": state.base}})
+            ref = args[-1].split("/compare/")[1].split("...")[0]
+            if ref in state.gone:
+                return subprocess.CompletedProcess(args, 1, b"", state.gone_error)
+            output = json.dumps({"merge_base_commit": {"sha": state.bases.get(ref, state.base)}})
         else:
             output = json.dumps(state.run)
         if kwargs.get("text", False):
@@ -503,7 +510,8 @@ def _bind(env, preflight):  # noqa: F811
 def test_cli_binds_a_focused_proof_run_on_the_branch_head(env, preflight):  # noqa: F811
     _focused_proof(preflight)
     assert _bind(env, preflight) == 0
-    assert idle.wait(env[0].redis, "sw", ME)["on"] == {"kind": "mutation", "target": URL, "head": "first"}
+    task = next(agent.task for agent in env[0].agents("sw") if agent.name == ME)
+    assert idle.wait(env[0].redis, "sw", ME)["on"] == {"kind": "mutation", "target": URL, "task": task, "head": "first"}
     assert preflight.requests == ["repos/org/repo/actions/runs/123", "repos/org/repo/git/ref/heads/feature/x"]
 
 
@@ -559,6 +567,78 @@ def test_a_focused_proof_reads_only_the_recorded_scope_at_the_report_root(prefli
     assert waits.resolution(held, {}, None, None, None, False) == (
         f"mutation preflight {URL}, now red; the mutation report does not grade the branch head from its dev merge base"
     )
+
+
+STACKED = {
+    "t1": {"id": "t1", "depends_on": ["t0", "t9"]},
+    "t0": {"id": "t0", "state": "pr", "branch": "engineer-0"},
+    "t9": {"id": "t9", "state": "done", "branch": "engineer-9"},
+}
+
+
+def _stacked_proof(preflight):
+    _focused_proof(preflight)
+    preflight.bases = {"dev": "base", "engineer-0": "stacked", "engineer-9": "merged"}
+    preflight.scope = {"base": "stacked", "head": "first"}
+
+
+def test_the_tick_ends_a_focused_proof_based_on_an_open_dependency_branch_green(tick, preflight):  # noqa: F811
+    _stacked_proof(preflight)
+    idle.declare_wait(
+        tick.store.redis, "sw", ME, 10_000_000, "", 1, on={**waits.on("mutation", URL, "t1"), "head": "first"}
+    )
+    assert tick.end(STACKED) == [f"ended the wait of {ME}: mutation preflight {URL}, now green; no failing mutants"]
+    assert "repos/org/repo/compare/engineer-0...first" in preflight.requests
+    assert not any("engineer-9" in request for request in preflight.requests)
+
+
+def test_a_red_focused_proof_based_on_an_open_dependency_branch_ends_red(preflight):
+    _stacked_proof(preflight)
+    preflight.run["conclusion"] = "failure"
+    preflight.report["failed"] = True
+    preflight.report["files"] = [
+        {"path": "scripts/swarm/waits.py", "failures": [{"name": "f", "fingerprint": "x", "status": "survived"}]}
+    ]
+    held = {**waits.on("mutation", URL, "t1"), "head": "first"}
+    assert waits.resolution(held, STACKED, None, None, None, False) == (
+        f"mutation preflight {URL}, now red; scripts/swarm/waits.py:f:x (survived)"
+    )
+
+
+@pytest.mark.parametrize(
+    "base, task, gone",
+    [("merged", "t1", ()), ("stacked", "", ()), ("stacked", "t7", ()), ("stacked", "t1", ("engineer-0",))],
+)
+def test_a_focused_proof_based_on_no_open_dependency_branch_ends_red(preflight, base, task, gone):
+    _stacked_proof(preflight)
+    preflight.scope["base"] = base
+    preflight.gone = gone
+    held = {**waits.on("mutation", URL, task), "head": "first"}
+    assert waits.resolution(held, STACKED, None, None, None, False) == (
+        f"mutation preflight {URL}, now red; the mutation report does not grade the branch head from its dev merge base"
+    )
+
+
+def test_a_rate_limited_dependency_compare_holds_the_wait(preflight, monkeypatch):
+    _stacked_proof(preflight)
+    scope = mutation_wait._scope
+
+    def limited(repo, ref, run):
+        if ref == "engineer-0":
+            raise mutation_wait.RateLimited("limited")
+        return scope(repo, ref, run)
+
+    monkeypatch.setattr(mutation_wait, "_scope", limited)
+    held = {**waits.on("mutation", URL, "t1"), "head": "first"}
+    assert waits.resolution(held, STACKED, None, None, None, False) == ""
+
+
+def test_a_failed_dependency_compare_other_than_not_found_holds_the_wait(preflight):
+    _stacked_proof(preflight)
+    preflight.gone = ("engineer-0",)
+    preflight.gone_error = b"gh: Server Error (HTTP 502)"
+    held = {**waits.on("mutation", URL, "t1"), "head": "first"}
+    assert waits.resolution(held, STACKED, None, None, None, False) == ""
 
 
 def test_a_focused_proof_run_of_another_proof_ends_red_without_a_report(preflight):

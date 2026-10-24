@@ -957,6 +957,17 @@ def test_claude_render_mcp_and_shared_data(world, capsys):
         assert os.readlink(out / name) == str(home / ".claude" / name)
 
 
+def test_claude_render_creates_the_shared_folders_a_fresh_home_lacks(world):
+    from scripts.profiles import render
+
+    shared = world["home"] / ".claude"
+    shutil.rmtree(shared, ignore_errors=True)
+    out = render.render_claude("rb-role")
+    for name in ("projects", "sessions", "todos"):
+        assert (shared / name).is_dir()
+        assert (out / name).resolve() == (shared / name).resolve()
+
+
 @pytest.mark.parametrize("present", [True, False])
 def test_claude_render_links_operator_keybindings(world, present):
     from scripts.profiles import render
@@ -2252,6 +2263,8 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "chain": chain,
         "overlays": [],
         "enabled_plugins": {},
+        "mcp_urls": {},
+        "mcp_bearer_env": {},
         "corrections": "",
     }
     assert render._stamp(None, []) == {
@@ -2261,6 +2274,8 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "chain": [],
         "overlays": [],
         "enabled_plugins": {},
+        "mcp_urls": {},
+        "mcp_bearer_env": {},
         "corrections": "",
     }
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]

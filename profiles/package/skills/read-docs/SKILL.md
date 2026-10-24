@@ -6,7 +6,7 @@ argument-hint: "QUESTION"
 
 # Read AgentiHooks Docs
 
-1. **Find.** Run the sibling script with Python 3.11 or later (standard library only):
+1. **Find.** Run the sibling script with Python 3.12 or later (standard library only):
 
    ```bash
    python3 SKILL_DIR/scripts/lookup.py --question "OPERATOR QUESTION"

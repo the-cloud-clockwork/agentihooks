@@ -1,18 +1,14 @@
 """Tests for hooks.context.kubectl_mutation_guard.
 
 Validates the HARD-FLOOR live-patching guard against the doctrine in
-CI Manifesto §3.5 + rules/code-is-source.md.
+CI Manifesto §2 + rules/code-is-source.md.
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+from hooks.context import kubectl_mutation_guard as guard
 from hooks.context.kubectl_mutation_guard import (
     check_kubectl_mutation_command,
 )
@@ -215,3 +211,229 @@ def test_check_kubectl_mutation_payload_allows_safe_command():
 
     payload = {"tool_input": {"command": "kubectl get pods"}}
     check_kubectl_mutation(payload)  # No exception expected
+
+
+OTEL_EVENT = "agentihooks.guardrail.kubectl_mutation_detected"
+HIVE_ALLOW = "agentihooks-swarm/agentihooks-swarm-worker-hive-*"
+
+
+@pytest.fixture
+def emitted(monkeypatch):
+    from hooks.observability import otel
+
+    events = []
+    monkeypatch.setattr(otel, "emit_event", lambda name, attributes=None: events.append((name, attributes)))
+    return events
+
+
+def test_check_kubectl_mutation_payload_allows_on_bypass(monkeypatch, emitted):
+    """Bypass mode (controls disabled) lets a mutating exec through and logs the pass-through."""
+    from hooks.context import controls_toggle
+    from hooks.context.kubectl_mutation_guard import check_kubectl_mutation
+
+    monkeypatch.setattr(controls_toggle, "is_controls_disabled", lambda sid: sid == "s1")
+
+    payload = {"session_id": "s1", "tool_input": {"command": "kubectl exec mypod -- sh -c 'echo x > /etc/config'"}}
+    check_kubectl_mutation(payload)
+    assert emitted == [(OTEL_EVENT, {"session.id": "s1", "action": "allow", "bypass": True})]
+
+
+def test_bypass_lookup_failure_keeps_the_guard(monkeypatch, emitted):
+    """A failing bypass lookup counts as controls on, so the mutation stays blocked."""
+    from hooks.context import controls_toggle
+    from hooks.context.kubectl_mutation_guard import check_kubectl_mutation
+    from hooks.hook_manager import BlockAction
+
+    def broken(_sid):
+        raise RuntimeError("controls store unreadable")
+
+    monkeypatch.setattr(controls_toggle, "is_controls_disabled", broken)
+    assert guard._controls_disabled("s1") is False
+    with pytest.raises(BlockAction):
+        check_kubectl_mutation({"session_id": "s1", "tool_input": {"command": "kubectl edit deploy/foo"}})
+    assert emitted == []
+
+
+def test_violation_message_names_doctrine_and_volunteers_no_unlock():
+    msg = check_kubectl_mutation_command("kubectl exec -n other other-pod -- tee /etc/config.yaml")
+    assert "  Rule:        exec-tee\n" in msg
+    assert "  Reason:      kubectl exec ... -- tee (writes a file inside the pod)\n" in msg
+    assert "\n  Doctrine:    CI Manifesto §2 + rules/code-is-source.md\n  Action:" in msg
+    assert msg.endswith("\n  Action:      change the source code, commit, push to dev, let CI deploy.")
+    assert "KUBECTL_MUTATION_GUARD_EXEC_ALLOW" not in msg
+    assert "disable controls" not in msg
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "kubectl exec -n ns web-1 -- tee /etc/a; kubectl exec -n prod db-1 -- tee /etc/b",
+        "kubectl exec -n ns web-1 -- sh -c 'echo x > /etc/a' && kubectl exec -n prod db-1 -- tee /etc/b",
+        "kubectl cp ./a ns/web-1:/etc/a && kubectl cp ./b prod/db-1:/etc/b",
+        "kubectl exec -n ns web-1 -- tee /etc/a; kubectl edit deploy/foo -n prod",
+        "kubectl exec -n ns web-1 -- tee /etc/a; ssh host 'echo x > /etc/b'",
+    ],
+)
+def test_allowlisted_segment_does_not_hide_a_later_mutation(monkeypatch, cmd):
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "ns/web-*")
+    assert check_kubectl_mutation_command(cmd) is not None
+
+
+def test_violation_message_carries_the_rule_description():
+    msg = check_kubectl_mutation_command("kubectl exec mypod -- vim /etc/config")
+    assert "  Reason:      kubectl exec ... -- vi/vim/nano/emacs (interactive file edit inside the pod)\n" in msg
+    msg = check_kubectl_mutation_command("kubectl exec mypod -- sh -c 'echo x > /etc/config'")
+    assert "  Rule:        exec-shell-c:redirect-to-fs-path\n" in msg
+    assert "  Reason:      kubectl exec ... -- sh/bash -c with mutation pattern (redirect-to-fs-path)\n" in msg
+
+
+@pytest.mark.parametrize(
+    ("raw", "entries"),
+    [
+        (None, []),
+        ("", []),
+        ("a/b,c/d", ["a/b", "c/d"]),
+        (" a/b , ,junk,*, c/* ", ["a/b", "c/*"]),
+    ],
+)
+def test_exec_allowlist_entries(monkeypatch, raw, entries):
+    if raw is None:
+        monkeypatch.delenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", raising=False)
+    else:
+        monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", raw)
+    assert guard._exec_allowlist_entries() == entries
+
+
+@pytest.mark.parametrize(
+    ("allow", "namespace", "pod", "expected"),
+    [
+        ("ns/*", "ns", None, False),
+        ("ns/*", "ns", "", False),
+        ("ns/*", "ns", "web-1", True),
+        ("ns/*", "other", "web-1", False),
+        ("/web-1", None, "web-1", True),
+        ("ns/*", None, "web-1", False),
+        ("x/y,ns/web-*", "ns", "web-1", True),
+    ],
+)
+def test_target_allowlisted(monkeypatch, allow, namespace, pod, expected):
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", allow)
+    assert guard._target_allowlisted(namespace, pod) is expected
+
+
+@pytest.mark.parametrize(
+    ("args", "target"),
+    [
+        (" mypod ", (None, "mypod")),
+        ("pod/mypod", (None, "mypod")),
+        ("-n ns mypod", ("ns", "mypod")),
+        ("--namespace ns mypod", ("ns", "mypod")),
+        ("--namespace=ns mypod", ("ns", "mypod")),
+        ("-n=ns mypod", ("ns", "mypod")),
+        ("--namespace=a=b mypod", ("a=b", "mypod")),
+        ("-c ctr mypod", (None, "mypod")),
+        ("--container ctr mypod", (None, "mypod")),
+        ("--container=ctr mypod", (None, "mypod")),
+        ("mypod extra", (None, "mypod")),
+        ("mypod -n", ("", "mypod")),
+        ("-it", (None, None)),
+        ("--context=web-1 mypod", (None, "mypod")),
+        ("-n ns --context web-1 db-1", (None, None)),
+        ("-n ns db-1 --as admin", (None, None)),
+        ("'unbalanced", (None, None)),
+    ],
+)
+def test_parse_kubectl_target(args, target):
+    assert guard._parse_kubectl_target(args) == target
+
+
+@pytest.mark.parametrize("flag", ["-i", "-t", "-it", "-ti", "--stdin", "--tty", "-q", "--quiet", "--no-preserve"])
+def test_boolean_flags_keep_the_target(flag):
+    assert guard._parse_kubectl_target(f"-n ns {flag} mypod") == ("ns", "mypod")
+
+
+def test_unknown_value_flag_allowlists_nothing(monkeypatch, emitted):
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "ns/web-*")
+    assert check_kubectl_mutation_command("kubectl exec -n ns --context web-1 db-1 -- tee /etc/x") is not None
+    assert emitted == []
+
+
+@pytest.mark.parametrize(
+    ("args", "target"),
+    [
+        (" ./f ns/web-1:/etc/a ", ("ns", "web-1")),
+        ("./f web-1:/etc/a", (None, "web-1")),
+        ("-n ns ./f web-1:/etc/a", ("ns", "web-1")),
+        ("-n ns ./f other/web-1:/etc/a", ("other", "web-1")),
+        ("./f ns/web-1:/etc/a:b -c ctr", ("ns", "web-1")),
+        ("./f", (None, None)),
+        ("'unbalanced", (None, None)),
+    ],
+)
+def test_cp_dest_target(args, target):
+    assert guard._cp_dest_target(args) == target
+
+
+def test_allowlisted_pod_lets_mutating_exec_through(monkeypatch, emitted):
+    """A pod matching KUBECTL_MUTATION_GUARD_EXEC_ALLOW is let through and logged."""
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", HIVE_ALLOW)
+    cmd = "kubectl exec -n agentihooks-swarm agentihooks-swarm-worker-hive-3 -- tee /etc/config.yaml"
+    assert check_kubectl_mutation_command(cmd) is None
+    assert emitted == [
+        (
+            OTEL_EVENT,
+            {
+                "rule": "exec-tee",
+                "namespace": "agentihooks-swarm",
+                "pod": "agentihooks-swarm-worker-hive-3",
+                "action": "allow",
+                "allowlisted": True,
+            },
+        )
+    ]
+
+
+def test_allowlisted_pod_lets_shell_mutation_through(monkeypatch, emitted):
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", HIVE_ALLOW)
+    cmd = "kubectl exec -n agentihooks-swarm agentihooks-swarm-worker-hive-3 -- sh -c 'echo x > /etc/config'"
+    assert check_kubectl_mutation_command(cmd) is None
+    assert [attrs["rule"] for _name, attrs in emitted] == ["exec-shell-c:redirect-to-fs-path"]
+
+
+def test_allowlist_without_namespace_logs_an_empty_namespace(monkeypatch, emitted):
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "/web-1")
+    assert check_kubectl_mutation_command("kubectl exec web-1 -- tee /etc/config.yaml") is None
+    assert emitted[0][1]["namespace"] == ""
+
+
+def test_allowlisted_pod_lets_cp_into_pod_through(monkeypatch, emitted):
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "ns/web-*")
+    assert check_kubectl_mutation_command("kubectl cp ./config ns/web-1:/etc/config") is None
+    assert emitted[0][1] == {
+        "rule": "kubectl-cp-into-pod",
+        "namespace": "ns",
+        "pod": "web-1",
+        "action": "allow",
+        "allowlisted": True,
+    }
+
+
+def test_cp_into_non_allowlisted_pod_still_blocked(monkeypatch, emitted):
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "ns/web-*")
+    assert check_kubectl_mutation_command("kubectl cp ./config ns/db-1:/etc/config") is not None
+    assert emitted == []
+
+
+def test_non_allowlisted_pod_still_blocked(monkeypatch, emitted):
+    """A pod NOT matching KUBECTL_MUTATION_GUARD_EXEC_ALLOW stays blocked."""
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", HIVE_ALLOW)
+    cmd = "kubectl exec -n other-namespace other-pod -- tee /etc/config.yaml"
+    assert check_kubectl_mutation_command(cmd) is not None
+    assert emitted == []
+
+
+def test_malformed_allowlist_entry_blocks_nothing_extra(monkeypatch):
+    """A malformed entry (no namespace/pod-glob shape) neither allows unrelated pods nor crashes."""
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "garbage-no-slash, , *")
+    cmd = "kubectl exec -n agentihooks-swarm agentihooks-swarm-worker-hive-3 -- tee /etc/config.yaml"
+    assert check_kubectl_mutation_command(cmd) is not None

@@ -146,17 +146,48 @@ def refusing_frontend(lane, task):
 
 
 @pytest.mark.parametrize(
-    ("room", "taken", "seen"),
+    ("room", "taken", "seen", "waits"),
     [
-        (0, [], []),
-        (1, ["e1"], ["f1", "e1"]),
-        (2, ["e1", "e2"], ["f1", "e1", "e2"]),
-        (5, ["e1", "e2"], ["f1", "e1", "e2"]),
+        (0, [], [], []),
+        (1, ["e1"], ["f1", "e1"], ["task f1 waits: the workstation hive spawns eng work"]),
+        (2, ["e1", "e2"], ["f1", "e1", "e2"], ["task f1 waits: the workstation hive spawns eng work"]),
+        (5, ["e1", "e2"], ["f1", "e1", "e2"], ["task f1 waits: the workstation hive spawns eng work"]),
     ],
 )
-def test_placeable_decides_ready_tasks_only_until_the_free_slots_fill(store, asked, room, taken, seen):
+def test_placeable_decides_ready_tasks_only_until_the_free_slots_fill(store, asked, room, taken, seen, waits):
     runtime = SimpleNamespace(router=SimpleNamespace(placement=object()), placement_refusal=refusing_frontend)
     ready = [{"id": "f1"}, {"id": "e1"}, {"id": "e2"}]
-    found = profile_first.placeable("sw", store.config("sw"), store, runtime, "eng", ready, room)
+    found, waited = profile_first.placeable("sw", store.config("sw"), store, runtime, "eng", ready, room)
     assert [task["id"] for task in found] == taken
+    assert waited == waits
     assert [task_id for _, task_id, _ in asked] == seen
+
+
+def unresolved_u(lane, task):
+    if task["id"].startswith("u"):
+        raise profile_choice.ProfileUnresolved(f"{task['id']} profile is unresolved")
+    return ""
+
+
+@pytest.mark.parametrize(
+    ("room", "taken"),
+    [(0, []), (1, ["u1", "e1"]), (2, ["u1", "e1", "u2", "e2"])],
+)
+def test_placeable_marks_an_unresolved_task_without_spending_a_slot(store, asked, room, taken):
+    runtime = SimpleNamespace(router=SimpleNamespace(placement=object()), placement_refusal=unresolved_u)
+    ready = [{"id": "u1"}, {"id": "e1"}, {"id": "u2"}, {"id": "e2"}, {"id": "e3"}]
+    found, waited = profile_first.placeable("sw", store.config("sw"), store, runtime, "eng", ready, room)
+    assert [task["id"] for task in found] == taken
+    assert {task["id"]: task.get(profile_first.UNRESOLVED) for task in found} == {
+        task_id: f"{task_id} profile is unresolved" if task_id.startswith("u") else None for task_id in taken
+    }
+    assert waited == []
+
+
+def test_placeable_lets_any_other_placement_error_through(store, asked):
+    def broken(lane, task):
+        raise RuntimeError("hive registry down")
+
+    runtime = SimpleNamespace(router=SimpleNamespace(placement=object()), placement_refusal=broken)
+    with pytest.raises(RuntimeError, match="^hive registry down$"):
+        profile_first.placeable("sw", store.config("sw"), store, runtime, "eng", [{"id": "e1"}], 1)

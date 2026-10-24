@@ -75,17 +75,28 @@ def config_path() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "herdr" / "config.toml"
 
 
-def turn_off_copy_on_select(path: Path) -> bool:
+def _table(doc, name: str):
+    table = doc.get(name)
+    if table is None:
+        table = doc[name] = tomlkit.table()
+    return table
+
+
+def apply_config(path: Path) -> list[str]:
     doc = tomlkit.parse(path.read_bytes().decode()) if path.exists() else tomlkit.document()
-    ui = doc.get("ui")
-    if ui is None:
-        ui = doc["ui"] = tomlkit.table()
-    if "copy_on_select" in ui:
-        return False
-    ui["copy_on_select"] = False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(tomlkit.dumps(doc).encode())
-    return True
+    changed = []
+    ui = _table(doc, "ui")
+    if "copy_on_select" not in ui:
+        ui["copy_on_select"] = False
+        changed.append("copy_on_select = false")
+    session = _table(doc, "session")
+    if session.get("resume_agents_on_restore") is not False:
+        session["resume_agents_on_restore"] = False
+        changed.append("resume_agents_on_restore = false")
+    if changed:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(tomlkit.dumps(doc).encode())
+    return changed
 
 
 def configure() -> int:
@@ -108,9 +119,10 @@ def configure() -> int:
     after = integration_status()
     print("[herdr] integrations: " + " ".join(f"{name}={after.get(name, '?')}" for name in INTEGRATIONS))
     path = config_path()
-    if turn_off_copy_on_select(path):
+    changed = apply_config(path)
+    if changed:
         subprocess.run([exe, "server", "reload-config"], capture_output=True)
-        print(f"[herdr] config: copy_on_select = false in {path}")
+        print(f"[herdr] config: {', '.join(changed)} in {path}")
     return 1 if failed else 0
 
 

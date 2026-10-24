@@ -16,7 +16,9 @@ The `promote` job in `.github/workflows/test.yml` is the last job of a `dev` pus
 |---|---|
 | The event is `push` and the ref is `refs/heads/dev` | job `if` in `test.yml`, repeated in `promote.yml` and `promote.cjs` |
 | `Gate — Required` succeeded | `needs.gate-required.result == 'success'` |
-| No dependency failed or was cancelled | `gate-required`, `refresh-durations`, `coverage-baseline` and `flake-budget`; `!contains(needs.*.result, 'failure')` and `'cancelled'` |
+| Hierarchy CPU proof succeeded | `needs.hierarchy-cpu.result == 'success'`; see [Hierarchy CPU proof at promotion](delivery-tiers.md#hierarchy-cpu-proof-at-promotion) |
+| Sonar produced an analysis | `needs.sonar.outputs.analysis != ''` |
+| No dependency failed or was cancelled | `gate-required`, `refresh-durations`, `coverage-baseline`, `flake-budget`, `sonar` and `hierarchy-cpu`; `!contains(needs.*.result, 'failure')` and `'cancelled'` |
 | The run was not cancelled | `!cancelled()` |
 
 Pull request and merge queue runs never promote. A dispatched Tests run never promotes.
@@ -28,11 +30,11 @@ Every `dev` push run shares the concurrency group `promotion-dev` with `cancel-i
 The job runs on `ubuntu-latest` in the `release` environment, which deploys only from `dev`, with a ten minute timeout. It holds the `release-version` concurrency group without cancelling, the same group the manual `release.yml` uses, so two version computations never overlap.
 
 1. **Mint an App token.** `actions/create-github-app-token` uses the `TCC_CI_CLIENT_ID` and `TCC_CI_APP_PRIVATE_KEY` secrets, scoped to this repository with metadata read and contents, pull requests and workflows write.
-2. **Compare trees.** When `main` already carries the graded tree, no pull request is made and the job goes straight to release. When the `main` commit message names an earlier graded revision (`Graded dev revision: <sha>`), the graded revision must not be that revision or an ancestor of it on `dev`; otherwise the job fails with `Graded revision is not newer than the last promotion`, so a rerun of an old run never rolls `main` back. The check needs that line on the current `main` commit, which every promotion made by this job writes; a `main` commit without it skips the check. A revision that has diverged from the named one is promoted; the `dev` ruleset blocks force pushes, so `dev` history never diverges.
+2. **Compare trees.** When `main` already carries the graded tree, no pull request is made and the job goes straight to release. When the `main` commit message names an earlier graded revision (`Graded dev revision: <sha>`), the graded revision must descend from it on `dev`. A revision that is that revision, an ancestor of it or diverged from it ends superseded: the step sets the `superseded` output to the revision `main` names, writes a `Promotion superseded` summary, and merges, tags and releases nothing, so a rerun of an old run never rolls `main` back. The check needs that line on the current `main` commit, which every promotion made by this job writes; a `main` commit without it skips the check.
 3. **Snapshot the graded tree on `main`.** The pull request never uses `dev` as its head, because `dev` keeps moving, and never the graded commit itself: each squash promotion puts a commit on `main` that `dev` does not contain, so a later `dev` commit would conflict with it on every file changed again. The head is a snapshot branch `promotion/<graded sha>` holding one commit whose tree is the graded tree and whose only parent is the current `main`. The job always reads the snapshot from that branch; it creates the commit and branch only when the branch is missing and no promotion pull request from it is open. The job fails with `Promotion snapshot is not the graded tree on main` when the snapshot commit has another tree or any parents other than exactly the current `main`.
 4. **Open or reuse the pull request.** An open pull request from the snapshot branch into `main` is reused; otherwise one is created titled `Promote green dev to main`, whose body names the graded revision and links the Tests run. The job fails when the pull request head is not the snapshot commit, its head repository is not this repository, or its base is not `main`.
 5. **Wait for mergeability.** Every five seconds, up to 48 times (four minutes), it reads the pull request. It fails when the pull request head moved away from the snapshot commit or GitHub reports conflicts, and proceeds once GitHub reports it mergeable and `clean`. An `unstable` head is also admitted when the current run's required grade on the graded `dev` commit succeeded and its exact running promotion job is the only unfinished check. The job is identified by its run, job id and check URL; all checks and effective commit statuses are read with pagination. Every other check must succeed or be legitimately skipped, and the latest status for every context must succeed.
-6. **Squash merge.** It merges with `merge_method: squash`, `sha` set to the snapshot commit and a commit message naming the graded revision and the Tests run, so GitHub refuses the merge if the head changed. `main` keeps linear history, as the `main-prod-lockdown` ruleset requires.
+6. **Squash merge.** It reads `main` again first. When `main` moved during the wait, the step 2 check runs on the new head: a promotion of a revision the graded revision does not descend from closes this run's pull request, deletes its snapshot branch and ends the run superseded, and any other move, including a promotion of an older revision it does descend from, fails it with `Promotion snapshot is stale, main moved during the wait`, because the snapshot's parent is no longer `main`. It then merges with `merge_method: squash`, `sha` set to the snapshot commit and a commit message naming the graded revision and the Tests run, so GitHub refuses the merge if the head changed. `main` keeps linear history, as the `main-prod-lockdown` ruleset requires.
 7. **Verify the tree.** The new `main` commit must carry the same tree as the graded `dev` commit; otherwise the job fails. The squash creates a new commit id, so tree equality is the identity check, not commit equality.
 8. **Delete the snapshot.** The `promotion/<graded sha>` branch is deleted; a branch GitHub already removed is accepted.
 9. **Compute the version.** It checks out the promoted `main` commit and runs `scripts/ci_release.sh version` with `BUMP=patch` and `REUSE_TREE=true`. When a stable `vX.Y.Z` tag already points at the same tree, that version is reused and no new tag is made. Otherwise the next patch version follows the latest stable tag.
@@ -40,7 +42,7 @@ The job runs on `ubuntu-latest` in the `release` environment, which deploys only
 11. **Release.** Unless the release already exists, `ci_release.sh notes` assembles every `changelog.d/` fragment added since the previous stable tag into one section per Keep a Changelog heading, and `gh release create vX.Y.Z --title vX.Y.Z --notes-file <assembled notes> --generate-notes --latest --verify-tag` creates the GitHub release with those entries ahead of the generated pull request list.
 12. **Close abandoned attempts.** The last step runs after any promotion outcome except cancellation, with the same App token. Every open pull request into `main` that the App opened from `promotion/<graded sha>` in this repository, whose graded revision is an ancestor of the revision this run graded, gets a comment naming the superseding revision and run, is closed, and loses its snapshot branch while that branch still points at the pull request head. The current attempt, newer or diverged attempts, other authors, forks and other branches stay open. The step stops examining pull requests after three minutes so the ten minute job timeout holds, and the summary names how many it left for the next run. The job summary lists each outcome; any failure fails the step after the other pull requests are handled, and the release steps before it have already run.
 
-The job summary records the graded `dev` commit, the promoted `main` commit and the tree. The `promote` step outputs `graded`, `main` and, when it merged, `pull-request`; the release steps read `main`.
+The job summary records the graded `dev` commit, the promoted `main` commit and the tree. The `promote` step outputs `graded`, `main` and, when it merged, `pull-request`, or `graded` and `superseded` when it ended superseded; the release steps read `main`.
 
 Promotion never publishes to PyPI and never dispatches another workflow. PyPI publication stays the operator's `publish-pypi.yml` run from `main`, with the `pypi` environment reviewer.
 
@@ -50,7 +52,7 @@ The `Squash the graded tree snapshot into main` step runs `promote.cjs`, so it c
 
 Pushing a `promotion/**` branch starts no Mutation preflight run: `mutation-preflight.yml` lists `promotion/**` in its push `branches-ignore`, beside `dev`, `main`, `gh-readonly-queue/**`, `wip/**` and `diffcheck/**`. Before [#3886](https://github.com/the-cloud-clockwork/agentihooks/pull/3886) the push ran a mutation preflight on the promotion head, a tree whose changes had already been mutation graded on their pull requests, and the merge waited for its `mutation` check. Other workflows still run on that push; on the snapshot of v2.17.2 they were `grade` (Branch workflow lanes) and two `measure` checks (Startup stages, Worker resources).
 
-The step can still wait on the graded `dev` commit. When the promotion pull request reports `unstable`, step 5 admits it only while this run's `promote / promote` job is the one check still running, this run's `Gate — Required` succeeded, every other check on the graded commit has completed with success or skipped, and the latest commit status of every context is success. A slow non-gate workflow on that commit, such as the Worker hive pod `kind` and `publish` jobs, holds the merge until it finishes or the four minute limit fails the step.
+The step can still wait on the graded `dev` commit. When the promotion pull request reports `unstable`, step 5 admits it only while this run's `promote / promote` job is the one check still running, this run's `Gate — Required` succeeded, every other check on the graded commit has completed with success or skipped, and the latest commit status of every context is success. A slow non-gate workflow on that commit, such as the Worker hive pod `kind` job, holds the merge until it finishes or the four minute limit fails the step.
 
 Measured on promotion runs of the Tests workflow, check times from the commits API and merge times from the pulls API:
 
@@ -94,7 +96,7 @@ A rerun after a partial failure is safe:
 - A stable tag on that tree is reused (`existing=true`), so the tag step is skipped.
 - A release that already exists is not recreated.
 
-A rerun after another promotion moved `main` is refused with `Graded revision is not newer than the last promotion` before any snapshot or write; a promotion pull request it opened earlier stays open.
+A rerun after another promotion moved `main` ends superseded before any snapshot or write; a promotion pull request it opened earlier stays open until a newer promotion run closes it as abandoned.
 
 ## When nothing is promoted
 
@@ -103,11 +105,70 @@ A rerun after another promotion moved `main` is refused with `Graded revision is
 | `Gate — Required` or any promotion dependency is red or cancelled | The `promote` job is skipped. `main` stays on the last promoted head; `dev` keeps merging. |
 | A newer push to `dev` arrived while a run was pending | The pending run is replaced and never runs; the running run still finishes and promotes its own revision when green. |
 | The snapshot commit has another tree or parents other than exactly the current `main`, or the pull request conflicts or its head differs from the snapshot commit, or it is not mergeable and clean within four minutes | The job fails and nothing is merged or tagged. |
-| The graded revision is not newer than the revision the last promotion names | The job fails and nothing is merged or tagged. |
+| The graded revision does not descend from the revision `main` names, at the start or after the mergeability wait | The run ends superseded with a green job; nothing is merged or tagged. |
+| `main` moved during the wait to a commit naming no graded revision or one the graded revision descends from | The job fails before merging and nothing is tagged. |
 | GitHub refuses the merge | The job fails before tagging. |
 | The promoted tree differs | The job fails before tagging; `main` has already advanced to the merged commit and the snapshot branch is kept for inspection. A rerun of that revision is refused, because `main` already names it. |
 
-A red promotion produces one fixer task per failing check under the [delivery tiers rule](delivery-tiers.md#rules); the fix lands through an ordinary pull request into `dev`, and the next green push run promotes it.
+A red promotion produces one fixer task per failing check under the [delivery tiers rule](delivery-tiers.md#rules); the fix lands through an ordinary pull request into `dev`, and the next green push run promotes it. When several swarms watch the repository, one of them owns that intake; see [promotion fixer intake](../pillars/swarm.md#promotion-fixer-intake).
+
+## Controller intake without git
+
+The swarm controller checks promotion failures during its tick. Its repository
+lookup works in the controller image even when that image has no `git`
+executable. This keeps promotion fixer intake running; it does not change the
+checks required to release. See [promotion fixer intake](../pillars/swarm.md#promotion-fixer-intake)
+for owner election, duplicate suppression and handover.
+
+Repository identity is selected automatically:
+
+| Lookup result | Identity used for intake ownership |
+|---|---|
+| `git rev-parse --path-format=absolute --git-common-dir` succeeds | The resolved git common directory; a primary checkout and its worktrees share ownership |
+| Starting `git` raises `FileNotFoundError` | The resolved checkout path |
+| `git` exits with a nonzero status, including outside a repository | The resolved checkout path |
+
+The owner record hashes that identity. No flag enables the fallback and no git
+installation is required for this lookup. `AGENTIHOOKS_SWARM_KEY_PREFIX` changes
+the Redis key prefix, as described in [choosing the owner](../pillars/swarm.md#choosing-the-owner);
+it does not choose the repository identity. For example, two linked swarms
+using `/workspace/agentihooks` still elect one intake owner without git. Two
+different checkout paths do not share that fallback identity, even when they
+are worktrees of the same repository. Keep linked watchers on the same resolved
+checkout path when git is unavailable.
+
+### Diagnose a missing git controller crash
+
+The failure repaired by [pull request 4380](https://github.com/the-cloud-clockwork/agentihooks/pull/4380)
+was a controller crash loop ending in `FileNotFoundError` for `git`, reached
+through `promotion_watch.refresh`, promotion owner intake and
+`promotion_owner.repository`. Before that repair, the missing executable escaped
+the repository lookup instead of using the checkout path.
+
+Inspect the failed CI job and compare it with a later dev push after the repair:
+
+```bash
+R=The-Cloud-Clockwork/agentihooks
+BEFORE=39092038586
+AFTER=39098125691
+gh run view "$BEFORE" -R "$R" --log-failed
+gh api "repos/$R/actions/runs/$AFTER/jobs?filter=latest" --paginate \
+  --jq '.jobs[] | select(.name == "helm-kind / kind") | {name, conclusion, html_url}'
+```
+
+These are the delivered repair's evidence runs; substitute the failing run and
+a later run containing your repair when diagnosing a new failure. A skipped or
+cancelled job does not prove recovery. If the same stack trace recurs, check
+whether the controller image includes the repair. Deliver any further fix
+through code and CI; changing a running container does not repair its image.
+
+The original dev push [39092038586](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39092038586)
+failed with the missing git error. The repair's [green regression run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39094909940)
+passed 23 tests, including resolved path fallback and a linked watched swarm and
+Doctor retaining one fixer without git on `PATH`. Its [mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39094879605)
+killed all 24 mutants. After merge, [helm-kind / kind in dev push 39098125691](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39098125691/job/117589554915)
+succeeded. That job proves the missing git recovery; it does not establish that
+every check in that push passed or that a release was promoted.
 
 ## Manual releases
 

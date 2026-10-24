@@ -275,6 +275,19 @@ def test_a_released_dependency_wait_does_not_hide_another_stalled_pull_request()
     assert swarm.ledger.rows["t2"]["state"] == "open"
 
 
+@pytest.mark.parametrize("kind, held", [("recover", True), ("merge", False)])
+def test_a_transient_unmergeable_requeue_backoff_holds_the_dropped_queue_reopen(kind, held):
+    swarm = Swarm(QUEUED, task={"awaiting": ready.AWAITING}, live=False)
+    found = ready.held_record(URL, "h", "", OWNER, START)
+    found["on"] = {"kind": kind, "target": URL, "head": "h"}
+    ready.save(swarm.store, SLUG, "t1", found)
+    swarm.tick(START)
+    swarm.pulls[URL] = GREEN
+    swarm.tick(START + MINUTE)
+    swarm.tick(START + 30 * MINUTE)
+    assert (swarm.ledger.rows["t1"]["state"] == "pr") is held
+
+
 @pytest.mark.parametrize("pull", [GREEN, RUNNING])
 def test_a_ready_release_since_the_snapshot_prevents_generic_stall_recovery(pull):
     swarm = Swarm(pull, live=False)
@@ -1193,3 +1206,185 @@ def test_a_release_hold_keeps_every_stall_rule_until_a_newer_release_exists(pull
     tick(START + 7 * limit * MINUTE)
     tick(START + 8 * limit * MINUTE)
     assert _reopened(swarm)
+
+
+REFRESHING = replace(RUNNING, pushed_at=START + MINUTE, checks_pending=True, required_pending=True)
+RESTARTED_AT = "1970-01-01T02:50:00Z"
+
+
+def _idle_owner(swarm):
+    swarm.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", state="idle", seat="eng-1@sw"))
+
+
+def test_a_dropped_pull_request_with_refreshed_checks_in_progress_waits_for_them():
+    swarm = Swarm(QUEUED)
+    _idle_owner(swarm)
+    swarm.tick(START)
+    swarm.pulls[URL] = REFRESHING
+    for minute in (1, 6, 30):
+        assert swarm.tick(START + minute * MINUTE) == []
+    assert not _reopened(swarm) and swarm.retired == [] and swarm.inbox() == []
+
+
+def test_a_pull_request_removed_from_the_queue_and_not_requeued_is_still_reported():
+    swarm = Swarm(QUEUED)
+    _idle_owner(swarm)
+    swarm.tick(START)
+    swarm.pulls[URL] = GREEN
+    swarm.tick(START + MINUTE)
+    assert not _reopened(swarm)
+    swarm.tick(START + 6 * MINUTE)
+    assert _reopened(swarm) and swarm.retired == [OWNER]
+    assert "unmergeable or dropped from the queue for 5 minutes" in swarm.inbox()[0].text
+
+
+def test_refreshed_checks_never_hold_a_dropped_pull_request_whose_owner_is_gone():
+    swarm = Swarm(QUEUED, live=False)
+    swarm.tick(START)
+    swarm.pulls[URL] = REFRESHING
+    swarm.tick(START + MINUTE)
+    swarm.tick(START + 6 * MINUTE)
+    assert not _reopened(swarm)
+    swarm.tick(START + 10 * MINUTE)
+    assert _reopened(swarm)
+    assert "owner not live for 10 minutes" in swarm.inbox()[0].text
+
+
+@pytest.mark.parametrize("fresh", [QUEUED, None, replace(GREEN, state="MERGED"), REFRESHING])
+def test_a_stall_the_decision_time_read_no_longer_shows_keeps_its_owner(fresh):
+    swarm = Swarm(QUEUED)
+    _idle_owner(swarm)
+    swarm.tick(START)
+    swarm.pulls[URL] = GREEN
+    swarm.tick(START + MINUTE, reread={URL: fresh}.get)
+    assert swarm.tick(START + 6 * MINUTE, reread={URL: fresh}.get) == []
+    assert not _reopened(swarm) and swarm.retired == [] and swarm.inbox() == []
+
+
+def test_a_stall_the_decision_time_read_confirms_reopens_the_task():
+    swarm = Swarm(QUEUED)
+    _idle_owner(swarm)
+    swarm.tick(START)
+    swarm.pulls[URL] = REFRESHING
+    swarm.tick(START + MINUTE, reread={URL: GREEN}.get)
+    assert not _reopened(swarm)
+    swarm.pulls[URL] = GREEN
+    swarm.tick(START + 2 * MINUTE, reread={URL: GREEN}.get)
+    swarm.tick(START + 7 * MINUTE, reread={URL: GREEN}.get)
+    assert _reopened(swarm) and swarm.retired == [OWNER]
+
+
+def _restarted_red(started, restarted=RESTARTED_AT):
+    return ledger_events.pull_request(
+        {
+            "state": "OPEN",
+            "timelineItems": {"nodes": [{"createdAt": restarted}] if restarted else []},
+            "statusCheckRollup": [
+                {"name": "Tests", "conclusion": "FAILURE", "startedAt": started, "completedAt": "1970-01-01T02:55:00Z"}
+            ],
+            "checkSuites": [
+                {"status": "COMPLETED", "conclusion": "FAILURE", "workflowRun": {"databaseId": 1, "createdAt": started}}
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "started,restarted,reopens",
+    [
+        ("1970-01-01T02:45:00Z", RESTARTED_AT, False),
+        ("1970-01-01T02:51:00Z", RESTARTED_AT, True),
+        ("1970-01-01T02:50:00Z", RESTARTED_AT, True),
+        ("1970-01-01T02:45:00Z", None, True),
+    ],
+)
+def test_only_red_runs_started_after_the_latest_reopen_or_queue_entry_stop_an_owner(started, restarted, reopens):
+    pull = _restarted_red(started, restarted)
+    assert pull.red and pull.stale_red == (not reopens)
+    swarm = Swarm(pull)
+    swarm.tick(START + 20 * MINUTE)
+    swarm.tick(START + 40 * MINUTE)
+    assert _reopened(swarm) == reopens
+    assert swarm.retired == ([OWNER] if reopens else [])
+
+
+def test_a_red_check_without_a_start_time_is_never_stale():
+    raw = {
+        "state": "OPEN",
+        "timelineItems": {"nodes": [None, {"createdAt": RESTARTED_AT}, {"createdAt": "1970-01-01T02:40:00Z"}]},
+        "statusCheckRollup": [{"name": "Tests", "conclusion": "FAILURE", "completedAt": "1970-01-01T02:55:00Z"}],
+    }
+    assert ledger_events.pull_request(raw).stale_red is False
+    status = {"context": "sonar", "state": "FAILURE", "createdAt": "1970-01-01T02:45:00Z"}
+    assert ledger_events.pull_request({**raw, "statusCheckRollup": [status]}).stale_red is True
+    assert ledger_events.pull_request({"state": "OPEN", "statusCheckRollup": [status]}).stale_red is False
+
+
+def test_a_stale_red_run_beside_fresh_passing_runs_is_stale_and_pending_required_checks_are_read():
+    fresh = {"name": "Lint", "conclusion": "SUCCESS", "startedAt": "1970-01-01T02:51:00Z"}
+    stale = {"name": "Tests", "conclusion": "FAILURE", "startedAt": "1970-01-01T02:45:00Z"}
+    running = {"name": "Build", "conclusion": None, "startedAt": "1970-01-01T02:52:00Z"}
+    raw = {"state": "OPEN", "timelineItems": {"nodes": [{"createdAt": RESTARTED_AT}]}}
+    pull = ledger_events.pull_request({**raw, "statusCheckRollup": [stale, fresh]})
+    assert pull.red and pull.stale_red and not pull.required_pending
+    optional = {**running, "isRequired": False}
+    assert ledger_events.pull_request({**raw, "statusCheckRollup": [fresh, running]}).required_pending is True
+    optional_pull = ledger_events.pull_request({**raw, "statusCheckRollup": [{**fresh, "isRequired": True}, optional]})
+    assert optional_pull.checks_pending and not optional_pull.required_pending
+    expected = {"context": "deleted workflow", "state": "EXPECTED", "createdAt": "1970-01-01T02:52:00Z"}
+    assert ledger_events.pull_request({**raw, "statusCheckRollup": [fresh, expected]}).required_pending is False
+
+
+def test_only_pending_optional_checks_never_hold_a_dropped_pull_request():
+    swarm = Swarm(QUEUED)
+    _idle_owner(swarm)
+    swarm.tick(START)
+    swarm.pulls[URL] = replace(GREEN, checks_pending=True)
+    swarm.tick(START + MINUTE)
+    swarm.tick(START + 6 * MINUTE)
+    assert _reopened(swarm) and swarm.retired == [OWNER]
+
+
+def test_a_push_seen_only_by_the_decision_time_read_restarts_the_red_limit():
+    swarm = Swarm(RED)
+    pushed = replace(RED, pushed_at=START + 19 * MINUTE)
+    assert swarm.tick(START + 20 * MINUTE, reread={URL: pushed}.get) == []
+    assert not _reopened(swarm) and swarm.retired == []
+    swarm.tick(START + 34 * MINUTE, reread={URL: pushed}.get)
+    assert _reopened(swarm)
+
+
+def test_the_decision_time_read_keeps_a_working_owner_on_a_conflict():
+    swarm = Swarm(GREEN)
+    _idle_owner(swarm)
+    swarm.tick(START)
+    assert swarm.tick(START + 10 * MINUTE, reread={URL: CONFLICTING}.get) == []
+    swarm.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", state="working", seat="eng-1@sw"))
+    assert swarm.tick(START + 16 * MINUTE, reread={URL: CONFLICTING}.get) == []
+    assert not _reopened(swarm) and swarm.retired == []
+
+
+def test_the_pull_request_view_reads_check_starts_and_the_latest_reopen_or_queue_entry():
+    assert "CheckRun{databaseId name conclusion startedAt completedAt" in ledger_events.CONTEXT_NODES
+    assert (
+        "timelineItems(last:1,itemTypes:[REOPENED_EVENT,ADDED_TO_MERGE_QUEUE_EVENT])"
+        "{nodes{...on ReopenedEvent{createdAt} ...on AddedToMergeQueueEvent{createdAt}}}"
+    ) in ledger_events.PULL_QUERY
+
+
+def test_the_tick_rereads_a_stall_from_github_before_acting():
+    import inspect
+
+    from scripts.swarm import cli
+
+    assert "reread=ledger_events.view" in inspect.getsource(cli.run_tick)
+
+
+def test_a_new_owner_inside_its_limit_costs_no_github_reread():
+    swarm = Swarm(RED)
+    swarm.tick(START)
+    claim = START + 180 * MINUTE
+    swarm.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", started_at=claim, seat="eng-1@sw"))
+    reads = []
+    assert swarm.tick(claim + MINUTE, reread=lambda url: reads.append(url) or RED) == []
+    assert reads == []

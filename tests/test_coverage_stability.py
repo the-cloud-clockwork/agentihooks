@@ -177,5 +177,5 @@ def test_the_scheduled_job_compares_the_newest_dev_runs_and_fails_on_any_differe
 
 def test_stability_reads_every_coverage_shard_the_unit_job_splits():
     unit = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["strategy"]["matrix"]
-    excluded = {entry["shard"] for entry in unit["exclude"] if entry["python-version"] == "3.12"}
-    assert stability.SHARDS == len([shard for shard in unit["shard"] if shard not in excluded])
+    assert unit["python-version"] == ["3.12"]
+    assert stability.SHARDS == len(unit["shard"])

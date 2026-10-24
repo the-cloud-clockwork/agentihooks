@@ -10,6 +10,7 @@ from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
 from scripts.swarm import autoscale, freeze, host_budget
+from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
 if TYPE_CHECKING:
@@ -68,6 +69,11 @@ def _master_snapshot(environ: dict, now: float) -> dict[str, tuple[float, balanc
     return {master.slug: (at, balancer.ProbeResult(master.slug, "allowed", state, margin, five, week))}
 
 
+def _known(environ: dict) -> set[str]:
+    filed = {name.removeprefix(balancer.TOKEN_PREFIX) for name in balancer._current_tokens(environ)}
+    return filed | set(account_sessions.token_accounts(environ).values())
+
+
 def _claude(environ: dict, now: float) -> list[Account]:
     tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
@@ -75,15 +81,14 @@ def _claude(environ: dict, now: float) -> list[Account]:
     observed.update({result.account: (now, result) for result in fresh})
     observed.update(_master_snapshot(environ, now))
     counts = account_sessions.sessions_by_account(environ=environ)
-    routed = set(account_sessions.token_accounts(environ).values())
+    routed = _known(environ)
     rows = []
     for at, result in observed.values():
         token = environ.get(f"{balancer.TOKEN_PREFIX}{result.account}")
-        if not token and not counts.get(result.account):
+        listed = result.account in routed
+        if not listed and (token or not counts.get(result.account)):
             continue
-        if token and result.account not in routed:
-            continue
-        cap = tokens.cap(result, now) if token and session_bands.fresh(at, now) else None
+        cap = tokens.cap(result, now) if listed and session_bands.fresh(at, now) else None
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
         five_reset = session_bands.upcoming(result.five_hour.resets_at, now)
@@ -136,7 +141,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     counts = account_sessions.codex_sessions_by_account()
     found = source.readings(pool, environ, now)
     known = {account.name for account in pool}
-    live = codex_router.live_accounts(pool, counts)
+    live = codex_router.routed_live(pool, counts, environ)
     found.update(codex_router.quotas(live, environ))
     rows = []
     for account in pool + live:
@@ -175,7 +180,11 @@ def _global(environ: dict, now: float) -> list[Account]:
         week = session_bands.left(quota["seven_day"]["used"], quota["seven_day"]["resets_at"], now) if quota else None
         cap = None
         if quota and session_bands.fresh(quota["observed_at"], now):
-            cap = session_bands.week_cap(week) if row["harness"] == "codex" else session_bands.cap(five, week)
+            cap = (
+                session_bands.week_cap(week)
+                if row["harness"] == "codex"
+                else session_bands.scaled_cap(five, week, session_bands.hive_ceiling(environ))
+            )
         weight = None
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)
@@ -206,8 +215,10 @@ def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
     rows = (
         _global(environ, now) if aggregate.enabled(environ) else _claude(environ, now) + _codex(environ, now, refresh)
     )
+    store = reservation._store(environ)
     for harness in LABELS:
-        rows = reserve(rows, reservation.current(harness, environ))
+        held = reservation.current(harness, environ)
+        rows = latch(reserve(rows, held), held, store)
     return rows
 
 
@@ -220,6 +231,34 @@ def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:
         else row
         for row in rows
     ]
+
+
+def latch(rows: list[Account], held: "Reservation | None", store: RedisStore | None) -> list[Account]:
+    """Keep the reserved account closed for workers until its week resets."""
+    from redis.exceptions import RedisError
+
+    if held is None or store is None:
+        return rows
+    key = f"{ROOT}:reserved-closed:{held.harness}:{held.slug}"
+    index = next(
+        (i for i, row in enumerate(rows) if (row.harness, row.name) == (held.harness, held.slug) and row.kind != API),
+        None,
+    )
+    if index is None:
+        return rows
+    row = rows[index]
+    try:
+        if row.reserved:
+            if row.week_resets_at:
+                store.redis.set(key, row.reserved, exat=row.week_resets_at)
+            return rows
+        reason = store.redis.get(key)
+    except (RedisError, OSError):
+        return rows
+    if not reason:
+        return rows
+    closed = replace(row, state=quota_state.CLOSED, cap=0, reserved=reason, unreserved_cap=row.cap)
+    return [*rows[:index], closed, *rows[index + 1 :]]
 
 
 def unreserved(rows: list[Account]) -> list[Account]:

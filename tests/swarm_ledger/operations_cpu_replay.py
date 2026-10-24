@@ -89,6 +89,7 @@ def replay(tmp_path, monkeypatch, profiled=False):
         seconds.append(time.thread_time() - start)
         if profiled:
             profiler.disable()
+        getattr(server.repository, "drain", lambda timeout: None)(60)
         persisted = repository.get_document(SLUG)
         frames = server.HUB.wait(SLUG, sequence, 0)
         if frames:

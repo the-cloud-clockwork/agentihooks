@@ -120,7 +120,7 @@ def publish(store: RedisStore, slug: str, status: dict, tails: dict) -> None:
 
 
 def view(store: RedisStore, slug: str) -> dict:
-    from scripts.swarm import lifecycle, quota_refresh, tick_activity
+    from scripts.swarm import lifecycle, quota_refresh, recovery_view, tick_activity
 
     config = store.config(slug)
     data = json.loads(store.redis.get(store.key(slug, "published")) or "{}")
@@ -140,6 +140,7 @@ def view(store: RedisStore, slug: str) -> dict:
         "executions": executions,
         "ledger_state_projection_errors": errors,
         "lifecycle": lifecycle.view(store, slug),
+        "recovery": recovery_view.view(store, slug, now),
     }
 
 

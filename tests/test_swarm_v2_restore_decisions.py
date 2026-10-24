@@ -115,6 +115,39 @@ def test_master_resume_with_compatible_checkpoint_replaces_the_attempt(pending):
     assert result["replacement"] == pending.world.occupant().execution_id
 
 
+@pytest.mark.parametrize(
+    "choice,reason",
+    [
+        ("native", "no complete compatible native checkpoint to resume from"),
+        ("context", "no complete compatible checkpoint to resume from"),
+    ],
+)
+def test_master_native_or_context_without_a_checkpoint_is_refused_and_keeps_waiting(pending, choice, reason):
+    before = pending.world.protected()
+    status, result = post(pending, pending.token, {"agent": "coordinator", "choice": choice})
+    assert (status, result["error_class"], result["message"]) == (409, "recovery_refused", reason)
+    assert pending.recovery.decision(pending.old.execution_id).mode == "recovery_pending"
+    assert pending.world.protected() == before
+
+
+def test_master_context_with_a_checkpoint_replaces_the_attempt(pending):
+    pending.world.checkpoints.by_execution[pending.old.execution_id] = pending.world.fx["first"]["checkpoints"]
+    status, result = post(pending, pending.token, {"agent": "coordinator", "choice": "context"})
+    assert status == 200
+    assert result["mode"] == "context"
+    assert result["checkpoint"]
+    assert result["replacement"] == pending.world.occupant().execution_id
+
+
+def test_a_replayed_context_decision_admits_no_second_replacement(pending):
+    pending.world.checkpoints.by_execution[pending.old.execution_id] = pending.world.fx["first"]["checkpoints"]
+    first = post(pending, pending.token, {"agent": "coordinator", "choice": "context"})
+    occupant = pending.world.occupant()
+    again = post(pending, pending.token, {"agent": "coordinator", "choice": "context"})
+    assert again == first
+    assert pending.world.occupant() == occupant
+
+
 def test_a_master_lists_verified_checkpoints_for_a_recovery(pending):
     entries = pending.world.fx["first"]["checkpoints"]
     pending.world.checkpoints.by_execution[pending.old.execution_id] = entries
@@ -345,7 +378,7 @@ def test_invalid_decision_requests_write_nothing(pending):
             authorization,
             {"agent": "coordinator", "choice": "invalid"},
             400,
-            "a recovery decision is fresh or resume",
+            "a recovery decision is native, context, fresh or resume",
         ),
         (
             "POST",

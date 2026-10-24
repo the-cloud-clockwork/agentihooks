@@ -62,10 +62,10 @@ def pin(slug, name, environ=os.environ):
 
 
 def hive_of(environ=os.environ):
-    if environ.get("AGENTIHOOKS_DEPLOYMENT", "local") == "local":
+    if ledger_link.local_mode(environ):
         return ""
     if not environ.get("AGENTIHOOKS_HIVE_ID"):
-        raise SwarmError("take-master on a remote host needs AGENTIHOOKS_HIVE_ID from agentihooks hive join")
+        raise SwarmError("take-master on a remote host needs AGENTIHOOKS_HIVE_ID from agentihooks hive add")
     return environ["AGENTIHOOKS_HIVE_ID"]
 
 

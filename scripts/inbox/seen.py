@@ -9,6 +9,7 @@ from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, now_ms, owner_key, pr
 from scripts.swarm.naming import NameRegistry
 
 TTL_S = 30 * 24 * 3600
+CLAIM_BATCH = 5
 SEEN_ON_LEDGER = "already shown through the ledger"
 UNSETTLED = "returned to pending: its seen mark kept changing"
 
@@ -51,6 +52,16 @@ class SeenMarks:
     def seen(self, name, ref):
         return bool(self.redis.sismember(self.key(NameRegistry(self.redis).resolve(name)), ref))
 
+    def seen_many(self, pairs: list[tuple[str, str]]) -> set[tuple[str, str]]:
+        if not pairs:
+            return set()
+        resolved = NameRegistry(self.redis).resolve_many(list(dict.fromkeys(name for name, _ in pairs)))
+        with self.redis.pipeline(transaction=False) as pipe:
+            for name, ref in pairs:
+                pipe.sismember(self.key(resolved[name]), ref)
+            rows = pipe.execute()
+        return {pair for pair, shown in zip(pairs, rows) if shown}
+
 
 def marks_for(slug, environ=None):
     """The marks store for a session working this swarm ledger, None for any other session or without Redis."""
@@ -75,12 +86,12 @@ def first_showing(marks, name, slug, events):
         return list(events)
 
 
-def claim(store, me):
-    """Deliver at most five oldest pending items across me, my seat and aliases; close ledger writes already shown."""
+def claim(store, me, limit=CLAIM_BATCH):
+    """Deliver at most limit oldest pending items across me, my seat and aliases; close ledger writes already shown."""
     store.redeliver(now_ms(), redelivery_ms())
     marks = SeenMarks(store.redis)
     shown = []
-    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me)[:5])):
+    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me)[:limit])):
         try:
             elsewhere = item.ref and _shown_elsewhere(marks, store, item, me)
         except InboxError:

@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -548,6 +549,37 @@ def test_shard_count_fills_each_shard_to_its_target_and_stays_within_the_limit(s
     assert plan.shard_count(seconds, mutants, 240, 10) == expected
 
 
+@pytest.mark.parametrize(("quota", "workers"), [("3", 3), ("4", 4)])
+def test_shards_are_sized_by_the_workers_the_batch_runner_quota_starts(tmp_path, monkeypatch, quota, workers):
+    from scripts.ci_mutation.measured import plan_shards
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", quota)
+    assert plan.shard_count(workers * 240 * 4, 500, 240, 10) == 4
+    tests = _timed_tests(tmp_path, {name: 10 for name in "abcdefghijkl"})
+    assert plan.slowest_bucket(tmp_path, tests, 1) == pytest.approx(120 / workers, abs=0.1)
+    assert plan_shards({"scripts.sample.x__mutmut_1": 1.0})["workers"] == workers
+
+
+def test_every_mutation_planning_step_reads_the_batch_runner_cpu_quota():
+    import yaml
+
+    planners = (
+        "scripts.ci_mutation.plan ",
+        "scripts.ci_mutation.measured ",
+        "scripts.ci_mutation.replay prepare",
+        "python .refinement-proof/run.py",
+    )
+    steps = {
+        f"{path.name}/{name}/{index}": step
+        for path in sorted((Path(__file__).parents[1] / ".github/workflows").glob("*.yml"))
+        for name, job in (yaml.safe_load(path.read_text())["jobs"] or {}).items()
+        for index, step in enumerate(job.get("steps", []))
+        if any(planner in step.get("run", "") for planner in planners)
+    }
+    assert len(steps) >= 6
+    assert [key for key, step in steps.items() if step.get("env", {}).get("MUTATION_SHARD_CPU_QUOTA") != "3"] == []
+
+
 def _timed_tests(tmp_path, seconds, marks=None):
     (tmp_path / "tests").mkdir(exist_ok=True)
     for name in seconds:
@@ -576,6 +608,21 @@ def test_stats_parts_split_a_shared_group_across_parts_but_never_inside_one(tmp_
     assert plan.slowest_bucket(tmp_path, tests, 1) == pytest.approx(80, abs=0.1)
     assert plan.stats_part_count(tmp_path, tests, 21, 10) == (4, pytest.approx(20, abs=0.1))
     assert plan.stats_part_count(tmp_path, [], 20, 10) == (1, 0)
+
+
+def test_stats_parts_read_the_stored_durations_once(tmp_path, monkeypatch):
+    tests = _timed_tests(tmp_path, {name: 20 for name in "abcdefgh"})
+    reads = []
+    read_text = Path.read_text
+
+    def counted(self, *args, **kwargs):
+        if self.name == ".test_durations":
+            reads.append(self)
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counted)
+    assert plan.stats_part_count(tmp_path, tests, 21, 10) == (2, pytest.approx(20, abs=0.1))
+    assert len(reads) == 1
 
 
 def _project(tmp_path, durations):

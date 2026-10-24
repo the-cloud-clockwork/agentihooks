@@ -53,6 +53,66 @@ def test_three_attempts_preserve_logical_identity(store, agent, repeat):
     assert store.execution_identity_conflicts_total("fixture") == 0
 
 
+def test_agent_reads_transfer_only_the_latest_visible_attempt(store, agent, monkeypatch):
+    first = store.start_execution("fixture", agent)
+    second = store.start_execution("fixture", agent, first.execution_id)
+    third = store.start_execution("fixture", agent, second.execution_id)
+    received = []
+    pipeline = store.redis.pipeline
+
+    def traced_pipeline(*args, **kwargs):
+        pipe = pipeline(*args, **kwargs)
+        execute = pipe.execute
+
+        def traced_execute(*args, **kwargs):
+            replies = execute(*args, **kwargs)
+            received.extend(replies[1])
+            return replies
+
+        monkeypatch.setattr(pipe, "execute", traced_execute)
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", traced_pipeline)
+    assert store.agents("fixture") == [third]
+    assert len(received) == 1
+    assert json.loads(received[0])["execution_id"] == third.execution_id
+
+
+def test_agent_reads_decode_only_attempts_of_current_agents(store, agent):
+    current = store.start_execution("fixture", agent)
+    key = store.key("fixture", "executions")
+    row = json.loads(store.redis.hget(key, current.execution_id))
+    reordered = {"generation": 2, **{k: v for k, v in row.items() if k != "generation"}, "execution_id": "exe-later"}
+    store.redis.hset(key, "exe-later", json.dumps(reordered))
+    store.redis.hset(key, "exe-retired", '{"name": "retired", "generation": ')
+
+    assert store.agents("fixture") == [replace(current, execution_id="exe-later", generation=2)]
+
+
+@pytest.mark.parametrize("query", ["occupants", "managed"])
+def test_identity_queries_do_not_download_past_attempts(store, agent, monkeypatch, query):
+    first = store.start_execution("fixture", agent)
+    second = store.start_execution("fixture", agent, first.execution_id)
+    third = store.start_execution("fixture", agent, second.execution_id)
+    received = []
+    execute = store.redis.execute_command
+
+    def traced_execute(*args, **kwargs):
+        reply = execute(*args, **kwargs)
+        if isinstance(reply, list):
+            received.extend(reply)
+        return reply
+
+    monkeypatch.setattr(store.redis, "execute_command", traced_execute)
+    if query == "occupants":
+        assert store.execution_registry.occupants("fixture") == {agent.seat: third}
+        assert len(received) == 1
+    else:
+        assert store.execution_registry.managed("fixture", agent.name) is True
+        assert store.execution_registry.managed("fixture", "missing") is False
+        assert received == []
+
+
 def protected(store):
     return {key: store.redis.dump(key) for key in store.redis.scan_iter() if not key.endswith("identity-conflicts")}
 
@@ -121,7 +181,7 @@ def test_restart_replay_snapshot_and_rollback(store, agent, repeat):
         k: v for k, v in asdict(agent).items() if k in preceding_fields
     }
     restored.drop_agent("fixture", third.name)
-    assert restored.executions("fixture", agent.seat) == [first, second, third]
+    assert restored.executions("fixture", agent.seat) == [first, second, replace(third, state="ended")]
 
 
 def test_legacy_local_records_remain_readable(store, agent):

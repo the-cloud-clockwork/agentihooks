@@ -25,8 +25,8 @@ def _step(job, name):
 
 
 def _job(name):
-    [job] = _load(name)["jobs"].values()
-    return job
+    jobs = _load(name)["jobs"]
+    return jobs.get("image") or jobs["publish"]
 
 
 def test_promotion_creates_the_release_with_the_app_token_so_its_event_starts_workflows():

@@ -36,6 +36,8 @@ CONFTEST = "conftest.py"
 # Only the full suite ran these checks, so a new or edited test module could pass its own tier and fail the queue.
 SUITE_SPEED = "tests/test_suite_speed.py"
 FAKEREDIS = "fakeredis"
+# Only the queue ran these whole tree checks, so a pull request adding, removing or moving a file passed its own tier.
+TREE_CHECKS = (f"{TESTS}/test_codeowners.py", f"{TESTS}/test_ci_pull_request_api.py")
 # Stored test seconds one leg runs inside the unit step timeout; a full shard holds about 157 and runs in 217.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
@@ -67,8 +69,18 @@ def naming_tests(root: Path, needles: set[str]) -> set[str]:
     return found
 
 
-def selected_tests(root: Path, changed: list[str]) -> set[str]:
+def reshaped(root: Path, base: str, head: str) -> bool:
+    command = ["git", "diff", "--quiet", "--no-renames", "--diff-filter=AD", f"{base}...{head}"]
+    result = subprocess.run(command, cwd=root)
+    if result.returncode not in (0, 1):
+        raise subprocess.CalledProcessError(result.returncode, command)
+    return result.returncode == 1
+
+
+def selected_tests(root: Path, changed: list[str], tree_reshaped: bool) -> set[str]:
     tests = {path for path in changed if is_test(path)}
+    if tree_reshaped:
+        tests.update(TREE_CHECKS)
     needles = set()
     for path in changed:
         needles.add(path)
@@ -120,10 +132,12 @@ def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: in
     return [sorted(leg) for leg in legs if leg]
 
 
-def decide(root: Path, changed: list[str], durations: dict[str, float], limit: int) -> tuple[str, list[list[str]]]:
+def decide(
+    root: Path, changed: list[str], durations: dict[str, float], limit: int, tree_reshaped: bool = False
+) -> tuple[str, list[list[str]]]:
     if needs_full_suite(changed):
         return FULL, []
-    tests = selected_tests(root, changed)
+    tests = selected_tests(root, changed, tree_reshaped)
     if not tests:
         return (NONE if all(is_doc(path) for path in changed) else FULL), []
     legs = legs_for(root, tests, durations, limit)
@@ -144,7 +158,8 @@ def main(argv: list[str] | None = None) -> int:
         durations = {}
         for path in args.durations or [args.root / DURATIONS]:
             durations.update(json.loads(path.read_text()))
-        scope, legs = decide(args.root, changed_files(args.root, args.base, args.head), durations, args.legs)
+        changed = changed_files(args.root, args.base, args.head)
+        scope, legs = decide(args.root, changed, durations, args.legs, reshaped(args.root, args.base, args.head))
     outputs = {"scope": scope, "legs": json.dumps(list(range(1, len(legs) + 1))), "count": str(len(legs))}
     outputs.update({f"files_{index}": " ".join(leg) for index, leg in enumerate(legs, 1)})
     for key, value in outputs.items():

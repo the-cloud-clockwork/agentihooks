@@ -2,14 +2,14 @@ import json
 import subprocess
 from collections.abc import Callable
 
-from scripts.swarm import ledger_events, staged_compatibility
+from scripts.swarm import ledger_events, mutation_wait, staged_compatibility
 from scripts.swarm.store import SwarmError
 
 FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
     repository { nameWithOwner }
     baseRefName baseRef { branchProtectionRule { requiredStatusCheckContexts requiredStatusChecks { context app { databaseId } } } }
 } } }"""
-FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } } body'
+FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft mergeable reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } } body'
 STATE = "query($url: URI!) { resource(url: $url) { ... on PullRequest { " + FIELDS + " } } }"
 QUEUE = """mutation($id: ID!, $head: GitObjectID!) {
     enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } }
@@ -47,10 +47,14 @@ def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
 
 
 def rest(path: str, run) -> dict | list | str:
+    if mutation_wait.backing_off():
+        raise SwarmError(f"GitHub API rate limit backoff holds {path}")
     command = ["gh", "api", path]
     try:
         done = run(command, capture_output=True, text=True, timeout=20)
         if done.returncode:
+            if mutation_wait.rate_limited(done.stderr):
+                mutation_wait.hold(path)
             raise SwarmError(done.stderr.strip() or "GitHub API failed")
         return done.stdout if path.endswith("/logs") else json.loads(done.stdout)
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
@@ -159,15 +163,26 @@ def waiting_ahead(url: str, target: str, run) -> list[dict]:
         variables["after"] = page["pageInfo"]["endCursor"]
 
 
-def prioritize(url: str, run=subprocess.run, journal=None) -> dict:
+class Untracked:
+    def add(self, pull: dict) -> None:
+        pass
+
+    def discard(self, url: str) -> None:
+        pass
+
+
+def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=None) -> dict:
+    displaced = displaced or Untracked()
     raw = graphql(STATE, {"url": url}, run)["resource"]
     if not raw or raw["baseRefName"] != "dev" or raw["state"] != "OPEN":
         raise SwarmError("queue priority requires an open pull request into dev")
+    if raw.get("isDraft"):
+        raise SwarmError("queue priority requires a ready pull request")
     if raw["repository"]["mergeQueue"] is None:
         raise SwarmError("queue priority requires a dev merge queue")
     staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
     require_green(url, raw["headRefOid"], run)
-    waiting = waiting_ahead(url, raw["id"], run)
+    waiting = [pull for pull in waiting_ahead(url, raw["id"], run) if pull["url"] not in ahead]
     before = journal.groups() if journal is not None else None
     errors = []
     steps = []
@@ -179,6 +194,7 @@ def prioritize(url: str, run=subprocess.run, journal=None) -> dict:
                 if current["mergeQueueEntry"] is not None and current["mergeQueueEntry"]["state"] == "QUEUED":
                     removed.append(pull)
                     steps.append(["dequeue", pull["url"]])
+                    displaced.add(pull)
                     graphql(DEQUEUE, {"id": pull["id"]}, run)
             current = graphql(STATE, {"url": url}, run)["resource"]
             if current["mergeQueueEntry"] is None:
@@ -195,6 +211,7 @@ def prioritize(url: str, run=subprocess.run, journal=None) -> dict:
                     steps.append(["restore", pull["url"]])
                     graphql(QUEUE, {"id": pull["id"], "head": pull["headRefOid"]}, run)
                     restored.append(pull["url"])
+                displaced.discard(pull["url"])
             except SwarmError as exc:
                 errors.append(f"could not restore {pull['url']}: {exc}")
         return {"url": url, "displaced": restored, "errors": errors}
