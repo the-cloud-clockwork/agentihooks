@@ -25,6 +25,11 @@ def validate(kind: str, doc: object) -> object:
     if error is not None:
         where = "/".join(str(part) for part in error.absolute_path) or "document"
         raise SchemaError(f"{kind} {where}: {error.message}")
+    if kind == "evidence":
+        ids = [item["id"] for item in doc["items"]]
+        duplicates = sorted({key for key in ids if ids.count(key) > 1})
+        if duplicates:
+            raise SchemaError(f"evidence items: duplicate id {', '.join(duplicates)}")
     return doc
 
 

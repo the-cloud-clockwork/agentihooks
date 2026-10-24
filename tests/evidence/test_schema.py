@@ -59,6 +59,16 @@ def test_refusal_names_the_document_when_the_error_has_no_path():
             "evidence items/0: Additional properties are not allowed ('model' was unexpected)",
         ),
         ("evidence", {"items": [ITEM, ITEM]}, f"evidence items: {[ITEM, ITEM]} has non-unique elements"),
+        (
+            "evidence",
+            {"items": [ITEM, {**ITEM, "claim": "other"}, {**ITEM, "id": "e0"}, {**ITEM, "id": "e0", "claim": "x"}]},
+            "evidence items: duplicate id e0, e1",
+        ),
+        (
+            "evidence",
+            {"items": [{**ITEM, "source": "see the run logs"}]},
+            "evidence items/0/source: 'see the run logs' does not match '^(https?://\\\\S+|[A-Za-z0-9_.][A-Za-z0-9_./-]*)$'",
+        ),
     ],
 )
 def test_validate_refuses_schema_errors(kind, doc, message):
