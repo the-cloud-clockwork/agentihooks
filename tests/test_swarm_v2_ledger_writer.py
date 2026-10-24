@@ -384,7 +384,7 @@ def test_the_server_holds_the_lease_while_it_serves_and_releases_it_after(servin
 def test_a_server_on_the_shared_database_serves_beside_a_held_folder(serving, lease, monkeypatch):
     monkeypatch.setenv(server.storage.postgres.URL, "postgresql://ledger.invalid/swarm")
     server.serve()
-    server.ThreadingHTTPServer.return_value.serve_forever.assert_called_once_with()
+    server.ThreadingHTTPServer.return_value.serve_forever.assert_called_once_with(server.POLL_S)
     assert ledger_writer.holder(serving)["pid"] == CLAIMANT["pid"]
     assert ledger_writer.conflicts_total(serving) == 0
 
