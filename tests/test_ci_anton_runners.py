@@ -41,6 +41,7 @@ MOVED = {
     ("codex-cache.yml", "seed"): STANDARD,
     ("coverage-stability.yml", "compare"): BATCH,
     ("equivalence.yml", "ledger-equivalence"): STANDARD,
+    ("equivalence.yml", "trigger"): LIGHT,
     ("helm-kind.yml", "kind"): QUEUED,
     ("hierarchy-cpu.yml", "grade"): LIGHT,
     ("hierarchy-cpu.yml", "hierarchy"): BATCH,
