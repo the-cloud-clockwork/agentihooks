@@ -1,12 +1,12 @@
 const WALKS = ["#outline a[data-target]", "#tasks .item-title > a.task-id"];
-const STEPS = { ArrowDown: 1, ArrowUp: -1, j: 1, k: -1 };
+const WALK_KEYS = { ArrowDown: 1, ArrowUp: -1, j: 1, k: -1 };
 
 function typing(el) {
   return !!el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
 }
 
 export function walkKeys(ev) {
-  const step = STEPS[ev.key];
+  const step = WALK_KEYS[ev.key];
   if (!step || ev.defaultPrevented || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey || typing(ev.target)) return;
   const at = document.activeElement;
   const walk = WALKS.find((selector) => at && at.matches(selector));
