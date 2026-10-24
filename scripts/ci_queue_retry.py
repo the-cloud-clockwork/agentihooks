@@ -16,6 +16,7 @@ RUNNER_LOSS = re.compile(
     r"|The job was not acquired by Runner"
     r"|" + re.escape(UNREADABLE_LOG)
 )
+STEP_EXITED = re.compile(r"Process completed with exit code (?:[1-9]|[1-9]\d|1[01]\d|12[0-7])\.")
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
 EXIT_POLLS = 60
 EXIT_POLL_SECONDS = 30
@@ -73,7 +74,8 @@ def job_text(repo: str, job_id: int, log: bool) -> str:
         try:
             notes += log_errors(repo, job_id)
         except subprocess.CalledProcessError:
-            notes.append(UNREADABLE_LOG)
+            if not any(STEP_EXITED.search(note) for note in notes):
+                notes.append(UNREADABLE_LOG)
     return "\n".join(notes)
 
 

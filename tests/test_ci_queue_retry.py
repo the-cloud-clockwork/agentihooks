@@ -232,6 +232,25 @@ def test_an_unreadable_shard_log_is_a_runner_loss(monkeypatch):
     assert ci_queue_retry.decide(run, failed, WORKFLOW) == (True, "runner lost on unit (3.12, 13)")
 
 
+def test_an_unreadable_log_beside_a_step_exit_is_not_a_runner_loss(monkeypatch):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.12, 4)", "conclusion": "failure"}]}
+    exited = json.dumps([{"message": "Process completed with exit code 1."}])
+    pages = {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": exited,
+    }
+
+    def api(path, *flags):
+        if path not in pages:
+            raise subprocess.CalledProcessError(1, ["gh", "api", path])
+        return pages[path]
+
+    monkeypatch.setattr(ci_queue_retry, "_api", api)
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert failed == [{"name": "unit (3.12, 4)", "text": "Process completed with exit code 1."}]
+    assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
+
+
 def cancelled_run_pages(lost_log):
     jobs = {
         "total_count": 4,
