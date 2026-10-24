@@ -307,7 +307,7 @@ class LandingBays(unittest.TestCase):
         self.assertEqual(resolve("--surface-1"), "transparent")
         self.assertEqual(resolve("--surface-2"), "#1b2636")
 
-    def test_only_home_falls_outside_the_bay_scope(self):
+    def test_the_static_ledger_and_home_shells_carry_no_main_class(self):
         mains = {
             "ledger": re.search(r"<main([^>]*)>", page_source()).group(1),
             "home": re.search(r"<main([^>]*)>", server.index_page()).group(1),
