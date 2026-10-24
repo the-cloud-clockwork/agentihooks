@@ -264,6 +264,7 @@ def test_a_server_that_never_listens_names_its_stderr(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(ledger_load, "ledger_server", SimpleNamespace(__file__=str(script)))
     monkeypatch.setattr(ledger_load, "SERVER_WAIT_S", 2.0)
+    monkeypatch.setattr(ledger_load, "RELAYS", {})
     with (tmp_path / "server.log").open("w") as log, pytest.raises(SystemExit) as exited:
         ledger_load.start_server(tmp_path, ledger_load.free_port(), log)
     assert "did not listen on port" in str(exited.value)

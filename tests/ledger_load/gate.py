@@ -48,7 +48,6 @@ RSS_GROWTH_KIB = 65_536
 MIN_WRITES = 0.9
 SERVER_WAIT_S = 60.0
 STDERR_TAIL_LINES = 200
-RELAY_JOIN_S = 5.0
 ALERT_QUIET_MS = 3_600_000
 WRITE_BREACH = "write p95"
 BUDGETS = {
@@ -267,7 +266,7 @@ def start_server(folder: Path, port: int, log: TextIO) -> subprocess.Popen:
 
 
 def startup_failure(server: subprocess.Popen, startup_stderr: collections.deque[bytes], outcome: str) -> str:
-    RELAYS.pop(server.pid).join(timeout=RELAY_JOIN_S)
+    RELAYS.pop(server.pid).join()
     return f"ledger server {outcome}; its stderr:\n" + b"".join(startup_stderr).decode(errors="replace")
 
 
@@ -290,7 +289,7 @@ def stop_server(server: subprocess.Popen) -> None:
         server.kill()
         server.wait()
     if relay := RELAYS.pop(server.pid, None):
-        relay.join(timeout=RELAY_JOIN_S)
+        relay.join()
 
 
 def client(api: ResourceClient, name: str, item: str, start: float, deadline: float, results: dict) -> None:
