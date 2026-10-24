@@ -106,15 +106,15 @@ def test_copied_package_build_accepts_tag_derived_metadata(tmp_path, monkeypatch
     (source / ".coverage").symlink_to(source / "removed-coverage")
     (source / ".coverage.worker").symlink_to(source / "removed-worker-coverage")
     (source / ".coveragerc").write_text("[run]\nbranch = True\n")
+    (source / "tests").mkdir()
+    (source / "tests" / "durations.json").symlink_to(source / "removed-durations")
     monkeypatch.setattr(sys.modules[__name__], "REPO", source)
 
     wheel = _tagged_wheel(tmp_path / "build")
 
     assert wheel.name == f"agentihooks-{WHEEL_VERSION}-py3-none-any.whl"
     copied = tmp_path / "build" / "src"
-    assert not (copied / ".coverage").exists()
-    assert not (copied / ".coverage.worker").exists()
-    assert (copied / ".coveragerc").read_bytes() == (source / ".coveragerc").read_bytes()
+    assert sorted(path.name for path in copied.iterdir()) == ["hooks", "pyproject.toml"]
 
 
 def test_version_is_unknown_without_package_metadata(monkeypatch):
