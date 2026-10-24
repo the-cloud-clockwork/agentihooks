@@ -4633,6 +4633,7 @@ which changes the handoff detector. The timer step's maximum is still set by `do
 | Setting | Default | Effect |
 |---|---|---|
 | `AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES` | `10` | Minutes between detection passes. Steps between passes skip the detectors. |
+| `AGENTIHOOKS_DOCTOR_SPEED_MINUTES` | `5` | Minutes between CI speed reads, which spend Actions REST calls. Ticks between reads skip it; the next read covers the gap. |
 
 The batch size of 1,000 and the detector list are fixed in code.
 
