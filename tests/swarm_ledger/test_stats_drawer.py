@@ -101,3 +101,12 @@ def test_the_drawer_closes_and_its_arrow_hides_on_a_wide_screen(tab):
     assert tab.locator("#stats-toggle").is_hidden()
     assert tab.locator("#stats-column").evaluate("el => getComputedStyle(el).position") != "fixed"
     assert not tab.evaluate(SWIPE, [1400, 1200, 0])
+
+
+def test_the_chat_send_button_sends_the_typed_message(tab):
+    tab.locator("#chat-fab").click()
+    box = tab.locator("#chat-input")
+    box.fill("hello from a phone")
+    tab.locator("#chat-send").evaluate("el => el.click()")
+    assert box.input_value() == ""
+    assert tab.locator("#chat-send").get_attribute("type") == "button"

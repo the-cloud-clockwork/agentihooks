@@ -217,7 +217,7 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 ### Inputs / Fields
 - **Inset:** `--surface-2` well, 6px radius, no border. Focus draws an accent inset underline.
 - **Line:** transparent with an edge underline that turns accent on focus.
-- **Checkbox:** 16px, 4px radius, surface-2; checked fills positive green with an ink tick.
+- **Checkbox:** 16px (24px on touch screens), 4px radius, surface-2; checked fills positive green with an ink tick.
 
 ### Panels / Sections
 - **Corner Style:** 6px.
