@@ -389,7 +389,7 @@ def test_the_controller_grants_render_the_controller_claims():
     assert claims["type"] == "user"
     assert grants.controller_grants(str(ROOT)) == {
         "publish": {"allow": frozenset(nats_grant.CONTROLLER_PUBLISH), "deny": frozenset()},
-        "subscribe": {"allow": frozenset({"_INBOX.>", "swarm.*.slots"}), "deny": frozenset()},
+        "subscribe": {"allow": frozenset({"_INBOX.>", "swarm.*.slots", "slots.*.*"}), "deny": frozenset()},
     }
 
 
@@ -433,11 +433,10 @@ def test_the_controller_grant_keeps_legacy_event_routing_and_swarm_discovery():
 
 
 def test_the_controller_grant_serves_hub_slot_requests():
-    from scripts.events.subjects import PREFIX
-    from scripts.hive import account_slots
+    from scripts.events.subjects import SLOTS
 
     claims = nats_grant.controller_claims()
-    assert f"{PREFIX}.*.{account_slots.SLOTS}" in claims["sub"]["allow"]
+    assert f"{SLOTS}.*.*" in claims["sub"]["allow"]
     assert "_INBOX.>" in claims["pub"]["allow"]
 
 
