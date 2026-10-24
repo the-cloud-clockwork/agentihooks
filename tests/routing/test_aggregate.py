@@ -108,7 +108,8 @@ def test_local_backend_counts_other_hives_and_unreported_launches_like_the_reser
     monkeypatch.delenv("AGENTIHOOKS_RUNTIME_BACKEND", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
     monkeypatch.setenv("SWARM_HIVE_ID", "own")
-    monkeypatch.setattr("hooks._redis.get_redis", lambda: redis)
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: None)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda environ=None: redis)
     monkeypatch.setattr(account_sessions, "handed_off_pids", set)
     monkeypatch.setattr(account_sessions, "live_sessions", lambda proc, skip, environ=None: {11: "one"})
     monkeypatch.setattr(account_sessions, "_codex_processes", lambda proc: ({}, {}))
@@ -128,6 +129,23 @@ def test_local_backend_counts_other_hives_and_unreported_launches_like_the_reser
     (row,) = capacity._claude({"AH_CC_TOKEN_one": "fake"}, time.time())
     assert row.sessions == 10
     assert slots.reserve("claude:one", "next", 11, 1000)
+
+
+@pytest.mark.parametrize("connected", [False, True])
+def test_hive_held_tolerates_swarm_redis_failure(monkeypatch, connected):
+    from redis.exceptions import ConnectionError
+
+    from hooks.context.account_sessions import hive_held
+
+    def unavailable(*args):
+        raise ConnectionError("unavailable")
+
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: object())
+    monkeypatch.setattr("scripts.routing.aggregate.elsewhere", unavailable)
+    if not connected:
+        monkeypatch.setattr("scripts.swarm.store.redis_client", unavailable)
+
+    assert hive_held("claude") == {}
 
 
 def test_aggregate_includes_reservations_once_and_exit_releases(redis, monkeypatch):

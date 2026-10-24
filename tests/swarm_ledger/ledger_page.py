@@ -39,6 +39,7 @@ ORDER += (
     "roles",
     "agent_cells",
     "swarm",
+    "recovery",
     "hives",
     "architecture",
     "controls",
