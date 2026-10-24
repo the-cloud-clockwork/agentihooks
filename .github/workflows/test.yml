@@ -835,7 +835,7 @@ jobs:
           cmp -s "$RUNNER_TEMP/base/tests/count_floor.py" tests/count_floor.py || exit 0
           git worktree add --detach "$RUNNER_TEMP/head" HEAD
           mkdir -p "$RUNNER_TEMP/count-record"
-          cd "$RUNNER_TEMP/head"
+          cd "$RUNNER_TEMP/base"
           python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json" --head "$RUNNER_TEMP/head" --collected "$RUNNER_TEMP/collected.json"
 
       - name: Upload the head count for the next queue group
