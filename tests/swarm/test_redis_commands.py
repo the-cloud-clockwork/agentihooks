@@ -57,7 +57,7 @@ LEASE = """
 EXTEND = "return redis.call('PEXPIRE', KEYS[1], ARGV[1])"
 
 
-def acquire(redis):
+def acquire(redis: "Redis"):
     redis.incr("lease")
     redis.execute_command("XINFO", "STREAM", "lease")
     sub = redis.pubsub()
@@ -257,8 +257,10 @@ CYCLE = {
     "scripts/__init__.py": "",
     "scripts/a.py": "from scripts.b import f\n",
     "scripts/b.py": "from scripts.a import f\n",
-    "scripts/e.py": "def go(redis):\n    redis.llen('k')\n",
+    "scripts/e.py": "def go(redis: 'Redis'):\n    redis.llen('k')\n",
     "scripts/c.py": """
+from redis import Redis
+
 from scripts.a import f
 
 
@@ -268,7 +270,7 @@ def main():
     f()
     scripts.e.go()
     client().hgetall("k")
-    factory().thing.hkeys("k")
+    client().pipeline().hkeys("k")
     bound(None)
 
 
@@ -277,7 +279,7 @@ def bound(self):
 
 
 def client():
-    return None
+    return Redis()
 """,
 }
 
@@ -301,12 +303,42 @@ def test_a_lock_taken_on_a_client_issues_the_commands_the_lock_sends(tmp_path):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts/__init__.py").write_text("")
     (tmp_path / "scripts/guard.py").write_text(
-        "def hold(redis):\n    redis.incr('k')\n    with redis.lock('guard', timeout=1):\n        pass\n"
+        "def hold(redis: 'Redis'):\n    redis.incr('k')\n    with redis.lock('guard', timeout=1):\n        pass\n"
     )
     program = code_reach.Program(code_reach.parse(tmp_path))
     issued = program.commands(program.reach(("scripts.guard:hold",)))
     assert {"INCRBY", "SET", "EVALSHA", "SCRIPT LOAD", "GET", "DEL", "PEXPIRE"} <= set(issued)
     assert issued["EVALSHA"] == {"scripts.guard:hold"}
+
+
+SHELF = """
+from redis import Redis
+
+
+def fill():
+    items = []
+    items.append("k")
+    client = Redis.from_url("redis://")
+    client.zadd("k", {"m": 1})
+    client.pipeline().sadd("s", "m").lpush("l", "v").execute()
+
+
+def drain(items, sadd):
+    items.zrem("k", "m")
+    sadd.ltrim("l", 0, 1)
+"""
+
+
+def test_a_list_append_is_not_a_redis_command_while_a_constructed_client_call_still_is(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/__init__.py").write_text("")
+    (tmp_path / "scripts/shelf.py").write_text(SHELF)
+    program = code_reach.Program(code_reach.parse(tmp_path))
+    sender = {"scripts.shelf:fill"}
+    assert program.commands(program.reach(("scripts.shelf:fill",))) == dict.fromkeys(
+        ("ZADD", "SADD", "LPUSH", "MULTI", "EXEC"), sender
+    )
+    assert program.commands(program.reach(("scripts.shelf:drain",))) == {}
 
 
 def test_an_entry_point_missing_from_the_code_is_refused(program):
@@ -344,8 +376,19 @@ def test_the_map_lists_each_consumer_role_commands_senders_and_keys(monkeypatch,
     }
 
 
-def test_every_consumer_reaches_redis(published):
-    assert all(consumer["commands"] for consumer in published.values())
+def test_every_consumer_but_the_worker_reaches_redis(published):
+    assert all(consumer["commands"] for name, consumer in published.items() if name != "worker")
+
+
+def test_the_published_map_drops_calls_on_receivers_that_hold_no_redis_client(published):
+    senders = {unit for consumer in published.values() for units in consumer["commands"].values() for unit in units}
+    false = (
+        "scripts.swarm_v2.checkpoints.native:",
+        "scripts.swarm_v2.herdr.endpoints:",
+        "scripts.claude_quota_balancer:",
+    )
+    assert not {unit for unit in senders if unit.startswith(false)}
+    assert published["worker"]["commands"] == {}
 
 
 def test_the_tick_reads_the_swarm_index_before_ticking_each_swarm(published):
