@@ -10,5 +10,7 @@
     "tests/fixtures/swarm_v2/ingest-batches.json": "b753db254a09046f47a578915d99de5dccbe5ce94a5826a801bb0d3838bba485"
   },
   "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40101811640",
-  "tested_commit": "pending"
+  "tested_commit": "deaf77532",
+  "records_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40101947186",
+  "records_note": "each record was printed by the committed evidence assertion failing on absent records in the records run; that run is not cited as green"
 }

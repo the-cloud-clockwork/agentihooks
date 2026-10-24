@@ -1,0 +1,87 @@
+{
+  "case": "T-SV2-SES-04-B",
+  "evidence_class": "mocked: an in-process caller and a SQLite catalog file stand in for the collector, the network and the central database; no HTTP server, Pod or hive collector runs",
+  "input_sha256": {
+    "ingest-batches.json": "b753db254a09046f47a578915d99de5dccbe5ce94a5826a801bb0d3838bba485"
+  },
+  "observed": {
+    "corrected_request": {
+      "accepted": {
+        "event_ids": [
+          "d505e906f67fcf6de3fda0ccef380196ec205a4eb98dcd36c5f6d56dc347e291"
+        ],
+        "first_sequence": 4,
+        "last_sequence": 4
+      },
+      "batch_id": "next-4",
+      "duplicates": [],
+      "durable_through": 4,
+      "indexed": false,
+      "rejected": [],
+      "source_generation": "device-1:inode-7:anchor-0",
+      "state": "committed"
+    },
+    "metrics": {
+      "access_domain": "swarm-fixture",
+      "ingest_duplicate_events_total": 0
+    },
+    "mixed_scope": {
+      "error": {
+        "class": "forbidden_scope",
+        "detail": "events [1] are outside the grant; the batch was not committed",
+        "retry": "never"
+      },
+      "operation_id": "ingest:549c0e5f4e9cb7e4",
+      "schema_version": "2.0",
+      "state": "rejected"
+    },
+    "mixed_scope_retried": {
+      "error": {
+        "class": "forbidden_scope",
+        "detail": "events [1] are outside the grant; the batch was not committed",
+        "retry": "never"
+      },
+      "operation_id": "ingest:549c0e5f4e9cb7e4",
+      "schema_version": "2.0",
+      "state": "rejected"
+    },
+    "other_corpus": {
+      "error": {
+        "class": "forbidden_scope",
+        "detail": "the grant does not cover the requested corpus",
+        "retry": "never"
+      },
+      "operation_id": "ingest:1130c2d2bf0859ac",
+      "schema_version": "2.0",
+      "state": "rejected"
+    },
+    "protected_state_unchanged": true,
+    "reused_batch_id": {
+      "error": {
+        "class": "revision_conflict",
+        "detail": "this batch_id was committed with different content",
+        "retry": "never"
+      },
+      "operation_id": "ingest:7ef99946fa96fa26",
+      "schema_version": "2.0",
+      "state": "rejected"
+    },
+    "rewritten_event": {
+      "error": {
+        "class": "revision_conflict",
+        "detail": "an event at this sequence was committed with different content",
+        "retry": "never"
+      },
+      "operation_id": "ingest:518934792f4bbb22",
+      "schema_version": "2.0",
+      "state": "rejected"
+    },
+    "stored_sequences": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "state": "passed"
+}

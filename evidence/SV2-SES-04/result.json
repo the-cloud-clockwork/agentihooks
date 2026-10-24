@@ -4,7 +4,7 @@
   "integration_gate": "G4",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/6731",
   "pull_request": "pending",
-  "tested_commit": "pending",
+  "tested_commit": "deaf77532",
   "package_complete": false,
   "evidence_class": "mocked: an in-process caller and a SQLite catalog file stand in for the collector, the network and the central database; no HTTP server, Pod or hive collector runs",
   "interfaces": [
