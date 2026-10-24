@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 import yaml
+from scripts.workflows import cli, loader, schema
 
 from scripts import cli_delegates
-from scripts.workflows import cli, loader, schema
 
 TEXT = (
     "workflow:\n"

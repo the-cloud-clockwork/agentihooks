@@ -2,7 +2,6 @@ import copy
 
 import pytest
 import yaml
-
 from scripts.workflows import schema
 from scripts.workflows.schema import WorkflowError
 
