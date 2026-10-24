@@ -64,7 +64,10 @@ def test_pending_browser_never_falls_through_to_a_token():
 
 
 @pytest.mark.parametrize("outcome", ["success", "captcha", "failure"])
-def test_browser_authorization_reports_through_master_inbox_and_ends_native_login(tmp_path, monkeypatch, outcome):
+@pytest.mark.parametrize("origin", ["https://claude.ai/oauth/authorize", "https://claude.com/cai/oauth/authorize"])
+def test_browser_authorization_reports_through_master_inbox_and_ends_native_login(
+    tmp_path, monkeypatch, outcome, origin
+):
     from scripts.inbox import store
     from scripts.swarm import operator_email
 
@@ -102,7 +105,7 @@ def test_browser_authorization_reports_through_master_inbox_and_ends_native_logi
             assert kwargs["stdin"] == subprocess.DEVNULL
             assert kwargs["stderr"] == subprocess.STDOUT
             assert kwargs["text"] is True
-            kwargs["stdout"].write("https://claude.ai/oauth/authorize?state=proof\n")
+            kwargs["stdout"].write(f"{origin}?state=proof\n")
             kwargs["stdout"].flush()
             self.returncode = 0 if outcome == "success" else None
 
@@ -129,7 +132,7 @@ def test_browser_authorization_reports_through_master_inbox_and_ends_native_logi
     assert sent[3] == (
         "Authorize this native master login using the already signed in claude.ai session in the operator browser connector; "
         "never sign in, sign out or switch accounts. Stop on a login form or CAPTCHA. "
-        "Open https://claude.ai/oauth/authorize?state=proof and reply exactly success, captcha or failure. "
+        f"Open {origin}?state=proof and reply exactly success, captcha or failure. "
         "Never send authorization codes or credentials."
     )
     assert ("close", "answer", "engineer@proof", "done", "browser outcome consumed") in events
