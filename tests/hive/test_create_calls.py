@@ -131,10 +131,8 @@ def test_a_full_create_makes_exactly_these_calls(world):
         ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"],
         list(machine.LIST),
         ["herdr", "machine", "add", "--label", NAME, "--remote-session", "default", TARGET],
-        ["ssh", "-o", "BatchMode=yes", TARGET, machine.DELIVER],
-        ["ssh", "-o", "BatchMode=yes", TARGET, machine.DELIVER_CA],
     ]
-    timeouts = {"kubectl": 60, "ssh-keygen": 60, "gh": 120, "herdr": 300, "ssh": 60}
+    timeouts = {"kubectl": 60, "ssh-keygen": 60, "gh": 120, "herdr": 300}
     for name, kwargs in world.run.kwargs:
         assert {key: kwargs[key] for key in ("capture_output", "text", "timeout", "check")} == {
             **GH,
@@ -156,9 +154,6 @@ def test_a_full_create_makes_exactly_these_calls(world):
         (f"repos/{REPO}/git/commits", {"message": MESSAGE, "tree": "sha", "parents": ["sha"]}),
         (f"repos/{REPO}/git/refs", {"ref": f"refs/heads/{NAME}", "sha": "sha"}),
     ]
-    stdin = [kwargs["input"] for name, kwargs in world.run.kwargs if name == "ssh"]
-    assert stdin[1] == "LOCAL CA\n"
-    assert f"AGENTIHOOKS_HIVE_URL={URL}\n" in stdin[0]
     record = world.bao.records[RECORD]
     assert record["ca_pem"] == "LOCAL CA\n"
     assert invite._env(record["credential"])[invite.REDIS_URL].endswith("@127.0.0.1:6379/0")
@@ -180,7 +175,7 @@ def test_a_full_create_makes_exactly_these_calls(world):
         f"hive create {NAME}: merge: merged {PR}",
         f"hive create {NAME}: settings: settings written",
         f"hive create {NAME}: live: hive {member} is live",
-        f"hive create {NAME}: herdr: added {TARGET} to herdr; its hive member is {json.loads(state.read_text())['added']}",
+        f"hive create {NAME}: herdr: added {TARGET} to herdr; its hive member is {member}",
         f"hive create {NAME}: engineer: engineer@{member} in demo works on the hive",
     ]
 

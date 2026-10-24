@@ -235,11 +235,10 @@ def _herdr(tools: Tools, options: Options) -> str:
     if options.dry_run:
         return f"would trust the hive host key and run hive add {target} --label {tools.state['name']}"
     _trust(tools)
-    member = _member(tools)
-    delivery = machine.Delivery(member[invite.HIVE_URL], member[invite.REDIS_URL], tools.ledger_ca)
-    grant = machine.add(tools.redis, tools.local_id, target, tools.state["name"], delivery, tools.run)
-    tools.state["added"] = grant["id"]
-    return f"added {target} to herdr; its hive member is {grant['id']}"
+    machine.save(tools.redis, tools.local_id, target, tools.state["name"], tools.run)
+    member = _member(tools)[invite.HIVE_ID]
+    tools.state["added"] = member
+    return f"added {target} to herdr; its hive member is {member}"
 
 
 def _engineer(tools: Tools, options: Options) -> str:
