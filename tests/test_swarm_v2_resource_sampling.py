@@ -1,6 +1,7 @@
 import gc
 import os
 import sys
+import threading
 import time
 import warnings
 from pathlib import Path
@@ -261,32 +262,53 @@ def leaked_file(path):
     cycle.append(cycle)
 
 
+FOREIGN_LEAK = compile("cycle = [open(path, 'w')]\ncycle.append(cycle)", "<another test's thread>", "exec")
+
+
+def leaked_by_another_thread(path):
+    thread = threading.Thread(target=exec, args=(FOREIGN_LEAK, {"path": str(path)}))
+    thread.start()
+    thread.join()
+
+
 @pytest.mark.flaky(reruns=0)
-@pytest.mark.parametrize("inherited", [True, False], ids=["inherited", "new-leak"])
-def test_live_workload_resource_audit_owns_only_sampling_leaks(tmp_path, capfd, monkeypatch, inherited):
+@pytest.mark.parametrize("case", ["inherited", "foreign", "new-leak"])
+def test_live_workload_resource_audit_owns_only_sampling_leaks(tmp_path, capfd, monkeypatch, case):
     enabled = gc.isenabled()
     gc.disable()
-    leak = tmp_path / ("inherited-resource" if inherited else "sampling-resource")
+    leak = tmp_path / f"{case}-resource"
     try:
-        if inherited:
+        if case == "inherited":
             leaked_file(leak)
+            test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd)
+        elif case == "foreign":
+            measure = sampling.measure
+
+            def measure_beside_another_thread(*args, **kwargs):
+                result = measure(*args, **kwargs)
+                leaked_by_another_thread(leak)
+                return result
+
+            monkeypatch.setattr(sampling, "measure", measure_beside_another_thread)
             test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd)
         else:
             measure = sampling.measure
 
             def leaking_measure(*args, **kwargs):
                 result = measure(*args, **kwargs)
+                leaked_by_another_thread(tmp_path / "foreign")
                 leaked_file(leak)
                 return result
 
             monkeypatch.setattr(sampling, "measure", leaking_measure)
             with pytest.raises(AssertionError) as failure:
                 test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd)
-            message = str(failure.value)
-            assert "ResourceWarning" in message
-            assert "unclosed file" in message
-            assert str(leak) in message
-            assert __file__ in message
+            summary = str(failure.value).splitlines()[0]
+            assert "ResourceWarning" in summary
+            assert "unclosed file" in summary
+            assert str(leak) in summary
+            assert __file__ in summary
+            assert str(tmp_path / "foreign") not in summary
     finally:
         gc.collect()
         if enabled:
