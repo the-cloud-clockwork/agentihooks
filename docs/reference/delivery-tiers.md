@@ -350,34 +350,35 @@ python -m tests.queue_shards --root . --collection collected.json --version "$PY
 python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
 ```
 
-1. The first command prices every collected test from the slowest recent dev durations, drops tests the queue reuses, and starts at 12 shards. It adds one shard at a time until the predicted slowest shard is under half the step timeout, or until it reaches `MAX_SHARDS`. It writes `queue_312=<legs>` to `queue-plan.txt` and prints `Python 3.12: <n> queue shards, predicted slowest <s>s of <half>s`.
+1. The first command prices every collected test from the slowest recent dev durations, drops tests the queue reuses, and starts at 12 shards. It adds one shard at a time until the predicted slowest shard is under a third of the step timeout, or until it reaches `MAX_SHARDS`. It writes `queue_312=<legs>` to `queue-plan.txt` and prints `Python 3.12: <n> queue shards, predicted slowest <s>s of <third>s`.
 2. `combine` reads the plan back and grades it against the pool. The `unit` matrix takes its `include` list from that output.
 
 | Setting | Value | Where it comes from |
 |---|---|---|
-| `MAX_SHARDS` | 30 | The `maxRunners` of the antoncore `anton-oss-queue` scale set, less the queue tier jobs that run during the unit stage (none today) |
+| `MAX_SHARDS` | 24 | The `maxRunners` of the antoncore `anton-oss-queue` scale set, less the queue tier jobs that run during the unit stage (none today) |
 | `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import; see [Step timeout limits](#step-timeout-limits) |
-| Half step timeout | 360 s | The target a plan must predict under |
+| Third of the step timeout | 240 s | The target the first command grows the shard count toward, so the merge group's unit stage uses the pool in one wave |
+| Half step timeout | 360 s | The limit a plan must predict under, or `combine` refuses it |
 | `SLOWDOWN` | 1.15 | Factor applied to the predicted slowest shard, calibrated from recorded queue runs |
 | `STARTUP_SECONDS` | 30 | Added to every shard's prediction |
 
 ### What combine decides
 
-Every plan that is not refused ends with the line `<n> queue jobs fit one wave of 30 runners; predicted slowest test step <s>s`; a capped plan prints its warnings before it.
+Every plan that is not refused ends with the line `<n> queue jobs fit one wave of 24 runners; predicted slowest test step <s>s`; a capped plan prints its warnings before it.
 
 | Plan | Outcome | Log line |
 |---|---|---|
-| At most 30 jobs, slowest under 360 s | Runs as one wave | `<n> queue jobs fit one wave of 30 runners; predicted slowest test step <s>s` |
-| At most 30 jobs, slowest at or over 360 s | The step fails and the merge group goes red | `Queue plan exceeds 360s of the step timeout: <s>s` |
-| More than 30 jobs, from `--from-output` with `--root` and `--inputs` | Replanned at 30 shards for every version and written back to `queue-plan.txt` | `::warning::<n> queue jobs exceed the pool of 30; capped at 30 shards` |
-| Capped plan whose slowest shard reaches 720 s | Still runs at 30 shards, with a warning | `::warning::The capped queue plan predicts <s>s, over 720s of the step timeout` |
-| More than 30 jobs from `--plans` | Refused | `<n> queue jobs exceed the pool of 30` |
+| At most 24 jobs, slowest under 360 s | Runs as one wave | `<n> queue jobs fit one wave of 24 runners; predicted slowest test step <s>s` |
+| At most 24 jobs, slowest at or over 360 s | The step fails and the merge group goes red | `Queue plan exceeds 360s of the step timeout: <s>s` |
+| More than 24 jobs, from `--from-output` with `--root` and `--inputs` | Replanned at 24 shards for every version and written back to `queue-plan.txt` | `::warning::<n> queue jobs exceed the pool of 24; capped at 24 shards` |
+| Capped plan whose slowest shard reaches 720 s | Still runs at 24 shards, with a warning | `::warning::The capped queue plan predicts <s>s, over 720s of the step timeout` |
+| More than 24 jobs from `--plans` | Refused | `<n> queue jobs exceed the pool of 24` |
 
-The capped path caps the total across Python versions, not each version, so two versions share the 30 runners. With 3.12 alone the first command already stops at 30, so a plan that cannot reach 360 s at 30 shards is refused rather than capped. A single test too slow to fit any shard produces that refusal.
+The capped path caps the total across Python versions, not each version, so two versions share the 24 runners. With 3.12 alone the first command already stops at 24, so a plan that cannot reach 360 s at 24 shards is refused rather than capped. A single test too slow to fit any shard produces that refusal.
 
 ### Changing the pool
 
-`MAX_SHARDS` must equal the queue pool `maxRunners` less any queue pool job that runs at the same time as the unit stage. When the antoncore scale set changes, change `MAX_SHARDS` in `tests/queue_shards.py` by pull request in the same window. Raising the pool is an antoncore change and stays with the operator. `tests/test_queue_shards.py` pins the cap: `test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool` plants a 40 job plan and expects `40 queue jobs exceed the pool of 30; capped at 30 shards`.
+`MAX_SHARDS` must equal the queue pool `maxRunners` less any queue pool job that runs at the same time as the unit stage. When the antoncore scale set changes, change `MAX_SHARDS` in `tests/queue_shards.py` by pull request in the same window. Raising the pool is an antoncore change and stays with the operator. `tests/test_queue_shards.py` pins the cap: `test_a_forty_job_queue_plan_is_capped_to_the_twenty_four_runner_queue_pool` plants a 40 job plan and expects `40 queue jobs exceed the pool of 24; capped at 24 shards`.
 
 ### Checking a queue shard run
 
@@ -389,7 +390,7 @@ gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/attempts/1/jobs"
   --jq '.jobs[] | select(.name | startswith("unit (")) | [.name, .created_at, .started_at, .completed_at] | @tsv'
 ```
 
-A shard's runner wait is `started_at` minus `created_at`. Count the shards: more than 30, or start times that fall into two groups minutes apart, means a second wave. The Doctor measure prints the run attempt's queue tier wall time in seconds:
+A shard's runner wait is `started_at` minus `created_at`. Count the shards: more than 24, or start times that fall into two groups minutes apart, means a second wave. The Doctor measure prints the run attempt's queue tier wall time in seconds:
 
 ```bash
 agentihooks doctor rig-grade-swarm measure "ci-tier-wall-time/<run id>-<attempt>"
@@ -447,15 +448,15 @@ That night's groups still ran Python 3.11 and 3.12 legs inside the same 30 shard
 
 A group's other shards in flight at its unit start is the number of other groups' unit shards whose `created_at` is before that group's first shard `created_at` and whose `completed_at` is after it. A group whose shards wait over a minute with that number over 10 is sharing the pool with another group; a wait with that number under 10 does not come from another merge group.
 
-The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`, while `MAX_SHARDS` in `tests/queue_shards.py` is still 30. Compare the two before reading a shard wait against the numbers above.
+The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`; the scale set has since moved to `maxRunners` 24, which `MAX_SHARDS` matches. Compare the two before reading a shard wait against the numbers above.
 
 ### Troubleshooting queue shard sizing
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `Queue plan exceeds 360s of the step timeout` | 30 shards cannot bring the slowest shard under half the step timeout, often one slow test or a slow serial group | Split or speed up the slow test file; the planner log names the predicted seconds |
-| Shards wait minutes for a runner while each group plans 30 or fewer | Several merge groups build at once and share the 30 runners; the queue builds up to three entries at a time | Read the runner waits of every group running in the same minutes before changing the plan; see [Concurrent merge groups on one pool](#concurrent-merge-groups-on-one-pool) |
-| More than 30 `unit` jobs in one run | `MAX_SHARDS` no longer matches the pool, or a second Python version was added without the capped path | Compare `MAX_SHARDS` with the antoncore scale set `maxRunners` |
+| `Queue plan exceeds 360s of the step timeout` | 24 shards cannot bring the slowest shard under half the step timeout, often one slow test or a slow serial group | Split or speed up the slow test file; the planner log names the predicted seconds |
+| Shards wait minutes for a runner while each group plans 24 or fewer | Several merge groups build at once and share the 24 runners; the queue builds up to three entries at a time | Read the runner waits of every group running in the same minutes before changing the plan; see [Concurrent merge groups on one pool](#concurrent-merge-groups-on-one-pool) |
+| More than 24 `unit` jobs in one run | `MAX_SHARDS` no longer matches the pool, or a second Python version was added without the capped path | Compare `MAX_SHARDS` with the antoncore scale set `maxRunners` |
 
 ### Delivery evidence
 
@@ -467,7 +468,7 @@ The queue shard planner and the shard budget grade shards against the time their
 
 | Reader | Job | Step | Timeout today | Limit it sets |
 |---|---|---|---|---|
-| `tests.queue_shards` (`STEP_SECONDS`) | `unit` | `Run tests` | 12 minutes | 720 s; a queue plan must predict its slowest shard under half of it, 360 s |
+| `tests.queue_shards` (`STEP_SECONDS`) | `unit` | `Run tests` | 12 minutes | 720 s; the planner grows shards toward a third of it, 240 s, and a queue plan must predict its slowest shard under half of it, 360 s |
 | `tests.shard_budget`, a unit shard | `unit` | `Run tests` | 12 minutes | 720 s of elapsed test step time |
 | `tests.shard_budget`, a selected leg | `unit-selected` | `Run the selected tests` | 7 minutes | 420 s of elapsed test step time |
 
@@ -548,7 +549,7 @@ When shards over budget have different limits, the last line joins them, for exa
 |---|---|---|
 | `split` fails with `IndexError: list index out of range` from `step_seconds` | The `unit` job or its `Run tests` step was renamed | Update `STEPS` in `tests/shard_budget.py` with the new name |
 | `TypeError: 'NoneType' object is not subscriptable` from `step_seconds` | The step's `timeout-minutes` was removed or written as an expression | Keep a plain integer `timeout-minutes` on the step |
-| The queue plans more shards than the step timeout needs | An older planner with a fixed timeout; before pull request 5043 it assumed 420 s while the step allowed 720 s | Merge `origin/dev`; the `split` log prints `of 360s` while the timeout is 12 minutes |
+| The queue plans more shards than the step timeout needs | An older planner with a fixed timeout; before pull request 5043 it assumed 420 s while the step allowed 720 s | Merge `origin/dev`; the `split` log prints `of 240s` while the timeout is 12 minutes |
 | A selected leg passes 420 s and nothing turns red | `shard-check` never runs beside `unit-selected` | Grade the leg's artifact by hand as above |
 | `KeyError` from `tests.shard_budget` | An `elapsed.json` names a job other than `unit` or `unit-selected` | Add the job and its step to `STEPS` |
 
