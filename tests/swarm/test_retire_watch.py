@@ -105,7 +105,8 @@ def test_retire_findings_identify_the_original_hive_and_removed_host_count(store
     from scripts.swarm.store import AgentRecord
 
     monkeypatch.setenv("SWARM_HIVE_ID", "controller")
-    for index, name in enumerate((NAME, "other"), 1):
+    names = [store.next_name("sw", "eng") for _ in range(2)]
+    for index, name in enumerate(names, 1):
         store.start_execution(
             "sw",
             AgentRecord(
