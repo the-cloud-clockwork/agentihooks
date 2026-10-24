@@ -223,7 +223,9 @@ def test_a_verdict_shows_at_once_and_leaves_the_priority_to_the_server():
 
 def test_each_priority_row_offers_approve_before_clear():
     render = function_source("renderPriorities")
-    assert render.index('verdictButton(p.item, "approved", "approve", "Approve")') < render.index('"clearing" : "Clear"')
+    assert render.index('verdictButton(p.item, "approved", "approve", "Approve")') < render.index(
+        '"clearing" : "Clear"'
+    )
 
 
 def test_approve_and_deny_take_their_colours_from_palette_roles():
