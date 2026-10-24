@@ -26,11 +26,10 @@ class Grant:
 
 
 class Rejected(Exception):
-    def __init__(self, error_class: str, detail: str, retry: str = "never"):
+    def __init__(self, error_class: str, detail: str):
         super().__init__(detail)
         self.error_class = error_class
         self.detail = detail
-        self.retry = retry
 
 
 def canonical(value: object) -> bytes:
@@ -99,7 +98,8 @@ def _authorize(grant: Grant, request: dict) -> None:
 def _record_error(record: object) -> str:
     if not isinstance(record, dict):
         return "record must be an object"
-    if record.get("kind") not in RECORD_KINDS:
+    kind = record.get("kind")
+    if not isinstance(kind, str) or kind not in RECORD_KINDS:
         return "record kind is not a supported normalized kind"
     return ""
 
@@ -140,7 +140,7 @@ def _refusal(request: object, error: Rejected) -> dict:
         "schema_version": SCHEMA_VERSION,
         "operation_id": f"ingest:{digest(request)[:16]}",
         "state": "rejected",
-        "error": {"class": error.error_class, "retry": error.retry, "detail": error.detail},
+        "error": {"class": error.error_class, "retry": "never", "detail": error.detail},
     }
 
 

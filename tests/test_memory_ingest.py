@@ -1,6 +1,7 @@
 """SV2-SES-04: idempotent central session ingestion."""
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -309,6 +310,57 @@ def test_a_repeated_quarantine_from_another_batch_is_kept_once(catalog):
     response = ingest(catalog, GRANT, request([bad], batch_id="batch-2"))
     assert response["state"] == "committed"
     assert len(catalog.quarantined("corpus-a", "corpus-a:claude:host:s1", "gen-1")) == 1
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ({**event(1), "record": {"kind": "x"}}, {**event(1, 0, 12), "record": {"kind": "x"}}),
+        ({**event(1), "record": {"kind": "x"}}, {**event(1), "record": "x"}),
+    ],
+)
+def test_a_quarantine_reused_with_another_range_or_reason_is_a_conflict(catalog, first, second):
+    ingest(catalog, GRANT, request([first]))
+    before = catalog.snapshot()
+    response = ingest(catalog, GRANT, request([second], batch_id="batch-2"))
+    assert error(response) == ("revision_conflict", "an event at this sequence was committed with different content")
+    assert catalog.snapshot() == before
+
+
+def test_an_event_replayed_under_another_project_is_a_conflict(catalog):
+    ingest(catalog, GRANT, request([event(1)]))
+    before = catalog.snapshot()
+    response = ingest(catalog, GRANT, request([event(1, project="project-b")], batch_id="batch-2"))
+    assert error(response) == ("revision_conflict", "an event at this sequence was committed with different content")
+    assert catalog.snapshot() == before
+
+
+def test_an_unhashable_record_kind_is_quarantined(catalog):
+    response = ingest(catalog, GRANT, request([{**event(1), "record": {"kind": ["user_text"]}}]))
+    assert response["rejected"][0]["reason"] == "record kind is not a supported normalized kind"
+
+
+def test_a_failed_commit_rolls_back_and_leaves_the_connection_usable(tmp_path, monkeypatch):
+    opened = Catalog(tmp_path / "c.sqlite3")
+    real = opened.db
+
+    class FailingCommit:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def execute(self, statement, *args):
+            if statement == "COMMIT":
+                raise sqlite3.OperationalError("disk I/O error")
+            return real.execute(statement, *args)
+
+    monkeypatch.setattr(opened, "db", FailingCommit())
+    with pytest.raises(sqlite3.OperationalError):
+        ingest(opened, GRANT, request([event(1)]))
+    monkeypatch.setattr(opened, "db", real)
+    assert not real.in_transaction
+    assert opened.snapshot() == {table: [] for table in catalog_module.TABLES}
+    assert ingest(opened, GRANT, request([event(1)]))["state"] == "committed"
+    opened.close()
 
 
 def test_access_domains_and_generations_keep_separate_batches_events_and_counters(tmp_path):

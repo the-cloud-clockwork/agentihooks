@@ -74,10 +74,11 @@ class Catalog:
         self.db.execute("BEGIN IMMEDIATE")
         try:
             yield
+            self.db.execute("COMMIT")
         except BaseException:
-            self.db.execute("ROLLBACK")
+            if self.db.in_transaction:
+                self.db.execute("ROLLBACK")
             raise
-        self.db.execute("COMMIT")
 
     def _scope(self, batch: BatchCommit) -> tuple[str, str, str]:
         return batch.access_domain, batch.session_uid, batch.source_generation
@@ -89,11 +90,11 @@ class Catalog:
             (domain, DUPLICATES, amount),
         )
 
-    def _settled(self, scope: tuple[str, str, str], sequence: int) -> tuple[str, str, str] | None:
+    def _settled(self, scope: tuple[str, str, str], sequence: int) -> tuple | None:
         found = self.db.execute(
-            "SELECT 'event', event_id, normalized_hash FROM session_event "
+            "SELECT 'event', event_id, normalized_hash, project_id FROM session_event "
             "WHERE access_domain = ? AND session_uid = ? AND source_generation = ? AND sequence = ? "
-            "UNION ALL SELECT 'quarantine', event_id, reason FROM session_quarantine "
+            "UNION ALL SELECT 'quarantine', event_id, reason, NULL FROM session_quarantine "
             "WHERE access_domain = ? AND session_uid = ? AND source_generation = ? AND sequence = ?",
             (*scope, sequence, *scope, sequence),
         ).fetchone()
@@ -101,7 +102,7 @@ class Catalog:
 
     def _insert_event(self, batch: BatchCommit, event: StoredEvent) -> bool:
         existing = self._settled(self._scope(batch), event.sequence)
-        if existing == ("event", event.event_id, event.normalized_hash):
+        if existing == ("event", event.event_id, event.normalized_hash, event.project_id):
             return False
         if existing:
             raise Conflict("an event at this sequence was committed with different content")
@@ -124,10 +125,12 @@ class Catalog:
 
     def _insert_quarantine(self, batch: BatchCommit, item: dict) -> None:
         existing = self._settled(self._scope(batch), item["sequence"])
-        if existing and existing[0] == "event":
+        if existing == ("quarantine", item["event_id"], item["reason"], None):
+            return
+        if existing:
             raise Conflict("an event at this sequence was committed with different content")
         self.db.execute(
-            "INSERT OR IGNORE INTO session_quarantine VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO session_quarantine VALUES (?, ?, ?, ?, ?, ?)",
             (*self._scope(batch), item["sequence"], item["event_id"], item["reason"]),
         )
 
