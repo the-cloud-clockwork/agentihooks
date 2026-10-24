@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import merge_queue, mutation_wait, outage
+from scripts.swarm import idle, merge_queue, mutation_wait, outage
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
@@ -810,6 +810,15 @@ def _priorities(mail, doc, raised):
     return sent
 
 
+def _merged_held(mail, task, now_ms):
+    after = (task.get("contract") or {}).get("after_at")
+    if after and int(after) > now_ms:
+        return True
+    holder = task.get("claimed_by")
+    held = idle.wait(mail.store.redis, mail.slug, holder) if holder else None
+    return bool(held and held["until"] > now_ms)
+
+
 def _pull_requests(mail, tasks, now_ms, github, ledger):
     sent = []
     for task in tasks:
@@ -821,6 +830,8 @@ def _pull_requests(mail, tasks, now_ms, github, ledger):
             continue
         title = f"task {task['id']} ({task.get('title', 'no title')})"
         if found.state == "MERGED" and found.merged_at:
+            if _merged_held(mail, task, now_ms):
+                continue
             age = now_ms - found.merged_at
             if age >= MERGED_ENGINEER_MS:
                 text = (
