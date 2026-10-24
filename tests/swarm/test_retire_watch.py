@@ -48,9 +48,7 @@ def test_a_dropped_agent_clears_its_failures(store):
 
 
 @pytest.mark.parametrize("projection", [True, False])
-def test_retry_of_an_ended_agent_without_process_or_pane_releases_its_seat(
-    store, tmp_path, monkeypatch, projection
-):
+def test_retry_of_an_ended_agent_without_process_or_pane_releases_its_seat(store, tmp_path, monkeypatch, projection):
     from dataclasses import replace
 
     from scripts.swarm.tick import _retire_ended
