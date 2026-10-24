@@ -20,9 +20,15 @@ NAME = "engineer@a1b2c3-0001"
 
 def test_record_writes_this_process_and_its_start_under_the_agent_name(tmp_path):
     launches.record({"AGENTIHOOKS_SWARM": "crew", "AGENTIHOOKS_AGENT_NAME": NAME}, tmp_path)
-    launches.record({"AGENTIHOOKS_SWARM": "crew", "AGENTIHOOKS_AGENT_NAME": NAME}, tmp_path)
     data = json.loads((tmp_path / "launches" / f"{NAME}.json").read_text())
     assert data == {"pid": os.getpid(), "start_time": processes()[os.getpid()].start_time}
+    assert launches.find(NAME, tmp_path).pid == os.getpid()
+
+
+def test_a_second_launch_under_the_same_name_replaces_the_record(tmp_path):
+    (tmp_path / "launches").mkdir()
+    (tmp_path / "launches" / f"{NAME}.json").write_text('{"pid": 1, "start_time": 1}')
+    launches.record({"AGENTIHOOKS_SWARM": "crew", "AGENTIHOOKS_AGENT_NAME": NAME}, tmp_path)
     assert launches.find(NAME, tmp_path).pid == os.getpid()
 
 
@@ -39,7 +45,7 @@ def test_record_defaults_to_the_swarm_home(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "content", [None, "not json", '{"pid": %d, "start_time": 1}', '{"pid": 999999999, "start_time": 1}']
+    "content", [None, "not json", "{}", "[]", '{"pid": %d, "start_time": 1}', '{"pid": 999999999, "start_time": 1}']
 )
 def test_find_returns_nothing_for_a_missing_unreadable_restarted_or_ended_launch(tmp_path, content):
     if content is not None:
@@ -60,7 +66,7 @@ def test_select_profile_records_its_own_process_before_launching(monkeypatch, tm
     assert seen[0].pid == os.getpid()
 
 
-def test_select_profile_dry_run_records_nothing(monkeypatch, tmp_path):
+def test_select_profile_dry_run_records_nothing(monkeypatch):
     monkeypatch.setattr(select_profile, "prepare", lambda *args: ({}, []))
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "crew")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", NAME)

@@ -29,7 +29,8 @@ def record(environ: dict[str, str], root: Path | None = None) -> None:
 def find(name: str, root: Path | None = None) -> Process | None:
     try:
         data = json.loads(_path(name, root).read_text())
-    except (OSError, ValueError):
+        pid, start = data["pid"], data["start_time"]
+    except (OSError, ValueError, KeyError, TypeError):
         return None
-    found = processes().get(data["pid"])
-    return found if found is not None and found.start_time == data["start_time"] else None
+    found = processes().get(pid)
+    return found if found is not None and found.start_time == start else None
