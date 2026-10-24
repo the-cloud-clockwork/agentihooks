@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import runtime
+from scripts.swarm import naming, runtime
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_ledger import authority_context, hosted_probe, ledger, ledger_authority, ledger_link
 from scripts.swarm_ledger.storage_migration import hosted as hosted_migration
@@ -161,7 +161,9 @@ def test_a_hive_launched_worker_joins_the_hosted_ledger_after_a_failed_probe(mon
     world.launch(FIRST)
     [spawned] = world.runtime.requests
     store, grant = hive
-    store.redis.hset(store.names.key("name", spawned.name), mapping={"swarm": SLUG, "code": "323133"})
+    code = naming.parse(spawned.name).code
+    store.names.adopt(SLUG, code, "", "")
+    store.redis.hset(store.names.key("name", spawned.name), mapping={"swarm": SLUG, "code": code})
     store.start_execution(SLUG, AgentRecord(spawned.name, "eng", "proof", seat=f"eng-1@{SLUG}", hive=grant["id"]))
     monkeypatch.setattr(ledger, "BASE", "")
     monkeypatch.delenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", raising=False)
