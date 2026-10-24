@@ -27,7 +27,7 @@ def save(store, slug: str, state: dict) -> None:
     store.redis.set(store.key(slug, "spawn-stall"), json.dumps(state))
 
 
-def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
+def eligible(store, slug: str, ledger, at: int, runtime, since: int | None = None) -> bool:
     from scripts.swarm.tick import _ended
 
     config = store.config(slug)
@@ -37,6 +37,7 @@ def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
         rows, ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
     except LedgerGone:
         return False
+    ready = placeable(store, slug, ready, at if since is None else since)
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
     requirements = None
@@ -52,12 +53,21 @@ def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
         host = capacity.granted(capacity.host_room(config, inputs), inputs.previous, inputs.now_ms)
         config, _ = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
-            config, inputs.observations, inputs.agents, inputs.demand, requirements, warned=inputs.warned
+            config, inputs.observations, inputs.agents, demand, requirements, warned=inputs.warned
         )
         decision["host"] = host
     if (decision.get("host") or {}).get("room") == 0:
         return False
     return any(decision["placements"].values())
+
+
+def placeable(store, slug: str, ready: dict, since: int) -> dict:
+    held = {
+        (row["lane"], task)
+        for task, row in placement_waits.read(store, slug).items()
+        if row.get("seen_at", row["started_at"]) >= since
+    }
+    return {lane: [task for task in tasks if (lane, task["id"]) not in held] for lane, tasks in ready.items()}
 
 
 def launched(store, slug: str) -> int:
@@ -71,7 +81,7 @@ def launched(store, slug: str) -> int:
 def observe(store, slug: str, ledger, at: int, runtime) -> dict:
     state = read(store, slug)
     last = launched(store, slug)
-    if capped(store, slug, state.get("at", 0)) or not eligible(store, slug, ledger, at, runtime):
+    if capped(store, slug, state.get("at", 0)) or not eligible(store, slug, ledger, at, runtime, state.get("at")):
         state = {}
     elif "since" not in state or last > state["launch"]:
         state = {"since": at, "launch": last}
