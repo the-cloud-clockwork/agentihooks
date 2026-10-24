@@ -147,14 +147,9 @@ function agentRows(sw, now) {
 }
 
 function agentRow(a, remote) {
-  return agentCellTips(withId(cells(nameCell(idCell(a.name), a), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail})` }, label(`remote control ${a.remoteControl.state}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])) : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
+  return agentCellTips(withId(cells(h("span", {}, a.account ? h("span", {}, idCell(a.name), h("span", { class: "sw-sub", title: `account ${a.account}`, text: a.account })) : idCell(a.name), ...(a.hive ? [h("span", { class: "sw-sub", title: `hive ${a.hive}`, text: a.hive })] : [])), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail})` }, label(`remote control ${a.remoteControl.state}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])) : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
     h("span", {}, a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), " ", label("promoted")) : label(a.state), joinCell(a.hiveJoin)),
     ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`));
-}
-
-function nameCell(id, a) {
-  const subs = [["account", a.account], ["hive", a.hive]].filter(([, value]) => value);
-  return subs.length ? h("span", {}, id, ...subs.map(([kind, value]) => h("span", { class: "sw-sub", title: `${kind} ${value}`, text: value }))) : id;
 }
 
 const transportCell = (c) => c ? h("span", { class: "sw-transport", "data-tip": `${c.push_inbox ? "push" : "no push"} · ${c.native_terminal_attach ? "native terminal" : "no native terminal"}` },
