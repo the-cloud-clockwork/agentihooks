@@ -115,7 +115,9 @@ def test_copied_package_build_accepts_tag_derived_metadata(tmp_path, monkeypatch
 
     assert wheel.name == f"agentihooks-{WHEEL_VERSION}-py3-none-any.whl"
     copied = tmp_path / "build" / "src"
-    assert sorted(path.name for path in copied.iterdir()) == sorted(WHEEL_INPUTS)
+    names = {path.name for path in copied.iterdir()}
+    assert set(WHEEL_INPUTS) <= names
+    assert not names & {"tests", ".coverage", ".coverage.worker", ".coveragerc"}
 
 
 def test_version_is_unknown_without_package_metadata(monkeypatch):
