@@ -65,6 +65,8 @@ if (_WORKFLOWS / "count-record.yml").is_file():
     LANE_USERS = LANE_USERS | {"count-record.yml"}
 if (_WORKFLOWS / "actions-storage.yml").is_file():
     LANE_USERS = LANE_USERS | {"actions-storage.yml"}
+if (_WORKFLOWS / "ci-minutes.yml").is_file():
+    LANE_USERS = LANE_USERS | {"ci-minutes.yml"}
 
 
 class _Context(dict):
