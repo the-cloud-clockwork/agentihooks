@@ -1,5 +1,9 @@
+import pytest
+
 from scripts.events import nkey
 from scripts.swarm import controller
+
+pytestmark = pytest.mark.unit
 
 
 def creds(name):
@@ -32,3 +36,9 @@ def test_controller_keeps_running_when_the_bus_refuses(capsys):
     environ = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_CREDENTIALS": creds("swarm-controller")}
     assert controller.open_controller_bus(environ, refused) is None
     assert capsys.readouterr().err == "controller: bus nats unreachable as swarm-controller: connection refused\n"
+
+
+def test_controller_bus_without_credentials_signs_in_anonymously(capsys):
+    environ = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://bus:4222"}
+    assert controller.open_controller_bus(environ, lambda config: "bus") == "bus"
+    assert capsys.readouterr().out == "controller: bus nats at nats://bus:4222 as anonymous\n"
