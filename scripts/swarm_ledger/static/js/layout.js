@@ -322,7 +322,7 @@ export function wireStatsDrawer() {
   let start = null;
   document.addEventListener("touchstart", (ev) => {
     const touch = ev.touches[0];
-    const skip = ev.touches.length !== 1 || ev.target.closest(".sw-scroll, .chat-panel, .notif, input, textarea, select");
+    const skip = ev.touches.length !== 1 || ev.target.closest(".sw-scroll, .chat-panel, .notif, dialog, .art-body, .image-scroll, input, textarea, select");
     start = narrow.matches && !skip ? { x: touch.clientX, y: touch.clientY } : null;
   }, { passive: true });
   document.addEventListener("touchend", (ev) => {
@@ -336,10 +336,13 @@ export function wireStatsDrawer() {
     if (dx > 0 && isOpen()) show(false);
     else if (dx < 0 && !isOpen() && from > window.innerWidth * 0.5) show(true);
   }, { passive: true });
-  document.addEventListener("pointerdown", (ev) => {
+  document.addEventListener("click", (ev) => {
     const path = ev.composedPath();
-    if (isOpen() && !path.includes(panel) && !path.includes(toggle)) show(false);
-  });
+    if (!isOpen() || path.includes(panel) || path.includes(toggle)) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    show(false);
+  }, true);
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && isOpen()) show(false); });
   narrow.addEventListener("change", () => show(false));
 }
