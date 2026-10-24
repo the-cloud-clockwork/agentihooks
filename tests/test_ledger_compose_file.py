@@ -52,7 +52,7 @@ def test_the_healthcheck_runs_the_write_probe_on_the_checkout_code():
 def test_the_server_runs_the_checkout_code_on_the_host_network_and_pids():
     assert STACK["name"] == "agentihooks-ledger"
     assert SERVICE["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev"
-    assert SERVICE["command"] == ["python", "${LEDGER_CODE}/scripts/swarm_ledger/ledger_server.py", "--serve"]
+    assert SERVICE["command"] == ["python", "${LEDGER_CODE}/scripts/swarm_ledger/server_supervisor.py"]
     assert (SERVICE["network_mode"], SERVICE["pid"]) == ("host", "host")
     assert SERVICE["user"] == "${LEDGER_UID:-1000}:${LEDGER_GID:-1000}"
     env = SERVICE["environment"]
