@@ -154,6 +154,7 @@ def test_with_the_classifier_down_the_input_passes_unchanged(shipped, judge):
     [
         (CUED, ["engineer@323133-0662", "opus", "attempt 2", "clearly"]),
         ("eng-9@rig-grade-swarm took the 3rd round", ["eng-9@rig-grade-swarm", "3rd round"]),
+        ("it went to master@rig-grade-swarm.", ["master@rig-grade-swarm"]),
         ("the planner and the master ran it", ["planner", "master"]),
         ("Sonnet, haiku, codex and gpt-5.1 agreed", ["Sonnet", "haiku", "codex", "gpt-5.1"]),
         ("iteration 4 and round #2", ["iteration 4", "round #2"]),
@@ -163,6 +164,7 @@ def test_with_the_classifier_down_the_input_passes_unchanged(shipped, judge):
             ["robust", "comprehensive", "perfectly", "I verified"],
         ),
         ("the cache keeps one entry per key", []),
+        ("clone git@github.com:org/repo.git and mail eng-1@example.com", []),
     ],
 )
 def test_the_cue_finder_flags_each_cue_once(text, cues):
