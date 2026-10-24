@@ -529,6 +529,117 @@ def test_the_host_sample_names_who_holds_its_spawns(tmp_path, monkeypatch, hold,
         box.close()
 
 
+@pytest.mark.parametrize(
+    ("agent", "ready_ids", "reason"),
+    [
+        ("codex", ["a", "b"], "accounts have quota; 1 eng spawn held on the eng lane pinned to codex"),
+        ("codex", ["a", "b", "c", "d"], "accounts have quota; 2 eng spawns held on the eng lane pinned to codex"),
+        ("auto", ["a", "b"], "accounts have quota"),
+        ("codex", ["a"], "accounts have quota"),
+    ],
+)
+def test_a_quota_hold_names_the_lane_pin_that_limits_it(tmp_path, monkeypatch, agent, ready_ids, reason):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0, lanes={"eng": {"agent": agent, "model": "auto"}}))
+    decision = {"configured": {"eng": 4}, "placements": {"eng": [{"index": 0}]}, "reason": "accounts have quota"}
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    ready = {lane: [] for lane in metrics_swarm.capacity.LANES}
+    ready["eng"] = [{"id": task} for task in ready_ids]
+    monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        metrics_swarm.record_pass(box, SLUG, NOW, store, doc(), [], {})
+        [row] = box.recent("host_samples", NOW)
+        assert row["reason"] == reason
+    finally:
+        box.close()
+
+
+@pytest.mark.parametrize(
+    ("wait_lane", "expected"),
+    [
+        ("eng", ("hive placement: no hive for eng has room", 1, "host", "")),
+        ("ci", ("accounts have quota; 1 eng spawn held on the eng lane pinned to codex", 1, "quota", "codex")),
+    ],
+)
+def test_a_hold_on_a_lane_waiting_for_hive_room_is_a_host_hold(tmp_path, monkeypatch, wait_lane, expected):
+    import fakeredis
+
+    from scripts.hive import placement_waits
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0, lanes={"eng": {"agent": "codex", "model": "auto"}}))
+    decision = {"configured": {"eng": 4}, "placements": {"eng": [{"index": 0}]}, "reason": "accounts have quota"}
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    placement_waits.observe(store, SLUG, wait_lane, "t9", "no hive for eng has room", NOW)
+    ready = {lane: [] for lane in metrics_swarm.capacity.LANES}
+    ready["eng"] = [{"id": "a"}, {"id": "b"}]
+    monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        metrics_swarm.record_pass(box, SLUG, NOW, store, doc(), [], {})
+        [row] = box.recent("host_samples", NOW)
+        assert (row["reason"], row["held_spawns"], row["held_by"], row["held_harness"]) == expected
+    finally:
+        box.close()
+
+
+def test_a_pin_note_without_a_capacity_reason_has_no_leading_separator():
+    assert metrics_swarm.held_pins({"eng": {"agent": "codex"}}, {"eng": 2, "ci": 0}, "") == (
+        "2 eng spawns held on the eng lane pinned to codex"
+    )
+
+
+def test_pin_notes_follow_the_reason_in_lane_order():
+    lanes = {"eng": {"agent": "codex"}, "ci": {"agent": "claude"}, "plan": {"agent": "auto"}}
+    assert metrics_swarm.held_pins(lanes, {"eng": 1, "ci": 2, "plan": 1}, "accounts have quota") == (
+        "accounts have quota; 2 ci spawns held on the ci lane pinned to claude;"
+        " 1 eng spawn held on the eng lane pinned to codex"
+    )
+
+
+def test_a_host_spawn_hold_keeps_its_own_reason_without_pin_notes(tmp_path, monkeypatch):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0, lanes={"eng": {"agent": "codex", "model": "auto"}}))
+    decision = {"configured": {"eng": 4}, "placements": {"eng": [{"index": 0}]}, "reason": "accounts have quota"}
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    store.redis.set(store.key(SLUG, "spawn-hold"), "host memory room 0")
+    ready = {lane: [] for lane in metrics_swarm.capacity.LANES}
+    ready["eng"] = [{"id": "a"}, {"id": "b"}]
+    monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        metrics_swarm.record_pass(box, SLUG, NOW, store, doc(), [], {})
+        [row] = box.recent("host_samples", NOW)
+        assert (row["reason"], row["held_spawns"], row["held_by"], row["held_harness"]) == (
+            "host memory room 0",
+            2,
+            "host",
+            "",
+        )
+    finally:
+        box.close()
+
+
 def test_done_task_is_observed_once_even_when_completion_precedes_the_tick(tmp_path, monkeypatch):
     import fakeredis
 
@@ -706,5 +817,69 @@ def test_record_pass_exports_queue_and_launch_rows(tmp_path, monkeypatch):
         metrics_swarm.record_pass(box, SLUG, NOW, store, doc(), [], pulls)
         assert "launch_failed" in {row["kind"] for row in box.recent("agent_events", NOW)}
         assert [row["kind"] for row in box.recent("delivery_events", NOW)] == ["merge_queued"]
+    finally:
+        box.close()
+
+
+def test_host_sample_counts_live_agents_on_this_machine_and_on_hives(monkeypatch):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
+    agents = [
+        {"runtime_backend": "local", "runtime_target": {"host_id": "root"}},
+        {"runtime_backend": "local", "runtime_target": {}},
+        {"runtime_backend": "local", "runtime_target": {"host_id": ""}},
+        {"runtime_target": {"host_id": "root"}},
+        {"runtime_backend": "local", "runtime_target": {"host_id": "hive-a"}},
+        {"runtime_backend": "kubernetes", "runtime_target": {"host_id": "root"}},
+    ]
+    counts = metrics_swarm.placement_counts(agents)
+    assert counts == {"workstation_agents": 4, "hive_agents": 2}
+    host = metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 6), counts)
+    assert [host[key] for key in ("workstation_agents", "hive_agents")] == [4, 2]
+    assert [metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 4), {})[key] for key in counts] == [0, 0]
+    assert {"workstation_agents", "hive_agents"} <= {column for column, _ in metrics_swarm.HOST.columns}
+
+
+def test_swarm_review_rounds_ship_as_review_round_events(tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        assert metrics_swarm.read_review_rounds(SLUG, box).rows == []
+        folder = tmp_path / "reviews"
+        folder.mkdir()
+        lines = [{"task": "t", "counter": "rounds", "round": round_, "at": NOW + round_} for round_ in (1, 2)]
+        (folder / "rounds.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
+        rows = metrics_swarm.read_review_rounds(SLUG, box).rows
+        assert [(row["kind"], row["target"], row["at"], row["review_id"]) for row in rows] == [
+            ("review round", "tasks/t", NOW + 1, "swarm:t:rounds:1"),
+            ("review round", "tasks/t", NOW + 2, "swarm:t:rounds:2"),
+        ]
+        delivery = metrics_swarm.delivery_rows(SLUG, doc(rows), [AGENT], {})
+        assert [row["kind"] for row in delivery] == ["review_round", "review_round"]
+        assert len({row["event_id"] for row in delivery}) == 2
+    finally:
+        box.close()
+
+
+def test_record_pass_ships_each_swarm_review_round_once(tmp_path, monkeypatch):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    (tmp_path / "reviews").mkdir()
+    log = tmp_path / "reviews" / "rounds.jsonl"
+    log.write_text(json.dumps({"task": TASK["id"], "counter": "rounds", "round": 1, "at": NOW}) + "\n")
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        batch = metrics_swarm.read_review_rounds(SLUG, box)
+        assert batch.source.startswith(f"{log}:") and batch.position == log.stat().st_size
+        metrics_swarm.record_pass(box, SLUG, NOW + 1_000, store, doc(), [], {})
+        rounds = [row for row in box.recent("delivery_events", NOW + 1_000) if row["kind"] == "review_round"]
+        assert [row["ts_ms"] for row in rounds] == [NOW]
+        assert metrics_swarm.read_review_rounds(SLUG, box).rows == []
     finally:
         box.close()

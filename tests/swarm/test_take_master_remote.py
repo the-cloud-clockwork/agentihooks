@@ -156,7 +156,7 @@ def test_a_remote_host_without_a_hive_id_is_refused_before_any_change(remote_tak
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "")
     assert run("sw", "take-master") == 1
     assert capsys.readouterr().err == (
-        "swarm: take-master on a remote host needs AGENTIHOOKS_HIVE_ID from agentihooks hive join\n"
+        "swarm: take-master on a remote host needs AGENTIHOOKS_HIVE_ID from agentihooks hive add\n"
     )
     assert (_masters(store), sent, broadcast.session_name(4242)) == ([], [], CARRIED)
 
@@ -165,6 +165,16 @@ def test_a_workstation_on_a_hosted_ledger_needs_no_hive_id():
     assert take_master.hive_of({"SWARM_URL": "https://swarm.example"}) == ""
     assert take_master.hive_of({"SWARM_URL": "https://swarm.example", "AGENTIHOOKS_DEPLOYMENT": "local"}) == ""
     assert take_master.hive_of({"AGENTIHOOKS_DEPLOYMENT": "compose", "AGENTIHOOKS_HIVE_ID": "member-9"}) == "member-9"
+
+
+def test_a_hub_address_with_no_mode_is_a_remote_host():
+    hub = "https://hub.example:8765"
+    assert take_master.hive_of({"LEDGER_URL": hub, "AGENTIHOOKS_HIVE_ID": "member-9"}) == "member-9"
+    assert take_master.hive_of({"LEDGER_URL": hub, "AGENTIHOOKS_DEPLOYMENT": "local", "AGENTIHOOKS_HIVE_ID": "m"}) == ""
+    assert take_master.hive_of({"AGENTIHOOKS_HIVE_ID": "member-9"}) == ""
+    with pytest.raises(SwarmError) as refused:
+        take_master.hive_of({"LEDGER_URL": hub})
+    assert str(refused.value) == "take-master on a remote host needs AGENTIHOOKS_HIVE_ID from agentihooks hive add"
 
 
 def test_a_local_ledger_keeps_the_session_unpinned(taker, monkeypatch):  # noqa: F811

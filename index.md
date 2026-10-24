@@ -21,7 +21,7 @@ A harness for Claude Code and Codex — built on four pillars that make your age
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE)
 [![Tests](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml/badge.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 {: .text-center .mb-8 }
 
 ---
@@ -167,7 +167,7 @@ agentihooks init --profile coding,infra-ops
 pip install agentihooks
 ```
 
-For the service stack, start with the [Docker Compose bundle quick start]({{ site.baseurl }}/docs/getting-started/compose-quick-start/). For native agents, install hooks for Claude Code and Codex:
+For the service stack, start with the [Docker Compose bundle quick start]({{ site.baseurl }}/docs/getting-started/compose-quick-start/). To run the whole swarm on one machine, follow the [single machine quick start]({{ site.baseurl }}/docs/getting-started/single-machine-quick-start/); to install the hub on a cluster, the [Kubernetes quick start]({{ site.baseurl }}/docs/getting-started/kubernetes-quick-start/); to join more machines or worker pods, [add a hive]({{ site.baseurl }}/docs/getting-started/add-hive-quick-start/). For native agents, install hooks for Claude Code and Codex:
 
 ```bash
 agentihooks init

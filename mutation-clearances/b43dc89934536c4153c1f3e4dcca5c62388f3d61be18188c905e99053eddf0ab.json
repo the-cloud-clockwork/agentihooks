@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.x\u01c1NatsBus\u01c1for_swarm__mutmut_5:f13019d67b269f8656f5febdc3286ad7d229af8e775cc1d57788c50ee58909a6": {
+    "reader": "standards-reader",
+    "reason": "The changed constant is a valid subject suffix. The returned subject is discarded; swarm validation and all observable results are identical."
+  }
+}

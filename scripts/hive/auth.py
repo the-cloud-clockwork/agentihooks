@@ -1,4 +1,4 @@
-"""Hive credentials: a one-time invite code is exchanged for a ledger credential and a Redis ACL user."""
+"""Hive credentials: a member is minted with a ledger credential and a Redis ACL user."""
 
 import hashlib
 import hmac
@@ -14,16 +14,40 @@ from scripts.swarm.keyspace import ROOT
 if TYPE_CHECKING:
     from redis import Redis
 
-INVITE_TTL_S = 900
-# Outside the ROOT keyspace, so a member's ACL user cannot mint invites or read the credential index.
+# Outside the ROOT keyspace, so a member's ACL user cannot read the credential index.
 PREFIX = f"{ROOT}-hive"
 # ACL cannot confine a user to one database, so a hive's Redis serves that hive alone.
 ACL_PATTERNS = (f"{ROOT}:*",)
 ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
+# Only keys a traced worker command writes; an entry with no writer widens every member's login.
+WORKER_KEYS = (
+    "swarm:*:agents",
+    "swarm:*:executions",
+    "swarm:*:identity-conflicts",
+    "swarm:*:desired-routes",
+    "swarm:*:state-since",
+    "swarm:*:claim:*",
+    "swarm:*:ready",
+    "swarm:*:restart-causes",
+    "swarm:*:transfers",
+    "swarm:*:handoff:*",
+    "swarm:*:handoff-seat:*",
+    "swarm:*:handoff-envelope:*",
+    "swarm:*:findings",
+    "swarm:*:checks:*",
+    "swarm:*:merge-stall",
+    "swarm:*:merge-stall-notice",
+    "swarm:*:hive-placement-waits",
+    "swarm:*:dev-red",
+    "seat:*:recaps",
+    "seat:*:learned",
+    "seat-of:*:exit",
+)
 INDEX = f"{ROOT}:hives"
 # A Redis started without --aclfile keeps users in memory only; there is nothing to save.
 NO_ACL_FILE = "not configured to use an ACL file"
 ENV_FILE = "hive.env"
+NATS_CREDS_FILE = "hive.creds"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
 
@@ -36,18 +60,9 @@ def _digest(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
 
 
-def invite(redis: "Redis", name: str) -> str:
-    code = secrets.token_hex(16)
-    redis.set(f"{PREFIX}:invite:{_digest(code)}", name, ex=INVITE_TTL_S)
-    return code
-
-
-def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
+def mint(redis: "Redis", name: str, redis_url: str) -> dict:
     from redis.exceptions import RedisError
 
-    name = redis.getdel(f"{PREFIX}:invite:{_digest(code)}")
-    if name is None:
-        raise HiveError("invite code is invalid, expired or already used")
     member_id = secrets.token_hex(8)
     password = secrets.token_urlsafe()
     ledger = secrets.token_urlsafe()
@@ -69,6 +84,15 @@ def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
         "ledger_credential": ledger,
         "redis_url": _with_user(redis_url, f"hive-{member_id}", password),
     }
+
+
+def member_of(redis: "Redis", credential: str) -> str | None:
+    from redis.exceptions import RedisError
+
+    try:
+        return redis.get(f"{PREFIX}:ledger:{_digest(credential)}")
+    except RedisError as exc:
+        raise HiveError(f"Redis refused the member lookup ({exc})") from exc
 
 
 def refresh(redis: "Redis", credential: str, redis_url: str) -> dict:
@@ -108,7 +132,21 @@ def _set_user(client, member_id: str, password: str) -> None:
 
 def _acl_keys(member_id: str) -> tuple[str, ...]:
     own = f"{ROOT}:hive:{member_id}"
-    return (f"%R~{ROOT}:*", f"~{own}", f"~{own}:*")
+    return (f"%R~{ROOT}:*", f"~{own}", f"~{own}:*", *(f"~{ROOT}:{key}" for key in WORKER_KEYS))
+
+
+def regrant(redis: "Redis") -> None:
+    for member_id in redis.smembers(INDEX):
+        redis.acl_setuser(
+            f"hive-{member_id}",
+            enabled=True,
+            reset_keys=True,
+            reset_channels=True,
+            categories=ACL_CATEGORIES,
+            keys=_acl_keys(member_id),
+            channels=ACL_PATTERNS,
+        )
+    _persist(redis)
 
 
 def _persist(redis: "Redis") -> None:
@@ -196,12 +234,30 @@ def revoke(redis: "Redis", member_id: str) -> None:
 
 
 def write_env(home: Path | str, url: str, grant: dict) -> Path:
-    return _write_private(
-        Path(home) / ENV_FILE,
+    creds = Path(home) / NATS_CREDS_FILE
+    if grant.get("nats_credentials"):
+        grant = {**grant, "bus_credentials": str(_write_private(creds, grant["nats_credentials"]))}
+    else:
+        creds.unlink(missing_ok=True)
+    return _write_private(Path(home) / ENV_FILE, env_text(url, grant))
+
+
+def env_text(url: str, grant: dict) -> str:
+    bus = (
+        f"AGENTIHOOKS_BUS_CREDENTIALS={grant['bus_credentials']}\nAGENTIHOOKS_BUS_BIND=1\n"
+        if grant.get("bus_credentials")
+        else ""
+    )
+    if grant.get("bus_scoped"):
+        bus += "AGENTIHOOKS_BUS_SCOPED=1\n"
+    if grant.get("bus_swarms"):
+        bus += f"AGENTIHOOKS_BUS_SWARMS={','.join(grant['bus_swarms'])}\n"
+    return (
         f"AGENTIHOOKS_HIVE_ID={grant['id']}\n"
         f"AGENTIHOOKS_HIVE_URL={url}\n"
         f"AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL={grant['ledger_credential']}\n"
-        f"AGENTIHOOKS_HIVE_REDIS_URL={grant['redis_url']}\n",
+        f"AGENTIHOOKS_HIVE_REDIS_URL={grant['redis_url']}\n"
+        f"{bus}"
     )
 
 

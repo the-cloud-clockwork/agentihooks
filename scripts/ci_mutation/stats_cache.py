@@ -46,20 +46,18 @@ def test_inputs(
             dependencies = set()
             if Path(current).suffix == ".py":
                 text = content.decode()
-                tree = ast.parse(text)
+                nodes = list(ast.walk(ast.parse(text)))
                 names = set(imported_names(text, Path(current).parent.parts))
                 loaders = {name: name for name in DYNAMIC_IMPORTS} | {
                     alias.asname or alias.name: alias.name
-                    for node in ast.walk(tree)
+                    for node in nodes
                     if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "importlib.util", "builtins")
                     for alias in node.names
                     if alias.name in DYNAMIC_IMPORTS
                 }
-                dynamic = [
-                    node for node in ast.walk(tree) if isinstance(node, ast.Call) and loader_name(node.func) in loaders
-                ]
+                dynamic = [node for node in nodes if isinstance(node, ast.Call) and loader_name(node.func) in loaders]
                 called = {id(node.func) for node in dynamic}
-                if any(id(node) not in called and loader_name(node) in loaders for node in ast.walk(tree)):
+                if any(id(node) not in called and loader_name(node) in loaders for node in nodes):
                     dependencies.update(modules.values())
                 for node in dynamic:
                     if (
@@ -81,7 +79,7 @@ def test_inputs(
                             dependencies.add(modules[prefix])
                 literals = {
                     node.value
-                    for node in ast.walk(tree)
+                    for node in nodes
                     if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
                 }
                 dependencies.update(resource for value in literals for resource in resources.get(value, ()))
@@ -117,7 +115,10 @@ def collect_cached_stats(
             parts = Path(path).parts
             for index in range(len(parts)):
                 resources.setdefault("/".join(parts[index:]), set()).add(path)
-    inputs = {path: test_inputs(root, test_file(path), modules, records, resources) for path in files}
+    traced = {}
+    for name in dict.fromkeys(map(test_file, files)):
+        traced[name] = test_inputs(root, name, modules, records, resources)
+    inputs = {path: dict(traced[test_file(path)]) for path in files}
     for dependencies in inputs.values():
         if not any(not name.startswith("tests/") for name in dependencies):
             for source in changes.keys() & resources:

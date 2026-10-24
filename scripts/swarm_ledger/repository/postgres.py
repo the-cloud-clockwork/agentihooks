@@ -3,15 +3,33 @@ import sqlite3
 import threading
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
-from . import hierarchy
+from . import hierarchy, refresh
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Snapshot, SQLiteLedgerRepository
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
 WRITER_LOCK = 0x4C454447
 KEPT = 8
+LOCK_WAIT = 10
+LOCK_TRIES = 3
+LOCK_REFUSED = f"the ledger writer lock was not granted in {LOCK_TRIES} waits of {LOCK_WAIT} seconds"
+# version 1 records the changed rows that replicas refresh from; a writer without them makes every replica rebuild
+VERSION = 1
+REQUIRED = 1
+VERSION_SETTING = "agentihooks.ledger_writer_version"
+REFUSED_CODE = "LW001"
+SESSION = {
+    "options": f"-c lock_timeout={LOCK_WAIT}s -c idle_in_transaction_session_timeout=15s -c statement_timeout=60s"
+    f" -c {VERSION_SETTING}={VERSION}",
+    "keepalives": 1,
+    "keepalives_idle": 30,
+    "keepalives_interval": 10,
+    "keepalives_count": 3,
+}
 READ_SNAPSHOT = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"
+# the first start after an upgrade builds row indexes over every stored ledger
+SCHEMA_STATEMENTS_UNTIMED = "SET LOCAL statement_timeout = 0"
 TABLES = "SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema()"
 STATEMENTS = {
     BEGIN_IMMEDIATE: f"SELECT pg_advisory_xact_lock({WRITER_LOCK})",
@@ -32,6 +50,51 @@ REWRITES = (
 IGNORE = "INSERT OR IGNORE INTO "
 UNFENCEABLE = "PRAGMA table_info"
 NAMED = re.compile(r"(?<![:\w]):(\w+)")
+REFUSAL_REASON = ", the oldest the shared database allows; update its code and restart it"
+REFUSED_LOCK = 0x4C574652
+REFUSED_SHIFT = 65536
+FLOOR_SCHEMA = "CREATE TABLE IF NOT EXISTS writer_floor (name TEXT PRIMARY KEY, version INTEGER NOT NULL);\n"
+OUTBOX_SCHEMA = "ALTER TABLE outbox_sent ADD COLUMN IF NOT EXISTS sent_at INTEGER NOT NULL DEFAULT 0;\n"
+RAISE_FLOOR = (
+    "INSERT INTO writer_floor VALUES ('ledger', ?) ON CONFLICT (name)"
+    " DO UPDATE SET version = GREATEST(writer_floor.version, EXCLUDED.version)"
+)
+FLOOR = "SELECT version FROM writer_floor WHERE name = 'ledger'"
+# a session advisory lock outlives the refused transaction, so allowed writers can see who was refused
+MARK_REFUSED = "SELECT pg_try_advisory_lock(?, ?)"
+REFUSED_WRITERS = (
+    "SELECT DISTINCT COALESCE(host(a.client_addr), 'an unseen client'),"
+    f" l.objid::BIGINT / {REFUSED_SHIFT}, l.objid::BIGINT % {REFUSED_SHIFT} FROM pg_locks l"
+    " JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.locktype = 'advisory' AND l.classid = ? AND l.objsubid = 2"
+    " AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+    " ORDER BY 1, 2, 3"
+)
+GUARD = f"""CREATE OR REPLACE FUNCTION ledger_writer_floor() RETURNS trigger LANGUAGE plpgsql AS $guard$
+DECLARE
+  writer BIGINT := COALESCE(NULLIF(current_setting('{VERSION_SETTING}', true), ''), '0')::BIGINT;
+  required BIGINT := (SELECT version FROM writer_floor WHERE name = 'ledger');
+BEGIN
+  IF writer < required
+    AND NOT EXISTS (SELECT 1 FROM row_changes WHERE slug = NEW.slug AND generation = NEW.generation) THEN
+    PERFORM pg_try_advisory_lock({REFUSED_LOCK}, (writer * {REFUSED_SHIFT} + required)::INTEGER);
+    RAISE EXCEPTION USING ERRCODE = '{REFUSED_CODE}', MESSAGE = 'ledger writer version ' || writer
+      || ' is below version ' || required || '{REFUSAL_REASON}';
+  END IF;
+  RETURN NEW;
+END
+$guard$"""
+GUARD_TRIGGER = (
+    "CREATE OR REPLACE TRIGGER ledger_writer_floor BEFORE UPDATE ON ledgers FOR EACH ROW"
+    " WHEN (NEW.generation IS DISTINCT FROM OLD.generation) EXECUTE FUNCTION ledger_writer_floor()"
+)
+
+
+class Refused(sqlite3.DatabaseError):
+    pass
+
+
+def refusal(version: int, required: int) -> str:
+    return f"ledger writer version {version} is below version {required}{REFUSAL_REASON}"
 
 
 def url(env: Mapping[str, str]) -> str | None:
@@ -86,6 +149,8 @@ def mapped() -> Iterator[None]:
     except psycopg2.errors.UndefinedTable as exc:
         raise sqlite3.OperationalError(str(exc)) from exc
     except psycopg2.Error as exc:
+        if exc.pgcode == REFUSED_CODE:
+            raise Refused(exc.diag.message_primary) from exc
         raise sqlite3.DatabaseError(str(exc)) from exc
 
 
@@ -100,7 +165,7 @@ class Pool:
             if self.idle:
                 return self.idle.pop()
         with mapped():
-            return errors().connect(self.address)
+            return errors().connect(self.address, **SESSION)
 
     def give(self, raw) -> None:
         psycopg2 = errors()
@@ -137,6 +202,8 @@ class Connection:
             raise sqlite3.OperationalError("hosted fences belong to SQLite ledger folders")
         if sql.startswith("PRAGMA"):
             return Empty()
+        if sql == BEGIN_IMMEDIATE:
+            return self.lock()
         with mapped():
             if sql == BEGIN:
                 if self.raw.get_transaction_status() != errors().extensions.TRANSACTION_STATUS_IDLE:
@@ -145,6 +212,22 @@ class Connection:
             cursor = self.raw.cursor()
             cursor.execute(translate(sql, isinstance(parameters, Mapping)), parameters)
         return cursor
+
+    def lock(self) -> object:
+        """The writer lock, asked for again after each wait the server ends at its lock timeout."""
+        psycopg2 = errors()
+        lost = psycopg2.errors.LockNotAvailable
+        with mapped():
+            if self.raw.get_transaction_status() != psycopg2.extensions.TRANSACTION_STATUS_IDLE:
+                raise sqlite3.OperationalError("cannot start a transaction within a transaction")
+            for _ in range(LOCK_TRIES):
+                cursor = self.raw.cursor()
+                try:
+                    cursor.execute(translate(BEGIN_IMMEDIATE), ())
+                    return cursor
+                except lost:
+                    self.raw.rollback()
+        raise sqlite3.OperationalError(LOCK_REFUSED)
 
     def executemany(self, sql: str, rows: Iterable) -> None:
         with mapped(), self.raw.cursor() as cursor:
@@ -222,8 +305,31 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
                 return
             with connection:
                 connection.execute(BEGIN_IMMEDIATE)
-                connection.executescript(SCHEMA + hierarchy.SCHEMA + ROWS_SCHEMA)
+                connection.execute(SCHEMA_STATEMENTS_UNTIMED)
+                connection.executescript(
+                    SCHEMA + OUTBOX_SCHEMA + hierarchy.SCHEMA + ROWS_SCHEMA + refresh.SCHEMA + FLOOR_SCHEMA
+                )
+                connection.execute(RAISE_FLOOR, (REQUIRED,))
+                connection.execute(GUARD)
+                connection.execute(GUARD_TRIGGER)
             self._ready.add(address)
+
+    def _write(self, connection, slug: str, entry, state: dict, events: list):
+        stored = connection.execute(FLOOR).fetchone()
+        required = REQUIRED if stored is None else stored[0]
+        if required > VERSION:
+            connection.execute(MARK_REFUSED, (REFUSED_LOCK, VERSION * REFUSED_SHIFT + required))
+            raise Refused(refusal(VERSION, required))
+        refused = connection.execute(REFUSED_WRITERS, (REFUSED_LOCK,)).fetchall()
+        if refused:
+            from scripts.swarm_ledger import ledger_alerts
+
+            before = [alert["text"] for alert in state.setdefault("alerts", [])]
+            raised = SimpleNamespace(rev=state["_meta"]["rev"], at=self.domain.now_ms())
+            for address, version, floor in refused:
+                text = f"The ledger writer at {address} was refused: {refusal(version, floor)}"
+                ledger_alerts.raise_warning(state, raised, (ledger_alerts.WRITER, text), before)
+        return super()._write(connection, slug, entry, state, events)
 
     @contextmanager
     def snapshot(self) -> Iterator[Snapshot]:

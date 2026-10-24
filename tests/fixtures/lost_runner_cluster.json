@@ -1,0 +1,141 @@
+{
+  "recorded": "2026-10-19 from kubectl get nodes and kubectl get pods -l actions.github.com/scale-set-name, trimmed; clfn7 is plant run 39290816342 attempt 2; job is plant run 39290816342 attempt 2 job lost from the GitHub jobs API, shown as it read while in progress; sets are kubectl get autoscalingrunnersets names",
+  "nodes": [
+    {
+      "metadata": {
+        "name": "k8s-worker-1"
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "Unknown",
+            "lastTransitionTime": "2026-10-19T09:10:24Z"
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "anton-oci-xprl7d2szima"
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "lastTransitionTime": "2026-10-19T05:32:46Z"
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "anton-oci-vjnhihp4znsq"
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "lastTransitionTime": "2026-10-19T05:36:12Z"
+          }
+        ]
+      }
+    }
+  ],
+  "pods": [
+    {
+      "metadata": {
+        "name": "anton-oss-light-cpwxt-runner-live1",
+        "labels": {
+          "actions.github.com/scale-set-name": "anton-oss-light"
+        }
+      },
+      "spec": {
+        "nodeName": "anton-oci-vjnhihp4znsq"
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "runner",
+            "state": {
+              "running": {
+                "startedAt": "2026-10-19T17:25:05Z"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "anton-oss-light-cpwxt-runner-clfn7",
+        "labels": {
+          "actions.github.com/scale-set-name": "anton-oss-light"
+        }
+      },
+      "spec": {
+        "nodeName": "anton-oci-xprl7d2szima"
+      },
+      "status": {
+        "phase": "Failed",
+        "containerStatuses": [
+          {
+            "name": "runner",
+            "state": {
+              "terminated": {
+                "exitCode": 137,
+                "reason": "Error",
+                "startedAt": "2026-10-19T17:13:21Z",
+                "finishedAt": "2026-10-19T17:13:27Z"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "anton-oss-light-cpwxt-runner-down1",
+        "labels": {
+          "actions.github.com/scale-set-name": "anton-oss-light"
+        }
+      },
+      "spec": {
+        "nodeName": "k8s-worker-1"
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "runner",
+            "state": {
+              "running": {
+                "startedAt": "2026-10-19T17:25:05Z"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "sets": [
+    "anton",
+    "anton-batch",
+    "anton-light",
+    "anton-oss",
+    "anton-oss-batch",
+    "anton-oss-light",
+    "anton-oss-queue"
+  ],
+  "job": {
+    "conclusion": null,
+    "name": "lost",
+    "runner_group_name": "anton-oss",
+    "runner_name": "anton-oss-light-cpwxt-runner-clfn7",
+    "started_at": "2026-10-19T17:13:26Z",
+    "status": "in_progress"
+  }
+}

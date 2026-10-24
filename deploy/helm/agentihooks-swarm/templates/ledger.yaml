@@ -1,3 +1,4 @@
+{{- if not .Values.hiveOnly }}
 {{- $fullname := include "swarm.fullname" . }}
 {{- $host := printf "%s-ledger" $fullname }}
 {{- $port := .Values.ledger.port }}
@@ -84,6 +85,7 @@ spec:
               value: {{ .Values.ledger.publicUrl | default (ternary (printf "https://%s" .Values.ingress.host) (include "swarm.ledgerUrl" .) .Values.ingress.enabled) | quote }}
             - name: SWARM_ALLOWED_HOSTS
               value: {{ printf "%s:%v,%s.%s:%v,%s.%s.svc:%v,%s.%s.svc.cluster.local:%v%s" $host $port $host .Release.Namespace $port $host .Release.Namespace $port $host .Release.Namespace $port (ternary (printf ",%s" .Values.ingress.host) "" .Values.ingress.enabled) | quote }}
+            {{- include "swarm.secretKeyEnv" .Values.ledger.secretEnv | nindent 12 }}
             {{- include "swarm.extraEnv" .Values.ledger.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           readinessProbe:
@@ -125,3 +127,4 @@ spec:
         resources:
           requests:
             storage: {{ .Values.ledger.persistence.size }}
+{{- end }}

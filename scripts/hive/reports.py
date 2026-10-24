@@ -5,11 +5,14 @@ import json
 from typing import TYPE_CHECKING
 
 from scripts.hive import registry
+from scripts.hive.auth import HiveError
 
 if TYPE_CHECKING:
     from redis import Redis
 
     from scripts.swarm.store import AgentRecord
+
+LOST_MS = 10 * 60_000
 
 
 def key(hive: str) -> str:
@@ -45,6 +48,31 @@ class Reports:
             return None
         found = report["executions"].get(agent.execution_id, {})
         return found if found.get("generation") == agent.generation else {}
+
+    def gone(self, agent: "AgentRecord") -> bool:
+        report = self.read(host(agent))
+        if report is None:
+            return False
+        if report.get("observed_at", 0) < (agent.launched_at or agent.started_at):
+            return False
+        panes = report.get("pane_ids")
+        if not isinstance(panes, list):
+            return False
+        namespace = report.get("process_namespace")
+        launched = agent.runtime_target.get("process_namespace")
+        if namespace and launched and namespace != launched:
+            return True
+        return bool(agent.pane_id) and agent.pane_id not in panes
+
+    def lost(self, agent: "AgentRecord", now_ms: int) -> bool:
+        hive = host(agent)
+        if not hive or self.read(hive) is not None:
+            return False
+        try:
+            record = registry.show(self.redis, hive)
+        except HiveError:
+            return False
+        return record is not None and 0 < record["heartbeat_at"] < now_ms - LOST_MS
 
     def names(self) -> set[str]:
         return {name for report in self.live().values() for name in report["names"]}

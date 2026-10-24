@@ -43,7 +43,7 @@ def test_agents_table_has_a_profile_column(open_page):
     heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
     assert heads[:9] == ["agent", "lane", "profile", "overlays", "model", "transport", "task", "state", "age"]
     assert [cells[:9] for cells in page.table("swarm-agents")] == [
-        ["master-1", "—", "master", "—", "opus high", "—", "—", "LIVE", "2h 0m"],
+        ["master-1\nluna", "—", "master", "—", "opus high", "—", "—", "LIVE", "2h 0m"],
         ["eng-58", "eng", "engineer", "—", "opus high", "—", "pb10", "IDLE", "1m"],
     ]
     assert [cells[2] for cells in open_page().table("swarm-agents")] == ["—", "—"]

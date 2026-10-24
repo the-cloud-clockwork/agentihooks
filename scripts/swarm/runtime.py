@@ -57,6 +57,7 @@ PLAN_MODE = ["--permission-mode", "plan"]
 REMOTE_PANE = "a remote agent's pane lives on its worker herdr server, never on the local one"
 MANAGED_RESUME = "unsupported resume: a managed Codex execution continues through its supervised server"
 TICK_ONLY = ("SWARM_SECRET", "AGENTIHOOKS_LEDGER_AGENT_TOKEN")
+REPO_VARIABLE = "AGENTIHOOKS_SWARM_REPO"
 
 
 def codex_plan_mode(environ):
@@ -158,13 +159,9 @@ def _titled(slug, lane, seat):
 
 
 def _launch_records(name):
-    from scripts import herdr_panes
+    from scripts.codex_session.attach import launch_records
 
-    return [
-        r
-        for r in herdr_panes.load(dict(os.environ))
-        if r.kind == "init-agent" and naming.plain(r.owner_session) == naming.plain(name)
-    ]
+    return launch_records(name, dict(os.environ))
 
 
 def _opened_pane(name, since_ms):
@@ -226,6 +223,31 @@ def _command(action, agent, text="", nonce=""):
     order_id = f"{action}:{agent.execution_id}:{agent.generation}" + (f":{nonce}" if nonce else "")
     slug = agent.seat.rpartition("@")[2]
     return CommandOrder(order_id, action, slug, agent.name, agent.execution_id, agent.generation, text)
+
+
+def _carries(pid, name):
+    from scripts.swarm.naming import resolve_name
+    from scripts.terminate_agent import agent_environ
+
+    carried = agent_environ(pid, ("AGENTIHOOKS_AGENT_NAME",))[0]
+    return bool(carried) and (carried == name or resolve_name(carried) == name)
+
+
+def _pane_process(agent):
+    from scripts.herdr_host import server_socket
+    from scripts.terminate_agent import herdr_pane, sessions
+
+    socket = server_socket(dict(os.environ))
+    owned = []
+    for session in sessions():
+        pane, target_socket = herdr_pane(session.process.pid)
+        if (
+            session.name == agent.name
+            and pane == agent.pane_id
+            and server_socket({"HERDR_SOCKET_PATH": target_socket}) == socket
+        ):
+            owned.append(session.process)
+    return min(owned, key=lambda process: process.start_time, default=None)
 
 
 class HerdrRuntime:
@@ -611,6 +633,7 @@ class HerdrRuntime:
         )
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
+        argv += ["--claim-fence", json.dumps(task["claim_fence"])] if task.get("claim_fence") else []
         argv += _titled(config.slug, lane, task.get("seat", ""))
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
@@ -651,11 +674,10 @@ class HerdrRuntime:
                 agent, saved.get("account") or self.planned_account(task["id"], agent), None, lane
             )
             route = ["--route", account.name]
-        placed = timing.call(
-            self._launch,
+        placed = self._account_launch(
             config,
             lane,
-            task["id"],
+            task,
             name,
             [
                 *argv,
@@ -671,8 +693,6 @@ class HerdrRuntime:
                 ),
                 *mode,
             ],
-            predecessor=_predecessor(task),
-            controller_epoch=task.get("controller_epoch"),
         )
         self._reserve_account(account, lane, agent)
         placed = codex.complete(config, name, placed, self._terminate)
@@ -766,6 +786,27 @@ class HerdrRuntime:
         )
         return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
 
+    def _account_launch(self, config, lane, task, name, argv):
+        if task.get("account_slot_hive"):
+            from scripts.hive.account_slots import EXECUTION_ENV, HIVE_ENV
+
+            argv = [
+                "env",
+                f"{HIVE_ENV}={task['account_slot_hive']}",
+                f"{EXECUTION_ENV}={task['execution_id']}",
+                *argv,
+            ]
+        return timing.call(
+            self._launch,
+            config,
+            lane,
+            task["id"],
+            name,
+            argv,
+            predecessor=_predecessor(task),
+            controller_epoch=task.get("controller_epoch"),
+        )
+
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):
             if (self.conversations() or {}).get(pane_id) == conversation_id:
@@ -774,6 +815,8 @@ class HerdrRuntime:
         return False
 
     def _argv(self, config, name, agent, text, prompt_name, profile, worn=()):
+        from scripts.hive import daemon
+
         path = self.home / config.slug / "prompts" / prompt_name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
@@ -786,7 +829,7 @@ class HerdrRuntime:
             "--workspace",
             naming.space(config.repo, config.code, config.slug),
             "--dir",
-            config.repo,
+            daemon.local_checkout(config.repo),
         ]
         argv += [
             "--name",
@@ -828,6 +871,7 @@ class HerdrRuntime:
                     **({PREDECESSOR: predecessor} if predecessor else {}),
                     **_ledger_token(config.slug, name),
                     "AGENTIHOOKS_SWARM": config.slug,
+                    REPO_VARIABLE: argv[argv.index("--dir") + 1],
                     "AGENTIHOOKS_SWARM_LANE": lane,
                     "AGENTIHOOKS_SWARM_TASK": task_id,
                     "AGENTIHOOKS_SWARM_AUTONOMY": config.autonomy,
@@ -999,6 +1043,29 @@ class HerdrRuntime:
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
         return self.retire_process(agent, pid, homes)
 
+    def retire_pane(self, agent: AgentRecord, homes: tuple = ()) -> bool:
+        found = None
+        if agent.pane_id:
+            try:
+                result = self.herdr(["agent", "get", agent.pane_id])
+                found = result.get("agent", result)
+            except Exception as exc:
+                if "not found" not in str(exc):
+                    self.refusals[agent.name] = {"process": 0, "refusal": str(exc)}
+                    return False
+        if found is not None and _owns(found, agent):
+            conversation = _conversation_id(found.get("agent_session"))
+            if found.get("name") or agent.conversation_id and conversation == agent.conversation_id:
+                launch = _pane_process(agent)
+                if launch is not None:
+                    return self.retire_process(agent, launch.pid, homes, launch.start_time)
+                if agent.name not in self.live_names():
+                    return self.retire_process(agent, None, homes)
+        if found is None and agent.name not in self.live_names():
+            return self.retire_process(replace(agent, pane_id=""), None, homes)
+        self.refusals[agent.name] = {"process": 0, "refusal": "no owned pane for unrecorded process"}
+        return False
+
     def _retire_managed(self, agent):
         from scripts.codex_session.binding import EXITED, BindingStore
         from scripts.codex_session.supervisor import execution_directory, remove_home
@@ -1016,15 +1083,20 @@ class HerdrRuntime:
         slug = store.names.slug_of(agent.name)
         recorded = bindings.viewers(slug, record.execution_id)
         try:
-            viewers = self._viewer_panes(agent.pane_id, recorded)
+            owned = self._owned_panes(agent, recorded)
         except Exception as exc:
             self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"pane list: {exc}"}
             return False
-        for pane in viewers:
+        for pane in owned:
+            launch = pane == agent.pane_id
             try:
-                self.close_pane(pane)
+                if launch:
+                    self._close_owned_pane(agent)
+                else:
+                    self.close_pane(pane)
             except Exception as exc:
-                self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"viewer pane {pane}: {exc}"}
+                refusal = f"pane {pane}: {exc}" if launch else f"viewer pane {pane}: {exc}"
+                self.refusals[agent.name] = {"process": record.server_pid, "refusal": refusal}
                 return False
         directory = execution_directory(record)
         if directory is not None and directory.exists():
@@ -1039,14 +1111,14 @@ class HerdrRuntime:
         self.refusals.pop(agent.name, None)
         return True
 
-    def _viewer_panes(self, launch_pane, recorded):
-        """A recorded viewer is closed only while herdr still lists its pane on the terminal it was opened with,
-        because herdr reuses a closed pane's id."""
-        live = []
-        if recorded:
-            listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"])["panes"]}
-            live = [pane for pane, terminal in recorded.items() if terminal and listed.get(pane) == terminal]
-        return [pane for pane in dict.fromkeys((launch_pane, *live)) if pane]
+    def _owned_panes(self, agent, recorded):
+        from scripts.codex_session.attach import recorded_terminals
+
+        known = recorded_terminals(agent.name, recorded, dict(os.environ))
+        if not known:
+            return []
+        listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"])["panes"]}
+        return [pane for pane, terminal in known.items() if listed.get(pane) == terminal]
 
     def retire_process(self, agent, pid, homes=(), start=0):
         if live_binding.managed(agent):
@@ -1060,11 +1132,10 @@ class HerdrRuntime:
             return False
         if agent.pane_id:
             try:
-                self.herdr(["pane", "close", agent.pane_id])
+                self._close_owned_pane(agent)
             except Exception as exc:
-                if "not found" not in str(exc):
-                    self.refusals[agent.name] = {"process": pid or 0, "refusal": f"pane {agent.pane_id}: {exc}"}
-                    return False
+                self.refusals[agent.name] = {"process": pid or 0, "refusal": f"pane {agent.pane_id}: {exc}"}
+                return False
         self.refusals.pop(agent.name, None)
         return True
 
@@ -1075,10 +1146,11 @@ class HerdrRuntime:
         from scripts.hive.orders import CommandOrder, Orders
         from scripts.terminate_agent import sessions
 
-        pids = [s.process.pid for s in sessions() if s.name == name]
-        host = "" if pids or self.hive is None else self.hive.holder(name)
+        held = [s.process.pid for s in sessions() if s.name == name]
+        host = "" if held or self.hive is None else self.hive.holder(name)
         if not host:
-            return not self.reap(pids).refusal
+            carrying = [pid for pid in held if _carries(pid, name)]
+            return not self.reap(carrying).refusal and len(carrying) == len(held)
         order = CommandOrder(f"reap:{name}", "reap", name=name)
         reaped = self._order(host, order, name)
         if reaped:
@@ -1099,6 +1171,17 @@ class HerdrRuntime:
         except Exception as exc:
             if "not found" not in str(exc):
                 raise
+
+    def _close_owned_pane(self, agent):
+        """herdr reuses a closed pane's id, so a pane it lists under another owner is left open."""
+        try:
+            found = self.herdr(["agent", "get", agent.pane_id])
+        except Exception as exc:
+            if "not found" not in str(exc):
+                raise
+            found = None
+        if found is None or _owns(found.get("agent", found), agent):
+            self.close_pane(agent.pane_id)
 
     def close_space(self, config: SwarmConfig) -> bool:
         try:
@@ -1125,6 +1208,8 @@ class HerdrRuntime:
 
     def observe(self, agent: AgentRecord) -> PaneObservation:
         if self.remote(agent):
+            if self.hive is not None and self.hive.gone(agent):
+                return PaneObservation("exited")
             pane = self._hosted(agent).get("pane")
             return PaneObservation(**pane) if pane else PaneObservation("unknown")
         if live_binding.managed(agent):

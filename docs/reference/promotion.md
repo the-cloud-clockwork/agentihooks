@@ -16,7 +16,9 @@ The `promote` job in `.github/workflows/test.yml` is the last job of a `dev` pus
 |---|---|
 | The event is `push` and the ref is `refs/heads/dev` | job `if` in `test.yml`, repeated in `promote.yml` and `promote.cjs` |
 | `Gate — Required` succeeded | `needs.gate-required.result == 'success'` |
-| No dependency failed or was cancelled | `gate-required`, `refresh-durations`, `coverage-baseline` and `flake-budget`; `!contains(needs.*.result, 'failure')` and `'cancelled'` |
+| Hierarchy CPU proof succeeded | `needs.hierarchy-cpu.result == 'success'`; see [Hierarchy CPU proof at promotion](delivery-tiers.md#hierarchy-cpu-proof-at-promotion) |
+| Sonar produced an analysis | `needs.sonar.outputs.analysis != ''` |
+| No dependency failed or was cancelled | `gate-required`, `refresh-durations`, `coverage-baseline`, `flake-budget`, `sonar` and `hierarchy-cpu`; `!contains(needs.*.result, 'failure')` and `'cancelled'` |
 | The run was not cancelled | `!cancelled()` |
 
 Pull request and merge queue runs never promote. A dispatched Tests run never promotes.
@@ -50,7 +52,7 @@ The `Squash the graded tree snapshot into main` step runs `promote.cjs`, so it c
 
 Pushing a `promotion/**` branch starts no Mutation preflight run: `mutation-preflight.yml` lists `promotion/**` in its push `branches-ignore`, beside `dev`, `main`, `gh-readonly-queue/**`, `wip/**` and `diffcheck/**`. Before [#3886](https://github.com/the-cloud-clockwork/agentihooks/pull/3886) the push ran a mutation preflight on the promotion head, a tree whose changes had already been mutation graded on their pull requests, and the merge waited for its `mutation` check. Other workflows still run on that push; on the snapshot of v2.17.2 they were `grade` (Branch workflow lanes) and two `measure` checks (Startup stages, Worker resources).
 
-The step can still wait on the graded `dev` commit. When the promotion pull request reports `unstable`, step 5 admits it only while this run's `promote / promote` job is the one check still running, this run's `Gate — Required` succeeded, every other check on the graded commit has completed with success or skipped, and the latest commit status of every context is success. A slow non-gate workflow on that commit, such as the Worker hive pod `kind` and `publish` jobs, holds the merge until it finishes or the four minute limit fails the step.
+The step can still wait on the graded `dev` commit. When the promotion pull request reports `unstable`, step 5 admits it only while this run's `promote / promote` job is the one check still running, this run's `Gate — Required` succeeded, every other check on the graded commit has completed with success or skipped, and the latest commit status of every context is success. A slow non-gate workflow on that commit, such as the Worker hive pod `kind` job, holds the merge until it finishes or the four minute limit fails the step.
 
 Measured on promotion runs of the Tests workflow, check times from the commits API and merge times from the pulls API:
 
@@ -107,7 +109,7 @@ A rerun after another promotion moved `main` is refused with `Graded revision is
 | GitHub refuses the merge | The job fails before tagging. |
 | The promoted tree differs | The job fails before tagging; `main` has already advanced to the merged commit and the snapshot branch is kept for inspection. A rerun of that revision is refused, because `main` already names it. |
 
-A red promotion produces one fixer task per failing check under the [delivery tiers rule](delivery-tiers.md#rules); the fix lands through an ordinary pull request into `dev`, and the next green push run promotes it.
+A red promotion produces one fixer task per failing check under the [delivery tiers rule](delivery-tiers.md#rules); the fix lands through an ordinary pull request into `dev`, and the next green push run promotes it. When several swarms watch the repository, one of them owns that intake; see [promotion fixer intake](../pillars/swarm.md#promotion-fixer-intake).
 
 ## Manual releases
 

@@ -1,0 +1,449 @@
+import contextlib
+import subprocess
+from types import SimpleNamespace
+
+import pytest
+import yaml
+
+from scripts import openbao_kv
+from scripts.events import nkey
+from scripts.events.config import BusConfig
+from scripts.hive import auth, cli, nats_grant, nats_trust
+from tests.events import nats_server
+
+pytestmark = pytest.mark.unit
+
+URL = "tls://nats.example:4222"
+WEBHOOK_PUBLISH = ["swarm.*.pull.opened", "$KV.hub-github.>"]
+USERS = [
+    {"user": "swarm-controller", "openbao": "k8s/agentihooks-swarm-nats-controller"},
+    {
+        "user": "swarm-github-webhook",
+        "openbao": "k8s/agentihooks-swarm-nats-github-webhook",
+        "permissions": {"publish": {"allow": WEBHOOK_PUBLISH}, "subscribe": {"allow": ["_INBOX.>"]}},
+    },
+    {
+        "user": "swarm-ledger",
+        "openbao": "k8s/agentihooks-swarm-nats-ledger",
+        "permissions": {"publish": ["swarm.>"], "subscribe": {"allow": ["swarm.>"], "deny": ["swarm.x"]}},
+    },
+]
+RETIRED = [{"user": "swarm-hive", "openbao": "k8s/agentihooks-swarm-nats-hive"}]
+
+
+@pytest.fixture
+def bao(monkeypatch):
+    records: dict[str, dict] = {"k8s/agentihooks-swarm-nats-controller": {"password": "old"}}
+
+    def read(found, path):
+        assert found.url == "https://bao.example"
+        assert path == nats_trust.SIGNER_PATH
+        return dict(records.get(path, {})), len(records.get(path, {}))
+
+    def merge(found, path, entries, stale=()):
+        assert found.url == "https://bao.example"
+        records[path] = {**records.get(path, {}), **entries}
+        return len(records[path])
+
+    def create(found, path, entries):
+        assert found.url == "https://bao.example"
+        if path in records:
+            return False
+        records[path] = dict(entries)
+        return True
+
+    monkeypatch.setattr(openbao_kv, "read", read)
+    monkeypatch.setattr(openbao_kv, "merge", merge)
+
+    def delete(found, path):
+        assert found.url == "https://bao.example"
+        records.pop(path, None)
+
+    monkeypatch.setattr(openbao_kv, "create", create)
+    monkeypatch.setattr(openbao_kv, "delete", delete)
+    return openbao_kv.OpenBao("https://bao.example", "t"), records
+
+
+@pytest.fixture
+def admin():
+    import fakeredis
+
+    return fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+
+
+def _signer(records: dict) -> nats_grant.Signer:
+    record = records[nats_trust.SIGNER_PATH]
+    return nats_grant.Signer(
+        nkey.from_seed(record["operator_seed"]),
+        nkey.from_seed(record["account_seed"]),
+        record["system_credentials"],
+        record["url"],
+        nkey.from_seed(record["operator_seed"]).public,
+    )
+
+
+def test_the_signer_record_lives_under_the_hub_path():
+    assert nats_trust.SIGNER_PATH == "agentihooks/hub/nats-signer"
+
+
+def test_bootstrap_creates_the_keys_once_and_keeps_them(bao, admin):
+    client, records = bao
+    _, lines = nats_trust.bootstrap(client, admin, USERS, URL)
+    first = dict(records[nats_trust.SIGNER_PATH])
+    _, again = nats_trust.bootstrap(client, admin, USERS, "tls://elsewhere:4222")
+
+    assert records[nats_trust.SIGNER_PATH] == first
+    assert first["url"] == URL
+    assert sorted(first) == ["account_seed", "operator_seed", "system_credentials", "system_seed", "url"]
+    operator, system, account = (nkey.from_seed(first[f"{name}_seed"]) for name in ("operator", "system", "account"))
+    assert (operator.public[0], system.public[0], account.public[0]) == ("O", "A", "A")
+    assert lines[0] == again[0] == f"operator {operator.public}, swarm account {account.public}"
+    jwt, user = nkey.parse_creds(first["system_credentials"])
+    assert user == nkey.derive(system, nkey.USER, "system")
+    assert nkey.claims(jwt) | {"jti": "", "iat": 0} == {
+        "jti": "",
+        "iat": 0,
+        "iss": system.public,
+        "name": "system",
+        "sub": user.public,
+        "nats": nats_grant.user_claims(),
+    }
+
+
+def test_each_service_user_is_signed_into_its_openbao_record(bao, admin):
+    client, records = bao
+    _, lines = nats_trust.bootstrap(client, admin, USERS, URL)
+    account = nkey.from_seed(records[nats_trust.SIGNER_PATH]["account_seed"])
+
+    assert records["k8s/agentihooks-swarm-nats-controller"]["password"] == "old"
+    assert lines[1:] == [
+        "swarm-controller: OpenBao secret/k8s/agentihooks-swarm-nats-controller: wrote credentials (2 keys total)",
+        "swarm-github-webhook: OpenBao secret/k8s/agentihooks-swarm-nats-github-webhook: wrote credentials (1 keys total)",
+        "swarm-ledger: OpenBao secret/k8s/agentihooks-swarm-nats-ledger: wrote credentials (1 keys total)",
+    ]
+    granted = {}
+    for entry in USERS:
+        jwt, user = nkey.parse_creds(records[entry["openbao"]]["credentials"])
+        claims = nkey.claims(jwt)
+        assert user == nkey.derive(account, nkey.USER, f"service-{entry['user']}")
+        assert (claims["iss"], claims["sub"], claims["name"]) == (account.public, user.public, entry["user"])
+        granted[entry["user"]] = (claims["nats"]["pub"], claims["nats"]["sub"])
+    assert granted == {
+        "swarm-controller": ({}, {}),
+        "swarm-github-webhook": ({"allow": WEBHOOK_PUBLISH}, {"allow": ["_INBOX.>"]}),
+        "swarm-ledger": ({"allow": ["swarm.>"]}, {"allow": ["swarm.>"], "deny": ["swarm.x"]}),
+    }
+
+
+def test_a_signed_service_user_is_stable_across_runs(bao, admin):
+    client, records = bao
+    nats_trust.bootstrap(client, admin, USERS, URL)
+    first = nkey.parse_creds(records[USERS[0]["openbao"]]["credentials"])[1]
+    nats_trust.bootstrap(client, admin, USERS, URL)
+    assert nkey.parse_creds(records[USERS[0]["openbao"]]["credentials"])[1] == first
+
+
+def test_the_trust_values_preload_the_system_and_swarm_accounts(bao, admin):
+    client, records = bao
+    values, _ = nats_trust.bootstrap(client, admin, USERS, URL)
+    record = records[nats_trust.SIGNER_PATH]
+    operator, system, account = (nkey.from_seed(record[f"{name}_seed"]) for name in ("operator", "system", "account"))
+    merge = values["config"]["merge"]
+
+    assert list(values) == ["config"] and list(values["config"]) == ["merge"]
+    assert list(merge) == ["operator", "system_account", "resolver_preload"]
+    assert merge["system_account"] == system.public
+    operator_claims = nkey.claims(merge["operator"])
+    assert (operator_claims["iss"], operator_claims["sub"], operator_claims["name"]) == (
+        operator.public,
+        operator.public,
+        "swarm",
+    )
+    assert operator_claims["nats"] == {"type": "operator", "version": 2, "system_account": system.public}
+    preload = merge["resolver_preload"]
+    assert list(preload) == [system.public, account.public]
+    system_claims = nkey.claims(preload[system.public])
+    assert (system_claims["iss"], system_claims["sub"], system_claims["name"]) == (
+        operator.public,
+        system.public,
+        "SYS",
+    )
+    assert system_claims["nats"] == {"type": "account", "version": 2, "limits": nats_trust.SYSTEM_LIMITS}
+    assert nats_trust.SYSTEM_LIMITS == {
+        "subs": -1,
+        "data": -1,
+        "payload": -1,
+        "imports": -1,
+        "exports": -1,
+        "conn": -1,
+        "leaf": -1,
+    }
+    account_claims = nkey.claims(preload[account.public])
+    assert (account_claims["iss"], account_claims["sub"], account_claims["name"]) == (
+        operator.public,
+        account.public,
+        "SWARM",
+    )
+    assert "revocations" not in account_claims["nats"]
+
+
+def test_a_retired_user_is_revoked_in_the_preloaded_account_and_its_record_deleted(bao, admin, monkeypatch):
+    client, records = bao
+    admin.hset(nats_grant.REVOKED, "UMEMBER", 5)
+    records[RETIRED[0]["openbao"]] = {"credentials": "old"}
+    monkeypatch.setattr(nats_trust, "time", SimpleNamespace(time=lambda: 100.5))
+    values, lines = nats_trust.bootstrap(client, admin, USERS[:1], URL, RETIRED)
+    account = nkey.from_seed(records[nats_trust.SIGNER_PATH]["account_seed"])
+    retired = nkey.derive(account, nkey.USER, "service-swarm-hive").public
+    preload = values["config"]["merge"]["resolver_preload"]
+
+    assert RETIRED[0]["openbao"] not in records
+    assert lines[2:] == [
+        f"swarm-hive: revoked {retired} in the preloaded swarm account, deleted OpenBao secret/k8s/agentihooks-swarm-nats-hive"
+    ]
+    assert nkey.claims(preload[account.public])["nats"]["revocations"] == {"UMEMBER": 5, retired: 100}
+    assert admin.hgetall(nats_grant.REVOKED) == {"UMEMBER": "5", retired: "100"}
+
+
+def test_a_retired_user_keeps_its_first_revocation_time(bao, admin, monkeypatch):
+    client, records = bao
+    times = iter([100, 200])
+    monkeypatch.setattr(nats_trust, "time", SimpleNamespace(time=lambda: next(times)))
+    nats_trust.bootstrap(client, admin, USERS[:1], URL, RETIRED)
+    values, _ = nats_trust.bootstrap(client, admin, USERS[:1], URL, RETIRED)
+    account = nkey.from_seed(records[nats_trust.SIGNER_PATH]["account_seed"])
+    revocations = nkey.claims(values["config"]["merge"]["resolver_preload"][account.public])["nats"]["revocations"]
+    assert revocations == {nkey.derive(account, nkey.USER, "service-swarm-hive").public: 100}
+
+
+def test_a_later_member_revocation_keeps_the_retired_user_revoked(bao, admin, monkeypatch):
+    client, records = bao
+    nats_trust.bootstrap(client, admin, USERS[:1], URL, RETIRED)
+    pushed = []
+    monkeypatch.setattr(nats_grant, "push", lambda signed, jwt: pushed.append(jwt))
+    signer = _signer(records)
+    nats_grant.revoke(admin, signer, "h1")
+    [jwt] = pushed
+    assert set(nkey.claims(jwt)["nats"]["revocations"]) == {
+        nkey.derive(signer.account, nkey.USER, "service-swarm-hive").public,
+        nats_grant.member_user(signer, "h1").public,
+    }
+
+
+def test_keys_another_run_created_first_are_used_instead_of_new_ones(bao, admin, monkeypatch):
+    client, records = bao
+    winner = {
+        "operator": nkey.create(nkey.OPERATOR),
+        "system": nkey.create(nkey.ACCOUNT),
+        "account": nkey.create(nkey.ACCOUNT),
+    }
+    reads = iter([({}, 0)])
+
+    def read(found, path):
+        assert found is client
+        return next(reads, (dict(records.get(path, {})), 1))
+
+    def create(found, path, entries):
+        records[path] = {f"{name}_seed": pair.seed for name, pair in winner.items()}
+        return False
+
+    monkeypatch.setattr(openbao_kv, "read", read)
+    monkeypatch.setattr(openbao_kv, "create", create)
+    values, lines = nats_trust.bootstrap(client, admin, USERS[:1], URL)
+
+    assert lines[0] == f"operator {winner['operator'].public}, swarm account {winner['account'].public}"
+    assert values["config"]["merge"]["system_account"] == winner["system"].public
+
+
+def test_a_signer_record_that_vanishes_after_a_lost_create_is_refused(bao, admin, monkeypatch):
+    client, _ = bao
+    monkeypatch.setattr(openbao_kv, "read", lambda found, path: ({}, 0))
+    monkeypatch.setattr(openbao_kv, "create", lambda found, path, entries: False)
+    with pytest.raises(auth.HiveError, match="^the NATS signer record agentihooks/hub/nats-signer cannot be used \\("):
+        nats_trust.bootstrap(client, admin, USERS, URL)
+
+
+def test_a_broken_signer_record_is_refused(bao, admin):
+    client, records = bao
+    records[nats_trust.SIGNER_PATH] = {"operator_seed": "nope"}
+    with pytest.raises(auth.HiveError, match="^the NATS signer record agentihooks/hub/nats-signer cannot be used \\("):
+        nats_trust.bootstrap(client, admin, USERS, URL)
+
+
+def test_the_users_file_is_read(tmp_path):
+    path = tmp_path / "users.yaml"
+    path.write_text(yaml.safe_dump({"users": USERS}))
+    assert nats_trust.load_users(path) == USERS
+
+
+def test_the_retired_users_are_read_and_default_to_none(tmp_path):
+    path = tmp_path / "users.yaml"
+    path.write_text(yaml.safe_dump({"users": USERS}))
+    assert nats_trust.load_retired(path) == []
+    path.write_text(yaml.safe_dump({"users": USERS, "retired": RETIRED}))
+    assert nats_trust.load_retired(path) == RETIRED
+
+
+@pytest.mark.parametrize(
+    "retired",
+    ["swarm-hive", ["swarm-hive"], [{"user": "swarm-hive"}], [{"openbao": "k8s/x"}], [{"user": "", "openbao": "k"}]],
+)
+def test_a_retired_user_without_a_name_or_record_is_refused(tmp_path, retired):
+    path = tmp_path / "users.yaml"
+    path.write_text(yaml.safe_dump({"users": USERS, "retired": retired}))
+    with pytest.raises(auth.HiveError) as refused:
+        nats_trust.load_retired(path)
+    assert str(refused.value) == f"every retired user in {path} needs a user name and the openbao record to delete"
+
+
+def test_a_user_listed_as_both_signed_and_retired_is_refused(tmp_path):
+    path = tmp_path / "users.yaml"
+    path.write_text(yaml.safe_dump({"users": [*USERS, *RETIRED], "retired": [*RETIRED, USERS[0]]}))
+    with pytest.raises(auth.HiveError) as refused:
+        nats_trust.load_retired(path)
+    assert str(refused.value) == f"{path} lists swarm-controller, swarm-hive under both users and retired"
+
+
+@pytest.mark.parametrize("body", ["", "users: []\n", "users: {}\n", "other: 1\n"])
+def test_a_users_file_without_users_is_refused(tmp_path, body):
+    path = tmp_path / "users.yaml"
+    path.write_text(body)
+    with pytest.raises(auth.HiveError) as refused:
+        nats_trust.load_users(path)
+    assert str(refused.value) == f"{path} must list the service users under users"
+
+
+@pytest.mark.parametrize(
+    "entry", ["swarm-ledger", {"user": "swarm-ledger"}, {"openbao": "k8s/x"}, {"user": "", "openbao": "k8s/x"}]
+)
+def test_a_user_without_a_name_or_record_is_refused(tmp_path, entry):
+    path = tmp_path / "users.yaml"
+    path.write_text(yaml.safe_dump({"users": [USERS[0], entry]}))
+    with pytest.raises(auth.HiveError) as refused:
+        nats_trust.load_users(path)
+    assert str(refused.value) == (
+        f"every user in {path} needs a user name and the openbao record its credential goes to"
+    )
+
+
+def test_cli_writes_the_trust_values_and_reports_each_user(bao, admin, tmp_path, monkeypatch, capsys):
+    _, records = bao
+    users, values = tmp_path / "users.yaml", tmp_path / "trust.yaml"
+    users.write_text(yaml.safe_dump({"users": USERS[:1], "retired": RETIRED}))
+    records[RETIRED[0]["openbao"]] = {"credentials": "old"}
+    monkeypatch.setattr(cli, "redis_client", lambda: admin)
+    monkeypatch.setenv("OPENBAO_URL", "https://bao.example")
+    monkeypatch.setenv("OPENBAO_TOKEN", "t")
+
+    status = cli.main(["nats-trust", "--users", str(users), "--url", URL, "--values", str(values)])
+
+    out = capsys.readouterr().out.splitlines()
+    account = nkey.from_seed(records[nats_trust.SIGNER_PATH]["account_seed"])
+    written = yaml.safe_load(values.read_text())
+    retired = nats_trust.service_user(account, "swarm-hive").public
+    assert status == 0
+    assert records[nats_trust.SIGNER_PATH]["url"] == URL
+    assert out[0].endswith(f"swarm account {account.public}")
+    assert out[1:] == [
+        "swarm-controller: OpenBao secret/k8s/agentihooks-swarm-nats-controller: wrote credentials (2 keys total)",
+        f"swarm-hive: revoked {retired} in the preloaded swarm account, deleted OpenBao secret/k8s/agentihooks-swarm-nats-hive",
+        f"wrote the public operator trust to {values}",
+    ]
+    assert RETIRED[0]["openbao"] not in records
+    assert list(written["config"]["merge"]) == ["operator", "system_account", "resolver_preload"]
+    assert list(written["config"]["merge"]["resolver_preload"])[1] == account.public
+    assert set(nkey.claims(written["config"]["merge"]["resolver_preload"][account.public])["nats"]["revocations"]) == {
+        retired
+    }
+    assert values.read_text().count("\n") == 7
+
+
+def test_cli_refuses_without_openbao(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("OPENBAO_URL", raising=False)
+    monkeypatch.delenv("OPENBAO_TOKEN", raising=False)
+    status = cli.main(["nats-trust", "--users", "u", "--url", URL, "--values", str(tmp_path / "v")])
+    assert status == 1
+    assert capsys.readouterr().err == (
+        "hive nats-trust refused: nats-trust writes OpenBao, so OPENBAO_URL and OPENBAO_TOKEN must be set\n"
+    )
+
+
+def test_cli_help_names_the_trust_command_and_its_options(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "300")
+    top = cli._parser().format_help()
+    with pytest.raises(SystemExit):
+        cli.main(["nats-trust", "--help"])
+    trust = capsys.readouterr().out
+
+    assert " Create the swarm NATS operator trust once and sign the service users of a users file\n" in top
+    for text in (
+        "YAML file listing each service user and its OpenBao record, and the retired users to revoke",
+        "NATS address the hive join endpoint pushes account updates to",
+        "Helm values file to write the public operator trust to",
+    ):
+        assert f" {text}\n" in trust
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args(["nats-trust", "--users", "u", "--url", "x"])
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args(["nats-trust", "--users", "u", "--values", "v"])
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args(["nats-trust", "--url", "x", "--values", "v"])
+
+
+def _opens(url: str, credentials: str | None) -> bool:
+    from scripts.events import nats
+
+    try:
+        bus = nats.open_bus(BusConfig(backend="nats", url=url, credentials=credentials, provision=False))
+    except Exception as exc:
+        assert "authorization" in str(exc).lower()
+        return False
+    bus.close()
+    return True
+
+
+@contextlib.contextmanager
+def _server(tmp_path, port: int, merge: dict):
+    preload = "".join(f"  {key}: {jwt}\n" for key, jwt in merge["resolver_preload"].items())
+    config = tmp_path / "nats.conf"
+    config.write_text(
+        f"host: 127.0.0.1\nport: {port}\nmax_control_line: 65536\n"
+        f"operator: {merge['operator']}\nsystem_account: {merge['system_account']}\n"
+        f'jetstream: {{store_dir: "{tmp_path / "js"}"}}\n'
+        f'resolver: {{type: full, dir: "{tmp_path / "jwt"}"}}\n'
+        f"resolver_preload: {{\n{preload}}}\n"
+    )
+    process = subprocess.Popen(
+        [nats_server.binary(), "-c", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    try:
+        nats_server.wait_listening(port, process)
+        yield f"nats://127.0.0.1:{port}"
+    finally:
+        process.terminate()
+        process.wait(10)
+
+
+def test_a_server_run_from_the_trust_values_admits_service_users_and_minted_members(bao, admin, tmp_path):
+    client, records = bao
+    port = nats_server.free_port()
+    values, _ = nats_trust.bootstrap(client, admin, USERS, f"nats://127.0.0.1:{port}")
+    with _server(tmp_path, port, values["config"]["merge"]) as url:
+        signer = _signer(records)
+        assert _opens(url, records[USERS[0]["openbao"]]["credentials"])
+        assert _opens(url, nats_grant.mint(signer, "h1"))
+        assert not _opens(url, None)
+        nats_grant.push(signer, nats_grant.account_jwt(signer.operator, signer.account, {}))
+
+
+def test_a_server_run_from_the_new_trust_refuses_a_retired_user_signed_earlier(bao, admin, tmp_path):
+    client, records = bao
+    port = nats_server.free_port()
+    url = f"nats://127.0.0.1:{port}"
+    nats_trust.bootstrap(client, admin, [*USERS, *RETIRED], url)
+    signed = records[RETIRED[0]["openbao"]]["credentials"]
+    values, _ = nats_trust.bootstrap(client, admin, USERS, url, RETIRED)
+    with _server(tmp_path, port, values["config"]["merge"]):
+        assert not _opens(url, signed)
+        assert _opens(url, records[USERS[0]["openbao"]]["credentials"])
+        assert _opens(url, nats_grant.mint(_signer(records), "h1"))

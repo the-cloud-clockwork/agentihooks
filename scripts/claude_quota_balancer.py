@@ -670,7 +670,9 @@ def _metric(value: float | None) -> float:
     return -1.0 if value is None else value
 
 
-def account_cap(result: ProbeResult, now: float | None = None, include_fable: bool = False) -> int | None:
+def account_cap(
+    result: ProbeResult, now: float | None = None, include_fable: bool = False, ceiling: int | None = None
+) -> int | None:
     """Live sessions the account may hold under the session bands; None without a full reading."""
     if result.provider_status == "rejected":
         return 0
@@ -678,7 +680,8 @@ def account_cap(result: ProbeResult, now: float | None = None, include_fable: bo
     weeks = [result.seven_day, *([result.fable] if include_fable else [])]
     left = [session_bands.left(window.used, window.resets_at, timestamp) for window in weeks]
     five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, timestamp)
-    return session_bands.cap(five, None if None in left else min(left))
+    week = None if None in left else min(left)
+    return session_bands.cap(five, week) if ceiling is None else session_bands.scaled_cap(five, week, ceiling)
 
 
 def is_routable(result: ProbeResult, now: float | None = None, include_fable: bool = False) -> bool:

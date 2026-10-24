@@ -1,8 +1,10 @@
 """Every Doctor detector over the watched swarm: one list of findings, and a line for each detector that failed."""
 
 import contextvars
+import json
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from functools import cache
@@ -49,13 +51,30 @@ def _inbox(store, mail, slug, now_ms, env, items):
     return inbox.findings(items, now_ms, wake.window_ms(env), read.inbox_receivers(store, mail, slug, items))
 
 
-def _traces(store, tasks, slug, now_ms, env):
-    record = traces_read.record(slug, tasks, [asdict(a) for a in store.agents(slug)], now_ms, traces_read.client(env))
-    record["waits"] = {
-        name: idle.wait_history(store.redis, slug, name)
-        for name in {traces._agent(trace) for trace in record["traces"]}
-    }
-    return traces.findings(record, traces.Limits.from_env(env))
+def _traces(store, tasks, slug, now_ms, env, trace_client=None):
+    started = time.monotonic()
+    key = store.key(slug, "doctor-task-cost")
+    previous = store.redis.get(key)
+    merged = traces_read.merged(tasks)
+    if previous is None:
+        previous = json.dumps(merged)
+        store.redis.set(key, previous)
+    judged = set(json.loads(previous))
+    limits = traces.Limits.from_env(env)
+    get = (trace_client or traces_read.client)(env)
+    record = traces_read.record(slug, tasks, [asdict(a) for a in store.agents(slug)], now_ms, get)
+    record["waits"], record["waits_unread"] = traces_read.waits(
+        lambda name: idle.wait_history(store.redis, slug, name),
+        traces.gap_agents(record, limits),
+        started,
+        traces_read.Budget(),
+    )
+    candidates = traces.task_cost_candidates(record) - judged
+    record["task_cost_candidates"] = candidates
+    found = traces.findings(record, limits)
+    if candidates:
+        store.redis.set(key, json.dumps(sorted(judged | candidates)))
+    return found
 
 
 def _overruns(store, slug):
@@ -64,6 +83,18 @@ def _overruns(store, slug):
         [asdict(a) for a in store.agents(slug)],
         lambda session: context_recycle.unmarked_overrun(session, limit),
     )
+
+
+def _starts(store, slug, now_ms):
+    from scripts.swarm.tick import ACKNOWLEDGING
+
+    agents = [asdict(a) for a in store.agents(slug)]
+    launches = store.redis.hgetall(store.key(slug, "launches"))
+    pending = frozenset(name for name, raw in launches.items() if json.loads(raw)["state"] == ACKNOWLEDGING)
+    beats = {
+        a["name"]: beat["at"] for a in agents if a["hive"] and (beat := idle.heartbeat(store.redis, slug, a["name"]))
+    }
+    return spawns.silent_starts(agents, activity.first_events(slug), now_ms, beats, pending)
 
 
 def _once(load):
@@ -85,6 +116,7 @@ def _ci(store, tasks, now_ms):
 
 
 def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetry=True):
+    """`telemetry` is False to skip the trace reader, or the client factory it reads through instead of the default."""
     env = os.environ if environ is None else environ
     mail = InboxStore(store.redis)
     items = _once(lambda: read.inbox_items(mail, slug))
@@ -100,13 +132,11 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         "handoff": lambda: handoffs.findings(read.handoffs(store, mail, home, slug, items())),
         "spawn": lambda: spawns.findings(spawn_read.records(store, slug, now_ms)),
         "master launch": lambda: master_launches.findings(spawn_read.master_records(store, slug)),
-        "startup": lambda: spawns.silent_starts(
-            [asdict(a) for a in store.agents(slug)], activity.first_events(slug), now_ms
-        ),
+        "startup": lambda: _starts(store, slug, now_ms),
         "context overrun": lambda: _overruns(store, slug),
         "ci": lambda: _ci(store, tasks(), now_ms),
         "dev workflow": lambda: ci.red_dev_workflows(ci_read.dev_pushes(store.config(slug).repo)),
-        "trace": lambda: _traces(store, tasks(), slug, now_ms, env),
+        "trace": lambda: _traces(store, tasks(), slug, now_ms, env, None if telemetry is True else telemetry),
     }
     return found if telemetry else {name: read for name, read in found.items() if name != "trace"}
 

@@ -422,3 +422,7 @@ Haiku handles the rest.
 - [Pillar 1: Identity](identity.md)
 - [Pillar 2: Guardrails](guardrails.md)
 - [Pillar 3: Context Intelligence](context.md)
+
+## GitHub App credentials
+
+`agentihooks github-app token` prints an installation token for scripts. `agentihooks github-app exec COMMAND ...` supplies current gh and git credentials to a process tree. `agentihooks github-app credential get|store|erase` is the GitHub HTTPS credential helper; it never stores tokens. See the [worker chart authentication choices](../../deploy/helm/agentihooks-swarm/README.md) for App and token Secret references.

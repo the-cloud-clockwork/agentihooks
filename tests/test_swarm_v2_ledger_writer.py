@@ -381,6 +381,14 @@ def test_the_server_holds_the_lease_while_it_serves_and_releases_it_after(servin
     successor.release()
 
 
+def test_a_server_on_the_shared_database_serves_beside_a_held_folder(serving, lease, monkeypatch):
+    monkeypatch.setenv(server.storage.postgres.URL, "postgresql://ledger.invalid/swarm")
+    server.serve()
+    server.ThreadingHTTPServer.return_value.serve_forever.assert_called_once_with()
+    assert ledger_writer.holder(serving)["pid"] == CLAIMANT["pid"]
+    assert ledger_writer.conflicts_total(serving) == 0
+
+
 @pytest.mark.parametrize("case", ["a", "b", "c"])
 def test_package_cases_match_their_committed_evidence(case, tmp_path):
     from tests.sv2_ldg04_cases import run_case

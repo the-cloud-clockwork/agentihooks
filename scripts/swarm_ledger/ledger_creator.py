@@ -30,7 +30,9 @@ def operator_asked(environ, quote) -> bool:
     name = environ.get("AGENTIHOOKS_AGENT_NAME")
     if not name:
         return caller(environ) == "operator"
-    from hooks.context import operator_words
+    from scripts.swarm_ledger import ports
+
+    operator_words = ports.hooks().operator_words
 
     return bool(operator_words.matching(name, quote))
 
@@ -48,7 +50,9 @@ def creator_refusal(environ) -> str:
 
 def swarm_refusal(environ) -> str:
     """Why this session may not create a swarm here: a proof swarm also needs its own Redis."""
-    from scripts.swarm.store import DEFAULT_URL
+    from scripts.swarm_ledger import ports
+
+    DEFAULT_URL = ports.swarm().store.DEFAULT_URL
 
     refused = creator_refusal(environ)
     if refused or shared(environ):

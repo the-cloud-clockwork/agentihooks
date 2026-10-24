@@ -100,6 +100,7 @@ const activeAgents = () => 0;
 const swarm = null;
 const inboxPending = () => 0;
 const document = {dispatchEvent: () => true};
+const closedLeft = () => 0;
 let meta = {created_at: Date.now() - 3600000};
 let doc = {phases: [{done: true}, {done: false}], followups: [], questions: [], tasks: [], time_left_minutes: 200};
 """
@@ -109,6 +110,7 @@ let doc = {phases: [{done: true}, {done: false}], followups: [], questions: [], 
             + function_source("statKey")
             + function_source("statGrip")
             + function_source("bottleneckStat")
+            + function_source("withRefusals")
             + function_source("renderStats")
         )
         script += """

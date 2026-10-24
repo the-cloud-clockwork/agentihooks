@@ -97,6 +97,13 @@ def remove_timer() -> str:
     return "\n  ".join(messages or [f"[--] {UNIT} not scheduled"])
 
 
+def reconcile_units(python: str, root: str, enabled: bool) -> str:
+    from scripts.host_guard.sync import reconcile
+
+    schedule = install_timer(python, root) if enabled else remove_timer()
+    return f"{schedule}\n  {reconcile(Path.home())}"
+
+
 def sweep(event: dict, delivery_id: str, redis: "Redis") -> None:
     from hooks._redis import redis_key
 

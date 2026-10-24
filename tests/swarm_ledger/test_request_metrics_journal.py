@@ -260,7 +260,7 @@ def test_a_stopping_server_persists_a_stop_before_it_releases_the_writer(tmp_pat
 
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
-    monkeypatch.setattr(server.ledger_writer, "WriterLease", Lease)
+    monkeypatch.setattr(server.ports.swarm().ledger_writer, "WriterLease", Lease)
     monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
     monkeypatch.setattr(server.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())

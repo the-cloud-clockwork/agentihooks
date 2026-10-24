@@ -137,16 +137,18 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
     monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: steps.append("drain")))
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
-    monkeypatch.setattr(server.ledger_writer, "WriterLease", Lease)
+    monkeypatch.setattr(server.ports.swarm().ledger_writer, "WriterLease", Lease)
     adopted = []
     monkeypatch.setattr(server.legacy, "adopt", adopted.append)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     server.serve()
     assert waits == [0.0]
-    watching = threads[0].pop("kwargs")["stopping"]
+    watching = threads[1].pop("kwargs")["stopping"]
     assert watching.is_set()
-    assert [{**t, "args": tuple(type(a) for a in t["args"])} for t in threads] == [
-        {"target": server.watch_ledgers, "args": (Server,), "daemon": True},
+    assert threads[0] == {"target": server.adopt_disk_files, "daemon": True}
+    assert threads[1]["target"].__wrapped__ is server.watch_ledgers
+    assert [{**t, "args": tuple(type(a) for a in t["args"])} for t in threads[1:]] == [
+        {"target": threads[1]["target"], "args": (Server,), "daemon": True},
         {"target": server.answer_reloads, "args": (Server,), "daemon": True},
         {"target": server.refresh_streams, "args": (list,), "daemon": True},
     ]
@@ -193,7 +195,7 @@ def test_a_successor_warms_reports_ready_then_waits_for_the_lease_and_takes_the_
     monkeypatch.setattr(server, "take_carry", lambda: steps.append("take carry") or ["demo"])
     monkeypatch.setattr(server, "write_carry", lambda since: steps.append(("write carry", since)))
     monkeypatch.setattr(server, "listening", listening)
-    monkeypatch.setattr(server.ledger_writer, "WriterLease", Lease)
+    monkeypatch.setattr(server.ports.swarm().ledger_writer, "WriterLease", Lease)
     monkeypatch.setattr(server.legacy, "adopt", lambda stored: steps.append("adopt"))
     monkeypatch.setattr(server, "adopt_unrelayed", lambda: None)
     threads = []
@@ -248,7 +250,7 @@ def test_a_successor_without_a_carry_refreshes_every_view_it_warmed(monkeypatch,
             serve_forever=lambda poll: None, drained=lambda timeout: True, server_close=lambda: None
         ),
     )
-    monkeypatch.setattr(server.ledger_writer, "WriterLease", Lease)
+    monkeypatch.setattr(server.ports.swarm().ledger_writer, "WriterLease", Lease)
     monkeypatch.setattr(server.legacy, "adopt", lambda stored: None)
     monkeypatch.setattr(server, "adopt_unrelayed", lambda: None)
     threads = []
@@ -289,7 +291,7 @@ def test_a_carry_that_cannot_be_written_still_releases_the_lease(monkeypatch, tm
             serve_forever=lambda poll: None, drained=lambda timeout: True, server_close=lambda: None
         ),
     )
-    monkeypatch.setattr(server.ledger_writer, "WriterLease", Lease)
+    monkeypatch.setattr(server.ports.swarm().ledger_writer, "WriterLease", Lease)
     monkeypatch.setattr(server.legacy, "adopt", lambda stored: None)
     monkeypatch.setattr(server, "adopt_unrelayed", lambda: None)
     monkeypatch.setattr(server.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
@@ -327,7 +329,7 @@ def test_requests_still_running_at_the_drain_bound_keep_the_lease_until_the_proc
             server_close=lambda: steps.append("close"),
         ),
     )
-    monkeypatch.setattr(server.ledger_writer, "WriterLease", Lease)
+    monkeypatch.setattr(server.ports.swarm().ledger_writer, "WriterLease", Lease)
     monkeypatch.setattr(server.legacy, "adopt", lambda stored: None)
     monkeypatch.setattr(server, "adopt_unrelayed", lambda: None)
     monkeypatch.setattr(server.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
@@ -422,18 +424,16 @@ def test_serve_follows_a_shared_database_on_its_own_daemon_thread(monkeypatch, t
     monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
     monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: None))
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
-    monkeypatch.setattr(server.ledger_writer, "WriterLease", Lease)
+    monkeypatch.setattr(server.ports.swarm().ledger_writer, "WriterLease", Lease)
     monkeypatch.setattr(server.legacy, "adopt", lambda repository: None)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server.storage, "shared", lambda: "postgresql://ledger@db.test/ledger")
     server.serve()
-    assert [t["target"] for t in threads] == [
-        server.watch_ledgers,
-        server.answer_reloads,
-        server.refresh_streams,
-        server.follow_shared,
-    ]
-    assert threads[-1] == {"target": server.follow_shared, "daemon": True}
+    assert [thread["daemon"] for thread in threads] == [True] * 5
+    assert threads[0]["target"] is server.adopt_disk_files
+    assert threads[1]["target"].__wrapped__ is server.watch_ledgers
+    assert [t["target"] for t in threads[2:4]] == [server.answer_reloads, server.refresh_streams]
+    assert threads[4]["target"].__wrapped__ is server.follow_shared
 
 
 def test_the_shared_follow_reads_every_watched_ledger_each_quarter_second(monkeypatch, capsys):

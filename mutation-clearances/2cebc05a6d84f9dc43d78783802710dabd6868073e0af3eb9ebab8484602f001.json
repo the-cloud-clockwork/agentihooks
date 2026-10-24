@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_cache.py:scripts.doctor.ci_cache.x__trim__mutmut_11:9f12b967a11b9d5ffb28e5e75045dff83f303d99df407c5986f9136063fdc4a2": {
+    "reader": "Standards",
+    "reason": "keys and the queued STRLEN commands come from the same list and execute returns one result per command or raises, so strict never triggers."
+  }
+}

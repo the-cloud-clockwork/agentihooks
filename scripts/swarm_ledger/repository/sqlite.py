@@ -8,7 +8,7 @@ from pathlib import Path
 
 from scripts.swarm_ledger import request_metrics
 
-from . import hierarchy
+from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
@@ -25,6 +25,10 @@ CREATE TABLE IF NOT EXISTS events (slug TEXT, key TEXT, revision INTEGER, positi
 CREATE INDEX IF NOT EXISTS events_revision ON events(slug,revision);
 CREATE INDEX IF NOT EXISTS events_position ON events(slug,position);
 CREATE TABLE IF NOT EXISTS relay_journal (kind TEXT, slug TEXT, revision INTEGER, PRIMARY KEY(kind,slug,revision));
+CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, slug TEXT NOT NULL, revision INTEGER NOT NULL, subject TEXT NOT NULL, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS outbox_sent (id TEXT PRIMARY KEY, sent_at INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS artifact_files (slug TEXT, id TEXT, data TEXT, PRIMARY KEY(slug,id));
+CREATE TABLE IF NOT EXISTS media_files (slug TEXT, id TEXT, data TEXT, saved_at INTEGER, PRIMARY KEY(slug,id));
 """
 ROWS_SCHEMA = "".join(
     f"CREATE TABLE IF NOT EXISTS {table} (slug TEXT, path TEXT, parent TEXT, key TEXT, "
@@ -35,15 +39,16 @@ DATABASE = "ledgers.sqlite3"
 BEGIN = "BEGIN"
 REGISTRY = "SELECT path,value FROM registry WHERE slug=?"
 PATH_END = "\x7f"
-PER_LEDGER = (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events")
+PER_LEDGER = (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events", "row_changes")
 GENERATION_SHIFT = 20
+CHANGES_KEPT = 256
 BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
 SLUGS = "SELECT slug FROM ledgers ORDER BY slug"
-ROOT = "[]"
+ROOT = refresh.ROOT
 REGISTRY_TABLE = "registry"
 UPDATE = "UPDATE ledgers SET revision=?, generation=?, summary=?, touched_at=? WHERE slug=?"
 INSERT = "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?, ?)"
@@ -54,9 +59,12 @@ RELEASE = "DELETE FROM relay_journal WHERE kind=? AND slug=? AND revision BETWEE
 DROP = "DELETE FROM relay_journal WHERE kind=? AND slug=?"
 REGISTRIES = "SELECT slug,path,value FROM registry WHERE path=? ORDER BY slug,path"
 ADD_REGISTRY = "INSERT INTO registry VALUES (?,?,?)"
+DROP_REGISTRIES = "DELETE FROM registry WHERE path=?"
 TABLES_SQL = "SELECT name FROM sqlite_master WHERE type='table'"
 FENCES = "CREATE TABLE IF NOT EXISTS hosted_fences (slug TEXT PRIMARY KEY, destination TEXT NOT NULL)"
 FENCED = "SELECT destination FROM hosted_fences WHERE slug IN (?, '*')"
+UNFENCE = "DELETE FROM hosted_fences WHERE destination=?"
+FROZEN = "SELECT 1 FROM hosted_fences WHERE slug='*'"
 FENCE_DESTINATIONS = "SELECT destination FROM hosted_fences WHERE slug IN (?, '*') OR ?='*'"
 TABLE_ID = re.compile(r"[a-z_]+\Z")
 # a fenced ledger's last relay must still be able to hold its revision
@@ -234,6 +242,10 @@ def read_document(directory, slug: str) -> dict | None:
             return None
 
 
+def registry_rows(connection, slug: str) -> list:
+    return [list(row) for row in connection.execute(REGISTRIES, (slug,))]
+
+
 def without_events(state: dict) -> dict:
     """The document as its rows hold it: the event log lives in its own table."""
     return {**state, "_meta": {key: value for key, value in state["_meta"].items() if key != "events"}}
@@ -241,12 +253,20 @@ def without_events(state: dict) -> dict:
 
 def fenced(directory: Path, slug: str) -> bool:
     """Whether the hosted migration fenced this ledger, or every ledger, in the folder's database."""
+    return fence_row(directory, FENCED, (slug,))
+
+
+def frozen(directory: Path) -> bool:
+    return fence_row(directory, FROZEN, ())
+
+
+def fence_row(directory: Path, query: str, parameters: tuple) -> bool:
     with read_only(directory) as connection:
         exists = (
             connection is not None
             and connection.execute("SELECT 1 FROM sqlite_master WHERE name='hosted_fences'").fetchone()
         )
-        return bool(exists and connection.execute(FENCED, (slug,)).fetchone())
+        return bool(exists and connection.execute(query, parameters).fetchone())
 
 
 class Transaction:
@@ -273,6 +293,17 @@ class Transaction:
 
     def add_registries(self, rows: list) -> None:
         self.connection.executemany(ADD_REGISTRY, rows)
+
+    def replace_registries(self, slug: str, rows: list) -> None:
+        self.connection.execute(DROP_REGISTRIES, (slug,))
+        self.add_registries(rows)
+
+    def registries(self, slug: str) -> list:
+        return registry_rows(self.connection, slug)
+
+    def purge(self, slug: str) -> None:
+        self.repository.purge(slug, self.connection)
+        self.connection.execute(DROP_REGISTRIES, (slug,))
 
     def export(self, slug: str) -> dict:
         return self.repository._export(self.connection, slug)
@@ -302,6 +333,10 @@ class Transaction:
     def fence(self, slug: str, destination: str) -> None:
         self.connection.execute("INSERT OR IGNORE INTO hosted_fences VALUES (?,?)", (slug, destination))
         self.connection.commit()
+
+    def unfence(self, destination: str) -> None:
+        self.connection.execute(FENCES)
+        self.connection.execute(UNFENCE, (destination,))
 
 
 class Snapshot:
@@ -339,7 +374,11 @@ class Snapshot:
         return self.repository._export(self.connection, slug)
 
     def registries(self, slug: str) -> list:
-        return [list(row) for row in self.connection.execute(REGISTRIES, (slug,))]
+        return registry_rows(self.connection, slug)
+
+    def token(self, slug: str) -> str | None:
+        row = self.connection.execute(TOKEN, (slug,)).fetchone()
+        return None if row is None else row[0]
 
 
 class SQLiteLedgerRepository:
@@ -403,6 +442,8 @@ class SQLiteLedgerRepository:
             connection.executescript(SCHEMA)
             connection.executescript(hierarchy.SCHEMA)
             connection.executescript(ROWS_SCHEMA)
+            connection.executescript(refresh.SCHEMA)
+            outbox.migrate(connection)
             self._ready.add(path)
 
     def _key(self, slug):
@@ -422,13 +463,22 @@ class SQLiteLedgerRepository:
             cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
                 return cached
-            state = assemble(read_rows(connection, slug))
+            state = None if cached is None else self._refreshed(connection, slug, cached, row[0])
+            whole = state is None
+            if whole:
+                state = assemble(read_rows(connection, slug))
             if "events" in state["_meta"]:
-                state["_meta"]["events"] = read_events(connection, slug)
-            fragments = document(state)
+                state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
+            fragments = document(state, None if whole else cached.fragments)
             entry = Entry(row[0], None, fragments.value, fragments)
             self._remember(slug, entry)
+        if whole:
+            heap.release()
         return entry
+
+    def _refreshed(self, connection, slug: str, cached: Entry, generation: int) -> dict | None:
+        paths = refresh.changed_paths(connection, slug, cached.generation, generation, CHANGES_KEPT)
+        return None if paths is None else refresh.refreshed(connection, slug, cached.state, paths)
 
     def _remember(self, slug: str, entry: Entry) -> None:
         with self._guard:
@@ -492,6 +542,7 @@ class SQLiteLedgerRepository:
             entry = self._entry(connection, slug)
         if view not in entry.views:
             entry.views[view] = view(entry.state)
+            heap.release()
         return entry.views[view]
 
     def read(self, slug: str, *keys: str) -> dict:
@@ -517,11 +568,13 @@ class SQLiteLedgerRepository:
             with connection:
                 request_metrics.begin(connection, BEGIN_IMMEDIATE)
                 entry = self._entry(connection, slug)
-                state = json.loads(entry.text)
+                state = entry.mutable()
                 rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
                 written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
+            artifact_files.drop(slug, ctx.unstored)
+            media_files.drop(slug, ctx.unstored)
             self._remember(slug, written)
-        return (json.loads(written.text) if copy_state else written.state), rejected
+        return (written.mutable() if copy_state else written.state), rejected
 
     def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
         meta, previous = state["_meta"], entry.state["_meta"]
@@ -533,13 +586,15 @@ class SQLiteLedgerRepository:
         fragments = document(state, entry.fragments)
         state = fragments.value
         before, after = diff(*(without_events(value) for value in (entry.state, state)))
-        write_rows(connection, slug, before, after)
+        paths = write_rows(connection, slug, before, after)
         hierarchy.sync(connection, slug, state)
         kept = len(state["_meta"].get("events", []))
         append_events(connection, slug, events, kept)
         if not events and "events" in state["_meta"]:
             trim_events(connection, slug, kept)
+        outbox.write(connection, slug, state["_meta"]["rev"], entry.state, state)
         generation = entry.generation + 1
+        refresh.record(connection, slug, generation, paths, CHANGES_KEPT)
         connection.execute(
             UPDATE,
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),
@@ -550,6 +605,7 @@ class SQLiteLedgerRepository:
         previous = connection.execute(GENERATION, (slug,)).fetchone()
         now = self.domain.now_ms()
         generation = now << GENERATION_SHIFT if previous is None else max(now << GENERATION_SHIFT, previous[0] + 1)
+        before = {} if previous is None else self._entry(connection, slug).state
         for table in PER_LEDGER:
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         stored = {**state, "_meta": {**state["_meta"]}}
@@ -559,6 +615,7 @@ class SQLiteLedgerRepository:
         write_rows(connection, slug, {}, flatten(stored))
         write_events(connection, slug, events)
         write_seeds(connection, slug, seeds or {})
+        outbox.write(connection, slug, state["_meta"]["rev"], before, state)
         connection.execute(
             INSERT,
             (
@@ -649,7 +706,10 @@ class SQLiteLedgerRepository:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
 
     def purge(self, slug: str, connection) -> None:
-        for table in PER_LEDGER:
+        if connection.execute(STORED, (slug,)).fetchone():
+            before = self._entry(connection, slug).state
+            outbox.write(connection, slug, before["_meta"]["rev"], before, {})
+        for table in (*PER_LEDGER, artifact_files.TABLE, media_files.TABLE):
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
 

@@ -1,3 +1,4 @@
+{{- if not .Values.hiveOnly }}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -31,3 +32,4 @@ spec:
           with urllib.request.urlopen(os.environ["LEDGER_URL"] + "/healthz", timeout=5, context=context) as response:
               print("GET /healthz:", response.status, response.read().decode())
               assert response.status == 200
+{{- end }}

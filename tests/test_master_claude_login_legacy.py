@@ -64,6 +64,18 @@ def test_a_launch_reuses_the_global_login_and_leaves_a_legacy_one_alone(ah, rend
     assert (legacy / "claude" / login.CREDENTIALS).is_file()
 
 
+def test_a_login_another_launch_wrote_after_the_offer_is_kept_over_a_legacy_one(ah, rendered, tmp_path, monkeypatch):
+    home = login.build(rendered)
+    (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: {"refreshToken": "global"}}))
+    (home / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
+    legacy = _legacy(ah, "rig")
+    monkeypatch.setattr(login, "_offered", lambda bao: {})
+    target, found = login.prepare(_environ(rendered), tmp_path)
+    assert target == home and found == "masteratexample_com"
+    assert json.loads((target / login.CREDENTIALS).read_text()) == {login.GRANT: {"refreshToken": "global"}}
+    assert (legacy / "claude" / login.CREDENTIALS).is_file()
+
+
 def test_a_single_legacy_login_is_adopted_and_its_folder_removed(ah, rendered, tmp_path):
     legacy = _legacy(ah, "rig")
     _legacy(ah, "doctor", logged_in=False)
@@ -96,7 +108,7 @@ def test_several_legacy_logins_refuse_naming_every_path(ah, rendered, tmp_path):
 
 def test_a_launch_with_only_the_recovery_copy_restores_it(rendered, tmp_path, monkeypatch):
     copy = {"grant": json.dumps(GRANT[login.GRANT]), "account": json.dumps(MASTER_ACCOUNT), "epoch": "0"}
-    monkeypatch.setattr(login, "stored", lambda bao: copy)
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if number == 1 else {})
     monkeypatch.setattr(login, "keep", lambda *_: False)
     target, found = login.prepare(_environ(rendered), tmp_path)
     assert found == "masteratexample_com"
@@ -105,7 +117,7 @@ def test_a_launch_with_only_the_recovery_copy_restores_it(rendered, tmp_path, mo
 
 def test_the_recovery_copy_wins_over_a_legacy_login(ah, rendered, tmp_path, monkeypatch):
     copy = {"grant": json.dumps({"refreshToken": "newer"}), "account": json.dumps(MASTER_ACCOUNT), "epoch": "0"}
-    monkeypatch.setattr(login, "stored", lambda bao: copy)
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if number == 1 else {})
     monkeypatch.setattr(login, "keep", lambda *_: False)
     legacy = _legacy(ah, "rig")
     target, _ = login.prepare(_environ(rendered), tmp_path)

@@ -165,7 +165,7 @@ def handoffs(store, inbox, home, slug, items=None):
         handoff = {"seat": seat, "task": task, "from": before, "to": path.stem, "at": mine["at"], "document": document}
         found.append(_record(store, handoff, sent))
     waiting = ":".join((PREFIX, slug, "handoff", ""))
-    for key in sorted(store.redis.scan_iter(match=waiting + "*")):
+    for key in sorted(store.redis.scan_iter(match=waiting + "*", count=BATCH)):
         task = key[len(waiting) :]
         seat = store.handoff_seat(slug, task)
         author = (store.handoff_envelope(slug, task) or {}).get("agent", "")

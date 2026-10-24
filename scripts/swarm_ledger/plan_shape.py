@@ -1,6 +1,6 @@
 from graphlib import CycleError, TopologicalSorter
 
-from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ports
 
 
 def _width(nodes, ancestors):
@@ -24,6 +24,7 @@ def analyze(tasks: list[dict]) -> dict:
     known = {t["id"] for t in tasks}
     graph = {key: set(t.get("depends_on", [])) & active.keys() for key, t in active.items()}
     unknown = {dep for t in active.values() for dep in t.get("depends_on", [])} - known
+    SwarmError = ports.swarm().store.SwarmError
     if unknown:
         raise SwarmError(f"plan has unknown dependencies: {', '.join(sorted(unknown))}")
     try:

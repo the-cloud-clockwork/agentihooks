@@ -82,17 +82,30 @@ naming both. The master gets `--remote-control`.
 Engineers, CI agents, planners, pool masters and Codex masters never take this route.
 
 `agentihooks claude login --master` takes no slug and runs `claude auth login`
-once in that home; it refuses while any master or another login command holding
-the home is still running. Native Claude is the only refresher of the login.
-The front door masters of several swarms hold the home at once: a master launch
-refuses while a login command holding the home or another live process under
-the same name is still running, and it rebuilds the home from its rendered profile only when no other live master runs
-on it, otherwise it launches on the home as it is. Each claim takes an epoch
-above the one stored in OpenBao. With `--openbao`, and
+in the first empty slot; `--slot N` logs slot N in again. Up to
+`AGENTIHOOKS_MASTER_LOGIN_SLOTS` logins are stored (default 5), slot 1 in
+`$AGENTIHOOKS_HOME/master-login/claude` and slot N in
+`$AGENTIHOOKS_HOME/master-login-N/claude`, each with its own OpenBao record,
+`secret/agentihooks/master-claude-login` and
+`secret/agentihooks/master-claude-login-N`. `--list` prints each stored login,
+its account, the live master holding it and its five hour and week usage; `--remove N` deletes a free login
+and clears its record. A login command refuses while a master or another login
+command holds that slot. Native Claude is the only refresher of the login.
+
+One live master holds one login: two masters never share a slot. A master
+launch takes the free stored login with the most room left (five hour and week
+windows from the router cache and its own sessions' quota snapshots), and
+refuses naming every holder when all stored logins are held. It never falls back
+to an `AH_CC_TOKEN_<slug>` token, because Remote Control refuses long lived
+tokens. At 98% of the week or 99% of five hours the quota policy hands the
+master's seat off, and the successor launches on the free stored login with the
+most room; with no free login the master gets `QUOTA STOP`, never a token.
+
+Each claim takes an epoch above the one stored in OpenBao. With `--openbao`, and
 at each master launch and Stop where `OPENBAO_URL` and `OPENBAO_TOKEN` are set,
-the latest grant native Claude saved is copied to
-`secret/agentihooks/master-claude-login` with its owner epoch, never replacing
-a newer copy; a launch whose home has no login restores it from there.
+the latest grant native Claude saved is copied to that slot's record with its
+owner epoch, never replacing a newer copy; a launch whose home has no login
+restores it from there.
 
 ## Codex login
 
@@ -110,6 +123,35 @@ shell block. A failed login does not update that block or OpenBao.
 The forms `agentihooks codex login` without a slug, `login status`, `login help`,
 and `login --<flag>` pass through to native Codex login instead of registering
 a routed account.
+
+## Codex logout
+
+```bash
+agentihooks codex logout developer@example.com
+```
+
+`agentihooks codex logout <slug> [--openbao | --no-openbao]` removes one Codex
+account from every place login registered it: the `AH_CX_TOKEN_<slug>` and
+`AH_CX_REFRESH_<slug>` keys of the OpenBao Codex record, the account's
+`CODEX_HOME` at `~/.agentihooks/codex/<slug>`, and its export in the managed
+shell block. It also removes the unnormalised name a login replaced. OpenBao
+runs first with check-and-set, keeping every other account; a failed write
+leaves the local registration in place so the command can be repeated. The
+OpenBao choice follows the same flags and prompts as login. Other shells keep
+the variable until `unset AH_CX_TOKEN_<slug>` or a new shell.
+
+`agentihooks codex logout` without a slug, `logout status`, `logout help` and
+`logout --<flag>` pass through to native Codex.
+
+## Duplicate Codex accounts
+
+Two `AH_CX_TOKEN_` names whose tokens carry the same ChatGPT account id are one
+account. The router keeps one routed name for it: the slug of the email in the
+token's profile claim, else a slug shaped like an email (`<user>at<domain>`),
+else the first name in sort order. The other names are reported by
+`agentihooks codex` as the same account and are left out of routing, the hive
+slots and quota readings the Swarm page Hives table shows, and the swarm quota
+table. Remove a duplicate with `agentihooks codex logout <slug>`.
 
 ## Managed shell token block
 

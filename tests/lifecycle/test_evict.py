@@ -1,0 +1,202 @@
+from pathlib import Path
+
+from hooks.lifecycle.evict import free_gb, make_room
+from hooks.lifecycle.lease import add_holder
+from hooks.lifecycle.locks import lock_file
+from hooks.lifecycle.model import Finding, Holder, Root
+
+from .conftest import age, git, process, snap
+
+HOUR = 3600
+
+
+def plenty(_path):
+    return 1000
+
+
+def wip_refs(repo):
+    return git(repo.origin, "for-each-ref", "--format=%(refname)", "refs/heads/wip")
+
+
+def test_full_cap_evicts_the_oldest_safe_worktree_first(repo, tmp_path):
+    old = repo.worktree("old")
+    new = repo.worktree("new")
+    age(old, 5 * HOUR)
+    age(new, HOUR)
+    lines = make_room(repo.primary, repo.root(), 0, 2, tmp_path / "home", snap(), plenty)
+    assert lines == [f"evicted {old}: removed"]
+    assert not old.exists() and new.exists()
+    assert (tmp_path / "home" / "gc-journal.json").read_text() == "{}"
+    assert lock_file(tmp_path / "home", str(old)).exists()
+    assert make_room(repo.primary, repo.root(), 0, 2, tmp_path / "home", snap(), plenty) == []
+
+
+def test_unique_work_is_pushed_to_wip_before_eviction(repo, tmp_path):
+    work = repo.worktree("work")
+    (work / "notes.txt").write_text("unsaved\n")
+    age(work, HOUR)
+    lines = make_room(repo.primary, repo.root(), 0, 1, tmp_path / "home", snap(), plenty)
+    [ref] = wip_refs(repo).split()
+    assert ref.startswith("refs/heads/wip/primary/work-")
+    assert lines == [f"evicted {work}: pushed {ref.removeprefix('refs/heads/')}; removed"]
+    assert not work.exists()
+
+
+def test_held_worktrees_are_never_evicted(repo, tmp_path):
+    main = repo.worktree("main")
+    used = repo.worktree("used")
+    owned = repo.worktree("owned")
+    add_holder(owned, "worktree", Holder("", 4242, 77, "boot-1"), 0.0)
+    for path in (main, used, owned):
+        age(path, 30 * HOUR)
+    view = snap(cwds=(str(used),), table={4242: process(4242, start=77)}, uptime=60)
+    assert make_room(repo.primary, repo.root(), 0, 1, tmp_path / "home", view, plenty) == []
+    assert main.exists() and used.exists() and owned.exists()
+
+
+def test_boot_grace_does_not_hold_an_eviction(repo, tmp_path):
+    done = repo.worktree("done")
+    age(done, HOUR)
+    lines = make_room(repo.primary, repo.root(), 0, 1, tmp_path / "home", snap(uptime=60), plenty)
+    assert lines == [f"evicted {done}: removed"]
+
+
+def other_repository(repo, tmp_path):
+    clone = tmp_path / "second"
+    git(tmp_path, "clone", "-q", str(repo.origin), str(clone))
+    tree = repo.trees / "second" / "theirs"
+    git(clone, "worktree", "add", "-q", "--no-track", "-b", "theirs", str(tree), "origin/dev")
+    return tree
+
+
+def test_free_space_floor_evicts_across_repos_until_met(repo, tmp_path):
+    theirs = other_repository(repo, tmp_path)
+    first = repo.worktree("first")
+    second = repo.worktree("second")
+    age(theirs, 9 * HOUR)
+    age(first, 5 * HOUR)
+    age(second, HOUR)
+
+    def free(path):
+        assert path == repo.trees
+        return 60 if not first.exists() else 10
+
+    lines = make_room(repo.primary, repo.root(), 50, 60, tmp_path / "home", snap(), free)
+    assert lines == [f"evicted {theirs}: removed", f"evicted {first}: removed"]
+    assert second.exists()
+
+
+def test_cap_alone_evicts_only_the_named_repository(repo, tmp_path):
+    theirs = other_repository(repo, tmp_path)
+    mine = repo.worktree("mine")
+    age(theirs, 9 * HOUR)
+    age(mine, HOUR)
+    lines = make_room(repo.primary, repo.root(), 0, 1, tmp_path / "home", snap(), plenty)
+    assert lines == [f"evicted {mine}: removed"]
+    assert theirs.exists()
+
+
+def test_failed_push_keeps_the_worktree_and_moves_on(repo, tmp_path):
+    stuck = repo.worktree("stuck")
+    (stuck / "notes.txt").write_text("unsaved\n")
+    clean = repo.worktree("clean")
+    age(stuck, 5 * HOUR)
+    age(clean, HOUR)
+    git(repo.primary, "remote", "set-url", "--push", "origin", str(tmp_path / "missing.git"))
+    lines = make_room(repo.primary, repo.root(), 0, 2, tmp_path / "home", snap(), plenty)
+    assert lines[0].startswith(f"kept {stuck}: git push: ")
+    assert lines[1:] == [f"evicted {clean}: removed"]
+    assert stuck.exists() and not clean.exists()
+
+
+def test_scratch_repository_work_is_evicted_when_its_push_fails(repo, tmp_path):
+    fixture = repo.worktree("fixture", base=tmp_path / "group" / "task")
+    (fixture / "notes.txt").write_text("unsaved\n")
+    age(fixture, HOUR)
+    git(repo.primary, "remote", "set-url", "--push", "origin", str(tmp_path / "missing.git"))
+    scratch = Root("scratchpad", str(tmp_path), "scratch")
+    [line] = make_room(repo.primary, scratch, 0, 1, tmp_path / "home", snap(), plenty)
+    [ref] = git(repo.primary, "for-each-ref", "--format=%(refname:short)", "refs/heads/wip").split()
+    assert line.startswith(f"evicted {fixture}: kept a local wip/ branch, push failed (git push: ")
+    assert line.endswith("); removed")
+    assert git(repo.primary, "show", f"{ref}:notes.txt") == "unsaved"
+    assert not fixture.exists()
+
+
+def test_candidates_carry_the_eviction_finding_oldest_first(repo, tmp_path):
+    from hooks.lifecycle.evict import _candidates
+
+    clean = repo.worktree("clean")
+    work = repo.worktree("work")
+    plant = repo.worktree("plant")
+    add_holder(plant, "ephemeral", Holder("", 1, 1, "gone"), 0.0)
+    for path in (work, plant):
+        (path / "notes.txt").write_text("unsaved\n")
+    age(work, 5 * HOUR)
+    age(plant, 3 * HOUR)
+    age(clean, HOUR)
+    repo.worktree("fresh")
+    found = _candidates(repo.root(), snap())
+    assert [entry[3] for entry in found] == [
+        Finding(str(work), "worktrees", "worktree", "snapshot", "evicted"),
+        Finding(str(plant), "worktrees", "worktree", "remove", "evicted"),
+        Finding(str(clean), "worktrees", "worktree", "remove", "evicted"),
+    ]
+    assert [entry[2] for entry in found] == [repo.primary.resolve()] * 3
+
+
+def test_free_space_exactly_at_the_floor_evicts_nothing(repo, tmp_path):
+    kept = repo.worktree("kept")
+    age(kept, HOUR)
+    assert make_room(repo.primary, repo.root(), 50, 60, tmp_path / "home", snap(), lambda _path: 50) == []
+    assert kept.exists()
+
+
+def test_free_gb_takes_the_smaller_filesystem_and_skips_missing_ones(tmp_path, monkeypatch):
+    from collections import namedtuple
+
+    from hooks.lifecycle import evict
+
+    usage = namedtuple("usage", "total used free")
+    mount = tmp_path / "mnt"
+    mount.mkdir()
+    sizes = {tmp_path: 80 << 30, mount: (30 << 30) + (1 << 29)}
+    monkeypatch.setattr(evict.shutil, "disk_usage", lambda path: usage(0, 0, sizes[Path(path)]))
+    monkeypatch.setattr(evict, "EXTRA_FILESYSTEMS", (str(mount),))
+    assert free_gb(tmp_path / "absent" / "deeper") == 30
+    monkeypatch.setattr(evict, "EXTRA_FILESYSTEMS", (str(tmp_path / "nowhere"),))
+    assert free_gb(tmp_path) == 80
+
+
+def test_a_worktree_younger_than_a_minute_is_never_evicted(repo, tmp_path):
+    from hooks.lifecycle.evict import FRESH
+
+    assert FRESH == 60
+    young = repo.worktree("young")
+    age(young, 50)
+    assert make_room(repo.primary, repo.root(), 0, 1, tmp_path / "home", snap(), plenty) == []
+    age(young, 70)
+    assert make_room(repo.primary, repo.root(), 0, 1, tmp_path / "home", snap(), plenty) == [
+        f"evicted {young}: removed"
+    ]
+
+
+def test_a_minute_old_worktree_is_old_enough_to_evict(repo, tmp_path):
+    from hooks.lifecycle.evict import FRESH, _candidates
+    from hooks.lifecycle.liveness import Snapshot
+
+    edge = repo.worktree("edge")
+    age(edge, HOUR)
+    [(touched, *_rest)] = _candidates(repo.root(), snap())
+    at_edge = Snapshot("boot-1", 99999.0, touched + FRESH, {}, (), {})
+    assert [entry[1] for entry in _candidates(repo.root(), at_edge)] == [edge]
+
+
+def test_a_held_worktree_does_not_stop_the_search(repo, tmp_path):
+    held = repo.worktree("aaa-held")
+    free = repo.worktree("zzz-free")
+    age(held, 5 * HOUR)
+    age(free, HOUR)
+    lines = make_room(repo.primary, repo.root(), 0, 2, tmp_path / "home", snap(cwds=(str(held),)), plenty)
+    assert lines == [f"evicted {free}: removed"]
+    assert held.exists()

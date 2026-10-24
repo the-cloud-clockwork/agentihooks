@@ -1,10 +1,11 @@
 import { h } from "./dom.js";
+import { closedLeft, loadClosed } from "./sync.js";
 
 export const PAGE_SIZE = 50;
 export const FULL_PAGE = { first: PAGE_SIZE, more: PAGE_SIZE };
 export const COMMENT_PAGE = { first: 8, more: 10, below: true };
 const shown = {};
-export const wanted = { id: null };
+export const wanted = { id: null, ids: new Set() };
 
 export function limit(key, page = FULL_PAGE) {
   return shown[key] || page.first;
@@ -16,7 +17,7 @@ export function include(key, index, page = FULL_PAGE) {
 }
 
 export function wantedIn(key, items, idOf, page = FULL_PAGE) {
-  if (wanted.id) include(key, items.findIndex((item) => idOf(item) === wanted.id), page);
+  if (wanted.id) for (const id of [wanted.id, ...wanted.ids]) include(key, items.findIndex((item) => idOf(item) === id), page);
 }
 
 export function firstPage(key, items, idOf, page = FULL_PAGE) {
@@ -52,4 +53,15 @@ export function lazy(box, fill) {
   box.addEventListener("toggle", load);
   load();
   return box;
+}
+
+export function closedMore(name, label, again) {
+  const left = closedLeft(name);
+  if (!left) return null;
+  const button = h("button", { class: "link", type: "button", "data-closed": name, text: `Show ${Math.min(left, 10)} more ${label} · ${left} left` });
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    loadClosed(name).catch(() => null).finally(() => { button.disabled = false; again(); });
+  });
+  return h("li", { class: "page-more" }, button);
 }
