@@ -175,7 +175,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
     progress = ci_speed_read.Progress(state.get("pending"), continuation.get("responses", {}))
     snapshot = ci_speed_read.read(since, end, pending=progress, known=state.get("known"), active=active)
     incidents, held = _incidents(state, now_ms)
-    found, gone = _crossings(state, snapshot["runs"], (since, now_ms), incidents, held)
+    found, gone = _crossings(state, snapshot["runs"], (since, end), incidents, held)
     report = {
         "complete": snapshot["complete"] and end == now_ms,
         "runs": len(snapshot["runs"]),
