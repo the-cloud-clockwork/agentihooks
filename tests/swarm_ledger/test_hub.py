@@ -60,6 +60,7 @@ def test_a_publish_appends_a_patch_that_rebuilds_the_new_value():
     assert hub.resource(SLUG, "ledger") == ledger(2, tasks=[{"id": "t1"}])
 
 
+@pytest.mark.wall_clock
 def test_a_wait_with_no_new_event_returns_empty_once_its_timeout_passes():
     hub = Hub()
     seq, _ = opened(hub)
@@ -95,6 +96,7 @@ def test_immutable_snapshot_baseline_and_unwatched_resources():
     assert hub.channels[SLUG].seq == 0
 
 
+@pytest.mark.wall_clock
 @pytest.mark.parametrize("change", ["metadata", "equivalent", "copy", "append", "reorder", "no_ids"])
 def test_snapshot_comparison_work_is_bounded_by_changed_structure(change, monkeypatch):
     shared = [{"id": str(index), "values": list(range(64))} for index in range(32)]
