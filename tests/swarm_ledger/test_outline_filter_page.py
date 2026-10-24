@@ -151,7 +151,7 @@ def test_tasks_group_under_their_phase_titles_done_tasks_included(ledger):
     page, _ = ledger
     groups = page.locator("#ol-sec-tasks .ol-group").all_text_contents()
     assert groups == ["Build it", "Ship it"]
-    order = page.locator("#ol-sec-tasks .ol-items > li").evaluate_all(
+    order = page.locator("#ol-sec-tasks .ol-items > li:is(.ol-group, :has(> a))").evaluate_all(
         "rows => rows.map(r => r.classList.contains('ol-group') ? r.textContent : r.querySelector('a').dataset.target.split('-').pop())"
     )
     assert order[:3] == ["Build it", "t91", "Ship it"]
@@ -243,10 +243,12 @@ def test_typing_in_a_form_control_is_never_taken_for_navigation(ledger):
     page.keyboard.type("jk")
     assert page.input_value("#outline-filter") == "jk"
     assert page.evaluate("() => document.activeElement.id") == "outline-filter"
-    page.focus("#jump-to")
-    page.keyboard.press("j")
     page.keyboard.press("ArrowDown")
-    assert page.evaluate("() => document.activeElement.id") == "jump-to"
+    assert page.evaluate("() => document.activeElement.id") == "outline-filter"
+    page.locator("#outline-state").focus()
+    page.keyboard.press("j")
+    page.keyboard.press("k")
+    assert page.evaluate("() => document.activeElement.id") == "outline-state"
     link = page.locator("#outline a[data-target]").first
     link.focus()
     page.keyboard.press("Control+j")

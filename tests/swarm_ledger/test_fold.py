@@ -169,7 +169,7 @@ const FOLD_KEY = "plan-ledger:demo:fold";
 function fakeBox(id, open) {{
   const on = {{}};
   const summary = {{ on: {{}}, addEventListener(ev, fn) {{ this.on[ev] = fn; }} }};
-  return {{ id, open, on, summary, querySelector: (sel) => (sel === ":scope > summary" ? summary : null),
+  return {{ id, open, on, summary, dataset: {{}}, querySelector: (sel) => (sel === ":scope > summary" ? summary : null),
     addEventListener(ev, fn) {{ on[ev] = fn; }} }};
 }}
 function click(box, inButton) {{
@@ -263,7 +263,7 @@ return [phases.fold.open, phases.boxes.map((b) => b.open), follow.boxes[0].open,
 class FakeDom:
     SCRIPT = """
 class El {
-  constructor(tag) { this.tag = tag; this.attrs = {}; this.kids = []; this.on = {}; this.textContent = ""; this.open = false; }
+  constructor(tag) { this.tag = tag; this.attrs = {}; this.kids = []; this.on = {}; this.textContent = ""; this.open = false; this.dataset = {}; }
   setAttribute(k, v) { this.attrs[k] = String(v); if (k === "open") this.open = true; }
   addEventListener(ev, fn) { this.on[ev] = fn; }
   append(...kids) { this.kids.push(...kids); }

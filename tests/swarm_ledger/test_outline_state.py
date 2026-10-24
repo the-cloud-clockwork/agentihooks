@@ -98,7 +98,7 @@ class OutlineDotsByState(unittest.TestCase):
         flipped = json.loads(json.dumps(DOC))
         flipped["phases"][0]["done"] = True
         self.assertEqual(states(flipped)["item-phases-p1"], "done")
-        self.assertIn("JSON.stringify(tree)", function_source("renderOutline"))
+        self.assertIn("JSON.stringify(shaped)", function_source("renderOutline"))
 
     def test_the_outline_link_carries_its_state_as_a_class(self):
         expr = """(() => {
@@ -108,7 +108,14 @@ class OutlineDotsByState(unittest.TestCase):
   return { items, head: group.kids[0].kids[0].kids[0].attrs.class || "" };
 })()"""
         self.assertEqual(
-            run_js(["outlineLink", "outlineGroup"], expr, STUB_H + STUB_FOLD + STUB_PAGES),
+            run_js(
+                ["outlineLink", "outlineRow", "phaseRows", "remoteMore", "filtering", "outlineGroup"],
+                expr,
+                STUB_H
+                + STUB_FOLD
+                + STUB_PAGES
+                + "const filter = { text: '', state: '' }; const remote = {}; const remoteTotal = {};\n",
+            ),
             {"items": ["st-done", ""], "head": ""},
         )
 
