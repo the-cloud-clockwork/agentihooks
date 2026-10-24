@@ -15,9 +15,11 @@ from scripts.swarm.store import MASTER, RedisStore, SwarmError
 
 INTERVAL_ENV = "AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES"
 QUIET_ENV = "AGENTIHOOKS_DOCTOR_QUIET_MINUTES"
+SPEED_ENV = "AGENTIHOOKS_DOCTOR_SPEED_MINUTES"
 INTERVAL_MINUTES = 10
 QUIET_MINUTES = 120
 SPEED_SLICE_MINUTES = 10
+SPEED_MINUTES = 5
 JUDGED_REAL = ("established", "early-real")
 FIXES = ("code", "tune")
 FIX_PHASE = "p2"
@@ -43,6 +45,17 @@ def _minutes(environ, name, default):
 
 def interval_minutes(environ):
     return _minutes(environ, INTERVAL_ENV, INTERVAL_MINUTES)
+
+
+def speed_due(store, doctor, now_ms, environ=None):
+    """The CI speed read spends Actions REST calls on every pass, so it runs once per speed interval, not per tick."""
+    key = store.key(doctor, "ci-speed-read-at")
+    last = store.redis.get(key)
+    every = _minutes(os.environ if environ is None else environ, SPEED_ENV, SPEED_MINUTES) * MINUTE_MS
+    if last is not None and now_ms - int(last) < every:
+        return False
+    store.redis.set(key, now_ms)
+    return True
 
 
 def reset(store, doctor):

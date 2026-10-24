@@ -242,7 +242,9 @@ def timer(store, doctor, now_ms, telemetry):
         now_ms,
         lambda watched: detect.collect(detect.readers(store, ledger, watched, now_ms, telemetry=telemetry)),
         lambda: _close(store, store.peer(doctor), doctor, QUIET),
-        speed=lambda watched: loop.speed(store, doctor, watched, now_ms),
+        speed=lambda watched: (
+            loop.speed(store, doctor, watched, now_ms) if loop.speed_due(store, doctor, now_ms) else []
+        ),
     )
 
 
