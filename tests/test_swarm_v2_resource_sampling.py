@@ -3,6 +3,7 @@ import os
 import sys
 import threading
 import time
+import tracemalloc
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ pytestmark = pytest.mark.unit
 WORKLOADS = Path(__file__).parent / "performance" / "swarm_v2" / "workloads"
 COMM = "w (x) y"
 PGRP = 999
+TRACE_FRAMES = 32
 
 
 def killed(pid: int) -> bool:
@@ -229,16 +231,34 @@ def test_size_of_a_vanished_entry_is_zero(tmp_path):
     assert sampling._size(tmp_path / "gone") == 0
 
 
+# A mutation stats worker runs many tests in one process: their threads drop garbage the audit's collection finalizes.
+def allocated_here(source) -> bool:
+    if source is None:
+        return True
+    trace = tracemalloc.get_object_traceback(source)
+    return trace is not None and any(frame.filename in (__file__, sampling.__file__) for frame in trace)
+
+
 def test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd):
     command = [sys.executable, str(WORKLOADS / "memory.py"), "--children", "2", "--mib", "48", "--hold", "1.5"]
     gc.collect()
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        result = sampling.measure(command, tmp_path, {"PATH": os.environ["PATH"]}, 0.05, 60)
-        gc.collect()
-    assert [w for w in caught if issubclass(w.category, ResourceWarning)] == [], "\n".join(
-        f"{w.category.__name__}: {w.message} at {w.filename}:{w.lineno}" for w in caught
-    )
+    tracing = tracemalloc.is_tracing()
+    if not tracing:
+        tracemalloc.start(TRACE_FRAMES)
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = sampling.measure(command, tmp_path, {"PATH": os.environ["PATH"]}, 0.05, 60)
+            gc.collect()
+        leaks = [
+            f"{w.category.__name__}: {w.message} at {w.filename}:{w.lineno}"
+            for w in caught
+            if issubclass(w.category, ResourceWarning) and allocated_here(w.source)
+        ]
+    finally:
+        if not tracing:
+            tracemalloc.stop()
+    assert leaks == [], " | ".join(leaks)
     assert result["exit_code"] == 0 and not result["timed_out"]
     assert 3 <= result["peak_processes"] < 10
     assert 96 <= result["peak_rss_mib"] < 2048
