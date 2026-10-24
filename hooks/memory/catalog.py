@@ -19,10 +19,11 @@ SCHEMA = (
         PRIMARY KEY (access_domain, session_uid, source_generation, sequence))""",
     """CREATE TABLE IF NOT EXISTS session_ingest_batch (
         access_domain TEXT NOT NULL, batch_id TEXT NOT NULL, payload_digest TEXT NOT NULL, result TEXT NOT NULL,
-        PRIMARY KEY (access_domain, batch_id))""",
+        schema_version TEXT NOT NULL, PRIMARY KEY (access_domain, batch_id))""",
     """CREATE TABLE IF NOT EXISTS session_watermark (
         access_domain TEXT NOT NULL, session_uid TEXT NOT NULL, source_generation TEXT NOT NULL,
-        durable_through INTEGER NOT NULL, PRIMARY KEY (access_domain, session_uid, source_generation))""",
+        durable_through INTEGER NOT NULL, schema_version TEXT NOT NULL,
+        PRIMARY KEY (access_domain, session_uid, source_generation))""",
     """CREATE TABLE IF NOT EXISTS ingest_counter (
         access_domain TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (access_domain, name))""",
 )
@@ -54,6 +55,7 @@ class BatchCommit:
     source_generation: str
     events: list[StoredEvent]
     rejected: list[dict]
+    schema_version: str
 
 
 class Catalog:
@@ -142,14 +144,16 @@ class Catalog:
         ).fetchone()
         return row[0] if row else 0
 
-    def _advance(self, scope: tuple[str, str, str]) -> int:
+    def _advance(self, batch: BatchCommit) -> int:
+        scope = self._scope(batch)
         through = self.watermark(*scope)
         while self._settled(scope, through + 1):
             through += 1
         self.db.execute(
-            "INSERT INTO session_watermark VALUES (?, ?, ?, ?) "
-            "ON CONFLICT (access_domain, session_uid, source_generation) DO UPDATE SET durable_through = ?",
-            (*scope, through, through),
+            "INSERT INTO session_watermark VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT (access_domain, session_uid, source_generation) "
+            "DO UPDATE SET durable_through = excluded.durable_through, schema_version = excluded.schema_version",
+            (*scope, through, batch.schema_version),
         )
         return through
 
@@ -176,10 +180,16 @@ class Catalog:
             "rejected": batch.rejected,
         }
         self.db.execute(
-            "INSERT INTO session_ingest_batch VALUES (?, ?, ?, ?)",
-            (batch.access_domain, batch.batch_id, batch.payload_digest, json.dumps(result, ensure_ascii=False)),
+            "INSERT INTO session_ingest_batch VALUES (?, ?, ?, ?, ?)",
+            (
+                batch.access_domain,
+                batch.batch_id,
+                batch.payload_digest,
+                json.dumps(result, ensure_ascii=False),
+                batch.schema_version,
+            ),
         )
-        return {**result, "state": "committed", "durable_through": self._advance(self._scope(batch))}
+        return {**result, "state": "committed", "durable_through": self._advance(batch)}
 
     def commit(self, batch: BatchCommit) -> dict:
         with self._transaction():
@@ -213,4 +223,4 @@ class Catalog:
         return row[0] if row else 0
 
     def snapshot(self) -> dict[str, list]:
-        return {table: sorted(self.db.execute(f"SELECT * FROM {table}").fetchall()) for table in TABLES}  # noqa: S608
+        return {table: sorted(self.db.execute(f"SELECT * FROM {table}").fetchall()) for table in TABLES}

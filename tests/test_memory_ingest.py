@@ -96,6 +96,8 @@ def test_canonical_form_sorts_keys_keeps_unicode_and_drops_spaces():
         (request([{**event(1), "byte_start": False}]), "event 0 byte range is invalid"),
         (request([event(1, project=3)]), "event 0 project_id must be a string or null"),
         (request([event(1), event(1, 50)]), "event sequences repeat inside the batch"),
+        (request([event(1)], principal="operator"), "request carries unknown fields"),
+        (request([event(1), {**event(2), "scope": "all"}]), "event 1 carries unknown fields"),
     ],
 )
 def test_malformed_requests_are_invalid_and_change_nothing(catalog, body, detail):
@@ -104,9 +106,19 @@ def test_malformed_requests_are_invalid_and_change_nothing(catalog, body, detail
     assert catalog.snapshot() == before
 
 
-def test_a_minor_schema_version_and_an_empty_byte_range_are_accepted(catalog):
-    response = ingest(catalog, GRANT, request([event(1, 0, 0)], schema_version="2.7"))
+@pytest.mark.parametrize("version", ["2", "2.7"])
+def test_a_major_two_schema_version_and_an_empty_byte_range_are_accepted_and_persisted(catalog, version):
+    response = ingest(catalog, GRANT, request([event(1, 0, 0)], schema_version=version))
     assert response["state"] == "committed"
+    rows = catalog.snapshot()
+    assert rows["session_ingest_batch"][0][-1] == version
+    assert rows["session_watermark"] == [("corpus-a", "corpus-a:claude:host:s1", "gen-1", 1, version)]
+
+
+def test_an_event_without_a_project_is_stored_unattributed(catalog):
+    body = request([{key: value for key, value in event(1).items() if key != "project_id"}])
+    assert ingest(catalog, GRANT, body)["state"] == "committed"
+    assert catalog.events("corpus-a", "corpus-a:claude:host:s1", "gen-1")[0]["project_id"] is None
 
 
 def test_a_refusal_carries_an_operation_id_retry_class_and_schema_version(catalog):
@@ -354,8 +366,17 @@ def test_a_failed_commit_rolls_back_and_leaves_the_connection_usable(tmp_path, m
             return real.execute(statement, *args)
 
     monkeypatch.setattr(opened, "db", FailingCommit())
-    with pytest.raises(sqlite3.OperationalError):
-        ingest(opened, GRANT, request([event(1)]))
+    body = request([event(1)])
+    assert ingest(opened, GRANT, body) == {
+        "schema_version": SCHEMA_VERSION,
+        "operation_id": f"ingest:{ingest_module.digest(body)[:16]}",
+        "state": "rejected",
+        "error": {
+            "class": "dependency_unavailable",
+            "retry": "same_batch",
+            "detail": "the catalog failed before acknowledging; retrying the same batch is safe",
+        },
+    }
     monkeypatch.setattr(opened, "db", real)
     assert not real.in_transaction
     assert opened.snapshot() == {table: [] for table in catalog_module.TABLES}
@@ -395,7 +416,9 @@ def test_the_catalog_creates_its_folder_and_commits_with_full_sync_in_wal_mode(t
 
 def test_a_failure_inside_the_transaction_rolls_back_and_releases_the_lock(tmp_path):
     first = Catalog(tmp_path / "c.sqlite3")
-    batch = BatchCommit("corpus-a", "b", "d", "s", "g", [StoredEvent("e", 1, 0, 1, None, {"kind": "meta"}, "h")], [])
+    batch = BatchCommit(
+        "corpus-a", "b", "d", "s", "g", [StoredEvent("e", 1, 0, 1, None, {"kind": "meta"}, "h")], [], "2.0"
+    )
     with pytest.raises(Conflict):
         with first._transaction():
             first._apply(batch)

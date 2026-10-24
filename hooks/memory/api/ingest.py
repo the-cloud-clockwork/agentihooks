@@ -7,6 +7,7 @@ with its sequence and reason while the rest of the batch commits.
 
 import hashlib
 import json
+import sqlite3
 from dataclasses import dataclass
 
 from hooks.memory.catalog import BatchCommit, Catalog, Conflict, StoredEvent
@@ -16,6 +17,9 @@ RECORD_KINDS = frozenset(
     {"user_text", "assistant_text", "system_text", "tool_call", "tool_result", "token_usage", "turn_complete", "meta"}
 )
 TEXT_FIELDS = ("batch_id", "access_domain", "session_uid", "source_generation")
+REQUEST_FIELDS = frozenset({"schema_version", "events", *TEXT_FIELDS})
+EVENT_FIELDS = frozenset({"sequence", "byte_start", "byte_end", "project_id", "record"})
+CATALOG_FAILED = "the catalog failed before acknowledging; retrying the same batch is safe"
 
 
 @dataclass(frozen=True)
@@ -26,10 +30,11 @@ class Grant:
 
 
 class Rejected(Exception):
-    def __init__(self, error_class: str, detail: str):
+    def __init__(self, error_class: str, detail: str, retry: str = "never"):
         super().__init__(detail)
         self.error_class = error_class
         self.detail = detail
+        self.retry = retry
 
 
 def canonical(value: object) -> bytes:
@@ -54,6 +59,8 @@ def _check_envelope(request: dict) -> None:
     version = request.get("schema_version")
     if not isinstance(version, str) or version.split(".")[0] != SCHEMA_VERSION.split(".")[0]:
         raise Rejected("invalid_request", "unsupported schema_version")
+    if set(request) - REQUEST_FIELDS:
+        raise Rejected("invalid_request", "request carries unknown fields")
     for name in TEXT_FIELDS:
         if not isinstance(request.get(name), str) or not request[name]:
             raise Rejected("invalid_request", f"{name} must be a non-empty string")
@@ -65,6 +72,8 @@ def _check_envelope(request: dict) -> None:
 def _check_event(index: int, event: object) -> None:
     if not isinstance(event, dict):
         raise Rejected("invalid_request", f"event {index} must be an object")
+    if set(event) - EVENT_FIELDS:
+        raise Rejected("invalid_request", f"event {index} carries unknown fields")
     if not _is_int(event.get("sequence"), 1):
         raise Rejected("invalid_request", f"event {index} sequence must be a positive integer")
     start, end = event.get("byte_start"), event.get("byte_end")
@@ -89,7 +98,7 @@ def _authorize(grant: Grant, request: dict) -> None:
     outside = [
         index
         for index, event in enumerate(request["events"])
-        if event["project_id"] is not None and event["project_id"] not in grant.projects
+        if event.get("project_id") is not None and event["project_id"] not in grant.projects
     ]
     if outside:
         raise Rejected("forbidden_scope", f"events {outside} are outside the grant; the batch was not committed")
@@ -119,7 +128,7 @@ def _prepare(request: dict) -> BatchCommit:
                 event["sequence"],
                 event["byte_start"],
                 event["byte_end"],
-                event["project_id"],
+                event.get("project_id"),
                 record,
                 digest(record),
             )
@@ -132,6 +141,7 @@ def _prepare(request: dict) -> BatchCommit:
         request["source_generation"],
         events,
         rejected,
+        request["schema_version"],
     )
 
 
@@ -140,7 +150,7 @@ def _refusal(request: object, error: Rejected) -> dict:
         "schema_version": SCHEMA_VERSION,
         "operation_id": f"ingest:{digest(request)[:16]}",
         "state": "rejected",
-        "error": {"class": error.error_class, "retry": "never", "detail": error.detail},
+        "error": {"class": error.error_class, "retry": error.retry, "detail": error.detail},
     }
 
 
@@ -154,6 +164,8 @@ def ingest(catalog: Catalog, grant: Grant, request: dict) -> dict:
         return _refusal(request, Rejected("revision_conflict", str(conflict)))
     except Rejected as error:
         return _refusal(request, error)
+    except sqlite3.Error:
+        return _refusal(request, Rejected("dependency_unavailable", CATALOG_FAILED, retry="same_batch"))
     return {
         "schema_version": SCHEMA_VERSION,
         "batch_id": request["batch_id"],

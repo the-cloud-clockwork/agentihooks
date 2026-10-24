@@ -11,7 +11,8 @@
     "hooks.memory.api.ingest.ingest(catalog, grant, request) is the POST /v2/sessions/ingest contract as a function: it checks schema major version 2, the envelope and every event's sequence, byte range and project before authorization, rejects the whole batch with forbidden_scope when the corpus or any event project is outside the Grant, and returns a response only after Catalog.commit returns",
     "hooks.memory.api.ingest.event_identity(session_uid, source_generation, event) is the sha256 of the session, source generation, sequence and byte range, so any worker or connection derives the same event_id for the same source event",
     "hooks.memory.catalog.Catalog(path).commit(batch) runs one BEGIN IMMEDIATE SQLite transaction in WAL mode with synchronous FULL: a known batch_id with the same payload digest returns its stored result as replayed with the current watermark, a different digest is a revision_conflict; otherwise events are inserted once per sequence, an identical event is counted as a duplicate, a different event at a committed sequence is a revision_conflict that rolls the batch back, unsupported records are quarantined with sequence and reason, and the batch result and the contiguous durable watermark are written in the same transaction",
-    "hooks.memory.catalog.Catalog.duplicate_events_total(access_domain) reads the durable ingest_duplicate_events_total counter, incremented in the committing transaction by each duplicate event and by every event of a replayed batch"
+    "hooks.memory.catalog.Catalog.duplicate_events_total(access_domain) reads the durable ingest_duplicate_events_total counter, incremented in the committing transaction by each duplicate event and by every event of a replayed batch",
+    "hooks.memory.api.ingest.ingest rejects unknown request or event fields as invalid_request, so no authority or scope field is dropped silently, and maps a catalog sqlite3.Error to dependency_unavailable with retry same_batch after the transaction rolled back; the request schema_version is stored on the batch and watermark rows"
   ],
   "supported_versions": {
     "python": "3.11 and later",
@@ -43,7 +44,9 @@
     "No HTTP server exposes POST /v2/sessions/ingest yet; callers use the function directly.",
     "The SV2-SES-03 spool flusher is still not wired to ingest: a spool Entry carries records without the session, generation and byte ranges that ingest requires.",
     "The catalog is SQLite; the Postgres session schema of the plan and its migration framework are not implemented.",
-    "Grants are passed in by the caller; no principal is authenticated here."
+    "Grants are passed in by the caller; no principal is authenticated here.",
+    "The NormalizedEvent fields trust_class, original_hash and redaction are not stored: the SV2-SES-01 TranscriptRecord carries none of them, so they stay unavailable until normalization emits them; injected memory is therefore not yet marked as derived context.",
+    "The rollback rehearsal covers restart and replay against the same catalog; disabling a producer was not rehearsed because no producer calls ingest yet."
   ],
   "compatibility": "Explicitly local compatibility path: ingest accepts the SV2-SES-01 TranscriptRecord kinds unchanged and stores each record exactly as submitted; the collector, spool, whole-file reader and memory store are untouched.",
   "authority": "The corpus and every event project come from the caller's Grant; a project label inside a record is never read as permission, and an unattributed event stays unattributed."
