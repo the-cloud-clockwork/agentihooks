@@ -777,3 +777,42 @@ def test_unusable_names_why_a_hive_cannot_run_the_master_login(monkeypatch, logi
     assert login.unusable() == expected
     monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", "True")
     assert login.unusable() == login.OFF
+
+
+@pytest.mark.parametrize(
+    "valid,outcome", [(True, "failure"), (False, "success"), (False, "captcha"), (False, "failure")]
+)
+def test_launch_preparation_checks_live_login_then_waits_for_browser(
+    ah, rendered, tmp_path, monkeypatch, valid, outcome
+):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+    from scripts.swarm import operator_email
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    calls = []
+
+    def check(environ, account):
+        calls.append("current")
+        assert environ["CLAUDE_CONFIG_DIR"] == str(login.home())
+        if not valid and calls.count("current") == 1:
+            raise native_login.LoginError(native_login.EXPIRED)
+        return dict(native_login.PROOF)
+
+    def browser(environ, target):
+        calls.append("browser")
+        assert target == login.home()
+        return outcome
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", browser, raising=False)
+    monkeypatch.setattr(operator_email, "send", lambda *_: pytest.fail("login must not send email"))
+    prepared = login.prepare_launch(_environ(rendered), tmp_path)
+    if valid or outcome == "success":
+        assert prepared == (login.home(), "masteratexample_com")
+        assert calls == (["current"] if valid else ["current", "browser", "current"])
+    else:
+        assert prepared is None
+        assert calls == ["current", "browser"]
+        assert login.holders(login.root()) == set()
