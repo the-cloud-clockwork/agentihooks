@@ -136,7 +136,9 @@ def test_shard_summary_step_passes_and_writes_a_normal_summary(tmp_path):
     assert "Ran 12 tests" in summary
 
 
-@pytest.mark.parametrize("case", ["complete", "missing", "duplicate", "reused", "missing_collection", "missing_flakes", "missing_plan"])
+@pytest.mark.parametrize(
+    "case", ["complete", "missing", "duplicate", "reused", "missing_collection", "missing_flakes", "missing_plan"]
+)
 def test_grouped_download_preserves_shard_integrity_without_installed_dependencies(tmp_path, case):
     steps = _jobs()["shard-check"]["steps"]
     downloads = [step for step in steps if step.get("uses", "").startswith("actions/download-artifact@")]
@@ -149,7 +151,9 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
     assert not any(step.get("uses", "").startswith("actions/setup-python@") for step in steps)
     layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
     root = tmp_path / "shard-durations"
-    for index, nodeids in enumerate((["suite::a"], ["suite::a", "suite::b"] if case == "duplicate" else ["suite::b"]), 1):
+    for index, nodeids in enumerate(
+        (["suite::a"], ["suite::a", "suite::b"] if case == "duplicate" else ["suite::b"]), 1
+    ):
         if case == "missing" and index == 2:
             continue
         directory = root / f"durations-3.12-{index}"
@@ -181,9 +185,13 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
         return
     assert arranged.returncode == 0, arranged.stdout + arranged.stderr
     command = [
-        sys.executable, "-S", "-m", "tests.shard_check",
+        sys.executable,
+        "-S",
+        "-m",
+        "tests.shard_check",
         *(str(path) for path in sorted(root.glob("*/durations.json"))),
-        "--collected", str(tmp_path / "collected-data/collected.json"),
+        "--collected",
+        str(tmp_path / "collected-data/collected.json"),
     ]
     if case == "reused":
         command.extend(["--reused", str(tmp_path / "reused-plan/reused-tests.json")])
