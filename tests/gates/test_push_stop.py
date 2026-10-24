@@ -900,7 +900,9 @@ def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch,
     rig.commit()
     slow = 8
     hook = rig.origin / "hooks" / "pre-receive"
-    hook.write_text(f'#!/bin/sh\nread old new ref\nif [ "$ref" != "refs/heads/{BRANCH}-2" ]; then sleep {slow}; fi\n')
+    hook.write_text(
+        f'#!/bin/sh\nread old new ref\nif [ "$ref" != "refs/heads/{BRANCH}-2" ]; then sleep {slow}; else sleep 5; fi\n'
+    )
     hook.chmod(0o755)
     timeout = RESERVE_S + 2
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
