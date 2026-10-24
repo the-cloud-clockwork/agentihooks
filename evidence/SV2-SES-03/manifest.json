@@ -10,7 +10,7 @@
     "tests/fixtures/swarm_v2/spool-outage.json": "3bec0d07f5174291b15e1aa49fb80f12039bee302153d213499ab409f1f25406"
   },
   "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40086742833",
-  "tested_commit": "1b683beed",
+  "tested_commit": "21d5304d8",
   "records_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40087708695",
   "records_note": "each record was printed by the committed evidence assertion failing on absent records in the records run; that run is not cited as green"
 }

@@ -4,7 +4,7 @@
   "integration_gate": "G4",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/6671",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/6691",
-  "tested_commit": "1b683beed",
+  "tested_commit": "21d5304d8",
   "package_complete": false,
   "evidence_class": "mocked: a local transcript file and an in-process destination stand in for the provider and central ingestion; no network, Pod or hive collector runs",
   "interfaces": [
