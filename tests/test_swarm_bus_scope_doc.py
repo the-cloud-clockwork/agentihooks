@@ -35,6 +35,7 @@ def test_doc_lists_every_jetstream_grant_of_a_scoped_member():
         for permission in nats_grant.swarm_publish("rig")
     }
     assert len(shapes) == 6
+    assert "for each of the swarm's streams above: " in text
     for shape in shapes:
         assert f"`{shape}`" in text
 
