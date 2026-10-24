@@ -12,6 +12,7 @@ SAVE_ATTEMPTS = 5
 UNNUMBERED = 10_000
 HIVES = "hives"
 RETIRED = "retired"
+RETIRED_AT = "retired-at."
 GONE = ("finished", "retiring")
 HIVE_KEY = "hive."
 HIVE_PAIR = f"a hive owner is set as {HIVE_KEY}<hive id>=<master seat>"
@@ -201,8 +202,8 @@ class MasterSeats:
         else:
             self.redis.hdel(self.key(slug), RETIRED)
 
-    def retire(self, slug: str, address: str) -> None:
-        """Every phase the seat owns moves to the front door in the same write."""
+    def retire(self, slug: str, address: str, at: int) -> None:
+        """Every phase the seat owns moves to the front door in the same write; at outlives a later refill."""
         from redis.exceptions import WatchError
 
         front, key = seat_address(slug, MASTER), self.key(slug)
@@ -214,12 +215,22 @@ class MasterSeats:
                     held = json.loads(pipe.hget(key, RETIRED) or "[]")
                     moved = {p: front if owner == address else owner for p, owner in saved.items()}
                     pipe.multi()
-                    pipe.hset(key, mapping={"owners": json.dumps(moved), RETIRED: json.dumps(_added(held, address))})
+                    pipe.hset(
+                        key,
+                        mapping={
+                            "owners": json.dumps(moved),
+                            RETIRED: json.dumps(_added(held, address)),
+                            f"{RETIRED_AT}{address}": at,
+                        },
+                    )
                     pipe.execute()
                     return
                 except WatchError:
                     continue
         raise MasterError(f"master seats of {slug} kept changing; seat {address} was not retired")
+
+    def retired_at(self, slug: str, address: str) -> int:
+        return int(self.redis.hget(self.key(slug), f"{RETIRED_AT}{address}") or 0)
 
     def retired(self, slug: str) -> list[str]:
         return json.loads(self.redis.hget(self.key(slug), RETIRED) or "[]")

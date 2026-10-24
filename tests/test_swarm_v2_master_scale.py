@@ -283,7 +283,7 @@ def test_a_lower_count_forgets_a_retired_seat_it_no_longer_holds(swarm):
     seats = masters.MasterSeats(store.redis)
     seats.set_count(SLUG, 4)
     for address in (SECOND, THIRD, FOURTH):
-        seats.retire(SLUG, address)
+        seats.retire(SLUG, address, NOW)
 
     seats.set_count(SLUG, 3)
 
@@ -309,7 +309,7 @@ def test_turning_the_rule_off_refills_a_retired_seat_with_its_phases(swarm):
     store, runtime = swarm
     seats = masters.MasterSeats(store.redis)
     seats.set_count(SLUG, 4)
-    seats.retire(SLUG, SECOND)
+    seats.retire(SLUG, SECOND, NOW)
     master_scale.set_rule(store.redis, SLUG, "")
 
     run(store, runtime)

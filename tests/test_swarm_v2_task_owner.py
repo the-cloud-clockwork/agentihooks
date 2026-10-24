@@ -235,28 +235,37 @@ def test_after_a_backend_master_retires_the_front_door_messages_a_claimant_in_it
     [phase] = [p for p, owner in table.owners(SLUG, world.doc()).items() if owner == SECOND]
     world.down(SECOND_NAME)
 
-    table.retire(SLUG, SECOND)
+    table.retire(SLUG, SECOND, 1)
 
     assert table.owners(SLUG, world.doc())[phase] == LEAD
     assert table.retired(SLUG) == [SECOND]
-    table.retire(SLUG, SECOND)
+    table.retire(SLUG, SECOND, 1)
     assert table.retired(SLUG) == [SECOND]
     master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
     assert world.refusals() == 0
 
 
-def test_after_a_backend_master_retires_the_items_it_decided_belong_to_the_front_door(world):
+def test_after_a_backend_master_retires_the_items_it_decided_belong_to_the_front_door(world, monkeypatch):
+    clock = iter(range(1_000, 10**9, 1_000))
+    monkeypatch.setattr(core, "now_ms", lambda: next(clock))
     table = masters.MasterSeats(world.redis)
     table.set_count(SLUG, 3)
     world.seat(world.store.names.next(SLUG, "master"), f"master-3@{SLUG}")
     assert world.decide(SECOND_NAME)["accepted"]
+    decided_at = world.doc()["_meta"]["stamps"][f"{cases.FOLLOWUP}/done"]["at"]
     world.down(SECOND_NAME)
 
-    table.retire(SLUG, SECOND)
+    table.retire(SLUG, SECOND, decided_at)
 
-    assert world.decide(cases.FORMER, False, 1)["warnings"] == [
-        f"{cases.FOLLOWUP} belongs to {LEAD}, so {cases.FORMER} cannot decide it"
-    ]
+    refused = [f"{cases.FOLLOWUP} belongs to {LEAD}, so {cases.FORMER} cannot decide it"]
+    assert world.decide(cases.FORMER, False, 1)["warnings"] == refused
+    world.redis.hdel(table.key(SLUG), masters.RETIRED)
+    refill = world.store.names.next(SLUG, "master")
+    world.seat(refill, SECOND)
+    assert world.decide(cases.FORMER, False, 2)["warnings"] == refused
+    assert world.decide(refill, True, 3)["accepted"]
+    [warning] = world.decide(cases.FORMER, False, 4)["warnings"]
+    assert warning.startswith(f"{cases.FOLLOWUP} was decided by {SECOND} at revision ")
 
 
 def racing_pipelines(world, monkeypatch, times):
@@ -284,7 +293,7 @@ def test_a_retire_racing_another_masters_write_retries_and_still_hands_the_phase
     [phase] = [p for p, owner in table.owners(SLUG, world.doc()).items() if owner == SECOND]
     raced = racing_pipelines(world, monkeypatch, 1)
 
-    table.retire(SLUG, SECOND)
+    table.retire(SLUG, SECOND, 1)
 
     assert raced == ["owners"]
     assert json.loads(world.redis.hget(table.key(SLUG), "owners"))[phase] == LEAD
@@ -297,7 +306,7 @@ def test_a_retire_that_keeps_losing_the_race_is_refused_naming_the_seat(world, m
     raced = racing_pipelines(world, monkeypatch, masters.SAVE_ATTEMPTS)
 
     with pytest.raises(masters.MasterError) as refused:
-        table.retire(SLUG, SECOND)
+        table.retire(SLUG, SECOND, 1)
 
     assert str(refused.value) == f"master seats of {SLUG} kept changing; seat {SECOND} was not retired"
     assert len(raced) == masters.SAVE_ATTEMPTS
