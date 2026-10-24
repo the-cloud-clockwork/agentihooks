@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from fnmatch import fnmatch
 from pathlib import Path
 
 import pytest
@@ -56,7 +57,8 @@ def test_the_chart_just_published_installs_on_kind_after_publication():
     chart = ROOT / "deploy/helm/agentihooks-swarm"
     assert (chart / "ci/kind-values.yaml").is_file()
     ignored = (chart / ".helmignore").read_text().split() if (chart / ".helmignore").exists() else []
-    assert not [pattern for pattern in ignored if pattern.strip("/*") in ("ci", "ci/kind-values.yaml")]
+    shipped = ("ci", "ci/kind-values.yaml", "kind-values.yaml")
+    assert not [pattern for pattern in ignored if any(fnmatch(path, pattern.strip("/")) for path in shipped)]
 
 
 def _install_published(tmp_path, mode):
