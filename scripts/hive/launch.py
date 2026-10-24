@@ -95,39 +95,8 @@ def _key(account: str) -> str:
     return account.replace("_", "-")
 
 
-def _open_claude_rows(rows: list, hived: dict[str, int]) -> list:
-    return [
-        row for row in rows if row.harness == "claude" and capacity.free_seats(row) - hived.get(_key(row.name), 0) > 0
-    ]
-
-
-def _count_claude(counted: dict[str, int], counts: dict[str, int]) -> None:
-    for slot, count in counts.items():
-        harness, _, account = slot.partition(":")
-        if harness == "claude" and account:
-            counted[_key(account)] = counted.get(_key(account), 0) + count
-
-
-def _hive_sessions(redis: object, now_ms: int) -> dict[str, int]:
-    """Remote hive sessions plus launch reservations no hive reports yet, as the account reservation counts them."""
-    from scripts.routing import aggregate
-
-    if aggregate.enabled():
-        return {}
-    from scripts.swarm.commands import hive_id
-
-    local = hive_id()
-    counted: dict[str, int] = {}
-    seen: set[str] = set()
-    for hive in registry.hives(redis):
-        if not registry.live(hive, now_ms):
-            continue
-        counts = json.loads(redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
-        seen.update(execution for ids in counts.pop("_executions", {}).values() for execution in ids)
-        if hive["id"] != local:
-            _count_claude(counted, counts)
-    _count_claude(counted, LaunchSlots(redis).counts(seen))
-    return counted
+def _open_claude_rows(rows: list) -> list:
+    return [row for row in rows if row.harness == "claude" and capacity.free_seats(row) > 0]
 
 
 def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: int | None) -> int | None:
@@ -259,16 +228,13 @@ class HiveLaunch:
                     if limited.room < hive["room"]:
                         hive["room"], hive["refusal"] = limited.room, admission.refusal(limited)
         account = ("" if moved else saved.get("account")) or self.herdr.planned_account(task["id"], "claude")
-        hived = _hive_sessions(self.store.redis, now)
-        open_rows = _open_claude_rows(rows, hived)
+        open_rows = _open_claude_rows(rows)
         candidates = [row for row in open_rows if not account or row.name == account]
         if not candidates:
             candidates = open_rows
         if not candidates:
             seats = ", ".join(
-                f"{row.name} {row.sessions} here and {hived.get(_key(row.name), 0)} on hives of {row.cap}"
-                for row in rows
-                if row.harness == "claude"
+                f"{row.name} {row.sessions} sessions of {row.cap}" for row in rows if row.harness == "claude"
             )
             pinned = f"; pinned to {account}" if account else ""
             return self._record_wait(
@@ -436,6 +402,15 @@ class HiveLaunch:
         if not ack or ack.status != "live":
             return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
         _match("ack host", order.hive, ack.target.get("host_id"))
+        if agent.runtime_target != ack.target:
+            bound = replace(
+                agent,
+                runtime_target=ack.target,
+                pane_id=ack.execution["pane_id"],
+                launched_at=ack.execution["launched_at"],
+                launch_timings=ack.execution["launch_timings"],
+            )
+            self.store.execution_registry.update(self.slug, bound)
         return Outcome("spawn", Status.OK, HIVE)
 
     def expire(self, request: SpawnRequest) -> bool | None:

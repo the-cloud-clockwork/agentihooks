@@ -130,7 +130,7 @@ function opNote(phase, action, error) {
     eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap", masters_down: "Lower masters step", masters_up: "Raise masters step",
     compact_down: "Lower compact limit", compact_up: "Raise compact limit",
     effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", overlays: "Apply overlays", lift: "Lift the gate", quota_refresh: "Refresh quota", routing: "Set routing", hive: "Set hive", master_move: "Move master",
-    attach: "Attach", drain: "Drain", cancel: "Cancel", force_stop: "Force stop" }[action] || action;
+    attach: "Attach", drain: "Drain", cancel: "Cancel", force_stop: "Force stop", "restore-decision": "Recovery decision" }[action] || action;
   return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
 }
 
@@ -277,6 +277,8 @@ export function wireSwarm() {
       return renderSwarm(swarm);
     }
     if (event.target.closest("#overlays-apply:not(:disabled)")) return swarmControl({ action: "set", overlays: overlayChanges(swarm) }, "overlays");
+    const recovery = event.target.closest("button[data-recovery-choice]");
+    if (recovery && !recovery.disabled) return swarmControl({ action: "restore-decision", agent: recovery.dataset.agent, choice: recovery.dataset.recoveryChoice });
     const restore = event.target.closest("button[data-restore-choice]");
     if (restore && !restore.disabled) return swarmControl({ action: "restore-decision", agent: restore.dataset.agent, choice: restore.dataset.restoreChoice });
     const btn = event.target.closest("button[data-swarm]");
