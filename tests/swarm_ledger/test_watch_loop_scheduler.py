@@ -63,6 +63,40 @@ def test_a_working_scheduler_wait_is_the_only_wait(monkeypatch):
     assert not ledger_server.SCHEDULER_UNAVAILABLE.is_set()
 
 
+def test_a_scheduler_wait_refused_by_redis_sleeps_instead(monkeypatch, capsys):
+    from redis.exceptions import NoPermissionError
+
+    refusals, slept = [], []
+
+    def refused(interval):
+        refusals.append(interval)
+        raise NoPermissionError("No permissions to access a key")
+
+    monkeypatch.setattr(ledger_server, "SCHEDULER_UNAVAILABLE", threading.Event())
+    monkeypatch.setattr(process_timer, "wait", refused)
+    monkeypatch.setattr(ledger_server.time, "sleep", slept.append)
+    ledger_server.scheduled_wait(2.0)
+    ledger_server.scheduled_wait(2.0)
+    assert refusals == [2.0]
+    assert slept == [2.0, 2.0]
+    assert ledger_server.SCHEDULER_UNAVAILABLE.is_set()
+    assert capsys.readouterr().err.count("scheduler wait unavailable, sleeping instead: No permissions") == 1
+
+
+def test_a_lost_redis_connection_still_reaches_the_watch_loop(monkeypatch):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    def lost(_interval):
+        raise RedisConnectionError("Connection reset by peer")
+
+    monkeypatch.setattr(ledger_server, "SCHEDULER_UNAVAILABLE", threading.Event())
+    monkeypatch.setattr(process_timer, "wait", lost)
+    monkeypatch.setattr(ledger_server.time, "sleep", lambda seconds: pytest.fail(f"slept {seconds}"))
+    with pytest.raises(RedisConnectionError, match="Connection reset"):
+        ledger_server.scheduled_wait(2.0)
+    assert not ledger_server.SCHEDULER_UNAVAILABLE.is_set()
+
+
 def test_a_scheduler_failure_other_than_the_filesystem_still_reaches_the_watch_loop(monkeypatch):
     def broken(_interval):
         raise RuntimeError("scheduler bug")

@@ -1,6 +1,7 @@
 import ast
 import re
 import subprocess
+import unicodedata
 from collections import Counter
 from functools import cache
 from pathlib import Path
@@ -8,6 +9,13 @@ from pathlib import Path
 INTEGRATION = "refs/remotes/origin/dev"
 PREFLIGHT = "actions/workflows/mutation-preflight.yml/runs"
 TESTS = "actions/workflows/test.yml/runs"
+SHARDS = (
+    '.jobs[] | if (.name | startswith("mutation (")) then .conclusion'
+    ' elif (.name | startswith("mutation-stats")) then (.conclusion as $job | .steps[]?'
+    ' | select(.name == "Mutate the only shard in the statistics job" and .conclusion != "skipped")'
+    ' | if $job == "success" then .conclusion else $job end)'
+    " else empty end"
+)
 
 
 def changed_lines(diff: str) -> set[int]:
@@ -46,9 +54,8 @@ def graded_green(sha: str) -> bool:
         return True
     # An open pull request skips the push preflight, so its own mutation shards grade the head.
     runs = api(TESTS, "-f", f"head_sha={sha}", "-f", "event=pull_request", "--jq", ".workflow_runs[].id")
-    shards = '.jobs[] | select(.name | startswith("mutation (")) | .conclusion'
     for run in runs.split():
-        found = api(f"actions/runs/{run}/jobs", "-f", "filter=all", "--paginate", "--jq", shards).split()
+        found = api(f"actions/runs/{run}/jobs", "-f", "filter=all", "--paginate", "--jq", SHARDS).split()
         if found and all(conclusion == "success" for conclusion in found):
             return True
     return False
@@ -162,7 +169,9 @@ def module_name(path: Path) -> str:
 @cache
 def imported_names(text: str, package: tuple[str, ...]) -> frozenset[str]:
     names = set()
-    for node in ast.walk(ast.parse(text)):
+    pending = [ast.parse(text)]
+    while pending:
+        node = pending.pop()
         if isinstance(node, ast.Import):
             names.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
@@ -170,30 +179,38 @@ def imported_names(text: str, package: tuple[str, ...]) -> frozenset[str]:
             module = ".".join([*base, *([node.module] if node.module else [])])
             names.add(module)
             names.update(f"{module}.{alias.name}" for alias in node.names)
+        pending.extend(
+            child
+            for child in ast.iter_child_nodes(node)
+            if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case)
+        )
     return frozenset(names)
 
 
 def select_tests(root: Path, source: Path) -> list[str]:
     module = module_name(source)
     named = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
-    modules = {}
-    for path in sorted((root / "tests").rglob("*.py")):
-        if not path.is_file():
-            continue
-        text = path.read_text()
-        modules[path] = (text, imported_names(text, path.relative_to(root).parent.parts))
+    texts = {path: path.read_text() for path in sorted((root / "tests").rglob("*.py")) if path.is_file()}
+
+    def importing(modules: set[str]) -> set[Path]:
+        # Every import of a module names its last part or is relative, so other files are never parsed.
+        words = "|".join(re.escape(name.rpartition(".")[2]) for name in modules)
+        mention = re.compile(rf"\b(?:{words})\b|\bfrom\W*\.")
+        return {
+            path
+            for path, text in texts.items()
+            if mention.search(unicodedata.normalize("NFKC", text))
+            and imported_names(text, path.relative_to(root).parent.parts) & modules
+        }
+
     reaching = {
-        path
-        for path, (text, imported) in modules.items()
-        if module in imported or named.search(text) or path.name == f"test_{source.stem}.py"
-    }
-    for _ in modules:
-        reached = {module_name(path.relative_to(root)) for path in reaching}
-        added = {path for path, (_, imported) in modules.items() if path not in reaching and imported & reached}
-        if not added:
-            break
+        path for path, text in texts.items() if named.search(text) or path.name == f"test_{source.stem}.py"
+    } | importing({module})
+    added = reaching
+    while added:
+        added = importing({module_name(path.relative_to(root)) for path in added}) - reaching
         reaching |= added
-    return [path.relative_to(root).as_posix() for path in modules if path in reaching and path.name.startswith("test_")]
+    return [path.relative_to(root).as_posix() for path in texts if path in reaching and path.name.startswith("test_")]
 
 
 def test_file(entry: str) -> str:

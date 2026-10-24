@@ -395,3 +395,28 @@ def test_controller_loads_the_environment_and_flushes_actions(store, monkeypatch
     assert controller.main(["run", "--once"]) == 0
     assert calls == [controller.os.environ]
     assert printed == [(("sw: worked",), {"flush": True})]
+
+
+def test_the_controller_never_ticks_a_host_ticked_swarm(store, monkeypatch):
+    from scripts.swarm import cli, controller
+    from scripts.swarm.store import SwarmConfig
+
+    for slug in ("hosted", "workstation", "doctor"):
+        store.create(SwarmConfig(slug, "agentihooks", 2, 0))
+    ticks = []
+    monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: ticks.append(slug) or [slug])
+    monkeypatch.setenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", "workstation,doctor")
+
+    assert controller.run_once(store) == {"hosted": ["hosted"]}
+    assert ticks == ["hosted"]
+
+
+def test_the_controller_ticks_every_swarm_while_no_host_ticked_list_is_set(store, monkeypatch):
+    from scripts.swarm import cli, controller
+    from scripts.swarm.store import SwarmConfig
+
+    store.create(SwarmConfig("XXXX", "agentihooks", 2, 0))
+    monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: [slug])
+    monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
+
+    assert controller.run_once(store) == {"XXXX": ["XXXX"]}

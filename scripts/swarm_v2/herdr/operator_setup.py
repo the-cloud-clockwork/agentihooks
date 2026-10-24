@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 import yaml
 
-from scripts import openbao_kv
+from scripts import openbao_kv, operator_env
 from scripts.gates.base import Who
 from scripts.scheduler import Scheduler
 from scripts.scheduler.service import ensure_running
@@ -307,15 +307,31 @@ def _contained(command: str, work: Callable[[], object]) -> None:
         print(f"operator terminal {command} failed: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
 
 
+def shell_environ() -> dict[str, str]:
+    return {**os.environ, **operator_env.values(os.environ)}
+
+
+def _setup_environ(address: str) -> dict[str, str]:
+    environ = shell_environ()
+    if address:
+        environ[ADDRESS_ENV] = address
+    return environ
+
+
 def refresh(event: dict, _delivery_id: str, _redis: "Redis") -> None:
     root, address = _job(event)
-    environ = {**os.environ, ADDRESS_ENV: address} if address else os.environ
-    _contained("setup", lambda: setup(root, environ))
+    _contained("setup", lambda: setup(root, _setup_environ(address)))
+
+
+def _awaiting_setup(placement: Placement) -> bool:
+    return placement.alarm.exists() and not placement.env.exists()
 
 
 def sync(event: dict, _delivery_id: str, _redis: "Redis") -> None:
     root, _ = _job(event)
-    _contained("sync", lambda: sync_once(os.environ, root))
+    if _awaiting_setup(Placement(root / FOLDER)):
+        return
+    _contained("sync", lambda: sync_once(shell_environ(), root))
 
 
 def outside_agent(who: Who) -> None:

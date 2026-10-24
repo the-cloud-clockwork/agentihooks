@@ -2,6 +2,7 @@
 
 import argparse
 import ast
+import collections
 import inspect
 import itertools
 import json
@@ -16,7 +17,7 @@ import time
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import TextIO
+from typing import BinaryIO, TextIO
 
 from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
@@ -46,6 +47,7 @@ THREAD_GROWTH = 8
 RSS_GROWTH_KIB = 65_536
 MIN_WRITES = 0.9
 SERVER_WAIT_S = 60.0
+STDERR_TAIL_LINES = 200
 ALERT_QUIET_MS = 3_600_000
 WRITE_BREACH = "write p95"
 BUDGETS = {
@@ -64,6 +66,7 @@ BUDGETS = {
     "READS_PER_SECOND": max,
     "SWEEPS": max,
 }
+RELAYS: dict[int, threading.Thread] = {}
 WORDS = "the swarm keeps every task with its comments proof and the work that landed for the operator".split()
 
 
@@ -236,19 +239,46 @@ def free_port() -> int:
 def start_server(folder: Path, port: int, log: TextIO) -> subprocess.Popen:
     env = {**os.environ, "LEDGER_DIR": str(folder), "LEDGER_PORT": str(port), "SWARM_RELOAD": "0"}
     server = subprocess.Popen(
-        [sys.executable, ledger_server.__file__, "--serve"], env=env, stdout=log, stderr=log, stdin=subprocess.DEVNULL
+        [sys.executable, ledger_server.__file__, "--serve"],
+        env=env,
+        stdout=log,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
     )
+    startup_stderr: collections.deque[bytes] = collections.deque(maxlen=STDERR_TAIL_LINES)
+    relay = threading.Thread(target=relay_stderr, args=(server.stderr, log.fileno(), startup_stderr), daemon=True)
+    relay.start()
+    RELAYS[server.pid] = relay
     deadline = time.monotonic() + SERVER_WAIT_S
     while time.monotonic() < deadline:
         if server.poll() is not None:
-            raise SystemExit(f"ledger server exited with {server.returncode}")
+            raise SystemExit(
+                startup_failure(server, startup_stderr, f"exited with {server.returncode} before listening")
+            )
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=1):
                 return server
         except OSError:
             time.sleep(0.2)
     server.kill()
-    raise SystemExit(f"ledger server did not listen on port {port} within {SERVER_WAIT_S}s")
+    server.wait()
+    raise SystemExit(startup_failure(server, startup_stderr, f"did not listen on port {port} within {SERVER_WAIT_S}s"))
+
+
+def startup_failure(server: subprocess.Popen, startup_stderr: collections.deque[bytes], outcome: str) -> str:
+    RELAYS.pop(server.pid).join()
+    return f"ledger server {outcome}; its stderr:\n" + b"".join(startup_stderr).decode(errors="replace")
+
+
+def relay_stderr(pipe: BinaryIO, fd: int, tail: collections.deque[bytes]) -> None:
+    for line in pipe:
+        tail.append(line)
+        view = memoryview(line)
+        try:
+            while view:
+                view = view[os.write(fd, view) :]
+        except OSError:
+            pass
 
 
 def stop_server(server: subprocess.Popen) -> None:
@@ -258,14 +288,16 @@ def stop_server(server: subprocess.Popen) -> None:
     except subprocess.TimeoutExpired:
         server.kill()
         server.wait()
+    if relay := RELAYS.pop(server.pid, None):
+        relay.join()
 
 
 def client(api: ResourceClient, name: str, item: str, start: float, deadline: float, results: dict) -> None:
     for n in itertools.count():
         began = start + n * write_every()
-        time.sleep(max(0.0, began - time.monotonic()))
         if began >= deadline:
             return
+        time.sleep(max(0.0, began - time.monotonic()))
         op = {"op": "add", "thread": f"{item}/comments", "id": f"c-{uuid.uuid4().hex[:10]}", "by": name}
         try:
             sent = time.monotonic()
@@ -285,9 +317,9 @@ def reader(api: ResourceClient, items: list[str], start: float, deadline: float,
     """One agent polling its own task, phase and follow up, READS_PER_SECOND single resource reads a second."""
     for n in itertools.count():
         began = start + n / READS_PER_SECOND
-        time.sleep(max(0.0, began - time.monotonic()))
         if began >= deadline:
             return
+        time.sleep(max(0.0, began - time.monotonic()))
         try:
             sent = time.monotonic()
             api.request(SLUG, items[n % len(items)])
@@ -307,8 +339,15 @@ def watcher(base: str, credentials: dict, deadline: float, results: dict) -> Non
     )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as stream:
-            while time.monotonic() < deadline:
-                if not stream.read1(65536):
+            while (remaining := deadline - time.monotonic()) > 0:
+                stream.fp.raw._sock.settimeout(min(TIMEOUT_S, remaining))
+                try:
+                    chunk = stream.read1(65536)
+                except TimeoutError:
+                    if remaining <= TIMEOUT_S:
+                        break
+                    raise
+                if not chunk and time.monotonic() < deadline:
                     raise ConnectionError("the server closed the stream before the load ended")
     except Exception as exc:  # a dropped or silent stream is a red request
         results["errors"].append(f"event stream: {type(exc).__name__}: {exc}")

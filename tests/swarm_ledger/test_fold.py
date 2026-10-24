@@ -75,8 +75,8 @@ SWARM_PANELS = {
     "hives-fold",
     "overlays-fold",
     "agents-fold",
-    "health-fold",
     "handoff-fold",
+    "recovery-fold",
     "freeze-fold",
     "architecture-fold",
 }
@@ -271,6 +271,10 @@ class El {
 const document = { createElement: (tag) => new El(tag) };
 const wired = [];
 function collapsible(box) { wired.push(box.attrs.id); }
+function closedLeft() { return 0; }
+function closedMore() { return null; }
+function viewItems(list, all) { return all; }
+function viewCount() { return ""; }
 function shape(el) { return { tag: el.tag, attrs: el.attrs, text: el.textContent, kids: el.kids.map(shape) }; }
 """
 

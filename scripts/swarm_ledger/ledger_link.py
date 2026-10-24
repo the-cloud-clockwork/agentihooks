@@ -11,6 +11,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from scripts.swarm_ledger import hosted_probe, ledger_route
+
 START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
 USER_AGENT = "agentihooks-swarm"
@@ -29,8 +31,10 @@ class Cleartext(SystemExit):
     pass
 
 
-def base(environ=os.environ) -> str:
-    if remote(environ):
+def base(environ=os.environ, slug="") -> str:
+    if selected := ledger_route.url(slug) or hosted_probe.hosted(environ):
+        return selected
+    if remote(environ, slug):
         url = environ.get("SWARM_URL") or environ.get("LEDGER_URL")
         if not url:
             raise SystemExit("a remote ledger client needs SWARM_URL, the address of the hosted ledger server")
@@ -89,7 +93,10 @@ def transport(environ=os.environ) -> dict:
             raise SystemExit(f"{CA_FILE_ENV} names no file: {found}")
         return {}
     context = ssl.create_default_context()
-    context.load_verify_locations(cafile=str(found))
+    try:
+        context.load_verify_locations(cafile=str(found))
+    except ssl.SSLError as error:
+        raise SystemExit(f"the ledger CA file {found} holds no valid certificate: {error.reason}") from error
     return {"context": context}
 
 
@@ -106,8 +113,17 @@ def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ)
     return urllib.request.urlopen(request, timeout=timeout, **transport(environ))
 
 
-def remote(environ=os.environ) -> bool:
-    return bool(environ.get("SWARM_URL")) or environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
+def remote(environ=os.environ, slug="") -> bool:
+    return bool(
+        ledger_route.url(slug)
+        or hosted_probe.hosted(environ)
+        or (environ.get("SWARM_URL") if not slug or environ.get("AGENTIHOOKS_SWARM", slug) == slug else "")
+    ) or not local_mode(environ)
+
+
+def local_mode(environ=os.environ) -> bool:
+    mode = environ.get("AGENTIHOOKS_DEPLOYMENT")
+    return not environ.get("LEDGER_URL") if mode is None else mode == "local"
 
 
 def access_headers(environ=os.environ) -> dict:
@@ -157,7 +173,7 @@ def allowed_origins(environ=os.environ) -> set[str]:
 
 
 def page_url(slug):
-    return f"{base()}/{slug}"
+    return f"{base(slug=slug)}/{slug}"
 
 
 def folder(environ=os.environ) -> Path:
@@ -180,12 +196,33 @@ def serving(timeout: float = 1, url: str | None = None) -> str | None:
 
 def page_line(slug):
     line = f"Ledger page: {page_url(slug)} (open it to follow and steer the work)"
-    served = serving()
+    if remote(slug=slug):
+        return hosted_line(slug, line)
+    target = base(slug=slug)
+    served = serving(url=target)
     if served is None:
         return f"{line}. The ledger server is not answering: start it with {START}"
     if not served or Path(served).resolve() != folder().resolve():
         return (
-            f"No ledger page link: {base()} serves {served or 'no ledger folder'}, not {folder()}. "
+            f"No ledger page link: {target} serves {served or 'no ledger folder'}, not {folder()}. "
             f"Set a spare LEDGER_PORT and start the ledger server with {START}"
         )
+    return line
+
+
+def hosted_line(slug, line):
+    from scripts.swarm_ledger import ledger
+
+    target = base(slug=slug)
+    silent = f"No ledger page link: the hosted ledger server {target} is not answering"
+    if serving(url=target) is None:
+        return silent
+    try:
+        ledger.resource(slug, "metadata")
+    except urllib.error.HTTPError as error:
+        return f"No ledger page link: {target} answered a read of ledger {slug} with HTTP {error.code}"
+    except ledger.Unauthenticated as error:
+        return f"No ledger page link: {target} refused a read of ledger {slug}: {error}"
+    except OSError:
+        return silent
     return line

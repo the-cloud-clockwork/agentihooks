@@ -10,6 +10,8 @@ from time import process_time
 
 from mutmut.utils.format_utils import get_mutant_name
 
+from scripts.ci_cpu_quota import quota_cpus
+from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
 from scripts.ci_mutation.report import mutation_lines
@@ -97,17 +99,21 @@ def file_seconds(root: Path, files: list[str]) -> dict[str, float]:
 
 
 def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
+    return split_parts(files, file_seconds(root, files), part)
+
+
+def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:
     # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
     index, total = part
-    seconds = file_seconds(root, files)
     parts = [[] for _ in range(total)]
     for path in sorted(files, key=lambda path: (-seconds[path], path)):
         min(parts, key=lambda chosen: sum(seconds[path] for path in chosen)).append(path)
     return sorted(parts[index])
 
 
-def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
-    seconds = file_seconds(root, files)
+def stats_shards(root: Path, files: list[str], count: int, seconds: dict[str, float] | None = None) -> list[list[str]]:
+    if seconds is None:
+        seconds = file_seconds(root, files)
     # Files that share an xdist group never run concurrently in CI, so they share a shard here.
     units = []
     for path in files:
@@ -191,7 +197,7 @@ def collect_parallel_stats(runner, test_runner, shards: list[list[str]], work: P
 
 
 def worker_count(requested: int) -> int:
-    return requested if os.environ.get("CI") else min(requested, 2)
+    return quota_workers(requested, quota_cpus()) if os.environ.get("CI") else min(requested, 2)
 
 
 def shard_collector(collect, shard: tuple[int, int]):

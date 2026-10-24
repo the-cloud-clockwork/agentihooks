@@ -71,8 +71,12 @@ jobs:
           print(f'{mode}: {seconds:.6f} seconds; {len(plan["assignments"])} selected mutants')
           PY
       - name: Baseline refinement planning
+        env:
+          MUTATION_SHARD_CPU_QUOTA: "3"
         run: PYTHONPATH=. python .refinement-proof/run.py before
       - name: Optimized refinement planning
+        env:
+          MUTATION_SHARD_CPU_QUOTA: "3"
         run: PYTHONPATH=. python .refinement-proof/run.py after
       - name: Compare every selected mutant and assignment
         run: |

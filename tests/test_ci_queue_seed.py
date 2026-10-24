@@ -138,7 +138,12 @@ def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     producer = "durations" if "durations" in jobs else "select"
     assert download["if"] == f"needs.{producer}.outputs.source == '' && needs.{producer}.outputs.queued == 'true'"
     assert download["uses"] == "./.github/actions/retry-download"
-    assert download["with"] == {"name": "dev-durations", "path": "~/dev-durations"}
+    assert download["with"] == {
+        "name": "dev-durations",
+        "path": "~/dev-durations",
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+    }
     assert steps.index(download) < steps.index(adopt)
 
 
@@ -194,7 +199,16 @@ def test_a_dev_run_without_a_baseline_still_restores_its_durations(lookup):
 
 @pytest.mark.parametrize(
     "name",
-    ["worker-image", "swarm-image", "brain-smoke", "ledger-load", "kind-due", "coverage-ratchet", "stage-budget"],
+    [
+        "worker-image",
+        "swarm-image",
+        "brain-smoke",
+        "writer-lock",
+        "ledger-load",
+        "kind-due",
+        "coverage-ratchet",
+        "stage-budget",
+    ],
 )
 def test_queue_excludes_promotion_jobs(name):
     from tests.contracts.ci_tiers.test_workflow import jobs_for

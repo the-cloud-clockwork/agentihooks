@@ -50,12 +50,13 @@ def _message(exc: urllib.error.HTTPError) -> str:
     return "; ".join(str(error) for error in errors) or str(exc.reason)
 
 
-def _call(bao: OpenBao, path: str, body: dict | None = None) -> dict:
+def _call(bao: OpenBao, path: str, body: dict | None = None, area: str = "data", method: str | None = None) -> dict:
     data = None if body is None else json.dumps(body).encode()
     opener = bao.opener or urllib.request.urlopen
     try:
         headers = {"X-Vault-Token": bao.token, "Content-Type": "application/json"}
-        request = urllib.request.Request(f"{bao.url.rstrip('/')}/v1/{MOUNT}/data/{path}", data=data, headers=headers)
+        url = f"{bao.url.rstrip('/')}/v1/{MOUNT}/{area}/{path}"
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
         with opener(request, timeout=TIMEOUT_S) as response:
             raw = response.read()
         found = json.loads(raw) if raw else {}
@@ -94,6 +95,41 @@ def merge(bao: OpenBao, path: str, entries: Mapping[str, str], stale: Iterable[s
             continue
         return len(merged)
     raise conflict
+
+
+def update(bao: OpenBao, path: str, change: Callable[[dict], Mapping]) -> int:
+    for _ in range(CAS_RETRIES + 1):
+        current, version = read(bao, path)
+        entries = dict(change(current))
+        if not entries:
+            return len(current)
+        try:
+            _call(bao, path, {"options": {"cas": version}, "data": current | entries})
+        except OpenBaoError as exc:
+            if not exc.conflict:
+                raise
+            conflict = exc
+            continue
+        return len(current | entries)
+    raise conflict
+
+
+def create(bao: OpenBao, path: str, entries: Mapping[str, str]) -> bool:
+    try:
+        _call(bao, path, {"options": {"cas": 0}, "data": dict(entries)})
+    except OpenBaoError as exc:
+        if exc.conflict:
+            return False
+        raise
+    return True
+
+
+def delete(bao: OpenBao, path: str) -> None:
+    try:
+        _call(bao, path, area="metadata", method="DELETE")
+    except OpenBaoError as exc:
+        if exc.status != 404:
+            raise
 
 
 def summary(path: str, names: Iterable[str], total: int) -> str:

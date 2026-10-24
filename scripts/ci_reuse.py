@@ -44,13 +44,51 @@ PROMOTION_SKIPS = (
     '(.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group")'
     ' or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push")',
 )
+WATCHER = "queue-fail-fast"
+WATCHER_LOSS = (
+    f' elif $event == "merge_group" and $job == "{WATCHER}" then'
+    ' (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == ""'
+)
+LOST_RERUN = (
+    ('"split", "unit", "shard-check", "test-count"]', '"split", "shard-check", "test-count"]'),
+    (
+        "and all($required[];",
+        'and ($event != "merge_group" or ([$jobs.unit.result, $jobs."unit-lost".result, $jobs."unit-rerun".result]'
+        ' | IN(["success", "skipped", "skipped"], ["failure", "success", "success"], ["cancelled", "success", "success"])))'
+        "\n      and all($required[];",
+    ),
+    (
+        ' else .value.result == "skipped" end)',
+        ' elif $event == "merge_group" and ($job | IN("unit", "unit-lost", "unit-rerun")) then true'
+        ' else .value.result == "skipped" end)',
+    ),
+    (
+        '(.key == "helm-kind" and .value.result == "skipped" and $kind == "false")',
+        '(.key == "helm-kind" and .value.result == "skipped" and $kind == "false")'
+        ' or ((.key == "unit-lost" or .key == "unit-rerun") and .value.result == "skipped" and $event != "merge_group")',
+    ),
+)
+
+INLINE_REQUIRED = (
+    '(if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)',
+    '(if $mutation == "true" then ["mutation-plan", "mutation-stats"]'
+    ' + (if $inline == "true" then [] else ["mutation"] end) else [] end)',
+)
+INLINE_SKIP = (
+    '.value.result == "skipped" and $mutation == "false")',
+    '.value.result == "skipped" and $mutation == "false")'
+    ' or (.key == "mutation" and .value.result == "skipped" and $inline == "true")',
+)
 
 
-QUEUE_TIER = """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
+QUEUE_TIER = (
+    """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
   if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
     (.select.outputs.scope // "") as $scope
     | (if $event == "merge_group" then
-      ["durations", "split", "unit", "shard-check", "test-count", "queue-fail-fast"]
+      ["durations", "split", "unit", "shard-check", "test-count", \""""
+    + WATCHER
+    + """\"]
     else
       ["durations", "select", "test-count", "lint", "semgrep", "sonar"]
       + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
@@ -68,6 +106,7 @@ QUEUE_TIER = """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_reques
   exit 0
 fi
 """
+)
 
 
 def gate_steps(
@@ -92,17 +131,14 @@ def gate_steps(
         )
     if watcher_loss:
         run = (
-            run.replace(', "queue-fail-fast"]', "]")
+            run.replace(f', "{WATCHER}"]', "]")
             .replace(
                 "and all($required[];",
-                'and ($event != "merge_group" or has("queue-fail-fast"))\n      and all($required[];',
+                f'and ($event != "merge_group" or has("{WATCHER}"))\n      and all($required[];',
             )
             .replace(
                 'then .value.result == "success" else .value.result == "skipped" end)',
-                'then .value.result == "success"'
-                ' elif $event == "merge_group" and $job == "queue-fail-fast" then'
-                ' (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == ""'
-                ' else .value.result == "skipped" end)',
+                f'then .value.result == "success"{WATCHER_LOSS} else .value.result == "skipped" end)',
             )
         )
     if docs:
@@ -122,8 +158,35 @@ def gate_steps(
     ] + (summary_steps() if summary else [])
 
 
+def inline_mutation(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    run = (
+        aggregation["run"]
+        .replace('--arg mutation "$MUTATION"', '--arg mutation "$MUTATION" --arg inline "${INLINE:-}"')
+        .replace(*INLINE_REQUIRED)
+        .replace(*INLINE_SKIP)
+    )
+    env = {
+        **aggregation["env"],
+        "INLINE": "${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}",
+    }
+    return [{**aggregation, "env": env, "run": run}, *rest]
+
+
+def lost_rerun(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    run = aggregation["run"]
+    for old, new in LOST_RERUN:
+        run = run.replace(old, new)
+    return [{**aggregation, "run": run}, *rest]
+
+
 def summary_steps() -> list[dict]:
     return yaml.safe_load(Path(__file__).with_name("ci_gate_summary_steps.yml").read_text())
+
+
+def pipefail_summary(steps: list[dict]) -> list[dict]:
+    return [{**step, "shell": "bash"} if step.get("name") == "Summarize this run's tests" else step for step in steps]
 
 
 def reuse_job() -> dict:

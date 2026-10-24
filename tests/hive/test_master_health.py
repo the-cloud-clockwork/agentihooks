@@ -3,7 +3,7 @@ import pytest
 from scripts.swarm.health import findings as health
 
 
-@pytest.mark.parametrize("kind", ["subscription", "api", "interactive"])
+@pytest.mark.parametrize("kind", ["subscription", "api", "interactive", "master-login"])
 @pytest.mark.parametrize("headless", [False, True])
 def test_master_health_reports_actual_auth_and_headless_placement(kind, headless):
     agent = {
@@ -17,7 +17,8 @@ def test_master_health_reports_actual_auth_and_headless_placement(kind, headless
     }
     found = health.findings({}, [agent], {}, health.Limits())
     assert {f.kind for f in found} == (
-        ({"master-fallback-auth"} if kind != "interactive" else set()) | ({"master-headless"} if headless else set())
+        ({"master-fallback-auth"} if kind in ("subscription", "api") else set())
+        | ({"master-headless"} if headless else set())
     )
     if headless:
         finding = next(f for f in found if f.kind == "master-headless")

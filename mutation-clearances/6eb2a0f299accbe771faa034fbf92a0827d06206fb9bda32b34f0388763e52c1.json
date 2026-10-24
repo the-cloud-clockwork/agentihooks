@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__where__mutmut_10:753d0fe839e0af1cb96ee139895580dbbbed45deb4e63db9331ddd782dca35d2": {
+    "reader": "standards_reader",
+    "reason": "In _where the scope clause is the first one, so params is still the empty list from clauses, params = [], [] when it is replaced; no element is lost and no other reference to the list exists."
+  }
+}

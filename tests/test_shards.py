@@ -134,6 +134,30 @@ def test_independent_worker_groups_balance_without_serializing_each_other():
     assert sorted(node for part in parts for node in part) == nodes
 
 
+def test_one_files_xdist_group_stays_on_one_shard_with_its_summed_time():
+    from tests.shards import assign_nodes
+
+    durations = {
+        "tests/test_g.py::test_builds": 5.0,
+        "tests/test_g.py::test_reuses": 30.0,
+        "tests/test_a.py::test_x": 20.0,
+        "tests/test_b.py::test_y": 20.0,
+    }
+    parts = assign_nodes(durations, 2, {"tests/test_g.py": "g"}, 4)
+    assert parts == [
+        ["tests/test_g.py::test_builds", "tests/test_g.py::test_reuses"],
+        ["tests/test_a.py::test_x", "tests/test_b.py::test_y"],
+    ]
+
+
+def test_a_grouped_file_longer_than_an_even_shard_share_still_splits():
+    from tests.shards import assign_nodes
+
+    durations = {f"tests/test_g.py::test_{n}": 30.0 for n in range(4)}
+    parts = assign_nodes(durations, 2, {"tests/test_g.py": "g"}, 4)
+    assert [len(part) for part in parts] == [2, 2]
+
+
 def test_worker_shards_charge_collection_once_per_file():
     from tests.shards import assign_nodes
 
@@ -353,6 +377,12 @@ def test_slow_tests_run_first_and_the_rest_keep_their_order():
     durations = {"t::a": 0.01, "t::b": 0.5, "t::c": 0.02, "t::d[x]": 1.5, "t::e": 0.1}
     nodeids = ["t::a", "t::b", "t::c", "t::d[x]@probe", "t::e", "t::new"]
     assert slowest_first(nodeids, durations, 0.1) == ["t::d[x]@probe", "t::b", "t::e", "t::a", "t::c", "t::new"]
+
+
+def test_an_xdist_group_keeps_collection_order_at_its_slowest_tests_place():
+    durations = {"t::builds": 1.0, "t::reuses": 2.0, "t::other": 1.5, "t::fast": 0.01}
+    nodeids = ["t::fast", "t::builds@g", "t::reuses@g", "t::other"]
+    assert slowest_first(nodeids, durations, 0.1) == ["t::builds@g", "t::reuses@g", "t::other", "t::fast"]
 
 
 def _modified_order(tmp_path, nodeids, **config):

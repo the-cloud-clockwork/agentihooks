@@ -1,6 +1,6 @@
 """Whether the operator is present in a session: a bound session starts off, typed operator on turns it on.
 
-The question tool and permission prompts stay off in every session, bound or not, until typed operator on.
+The question tool and permission prompts stay off in a bound session until typed operator on; an unbound session always has them.
 
 On lasts until the operator types operator off.
 """
@@ -17,8 +17,8 @@ WINDOW_SEC = 1800
 QUIET_EVERY = 2
 QUIET_WORDS = 20
 REMINDER = "Operator not present: replies stay within {words} words."
-SWITCH = re.compile(r"operator (on|off)\b")
-ON_NOTICE = "Operator on: the operator is present in this pane until the idle timer expires or he types operator off."
+SWITCH = re.compile(r"(?<![\w-])operator (on|off)(?![\w-])")
+ON_NOTICE = "Operator on: the operator is present in this pane until he types operator off or the session restarts."
 OFF_NOTICE = "Operator off: the operator is not present in this pane."
 TURN_NOTICE = "Operator present for this turn: reply without a word limit."
 QUESTION_TOOL = "AskUserQuestion"
@@ -31,10 +31,6 @@ MASTER_ASK_REFUSAL = (
     "The operator is not present in this pane, so the question tool is off. Never write the questions as chat text. "
     "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
     'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
-)
-STANDALONE_ASK_REFUSAL = (
-    "The operator is not present in this pane, so the question tool is off until he types operator on. "
-    "State the open question in one short line, take the most reasonable choice and keep working."
 )
 PROMPT_REFUSAL = (
     "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
@@ -69,8 +65,8 @@ def _on(state, now):
 
 
 def switch(prompt):
-    found = SWITCH.match(" ".join(str(prompt).lower().split()))
-    return found.group(1) if found else ""
+    words = SWITCH.findall(" ".join(str(prompt).lower().split()))
+    return "off" if "off" in words else "on" if words else ""
 
 
 def _turn(state, now):
@@ -89,13 +85,20 @@ def observe(session_id, prompt, typed, now=None):
         if word or (typed and _on(state, now)):
             state.update(on=word != "off", at=now)
         state["turn_at"] = now if typed and word != "off" else None
-        if word == "off":
-            operator_expiry.cancel(session_id, state)
-        elif typed and state.get("on"):
-            operator_expiry.start(session_id, state, now)
-        else:
-            _save(session_id, state)
+        operator_expiry.cancel(session_id, state)
     return word
+
+
+def reset(payload: dict) -> None:
+    from hooks.context import operator_expiry
+
+    session_id = payload.get("session_id")
+    if not session_id or payload.get("source") == "compact":
+        return
+    with operator_expiry.state_lock(session_id):
+        state = _load(session_id)
+        state.update(on=False, turn_at=None)
+        operator_expiry.cancel(session_id, state)
 
 
 def notice(payload, typed, now=None):
@@ -133,17 +136,16 @@ def _binding(env, session_id):
 def question_block(tool_name, session_id, environ=None):
     """The refusal of the question tool until the operator types operator on, naming what to do instead."""
     env = os.environ if environ is None else environ
-    if tool_name != QUESTION_TOOL or _heard(session_id):
+    if tool_name != QUESTION_TOOL or _heard(session_id, env):
         return ""
-    if not _attached(env, session_id):
-        return STANDALONE_ASK_REFUSAL
     slug, name = _binding(env, session_id)
     refusal = MASTER_ASK_REFUSAL if name.startswith("master@") else ASK_REFUSAL
     return refusal.format(slug=slug, name=name)
 
 
-def _heard(session_id):
-    return bool(session_id) and bool(_load(session_id).get("on"))
+def _heard(session_id, environ=None):
+    env = os.environ if environ is None else environ
+    return not _attached(env, session_id) or (bool(session_id) and bool(_load(session_id).get("on")))
 
 
 def _away(session_id, environ, now):

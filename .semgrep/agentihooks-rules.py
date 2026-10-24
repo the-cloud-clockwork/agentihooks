@@ -85,6 +85,15 @@ def bounded(probe, deadline):
         time.sleep(0.1)
 
 
+def beat_on_the_scheduler(beat, delay):
+    from scripts.scheduler.process_timer import wait as scheduled_wait
+
+    while True:
+        beat()
+        # ok: periodic-sleep-loop
+        scheduled_wait(delay, timeout=delay + 1)
+
+
 def reconnect(connect):
     delay = 1.0
     while True:

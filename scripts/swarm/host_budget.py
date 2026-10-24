@@ -9,6 +9,7 @@ from scripts.swarm.store import SwarmConfig
 
 MEMORY_PER_AGENT_MB = 700
 SWAP_FULL_SHARE = 0.9
+SWAP_FLOOR_MB = 4096
 MEMINFO_KEYS = frozenset({"MemAvailable", "SwapTotal", "SwapFree"})
 LOAD_HIGH = 1.5
 LOAD_LOW = 1.0
@@ -30,6 +31,7 @@ class Thresholds:
     load_low: float = LOAD_LOW
     memory_per_agent_mb: int = MEMORY_PER_AGENT_MB
     swap_full_share: float = SWAP_FULL_SHARE
+    swap_floor_mb: int = SWAP_FLOOR_MB
 
 
 @dataclass(frozen=True)
@@ -53,7 +55,9 @@ class Room:
 
 
 def thresholds(config: SwarmConfig) -> Thresholds:
-    return Thresholds(config.load_high, config.load_low, config.memory_per_agent_mb, config.swap_full_share)
+    return Thresholds(
+        config.load_high, config.load_low, config.memory_per_agent_mb, config.swap_full_share, config.swap_floor_mb
+    )
 
 
 def spawn_room(config: SwarmConfig, sample: HostSample | Room | None, previous: int | None) -> Room:
@@ -67,11 +71,19 @@ def spawn_room(config: SwarmConfig, sample: HostSample | Room | None, previous: 
 def memory_room(sample: HostSample, thresholds: Thresholds) -> int:
     if swap_full(sample, thresholds):
         return 0
-    return max(0, (sample.available_mb - sample.swap_used_mb) // per_agent_mb(sample, thresholds))
+    return max(0, (sample.available_mb - counted_swap_mb(sample, thresholds)) // per_agent_mb(sample, thresholds))
+
+
+def counted_swap_mb(sample: HostSample, thresholds: Thresholds) -> int:
+    return 0 if swap_above_share(sample, thresholds) else sample.swap_used_mb
+
+
+def swap_above_share(sample: HostSample, thresholds: Thresholds) -> bool:
+    return sample.swap_used_mb > thresholds.swap_full_share * sample.swap_total_mb
 
 
 def swap_full(sample: HostSample, thresholds: Thresholds) -> bool:
-    return sample.swap_used_mb > thresholds.swap_full_share * sample.swap_total_mb
+    return swap_above_share(sample, thresholds) and sample.available_mb < thresholds.swap_floor_mb
 
 
 def per_agent_mb(sample: HostSample, thresholds: Thresholds) -> int:
@@ -79,22 +91,32 @@ def per_agent_mb(sample: HostSample, thresholds: Thresholds) -> int:
 
 
 def memory_text(sample: HostSample, thresholds: Thresholds, memory: int) -> str:
+    swap = (
+        f"swap {sample.swap_used_mb} of {sample.swap_total_mb} MB in use is above the "
+        f"{thresholds.swap_full_share:.0%} share"
+    )
     if swap_full(sample, thresholds):
         return (
-            f"swap {sample.swap_used_mb} of {sample.swap_total_mb} MB in use is above the "
-            f"{thresholds.swap_full_share:.0%} share, no memory room"
+            f"{swap} and {sample.available_mb} MB available memory is below the {thresholds.swap_floor_mb} MB floor, "
+            "no memory room"
         )
+    stale = ""
+    supply = (
+        f"{sample.available_mb} MB available memory less {sample.swap_used_mb} of {sample.swap_total_mb} MB swap in use"
+    )
+    if swap_above_share(sample, thresholds):
+        stale = (
+            f"{swap} but {sample.available_mb} MB available memory is at or above the {thresholds.swap_floor_mb} MB "
+            "floor, so the swap reads stale; "
+        )
+        supply = f"{sample.available_mb} MB available memory"
     figure = "the configured figure"
     if sample.measured_agents:
         figure = (
             f"the larger of {sample.agent_mb} MB measured over {sample.measured_agents} Claude agent trees "
             f"and the configured {thresholds.memory_per_agent_mb} MB"
         )
-    return (
-        f"{sample.available_mb} MB available memory less {sample.swap_used_mb} of {sample.swap_total_mb} MB swap "
-        f"in use fits {memory} "
-        f"at {per_agent_mb(sample, thresholds)} MB each, {figure}"
-    )
+    return f"{stale}{supply} fits {memory} at {per_agent_mb(sample, thresholds)} MB each, {figure}"
 
 
 def load_room(sample: HostSample, thresholds: Thresholds) -> int | None:

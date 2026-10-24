@@ -159,7 +159,9 @@ def restart(session):
 
 def progress_of(session):
     from scripts.gates.progress import Progress
-    from scripts.swarm.store import redis_client
+    from scripts.swarm_ledger import ports
+
+    redis_client = ports.swarm().store.redis_client
 
     return Progress(redis_client(), session["slug"])
 
@@ -172,7 +174,9 @@ def note_outcome(session, kind):
 
 
 def wait_seen(session: dict) -> bool:
-    from scripts.swarm import idle
+    from scripts.swarm_ledger import ports
+
+    idle = ports.swarm().idle
 
     try:
         held = idle.wait(progress_of(session).redis, session["slug"], session["name"])
@@ -318,7 +322,9 @@ def dispatch(payload):
     sfile = SESSIONS / f"{sid}.json"
     session = read_json(sfile)
     if session is not None:
-        from scripts.swarm.naming import resolve_name
+        from scripts.swarm_ledger import ports
+
+        resolve_name = ports.swarm().naming.resolve_name
 
         session["name"] = resolve_name(session["name"])
     handler = HANDLERS.get(payload.get("hook_event_name"))
@@ -346,4 +352,7 @@ def main():
 
 
 if __name__ == "__main__":
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     sys.exit(main())

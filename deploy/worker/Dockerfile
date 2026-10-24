@@ -1,19 +1,42 @@
 ARG WORKER_IMAGE=ghcr.io/the-cloud-clockwork/agentihooks-worker:dev
-FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS wheel
+ARG AGENTIHOOKS_SOURCE=git
+FROM mirror.gcr.io/library/node:22.20.0-bookworm-slim AS node
+FROM ghcr.io/astral-sh/uv:0.10.9 AS uv
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS source-git
+ARG AGENTIHOOKS_REF=dev
+ADD https://github.com/the-cloud-clockwork/agentihooks.git#${AGENTIHOOKS_REF} /build
+
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS source-local
+COPY pyproject.toml README.md /build/
+COPY hooks /build/hooks
+COPY scripts /build/scripts
+COPY profiles /build/profiles
+
+FROM source-${AGENTIHOOKS_SOURCE} AS wheel
 WORKDIR /build
-COPY pyproject.toml README.md ./
-COPY hooks/ hooks/
-COPY scripts/ scripts/
-COPY profiles/ profiles/
-RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip wheel --no-deps --wheel-dir /wheels .
+RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip wheel --no-deps --wheel-dir /wheels . \
+    && python -c "import tomllib; dev = tomllib.load(open('pyproject.toml', 'rb'))['project']['optional-dependencies']['dev']; print(*[r for r in dev if r.startswith('ruff==')])" > /wheels/tools.txt
 
 FROM ${WORKER_IMAGE}
 USER root
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY --from=uv /uv /uvx /usr/local/bin/
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -r /var/lib/apt/lists/* \
+    && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 COPY --from=wheel /wheels /wheels
 RUN pip install --no-cache-dir --no-deps --force-reinstall /wheels/*.whl \
+    && pip install --no-cache-dir -r /wheels/tools.txt \
     && rm -r /wheels \
-    && python -c 'import profiles; from pathlib import Path; import os; helper = Path(profiles.__file__).parent / "package/skills/worktree/scripts/wt.sh"; helper.chmod(0o755); os.symlink(helper, "/usr/local/bin/wt.sh")'
+    && python -c 'import profiles; from pathlib import Path; import os; helper = Path(profiles.__file__).parent / "package/skills/worktree/scripts/wt.sh"; helper.chmod(0o755); os.symlink(helper, "/usr/local/bin/wt.sh")' \
+    && usermod -s /bin/bash worker
+ENV NPM_CONFIG_PREFIX=/home/worker/.local \
+    PATH=/home/worker/.local/bin:$PATH
 COPY --chmod=0755 deploy/worker/start.sh /opt/worker-hive/start.sh
+COPY --chmod=0755 deploy/worker/gh /usr/local/bin/gh
 USER 10001:10001
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/worker-hive/start.sh"]
 CMD []

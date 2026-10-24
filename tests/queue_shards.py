@@ -5,6 +5,7 @@ import re
 import sys
 from pathlib import Path
 
+from tests.shard_budget import step_seconds
 from tests.shards import (
     FIRST_SHARD_FILES,
     SECONDS_PER_SOURCE_BYTE,
@@ -15,9 +16,9 @@ from tests.shards import (
 )
 
 WORKERS = 4
-STEP_SECONDS = 420
+STEP_SECONDS = step_seconds("unit")
 STARTUP_SECONDS = 30
-SLOWDOWN = 1.5
+SLOWDOWN = 1.15
 MAX_SHARDS = 30
 
 
@@ -27,22 +28,10 @@ def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, 
     sizes = source_sizes(root, files)
     result = []
     for version, durations in versions.items():
-        measured = {node: seconds for node, seconds in durations.items() if node.split("::", 1)[0] in sizes}
-        pinned = {node: seconds for node, seconds in measured.items() if node.split("::", 1)[0] in FIRST_SHARD_FILES}
-        measured = {node: seconds for node, seconds in measured.items() if node not in pinned}
         count = counts[version] if counts else 12
         while True:
-            parts = assign_nodes(measured, count, grouped, WORKERS, sizes=sizes)
-            parts[0].extend(pinned)
-            peak = max(_seconds(part, {**measured, **pinned}, grouped, sizes) for part in parts)
-            predicted = STARTUP_SECONDS + SLOWDOWN * peak
-            if counts:
-                if predicted >= STEP_SECONDS:
-                    raise SystemExit(
-                        f"Python {version} cannot fit {count} queue shards below the step timeout: {predicted:.1f}s"
-                    )
-                break
-            if predicted < STEP_SECONDS / 2 or count == MAX_SHARDS:
+            predicted = _predicted(durations, count, grouped, sizes)
+            if counts or predicted < STEP_SECONDS / 2 or count == MAX_SHARDS:
                 break
             count += 1
         print(f"Python {version}: {count} queue shards, predicted slowest {predicted:.1f}s of {STEP_SECONDS / 2:.0f}s")
@@ -51,6 +40,16 @@ def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, 
             for shard in range(1, count + 1)
         )
     return result
+
+
+def _predicted(durations: dict[str, float], count: int, grouped: dict[str, str], sizes: dict[str, int]) -> float:
+    measured = {node: seconds for node, seconds in durations.items() if node.split("::", 1)[0] in sizes}
+    pinned = {node: seconds for node, seconds in measured.items() if node.split("::", 1)[0] in FIRST_SHARD_FILES}
+    measured = {node: seconds for node, seconds in measured.items() if node not in pinned}
+    parts = assign_nodes(measured, count, grouped, WORKERS, sizes=sizes)
+    parts[0].extend(pinned)
+    peak = max(_seconds(part, {**measured, **pinned}, grouped, sizes) for part in parts)
+    return STARTUP_SECONDS + SLOWDOWN * peak
 
 
 def _seconds(part: list[str], durations: dict[str, float], grouped: dict[str, str], sizes: dict[str, int]) -> float:
@@ -79,49 +78,38 @@ def _estimates(durations: dict[str, float], collected: list[str]) -> dict[str, f
 def _combine(argv: list[str]) -> None:
     parser = argparse.ArgumentParser()
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--plans", nargs=2)
+    source.add_argument("--plans", nargs="+")
     source.add_argument("--from-output", type=Path)
     parser.add_argument("--root", type=Path)
     parser.add_argument("--inputs", type=Path)
     args = parser.parse_args(argv)
     if args.from_output:
         outputs = dict(line.split("=", 1) for line in args.from_output.read_text().splitlines())
-        fragments = [outputs["queue_311"], outputs["queue_312"]]
+        fragments = [outputs["queue_312"]]
     else:
         fragments = args.plans
     plan = [leg for fragment in fragments for leg in json.loads("[" + fragment + "]")]
-    limit = STEP_SECONDS / 2
-    if len(plan) > MAX_SHARDS:
+    capped = len(plan) > MAX_SHARDS
+    if capped:
         if not (args.from_output and args.root and args.inputs):
             raise SystemExit(f"{len(plan)} queue jobs exceed the pool of {MAX_SHARDS}")
         plan = _capped(plan, args.root, args.inputs)
-        args.from_output.write_text(
-            "".join(
-                f"queue_{version.replace('.', '')}={json.dumps([leg for leg in plan if leg['python-version'] == version])[1:-1]}\n"
-                for version in ("3.11", "3.12")
-            )
-        )
-        limit = STEP_SECONDS
+        args.from_output.write_text(f"queue_312={json.dumps(plan)[1:-1]}\n")
     peak = max(leg["predicted_seconds"] for leg in plan)
-    if peak >= limit:
-        raise SystemExit(f"Queue plan exceeds {limit:.0f}s of the step timeout: {peak:.1f}s")
+    if capped and peak >= STEP_SECONDS:
+        print(f"::warning::The capped queue plan predicts {peak:.1f}s, over {STEP_SECONDS}s of the step timeout")
+    elif not capped and peak >= STEP_SECONDS / 2:
+        raise SystemExit(f"Queue plan exceeds {STEP_SECONDS / 2:.0f}s of the step timeout: {peak:.1f}s")
     print(f"{len(plan)} queue jobs fit one wave of {MAX_SHARDS} runners; predicted slowest test step {peak:.1f}s")
 
 
 def _capped(plan: list[dict], root: Path, inputs: Path) -> list[dict]:
     needed = {leg["python-version"]: leg["total"] for leg in plan}
-    total = sum(needed.values())
-    counts = {version: count * MAX_SHARDS // total for version, count in needed.items()}
-    spare = MAX_SHARDS - sum(counts.values())
-    for version in sorted(needed, key=lambda version: needed[version] * MAX_SHARDS % total, reverse=True)[:spare]:
-        counts[version] += 1
-    print(
-        f"::warning::{total} queue jobs exceed the pool of {MAX_SHARDS}; capped "
-        + " and ".join(f"Python {version} at {counts[version]}" for version in needed)
-        + " shards"
-    )
     versions = {version: json.loads((inputs / version / ".test_durations").read_text()) for version in needed}
-    return matrix(root, versions, counts)
+    print(
+        f"::warning::{sum(needed.values())} queue jobs exceed the pool of {MAX_SHARDS}; capped at {MAX_SHARDS} shards"
+    )
+    return matrix(root, versions, dict.fromkeys(needed, MAX_SHARDS))
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -197,6 +198,28 @@ def test_every_declared_input_exists_and_covers_its_own_workflow():
             assert (_ROOT / path).exists(), path
 
 
+def test_the_chart_proof_key_covers_every_test_file_its_scripts_run():
+    declared = _registry()["helm-kind"]["paths"]
+    scripts = sorted((_ROOT / "deploy/helm/agentihooks-swarm/ci").glob("*.sh"))
+    roots = r"(?:scripts|hooks|profiles|docker|docs|media|tests)/[\w./-]+"
+    used = {path for script in scripts for path in re.findall(roots, script.read_text())}
+    assert {
+        "tests/chart_hub.py",
+        "tests/chart_nats.py",
+        "tests/chart_hive_only.py",
+        "tests/chart_github_auth.py",
+    } <= used
+    pending = [path for path in used if path.startswith("tests/") and path.endswith(".py")]
+    while pending:
+        source = (_ROOT / pending.pop()).read_text()
+        for name in re.findall(r"^(?:from|import) (chart_\w+)", source, re.MULTILINE):
+            if f"tests/{name}.py" not in used:
+                used.add(f"tests/{name}.py")
+                pending.append(f"tests/{name}.py")
+    for path in used:
+        assert any(path == entry or path.startswith(f"{entry}/") for entry in declared), path
+
+
 def test_the_lookup_only_checks_the_key_and_reports_a_hit_as_true_or_false():
     steps = yaml.safe_load((_ROOT / ".github/actions/input-key/action.yml").read_text())["runs"]["steps"]
     key, lookup, notice = steps
@@ -216,7 +239,10 @@ def test_the_lookup_only_checks_the_key_and_reports_a_hit_as_true_or_false():
 @pytest.mark.parametrize("job", sorted(_registry()))
 def test_a_keyed_job_runs_its_heavy_steps_only_on_a_miss_and_saves_only_after_they_pass(job):
     jobs = yaml.safe_load((_ROOT / f".github/workflows/{job}.yml").read_text())["jobs"]
-    [steps] = [job_def["steps"] for job_def in jobs.values() if any(s.get("uses") == _KEY for s in job_def["steps"])]
+    [(name, keyed)] = [
+        (name, job_def) for name, job_def in jobs.items() if any(s.get("uses") == _KEY for s in job_def["steps"])
+    ]
+    steps = keyed["steps"]
     index = next(i for i, step in enumerate(steps) if step.get("uses") == _KEY)
     assert steps[index]["id"] == "key"
     assert steps[index]["with"]["job"] == job
@@ -224,6 +250,18 @@ def test_a_keyed_job_runs_its_heavy_steps_only_on_a_miss_and_saves_only_after_th
         step.get("if") in {None, "${{ !inputs.streams }}", "${{ !inputs.streams && !inputs.compare }}"}
         for step in steps[:index]
     )
+    if "hit" in keyed.get("outputs", {}):
+        assert keyed["outputs"]["hit"] == "${{ steps.key.outputs.hit }}"
+        assert keyed["outputs"]["key"] == "${{ steps.key.outputs.key }}"
+        [scenario] = [definition for definition in jobs.values() if definition.get("needs") == [name]]
+        assert "services" not in keyed
+        assert scenario["if"] == f"github.event_name == 'workflow_dispatch' || needs.{name}.outputs.hit != 'true'"
+        [save] = [step for step in scenario["steps"] if step.get("uses") == _SAVE]
+        assert scenario["steps"][-1] is save
+        assert save["if"] == "github.event_name == 'push' || github.event_name == 'workflow_dispatch'"
+        assert save["with"] == {"key": f"${{{{ needs.{name}.outputs.key }}}}"}
+        assert len(scenario["steps"]) > 1
+        return
     [save] = [step for step in steps if step.get("uses") == _SAVE]
     assert save["if"] == (
         "steps.key.outputs.hit == 'false' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')"

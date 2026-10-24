@@ -1,14 +1,14 @@
 ---
 name: swarm-ledger
 description: >
-  Turn a plan file (plus any documents written for the work) into one interactive
-  HTML ledger the operator keeps open in a browser: title, overview, sources, phase
+  Turn a plan file (plus any documents written for the work) into one ledger page
+  the operator keeps open in a browser: title, overview, sources, phase
   checkboxes, open questions with answer boxes, operator notes, follow-ups, and a
-  comments dropdown under every item. Saves to localStorage and
-  ~/development-ledger/<slug>.json through a local server. Every agent working that
+  comments dropdown under every item. A local server stores it as one record in
+  ~/development-ledger/ledgers.sqlite3. Every agent working that
   plan follows the ledger: operator writes reach it through the inbox in a swarm
-  or a ledger watch outside one, it acts on the operator's checks, answers and notes, and records phase states and follow-ups in
-  the HTML as work lands. Use when the user says "swarm ledger", "make a ledger for
+  or a ledger watch outside one, it acts on the operator's checks, answers and notes, and records phase states and follow-ups on
+  the ledger as work lands. Use when the user says "swarm ledger", "make a ledger for
   this plan", "ledger this plan", or when you work a plan that already has a ledger.
 argument-hint: "<plan-file> [other development documents ...]"
 ---
@@ -103,7 +103,7 @@ when `--ensure` printed the base URL.
 ### A4. Bind the crew and install the gate
 
 A ledger is one task unit: an orchestrator and every agent of that crew share it.
-Requirements: Python 3.11+ (the agentihooks floor), stdlib only; the gate needs Claude Code. Codex and
+Requirements: Python 3.12+ (the agentihooks floor), stdlib only; the gate needs Claude Code. Codex and
 Copilot sessions get the CLI and the watcher, with advisory rules only.
 
 `agentihooks init` installs the gate hooks with the rest of its settings

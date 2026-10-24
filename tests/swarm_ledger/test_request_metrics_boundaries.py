@@ -161,7 +161,7 @@ def test_command_defaults_trims_url_and_emits_sorted_json(capture, monkeypatch, 
         calls.append((url, timeout))
         return io.StringIO('{"z": 2, "a": 1}')
 
-    monkeypatch.setattr(ledger_link, "address", lambda: ("example", 9999))
+    monkeypatch.setattr(ledger_link, "address", lambda environ: ("example", 9999))
     monkeypatch.setattr(metrics, "urlopen", read)
     metrics.main(args)
     assert calls == [(f"{base}/api/v1/metrics?hours={hours}", 10)]

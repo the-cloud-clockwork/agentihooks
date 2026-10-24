@@ -6,7 +6,7 @@ import subprocess
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from scripts.doctor import ci
+from scripts.doctor import ci, ci_cache
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -73,9 +73,9 @@ def _job_tests(repo, job, run):
 
 def _attempt(repo, workflow, number, run, cache):
     key = f"{ROOT}:doctor:ci-attempt:{repo}:{workflow['id']}:{number}"
-    saved = cache.get(key) if cache is not None else None
+    saved = ci_cache.read(cache, key) if cache is not None else None
     if saved is not None:
-        return json.loads(saved)
+        return saved
     endpoint = f"repos/{repo}/actions/runs/{workflow['id']}/attempts/{number}/jobs?per_page=100"
     tests = []
     for job in _pages(endpoint, "jobs", run):
@@ -83,8 +83,22 @@ def _attempt(repo, workflow, number, run, cache):
             tests.extend(_job_tests(repo, job, run))
     attempt = {"run_id": workflow["id"], "attempt": number, "head_sha": workflow["head_sha"], "tests": tests}
     if cache is not None:
-        cache.set(key, json.dumps(attempt), ex=604800)
+        ci_cache.write(cache, key, attempt)
     return attempt
+
+
+def _effective_checks(checks: list[dict], runs: list[dict]) -> list[dict]:
+    passed = {
+        (r["workflow_id"], r["head_sha"])
+        for r in runs
+        if r["status"] == "completed" and r["conclusion"] == "success" and "workflow_id" in r
+    }
+    superseded = {
+        r["check_suite_id"]
+        for r in runs
+        if r["conclusion"] == "cancelled" and (r.get("workflow_id"), r["head_sha"]) in passed and "check_suite_id" in r
+    }
+    return [c for c in checks if c.get("check_suite", {}).get("id") not in superseded]
 
 
 def pull_request(repo: str, number: int, run: Callable = subprocess.run, cache: Redis | None = None) -> dict:
@@ -92,9 +106,9 @@ def pull_request(repo: str, number: int, run: Callable = subprocess.run, cache: 
     pr = json.loads(_gh(["api", f"{root}/pulls/{number}"], run))
     sha = pr["head"]["sha"]
     checks = _pages(f"{root}/commits/{sha}/check-runs?per_page=100", "check_runs", run)
-    runs = [
-        r for r in _pages(f"{root}/actions/runs?head_sha={sha}&per_page=100", "workflow_runs", run) if _belongs(r, pr)
-    ]
+    workflows = _pages(f"{root}/actions/runs?head_sha={sha}&per_page=100", "workflow_runs", run)
+    checks = _effective_checks(checks, workflows)
+    runs = [r for r in workflows if _belongs(r, pr)]
     return {
         "pr": pr,
         "checks": checks,

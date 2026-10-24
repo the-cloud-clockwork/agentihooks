@@ -36,6 +36,8 @@ runs:
       if: steps.image.outputs.linked != 'true'
       id: cache
       uses: actions/cache/restore@v4
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
       with:
         path: ${{ github.workspace }}/.playwright
         key: chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}

@@ -29,6 +29,11 @@ DISRUPTION = "DisruptionTarget"
 NODE_DISRUPTIONS = frozenset(("DeletionByTaintManager", "DeletionByPodGC"))
 RELEASES = ("grant", "account")
 RESUME, FRESH, PENDING = "resume", "fresh", "recovery_pending"
+NATIVE, CONTEXT = "native", "context"
+CHOICES = (NATIVE, CONTEXT, FRESH)
+NO_SESSION = "the lost attempt held no native session"
+NO_NATIVE = "no complete compatible native checkpoint to resume from"
+NO_CHECKPOINT = "no complete compatible checkpoint to resume from"
 AWAITING, FENCED = "awaiting-decision", "fenced"
 PENDING_POD = "swarm-pending"
 NEW_ATTEMPT = {"execution_id": "", "generation": 0, "state": "working", "conversation_id": ""}
@@ -40,6 +45,9 @@ PULLS = "image-pull-since"
 PAUSED = "recovery-paused"
 RESTORES = "attempt-restores"
 REQUESTS = "recovery-requests"
+MATERIAL = "attempt-recovery-material"
+REFUSED_REQUESTS = "recovery-request-refusals"
+DECIDED = "attempt-decided-at"
 NO_TAIL = "the image never started, so no transcript was written"
 TAIL = (
     "transcript written by native session {session} after archive offset {watermark} was not archived before the "
@@ -111,6 +119,22 @@ def tail(reason: str, session: str, watermark: int) -> str:
     return TAIL.format(session=session or "unknown", watermark=watermark, reason=reason.replace("_", " "))
 
 
+def _shown(entry: dict) -> dict:
+    continuation = model.CONTEXT if entry.get("continuation") == model.CONTEXT else model.NATIVE
+    return {"checkpoint_id": entry["checkpoint_id"], "sequence": entry["sequence"], "continuation": continuation}
+
+
+def _refusal(entry: dict, compatibility: str) -> dict:
+    """Why a newer checkpoint was passed over: its own verification reason, its status, or another image."""
+    if entry.get("status") != "complete":
+        diagnosis = entry.get("reason") or entry.get("status") or "unverified"
+    else:
+        diagnosis = (
+            f"written by {entry.get('compatibility') or 'an unrecorded image'}, this worker runs {compatibility}"
+        )
+    return {"checkpoint_id": entry["checkpoint_id"], "sequence": entry["sequence"], "diagnosis": diagnosis}
+
+
 def restore_directive(store: RedisStore, slug: str, replacement: str) -> dict | None:
     """The restore a replacement attempt's launch record names, or None for an attempt no recovery admitted."""
     raw = store.redis.hget(store.key(slug, RESTORES), replacement)
@@ -169,6 +193,9 @@ class Recovery:
         for execution_id, group in groups.items():
             if self.fence(execution_id):
                 seen[execution_id] = self._late(execution_id, len(group))
+        for execution_id, raw in sorted(self.store.redis.hgetall(self._key(RECOVERIES)).items()):
+            if json.loads(raw)["mode"] == PENDING:
+                self._publish(execution_id)
         return seen
 
     def handle(self, execution_id: str, reason: str) -> Decision:
@@ -189,28 +216,88 @@ class Recovery:
         return self._decide(agent, fence["reason"])
 
     def decide(self, execution_id: str, choice: str) -> Decision:
-        if choice not in (FRESH, RESUME):
-            raise SwarmError("a recovery decision is fresh or resume")
+        """`native` and `context` name the continuation explicitly and refuse before any replacement when the
+        checkpoints cannot give it; `resume` keeps the best continuation the latest checkpoint supports."""
+        if choice not in (*CHOICES, RESUME):
+            raise SwarmError("a recovery decision is native, context, fresh or resume")
         self.controller.require()
         known = self.decision(execution_id)
         if known is None or known.mode != PENDING:
             raise SwarmError("no recovery decision is pending for this attempt")
-        entry = self._checkpoint(execution_id) if choice == RESUME else {}
-        if choice == RESUME and not entry:
-            raise SwarmError("no complete compatible checkpoint to resume from")
         agent = self.store.execution(self.slug, execution_id)
-        native = entry.get("continuation") != model.CONTEXT and bool(agent.conversation_id)
+        unavailable = self.unavailable(agent, choice)
+        if unavailable:
+            raise SwarmError(unavailable)
+        entry = self._checkpoint(execution_id, native_only=choice == NATIVE) if choice != FRESH else {}
+        native = choice == NATIVE or (
+            choice == RESUME and entry.get("continuation") != model.CONTEXT and bool(agent.conversation_id)
+        )
         recovery = restoring.FRESH if choice == FRESH else restoring.NATIVE if native else restoring.RECONSTRUCTED
         successor = self._replace(agent)
         checkpoint = entry.get("checkpoint_id", "")
         decision = replace(known, mode=choice, checkpoint=checkpoint, replacement=successor.execution_id)
+        self._decided(execution_id)
         self._direct(decision, recovery)
         return self._record(agent, decision, successor.generation)
+
+    def unavailable(self, agent: AgentRecord, choice: str) -> str:
+        """Why the authoritative checkpoints cannot give this continuation; empty when they can."""
+        if choice == FRESH:
+            return ""
+        if choice == NATIVE and not agent.conversation_id:
+            return NO_SESSION
+        if not self._checkpoint(agent.execution_id, native_only=choice == NATIVE):
+            return NO_NATIVE if choice == NATIVE else NO_CHECKPOINT
+        return ""
+
+    def material(self, execution_id: str) -> dict | None:
+        """What a fenced attempt left to recover from, as the ledger page shows it; None for an unfenced attempt."""
+        fence = self.fence(execution_id)
+        if fence is None:
+            return None
+        agent = self.store.execution(self.slug, execution_id)
+        latest = self._checkpoint(execution_id)
+        decision = self.decision(execution_id)
+        return {
+            "execution_id": execution_id,
+            "generation": fence["generation"],
+            "agent": agent.name,
+            "seat": fence["seat"],
+            "task": agent.task,
+            "reason": fence["reason"],
+            "fenced_at_ms": fence["fenced_at_ms"],
+            "archive_watermark": fence["archive_watermark"],
+            "tail": fence["tail"],
+            "checkpoint": _shown(latest) if latest else None,
+            "refused": [_refusal(entry, self.compatibility) for entry in self._passed_over(execution_id, latest)],
+            "choices": {choice: self.unavailable(agent, choice) for choice in CHOICES},
+            "decision": asdict(decision) if decision else None,
+            "decided_at_ms": int(self.store.redis.hget(self._key(DECIDED), execution_id) or 0),
+            "requested": self.store.redis.hget(self._key(REQUESTS), execution_id) or "",
+            "refused_request": json.loads(self.store.redis.hget(self._key(REFUSED_REQUESTS), execution_id) or "null"),
+        }
+
+    def _passed_over(self, execution_id: str, latest: dict) -> list[dict]:
+        entries = self.checkpoints.list(execution_id)
+        newer = [entry for entry in entries if not latest or entry["sequence"] > latest["sequence"]]
+        return sorted(newer, key=lambda entry: entry["sequence"], reverse=True)
+
+    def _publish(self, execution_id: str) -> None:
+        shown = self.material(execution_id)
+        if shown is not None:
+            self.controller.require()
+            self.store.redis.hset(self._key(MATERIAL), execution_id, json.dumps(shown, sort_keys=True))
+
+    def _decided(self, execution_id: str) -> None:
+        """Kept beside the decision so the decision record keeps the shape earlier attempts were stored in."""
+        self.controller.require()
+        self.store.redis.hset(self._key(DECIDED), execution_id, lease.now_ms(self.store))
+        self.store.redis.hdel(self._key(REFUSED_REQUESTS), execution_id)
 
     def request(self, execution_id: str, choice: str) -> Decision:
         """A repeated request for the choice already accepted returns that decision and admits nothing."""
         known = self.decision(execution_id)
-        if choice in (FRESH, RESUME) and known is not None and known.mode == choice:
+        if choice in (*CHOICES, RESUME) and known is not None and known.mode == choice:
             self.controller.require()
             return known
         return self.decide(execution_id, choice)
@@ -263,7 +350,7 @@ class Recovery:
         session = fence["native_session"] if recovery == restoring.NATIVE else ""
         directive = restoring.Directive(decision.checkpoint, recovery, session, fence["archive_watermark"])
         self.controller.require()
-        self.store.redis.hsetnx(self._key(RESTORES), decision.replacement, json.dumps(directive.record()))
+        self.store.redis.hset(self._key(RESTORES), decision.replacement, json.dumps(directive.record()))
 
     def _requested(self) -> None:
         for execution_id, choice in sorted(self.store.redis.hgetall(self._key(REQUESTS)).items()):
@@ -271,6 +358,9 @@ class Recovery:
                 self.request(execution_id, choice)
             except SwarmError as error:
                 print(f"controller: the recovery request for {execution_id} was refused: {error}", flush=True)
+                self.controller.require()
+                refusal = json.dumps({"choice": choice, "reason": str(error)})
+                self.store.redis.hset(self._key(REFUSED_REQUESTS), execution_id, refusal)
             self.controller.require()
             self.store.redis.hdel(self._key(REQUESTS), execution_id)
 
@@ -437,6 +527,7 @@ class Recovery:
         successor = self._replace(agent)
         checkpoint = entry["checkpoint_id"]
         decision = Decision(agent.execution_id, agent.generation, reason, RESUME, checkpoint, successor.execution_id)
+        self._decided(agent.execution_id)
         self._direct(decision, restoring.NATIVE)
         return self._record(agent, decision, successor.generation)
 
@@ -479,6 +570,7 @@ class Recovery:
             mode=decision.mode,
             replacement=decision.replacement,
         )
+        self._publish(decision.execution_id)
         return decision
 
     def _write(self, name: str, execution_id: str, value: dict) -> None:

@@ -43,6 +43,14 @@ class RefillingLoadGroupScheduling(LoadGroupScheduling):
             self._assign_work_unit(node)
 
 
+def pytest_xdist_make_scheduler(config, log):
+    # xdist's own load group scheduler requeues every unit a crashed worker completed and hands its
+    # replacement an empty one, so a run whose last test crashes its worker never ends.
+    if config.getvalue("dist") == "loadgroup":
+        return RefillingLoadGroupScheduling(config, log)
+    return None
+
+
 def _error(report):
     crash = getattr(report.longrepr, "reprcrash", None)
     if crash:
@@ -65,11 +73,6 @@ class FlakeLedger:
         self.crashing = set()
         self.crash_failed = {}
         self.workers_down = 0
-
-    def pytest_xdist_make_scheduler(self, config, log):
-        if config.getvalue("dist") == "loadgroup":
-            return RefillingLoadGroupScheduling(config, log)
-        return None
 
     def pytest_testnodedown(self, node, error):
         self.workers_down += bool(error)
