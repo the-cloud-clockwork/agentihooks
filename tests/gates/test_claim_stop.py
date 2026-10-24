@@ -31,11 +31,19 @@ class FakeLedger:
     def tasks(self, slug):
         return list(self.rows.values()) if slug == SLUG else []
 
-    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
-        if if_state and self.rows[task_id].get("state") not in if_state:
-            return
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
+        row = self.rows[task_id]
+        if if_state and row.get("state") not in if_state:
+            return row
+        if if_match and any(
+            row.get(key, 0 if key == "claim_generation" else "") != value for key, value in if_match.items()
+        ):
+            return row
         self.updates.append((slug, task_id, fields, by))
-        self.rows[task_id].update(fields)
+        if "claimed_by" in fields and fields["claimed_by"] != row.get("claimed_by", ""):
+            row["claim_generation"] = row.get("claim_generation", 0) + 1
+        row.update(fields)
+        return row
 
     def comment(self, slug, task_id, text, by):
         self.comments.append((slug, task_id, text, by))
@@ -264,6 +272,7 @@ def test_future_verification_stop_passes_and_releases_its_claim(rig, offset):
     assert rig.task["awaiting"] == "verify"
     assert rig.task["state"] == "open"
     assert rig.task["claimed_by"] == ""
+    assert rig.task["claim_generation"] == 1
     assert rig.rows() == []
 
 
@@ -281,6 +290,49 @@ def test_due_or_unscheduled_verification_stop_still_owes_contract(rig, after_at,
     decision = rig.stop()
     assert not decision.allowed
     assert "contract" in decision.reason
+    assert rig.store.claimant(SLUG, "t1") == ME
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"state": "done"},
+        {"claimed_by": "successor"},
+        {"pr_url": "https://github.com/o/r/pull/8"},
+        {"awaiting": "merge"},
+        {"claim_generation": 2},
+    ],
+)
+def test_verification_release_preserves_a_changed_task(rig, monkeypatch, changed):
+    rig.task.update(
+        state="pr",
+        pr_url=URL,
+        kind="ops",
+        awaiting="verify",
+        claim_generation=1,
+        contract={"after": "yes", "after_at": "1000001"},
+    )
+    rig.pulls[URL] = MERGED
+    update = rig.ledger.update_task
+
+    def race(slug, task_id, fields, **kwargs):
+        rig.task.update(changed)
+        return update(slug, task_id, fields, **kwargs)
+
+    monkeypatch.setattr(rig.ledger, "update_task", race)
+    assert not rig.stop().allowed
+    assert rig.store.claimant(SLUG, "t1") == ME
+    assert rig.store.agents(SLUG)[0].state == "working"
+    assert rig.ledger.updates == []
+    assert all(rig.task[key] == value for key, value in changed.items())
+
+
+def test_a_future_contract_without_verification_still_owes_its_proof(rig):
+    rig.task.update(state="pr", pr_url=URL, kind="code", contract={"after": "yes", "after_at": "1000001"})
+    rig.pulls[URL] = MERGED
+    decision = rig.stop()
+    assert not decision.allowed and "contract" in decision.reason
+    assert '--command "<command>" --output "<its output>"' in decision.reason
     assert rig.store.claimant(SLUG, "t1") == ME
 
 

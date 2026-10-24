@@ -81,13 +81,28 @@ def parked_by(store, who, task):
     return any(a.name == who.name and a.state == "finished" for a in store.agents(who.swarm))
 
 
-def release_verification(task, store, who, now):
+def release_verification(task, store, ledger, who, now):
     from dataclasses import replace
 
     if task.get("awaiting") != "verify":
         return False
     at = (task.get("contract") or {}).get("after_at")
     if not at or int(at) <= now:
+        return False
+    expected = {key: task.get(key, "") for key in ("claimed_by", "pr_url", "awaiting")}
+    expected["claim_generation"] = task.get("claim_generation", 0)
+    released = ledger.update_task(
+        who.swarm,
+        who.task,
+        {"state": "open", "claimed_by": ""},
+        if_state=ACTIVE,
+        if_match=expected,
+    )
+    if (
+        released.get("state") != "open"
+        or released.get("claimed_by")
+        or released.get("claim_generation", 0) != expected["claim_generation"] + 1
+    ):
         return False
     store.release(who.swarm, who.task, who.name)
     for agent in store.agents(who.swarm):
@@ -106,9 +121,10 @@ def refusal(owed, slug, task, pull):
         return f"your pull request {url} merged: close the task now with agentihooks swarm {slug} done --pr {url}"
     if owed == "contract":
         kind = ledger_kinds.kind(task)
+        proof = CONTRACT_PROOF["ops"] if ledger_kinds.after(task) else CONTRACT_PROOF[kind]
         return (
             f"your pull request {url} merged, and {kind} task {task['id']} closes on its proof contract: close it with "
-            f"agentihooks swarm {slug} done {CONTRACT_PROOF[kind]}. {name_wait}"
+            f"agentihooks swarm {slug} done {proof}. {name_wait}"
         )
     if owed == "red":
         return (
@@ -151,7 +167,7 @@ class ClaimStop:
         ):
             streak.clear()
             return Decision()
-        if release_verification(task, store, who, now):
+        if release_verification(task, store, ledger, who, now):
             streak.clear()
             return Decision()
         if parked_by(store, who, task) or ready.awaiting(task):
