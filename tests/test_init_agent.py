@@ -87,6 +87,36 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     assert "host=linux" in capsys.readouterr().out
 
 
+def test_private_master_login_gets_its_coordinated_launch_deadline(monkeypatch, tmp_path):
+    from scripts import master_login_chain as chain
+
+    _, profile_env = _profile(monkeypatch, tmp_path)
+    original, seen = init_agent.LaunchDeadline, []
+
+    def deadline(seconds):
+        seen.append(seconds)
+        return original(seconds)
+
+    monkeypatch.setattr(init_agent, "LaunchDeadline", deadline)
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    argv = [
+        "--dir",
+        str(tmp_path),
+        "--name",
+        "master-proof",
+        "--agent",
+        "claude",
+        "--dry-run",
+        "--",
+        "--route",
+        "master-login",
+    ]
+    assert (
+        init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), **profile_env}) == 0
+    )
+    assert seen[0] >= chain.BUDGET.launch
+
+
 def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeypatch, tmp_path):
     monkeypatch.setattr(init_agent.platform, "system", lambda: "Linux")
     monkeypatch.setattr(

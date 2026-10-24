@@ -629,12 +629,15 @@ def test_launch_turns_a_refusal_into_a_routing_error(ah, rendered, tmp_path, mon
     from scripts.claude_quota_balancer import RoutingError
 
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    (rendered / "settings.json").write_text('{"apiKeyHelper":"unsafe"}')
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(RoutingError, match="^no master claude ai login: run"):
+    with pytest.raises(RoutingError, match="sets apiKeyHelper$"):
         login.launch_claude("/opt/claude", [], _environ(rendered), "")
 
 
 def test_the_claude_launcher_hands_the_master_login_route_to_this_module(tmp_path, monkeypatch):
+    import fcntl
+
     from scripts import install
 
     seen = []
@@ -642,7 +645,13 @@ def test_the_claude_launcher_hands_the_master_login_route_to_this_module(tmp_pat
     monkeypatch.setattr("scripts.deps_preflight.ensure", lambda: None)
     monkeypatch.setattr("scripts.claude_quota_balancer._cache_path", lambda _: tmp_path / "quota.json")
     monkeypatch.setattr(install.shutil, "which", lambda name: f"/opt/{name}")
-    monkeypatch.setattr(login, "launch_claude", lambda *args: seen.append(args))
+
+    def launch(*args):
+        with (tmp_path / "claude-route.lock").open("a+") as waiting:
+            fcntl.flock(waiting, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        seen.append(args)
+
+    monkeypatch.setattr(login, "launch_claude", launch)
     install.cmd_claude(["--route", "master-login", "--agentihooks-report", str(tmp_path / "r"), "--version"])
     assert seen == [("/opt/claude", ["--version"], install.os.environ, str(tmp_path / "r"))]
 
@@ -666,7 +675,9 @@ def test_the_stop_hook_checkpoints_the_master_login_and_logs_a_failure(monkeypat
 
 def test_a_worker_token_master_launch_holds_its_workers_at_the_one_master_ceiling(ah, rendered, tmp_path, monkeypatch):
     from scripts.claude_quota_balancer import ClaudeTokenSource, ProbeResult, QuotaWindow
+    from scripts.routing import native_login
 
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
     _seed(rendered)
     store = _store(tmp_path)
     monkeypatch.setattr(login, "routing_store", lambda environ: store)
@@ -979,3 +990,33 @@ def test_native_master_launch_checks_the_session_before_exec(ah, rendered, tmp_p
     monkeypatch.chdir(tmp_path)
     login.launch_claude("/opt/claude", ["--model", "opus"], _environ(rendered), "")
     assert checked == ["masteratexample_com"]
+
+
+def test_browser_success_rechecks_the_same_claimed_slot(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts import master_logins
+    from scripts.routing import native_login
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.setattr(master_logins, "left", lambda *_: 100.0)
+    checked = []
+
+    def check(environ, account):
+        checked.append(environ["CLAUDE_CONFIG_DIR"])
+        if len(checked) == 1:
+            raise native_login.LoginError(native_login.EXPIRED)
+        return dict(native_login.PROOF)
+
+    def browser(environ, target):
+        other = login._rebuild(login.root(2), rendered)
+        _login(other)
+        monkeypatch.setenv(login.SLOT_ENV, "2")
+        return "success"
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", browser)
+    assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(1), "masteratexample_com")
+    assert checked == [str(login.home(1)), str(login.home(1))]
+    assert login.holders(login.root(1)) == {"master@a-1": os.getpid()}
+    assert login.holders(login.root(2)) == {}

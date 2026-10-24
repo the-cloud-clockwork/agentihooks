@@ -239,3 +239,49 @@ def test_browser_ignores_an_outcome_for_another_request_or_master(tmp_path, monk
     env = {"AGENTIHOOKS_SWARM": "proof", "AGENTIHOOKS_AGENT_NAME": "engineer@proof"}
     assert chain.authorize(env, target, timeout=0.002) == "failure"
     assert closed == []
+
+
+@pytest.mark.parametrize("failing_operation", ["send", "get"])
+def test_inbox_outage_ends_native_auth_and_returns_browser_failure(tmp_path, monkeypatch, failing_operation):
+    from redis.exceptions import RedisError
+    from scripts.inbox import store
+
+    target = tmp_path / "slot" / "claude"
+    target.mkdir(parents=True)
+    events = []
+
+    class Inbox:
+        def send(self, *args, **kwargs):
+            if failing_operation == "send":
+                raise RedisError("inbox disconnected")
+            return SimpleNamespace(id="request")
+
+        def get(self, item):
+            raise RedisError("inbox disconnected")
+
+    class Process:
+        def __init__(self, *args, **kwargs):
+            kwargs["stdout"].write("https://claude.ai/oauth/authorize?state=proof\n")
+            kwargs["stdout"].flush()
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            events.append("terminated")
+            self.returncode = -15
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    monkeypatch.setattr(store, "connect", lambda _: Inbox())
+    monkeypatch.setattr(subprocess, "Popen", Process)
+    env = {"AGENTIHOOKS_SWARM": "proof", "AGENTIHOOKS_AGENT_NAME": "engineer@proof"}
+    assert chain.authorize(env, target, timeout=1) == "failure"
+    assert events == ["terminated"]
+    assert json.loads((target.parent / "login-notifications.jsonl").read_text().splitlines()[-1]) == {
+        "step": "browser",
+        "outcome": "failure",
+        "transport": "inbox",
+    }

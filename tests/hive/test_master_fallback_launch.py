@@ -536,6 +536,56 @@ def test_a_headless_hive_with_a_usable_master_login_takes_the_front_door_launch(
     runtime.spawn.assert_called_once()
 
 
+def test_empty_native_sessions_reach_front_door_recovery(setup, monkeypatch):
+    from scripts import master_claude_login
+    from scripts.hive import orders
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    monkeypatch.setattr(master_claude_login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
+    monkeypatch.setattr(master_claude_login, "logins", lambda: {})
+    order, admitted, task = headless_front_door_order(setup)
+    runtime = Mock()
+    runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="recovery reached")
+    ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
+    assert ack.failure == "unavailable: recovery reached"
+    runtime.spawn.assert_called_once()
+
+
+def test_native_master_fallback_account_is_recorded_canonically(setup):
+    from scripts.hive.orders import Ack
+
+    order, admitted, task = headless_front_door_order(setup)
+    ack = Ack(
+        "live",
+        {"host_id": "remote", "pid": 12, "start_time": 34},
+        execution={
+            "account": "token-account",
+            "placement": "fallback",
+            "profile_decision": {"validation": {"account": "token-account"}},
+        },
+    )
+    live = setup.launcher.record(admitted, order, ack)
+    assert live.account == "token-account"
+    assert setup.store.execution_registry.get(order.slug, admitted.execution_id).account == "token-account"
+
+
+def test_master_browser_wait_fits_the_launch_order_lifetime(setup, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.swarm import lease
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    task = {**master(setup), "seat": "master@fixture", "controller_epoch": setup.held.epoch}
+    master_login_hive(setup)
+    request = SpawnRequest(setup.config, "master", setup.store.next_name(setup.config.slug, "master"), task)
+    selected = setup.launcher.select(setup.config, "master", task)
+    captured = []
+    monkeypatch.setattr(setup.launcher, "answer", lambda request, order: captured.append(order))
+    setup.launcher.send_order(request, selected, task)
+    order = captured[0]
+    assert order.expires_at - lease.now_ms(setup.store) >= chain.BUDGET.order_ttl_ms - 1000
+    assert setup.store.redis.pttl(order.prompt_ref) >= chain.BUDGET.order_ttl_ms - 1000
+
+
 @pytest.mark.parametrize(("route", "failure"), [("subscription", "unavailable: spawned"), ("", "refused")])
 def test_a_ui_hive_checks_the_master_login_only_for_a_master_login_order(setup, monkeypatch, route, failure):
     from scripts import master_claude_login
