@@ -9,10 +9,10 @@ import pytest
 
 import scripts.swarm.store as swarm_store
 from scripts import openbao_kv
-from scripts.hive import auth, cli, create, create_github, create_render, invite, machine, registry
+from scripts.hive import auth, cli, create, create_github, create_render, invite, machine, nats_grant, registry
 from scripts.hive.bundle_origin import SETTINGS_PATH
 from tests.codex_fakes import http_error
-from tests.hive.test_create import NAME, NOW, PR, RECORD, REPO, TARGET, TEMPLATE, Run, Store
+from tests.hive.test_create import NAME, NOW, PR, RECORD, REPO, RESYNC, SIGNER, TARGET, TEMPLATE, Run, Store
 from tests.hive.test_invite import LIKE, SWARM, URL, Bao, _bao
 
 pytestmark = pytest.mark.unit
@@ -62,8 +62,14 @@ def world(tmp_path, monkeypatch):
     (tmp_path / ".ssh" / "a.pub").write_text("ssh-ed25519 FIRST a\n")
     (tmp_path / ".ssh" / "b.pub").write_text("ssh-ed25519 SECOND b\n")
     (tmp_path / ".ssh" / "known_hosts").write_text("[other]:22 ssh-ed25519 OTHER\n")
-    bao = Bao({LIKE: {"credential": f"AGENTIHOOKS_HIVE_URL={URL}\n", "swarm_url": SWARM}})
-    environ = {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / "deep" / "agentihooks")}
+    bao = Bao(
+        {LIKE: {"credential": f"AGENTIHOOKS_HIVE_URL={URL}\n", "swarm_url": SWARM}, SIGNER: {"member_swarms": {}}}
+    )
+    environ = {
+        "HOME": str(tmp_path),
+        "AGENTIHOOKS_HOME": str(tmp_path / "deep" / "agentihooks"),
+        nats_grant.SIGNER_ENV: SIGNER,
+    }
     run, lines, published = Strict(), [], []
     monkeypatch.setattr(create.setup, "publish", lambda *args: published.append(args) or "settings written")
     monkeypatch.setattr(swarm_store, "RedisStore", OneStore)
@@ -103,6 +109,7 @@ def test_a_full_create_makes_exactly_these_calls(world):
     member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
     assert world.run.plain() == [
         ["kubectl", "get", "service", "-A", "-o", "json"],
+        RESYNC,
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", NAME, "-f", "host_key"],
         ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.TEMPLATE_PATH}?ref=dev"],
         ["gh", "pr", "list", "-R", REPO, "--head", NAME, "--state", "all", "--json", "url,state", "--jq", PENDING],
@@ -173,7 +180,9 @@ def test_a_full_create_makes_exactly_these_calls(world):
     assert world.sleeps == []
     assert world.lines == [
         f"hive create {NAME}: invite: invited hive member {member} as {NAME}; "
-        f"OpenBao secret/{RECORD}: wrote ca_pem, credential, swarm_url (3 keys total)",
+        f"OpenBao secret/{RECORD}: wrote ca_pem, credential, swarm_url (3 keys total); "
+        f"listed {member} on the hub signer record {SIGNER} for demo "
+        "and asked the hub's agentihooks-swarm-nats-signer sync to refresh it now",
         f"hive create {NAME}: ssh keys: OpenBao secret/{RECORD}: wrote ssh_authorized_keys, ssh_host_key, "
         "ssh_host_public_key (6 keys total)",
         f"hive create {NAME}: manifests: opened pull request {PR}",
