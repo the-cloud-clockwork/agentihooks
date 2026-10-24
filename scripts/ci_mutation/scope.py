@@ -193,6 +193,14 @@ def mentions(text: str) -> tuple[bool, frozenset[str]]:
     return re.search(r"\bfrom\W*\.", normalized) is not None, frozenset(re.findall(r"\w+", normalized))
 
 
+def mentioned(text: str, words: set[str]) -> bool:
+    relative, tokens = mentions(text)
+    if relative or not words.isdisjoint(tokens):
+        return True
+    odd = [re.escape(word) for word in words if not re.fullmatch(r"\w+", word)]
+    return bool(odd) and re.search(rf"\b(?:{'|'.join(odd)})\b", unicodedata.normalize("NFKC", text)) is not None
+
+
 def select_tests(root: Path, source: Path) -> list[str]:
     module = module_name(source)
     named = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
@@ -204,14 +212,13 @@ def select_tests(root: Path, source: Path) -> list[str]:
         return {
             path
             for path, text in texts.items()
-            if ((relative := mentions(text))[0] or not words.isdisjoint(relative[1]))
-            and imported_names(text, path.relative_to(root).parent.parts) & modules
+            if mentioned(text, words) and imported_names(text, path.relative_to(root).parent.parts) & modules
         }
 
     reaching = {
         path
         for path, text in texts.items()
-        if module in text and named.search(text) or path.name == f"test_{source.stem}.py"
+        if (module in text and named.search(text)) or path.name == f"test_{source.stem}.py"
     } | importing({module})
     added = reaching
     while added:
