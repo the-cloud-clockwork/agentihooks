@@ -846,6 +846,7 @@ jobs:
           path: ${{ runner.temp }}/count-record/record.json
           if-no-files-found: ignore
           retention-days: 7
+          overwrite: true
 
       - name: Save exact count collections
         if: steps.counts.outputs.cache-hit != 'true'

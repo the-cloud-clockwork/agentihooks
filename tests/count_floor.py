@@ -82,7 +82,7 @@ def dev_record(listing: dict, base: str) -> int | None:
         run = artifact.get("workflow_run") or {}
         if (
             not artifact.get("expired")
-            and (run.get("head_branch") == "dev" or str(run.get("head_branch")).startswith("gh-readonly-queue/dev/"))
+            and (run.get("head_branch") == "dev" or (run.get("head_branch") or "").startswith("gh-readonly-queue/dev/"))
             and run.get("head_sha") == base
             and run.get("repository_id") is not None
             and run.get("repository_id") == run.get("head_repository_id")
