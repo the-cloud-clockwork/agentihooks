@@ -149,7 +149,8 @@ def delete_all(work: list[tuple[str, dict]], per_minute: int = DELETES_PER_MINUT
 
     def paced(item: tuple[str, dict]) -> bool:
         with lock:
-            wait, slot[0] = slot[0] - time.monotonic(), max(slot[0], time.monotonic()) + gap
+            now = time.monotonic()
+            wait, slot[0] = slot[0] - now, max(slot[0], now) + gap
         if wait > 0:
             time.sleep(wait)
         return delete(*item)
@@ -197,8 +198,9 @@ def prune(args: argparse.Namespace, now: datetime) -> dict:
         doomed.append((name, row))
         total -= row["size_in_bytes"]
     ranked = sorted(doomed, key=lambda item: (item[1]["expired"], -item[1]["size_in_bytes"]))
-    chosen = {(name, row["id"]) for name, row in ranked[: args.budget]}
-    gone = delete_all(ranked[: args.budget]) if args.apply else chosen
+    budgeted = ranked[: args.budget]
+    chosen = {(name, row["id"]) for name, row in budgeted}
+    gone = delete_all(budgeted) if args.apply else chosen
     report = []
     for name, (found, _, _) in plans.items():
         mine = [row for row_name, row in doomed if row_name == name]
