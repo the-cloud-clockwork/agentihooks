@@ -603,6 +603,45 @@ def test_current_placement_holds_explain_the_spawn_wait(stalled, reason):
     assert InboxStore(store.redis).pending_mail("master@sw") == []
 
 
+@pytest.mark.parametrize("lane", ["eng", "ci"])
+def test_an_unheld_task_keeps_the_stall_alarm_eligible(stalled, lane):
+    store, ledger, _, clock, _ = stalled
+    store.update("sw", max_ci=1)
+    ledger.rows["t3"] = {**ledger.rows["t1"], "id": "t3", "lane": lane}
+    for _ in range(2):
+        for task in ("t1", "t2"):
+            row = ledger.rows[task]
+            placement_waits.observe(store, "sw", row["lane"], task, CPU_WAIT, clock[0])
+        quiet_watch(stalled)
+        clock[0] += 600_000
+    assert len(spawn_stall.findings(store, "sw")) == 1
+
+
+def test_an_expired_placement_hold_starts_a_new_stall_interval(stalled):
+    store, _, _, clock, _ = stalled
+    placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0])
+    quiet_watch(stalled)
+    clock[0] += 1
+    quiet_watch(stalled)
+    clock[0] += 1
+    quiet_watch(stalled)
+    clock[0] += 599_999
+    quiet_watch(stalled)
+    assert spawn_stall.findings(store, "sw") == []
+    clock[0] += 1
+    quiet_watch(stalled)
+    assert len(spawn_stall.findings(store, "sw")) == 1
+
+
+def test_a_wait_recorded_for_another_lane_does_not_hide_ready_work(stalled):
+    store, _, _, clock, _ = stalled
+    for _ in range(2):
+        placement_waits.observe(store, "sw", "ci", "t1", CPU_WAIT, clock[0])
+        quiet_watch(stalled)
+        clock[0] += 600_000
+    assert len(spawn_stall.findings(store, "sw")) == 1
+
+
 def capped_watch(stalled, refused=True):
     store, ledger, runtime, clock, _ = stalled
     with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
@@ -661,7 +700,8 @@ def test_a_local_cap_refusal_reads_the_refusing_machine(stalled, monkeypatch):
 
 
 def test_admission_refusals_without_a_failed_launch_are_named_in_the_alarm(stalled):
-    store, _, _, clock, _ = stalled
+    store, ledger, _, clock, _ = stalled
+    ledger.rows["t3"] = {**ledger.rows["t1"], "id": "t3"}
     quiet_watch(stalled)
     seed_refusals(store, clock)
     clock[0] += 600_000
@@ -676,7 +716,8 @@ def test_admission_refusals_without_a_failed_launch_are_named_in_the_alarm(stall
 
 
 def test_a_fresh_failed_launch_follows_the_admission_refusals(stalled):
-    store, _, _, clock, _ = stalled
+    store, ledger, _, clock, _ = stalled
+    ledger.rows["t3"] = {**ledger.rows["t1"], "id": "t3"}
     tick_failure(stalled)
     seed_refusals(store, clock)
     clock[0] += 600_000
