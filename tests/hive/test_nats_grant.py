@@ -609,7 +609,7 @@ def test_hive_remove_and_serve_carry_the_signer(admin, wired, monkeypatch):
     monkeypatch.setattr(server, "make_server", make_server)
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://own:6379/0")
     assert cli.main(["serve"]) == 0
-    assert served == [signed]
+    assert [loader() for loader in served] == [signed]
 
 
 def test_remove_revokes_with_the_plan_signer(admin, monkeypatch):

@@ -200,6 +200,7 @@ def test_the_invite_parser_names_its_record_and_addresses():
         (["--redis-url"], "redis_url", "Redis URL the new hive connects to"),
         (["--swarm-url"], "swarm_url", "ledger address the new hive reaches"),
         (["--bus-url"], "bus_url", "NATS address the new hive reaches; copied from --like when omitted"),
+        (["--swarm"], "swarm", "swarm the member's bus credential reaches; every swarm if omitted"),
     ]
 
 

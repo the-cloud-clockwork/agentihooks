@@ -86,6 +86,15 @@ def mint(redis: "Redis", name: str, redis_url: str) -> dict:
     }
 
 
+def member_of(redis: "Redis", credential: str) -> str | None:
+    from redis.exceptions import RedisError
+
+    try:
+        return redis.get(f"{PREFIX}:ledger:{_digest(credential)}")
+    except RedisError as exc:
+        raise HiveError(f"Redis refused the member lookup ({exc})") from exc
+
+
 def refresh(redis: "Redis", credential: str, redis_url: str) -> dict:
     from redis.exceptions import RedisError
 

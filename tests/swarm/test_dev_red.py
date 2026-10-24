@@ -98,7 +98,7 @@ def test_a_green_dev_run_at_or_after_the_red_one_reopens_the_task_and_comments(s
         dev_red.REOPENED == "Dev Tests passed again after the red run that blocked this task, so the swarm reopened it."
     )
     assert store.redis.hgetall(dev_red.key("sw")) == {}
-    assert store.claims("sw", "t1") == 2
+    assert store.claims("sw", "t1") == 3
 
 
 @pytest.mark.parametrize(

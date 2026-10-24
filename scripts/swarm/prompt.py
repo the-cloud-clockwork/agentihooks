@@ -96,8 +96,11 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         *priming_lines(task),
         *summary,
         "",
-        f"Before anything else, read the ledger in full with {ledger_read(slug)}: every task and its state, "
-        "the operator's notes, answers, comments and chat.",
+        f"Never run {ledger_read(slug)}: it downloads the whole ledger and slows every write for the swarm. Read "
+        f"through the ledger API one item at a time: agentihooks ledger --slug {slug} get tasks/<id> prints one task "
+        "(phases/<id>, followups/<id> and priorities/<id> work the same way), and "
+        f"agentihooks ledger --slug {slug} tasks --state <state> --lane <lane> --text <words> lists the open tasks, "
+        "each filter optional.",
         f"Run once: {led} join --role orchestrator. {INBOX_LINE} Act on every OPERATOR line, then run {led} ack.",
         "",
         (

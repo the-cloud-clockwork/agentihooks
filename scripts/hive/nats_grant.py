@@ -63,7 +63,7 @@ class Signer:
     member_swarms: Mapping[str, tuple[str, ...]] | None = None
 
 
-def _member_swarms(value) -> dict[str, tuple[str, ...]]:
+def member_swarms(value) -> dict[str, tuple[str, ...]]:
     if not isinstance(value, dict) or any(not isinstance(swarms, (list, tuple)) for swarms in value.values()):
         raise auth.HiveError("member_swarms must map member ids to lists of swarm names")
     try:
@@ -140,7 +140,7 @@ def _signer(record: Mapping, trusted: str) -> Signer:
         record["system_credentials"],
         record["url"],
         trusted,
-        _member_swarms(record["member_swarms"]) if "member_swarms" in record else None,
+        member_swarms(record["member_swarms"]) if "member_swarms" in record else None,
     )
 
 
@@ -178,9 +178,17 @@ def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
     return nkey.derive(signer.account, nkey.USER, member_id)
 
 
+def require_listed(signer: Signer, member_id: str) -> None:
+    if signer.member_swarms is not None and member_id not in signer.member_swarms:
+        raise auth.HiveError(
+            f"the hub record lists no member swarms for hive member {member_id}; it mints no unscoped bus credential"
+        )
+
+
 def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
-    swarms = None if signer.member_swarms is None else signer.member_swarms.get(member_id, ())
+    require_listed(signer, member_id)
+    swarms = None if signer.member_swarms is None else signer.member_swarms[member_id]
     claims = member_claims(user.public, swarms)
     return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 

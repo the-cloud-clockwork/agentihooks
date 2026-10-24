@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 from scripts.hive import auth
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from redis import Redis
 
     from scripts.hive.nats_grant import Signer
@@ -56,11 +58,13 @@ class _TLSHandler(BaseHTTPRequestHandler):
 
 
 def _grant(operation: str, redis: "Redis", value: str, redis_url: str, signer: "Signer | None") -> dict:
-    grant = getattr(auth, operation)(redis, value, redis_url)
     if signer is None:
-        return grant
+        return getattr(auth, operation)(redis, value, redis_url)
     from scripts.hive import nats_grant
 
+    if signer.member_swarms is not None and (member := auth.member_of(redis, value)):
+        nats_grant.require_listed(signer, member)
+    grant = getattr(auth, operation)(redis, value, redis_url)
     grant = {**grant, "nats_credentials": nats_grant.mint(signer, grant["id"])}
     if signer.member_swarms is None:
         return {**grant, "bus_scoped": False}
@@ -72,7 +76,7 @@ def _handler(
     redis_url: str,
     context: ssl.SSLContext | None,
     ledger_ca: str | None = None,
-    signer: "Signer | None" = None,
+    signer: "Signer | Callable[[], Signer | None] | None" = None,
 ) -> type[BaseHTTPRequestHandler]:
     class Join(_TLSHandler):
         timeout = REQUEST_TIMEOUT_S
@@ -89,7 +93,8 @@ def _handler(
             from redis.exceptions import TimeoutError as Stalled
 
             try:
-                grant = _grant(operation, redis, value, redis_url, signer)
+                current = signer() if callable(signer) else signer
+                grant = _grant(operation, redis, value, redis_url, current)
                 return self._answer(200, {**grant, "ledger_ca": ledger_ca} if ledger_ca else grant)
             except auth.HiveError as exc:
                 if not isinstance(exc.__cause__, (Stalled, Unreachable)):
@@ -193,7 +198,7 @@ def make_server(
     port: int,
     tls: tuple[str, str] | None = None,
     ledger_ca: str | None = None,
-    signer: "Signer | None" = None,
+    signer: "Signer | Callable[[], Signer | None] | None" = None,
 ) -> ThreadingHTTPServer:
     if tls is None and not is_loopback(host):
         raise auth.HiveError("a hive endpoint off loopback hands out credentials, so it needs --tls-cert and --tls-key")

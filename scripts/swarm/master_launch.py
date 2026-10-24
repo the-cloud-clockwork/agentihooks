@@ -38,8 +38,9 @@ OFFER = "Start a new master instead? [y/N] "
 NONE_RECORDED = "no earlier master is recorded"
 RESUMED = (
     "The operator brought you back with agentihooks swarm {slug} master up as {name}, the master of this swarm. "
-    "Time passed and other agents may have moved the work. Before acting, re-read the ledger with {ledger} and your "
-    "inbox, then continue as master."
+    "Time passed and other agents may have moved the work. Before acting, read your inbox and the items you need one "
+    "at a time with agentihooks ledger --slug {slug} get tasks/<id> and agentihooks ledger --slug {slug} tasks, "
+    "never {ledger}, then continue as master."
 )
 RECORD_FIELDS = {f.name for f in fields(AgentRecord)}
 
