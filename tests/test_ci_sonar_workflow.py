@@ -65,6 +65,24 @@ def test_required_gate_rejects_unsuccessful_sonar(sonar):
         assert "::error::" in result.stdout
 
 
+@pytest.mark.parametrize("selection", ["cancelled", "failure"])
+@pytest.mark.parametrize("scope", ["", "selected", "full", "none"])
+def test_required_gate_names_selection_failure_before_downstream_coverage(selection, scope):
+    jobs = _workflow()["jobs"]
+    needs = {job: {"result": "skipped"} for job in jobs["gate-required"]["needs"]}
+    needs["select"] = {"result": selection, "outputs": {"scope": scope}}
+    needs["sonar"] = {"result": "failure"}
+    result = subprocess.run(
+        ["bash", "-e", "-c", jobs["gate-required"]["steps"][0]["run"]],
+        env=dict(os.environ, NEEDS=json.dumps(needs), EVENT="pull_request", MUTATION="false"),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"::error::Test selection {selection};" in result.stdout
+    assert "Every gate required for this event" not in result.stdout
+
+
 def _queued_step():
     steps = _workflow()["jobs"]["sonar"]["steps"]
     return next(step for step in steps if step.get("id") == "queued")
