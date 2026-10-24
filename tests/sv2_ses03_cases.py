@@ -1,14 +1,13 @@
 import hashlib
 import json
 import tempfile
-import threading
 from pathlib import Path
 
 import pytest
 
 from hooks.memory.collector import Collector
 from hooks.memory.cursors import CursorStore
-from hooks.memory.spool import Spool, SpoolConfig, SpoolFull, run_flusher
+from hooks.memory.spool import Spool, SpoolConfig, SpoolFull, start_flusher, stop_flusher
 
 FIXTURE = Path(__file__).parent / "fixtures/swarm_v2/spool-outage.json"
 EVIDENCE_CLASS = (
@@ -113,9 +112,8 @@ def positive(inputs, root):
     idle = rig.collector.poll(rig.source, rig.accept)
     assert idle.records == [] and rig.spool.status().pending == warned.pending
     rig.central.down = False
-    stop = threading.Event()
-    stop.set()
-    final = run_flusher(rig.spool, rig.central, stop, 30.0)
+    flusher = start_flusher(rig.spool, rig.central, 3600.0)
+    final = stop_flusher(flusher, rig.spool, rig.central)
     recovered = rig.spool.status()
     expected = inputs["prompts"][: warned.buffered]
     assert rig.central.texts() == expected

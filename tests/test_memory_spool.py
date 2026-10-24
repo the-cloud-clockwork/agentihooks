@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from hooks.memory import spool as spool_module
-from hooks.memory.spool import Entry, FlushResult, Spool, SpoolConfig, SpoolFull, run_flusher
+from hooks.memory.spool import Entry, FlushResult, Spool, SpoolConfig, SpoolFull, start_flusher, stop_flusher
 from tests import sv2_ses03_cases
 
 pytestmark = pytest.mark.unit
@@ -382,24 +382,34 @@ def test_write_durably_syncs_the_file_then_the_folder(tmp_path, monkeypatch):
     assert (tmp_path / "x.json").read_bytes() == b"data"
 
 
-def test_run_flusher_flushes_each_interval_then_once_on_stop(spool):
-    class Stop:
-        def __init__(self, answers):
-            self.answers = answers
-            self.intervals = []
+def test_the_flusher_runs_on_a_scheduler_interval_then_flushes_once_on_stop(spool, monkeypatch):
+    events = []
 
-        def wait(self, interval):
-            self.intervals.append(interval)
-            return self.answers.pop(0)
+    class FakeInterval:
+        def __init__(self, callback, *, every):
+            self.callback = callback
+            events.append(("interval", every))
 
-    calls = []
-    spool.flush = lambda upload: calls.append(upload) or FlushResult([len(calls)])
-    stop = Stop([False, False, True])
+        def start(self):
+            events.append("start")
+
+        def close(self):
+            events.append("close")
+
+    def flush(upload):
+        events.append(("flush", upload))
+        return FlushResult([len(events)])
+
+    monkeypatch.setattr(spool_module, "Interval", FakeInterval)
+    spool.flush = flush
     upload = object()
-    result = run_flusher(spool, upload, stop, 12.5)
-    assert stop.intervals == [12.5, 12.5, 12.5]
-    assert calls == [upload, upload, upload]
-    assert result == FlushResult([3])
+    interval = start_flusher(spool, upload, 12.5)
+    assert events == [("interval", 12.5), "start"]
+    interval.callback()
+    assert events[-1] == ("flush", upload)
+    result = stop_flusher(interval, spool, upload)
+    assert events[-2:] == ["close", ("flush", upload)]
+    assert result == FlushResult([len(events)])
 
 
 def test_entry_fields():

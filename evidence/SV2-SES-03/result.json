@@ -13,7 +13,7 @@
     "hooks.memory.spool.SpoolFull is raised when a new batch would pass max_bytes; no pending batch is removed to make room",
     "hooks.memory.spool.Spool.status() reports level ok, warning at warn_bytes or full at max_bytes; buffered, the highest local sequence; settled, the highest sequence flushed or quarantined; acknowledged, the highest sequence below which every batch was centrally accepted; pending and corrupt sequences verified by checksum; lost sequences; transcript_spool_bytes and archive_lag_seconds",
     "hooks.memory.spool.Spool.flush(upload) uploads pending batches in sequence order, writes the fsynced ack file only after upload returns, then removes the batch file, stops at the first upload error and quarantines a batch failing its checksum as lost without counting it acknowledged",
-    "hooks.memory.spool.run_flusher(spool, upload, stop, interval) flushes every interval until stop is set, then once more for controlled shutdown"
+    "hooks.memory.spool.start_flusher(spool, upload, every) runs spool.flush on a scripts.scheduler process Interval; stop_flusher(interval, spool, upload) closes it and flushes once more for controlled shutdown"
   ],
   "supported_versions": {
     "python": "3.11 and later",

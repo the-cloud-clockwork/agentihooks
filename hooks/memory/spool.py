@@ -4,7 +4,6 @@ import fcntl
 import hashlib
 import json
 import os
-import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -12,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hooks.memory.collector import Batch
+from scripts.scheduler.process_interval import Interval
 
 RECENT_IDENTITIES = 4096
 
@@ -206,8 +206,13 @@ class Spool:
         return FlushResult(uploaded, lost)
 
 
-def run_flusher(spool: Spool, upload: Callable[[Entry], None], stop: threading.Event, interval: float) -> FlushResult:
-    """Flush every ``interval`` seconds until ``stop`` is set, then once more for controlled shutdown."""
-    while not stop.wait(interval):
-        spool.flush(upload)
+def start_flusher(spool: Spool, upload: Callable[[Entry], None], every: float) -> Interval:
+    interval = Interval(lambda: spool.flush(upload), every=every)
+    interval.start()
+    return interval
+
+
+def stop_flusher(interval: Interval, spool: Spool, upload: Callable[[Entry], None]) -> FlushResult:
+    """Controlled shutdown: stop the periodic flush, then flush once more."""
+    interval.close()
     return spool.flush(upload)
