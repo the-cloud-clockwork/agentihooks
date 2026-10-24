@@ -115,6 +115,8 @@ def task_cost(record: dict, limits: Limits) -> list[Finding]:
     finished = {c["task"]: _finished(record, c["task"]) for c in costs}
     found = []
     for cost in costs:
+        if cost["task"] not in record.get("task_cost_candidates", record["merged"]):
+            continue
         others = [c["tokens"] for c in costs if c is not cost and finished[c["task"]] <= finished[cost["task"]]]
         if not others or cost["tokens"] <= limits.task_cost_ratio * median(others):
             continue

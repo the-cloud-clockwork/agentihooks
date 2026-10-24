@@ -285,7 +285,11 @@ def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch, tm
         asked.append((path, params))
         return {"data": [], "meta": {"page": 1, "totalPages": 1}}
 
-    store = type("Store", (), {"redis": object()})()
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.agents = lambda slug: [AgentRecord("s-master-1", "master", "master", conversation_id="c1", started_at=1)]
     ledger = type("Ledger", (), {"tasks": lambda self, slug: []})()
     monkeypatch.setattr(traces_read, "client", lambda env: get)
