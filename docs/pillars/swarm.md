@@ -421,7 +421,8 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
 - **Cool off.** A rise launches the next backend seat at once. A fall waits until the wanted count stayed lower for
   ten minutes running, and the cool off restarts whenever the count rises. Then every extra backend master is asked
   to hand off at once and the count falls from the top as they leave; an asked seat below a live higher seat retires
-  as soon as it is empty. A retired seat's handoff and open inbox items go to the front door. The front door never retires by
+  as soon as it is empty. A retired seat's phases, with their tasks, and its handoff and open inbox items go to the front door
+  in the same step. The front door never retires by
   scaling.
 - **Inbox pool.** With two or more live masters, items for the master seat from agents and the tick wait in one
   pool per swarm, first in first out, and each is claimed by exactly one live master in round robin seat order,
@@ -692,7 +693,8 @@ minutes at a lower wanted count:
 2. When that master has left its seat, the tick retires the seat. Its handoff document reaches `master@<id>` as an
    inbox item. Every open item still at the seat is redirected to `master@<id>`, except the retire request, which
    is withdrawn. The tick prints `retired master seat master-2@<id> after <seconds> seconds`.
-3. The seat count falls, phase owners rebalance and the masters channel announces the new owners.
+3. Every phase the retired seat owned, with its tasks, moves to `master@<id>` in the same step, so the front door
+   can message their claimants. The seat count falls and the masters channel announces the new owners.
 
 An extra backend seat that is empty and has no live seat above it retires at once when the cool off ends, and the
 tick prints

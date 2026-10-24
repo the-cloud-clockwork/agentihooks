@@ -61,7 +61,7 @@ def test_the_refusals_name_the_owning_master_in_full():
     )
 
 
-OWN = {"followups/f1/done": {"rev": 5, "by": "master@abcdef-0001"}}
+OWN = {"followups/f1/done": {"rev": 5, "by": "master@abcdef-0001", "at": 10}}
 
 
 @pytest.mark.parametrize(
@@ -71,7 +71,7 @@ OWN = {"followups/f1/done": {"rev": 5, "by": "master@abcdef-0001"}}
         ({**OWN, "followups/f1/needs_operator": {"rev": 9, "by": "master@abcdef-0002"}}, True),
         ({**OWN, "followups/f1/comments": {"rev": 9, "by": "engineer@abcdef-0005"}}, True),
         ({**OWN, "followups/f1/text": {"rev": 4, "by": "operator"}}, True),
-        ({**OWN, "followups/f1/text": {"rev": 5, "by": "operator"}}, True),
+        ({**OWN, "followups/f1/text": {"rev": 5, "by": "operator", "at": 10}}, True),
         ({**OWN, "followups/f12/done": {"rev": 9, "by": "operator"}}, True),
         ({**OWN, "followups/f1/needs_operator": {"rev": 6, "by": "operator"}}, False),
         ({**OWN, "followups/f1/text": {"rev": 6, "by": "engineer@abcdef-0005"}}, False),
@@ -81,7 +81,12 @@ OWN = {"followups/f1/done": {"rev": 5, "by": "master@abcdef-0001"}}
     ],
 )
 def test_a_decider_record_holds_while_its_write_stands_and_only_masters_wrote_since(stamps, held):
-    assert master_fence.current({"seat": "master@sw", "rev": 5}, "followups/f1", stamps) is held
+    assert master_fence.current({"seat": "master@sw", "rev": 5}, "followups/f1", stamps, 0) is held
+
+
+@pytest.mark.parametrize(("retired_at", "held"), [(9, True), (10, False), (11, False)])
+def test_a_decider_record_stamped_before_its_seat_last_retired_no_longer_holds(retired_at, held):
+    assert master_fence.current({"seat": "master@sw", "rev": 5}, "followups/f1", OWN, retired_at) is held
 
 
 @pytest.mark.parametrize(
