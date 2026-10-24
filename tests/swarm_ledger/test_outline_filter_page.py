@@ -209,6 +209,12 @@ def test_j_and_k_start_at_the_outline_and_walk_task_links_in_the_task_list(ledge
     assert page.evaluate("() => document.activeElement.textContent") == ids[1]
     page.keyboard.press("k")
     assert page.evaluate("() => document.activeElement.textContent") == ids[0]
+    page.keyboard.press("Enter")
+    page.wait_for_function(
+        """id => { const el = document.getElementById(`item-tasks-${id}`);
+        return el && el.classList.contains('flash'); }""",
+        arg=ids[0],
+    )
 
 
 def test_typing_in_a_form_control_is_never_taken_for_navigation(ledger):

@@ -154,7 +154,10 @@ function shapeOutline(tree) {
 
 async function searchRemote() {
   const turn = ++searchTurn;
-  for (const list of SEARCHED) delete remote[list], delete remoteTotal[list];
+  for (const list of SEARCHED) {
+    delete remote[list];
+    delete remoteTotal[list];
+  }
   if (filter.text && ["", "done"].includes(filter.state)) {
     for (const list of SEARCHED.filter((name) => closedLeft(name))) {
       try {
