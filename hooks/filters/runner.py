@@ -39,7 +39,8 @@ def _applies(spec: schema.FilterSpec, tool_input: dict) -> bool:
 def find(spec: schema.FilterSpec, pieces: list[extract.Piece], payload: dict | None = None) -> list[Finding]:
     payload = payload or {}
     if spec.mode == "classifier":
-        return [Finding(p.where, 0, len(p.text), p.text, "whole text", p.text) for p in pieces if p.text]
+        units = extract.units(payload.get("tool_name"), pieces)
+        return [Finding(p.where, 0, len(p.text), p.text, "whole text", p.text) for p in units if p.text]
     named = scripts.resolve(payload.get("cwd")) if any(f.script for f in spec.finders) else {}
     path = extract.target_path(payload.get("tool_input") or {})
     tool = payload.get("tool_name", "")
@@ -70,7 +71,9 @@ def _enclosing_lines(text: str, start: int, end: int) -> str:
 
 
 def _intent(spec: schema.FilterSpec, tool_input: dict) -> str:
-    value = tool_input.get(spec.intent_from) if spec.intent_from else None
+    value = tool_input
+    for key in filter(None, spec.intent_from.split(".")):
+        value = value.get(key) if isinstance(value, dict) else None
     return value if isinstance(value, str) and value else spec.intent
 
 
@@ -137,11 +140,15 @@ def strip(step: str, payload: dict, findings: list[Finding]) -> dict:
     tool_input = payload.get("tool_input") or {}
     texts = {piece.where: piece.text for piece in extract.pieces(payload.get("tool_name"), tool_input)}
     spans: dict[tuple, list[tuple[int, int]]] = {}
+    dropped = []
     for finding in findings:
-        spans.setdefault(finding.where, []).append((finding.start, finding.end))
+        if finding.where in texts:
+            spans.setdefault(finding.where, []).append((finding.start, finding.end))
+        else:
+            dropped.append(finding.where)
     replaced = {where: _cut(texts[where], cut) for where, cut in spans.items()}
     out = {
-        "tool_input": extract.rewrite(tool_input, replaced),
+        "tool_input": extract.rewrite(tool_input, replaced, dropped),
         "context": f"filter stripped:\n{_listing(findings)}",
     }
     if payload.get("permission_mode") != "bypassPermissions":
@@ -225,6 +232,8 @@ def run(entry: dict, step: str, payload: dict) -> dict:
     if not isinstance(tool_input, dict) or not _applies(spec, tool_input):
         return _passed()
     pieces = extract.pieces(payload.get("tool_name"), tool_input)
+    if spec.fields:
+        pieces = [piece for piece in pieces if piece.where[0] in spec.fields]
     findings = find(spec, pieces, payload)
     try:
         confirmed = confirm(entry, spec, payload, findings) if findings else []

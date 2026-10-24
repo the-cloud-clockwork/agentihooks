@@ -26,6 +26,7 @@ class Finder:
 @dataclass(frozen=True)
 class FilterSpec:
     paths: tuple[str, ...] = ()
+    fields: tuple[str, ...] = ()
     finders: tuple[Finder, ...] = ()
     mode: str = "both"
     intent: str = ""
@@ -86,6 +87,7 @@ def _finders(value: object) -> tuple[Finder, ...]:
 
 _FIELDS = {
     "paths": lambda v: _strings("paths", v),
+    "fields": lambda v: _strings("fields", v),
     "finders": _finders,
     "mode": lambda v: _choice("mode", v, MODES),
     "intent": lambda v: _text("intent", v),
