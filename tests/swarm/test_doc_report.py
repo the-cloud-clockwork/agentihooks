@@ -72,6 +72,14 @@ def test_the_watchdog_reply_is_recorded_on_the_task(world):
     assert sweep(world, AT + 120_000) == []
 
 
+def test_a_watchdog_close_without_a_reply_records_its_detail(world):
+    inbox, _ = world
+    sweep(world)
+    inbox.close(doc_report.report_id(SLUG, "t1"), WATCHDOG, "done", "item 10 closed on the doc")
+    assert sweep(world, AT + 60_000) == ["recorded the watchdog acknowledgment of t1"]
+    assert task("t1")["watchdog"]["ack"] == "item 10 closed on the doc"
+
+
 def test_an_unacknowledged_report_raises_one_priority_after_the_window(world):
     sweep(world)
     assert sweep(world, AT + doc_report.ack_ms() - 1) == []

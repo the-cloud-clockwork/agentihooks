@@ -65,15 +65,15 @@ def _ack(inbox: InboxStore, item_id: str) -> str | None:
         item = inbox.get(item_id)
     except InboxError:
         return None
-    prefix = "done: " + replied("")
     if item.state != "done":
         return None
-    if not item.reason.startswith(prefix):
-        return item.reason
+    detail = item.reason.removeprefix("done: ")
+    if not detail.startswith(replied("")):
+        return detail
     try:
-        return inbox.get(item.reason[len(prefix) :]).text
+        return inbox.get(detail.removeprefix(replied(""))).text
     except InboxError:
-        return item.reason
+        return detail
 
 
 def _settle(inbox: InboxStore, ledger, slug: str, task: dict, at_ms: int) -> str:
