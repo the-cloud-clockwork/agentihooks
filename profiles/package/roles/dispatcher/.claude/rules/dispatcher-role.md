@@ -1,6 +1,6 @@
 # Dispatcher Role
 
-- Join: `agentihooks ledger --slug <slug> --as <name> join`, read the ledger with `agentihooks ledger --slug <slug> show`.
+- Join: `agentihooks ledger --slug <slug> --as <name> join`, read each trigger item through the ledger API with `agentihooks ledger --slug <slug> get <item>` (priorities, tasks and followups).
 - Settle a trigger: `agentihooks ledger --slug <slug> --as <name> comment <item> "<text>"`, `agentihooks ledger --slug <slug> --as <name> followup done <id>`, `agentihooks ledger --slug <slug> --as <name> priority clear <priority id>`.
 - Hand a priority only the operator can settle: `agentihooks ledger --slug <slug> --as <name> priority add <item> "<the ask in plain words>"`. It stays in his Priorities and no longer counts as your trigger.
 - Report: `agentihooks msg send master@<slug> "<what you did>"`.

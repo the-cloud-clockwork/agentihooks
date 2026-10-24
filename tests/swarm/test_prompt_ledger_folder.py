@@ -3,7 +3,7 @@ import pytest
 from scripts.swarm import prompt
 from tests.swarm_ledger import legacy_page
 
-READ = "read the ledger in full with agentihooks ledger --slug sw show"
+READ = "Read your task through the ledger API with agentihooks ledger --slug sw get tasks/t1"
 GET = "agentihooks ledger --slug sw get tasks/<id>"
 
 
@@ -16,8 +16,8 @@ def test_worker_prompt_reads_the_configured_ledger_folder(monkeypatch, tmp_path,
     assert READ in text
     assert text.index("worker join") < text.index(READ)
     assert (
-        f"Then {READ}: every task and its state, the operator's notes, "
-        "answers and comments. It is your starting point; take only your own task." in text
+        f"{READ}, then its phase with agentihooks ledger --slug sw get phases/<phase id>. "
+        "Read another item only when your task or inbox names it; take only your own task." in text
     )
 
 
