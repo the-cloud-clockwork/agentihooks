@@ -604,6 +604,19 @@ def test_request_record_defaults(home, enabled, monkeypatch):
     assert json.loads(trace_flush.request_path("s").read_text())["at"] > first["at"]
 
 
+def test_a_stop_stays_recorded_through_later_requests(home, enabled):
+    def stopped():
+        return json.loads(trace_flush.request_path("s").read_text())["stopped"]
+
+    trace_flush.request("s", "", "start", owner_pid=os.getpid(), spawn=lambda s: None)
+    assert stopped() is False
+    trace_flush.request("s", "", "compact", owner_pid=os.getpid(), spawn=lambda s: None)
+    assert stopped() is False
+    trace_flush.request("s", "", "stop", owner_pid=os.getpid(), spawn=lambda s: None)
+    trace_flush.request("s", "", "compact", owner_pid=os.getpid(), spawn=lambda s: None)
+    assert stopped() is True
+
+
 def test_spawn_detaches_the_exporter(monkeypatch):
     calls = []
     monkeypatch.setattr("hooks._async.fork_and_call", lambda fn, *a, **k: calls.append((fn, a, k)))

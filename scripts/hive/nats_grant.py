@@ -12,6 +12,7 @@ from scripts import openbao_kv
 from scripts.events import nkey, subjects
 from scripts.events.dead import DEAD_STREAM
 from scripts.hive import auth, buckets
+from scripts.hub import slots
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -51,6 +52,38 @@ MEMBER_PUBLISH = (
     *(f"$KV.{bucket}.>" for bucket in buckets.NAMES),
     *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets.NAMES),
     *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets.NAMES),
+)
+CONTROLLER_BUCKETS = (
+    *buckets.NAMES,
+    *slots.BUCKETS,
+    "hub-versions",
+    "hub-leases",
+    "hub-hive-loss",
+    "hub-timers",
+    "hub-github",
+    "hub-reconciler",
+    "inbox",
+    "inbox-wake",
+    "inbox_legacy",
+)
+# Queue stream names hash the swarm and lane into one token, so stream level API grants take any stream name.
+CONTROLLER_PUBLISH = (
+    f"{subjects.PREFIX}.>",
+    f"legacy.{subjects.PREFIX}.>",
+    "dead.>",
+    "agentihooks.queue.>",
+    "$JS.API.STREAM.LIST",
+    "$JS.API.STREAM.CREATE.*",
+    "$JS.API.STREAM.UPDATE.*",
+    "$JS.API.STREAM.INFO.*",
+    "$JS.API.STREAM.MSG.GET.*",
+    "$JS.API.CONSUMER.CREATE.>",
+    "$JS.API.CONSUMER.DURABLE.CREATE.>",
+    "$JS.API.CONSUMER.INFO.>",
+    "$JS.API.CONSUMER.MSG.NEXT.>",
+    "$JS.ACK.>",
+    *(f"$KV.{bucket}.>" for bucket in CONTROLLER_BUCKETS),
+    "_INBOX.>",
 )
 
 
@@ -175,6 +208,14 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str 
     }
 
 
+def controller_claims() -> dict:
+    return {
+        **user_claims(),
+        "pub": {"allow": list(CONTROLLER_PUBLISH)},
+        "sub": {"allow": ["_INBOX.>", "swarm.*.slots"]},
+    }
+
+
 def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
     return nkey.derive(signer.account, nkey.USER, member_id)
 
@@ -224,11 +265,13 @@ def push(signer: Signer, jwt: str) -> None:
         raise auth.HiveError(f"NATS refused the account update ({answer['error'].get('description')})")
 
 
+def revoked(redis: "Redis") -> dict[str, int]:
+    return {key: int(value) for key, value in redis.hgetall(REVOKED).items()}
+
+
 def revoke(redis: "Redis", signer: Signer, member_id: str) -> str:
     redis.hset(REVOKED, member_user(signer, member_id).public, int(time.time()))
-    jwt = account_jwt(
-        signer.operator, signer.account, {key: int(value) for key, value in redis.hgetall(REVOKED).items()}
-    )
+    jwt = account_jwt(signer.operator, signer.account, revoked(redis))
     issuer = nkey.claims(jwt)["iss"]
     if issuer != signer.trusted_operator:
         raise auth.HiveError(

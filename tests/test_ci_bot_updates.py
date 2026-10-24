@@ -34,7 +34,7 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
     assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
     assert job["permissions"] == {"contents": "read"}
-    upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")
+    upload = next(s for s in job["steps"] if s.get("uses") == "./.github/actions/retry-upload")
     assert upload["with"]["name"] == "durations-merged"
     assert upload["with"]["path"] == ".test_durations*"
     assert upload["with"]["include-hidden-files"] is True

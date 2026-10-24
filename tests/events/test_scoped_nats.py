@@ -353,3 +353,36 @@ def test_scoped_members_open_no_root_state_including_the_hub_owned_account_bucke
             assert str(caught.value) == "select a swarm before opening scoped state"
     finally:
         first.close()
+
+
+def test_hive_heartbeat_keeps_beating_on_a_fresh_bus_until_the_hub_serves_account_slots(
+    hub, signer, monkeypatch, capsys
+):
+    import fakeredis
+
+    from scripts.hive import account_slots, daemon
+    from scripts.hub import slots
+
+    redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    report = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    hosted = {"executions": {}, "names": []}
+    client, beats = member(signer), []
+
+    def publish(hive, beat_report, beat_hosted):
+        ask = account_slots.asker(client.for_swarm("rig"), "rig", 500)
+        account_slots.Remote(ask, hive, lambda: beat_report).heartbeat(beat_report, beat_hosted["executions"])
+        beats.append(hive)
+
+    monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
+    monkeypatch.setattr(daemon, "execution_report", lambda *args: hosted)
+    monkeypatch.setattr(account_slots, "publish", publish)
+    try:
+        daemon.beat(redis, "m1")
+        assert "account slot heartbeat failed (TimeoutError" in capsys.readouterr().err
+        assert beats == []
+        slots.serve(hub, clock=lambda: 1000)
+        daemon.beat(redis, "m1")
+        assert beats == ["m1"]
+        assert "account slot heartbeat failed" not in capsys.readouterr().err
+    finally:
+        client.close()

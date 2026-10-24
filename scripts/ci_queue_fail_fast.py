@@ -5,13 +5,13 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from scripts.ci_queue_retry import RUNNER_LOSS, SHARD, base_name, log_errors
+from scripts.ci_queue_retry import FAILED_RESULT, SHARD, STEP_EXITED, base_name, log_errors, runner_lost
 
 SELF = "queue-fail-fast"
 # Needs every graded job, so once it completes nothing graded can still fail.
 LAST = "stage-budget"
 FATAL = ("failure", "timed_out", "cancelled")
-EXITED = re.compile(r"##\[error\]Process completed with exit code (?:[1-9]|[1-9]\d|1[01]\d|12[0-7])\.")
+EXITED = re.compile(r"##\[error\]" + STEP_EXITED.pattern)
 
 
 def failed(jobs: list[dict], lost: Callable[[dict], bool] = lambda job: False) -> str | None:
@@ -39,8 +39,8 @@ def logged_loss(repo: str, job: dict, seen: dict[str, bool]) -> bool:
             errors = log_errors(repo, job["id"])
         except subprocess.CalledProcessError:
             return True
-        lost = any(RUNNER_LOSS.search(line) for line in errors)
-        seen[key] = lost or not any(EXITED.search(line) for line in errors)
+        text = "\n".join(errors)
+        seen[key] = runner_lost(text) or not (FAILED_RESULT.search(text) or EXITED.search(text))
     return seen[key]
 
 

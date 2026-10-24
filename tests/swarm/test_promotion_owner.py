@@ -81,7 +81,10 @@ def linked():
 
 
 def github(argv, **kwargs):
-    body = [{"name": "coverage-ratchet", "conclusion": "failure", "steps": []}] if "/jobs" in argv[2] else [RED]
+    jobs = [{"name": "coverage-ratchet", "conclusion": "failure", "steps": []}]
+    if RED["conclusion"] == "success":
+        jobs = [{"name": "promote / promote", "conclusion": "success"}]
+    body = jobs if "/jobs" in argv[2] else [RED]
     return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(row) for row in body), "")
 
 

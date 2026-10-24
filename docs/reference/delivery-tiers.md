@@ -197,8 +197,8 @@ On a pull request, the `select` job in `.github/workflows/test.yml` runs `script
 
 | Scope | When | What runs |
 |---|---|---|
-| `full` | The change touches a harness file or a `conftest.py`, the selected tests would need more than three legs, or no test was selected and the change is not documentation only | `split`, `unit` and `shard-check`, the whole suite |
-| `selected` | One or more tests were selected and fit in three legs | `unit-selected`, one job per leg, on the files listed in `files_1`, `files_2` and `files_3` |
+| `full` | The change touches a harness file or a `conftest.py`, the selected tests would need more than twelve legs, or no test was selected and the change is not documentation only | `split`, `unit` and `shard-check`, the whole suite |
+| `selected` | One or more tests were selected and fit in twelve legs | `unit-selected`, one job per leg of about 180 stored seconds, on the `files_<leg>` line of the `selection` artifact the `select` job uploads |
 | `none` | Every changed file is documentation (`docs/` or a `.md` file) | no unit tests |
 
 The merge queue always runs the whole suite. `tests/test_suite_speed.py` holds two whole suite checks that read every test module mentioning `fakeredis`:
@@ -885,8 +885,9 @@ GitHub runs `workflow_run` workflows from the default branch, `main`. A change t
    - `The runner has received a shutdown signal`
    - `lost communication with the server`
    - `The job was not acquired by Runner`
+   - `The job log could not be read`
 
-   One red shard beside a lost one refuses the requeue.
+   The last is recorded when the job log API refuses the read, as it does for a shard lost before it uploaded a log, unless an annotation shows a step exited nonzero. One red shard beside a lost one refuses the requeue.
 4. The pull request number comes from the merge group branch, `gh-readonly-queue/<base>/pr-<number>-<sha>`.
 5. While the pull request is still in the queue, the classifier polls every 30 seconds, up to 30 minutes, for GitHub to drop it. The job's 35 minute timeout covers that wait.
 6. The pull request must be open and outside the queue. If it left the queue since its head commit, the newest removal must be for failed checks, and there must be at most one failed checks removal. A head that already failed in the queue twice, or that last left the queue for another reason, is not requeued. Pushing a new head starts the count again.
@@ -1300,5 +1301,45 @@ The disabled `queue-baseline` job is gone: pull request [3517](https://github.co
 | `No measured Tests run on base <sha> kept a live coverage-baseline artifact with successful measuring and publishing jobs.` | No cache entry fit and no dev push run of the base kept a live artifact with passed unit shards and publishing steps. | Rerun the failed jobs once the next dev push publishes a baseline, or dispatch the Tests workflow against a measured base. |
 | `Base <sha> is outside dev history.` | The base commit is not on `dev`. | Dispatch the Tests workflow with a `base` on `dev`. |
 | `The base carries no tests/coverage_ratchet.py, so nothing trusted can grade.` | The base predates the ratchet. | Dispatch the Tests workflow with a newer `base` input. |
-| `<n> lines the base ran are no longer run by any head test; see the coverage-ratchet report.` | A merged change removed or rerouted the only test reaching those lines, listed by file and line in `report.txt`, so promotion is red while the queue keeps merging. | Add or restore a test that reaches each line through a normal pull request; never lower the ratchet or exclude the line. |
+| `<n> lines the base ran are no longer run by any head test; see the coverage-ratchet report.` | A merged change removed or rerouted the only test reaching those lines, listed by file and line in `report.txt`, so promotion is red while the queue keeps merging. | Follow [Clearing a lost line](#clearing-a-lost-line); never lower the ratchet or exclude the line. |
 | A coverage job ran in a merge group and `Gate — Required` failed with `Every gate required for this event must succeed and other gates must be skipped.` | A workflow change gave a coverage job a `merge_group` condition. | Restore the event conditions in the table above. |
+
+### Clearing a lost line
+
+The ratchet grades a base line only through its place in the head file. `tests/coverage_grade.py` maps each line the base ran onto the head source with a line diff. A renamed file is mapped line by line, and a file whose definitions moved into several files is mapped definition by definition. A base line with no unchanged match in the head, because the change deleted or rewrote it or deleted its file, is not graded. A base line that still exists in the head is graded whether its callers changed or not.
+
+Read `report.txt` first. Each lost line has its own line:
+
+```text
+scripts/swarm/ledger_probe.py:42 ran on base dff4aa25a502d1b98bb625828cc77c96d47ec8a1 and no head test runs it
+```
+
+```bash
+gh run download <run id> --repo the-cloud-clockwork/agentihooks \
+  --name coverage-ratchet --dir coverage-ratchet
+grep "no head test runs it" coverage-ratchet/report.txt
+```
+
+Then decide per line:
+
+| What the line is now | Fix |
+|---|---|
+| Code the change left without callers | Delete it. Confirm first that nothing calls it, for example `git grep "\.took()" origin/dev -- scripts tests hooks` returns nothing. The deleted line drops out of grading. |
+| Code still reached in production, which the base's tests only reached indirectly | Add a unit test that calls it directly and asserts what it does. |
+| Code the change's own tests stopped reaching | Restore or add the test that reaches it. |
+
+Every fix goes through a normal pull request into `dev`. The promotion fixer task is closed by the next green dev push run, which passes `coverage-ratchet`.
+
+#### The 18 October ledger probe loss
+
+Pull request [4266](https://github.com/the-cloud-clockwork/agentihooks/pull/4266) moved the ledger probe notices onto the retained pass summaries. Its dev push, commit `740ce511`, failed `coverage-ratchet` in [run 39091332968](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39091332968), graded against base `dff4aa25`. `report.txt` listed three lines:
+
+- `scripts/swarm/ledger_probe.py:42` and `:43`, the body of `Sample.took`. Pull request 4266 had replaced every caller, so the method was left with none.
+- `scripts/swarm_ledger/ledger_server.py:875`, the `return None` in `Handler.put_swarm` when `refused(slug)` is true. Neither the server nor its tests changed in that range; the base reached the line only indirectly.
+
+Pull request [4374](https://github.com/the-cloud-clockwork/agentihooks/pull/4374), merged on 18 October 2026, applied the first two rows of the table above:
+
+- It deleted `Sample.took`.
+- It added `test_the_swarm_route_stops_at_a_refused_request` in `tests/test_swarm_lifecycle.py`. The test calls `Handler.put_swarm` with `refused` returning true and asserts it returns `None`, sends no reply and never calls `lifecycle_control`.
+
+The dev push of its merge, commit `75b9649d`, in [run 39099281007](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099281007), no longer listed any of the three lines. That run still failed the ratchet on one other line, `scripts/inbox/store.py:714`, which pull request 4374 did not touch. The dev push run on commit `96fa76fe`, [run 39101112212](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39101112212), passed `coverage-ratchet` against the same base.

@@ -1,6 +1,6 @@
 """Whether the operator is present in a session: a bound session starts off, typed operator on turns it on.
 
-The question tool and permission prompts stay off in every session, bound or not, until typed operator on.
+The question tool and permission prompts stay off in a bound session until typed operator on; an unbound session always has them.
 
 On lasts until the operator types operator off.
 """
@@ -31,10 +31,6 @@ MASTER_ASK_REFUSAL = (
     "The operator is not present in this pane, so the question tool is off. Never write the questions as chat text. "
     "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
     'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
-)
-STANDALONE_ASK_REFUSAL = (
-    "The operator is not present in this pane, so the question tool is off until he types operator on. "
-    "State the open question in one short line, take the most reasonable choice and keep working."
 )
 PROMPT_REFUSAL = (
     "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
@@ -140,17 +136,16 @@ def _binding(env, session_id):
 def question_block(tool_name, session_id, environ=None):
     """The refusal of the question tool until the operator types operator on, naming what to do instead."""
     env = os.environ if environ is None else environ
-    if tool_name != QUESTION_TOOL or _heard(session_id):
+    if tool_name != QUESTION_TOOL or _heard(session_id, env):
         return ""
-    if not _attached(env, session_id):
-        return STANDALONE_ASK_REFUSAL
     slug, name = _binding(env, session_id)
     refusal = MASTER_ASK_REFUSAL if name.startswith("master@") else ASK_REFUSAL
     return refusal.format(slug=slug, name=name)
 
 
-def _heard(session_id):
-    return bool(session_id) and bool(_load(session_id).get("on"))
+def _heard(session_id, environ=None):
+    env = os.environ if environ is None else environ
+    return not _attached(env, session_id) or (bool(session_id) and bool(_load(session_id).get("on")))
 
 
 def _away(session_id, environ, now):
