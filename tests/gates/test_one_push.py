@@ -573,6 +573,8 @@ def test_an_unset_variable_or_an_exported_one_still_finds_the_pull_request_check
         (f'export ROOT={tree.parent} X=1; cd "${{ROOT}}/work" && git push origin task', other_repo),
         (f'declare A={tree}; cd "$A" && git push origin task', other_repo),
         (f"pushd {tree} && git push origin task", other_repo),
+        (f"cd -P -- {tree} && git push origin task", other_repo),
+        (f"cd {tree}; cd {other_repo}; cd - && git push origin task", other_repo),
     ):
         decision = gate(pull()).decide(bash(command, cwd), ME, state(tmp_path))
         assert (decision.allowed, decision.reason) == (False, push_refusal("demo", URL)), command

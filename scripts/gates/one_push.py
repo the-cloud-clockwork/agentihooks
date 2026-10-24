@@ -56,8 +56,8 @@ def actions(command, cwd):
                 assigned[name] = expand(value, assigned)
             continue
         program, rest = PurePosixPath(words[index]).name, words[index + 1 :]
-        if program in ("cd", "pushd") and rest:
-            here = here / Path(expand(rest[0], assigned)).expanduser()
+        if program in ("cd", "pushd") and (dirs := [word for word in rest if word == "-" or word[:1] != "-"]):
+            here = here / Path("$OLDPWD" if dirs[0] == "-" else expand(dirs[0], assigned)).expanduser()
         elif program == "gh" and _gh_args(rest)[:2] in OPENS and not DRAFTS.intersection(rest):
             yield "open", here, ()
         elif program == "git":
