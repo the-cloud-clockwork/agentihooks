@@ -25,6 +25,7 @@
           "relative_path": "-fixture-dev-agentihooks/7c3d-lost.jsonl"
         }
       ],
+      "principal": "importer-fixture",
       "sources": [
         {
           "events": 0,
@@ -95,6 +96,7 @@
           "relative_path": "-fixture-dev-agentihooks/7c3d-lost.jsonl"
         }
       ],
+      "principal": "importer-fixture",
       "sources": [
         {
           "events": 4,
