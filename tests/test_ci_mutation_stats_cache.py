@@ -670,3 +670,127 @@ def test_file_stats_pass_sorted_changed_lines_and_runner_options_to_the_cache(tm
             ["-q", "-x"],
         )
     ]
+
+
+@pytest.mark.parametrize("changed", ["unloaded", "loaded", "loaded_resource", "other_test"])
+def test_dynamic_import_stats_track_the_modules_the_collection_loaded(tmp_path, changed):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py", "tests/test_other.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import importlib\nimport sys\nimportlib.import_module(sys.argv[0])\n",
+            files[1]: "def test_other():\n    pass\n",
+            "scripts/a.py": "from pathlib import Path\nvalue = Path('assets/data').read_text()\n",
+            "scripts/unloaded.py": "value = 1\n",
+            "assets/data": "original",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {},
+                "durations": {},
+                "cpu": 1,
+                "files": chosen,
+                "modules": [*chosen, "scripts/a.py", "outside/site.py"],
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    cold = collect_cached_stats(root, cache, {}, files, [], collect)
+    assert all("modules" not in result and "files" not in result for result in cold)
+    target, text = {
+        "unloaded": ("scripts/unloaded.py", "value = 2\n"),
+        "loaded": ("scripts/a.py", "value = 2\n"),
+        "loaded_resource": ("assets/data", "changed"),
+        "other_test": (files[1], "def test_other():\n    assert True\n"),
+    }[changed]
+    (root / target).write_text(text)
+    warm = collect_cached_stats(root, cache, {}, files, [], collect)
+    assert all("modules" not in result and "files" not in result for result in warm)
+    assert (
+        calls
+        == {
+            "unloaded": [files],
+            "loaded": [files, files],
+            "loaded_resource": [files, files],
+            "other_test": [files, [files[1]]],
+        }[changed]
+    )
+
+
+def test_dynamic_import_stats_without_a_module_record_track_every_module(tmp_path):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import importlib\nimport sys\nimportlib.import_module(sys.argv[0])\n",
+            "scripts/unloaded.py": "value = 1\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1, "files": chosen}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "scripts/unloaded.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
+def test_dynamic_import_stats_recollect_when_a_loaded_module_changes_its_mutated_lines(tmp_path):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import importlib\nimport sys\nimportlib.import_module(sys.argv[0])\n",
+            "scripts/a.py": "def first():\n    return 1\n\n\ndef second():\n    return 2\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1, "files": chosen, "modules": ["scripts/a.py"]}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {"scripts/a.py": [2]}, files, [], collect)
+    collect_cached_stats(root, cache, {"scripts/a.py": [2]}, files, [], collect)
+    collect_cached_stats(root, cache, {"scripts/a.py": [6]}, files, [], collect)
+    assert calls == [files, files]
+
+
+def test_loaded_files_name_repository_modules_under_the_first_matching_base(tmp_path):
+    import types
+
+    from scripts.ci_mutation.selection import loaded_files
+
+    work = tmp_path / "work"
+    (work / "mutants/scripts").mkdir(parents=True)
+    (work / "conftest.py").write_text("")
+    (work / "mutants/scripts/a.py").write_text("")
+    entries = {
+        "mutated": types.SimpleNamespace(__file__=str(work / "mutants/scripts/a.py")),
+        "copied": types.SimpleNamespace(__file__=str(work / "conftest.py")),
+        "outside": types.SimpleNamespace(__file__=str(tmp_path / "site/b.py")),
+        "builtin": types.SimpleNamespace(),
+        "namespace": types.SimpleNamespace(__file__=None),
+    }
+    assert loaded_files([work / "mutants", work], entries) == ["conftest.py", "scripts/a.py"]

@@ -132,6 +132,17 @@ def stats_shards(root: Path, files: list[str], count: int, seconds: dict[str, fl
     return [sorted(shard) for shard in shards]
 
 
+def loaded_files(bases: list[Path], modules: dict = sys.modules) -> list[str]:
+    found = set()
+    for module in list(modules.values()):
+        if origin := getattr(module, "__file__", None):
+            path = Path(origin).resolve()
+            base = next((base for base in bases if path.is_relative_to(base)), None)
+            if base is not None:
+                found.add(path.relative_to(base).as_posix())
+    return sorted(found)
+
+
 def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
     os.environ["MUTANT_UNDER_TEST"] = "stats"
     os.environ["PY_IGNORE_IMPORTMISMATCH"] = "1"
@@ -146,6 +157,12 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
         "not wall_clock",
         f"--basetemp={basetemp}",
     ]
+    work = Path.cwd().resolve()
+    bases = [
+        work / "mutants",
+        work,
+        *(Path(root).resolve() for root in [os.environ.get("MUTATION_STATS_ROOT")] if root),
+    ]
     start = process_time()
     status = test_runner.run_stats(tests=tests)
     tests_by_function = {name: sorted(names) for name, names in runner.mutmut.tests_by_mangled_function_name.items()}
@@ -156,6 +173,8 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
                 "cpu": process_time() - start,
                 "tests": tests_by_function,
                 "durations": runner.mutmut.duration_by_test,
+                "files": tests,
+                "modules": loaded_files(bases),
             }
         )
     )
