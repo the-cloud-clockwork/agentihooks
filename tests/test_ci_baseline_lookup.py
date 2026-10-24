@@ -61,7 +61,7 @@ def lookup(tmp_path):
             {"name": f"unit ({version}, {shard})", "conclusion": "success"}
             for version, count in ((("3.12", 20),) if fault == "twenty-shards" else (("3.11", 6), ("3.12", 12)))
             for shard in range(1, count + 1)
-            if not (fault == "shard-gap" and (version, shard) == ("3.12", 7))
+            if not (fault == "shard-gap" and (version, shard) == ("3.12", 7)) and fault != "no-units"
         ]
         jobs.extend(
             [
@@ -194,6 +194,7 @@ def test_lookup_rejects_unverified_queue_reuse(lookup, selector, fault):
         "unit",
         "missing-unit",
         "shard-gap",
+        "no-units",
         "measure",
         "publish",
         "missing-publisher",
