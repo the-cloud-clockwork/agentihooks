@@ -212,8 +212,8 @@ def test_priority_never_restores_an_unfinished_prerequisite():
 
     result = merge_queue.prioritize(PRIORITY_URL, run=run)
     assert ("queue", 2) not in fake.mutations
-    assert ("queue", 3) in fake.mutations
-    assert result["displaced"] == ["https://github.com/o/r/pull/3"]
+    assert ("queue", 3) not in fake.mutations
+    assert result["displaced"] == []
     assert len(result["errors"]) == 1
     assert "planned prerequisite edits" in result["errors"][0]
 
