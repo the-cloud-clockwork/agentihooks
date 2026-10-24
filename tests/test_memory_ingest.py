@@ -96,6 +96,8 @@ def test_canonical_form_sorts_keys_keeps_unicode_and_drops_spaces():
         (request([{**event(1), "byte_start": False}]), "event 0 byte range is invalid"),
         (request([event(1, project=3)]), "event 0 project_id must be a string or null"),
         (request([event(1), event(1, 50)]), "event sequences repeat inside the batch"),
+        (request([{**event(1), "sequence": 2**63}]), "event 0 sequence must be a positive integer"),
+        (request([event(2**63 - 1, 0, 2**63)]), "event 0 byte range is invalid"),
         (request([event(1)], principal="operator"), "request carries unknown fields"),
         (request([event(1), {**event(2), "scope": "all"}]), "event 1 carries unknown fields"),
     ],
@@ -119,6 +121,12 @@ def test_an_event_without_a_project_is_stored_unattributed(catalog):
     body = request([{key: value for key, value in event(1).items() if key != "project_id"}])
     assert ingest(catalog, GRANT, body)["state"] == "committed"
     assert catalog.events("corpus-a", "corpus-a:claude:host:s1", "gen-1")[0]["project_id"] is None
+
+
+def test_the_largest_sqlite_integer_is_accepted_for_sequence_and_range(catalog):
+    response = ingest(catalog, GRANT, request([event(2**63 - 1, 2**63 - 1, 2**63 - 1)]))
+    assert response["state"] == "committed"
+    assert catalog.events("corpus-a", "corpus-a:claude:host:s1", "gen-1")[0]["byte_end"] == 2**63 - 1
 
 
 def test_a_refusal_carries_an_operation_id_retry_class_and_schema_version(catalog):

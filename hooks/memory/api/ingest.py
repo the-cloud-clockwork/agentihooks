@@ -19,6 +19,7 @@ RECORD_KINDS = frozenset(
 TEXT_FIELDS = ("batch_id", "access_domain", "session_uid", "source_generation")
 REQUEST_FIELDS = frozenset({"schema_version", "events", *TEXT_FIELDS})
 EVENT_FIELDS = frozenset({"sequence", "byte_start", "byte_end", "project_id", "record"})
+SQLITE_MAX_INT = 2**63 - 1
 CATALOG_FAILED = "the catalog failed before acknowledging; retrying the same batch is safe"
 
 
@@ -50,7 +51,7 @@ def event_identity(session_uid: str, source_generation: str, event: dict) -> str
 
 
 def _is_int(value: object, minimum: int) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
+    return isinstance(value, int) and not isinstance(value, bool) and minimum <= value <= SQLITE_MAX_INT
 
 
 def _check_envelope(request: dict) -> None:
@@ -164,7 +165,7 @@ def ingest(catalog: Catalog, grant: Grant, request: dict) -> dict:
         return _refusal(request, Rejected("revision_conflict", str(conflict)))
     except Rejected as error:
         return _refusal(request, error)
-    except sqlite3.Error:
+    except sqlite3.OperationalError:
         return _refusal(request, Rejected("dependency_unavailable", CATALOG_FAILED, retry="same_batch"))
     return {
         "schema_version": SCHEMA_VERSION,
