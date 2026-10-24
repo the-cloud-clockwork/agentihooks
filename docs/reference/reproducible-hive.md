@@ -44,7 +44,7 @@ agentihooks hive create
 | name | `swarm-hive-<epoch seconds>`, the release, namespace, NFS home folder and herdr label; the LAN address is the one the `agentihooks-swarm` shared MetalLB services carry, and the SSH port is the first port from 2222 free on it | an unfinished create is saved in `hive-create.json` under the agentihooks home |
 | invite | `hive invite` into `k8s/agentihooks-hive-<name>`, like `k8s/agentihooks-swarm-workstation-hive` | the record holds a credential |
 | ssh keys | a new ed25519 host key and every `~/.ssh/*.pub` as `ssh_host_key`, `ssh_host_public_key` and `ssh_authorized_keys` in the same record | the record holds a host key |
-| manifests | renders antoncore `k8s/templates/agentihooks-hive.yaml`, adds the hive to the NFS home list and opens one pull request into antoncore `dev` | the saved create holds the pull request |
+| manifests | renders antoncore `k8s/templates/agentihooks-hive.yaml` and opens one pull request into antoncore `dev`; the rendered manifests make the hive's NFS home folder, so the NFS server never restarts | the saved create holds the pull request |
 | merge | `gh pr merge --squash --auto`, then waits for the merge | the pull request merged |
 | settings | `hive setup` into the hive settings record | never; it rewrites the same keys |
 | live | waits for the member's heartbeat | never; a live hive passes at once |
