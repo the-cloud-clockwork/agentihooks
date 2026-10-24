@@ -22,13 +22,16 @@ def source_sizes(root: Path, files: list[str]) -> dict[str, int]:
 def grouped_files(root: Path, files: list[str]) -> dict[str, str]:
     grouped = {}
     for path in files:
+        source = (root / path).read_text()
+        if "xdist_group" not in source:
+            continue
         names = {
             ast.unparse(
                 node.args[0]
                 if node.args
                 else next((kw.value for kw in node.keywords if kw.arg == "name"), ast.Constant("default"))
             )
-            for node in ast.walk(ast.parse((root / path).read_text()))
+            for node in ast.walk(ast.parse(source))
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "xdist_group"
         }
         if names:
