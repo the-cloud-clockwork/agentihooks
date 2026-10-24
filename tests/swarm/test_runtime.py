@@ -33,6 +33,29 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
     assert seen["env"]["AGENTIHOOKS_SWARM_TASK"] == "t4"
 
 
+def test_claimed_spawn_passes_its_exact_pinned_revision_to_init_agent(tmp_path):
+    import json
+
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(
+            returncode=0, stdout=validated(argv, "status=started\\nroute_status=routed\\n"), stderr=""
+        )
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="swarm-buildout", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    fence = {"key": "claim-a", "revision": 7}
+    runtime.spawn(config, "eng", "swarm-buildout-eng-4", {"id": "t4", "title": "x", "claim_fence": fence})
+    argv = seen["argv"]
+    parsed = json.loads(argv[argv.index("--claim-fence") + 1])
+    assert parsed == fence
+    assert argv.index("--claim-fence") < argv.index("--")
+
+
 def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypatch):
     clock = iter([5_000.0, 9_000.0])
     monkeypatch.setattr("scripts.swarm.runtime.time", SimpleNamespace(time=lambda: next(clock), sleep=lambda _: None))

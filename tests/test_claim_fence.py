@@ -166,3 +166,34 @@ def test_hook_dispatch_passes_the_normalized_payload_through_the_claim_fence():
     assert exited.value.code == 0
     check.assert_called_once_with(payload)
     handler.assert_called_once_with(payload)
+
+
+def test_init_agent_passes_the_pinned_claim_and_bus_to_the_shared_launcher(tmp_path):
+    from scripts import init_agent
+
+    fence = json.dumps({"key": "claim-a", "revision": 7})
+    environ = {
+        "AGENTIHOOKS_SWARM": "rig",
+        "AGENTIHOOKS_AGENT_NAME": "agent-a",
+        "AGENTIHOOKS_BUS": "nats",
+        "AGENTIHOOKS_BUS_URL": "nats://bus.invalid:4222",
+    }
+    with (
+        patch.object(init_agent.operator_env, "fill"),
+        patch.object(init_agent.agent_choice, "choose", return_value=("claude", "open")),
+        patch.object(init_agent, "_prepare_profile", return_value=[]),
+        patch.object(init_agent, "_select_host", return_value=("herdr", True)),
+        patch.object(init_agent, "_write_launcher", return_value=(tmp_path / "launcher", None)) as writer,
+    ):
+        assert (
+            init_agent.main(
+                ["--dry-run", "--dir", str(tmp_path), "--name", "agent-a", "--claim-fence", fence], environ=environ
+            )
+            == 0
+        )
+    passed = writer.call_args.args[4]
+    assert passed["AGENTIHOOKS_CLAIM_FENCE"] == fence
+    exports = init_agent._swarm_exports(passed)
+    assert f"export AGENTIHOOKS_CLAIM_FENCE='{fence}'" in exports
+    assert "export AGENTIHOOKS_BUS=nats" in exports
+    assert "export AGENTIHOOKS_BUS_URL=nats://bus.invalid:4222" in exports
