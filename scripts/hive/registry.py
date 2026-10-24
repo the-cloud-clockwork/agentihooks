@@ -80,20 +80,20 @@ def _count(setting: str, value: str) -> int:
     return int(value)
 
 
-def _excluded(setting: str, value: str) -> list[str]:
+def _names(setting: str, value: str, noun: str) -> list[str]:
     names = list(dict.fromkeys(name.strip() for name in value.split(",") if name.strip()))
     for name in names:
         if not EXCLUDED_NAME.fullmatch(name):
-            raise HiveError(f"{setting} takes lane roles or profiles, not {name!r}")
+            raise HiveError(f"{setting} takes {noun}, not {name!r}")
     return names
+
+
+def _excluded(setting: str, value: str) -> list[str]:
+    return _names(setting, value, "lane roles or profiles")
 
 
 def _capabilities(setting: str, value: str) -> list[str]:
-    names = list(dict.fromkeys(name.strip() for name in value.split(",") if name.strip()))
-    for name in names:
-        if not EXCLUDED_NAME.fullmatch(name):
-            raise HiveError(f"{setting} takes capability names, not {name!r}")
-    return names
+    return _names(setting, value, "capability names")
 
 
 def _prefer(setting: str, value: str) -> dict[str, int]:

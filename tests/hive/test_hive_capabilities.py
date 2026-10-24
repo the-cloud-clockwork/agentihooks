@@ -48,7 +48,7 @@ def test_a_headed_hive_claims_the_headed_task_over_a_preferred_normal_hive(setup
     assert setup.launcher.select(setup.config, "eng", {"id": "other"}).hive == "remote"
     assert setup.launcher.select(setup.config, "eng", HEADED).hive == "desk"
     assert setup.launcher.select(setup.config, "eng", {**HEADED, "needs": ["headed", "gpu"]}) == Wait(
-        placement.NEEDS_CAPABILITY.format(needs="headed, gpu")
+        placement.NEEDS_CAPABILITY.format(needs="gpu")
     )
 
 

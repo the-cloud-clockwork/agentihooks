@@ -49,8 +49,10 @@ def equipped(task: dict, hive: dict | None) -> bool:
     return set(task.get("needs") or ()) <= set((hive or {}).get("capabilities") or ())
 
 
-def needs_refusal(task: dict) -> str:
-    return NEEDS_CAPABILITY.format(needs=", ".join(task.get("needs") or ()))
+def needs_refusal(task: dict, hives: list[dict]) -> str:
+    declared = {name for hive in hives for name in hive.get("capabilities") or ()}
+    needs = task.get("needs") or ()
+    return NEEDS_CAPABILITY.format(needs=", ".join([name for name in needs if name not in declared] or needs))
 
 
 def _room(hive: dict) -> int:

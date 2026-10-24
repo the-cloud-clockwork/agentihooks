@@ -140,8 +140,9 @@ class FencedRuntime:
         from scripts.swarm.commands import hive_id
 
         machine = hive_id()
-        if not equipped(task, registry.show(self.store.redis, machine)):
-            return needs_refusal(task)
+        local = registry.show(self.store.redis, machine)
+        if not equipped(task, local):
+            return needs_refusal(task, [local] if local else [])
         maximum = local_slots.maximum(self.store, self.slug, self.store.config(self.slug).local_max_agents)
         taken = (
             local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum)
