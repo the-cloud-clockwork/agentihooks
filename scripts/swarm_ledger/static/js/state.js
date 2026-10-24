@@ -54,6 +54,7 @@ function pendingKey(op) {
   if (["verdict", "phase_review", "task_rank"].includes(op.op)) return op.item;
   if (["alert_claim", "alert_close"].includes(op.op)) return `alerts/${op.target}`;
   if (["artifact_delete", "artifact_restore"].includes(op.op)) return `artifacts/${op.target}`;
+  if (op.op === "priority_clear") return `priorities/${op.target}`;
   return "";
 }
 
@@ -71,10 +72,6 @@ export function applyOp(d, op) {
   if (op.op === "sync" || op.op === "stats_sync") return;
   const key = pendingKey(op);
   if (key) d.pending[key] = op;
-  if (op.op === "priority_clear") {
-    d.priorities = op.target === "all" ? [] : d.priorities.filter((p) => p.id !== op.target);
-    return;
-  }
   if (op.op === "verdict") {
     const [list, id] = op.item.split("/");
     const item = itemOf(d, list, id);

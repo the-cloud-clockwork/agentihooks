@@ -37,13 +37,14 @@ export function renderPriorities() {
   if (!$("prio-box").open) return $("priorities").replaceChildren();
   $("priorities").replaceChildren(...firstPage("priorities", list, (p) => `item-priorities-${p.id}`).map((p) => {
     const { label, title, gone } = prioritySubject(p.item);
+    const clearing = pendingOf(doc, `priorities/${p.id}`) || pendingOf(doc, "priorities/all");
     const link = (cls, text) => h("a", { class: cls, href: `#item-${p.item.replace("/", "-")}`, text, on: { click: (ev) => jumpTo(ev, p.item) } });
-    return h("li", { class: "prio", id: `item-priorities-${p.id}` },
+    return h("li", { class: "prio" + (clearing ? " pending" : ""), id: `item-priorities-${p.id}` },
       h("div", { class: "prio-body" },
         h("div", { class: "prio-head-line" }, link("prio-link", label), link(gone ? "prio-title gone" : "prio-title", title)),
         h("div", { class: "prio-text", text: p.text })),
       verdictButton(p.item, "approved", "approve", "Approve"),
-      h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }));
+      h("button", { class: "link danger", type: "button", text: clearing ? "clearing" : "Clear", disabled: !!clearing, on: { click: () => clearPriority(p.id) } }));
   }), moreButton("priorities", list.length, "more priorities", renderPriorities) || "");
   if (!list.length) $("priorities").append(h("li", { class: "empty", text: doc.priorities.length ? "All priorities are hidden." : "Nothing waits on you." }));
 }

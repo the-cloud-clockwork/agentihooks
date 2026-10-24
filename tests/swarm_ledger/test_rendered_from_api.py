@@ -88,6 +88,7 @@ OPS = [
     {"op": "task_rank", "id": "k1", "item": "tasks/t1", "rank": "next"},
     {"op": "alert_claim", "id": "l1", "target": "a1"},
     {"op": "artifact_delete", "id": "d1", "target": "x1"},
+    {"op": "priority_clear", "id": "q1", "target": "all"},
 ]
 
 
@@ -103,6 +104,7 @@ def test_an_action_the_server_decides_is_marked_pending_instead_of_replayed():
         "phases/p1": "phase_review",
         "alerts/a1": "alert_claim",
         "artifacts/x1": "artifact_delete",
+        "priorities/all": "priority_clear",
     }
     assert [c["text"] for c in d["tasks"][0]["comments"]] == ["approved"]
 
