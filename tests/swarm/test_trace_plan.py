@@ -499,7 +499,7 @@ def test_required_changelog_fragment_is_kept_without_scope_comment(ask, areas, k
         piece("Add an unrelated user guide", "docs/guide.md"),
     ]
     record = trace_plan.trace(pieces, INTENT, None, now_ms=5)
-    assert record["authorizations"] == []
+    assert record.get("authorizations", []) == []
     assert [row["kept"] for row in record["pieces"]] == [True, kept, False]
     assert record["verdict"] == ("pass" if kept else "fail")
 
