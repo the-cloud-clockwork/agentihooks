@@ -763,14 +763,13 @@ def stop_now(store, slug, runtime, ledger):
             left.append(agent.name)
             continue
         row = rows.get(agent.task, {})
-        held = (
-            agent.state != "finished" and row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name
-        )
-        if held:
+        reopen = agent.state != "finished" and row.get("state") in ("claimed", "pr")
+        reopen = reopen and row.get("claimed_by") == agent.name
+        if reopen:
             store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
         store.release(slug, agent.task, agent.name)
         store.drop_agent(slug, agent.name)
-        if held:
+        if reopen:
             try:
                 ledger.update_task(slug, agent.task, {"state": "open", "claimed_by": ""})
             except LedgerRefused as exc:
@@ -1751,11 +1750,11 @@ def _dev_red_run(store, slug):
 
 def block_agent(store, slug, agent, note, ledger, red_run=None):
     dev_red.hold(store.redis, slug, agent.task, red_run)
+    if red_run is not None:
+        store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
     ledger.update_task(slug, agent.task, {"state": "blocked"}, by=agent.name)
     ledger.comment(slug, agent.task, note, by=agent.name)
     waits.settle_notices(InboxStore(store.redis), agent, "a block")
-    if red_run is not None:
-        store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
     _retire(store, slug, agent, "blocked its task and exited")
 
 

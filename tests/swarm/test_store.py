@@ -230,6 +230,18 @@ def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generat
     assert store.claimant("smoke", "t1") == "second"
 
 
+def test_a_held_claim_refunds_one_life_however_many_paths_ask(store):
+    for _ in range(3):
+        store.count_claim("smoke", "t1")
+    store.claim("smoke", "t1", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is True
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 2
+    assert store.claimant("smoke", "t1") == "agent"
+
+
 def test_a_held_claim_refund_reads_a_missing_generation_as_zero(store):
     store.count_claim("smoke", "t1")
     store.redis.set(store.key("smoke", "claim", "t1"), "agent")
@@ -284,6 +296,7 @@ def test_a_held_claim_refund_refuses_a_second_refund_for_the_same_claimant_and_g
     [
         ("claim", lambda redis, key: redis.set(key, "other"), 1),
         ("claim", lambda redis, key: redis.incr(f"{key}:generation"), 1),
+        ("claim", lambda redis, key: redis.set(f"{key}:refunded", redis.get(f"{key}:generation")), 1),
         ("started-lives", lambda redis, key: redis.hset(key, "t1", 5), 5),
         ("refunded-claims", lambda redis, key: redis.hset(key, "t1", "agent:1"), 1),
         ("task-authority", lambda redis, key: redis.set(key, "hub"), 1),
