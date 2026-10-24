@@ -32,14 +32,13 @@ class Grant:
 
 class Rejected(Exception):
     def __init__(self, error_class: str, detail: str, retry: str = "never"):
-        super().__init__(detail)
         self.error_class = error_class
         self.detail = detail
         self.retry = retry
 
 
 def canonical(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
 def digest(value: object) -> str:

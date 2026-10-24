@@ -29,6 +29,32 @@ SCHEMA = (
 )
 TABLES = ("session_event", "session_quarantine", "session_ingest_batch", "session_watermark", "ingest_counter")
 DUPLICATES = "ingest_duplicate_events_total"
+PRAGMAS = ("PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", "PRAGMA busy_timeout=5000")
+SCOPE = "access_domain = ? AND session_uid = ? AND source_generation = ?"
+COUNT = (
+    "INSERT INTO ingest_counter VALUES (?, ?, ?) "
+    "ON CONFLICT (access_domain, name) DO UPDATE SET value = value + excluded.value"
+)
+SETTLED = (
+    f"SELECT 'event', event_id, normalized_hash, project_id FROM session_event WHERE {SCOPE} AND sequence = ? "
+    f"UNION ALL SELECT 'quarantine', event_id, reason, NULL FROM session_quarantine WHERE {SCOPE} AND sequence = ?"
+)
+INSERT_EVENT = "INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+INSERT_QUARANTINE = "INSERT INTO session_quarantine VALUES (?, ?, ?, ?, ?, ?)"
+WATERMARK = f"SELECT durable_through FROM session_watermark WHERE {SCOPE}"
+ADVANCE = (
+    "INSERT INTO session_watermark VALUES (?, ?, ?, ?, ?) "
+    "ON CONFLICT (access_domain, session_uid, source_generation) "
+    "DO UPDATE SET durable_through = excluded.durable_through, schema_version = excluded.schema_version"
+)
+INSERT_BATCH = "INSERT INTO session_ingest_batch VALUES (?, ?, ?, ?, ?)"
+BATCH = "SELECT payload_digest, result FROM session_ingest_batch WHERE access_domain = ? AND batch_id = ?"
+EVENTS = (
+    "SELECT event_id, sequence, byte_start, byte_end, project_id, record, normalized_hash FROM session_event "
+    f"WHERE {SCOPE} ORDER BY sequence"
+)
+QUARANTINED = f"SELECT sequence, event_id, reason FROM session_quarantine WHERE {SCOPE} ORDER BY sequence"
+COUNTER = "SELECT value FROM ingest_counter WHERE access_domain = ? AND name = ?"
 
 
 class Conflict(Exception):
@@ -62,10 +88,7 @@ class Catalog:
     def __init__(self, path: str | Path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, isolation_level=None)
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.execute("PRAGMA synchronous=FULL")
-        self.db.execute("PRAGMA busy_timeout=5000")
-        for statement in SCHEMA:
+        for statement in PRAGMAS + SCHEMA:
             self.db.execute(statement)
 
     def close(self) -> None:
@@ -87,17 +110,13 @@ class Catalog:
 
     def _count(self, domain: str, amount: int) -> None:
         self.db.execute(
-            "INSERT INTO ingest_counter VALUES (?, ?, ?) "
-            "ON CONFLICT (access_domain, name) DO UPDATE SET value = value + excluded.value",
+            COUNT,
             (domain, DUPLICATES, amount),
         )
 
     def _settled(self, scope: tuple[str, str, str], sequence: int) -> tuple | None:
         found = self.db.execute(
-            "SELECT 'event', event_id, normalized_hash, project_id FROM session_event "
-            "WHERE access_domain = ? AND session_uid = ? AND source_generation = ? AND sequence = ? "
-            "UNION ALL SELECT 'quarantine', event_id, reason, NULL FROM session_quarantine "
-            "WHERE access_domain = ? AND session_uid = ? AND source_generation = ? AND sequence = ?",
+            SETTLED,
             (*scope, sequence, *scope, sequence),
         ).fetchone()
         return tuple(found) if found else None
@@ -109,7 +128,7 @@ class Catalog:
         if existing:
             raise Conflict("an event at this sequence was committed with different content")
         self.db.execute(
-            "INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            INSERT_EVENT,
             (
                 batch.access_domain,
                 event.event_id,
@@ -119,7 +138,7 @@ class Catalog:
                 event.byte_start,
                 event.byte_end,
                 event.project_id,
-                json.dumps(event.record, sort_keys=True, ensure_ascii=False),
+                json.dumps(event.record),
                 event.normalized_hash,
             ),
         )
@@ -132,14 +151,13 @@ class Catalog:
         if existing:
             raise Conflict("an event at this sequence was committed with different content")
         self.db.execute(
-            "INSERT INTO session_quarantine VALUES (?, ?, ?, ?, ?, ?)",
+            INSERT_QUARANTINE,
             (*self._scope(batch), item["sequence"], item["event_id"], item["reason"]),
         )
 
     def watermark(self, domain: str, session_uid: str, source_generation: str) -> int:
         row = self.db.execute(
-            "SELECT durable_through FROM session_watermark "
-            "WHERE access_domain = ? AND session_uid = ? AND source_generation = ?",
+            WATERMARK,
             (domain, session_uid, source_generation),
         ).fetchone()
         return row[0] if row else 0
@@ -150,9 +168,7 @@ class Catalog:
         while self._settled(scope, through + 1):
             through += 1
         self.db.execute(
-            "INSERT INTO session_watermark VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT (access_domain, session_uid, source_generation) "
-            "DO UPDATE SET durable_through = excluded.durable_through, schema_version = excluded.schema_version",
+            ADVANCE,
             (*scope, through, batch.schema_version),
         )
         return through
@@ -180,12 +196,12 @@ class Catalog:
             "rejected": batch.rejected,
         }
         self.db.execute(
-            "INSERT INTO session_ingest_batch VALUES (?, ?, ?, ?, ?)",
+            INSERT_BATCH,
             (
                 batch.access_domain,
                 batch.batch_id,
                 batch.payload_digest,
-                json.dumps(result, ensure_ascii=False),
+                json.dumps(result),
                 batch.schema_version,
             ),
         )
@@ -194,15 +210,14 @@ class Catalog:
     def commit(self, batch: BatchCommit) -> dict:
         with self._transaction():
             stored = self.db.execute(
-                "SELECT payload_digest, result FROM session_ingest_batch WHERE access_domain = ? AND batch_id = ?",
+                BATCH,
                 (batch.access_domain, batch.batch_id),
             ).fetchone()
             return self._replay(batch, stored) if stored else self._apply(batch)
 
     def events(self, domain: str, session_uid: str, source_generation: str) -> list[dict]:
         rows = self.db.execute(
-            "SELECT event_id, sequence, byte_start, byte_end, project_id, record, normalized_hash FROM session_event "
-            "WHERE access_domain = ? AND session_uid = ? AND source_generation = ? ORDER BY sequence",
+            EVENTS,
             (domain, session_uid, source_generation),
         ).fetchall()
         names = ("event_id", "sequence", "byte_start", "byte_end", "project_id", "record", "normalized_hash")
@@ -210,16 +225,13 @@ class Catalog:
 
     def quarantined(self, domain: str, session_uid: str, source_generation: str) -> list[dict]:
         rows = self.db.execute(
-            "SELECT sequence, event_id, reason FROM session_quarantine "
-            "WHERE access_domain = ? AND session_uid = ? AND source_generation = ? ORDER BY sequence",
+            QUARANTINED,
             (domain, session_uid, source_generation),
         ).fetchall()
         return [{"sequence": row[0], "event_id": row[1], "reason": row[2]} for row in rows]
 
     def duplicate_events_total(self, domain: str) -> int:
-        row = self.db.execute(
-            "SELECT value FROM ingest_counter WHERE access_domain = ? AND name = ?", (domain, DUPLICATES)
-        ).fetchone()
+        row = self.db.execute(COUNTER, (domain, DUPLICATES)).fetchone()
         return row[0] if row else 0
 
     def snapshot(self) -> dict[str, list]:

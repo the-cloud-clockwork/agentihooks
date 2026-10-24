@@ -70,7 +70,7 @@ def test_event_identity_is_stable_and_covers_session_generation_sequence_and_ran
 
 
 def test_canonical_form_sorts_keys_keeps_unicode_and_drops_spaces():
-    assert ingest_module.canonical({"b": "日本", "a": [1, 2]}) == '{"a":[1,2],"b":"日本"}'.encode()
+    assert ingest_module.canonical({"b": "日本", "a": [1, 2]}) == b'{"a":[1,2],"b":"\\u65e5\\u672c"}'
     assert ingest_module.digest({"b": 1, "a": 2}) == ingest_module.digest({"a": 2, "b": 1})
 
 
@@ -415,7 +415,8 @@ def test_counters_and_lookups_default_to_empty(catalog):
 
 
 def test_the_catalog_creates_its_folder_and_commits_with_full_sync_in_wal_mode(tmp_path):
-    opened = Catalog(tmp_path / "deep" / "catalog.sqlite3")
+    opened = Catalog(tmp_path / "deep" / "deeper" / "catalog.sqlite3")
+    assert opened.db.isolation_level is None
     assert opened.db.execute("PRAGMA journal_mode").fetchone() == ("wal",)
     assert opened.db.execute("PRAGMA synchronous").fetchone() == (2,)
     assert opened.db.execute("PRAGMA busy_timeout").fetchone() == (5000,)
