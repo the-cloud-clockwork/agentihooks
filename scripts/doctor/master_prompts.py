@@ -21,9 +21,10 @@ def findings(agents: list[dict], since: dict[str, int | None], now_ms: int) -> l
         entered = since.get(agent["name"])
         if agent["lane"] != "master" or not agent["input_prompt"] or not entered:
             continue
-        waited = (now_ms - entered) // MINUTE_MS // STEP_MINUTES * STEP_MINUTES
-        if waited <= 0:
+        minutes = (now_ms - entered) // MINUTE_MS
+        if minutes < STEP_MINUTES:
             continue
+        waited = minutes // STEP_MINUTES * STEP_MINUTES
         seat = agent["seat"] or agent["name"]
         found.append(
             Finding(

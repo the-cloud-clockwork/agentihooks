@@ -67,6 +67,15 @@ def test_only_a_master_on_a_prompt_with_an_entry_time_is_read(agent, since):
     assert found_at(60, agent, since) == []
 
 
+def test_skipped_rows_before_a_waiting_master_do_not_hide_it():
+    engineer = {**MASTER, "name": "engineer@d44a5a-0003", "lane": "eng", "seat": "eng-1@sw"}
+    young = {**MASTER, "name": "master@d44a5a-0001", "seat": "master@young"}
+    now = ENTERED + 15 * MINUTE
+    since = {engineer["name"]: ENTERED, young["name"]: ENTERED + 2 * MINUTE, MASTER["name"]: ENTERED}
+    found = master_prompts.findings([engineer, young, MASTER], since, now)
+    assert [f.subject for f in found] == ["master@sw"]
+
+
 def test_a_judged_wait_returns_only_when_it_grows_by_another_fifteen_minutes():
     verdicts = VerdictStore(fakeredis.FakeRedis(decode_responses=True), "doctor-findings")
 
