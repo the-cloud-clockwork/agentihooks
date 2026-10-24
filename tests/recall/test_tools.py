@@ -196,6 +196,9 @@ def test_sources_list_counts_indexed_time_and_bin(environ):
     after = {entry["source"]: entry for entry in tools.sources(environ=environ)["sources"]}["ledger/alpha"]
     assert after["archived"] == 4
     assert after["last_indexed"] >= alpha["last_indexed"]
+    SQLiteRecallStore(default_path(environ)).sync("ledger/alpha", ALPHA[:2])
+    again = {entry["source"]: entry for entry in tools.sources(environ=environ)["sources"]}["ledger/alpha"]
+    assert again == after
 
 
 def test_a_missing_archive_is_an_error_and_never_created(tmp_path):
@@ -213,7 +216,8 @@ def test_a_missing_archive_is_an_error_and_never_created(tmp_path):
 
 def test_the_cli_prints_the_same_json(environ, capsys):
     assert main(["search", "shared", "--scope", "beta"], in_swarm(environ)) == 0
-    assert json.loads(capsys.readouterr().out) == tools.search("shared", tools.filters("beta"), environ=environ)
+    expected = json.loads(json.dumps(tools.search("shared", tools.filters("beta"), environ=environ)))
+    assert json.loads(capsys.readouterr().out) == expected
     assert main(["get", "alpha/tasks/t1"], environ) == 0
     assert json.loads(capsys.readouterr().out)["item"]["text"].endswith("second part")
     assert main(["timeline", "--kind", "task", "--kind", "phase", "--limit", "1"], in_swarm(environ)) == 0

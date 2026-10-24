@@ -113,7 +113,6 @@ class SQLiteRecallStore:
         refs = {record.ref for record in records}
         counts = dict.fromkeys(("written", "unchanged", "archived", "removed"), 0)
         with self._write() as connection:
-            self._mark(connection, source)
             counts["removed"] = self._remove(connection, source, deleted)
             existing = {
                 key: (rowid, ref, digest, state)
@@ -136,7 +135,12 @@ class SQLiteRecallStore:
                 elif state == "present":
                     connection.execute("UPDATE records SET source_state = 'archived' WHERE id = ?", (rowid,))
                     counts["archived"] += 1
+            if counts["written"] or counts["archived"] or counts["removed"] or not self._indexed(connection, source):
+                self._mark(connection, source)
         return SyncCounts(**counts)
+
+    def _indexed(self, connection: sqlite3.Connection, source: str) -> bool:
+        return connection.execute("SELECT 1 FROM indexed WHERE source = ?", (source,)).fetchone() is not None
 
     def _remove(self, connection: sqlite3.Connection, source: str, refs: Iterable[str]) -> int:
         removed = 0
@@ -152,8 +156,10 @@ class SQLiteRecallStore:
 
     def remove(self, source: str, refs: Iterable[str]) -> int:
         with self._write() as connection:
-            self._mark(connection, source)
-            return self._remove(connection, source, refs)
+            removed = self._remove(connection, source, refs)
+            if removed:
+                self._mark(connection, source)
+            return removed
 
     def _mark(self, connection: sqlite3.Connection, source: str) -> None:
         connection.execute(
