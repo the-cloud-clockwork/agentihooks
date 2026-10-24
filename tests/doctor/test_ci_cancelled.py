@@ -48,6 +48,16 @@ def test_missing_run_identity_keeps_the_failed_check(missing):
     assert finding.measure == 1
 
 
+def test_recorded_cancelled_manual_run_moves_false_findings_from_one_to_zero():
+    incident = load("ci_cancelled")
+    now = 1_800_000_000_000
+    [before] = ci.red_checks(incident, now)
+    assert before.subject == "3946"
+    assert before.measure == 2
+    record = _github_record(incident["pr"], incident["checks"], incident["runs"])
+    assert ci.red_checks(record, now) == []
+
+
 def _read(*, reverse=False, success_change=None, cancelled_conclusion="cancelled", check_suite=200, missing=None):
     fixture = load("ci")
     success = {**fixture["runs"][0], "workflow_id": 1, "check_suite_id": 100, **(success_change or {})}
@@ -68,15 +78,20 @@ def _read(*, reverse=False, success_change=None, cancelled_conclusion="cancelled
         cancelled.pop(missing)
         success.pop(missing)
     runs = [cancelled, success] if reverse else [success, cancelled]
+    return _github_record(fixture["pr"], [check], runs)
+
+
+def _github_record(pr, checks, runs):
     root = "repos/the-cloud-clockwork/agentihooks"
-    sha = fixture["pr"]["head"]["sha"]
+    sha = pr["head"]["sha"]
+    number = pr["number"]
     responses = {
-        f"{root}/pulls/487": json.dumps(fixture["pr"]),
-        f"{root}/commits/{sha}/check-runs?per_page=100": json.dumps(check),
+        f"{root}/pulls/{number}": json.dumps(pr),
+        f"{root}/commits/{sha}/check-runs?per_page=100": "\n".join(json.dumps(check) for check in checks),
         f"{root}/actions/runs?head_sha={sha}&per_page=100": "\n".join(json.dumps(run) for run in runs),
     }
 
     def gh(argv, **kwargs):
         return subprocess.CompletedProcess(argv, 0, responses[argv[2]], "")
 
-    return ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=gh)
+    return ci_read.pull_request("the-cloud-clockwork/agentihooks", number, run=gh)
