@@ -142,7 +142,7 @@ def test_priority_keeps_displaced_ahead_of_later_arrivals_in_one_pass():
 
 def test_priority_leaves_earlier_priority_targets_in_place_on_either_side():
     queue = FakeQueue(queued=True)
-    queue.entries.append(queue.entry(5))
+    queue.entries += [queue.entry(5)]
     result = merge_queue.prioritize(URL, run=queue.run, ahead=(URL[:-1] + "2", URL[:-1] + "5"))
     assert [int(e["pullRequest"]["id"][1:]) for e in queue.entries] == [1, 2, 9, 5, 3, 4]
     assert queue.mutations == [("dequeue", 4), ("dequeue", 3), ("queue", 3), ("queue", 4)]
@@ -293,7 +293,7 @@ def test_priority_attempts_every_restoration_after_one_is_refused():
 @pytest.mark.parametrize("queued, split", [(False, 2), (True, 4)])
 def test_priority_preserves_order_across_queue_pages(queued, split):
     queue = FakeQueue()
-    queue.entries += [queue.entry(9)] * queued + [queue.entry(4), queue.entry(5)]
+    queue.entries += ([queue.entry(9)] if queued else []) + [queue.entry(4), queue.entry(5)]
     pages = []
 
     def run(command, **kwargs):
