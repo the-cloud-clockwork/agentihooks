@@ -245,7 +245,7 @@ def test_browser_ignores_an_outcome_for_another_request_or_master(tmp_path, monk
 def test_inbox_outage_ends_native_auth_and_returns_browser_failure(tmp_path, monkeypatch, failing_operation):
     from redis.exceptions import RedisError
 
-    from scripts.inbox import store
+    from scripts.inbox import outbox, store
 
     target = tmp_path / "slot" / "claude"
     target.mkdir(parents=True)
@@ -258,6 +258,9 @@ def test_inbox_outage_ends_native_auth_and_returns_browser_failure(tmp_path, mon
             return SimpleNamespace(id="request")
 
         def get(self, item):
+            raise RedisError("inbox disconnected")
+
+        def close(self, *args):
             raise RedisError("inbox disconnected")
 
     class Process:
@@ -276,11 +279,16 @@ def test_inbox_outage_ends_native_auth_and_returns_browser_failure(tmp_path, mon
         def wait(self, timeout=None):
             return self.returncode
 
+    queued = []
     monkeypatch.setattr(store, "connect", lambda _: Inbox())
+    monkeypatch.setattr(outbox, "waiting", lambda _: False)
+    monkeypatch.setattr(outbox, "append", queued.append)
     monkeypatch.setattr(subprocess, "Popen", Process)
     env = {"AGENTIHOOKS_SWARM": "proof", "AGENTIHOOKS_AGENT_NAME": "engineer@proof"}
     assert chain.authorize(env, target, timeout=1) == "failure"
     assert events == ["terminated"]
+    assert len(queued) == 1
+    assert queued[0]["op"] == "close" and queued[0]["args"]["kind"] == "cancel"
     assert json.loads((target.parent / "login-notifications.jsonl").read_text().splitlines()[-1]) == {
         "step": "browser",
         "outcome": "failure",

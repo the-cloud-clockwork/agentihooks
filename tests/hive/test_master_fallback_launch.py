@@ -552,9 +552,12 @@ def test_empty_native_sessions_reach_front_door_recovery(setup, monkeypatch):
 
 
 def test_native_master_fallback_account_is_recorded_canonically(setup):
+    from dataclasses import replace
+
     from scripts.hive.orders import Ack
 
     order, admitted, task = headless_front_door_order(setup)
+    order = replace(order, hive="remote")
     ack = Ack(
         "live",
         {"host_id": "remote", "pid": 12, "start_time": 34},
@@ -567,6 +570,28 @@ def test_native_master_fallback_account_is_recorded_canonically(setup):
     live = setup.launcher.record(admitted, order, ack)
     assert live.account == "token-account"
     assert setup.store.execution_registry.get(order.slug, admitted.execution_id).account == "token-account"
+
+
+def test_non_native_ack_cannot_replace_the_recorded_account(setup):
+    from dataclasses import replace
+
+    from scripts.hive.orders import Ack
+    from scripts.swarm.store import SwarmError
+
+    order, admitted, task = headless_front_door_order(setup)
+    order = replace(order, hive="remote", route_kind="subscription")
+    ack = Ack(
+        "live",
+        {"host_id": "remote"},
+        execution={
+            "account": "other",
+            "placement": "fallback",
+            "profile_decision": {"validation": {"account": "other"}},
+        },
+    )
+    with pytest.raises(SwarmError, match="ack account"):
+        setup.launcher.record(admitted, order, ack)
+    assert setup.store.execution_registry.get(order.slug, admitted.execution_id).account == admitted.account
 
 
 def test_master_browser_wait_fits_the_launch_order_lifetime(setup, monkeypatch):

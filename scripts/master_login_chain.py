@@ -5,11 +5,41 @@ import shutil
 import subprocess
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
 T = TypeVar("T")
 OUTCOMES = ("success", "captcha", "failure")
+
+
+@dataclass(frozen=True)
+class LoginBudget:
+    browser: float = 300
+    native_check: float = 30
+    token: float = 60
+    canary: float = 120
+    start: float = 30
+    grace: float = 30
+
+    @property
+    def route(self) -> float:
+        return self.browser + 2 * self.native_check + self.token + self.grace
+
+    @property
+    def launch(self) -> float:
+        return self.route + self.start + self.canary + self.grace
+
+    @property
+    def spawn(self) -> float:
+        return self.launch + self.grace
+
+    @property
+    def order_ttl_ms(self) -> int:
+        return int((self.spawn + self.grace) * 1000)
+
+
+BUDGET = LoginBudget()
 
 
 def run(current: Callable[[], T | None], browser: Callable[[], str], token: Callable[[], T]) -> T:
@@ -34,6 +64,19 @@ def notification(target: Path, step: str, outcome: str, transport: str = "none")
         stream.write(json.dumps(record) + "\n")
 
 
+def _close(store, sender, item, kind):
+    from scripts.inbox import outbox
+
+    detail = "browser attempt ended" if kind == "cancel" else "browser outcome consumed"
+    entry = outbox.record("close", sender, {"kind": kind, "detail": detail}, item=item)
+
+    def apply(store, record):
+        store.close(record["item"], record["by"], record["args"]["kind"], record["args"]["detail"])
+        return {}
+
+    outbox.submit(store, entry, apply)
+
+
 def _browser_reply(store, request, recipient: str, sender: str) -> str | None:
     current = store.get(request.id)
     prefix = "done: replied with message "
@@ -43,13 +86,15 @@ def _browser_reply(store, request, recipient: str, sender: str) -> str | None:
     if answer.ref != request.id or not store.acts_for(answer.sender, recipient):
         return None
     outcome = answer.text.strip()
-    if outcome not in OUTCOMES:
-        return "failure"
-    store.close(answer.id, sender, "done", "browser outcome consumed")
-    return outcome
+    _close(store, sender, answer.id, "done")
+    return outcome if outcome in OUTCOMES else "failure"
 
 
 def _request(store, environ, target, output):
+    from redis.exceptions import RedisError
+
+    from scripts.inbox.store import new_item_id
+
     link = re.search(r"https://(?:claude\.ai|claude\.com)/oauth/authorize\?[^\s\x1b]+", output.read_text())
     if link is None:
         return None
@@ -59,10 +104,14 @@ def _request(store, environ, target, output):
         f"Open {link.group(0)} and reply exactly success, captcha or failure. "
         "Never send authorization codes or credentials."
     )
+    sender = environ["AGENTIHOOKS_AGENT_NAME"]
     recipient = f"master@{environ['AGENTIHOOKS_SWARM']}"
-    request = store.send(
-        environ["AGENTIHOOKS_AGENT_NAME"], recipient, text, task=environ.get("AGENTIHOOKS_SWARM_TASK", "")
-    )
+    item = new_item_id()
+    try:
+        request = store.send(sender, recipient, text, task=environ.get("AGENTIHOOKS_SWARM_TASK", ""), item_id=item)
+    except RedisError:
+        _close(store, sender, item, "cancel")
+        raise
     notification(target, "browser", "requested", "inbox")
     return request
 
@@ -88,8 +137,19 @@ def _wait_for_browser(process, store, environ: Mapping[str, str], target: Path, 
             time.sleep(0.25)
         return "failure"
     finally:
-        if request is not None and store.get(request.id).state not in ("done", "cancelled", "blocked"):
-            store.close(request.id, sender, "cancel", "browser attempt ended")
+        if request is not None:
+            _finish_request(store, sender, request.id)
+
+
+def _finish_request(store, sender, item):
+    from redis.exceptions import RedisError
+
+    try:
+        pending = store.get(item).state not in ("done", "cancelled", "blocked")
+    except RedisError:
+        pending = True
+    if pending:
+        _close(store, sender, item, "cancel")
 
 
 def _stop_login(process) -> None:
@@ -106,7 +166,9 @@ def _stop_login(process) -> None:
         process.wait()
 
 
-def authorize(environ: Mapping[str, str], target: Path, timeout: float = 300) -> str:
+def authorize(environ: Mapping[str, str], target: Path, timeout: float = BUDGET.browser) -> str:
+    from redis.exceptions import RedisError
+
     from scripts import master_claude_login as login
     from scripts.inbox import store as inbox
 
@@ -131,7 +193,7 @@ def authorize(environ: Mapping[str, str], target: Path, timeout: float = 300) ->
                 outcome = _wait_for_browser(process, store, environ, target, output, timeout)
             finally:
                 _stop_login(process)
-    except (OSError, inbox.InboxError):
+    except (OSError, inbox.InboxError, RedisError):
         outcome = "failure"
     notification(target, "browser", outcome, "inbox")
     return outcome

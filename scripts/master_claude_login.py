@@ -107,7 +107,7 @@ def signed_in() -> str:
 def unusable() -> str:
     if hooks_config.MASTER_CLAUDE_LOGIN is not True:
         return OFF
-    return "" if any(logins().values()) else NO_LOGIN
+    return ""
 
 
 def slot() -> int:
@@ -482,7 +482,15 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
     def current():
         nonlocal target
         try:
-            target, found = prepare(environ, cwd)
+            if target is None:
+                target, found = prepare(environ, cwd)
+            else:
+                number = next(number for number in numbers() if home(number) == target)
+                found = account(target, environ, number=number)
+                if environ.get(binding.REPORT):
+                    binding.rehome(Path(environ[binding.REPORT]), target)
+                epoch = int(_read(target.parent / OWNER)["epoch"])
+                keep(openbao_kv.from_env(environ), target, epoch, number)
         except LoginRefused as exc:
             if str(exc) == NO_LOGIN or str(exc).startswith("every stored master claude ai login is held"):
                 return None
@@ -491,6 +499,7 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
             native_login.check(child(environ, target), found)
         except native_login.LoginError:
             return None
+        chain.notification(target, "current", "success")
         return target, found
 
     def browser():
@@ -499,6 +508,7 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
             target = target or browser_home(environ)
         except LoginRefused:
             return "failure"
+        chain.notification(target, "current", "unavailable")
         return chain.authorize(environ, target)
 
     def token():
@@ -540,6 +550,18 @@ def _token_args(args: list[str]) -> list[str]:
     return result
 
 
+def _token_lock(environ: Mapping[str, str]):
+    import fcntl
+
+    from scripts.claude_quota_balancer import _cache_path
+
+    path = _cache_path(environ).with_name("claude-route.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = path.open("a+", encoding="utf-8")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    return lock
+
+
 def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from hooks.context.account_sessions import sessions_by_account
     from scripts import master_login_chain as chain
@@ -547,18 +569,21 @@ def launch_token(binary: str, args: list[str], environ: Mapping[str, str], repor
     from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
-    decision = select_credential(environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,))
-    target = token_home(environ)
-    child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}
-    chain.notification(target, "token", "routed")
-    _write_route_report(report, status="routed", account=decision.account, placement="fallback", remote_control="off")
-    print(f"[agenti] account={decision.account} route=token-fallback remote-control=off", flush=True)
-    execute(
-        "claude",
-        decision.account,
-        child_env,
-        lambda env: os.execvpe(binary, _claude_command(binary, _token_args(args)), env),
-    )
+    with _token_lock(environ):
+        decision = select_credential(environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,))
+        target = token_home(environ)
+        child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}
+        chain.notification(target, "token", "routed")
+        _write_route_report(
+            report, status="routed", account=decision.account, placement="fallback", remote_control="off"
+        )
+        print(f"[agenti] account={decision.account} route=token-fallback remote-control=off", flush=True)
+        execute(
+            "claude",
+            decision.account,
+            child_env,
+            lambda env: os.execvpe(binary, _claude_command(binary, _token_args(args)), env),
+        )
 
 
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:

@@ -156,6 +156,19 @@ class Orders:
         self.redis.delete(self.command_receipt(hive, order_id))
 
 
+def master_login_fallback(order: LaunchOrder, account: str, placement: str, decision: dict) -> bool:
+    validation = decision.get("validation", {})
+    return (
+        order.route_kind == "master-login"
+        and order.lane == MASTER
+        and order.harness == "claude"
+        and bool(account)
+        and placement == "fallback"
+        and isinstance(validation, dict)
+        and validation.get("account") == account
+    )
+
+
 class Consumer:
     def __init__(self, redis: "Redis", hive: str, runtime: "LocalHerdrRuntime", pod: str = POD) -> None:
         self.store = RedisStore(redis)
@@ -374,13 +387,17 @@ class Consumer:
         live = replace(agent, runtime_target=target, pane_id=placed.pane_id)
         if order.expires_at <= lease.now_ms(self.store):
             return self._stop(live, "expired")
-        if (placed.harness, placed.profile, placed.account) != (order.harness, order.profile, order.slot):
+        fallback = master_login_fallback(order, placed.account, placed.placement, placed.profile_decision)
+        if (placed.harness, placed.profile) != (order.harness, order.profile) or (
+            placed.account != order.slot and not fallback
+        ):
             return self._stop(live, "identity")
         try:
             lease.require_epoch(self.store, order.slug, order.epoch)
         except SwarmError:
             return self._stop(live, "refused")
         execution = {
+            **({"account": placed.account, "placement": placed.placement} if fallback else {}),
             "pane_id": placed.pane_id,
             "model": placed.model,
             "effort": placed.effort,

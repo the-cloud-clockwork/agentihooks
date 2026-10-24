@@ -951,9 +951,18 @@ def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[
     return named
 
 
+def _launch_seconds(args) -> float:
+    from scripts.master_login_chain import BUDGET
+
+    if args.agent in ("", "claude") and _flag_value(args.claude_args, ("--route",)) == "master-login":
+        args.route_timeout = max(args.route_timeout, BUDGET.route)
+        return BUDGET.launch
+    return LAUNCH_DEADLINE_S
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    launch = LaunchDeadline(LAUNCH_DEADLINE_S)
+    launch = LaunchDeadline(_launch_seconds(args))
     active_env = dict(os.environ if environ is None else environ)
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
     operator_env.fill(active_env)

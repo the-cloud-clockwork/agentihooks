@@ -351,6 +351,9 @@ class HiveLaunch:
             raise
 
     def send_order(self, request: SpawnRequest, selected: Selection, task: dict) -> Outcome:
+        from scripts.master_login_chain import BUDGET
+
+        ttl = BUDGET.order_ttl_ms if selected.route_kind == placement.MASTER_LOGIN else TTL_MS
         admitted = self.admit(request, selected)
         if selected.route_kind != placement.MASTER_LOGIN and not self.slots.reserve(
             f"claude:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
@@ -370,11 +373,11 @@ class HiveLaunch:
             selected.route_kind,
             prompt_ref,
             self.held.epoch,
-            lease.now_ms(self.store) + TTL_MS,
+            lease.now_ms(self.store) + ttl,
             selected.hive,
         )
         with self.store.redis.pipeline() as pipe:
-            pipe.set(prompt_ref, json.dumps(task), px=TTL_MS)
+            pipe.set(prompt_ref, json.dumps(task), px=ttl)
             pipe.hset(self.store.key(self.slug, ORDERS), request.task["id"], json.dumps(order.__dict__))
             Orders(pipe).send(selected.hive, order)
             pipe.execute()
@@ -549,6 +552,11 @@ class HiveLaunch:
         decision = ack.execution.get("profile_decision", {})
         _match("ack host", order.hive, ack.target.get("host_id"))
         _match("profile decision type", "dict", type(decision).__name__)
+        account = ack.execution.get("account", agent.account)
+        if account != agent.account and not orders.master_login_fallback(
+            order, account, ack.execution.get("placement", ""), decision
+        ):
+            _match("ack account", agent.account, account)
         kept = {
             key: agent.profile_decision[key]
             for key in ("master_placement", "placement_fallback")
@@ -556,6 +564,7 @@ class HiveLaunch:
         }
         live = replace(
             agent,
+            account=account,
             runtime_target=ack.target,
             state="working",
             pane_id=ack.execution.get("pane_id", agent.pane_id),

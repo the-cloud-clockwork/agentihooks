@@ -370,7 +370,17 @@ def test_runtime_substitution_is_refused_and_terminated(setup, field, value):
     setup.runtime.terminate.assert_called_once()
 
 
-@pytest.mark.parametrize("changed", [{}, {"account": ""}, {"harness": "codex"}, {"profile": "qa"}])
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {},
+        {"account": ""},
+        {"harness": "codex"},
+        {"profile": "qa"},
+        {"placement": "forced"},
+        {"profile_decision": {"validation": {"pid": 12, "account": "other"}}},
+    ],
+)
 def test_only_an_authorized_native_master_may_acknowledge_a_token_account(setup, monkeypatch, changed):
     from scripts import master_claude_login
     from scripts.swarm_v2.runtime.base import Outcome, Status
