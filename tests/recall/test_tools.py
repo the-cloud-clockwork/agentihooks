@@ -343,6 +343,7 @@ def test_the_cli_parses_every_query_option():
     unset = {"scope": "", "kind": [], "since": "", "until": "", "author": "", "seat": ""}
     assert parse("search", "q") == {"command": "search", "query": "q", "limit": 10, **unset}
     assert parse("timeline") == {"command": "timeline", "limit": 200, **unset}
+    assert parse("timeline", "--limit", "2")["limit"] == 2
     full = ["--scope", "all", "--kind", "task", "--kind", "phase", "--since", "2d", "--until", "1d"]
     full += ["--author", "operator", "--seat", "eng-1", "--limit", "3"]
     assert parse("search", "q", *full) == {
