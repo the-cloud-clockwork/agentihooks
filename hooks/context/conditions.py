@@ -343,6 +343,10 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
+def _is_filter(entry: dict) -> bool:
+    return entry["file"].lower().endswith(FILTER_SUFFIX)
+
+
 def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
     from hooks.filters import runner
 
@@ -362,7 +366,7 @@ def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
 
 def execute(entry: dict, step: str, payload: dict, timeout: float) -> dict:
     """Run one condition; never raises."""
-    if entry["file"].lower().endswith(FILTER_SUFFIX):
+    if _is_filter(entry):
         return _run_filter(entry, step, payload, timeout)
     cmd = _command(entry)
     if cmd is None:
@@ -410,6 +414,31 @@ def _run_all(entries: list[dict], step: str, payload: dict) -> list[dict]:
 
     with ThreadPoolExecutor(max_workers=min(CONDITIONS_MAX_PARALLEL, len(entries))) as pool:
         return list(pool.map(lambda entry: execute(entry, step, payload, CONDITIONS_TIMEOUT_SEC), entries))
+
+
+def _run_chained(entries: list[dict], step: str, payload: dict) -> list[dict]:
+    from hooks.config import CONDITIONS_TIMEOUT_SEC
+
+    runs, patch = [], {}
+    for entry in entries:
+        current = {**payload, "tool_input": {**payload["tool_input"], **patch}} if patch else payload
+        run = execute(entry, step, current, CONDITIONS_TIMEOUT_SEC)
+        rewritten = _parse_stdout(run.get("stdout", "")).get("tool_input") if run.get("returncode") == 0 else None
+        if isinstance(rewritten, dict):
+            patch.update(rewritten)
+        runs.append(run)
+    return runs
+
+
+def _run_synchronous(entries: list[dict], step: str, payload: dict) -> list[dict]:
+    chained = [entry for entry in entries if step == "pre" and _is_filter(entry)]
+    if len(chained) < 2:
+        return _run_all(entries, step, payload)
+    rest = [entry for entry in entries if not _is_filter(entry)]
+    runs = dict(zip(map(id, chained), _run_chained(chained, step, payload)))
+    if rest:
+        runs.update(zip(map(id, rest), _run_all(rest, step, payload)))
+    return [runs[id(entry)] for entry in entries]
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +565,7 @@ def run_step(step: str, payload: dict) -> StepResult | None:
     synchronous = [entry for entry in entries if not entry["async"]]
     if not synchronous:
         return None
-    return merge(step, payload, list(zip(synchronous, _run_all(synchronous, step, payload))))
+    return merge(step, payload, list(zip(synchronous, _run_synchronous(synchronous, step, payload))))
 
 
 # ---------------------------------------------------------------------------
