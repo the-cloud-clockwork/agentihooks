@@ -338,9 +338,9 @@ def test_retirement_without_a_recorded_pid_ends_only_its_owned_pane(tmp_path, mo
     assert all(NAME not in call for call in calls)
 
 
-@pytest.mark.parametrize("owner", [None, "engineer@a1b2c3-0009"])
+@pytest.mark.parametrize("owner", [None, "", "engineer@a1b2c3-0009"])
 def test_a_live_agent_without_a_pid_or_owned_pane_is_refused(tmp_path, monkeypatch, owner):
-    panes = {} if owner is None else {"w1:p1": {"pane_id": "w1:p1", "name": owner}}
+    panes = {} if owner is None else {"w1:p1": {"pane_id": "w1:p1", "name": owner, "agent_session": {"value": "other"}}}
     herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes=panes)
     monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
     local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {PID: proc()})
