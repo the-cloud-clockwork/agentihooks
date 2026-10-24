@@ -227,6 +227,27 @@ def test_a_binding_must_be_an_operator_owned_regular_file(tmp_path):
 
 def test_the_binding_path_defaults_below_home_without_an_agentihooks_home(tmp_path):
     assert brain_binding.path({"HOME": str(tmp_path)}) == tmp_path / ".agentihooks" / "swarm" / "brain-binding.json"
+    elsewhere = {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / "state")}
+    assert brain_binding.path(elsewhere) == tmp_path / "state" / "swarm" / "brain-binding.json"
+
+
+def test_trailing_slashes_and_a_missing_instance_name_are_normalized(tmp_path):
+    doc = _document(lan={"api": API + "/", "mcp": MCP + "/"})
+    del doc["instance"]
+    _binding(tmp_path / ".agentihooks", doc)
+
+    assert brain_binding.resolve(_environ(tmp_path)) == {**BOUND, "instance": ""}
+
+
+def test_an_owner_executable_binding_is_accepted_and_a_directory_is_refused(tmp_path):
+    path = _binding(tmp_path / ".agentihooks", mode=0o711)
+    assert brain_binding.decide(_environ(tmp_path)) == BOUND
+    path.unlink()
+    path.mkdir(mode=0o700)
+    assert brain_binding.decide(_environ(tmp_path)) == {
+        "status": "refused",
+        "reason": f"swarm brain binding {path} is not an operator owned file",
+    }
 
 
 def test_the_managed_brain_is_the_only_agentibrain_after_the_overlay():
@@ -244,7 +265,7 @@ def test_the_managed_brain_is_the_only_agentibrain_after_the_overlay():
 def _shell(script: str, environ: dict) -> dict:
     probe = "".join(
         f'printf "{key}=%s|%s\\n" "${{{key}+set}}" "${{{key}:-}}"\n'
-        for key in ("BRAIN_URL", "BRAIN_HTTP_TOKEN", "KB_ROUTER_TOKEN", "BRAIN_ENABLED", "BRAIN_SOURCE_TYPE")
+        for key in (*BRAIN_KEYS[:5], brain_binding.VARIABLE)
     )
     done = subprocess.run(
         ["bash", "--noprofile", "--norc", "-c", script + probe], env=environ, capture_output=True, text=True, check=True
@@ -264,6 +285,7 @@ def test_bound_exports_win_over_conflicting_personal_env_files(tmp_path):
         "KB_ROUTER_TOKEN": "|",
         "BRAIN_ENABLED": "set|true",
         "BRAIN_SOURCE_TYPE": "set|none",
+        brain_binding.VARIABLE: f"set|{json.dumps(BOUND)}",
     }
     assert API_FIXTURE not in brain_binding.exports(environ)
 
@@ -275,18 +297,16 @@ def test_a_credential_missing_in_the_launch_shell_refuses_the_brain(tmp_path, mi
     shell = {key: value for key, value in environ.items() if key != missing}
     script = operator_env.source_line(environ) + brain_binding.exports(environ)
 
-    seen = _shell(script + f'printf "binding=%s\\n" "${{{brain_binding.VARIABLE}}}"\n', shell)
+    seen = _shell(script, shell)
 
-    assert json.loads(seen.pop("binding")) == {
-        "status": "refused",
-        "reason": "a brain credential is unset in the launch shell",
-    }
+    missed = {"status": "refused", "reason": "a brain credential is unset in the launch shell"}
     assert seen == {
         "BRAIN_URL": "|",
         "BRAIN_HTTP_TOKEN": "|",
         "KB_ROUTER_TOKEN": "|",
         "BRAIN_ENABLED": "set|false",
         "BRAIN_SOURCE_TYPE": "set|none",
+        brain_binding.VARIABLE: f"set|{json.dumps(missed)}",
     }
 
 
@@ -302,6 +322,7 @@ def test_refused_exports_drop_every_personal_brain_setting(tmp_path):
         "KB_ROUTER_TOKEN": "|",
         "BRAIN_ENABLED": "set|false",
         "BRAIN_SOURCE_TYPE": "set|none",
+        brain_binding.VARIABLE: f"set|{json.dumps(REFUSED)}",
     }
     assert brain_binding.exports({}) == ""
 
@@ -323,6 +344,7 @@ def test_the_credential_goes_only_to_the_bound_api_origin(tmp_path):
     assert brain_binding.audience({**environ, "BRAIN_URL": API.upper() + "/"})
     assert not brain_binding.audience({**environ, "BRAIN_URL": REPO_ENDPOINT})
     assert not brain_binding.audience({**environ, "BRAIN_URL": PERSONAL})
+    assert brain_binding.audience(environ) is False
     forged = {**BOUND, "api": REPO_ENDPOINT}
     assert not brain_binding.audience({**environ, **_managed(forged), "BRAIN_URL": REPO_ENDPOINT})
     assert not brain_binding.audience({**environ, **_managed(REFUSED), "BRAIN_URL": API})
@@ -353,9 +375,10 @@ def test_a_managed_session_never_adopts_the_personal_brain_dotenv(hook_env, monk
     monkeypatch.setenv(brain_binding.VARIABLE, json.dumps(REFUSED))
 
     hook_env._load_brain_env()
-    hook_env._guard_swarm_brain()
 
     assert "BRAIN_URL" not in os.environ and "BRAIN_HTTP_TOKEN" not in os.environ
+    hook_env._guard_swarm_brain()
+
     assert (os.environ["BRAIN_ENABLED"], os.environ["BRAIN_WRITER_ENABLED"]) == ("false", "false")
     assert os.environ["BRAIN_SOURCE_TYPE"] == "none"
 
@@ -543,6 +566,24 @@ def test_a_managed_launch_to_an_arbitrary_endpoint_refuses_the_brain(launch, tmp
 
     assert json.loads(rendered)["status"] == "refused"
     assert "export BRAIN_URL=" not in text and "export BRAIN_ENABLED=false" in text
+
+
+def test_a_cluster_launch_binds_the_service_origins(launch, tmp_path):
+    _binding(tmp_path / ".agentihooks")
+
+    text, rendered = launch("engineer", "codex", "launch", KUBERNETES_SERVICE_HOST="10.0.0.1")
+
+    assert json.loads(rendered) == {**BOUND, "site": "cluster", "api": CLUSTER_API, "mcp": CLUSTER_MCP}
+    assert f"export BRAIN_URL={CLUSTER_API}\n" in text
+
+
+def test_a_personal_handoff_drops_an_inherited_binding(launch, tmp_path):
+    _binding(tmp_path / ".agentihooks")
+
+    text, rendered = launch("engineer", "claude", "handoff", swarm=False, **_managed(BOUND))
+
+    assert rendered is None
+    assert brain_binding.VARIABLE not in text
 
 
 def test_an_unrelated_personal_launch_keeps_its_installation(launch, tmp_path, monkeypatch, capsys):

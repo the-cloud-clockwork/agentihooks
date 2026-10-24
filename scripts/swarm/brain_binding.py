@@ -59,7 +59,7 @@ def _authorized(url: object, where: str) -> str:
     if not host or parts.username or parts.password or parts.query or parts.fragment:
         raise Refused(f"endpoint {origin(url)} is not a plain origin")
     if parts.scheme == "https" or (parts.scheme == "http" and where == "cluster" and host.endswith(CLUSTER_HOSTS)):
-        return url.rstrip("/")
+        return url.removesuffix("/")
     raise Refused(f"endpoint {origin(url)} is not an authorized brain origin")
 
 
@@ -71,7 +71,7 @@ def _operator_file(found: Path) -> dict:
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
         raise Refused(f"swarm brain binding {found} is not an operator owned file")
     try:
-        doc = json.loads(found.read_text(encoding="utf-8"))
+        doc = json.loads(found.read_bytes())
     except (OSError, ValueError):
         raise Refused(f"swarm brain binding {found} is not readable JSON") from None
     if not isinstance(doc, dict):
@@ -164,7 +164,7 @@ def exports(environ: Mapping[str, str]) -> str:
         f'export BRAIN_HTTP_TOKEN="${{{binding["api_env"]}}}"\n'
         "export BRAIN_ENABLED=true BRAIN_WRITER_ENABLED=true\n"
         "else\n"
-        f"export {VARIABLE}={shlex.quote(json.dumps(missing, sort_keys=True))}\n{refused}"
+        f"export {VARIABLE}={shlex.quote(json.dumps(missing))}\n{refused}"
         "fi\n"
     )
 
@@ -187,4 +187,5 @@ def audience(environ: Mapping[str, str]) -> bool:
         bound = resolve(environ)
     except Refused:
         return False
-    return origin(environ.get("BRAIN_URL", "")) == origin(bound["api"]) == origin(binding["api"])
+    url = environ.get("BRAIN_URL")
+    return bool(url) and origin(url) == origin(bound["api"]) == origin(binding["api"])

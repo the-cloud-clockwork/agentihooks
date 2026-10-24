@@ -217,12 +217,13 @@ def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[s
 
 def _bind_brain(environ: dict[str, str]) -> None:
     # The profile renderer reads the binding from the process environment.
-    os.environ.pop(brain_binding.VARIABLE, None)
-    environ.pop(brain_binding.VARIABLE, None)
-    if environ.get("AGENTIHOOKS_SWARM"):
-        # A herdr pane gets credentials only from the env files its launcher sources.
-        decided = brain_binding.decide(environ, operator_env.values(environ))
-        environ[brain_binding.VARIABLE] = os.environ[brain_binding.VARIABLE] = json.dumps(decided, sort_keys=True)
+    if not environ.get("AGENTIHOOKS_SWARM"):
+        os.environ.pop(brain_binding.VARIABLE, None)
+        environ.pop(brain_binding.VARIABLE, None)
+        return
+    # A herdr pane gets credentials only from the env files its launcher sources.
+    decided = brain_binding.decide(environ, operator_env.values(environ))
+    environ[brain_binding.VARIABLE] = os.environ[brain_binding.VARIABLE] = json.dumps(decided, sort_keys=True)
 
 
 def _with_predecessor(environ: dict[str, str], handoff: bool) -> dict[str, str]:
